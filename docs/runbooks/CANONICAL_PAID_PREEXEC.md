@@ -209,3 +209,5 @@ refusal remain. Environment, stderr, tokens, path values and exception repr are
 not emitted; unknown diagnostic data becomes a fixed unavailable classification.
 These diagnostic cases do not qualify an actual host namespace or approve an
 initializer, and a passing fast preflight alone is not protected acceptance.
+
+The hosted fallback fixture explicitly models only the enumerated image-selector directory ancestry in its fresh observer, matching its parent premise. Metadata for unmodeled/private sibling directories and regular files remains real and adverse checks use the actual observer walk guard. This is a finite test premise, not qualification of the hosted or deployed distribution.

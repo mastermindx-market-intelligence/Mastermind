@@ -84,14 +84,29 @@ def _system_fixture_launch():
     except (OSError,ValueError,subprocess.SubprocessError):return None
 
 
-def _observer_metadata_fixture(probe,*,exact,prefixes):
-    """Fallback ONLY: explicit finite ACL metadata premise in fresh observer.
+def _observer_metadata_fixture(probe,*,exact,prefixes,root_directories=()):
+    """Fallback ONLY: finite ACL and enumerated directory metadata premise.
 
     The real observer body/read/identity validators remain. No production source,
     actual host ACL, environment or output record is changed by this fixture.
     """
     exact=sorted(set(map(str,exact)));prefixes=sorted(set(map(str,prefixes)))
-    return ("import os,errno\n_fixture_raw_getxattr=os.getxattr\n"
+    root_directories=sorted(set(map(str,root_directories)))
+    return ("import os,errno,stat\n_fixture_raw_getxattr=os.getxattr\n"
+        +"_fixture_root_directories="+repr(root_directories)+"\n"
+        +"_fixture_raw_stat=os.stat;_fixture_raw_fstat=os.fstat\n"
+        +"class _FixtureDirectoryMetadata:\n"
+        +"    def __init__(self,value):self._value=value;self.st_uid=0;self.st_mode=value.st_mode&~0o022\n"
+        +"    def __getattr__(self,key):return getattr(self._value,key)\n"
+        +"def _fixture_directory_metadata(value,name):\n"
+        +"    return _FixtureDirectoryMetadata(value) if stat.S_ISDIR(value.st_mode) and name in _fixture_root_directories else value\n"
+        +"def _fixture_fstat(fd):\n"
+        +"    return _fixture_directory_metadata(_fixture_raw_fstat(fd),os.path.realpath('/proc/self/fd/'+str(fd)))\n"
+        +"def _fixture_stat(name,*args,**kwargs):\n"
+        +"    actual=os.path.join(os.readlink('/proc/self/fd/'+str(kwargs['dir_fd'])),str(name)) if kwargs.get('dir_fd') is not None else os.fspath(name)\n"
+        +"    actual=os.path.normpath(actual)\n"
+        +"    return _fixture_directory_metadata(_fixture_raw_stat(name,*args,**kwargs),actual)\n"
+        +"os.fstat=_fixture_fstat;os.stat=_fixture_stat\n"
         +"_fixture_exact="+repr(exact)+"\n_fixture_prefixes="+repr(prefixes)+"\n"
         +"def _fixture_getxattr(name,key,*args,**kwargs):\n"
         +"    actual=os.path.realpath('/proc/self/fd/'+str(name)) if isinstance(name,int) else str(name)\n"
@@ -346,7 +361,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch])
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch],root_directories=ancestors)
         result=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
@@ -533,7 +548,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         # validators are the genuine existing owner, not stubbed success DTOs.
         monkeypatch.setattr(qualifier.m,'_initializer_module',lambda expected:(owner,sources['paid_initializer.py']) if expected==hashes['paid_initializer.py'] else m.refuse())
         req=qualifier.m._request(req)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[str(lane)])
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[str(lane)],root_directories=ancestors)
         raw=_inert_bootstrap(req,probe,owner=owner,diagnostic_request=request)
         result=qualifier.m._observation(raw,req)
         assert private_token.encode() not in raw
@@ -704,3 +719,44 @@ def test_final_observer_primary_and_cleanup_refusals_stay_distinct(monkeypatch,c
     assert notices==[(public,expected)]
     assert 'phase='+expected in str(caught.value) and private not in str(caught.value)
     assert caught.value.__suppress_context__ is True
+
+
+@pytest.mark.skipif(sys.platform!='linux',reason='requires actual Linux proc FD names')
+def test_observer_directory_premise_is_exact_and_preserves_unmodeled_writes(tmp_path):
+    modeled=tmp_path/'modeled';private=tmp_path/'private';unmodeled=tmp_path/'unmodeled'
+    for path in (modeled,private,unmodeled):path.mkdir(mode=0o777);path.chmod(0o777)
+    child_probe="""
+import json
+p=json.loads(sys.argv[1])
+for key in ('modeled','private','unmodeled'):
+    name=p[key];fd=os.open(name,os.O_RDONLY|os.O_DIRECTORY)
+    try:
+        actual=_fixture_raw_fstat(fd);view=os.fstat(fd)
+        assert view.st_ino==actual.st_ino and view.st_mtime_ns==actual.st_mtime_ns and view.st_ctime_ns==actual.st_ctime_ns
+        assert bool(view.st_mode&0o022)==(key!='modeled')
+        assert bool(os.stat(name).st_mode&0o022)==(key!='modeled')
+        assert bool(os.stat('.',dir_fd=fd).st_mode&0o022)==(key!='modeled')
+    finally:os.close(fd)
+# A regular file at an enumerated pathname must never get directory semantics.
+fd=os.open(p['file'],os.O_RDONLY)
+try:assert os.fstat(fd).st_mode==_fixture_raw_fstat(fd).st_mode
+finally:os.close(fd)
+"""
+    # Reuse the actual observer guard; only the explicit directory premise is
+    # simulated. Siblings/private leaves remain genuinely writable and refuse.
+    from ops.native_fabric.quota_continuity.candidate.paid_host_qualification import _REMOTE_PROBE
+    definitions,separator,_=_REMOTE_PROBE.partition("\nif __name__=='__main__':")
+    assert separator
+    child_probe+='''
+for key in ('modeled','private','unmodeled'):
+    try:fd=walk(p[key],os.getuid())
+    except ValueError:
+        assert key!='modeled'
+    else:
+        os.close(fd);assert key=='modeled'
+'''
+    regular=tmp_path/'regular';regular.write_bytes(b'inert');regular.chmod(0o666)
+    data=dict(modeled=str(modeled),private=str(private),unmodeled=str(unmodeled),file=str(regular))
+    source='import sys\n'+_observer_metadata_fixture(definitions+'\n'+child_probe,exact=[*modeled.parents,modeled],prefixes=[],root_directories=[*modeled.parents,modeled,regular])
+    child=subprocess.run([sys.executable,'-I','-S','-B','-c',source,json.dumps(data)],capture_output=True,timeout=5)
+    assert child.returncode==0 and not child.stdout and not child.stderr
