@@ -24,12 +24,16 @@ def validate_parallel_workflow(text: str) -> None:
 
     ci_pytest.validate_workflow(text)
     payload = yaml.load(text, Loader=ci_pytest._WorkflowYAMLLoader)
+    if payload.get("permissions") != {"contents": "read"}:
+        raise ci_pytest.PolicyError("CI workflow root may only read source")
     jobs = payload.get("jobs")
     if not isinstance(jobs, dict) or set(jobs) != {"pytest_shards", "test"}:
         raise ci_pytest.PolicyError("parallel CI jobs must be exactly shards and test gate")
     shards, gate = jobs["pytest_shards"], jobs["test"]
     if not isinstance(shards, dict) or not isinstance(gate, dict):
         raise ci_pytest.PolicyError("parallel CI job configuration is invalid")
+    if shards.get("permissions") != {"contents": "read", "actions": "read"} or gate.get("permissions") is not None:
+        raise ci_pytest.PolicyError("Actions proof permission must be scoped to pytest shard jobs only")
     strategy = shards.get("strategy")
     matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
     indices = matrix.get("index") if isinstance(matrix, dict) else None
@@ -59,17 +63,49 @@ def validate_parallel_workflow(text: str) -> None:
     gate_steps = gate.get("steps", [])
     if not isinstance(shard_steps, list) or not isinstance(gate_steps, list):
         raise ci_pytest.PolicyError("parallel CI steps are missing")
+    # GitHub step expressions address IDs rather than displayed names. A later
+    # duplicate, including one with different casing, could shadow the pinned
+    # previous_ci producer and falsely report reuse=true to skip pytest. Require
+    # global uniqueness across both CI jobs rather than depending on runner
+    # behavior for duplicate IDs.
+    seen_step_ids: set[str] = set()
+    for step in (*shard_steps, *gate_steps):
+        if not isinstance(step, dict):
+            raise ci_pytest.PolicyError("parallel CI steps must be mappings")
+        if "id" not in step:
+            continue
+        step_id = step["id"]
+        if not isinstance(step_id, str) or not step_id:
+            raise ci_pytest.PolicyError("parallel CI step IDs must be nonempty strings")
+        canonical_id = step_id.casefold()
+        if canonical_id in seen_step_ids:
+            raise ci_pytest.PolicyError("parallel CI step IDs must be globally unique")
+        seen_step_ids.add(canonical_id)
+    # The single prior-CI probe is read-only and executes before the shard.
+    # The final shard step can be conditional ONLY on the verified output of
+    # this pinned producer. No skipping whole jobs or trusted non-pytest gates.
+    proof_steps = [
+        step for step in shard_steps
+        if isinstance(step, dict) and step.get("name") == "Verify exact prior merge-group CI"
+    ]
     shard_runner = [
         step for step in shard_steps
         if isinstance(step, dict) and step.get("name") == "Run repository test shard"
     ]
+    if len(proof_steps) != 1 or len(shard_runner) != 1:
+        raise ci_pytest.PolicyError("each shard needs one bounded proof and one runner")
+    proof, runner = proof_steps[0], shard_runner[0]
     if (
-        len(shard_runner) != 1
-        or shard_runner[0].get("run")
-        != "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}"
-        or shard_runner[0].get("if") is not None
+        set(proof) != {"name", "id", "env", "run"}
+        or proof.get("id") != "previous_ci"
+        or proof.get("env") != {"GH_TOKEN": "${{ github.token }}"}
+        or proof.get("run") != "python -m scripts.ci_postmerge_proof"
+        or shard_steps.index(proof) >= shard_steps.index(runner)
+        or set(runner) != {"name", "if", "run"}
+        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}"
+        or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
-        raise ci_pytest.PolicyError("each matrix member must run its canonical shard")
+        raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
     for name in (
         "Verify Paper direct pinned MCP SDK",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
