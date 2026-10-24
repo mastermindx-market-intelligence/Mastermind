@@ -24,9 +24,17 @@ function read(file) {
 }
 const reply = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }] })
 log({ event: 'start', cwd: process.cwd(), home: process.env.HOME,
+  tmpdir: process.env.TMPDIR,
   ambient: process.env.MMX_UNAPPROVED_CONFIG ?? null,
   explicit: process.env.MMX_EXPLICIT_CONFIG ?? null,
-  nodeOptions: process.env.NODE_OPTIONS ?? null })
+  nodeOptions: process.env.NODE_OPTIONS ?? null,
+  // Synthetic-only witness: the actual MCP child, not the parent plugin,
+  // observed the six exact private Attempt values from its stdio transport.
+  attempt: process.env.MMX_ACP_JOB_ID ? Object.fromEntries([
+    'MMX_ACP_WORKSPACE_PATH', 'MMX_ACP_WORKSPACE_BASE_SHA',
+    'MMX_ACP_RUN_ID', 'MMX_ACP_JOB_ID', 'MMX_ACP_WORKER_ID',
+    'MMX_ACP_DEADLINE_MS',
+  ].map(key => [key, process.env[key] ?? null])) : null })
 const server = new McpServer({ name: 'mmx-stdio-fixture', version: '1' },
   { instructions: 'Synthetic server instructions must not enter a tool-only profile.' })
 server.registerTool('read_file', { inputSchema: z.object({ file: z.enum(files) }) }, async ({ file }, context) => {
