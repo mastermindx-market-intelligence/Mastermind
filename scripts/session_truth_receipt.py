@@ -21,6 +21,7 @@ if os.fspath(_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_ROOT))
 
 from control_plane.session_truth import build_receipt, render_receipt  # noqa: E402
+from control_plane.executive_cross_plane_view import build_cross_plane_view  # noqa: E402
 from control_plane.session_truth_acquire import (  # noqa: E402
     AcquisitionError,
     collect_agentos,
@@ -63,7 +64,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--macro-root")
     parser.add_argument("--protected-skillpack-sha", required=True)
     parser.add_argument("--now")
-    parser.add_argument("--json", action="store_true", dest="emit_json")
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--json", action="store_true", dest="emit_json")
+    output.add_argument(
+        "--cross-plane-json", action="store_true",
+        help="render the existing receipt as the read-only Executive cross-plane card document",
+    )
+    parser.add_argument(
+        "--stale-after-seconds", type=int,
+        help="nonnegative caller freshness window for --cross-plane-json only",
+    )
     return parser
 
 
@@ -100,6 +110,11 @@ def main(
     env = os.environ if environ is None else environ
     out = sys.stdout if stdout is None else stdout
     err = sys.stderr if stderr is None else stderr
+
+    if args.stale_after_seconds is not None and (
+        not args.cross_plane_json or args.stale_after_seconds < 0
+    ):
+        return _error(err, "--stale-after-seconds requires --cross-plane-json and nonnegative seconds")
 
     observed_started_at = args.now or _utc_now_z()
     try:
@@ -168,11 +183,22 @@ def main(
         return _error(err, "invalid session truth input")
 
     try:
-        rendered = (
-            canonical_json(receipt) + "\n"
-            if args.emit_json
-            else render_receipt(receipt)
-        )
+        if args.cross_plane_json:
+            # One receipt, one owner acquisition and one projection. No second
+            # GitHub/Linear read, lifecycle assertion or persistent cache.
+            projection = build_cross_plane_view(
+                receipt,
+                evaluated_at=observed_ended_at,
+                stale_after_seconds=args.stale_after_seconds,
+                strict=True,
+            )
+            rendered = canonical_json(projection) + "\n"
+        else:
+            rendered = (
+                canonical_json(receipt) + "\n"
+                if args.emit_json
+                else render_receipt(receipt)
+            )
     except SessionTruthContractError:
         return _error(err, "invalid session truth output")
     out.write(rendered)
