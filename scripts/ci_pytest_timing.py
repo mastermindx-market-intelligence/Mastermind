@@ -209,29 +209,38 @@ class ModuleTiming:
             )
 
     def _h1_failure(self,nodeid,phase,*,error=None,crash=None):
-        try:value=_h1_failure_metadata(nodeid,phase,error=error,crash=crash)
+        try:
+            try:value=_h1_failure_metadata(nodeid,phase,error=error,crash=crash)
+            except Exception:
+                # A diagnostic failure must never replace the original test result.
+                # Keep only the independently fixed module/phase, without rendering it.
+                module=nodeid.split('::',1)[0]
+                value=(dict(module=module,case=None,function=None,phase=phase,line=None,errno=None)
+                    if module in _H1_OWNED and phase in ('collect','setup','call','teardown') else None)
+            if value is not None and _h1_metadata_is_safe(value):
+                self.reporter.write_line('\n::error file='+value['module']
+                    +',title=H1 preflight failure metadata::'+json.dumps(value,sort_keys=True,separators=(',',':')))
         except Exception:
-            # A diagnostic failure must never replace the original test result.
-            # Keep only the independently fixed module/phase, without rendering it.
-            module=nodeid.split('::',1)[0]
-            value=(dict(module=module,case=None,function=None,phase=phase,line=None,errno=None)
-                if module in _H1_OWNED and phase in ('collect','setup','call','teardown') else None)
-        if value is not None and _h1_metadata_is_safe(value):
-            self.reporter.write_line('\n::error file='+value['module']
-                +',title=H1 preflight failure metadata::'+json.dumps(value,sort_keys=True,separators=(',',':')))
+            pass  # Best-effort diagnostics cannot replace the original report.
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_makereport(self,item,call):
         outcome=yield
         report=outcome.get_result()
-        if report.failed:
-            error=call.excinfo.value if call.excinfo is not None else None
-            self._h1_failure(report.nodeid,report.when,error=error)
+        try:
+            if report.failed:
+                error=call.excinfo.value if call.excinfo is not None else None
+                self._h1_failure(report.nodeid,report.when,error=error)
+        except Exception:
+            pass
 
     def pytest_collectreport(self,report):
-        if report.failed:
-            crash=getattr(report.longrepr,'reprcrash',None)
-            self._h1_failure(report.nodeid,'collect',crash=crash)
+        try:
+            if report.failed:
+                crash=getattr(report.longrepr,'reprcrash',None)
+                self._h1_failure(report.nodeid,'collect',crash=crash)
+        except Exception:
+            pass
 
     def pytest_runtest_logstart(self, nodeid, location):
         module = nodeid.split("::", 1)[0]

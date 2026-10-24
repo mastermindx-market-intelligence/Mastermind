@@ -81,3 +81,25 @@ def test_emission_boundary_cannot_render_private_or_unapproved_fields(monkeypatc
     monkeypatch.setattr(m,'_h1_failure_metadata',lambda *a,**kw:data)
     m.ModuleTiming(SimpleNamespace(write_line=lines.append))._h1_failure(MODULE+'::'+CASE,'call')
     assert lines==[]
+
+
+def test_actual_annotation_writer_failure_cannot_replace_pytest_failure(tmp_path):
+    tests=tmp_path/'tests';tests.mkdir()
+    (tests/'test_paid_initializer_nosite.py').write_text('def '+CASE+'():\n raise AssertionError("original owned case failure")\n')
+    (tmp_path/'conftest.py').write_text('''def pytest_sessionstart(session):
+ reporter=session.config.pluginmanager.getplugin('terminalreporter');original=reporter.write_line
+ def write(line,*args,**kwargs):
+  if '::error ' in line:raise RuntimeError('annotation writer unavailable')
+  return original(line,*args,**kwargs)
+ reporter.write_line=write
+''')
+    env={**os.environ,'PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1','PYTHONPATH':str(Path(__file__).resolve().parents[1])}
+    child=subprocess.run([sys.executable,'-m','pytest','-q','--tb=short','-p','no:cacheprovider','-p','scripts.ci_pytest_timing',MODULE],cwd=tmp_path,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=20)
+    assert child.returncode==1 and '1 failed' in child.stdout and 'INTERNALERROR' not in child.stdout
+
+
+@pytest.mark.parametrize('interrupt',[KeyboardInterrupt,SystemExit])
+def test_diagnostic_best_effort_never_swallows_interrupts(interrupt):
+    from types import SimpleNamespace
+    def stop(line):raise interrupt()
+    with pytest.raises(interrupt):m.ModuleTiming(SimpleNamespace(write_line=stop))._h1_failure(MODULE+'::'+CASE,'call')
