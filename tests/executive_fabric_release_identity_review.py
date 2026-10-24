@@ -286,24 +286,24 @@ REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
               (903, 66, 69, "int", "500")),
 }
 
-# Exact #1515 Control Room action/HTTP status review at source12c83.
-# Independent diagnosis: PR1515 issuecomment6251590011; full source and fixed
-# token positions verified before publication. These are HTTP response statuses,
+# #1515 source-pin alignment candidate on unchanged app.py blob.
+# Eight exact action refusal statuses manually inspected; independent current-
+# head re-review remains required before protected release. These are HTTP response statuses,
 # not account/UID/GID values. Any changed byte/site restores ordinary D8.
 REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
     'sha256': 'ff72b9f6d5165cd07bc41052fc322da84e02eef2e3041f58e7569de4f37bfb50',
     'sites': ((135, 58, 61, 'int', '409'),),
 }
 REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
-    'sha256': '2835c7b2c96b63e38f0d5d3c04e4c8dd69585053ab6bea2a9e98fa49dee591c2',
+    'sha256': 'aafbdfcc401105829a40974f16bb4963862349f76b14ec74c1dc6d037f468e75',
     'sites': (
-        (750, 71, 74, 'int', '400'),
-        (761, 71, 74, 'int', '403'),
-        (769, 71, 74, 'int', '400'),
-        (775, 79, 82, 'int', '400'),
-        (784, 71, 74, 'int', '400'),
-        (794, 71, 74, 'int', '403'),
-        (799, 76, 79, 'int', '503'),
-        (805, 71, 74, 'int', '403'),
+        (758, 71, 74, 'int', '400'),
+        (769, 71, 74, 'int', '403'),
+        (777, 71, 74, 'int', '400'),
+        (783, 79, 82, 'int', '400'),
+        (792, 71, 74, 'int', '400'),
+        (802, 71, 74, 'int', '403'),
+        (807, 76, 79, 'int', '503'),
+        (813, 71, 74, 'int', '403'),
     ),
 }

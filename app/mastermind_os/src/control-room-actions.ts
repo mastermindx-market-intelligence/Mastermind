@@ -37,7 +37,7 @@ const unicode = (v: string) => {
   }
   return true;
 };
-const invalid = (): never => { throw new Error("CONTROL_ROOM_ACTION_INVALID"); };
+function invalid(): never { throw new Error("CONTROL_ROOM_ACTION_INVALID"); }
 function strictJsonValue(value: unknown, visited = { count: 0 }, depth = 0): void {
   if (++visited.count > 10000 || depth > 48) invalid();
   if (value === null || typeof value === "boolean") return;
