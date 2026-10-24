@@ -2359,6 +2359,176 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             self.assertEqual(before, (roots["config"].read_bytes(), self._all_files(roots)))
 
 
+class TestC2BusinessMergePublisher(unittest.TestCase):
+    # Reuse only the existing fixture builders, not the generic-seat test cases.
+    _installed_fleet_fixture = TestFleetV10PublisherCompatibility._installed_fleet_fixture
+    _installed_merge_predecessor_fixture = TestFleetV10PublisherCompatibility._installed_merge_predecessor_fixture
+    _all_files = staticmethod(TestFleetV10PublisherCompatibility._all_files)
+
+    @contextmanager
+    def fixture(self):
+        with self._installed_merge_predecessor_fixture("chatgpt2-business") as (args, roots, cfg):
+            args.publisher_only_fleet_v10 = False
+            args.c2_business_merge_publisher_only = True
+            with mock.patch.object(svc, "C2_BUSINESS_MERGE_MANIFEST_SHA256",
+                                   args.publisher_expected_manifest_sha256, create=True):
+                yield args, roots, cfg
+
+    def test_cli_separate_opt_in(self):
+        args = svc.build_parser().parse_args([
+            "upgrade", "--account", "chatgpt2-business", "--port", "45028",
+            "--source", "/src", "--node", "/node", "--backend", "/backend",
+            "--c2-business-merge-publisher-only"])
+        self.assertTrue(args.c2_business_merge_publisher_only)
+        self.assertEqual(svc.FLEET_V10_ENROLLED_ACCOUNTS, {"chatgpt1", "chatgpt3"})
+
+    def test_production_manifest_pin(self):
+        self.assertEqual(svc.C2_BUSINESS_MERGE_MANIFEST_SHA256,
+                         "7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421")
+
+    def test_preflight_no_writes_and_apply_changes_only_two_modules(self):
+        with self.fixture() as (args, roots, cfg):
+            before = self._all_files(roots)
+            config, plist = roots["config"].read_bytes(), roots["plist"].read_bytes()
+            args.publisher_preflight_only = True
+            with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                rc, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+            write.assert_not_called()
+            args.publisher_preflight_only = False
+            with mock.patch.object(svc, "_run", CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result("chatgpt2-business"))):
+                rc, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+            self.assertEqual(config, roots["config"].read_bytes())
+            self.assertEqual(plist, roots["plist"].read_bytes())
+            self.assertEqual({n for n, b in before.items() if b != (roots["base"] / n).read_bytes()},
+                             {"git-publish.mjs", "workspace-access.mjs"})
+            svc._verify_staged_install(args.account, _label_for(args.account), roots)
+
+    def test_wrong_cas_account_and_conflicting_modes_refuse_without_writes(self):
+        for change in ({"publisher_expected_manifest_sha256": "0" * 64},
+                       {"account": "chatgpt1"}, {"publisher_only_fleet_v10": True},
+                       {"c2_business_repository_enrollment": True},
+                       {"c2_personal_git_timeout_only": True},
+                       {"enable_repository_workspaces": True}):
+            with self.subTest(change=change), self.fixture() as (args, roots, cfg):
+                for k, v in change.items():
+                    setattr(args, k, v)
+                with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    with self.assertRaises(SystemExit):
+                        svc.cmd_upgrade(args)
+                write.assert_not_called()
+
+    def test_resealed_manifest_is_not_an_eligible_predecessor(self):
+        with self.fixture() as (args, roots, cfg):
+            roots["manifest"].write_bytes(roots["manifest"].read_bytes() + b"\n")
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+            with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "C2 Business"):
+                    svc.cmd_upgrade(args)
+            write.assert_not_called()
+
+    def test_live_service_refuses_and_partial_failure_restores_original(self):
+        with self.fixture() as (args, roots, cfg):
+            before = roots["manifest"].read_bytes(), self._all_files(roots)
+            with mock.patch.object(svc, "_lifecycle_inspect", return_value={"pid": 123}):
+                with self.assertRaisesRegex(SystemExit, "while service is loaded"):
+                    svc.cmd_upgrade(args)
+            real, fired = svc._atomic_write_bytes, []
+            def fail(path, data, mode=svc.FILE_MODE):
+                real(path, data, mode)
+                if Path(path).name == "workspace-access.mjs" and not fired:
+                    fired.append(True)
+                    raise OSError("after replace")
+            with mock.patch.object(svc, "_run", CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result("chatgpt2-business"))), mock.patch.object(svc, "_atomic_write_bytes", fail):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(fired)
+            self.assertEqual(before, (roots["manifest"].read_bytes(), self._all_files(roots)))
+
+    def test_preflight_does_not_lock_and_apply_holds_original_mutex(self):
+        with self.fixture() as (args, roots, cfg):
+            held = []
+            @contextmanager
+            def lock(account):
+                self.assertEqual(account, "chatgpt2-business")
+                held.append(True)
+                try:
+                    yield
+                finally:
+                    held.pop()
+            real = svc._atomic_write_bytes
+            def write(path, data, mode=svc.FILE_MODE):
+                self.assertTrue(held, "installation writes require the C2 owner mutex")
+                return real(path, data, mode)
+            args.publisher_preflight_only = True
+            with mock.patch.object(svc, "_c2_lifecycle_mutex") as mutex:
+                _capture_stdout(lambda: svc.cmd_upgrade(args))
+            mutex.assert_not_called()
+            args.publisher_preflight_only = False
+            with mock.patch.object(svc, "_c2_lifecycle_mutex", lock), mock.patch.object(svc, "_atomic_write_bytes", write), mock.patch.object(svc, "_run", CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result("chatgpt2-business"))):
+                _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(held, [])
+
+    def test_runtime_identity_mismatch_refuses_without_writes(self):
+        for field, value in (("port", 45029), ("node", "/foreign-node"), ("backend", "/foreign-backend")):
+            with self.subTest(field=field), self.fixture() as (args, roots, cfg):
+                setattr(args, field, value)
+                with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    with self.assertRaises(SystemExit):
+                        svc.cmd_upgrade(args)
+                write.assert_not_called()
+
+    def test_postcommit_verification_failure_never_claims_rollback(self):
+        with self.fixture() as (args, roots, cfg):
+            real = svc._verify_staged_install
+            def verify(*values, **options):
+                if svc._sha256_file(roots["manifest"]) != args.publisher_expected_manifest_sha256:
+                    raise OSError("postcommit verification unavailable")
+                return real(*values, **options)
+            with mock.patch.object(svc, "_verify_staged_install", verify), mock.patch.object(svc, "_run", CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result("chatgpt2-business"))):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after manifest commit"):
+                    svc.cmd_upgrade(args)
+            self.assertNotEqual(svc._sha256_file(roots["manifest"]), args.publisher_expected_manifest_sha256)
+
+    def test_indeterminate_launchctl_is_not_absence(self):
+        with self.fixture() as (args, roots, cfg):
+            with mock.patch.object(svc, "_run", CmdRecorder(default=FakeResult(1, "", "denied"))), mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "indeterminate"):
+                    svc.cmd_upgrade(args)
+            write.assert_not_called()
+
+    def test_interrupted_unsealed_module_refuses_without_repair(self):
+        with self.fixture() as (args, roots, cfg):
+            (roots["base"] / "git-publish.mjs").write_bytes(b"interrupted")
+            with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "hash mismatch"):
+                    svc.cmd_upgrade(args)
+            write.assert_not_called()
+
+    def test_changed_target_source_refuses(self):
+        with self.fixture() as (args, roots, cfg):
+            (Path(args.source) / "git-publish.mjs").write_bytes(b"unreviewed target")
+            with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "module hash mismatch"):
+                    svc.cmd_upgrade(args)
+            write.assert_not_called()
+
+    def test_rollback_refuses_foreign_bytes_and_preserves_uncertainty(self):
+        with self.fixture() as (args, roots, cfg):
+            real = svc._atomic_write_bytes
+            def fail(path, data, mode=svc.FILE_MODE):
+                real(path, data, mode)
+                if Path(path).name == "workspace-access.mjs":
+                    (roots["base"] / "git-publish.mjs").write_bytes(b"foreign writer")
+                    raise OSError("concurrent write")
+            with mock.patch.object(svc, "_run", CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result("chatgpt2-business"))), mock.patch.object(svc, "_atomic_write_bytes", fail):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual((roots["base"] / "git-publish.mjs").read_bytes(), b"foreign writer")
+
+
 class TestC2PaperRuntimeCompatibility(unittest.TestCase):
     """Real installer checks over isolated, sealed data fixtures; no live effects."""
 

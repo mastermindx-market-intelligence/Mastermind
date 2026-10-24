@@ -96,3 +96,36 @@ Retention belongs to the existing backend lifetime: shared-account frontends use
 `OUTPUT_NOT_RETAINED` means no full-result receipt exists. `OUTPUT_NOT_AVAILABLE` means the requested receipt is unknown, expired, or belongs elsewhere. `OUTPUT_PROJECTION_FAILED` means a backend response was received but could not be projected. None authorizes repeating the original action. Reconcile its original source/effect instead. Projection failures are kept out of backend timeout/taint handling, and original error flags remain truthful. Do not log result bodies, request arguments, or opaque receipts as telemetry.
 
 The existing private installer stages `output-budget.mjs` and recognizes both exact historical file layouts for controlled stopped-service upgrades. Tests use local fixture backends and temporary installer roots, not installed accounts. Source/fixture qualification does not establish protected publication, installation, native-account adoption, or improved Pro-turn behavior; those remain separate release and acceptance gates.
+
+
+### C2 Business merge-publisher compatibility (source candidate; installation held)
+
+The enrolled `chatgpt2-business` v2/12-file installation has a distinct,
+byte-pinned migration selected with `upgrade --c2-business-merge-publisher-only`.
+It does not extend `--publisher-only-fleet-v10` eligibility. Supply the existing
+account's exact source, node, backend and port plus
+`--publisher-expected-manifest-sha256
+7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421`.
+The pin binds all predecessor module hashes, config, plist, runtime seal and
+source identity. Only the reviewed merge-capable `git-publish.mjs` and
+`workspace-access.mjs` bytes are admitted; the existing closed repository grants,
+Paper runtime, fleet routes, concurrency and configuration bytes are preserved.
+No configuration rewrite, new service or publisher is introduced.
+
+`--publisher-preflight-only` validates without installation writes or lifecycle
+changes and may run while the gateway is loaded. Application requires the existing
+C2 lifecycle mutex and positive stopped-service evidence. Indeterminate launchctl
+output refuses application. The incumbent transaction writes the manifest last;
+precommit failures reconcile exact old/planned bytes before rollback, foreign
+bytes or failed rollback retain `EFFECT_UNKNOWN`, and postcommit verification
+failure freezes the installed result for same-owner reconciliation. Interrupted
+unsealed files are refused rather than automatically repaired or replayed.
+
+This source candidate does not authorize installation. Qualify its independent
+security review and release first, then use the existing service owner for the
+maintenance transaction. The published Business app's admin-approved action
+snapshot is an additional gate: only an actual same-account schema readback of
+`merge.expected_protected_base_sha` and `merge.expected_tree_sha` establishes
+callable availability. No Macro publication, merge or vendor activation is part
+of this installer change. Consumer custody and evidence remain in Mastermind
+issue #1333 and Macro PR #10136.
