@@ -346,3 +346,41 @@ def test_normal_service_dispatch_owns_allocation_before_supervisor_edge(tmp_path
             await service._dispatch_cycle_job_exact(job.job_id,'service-allocation-edge')
     asyncio.run(exercise())
     assert sum(e.event_type=='COO_CHILD_WORKSPACE_COMPLETED' for e in runtime.events.list_events(job_id=job.job_id))==1
+
+
+@pytest.mark.parametrize('authorities,paths,commands',[
+    (['READ','WRITE_BRANCH'],['research/commission.md'],[]),
+    (['READ','RUN_TESTS'],[],[['python3','-m','pytest']]),
+    (['READ'],['research/commission.md'],[]),
+    (['READ'],[],[['python3','-m','pytest']]),
+])
+def test_new_profile_rejects_writing_or_testing_root_at_actual_intent_admission(tmp_path,authorities,paths,commands):
+    from control_plane.ceo_intent import submit_intent,CeoIntentError
+    from tests.test_executive_os_phase1fc import _v2_intent
+    config=_config(tmp_path,coo_paid_work_placements=(PaidWorkPlacement('glm.paid.sealed-input','offline-paid-read'),))
+    service=ExecutiveControlService(config,supervisor_factory=lambda _:object())
+    runtime=er.Runtime.at(tmp_path/'runtime')
+    intent=_v2_intent(intent_id='CEO-ROOT-GRANT-NEGATIVE')
+    intent['grounding']['mastermind_sha']=config.proof_base_sha
+    intent['execution_contract'].update(requested_authorities=authorities,allowed_write_paths=paths,
+        validation_commands=commands,branch='codex/grant-negative',worktree=str(config.proof_workspace_root/'negative'))
+    with pytest.raises((er.StateConflict,CeoIntentError)):
+        submit_intent(runtime,intent,execution_binding=service._coo_execution_binding,workspace_root=config.proof_workspace_root)
+    assert runtime.jobs.list_jobs()==[]
+    assert runtime.events.list_events()==[]
+
+
+def test_legacy_writing_root_without_new_host_policy_is_not_weakened(tmp_path):
+    from control_plane.ceo_intent import submit_intent
+    from tests.test_executive_os_phase1fc import _v2_intent
+    config=_config(tmp_path,coo_paid_work_placements=(PaidWorkPlacement('glm.paid.sealed-input','offline-paid-read'),))
+    service=ExecutiveControlService(config,supervisor_factory=lambda _:object())
+    binding=dict(service._coo_execution_binding);binding.pop(er.CHILD_WORKSPACE_POLICY_KEY)
+    runtime=er.Runtime.at(tmp_path/'runtime');intent=_v2_intent(intent_id='CEO-ROOT-LEGACY-WRITE')
+    intent['grounding']['mastermind_sha']=config.proof_base_sha
+    intent['execution_contract'].update(requested_authorities=['READ','WRITE_BRANCH'],
+        allowed_write_paths=['research/commission.md'],branch='codex/legacy',worktree=str(config.proof_workspace_root/'legacy'))
+    receipt=submit_intent(runtime,intent,execution_binding=binding,workspace_root=config.proof_workspace_root)
+    root=runtime.jobs.get_job(receipt['job_id'])
+    assert root.requested_authorities==['READ','WRITE_BRANCH']
+    assert er.CHILD_WORKSPACE_POLICY_KEY not in root.constraints

@@ -6,8 +6,9 @@ constraints cannot supply it. Existing roots, Jobs, assignments, host-binding
 digests and write-capable cycles keep their original behavior. There is no arm,
 socket command, caller path, receipt DTO or migration that promotes an old root.
 
-This initial profile permits only READ/RESEARCH leaves, with no write paths or
-validation commands. Work, independent review and repair Jobs each receive a
+This initial profile permits only READ/RESEARCH roots and leaves, with no write
+paths or validation commands. Incompatible root grants refuse before any Job or
+Event is created; authorities are never silently stripped. Work, independent review and repair Jobs each receive a
 separate deterministic `job-NNN` credentialless clone and branch, committed in
 the existing Job before execution. Coordinators and planners keep the existing
 root workspace. The original root, parent, budget, reserved Job/Attempt counts,

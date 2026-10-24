@@ -15826,6 +15826,10 @@ class JobRegistry:
             )
         except (AuthorityDenied, AuthorityPolicyError) as exc:
             raise StateConflict(f"job authority is denied: {exc}") from exc
+        if (normalized_constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY
+                and (set(authority.requested) - {"READ", "RESEARCH"}
+                     or authority.allowed_write_paths or authority.validation_commands)):
+            raise StateConflict("read-only child workspace root admits READ/RESEARCH only")
         if (
             orchestration_role in {"plan", "aggregation"}
             and "READ" not in authority.requested
