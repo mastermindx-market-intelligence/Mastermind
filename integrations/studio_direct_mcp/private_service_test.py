@@ -4600,6 +4600,50 @@ class TestFabricPoolPinMigration(unittest.TestCase):
 
 
 
+    def test_pinned_original_config_hash_never_admits_tampered_manifest(self):
+        # The original config remains intact; mutating another manifest value
+        # previously bypassed the current raw-byte seal via a generic fileset.
+        current = (*self.pins, svc._canonical_json_sha256(self.original_manifest))
+        self.patch("FABRIC_POOL_PIN_MIGRATION_CURRENT", {self.account: current})
+        self.assertEqual(
+            svc._read_manifest(self.roots["manifest"], self.account, self.label),
+            self.original_manifest,
+        )
+        modified = dict(self.original_manifest)
+        modified["files"] = {"unreviewed-module.js": "0" * 64}
+        self.roots["manifest"].write_text(json.dumps(modified, indent=2, sort_keys=True))
+        with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+            svc._read_manifest(self.roots["manifest"], self.account, self.label)
+        self.roots["manifest"].write_bytes(self.original_manifest_bytes)
+        self.assert_original()
+
+    def test_distinct_historical_original_bytes_with_shared_config_remain_admitted(self):
+        # An old original manifest and a publisher-era original manifest may
+        # share the exact same config hash. Both are allowed only if *each*
+        # matches its own immutable raw-seal registration.
+        historic = dict(self.original_manifest)
+        historic["files"] = {"legacy-module.js": "1" * 64}
+        historic_bytes = json.dumps(historic, indent=2, sort_keys=True).encode()
+        sha = lambda raw: hashlib.sha256(raw).hexdigest()
+        older = (sha(historic_bytes), self.pins[1], *self.pins[2:])
+        current = (*self.pins, svc._canonical_json_sha256(self.original_manifest))
+        self.patch("FABRIC_POOL_PIN_MIGRATION", {self.account: older})
+        self.patch("FABRIC_POOL_PIN_MIGRATION_CURRENT", {self.account: current})
+        self.assertEqual(
+            svc._read_manifest(self.roots["manifest"], self.account, self.label),
+            self.original_manifest,
+        )
+        self.roots["manifest"].write_bytes(historic_bytes)
+        self.assertEqual(
+            svc._read_manifest(self.roots["manifest"], self.account, self.label),
+            historic,
+        )
+        historic["files"] = {"legacy-module.js": "2" * 64}
+        self.roots["manifest"].write_text(json.dumps(historic, sort_keys=True, indent=2))
+        with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+            svc._read_manifest(self.roots["manifest"], self.account, self.label)
+
+
 class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):
     """Exact original lifecycle inode serializes pin writer and start/stop."""
 
