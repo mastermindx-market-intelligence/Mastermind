@@ -273,11 +273,11 @@ def test_inspection_command_fixed_isolated_and_not_shell_hook(backend,monkeypatc
 
 def test_inspection_shell_mode_exclusive_before_telemetry_or_daemon():
     text=(SOURCE/'host_pull.sh').read_text()
-    body=text[text.index('if [ -n "$INSPECT_HOST" ]; then'):text.index('if [ "$PAID_REQUESTED" -eq 1 ]; then')]
+    body=text[text.index('if [ -n "$PHYSICAL_HOST" ]; then'):text.index('if [ "$PAID_REQUESTED" -eq 1 ]; then')]
     assert 'run_probe 0 "$INSPECT_ALIAS" "$INSPECT_PROBE" fixed-hook-inspection' in body
     assert 'inspect-host-env-result' in body and 'exit $?' in body
     assert 'write_state' not in body and 'glm_probe' not in body and 'pass_once' not in body.replace('# never enters pass_once, shared telemetry writes, or daemon startup.','')
-    assert text.index('if [ -n "$INSPECT_HOST" ]; then')<text.index('if [ "$ONCE" -eq 0 ]; then')
+    assert text.index('if [ -n "$PHYSICAL_HOST" ]; then')<text.index('if [ "$ONCE" -eq 0 ]; then')
 
 
 @pytest.mark.parametrize('args',[['--inspect-host-env','ubuntu0','--once'],['--inspect-host-env','ubuntu1'],['--once','--inspect-host-env','ubuntu0'],['--inspect-host-env','ubuntu0','--paid-qualification','ubuntu0']])
@@ -318,10 +318,10 @@ def test_hook_held_namespace_rename_refuses(backend,tmp_path,monkeypatch):
 
 def test_inspection_transport_no_key_mutation_normal_transport_unchanged(tmp_path):
     text=(SOURCE/'host_pull.sh').read_text()
-    function=text[text.index('run_probe() {'):text.index('if [ -n "$INSPECT_HOST" ]; then')]
+    function=text[text.index('run_probe() {'):text.index('if [ -n "$PHYSICAL_HOST" ]; then')]
     # Bash functions stand in for transport executables; no SSH/perl is run.
     stub='perl(){ printf "ARG:%s\\n" "$@"; }; sh(){ return 98; };\n'
-    for flag in ('','fixed-hook-inspection'):
+    for flag in ('','fixed-hook-inspection','fixed-physical-diagnostic'):
         script=stub+function+'\nrun_probe 0 mmx-ubuntu0 INERT '+flag
         result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',script],
                               env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
@@ -330,3 +330,188 @@ def test_inspection_transport_no_key_mutation_normal_transport_unchanged(tmp_pat
         assert ('ARG:StrictHostKeyChecking=yes' in result.stdout)==bool(flag)
         assert ('ARG:UpdateHostKeys=no' in result.stdout)==bool(flag)
         assert result.stdout.endswith('ARG:mmx-ubuntu0\nARG:INERT\n')
+
+
+def physical_frame(output=None, digest='a'*64):
+    return ('HOST_PULL_PHYSICAL_V1 BEGIN\n' + (physical() if output is None else output)
+            + 'occupancy_source_sha256=' + digest + '\nHOST_PULL_PHYSICAL_V1 EXIT 0\n')
+
+
+def test_physical_diagnostic_is_detached_no_readiness_or_arbitrary_output(backend):
+    value=backend.physical_diagnostic_result(physical_frame()+SECRET,0,'a'*64)
+    assert value['status']=='UNAVAILABLE'
+    value=backend.physical_diagnostic_result(physical_frame(physical()+'glm_local_account_readiness='+SECRET+'\n'),0,'a'*64)
+    assert value['status']=='OBSERVED' and value['published'] is False
+    assert value['scope']=='DIAGNOSTIC_ONLY' and value['readiness']=='NOT_REQUESTED'
+    assert value['occupancy_source']=='QUALIFIED' and value['physical']['active_lanes']==0
+    assert SECRET not in json.dumps(value)
+    assert not any('readiness' in key for key in value['physical'])
+
+
+@pytest.mark.parametrize('rc',[1,78,128,255,None,True,256])
+def test_physical_diagnostic_nonzero_never_salvaged(backend,rc):
+    value=backend.physical_diagnostic_result(physical_frame(),rc,'a'*64)
+    assert value['status']=='UNAVAILABLE' and value['physical']=={}
+
+
+@pytest.mark.parametrize('change',[
+    lambda s:s.replace('HOST_PULL_PHYSICAL_V1 BEGIN\n',''),
+    lambda s:s+'HOST_PULL_PHYSICAL_V1 EXIT 0\n',
+    lambda s:s.replace('EXIT 0','EXIT 1'),
+    lambda s:s.replace('load1=0.5','load1=nan'),
+    lambda s:s.replace('ncpu=8','ncpu=0'),
+    lambda s:s.replace('tools=claude,python3','tools='+SECRET),
+    lambda s:s.replace('load1=0.5','load1=0.5\nload1=0.5'),
+    lambda s:s.replace('a'*64,'b'*64),
+])
+def test_physical_diagnostic_invalid_or_wrong_source_unavailable(backend,change):
+    value=backend.physical_diagnostic_result(change(physical_frame()),0,'a'*64)
+    assert value['status']=='UNAVAILABLE' and value['physical']=={}
+    assert SECRET not in json.dumps(value)
+
+
+def test_physical_diagnostic_unknown_occupancy_never_invents_capacity(backend):
+    raw=physical().replace('\nactive_lanes=0\n','\nactive_lanes=\n').replace('\nlease_active_lanes=0\n','\nlease_active_lanes=\n').replace('active_lanes_status=known','active_lanes_status=unknown')
+    value=backend.physical_diagnostic_result(physical_frame(raw),0,'a'*64)
+    assert value['status']=='OBSERVED'
+    assert value['physical']['active_lanes_status']=='unknown'
+    assert value['physical']['active_lanes'] is None and value['physical']['lease_active_lanes'] is None
+
+
+def test_physical_preparation_uses_selected_template_and_runtime_no_account_hook(backend,monkeypatch):
+    actual_template=(ROOT/'ops/native_fabric/quota_continuity/source/host_pull_probe.template').read_bytes()
+    runtime=(SOURCE/'lane_runtime.py').read_bytes()
+    monkeypatch.setattr(backend,'prepare_host_env_inspection',lambda registry,host:('mmx-ubuntu0','DISCARDED_INSPECTOR'))
+    def owned(path):
+        return {'host_pull_probe.template':actual_template,'lane_runtime.py':runtime}[path.name]
+    monkeypatch.setitem(sys.modules,'glm_host_account_source',SimpleNamespace(owned_bytes=owned))
+    alias,command=backend.prepare_physical_diagnostic('fixture','ubuntu0')
+    assert alias=='mmx-ubuntu0' and 'DISCARDED_INSPECTOR' not in command
+    assert 'HOST_ENV' not in command and 'glm_host_account_probe' not in command
+    assert 'glm_keys' not in command and 'bailian' not in command
+    assert '/usr/bin/python3 -I -S -B' in command
+    assert hashlib.sha256(runtime).hexdigest() in command
+    assert 'readiness' not in command and '@@LR@@' not in command and '@@WR@@' not in command
+
+
+def test_physical_mode_exits_before_state_or_daemon_and_uses_strict_transport():
+    text=(SOURCE/'host_pull.sh').read_text()
+    body=text[text.index('if [ -n "$PHYSICAL_HOST" ]; then'):text.index('if [ -n "$INSPECT_HOST" ]; then')]
+    assert 'physical-diagnostic-prepare' in body and 'physical-diagnostic-result' in body
+    assert 'fixed-physical-diagnostic' in body and 'exit $?' in body
+    assert 'write_state' not in body and 'pass_once' not in body and 'mkdir' not in body
+    assert text.index('if [ -n "$PHYSICAL_HOST" ]; then') < text.index('pass_once()')
+
+
+@pytest.mark.parametrize('args',[
+    ['--diagnose-physical','ubuntu1'],['--diagnose-physical','ubuntu0','--once'],
+    ['--once','--diagnose-physical','ubuntu0'],
+    ['--diagnose-physical','ubuntu0','--inspect-host-env','ubuntu0']])
+def test_physical_arguments_exclusive_before_dependencies(tmp_path,args):
+    script=(SOURCE/'host_pull.sh').read_text()
+    script=script[:script.index('# One probe snippet')]
+    result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',script,'fixture',*args],
+                          env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
+    assert result.returncode!=0
+
+
+@pytest.mark.parametrize('mismatch',[False,True])
+def test_occupancy_held_source_exact_or_refused_before_execution(backend,tmp_path,monkeypatch,capsys,mismatch):
+    import os
+    from types import ModuleType
+    root=tmp_path/'root';ext=root/'home/ubuntu0/lanes/ext';ext.mkdir(parents=True)
+    raw=b"print('INERT_OCCUPANCY_CALLED')\n"
+    (ext/'lane_runtime.py').write_bytes(raw)
+    original_open=os.open
+    def mapped(path,*args,**kwargs):
+        return original_open(str(root) if path=='/' else path,*args,**kwargs)
+    monkeypatch.setattr(os,'open',mapped)
+    monkeypatch.setattr(sys,'argv',list(sys.argv))
+    monkeypatch.setitem(sys.modules,'__main__',ModuleType('__main__'))
+    digest=hashlib.sha256(raw).hexdigest()
+    if mismatch:
+        with pytest.raises(SystemExit) as error:backend.physical_occupancy('b'*64)
+        assert error.value.code==78 and 'INERT_OCCUPANCY_CALLED' not in capsys.readouterr().out
+    else:
+        backend.physical_occupancy(digest)
+        assert 'INERT_OCCUPANCY_CALLED' in capsys.readouterr().out
+
+
+def test_diagnostic_absence_does_not_qualify_account_readiness(backend):
+    spec=importlib.util.spec_from_file_location('pure_readiness',ROOT/'ops/native_fabric/quota_continuity/source/glm_host_account_readiness.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    observed=backend.physical_diagnostic_result(physical_frame(),0,'a'*64)
+    for mode,model,predicate in [('glm','glm-5.3-flash',module.filter_glm_host_accounts),
+                                 ('qwen','qwen3.8-flash',module.filter_bailian_host_accounts)]:
+        ready,reason=predicate([{'name':'fixture-account'}],observed,host='ubuntu0',transport_alias='mmx-ubuntu0',
+            mode=mode,model=model,candidate_model=model,validator_sha256='a'*64,now=1000,source_verified=True)
+        assert ready==[]
+
+
+def test_physical_actual_shell_branch_never_enters_daemon_state_or_readiness(tmp_path):
+    # Test-only local dependency and transport stand-ins; the entire real
+    # CLI branch runs, while every external executable is a Bash function.
+    here=tmp_path/'collector';here.mkdir()
+    (here/'host_pull_probe.template').write_text('INERT_TEMPLATE')
+    (here/'host_pull_backend.py').write_text('INERT_BACKEND')
+    state=here/'state';state.mkdir()
+    sentinel=state/'daemon-existing.json';sentinel.write_text(SECRET)
+    source=(SOURCE/'host_pull.sh').read_text()
+    source=source.replace('HERE="$(cd "$(dirname "$0")" && pwd)"','HERE='+shlex.quote(str(here)),1)
+    stubs='''python3(){
+ case "$3" in
+ physical-diagnostic-prepare) printf 'mmx-ubuntu0\\nINERT_REMOTE';;
+ physical-diagnostic-result) while IFS= read -r line; do :; done; printf 'DETACHED_RESULT\\n';;
+ *) return 97;; esac
+};
+perl(){ printf 'INERT_TRANSPORT\\n'; };
+'''
+    result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',stubs+source,'fixture','--diagnose-physical','ubuntu0'],
+                          env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
+    assert result.returncode==0 and result.stdout=='DETACHED_RESULT\n'
+    assert sentinel.read_text()==SECRET and sorted(p.name for p in state.iterdir())==['daemon-existing.json']
+
+
+@pytest.mark.parametrize('defect',['symlink','changed','oversize'])
+def test_occupancy_provenance_defects_never_execute(backend,tmp_path,monkeypatch,capsys,defect):
+    import os
+    from types import ModuleType
+    root=tmp_path/'root';ext=root/'home/ubuntu0/lanes/ext';ext.mkdir(parents=True)
+    raw=b"print('MUST_NOT_EXECUTE')\n";leaf=ext/'lane_runtime.py';leaf.write_bytes(raw)
+    if defect=='symlink':
+        leaf.rename(ext/'other.py');leaf.symlink_to('other.py')
+    if defect=='oversize':leaf.write_bytes(b'#'*(1048576+1))
+    original_open=os.open;original_read=os.read
+    def mapped(path,*args,**kwargs):
+        return original_open(str(root) if path=='/' else path,*args,**kwargs)
+    changed=[]
+    def read(fd,count):
+        value=original_read(fd,count)
+        if defect=='changed' and value and not changed:
+            changed.append(True);leaf.write_bytes(raw+b'# changed\n')
+        return value
+    monkeypatch.setattr(os,'open',mapped);monkeypatch.setattr(os,'read',read)
+    monkeypatch.setattr(sys,'argv',list(sys.argv));monkeypatch.setitem(sys.modules,'__main__',ModuleType('__main__'))
+    with pytest.raises(SystemExit) as error:backend.physical_occupancy(hashlib.sha256(raw).hexdigest())
+    assert error.value.code==78 and 'MUST_NOT_EXECUTE' not in capsys.readouterr().out
+
+
+def test_actual_selected_occupancy_cli_reads_disposable_existing_lane(backend,tmp_path,monkeypatch,capsys):
+    import os
+    from types import ModuleType
+    root=tmp_path/'root';ext=root/'home/ubuntu0/lanes/ext';ext.mkdir(parents=True)
+    active=ext/'active';active.mkdir();lock=active/'.admission.lock';lock.write_bytes(b'')
+    raw=(SOURCE/'lane_runtime.py').read_bytes();(ext/'lane_runtime.py').write_bytes(raw)
+    before={p.relative_to(root):(p.stat().st_ino,p.read_bytes()) for p in root.rglob('*') if p.is_file()}
+    original_open=os.open;original_resolve=Path.resolve
+    def mapped(path,*args,**kwargs):return original_open(str(root) if path=='/' else path,*args,**kwargs)
+    def resolve(path,*args,**kwargs):
+        if str(path)=='/home/ubuntu0/lanes/ext/lane_runtime.py':return ext/'lane_runtime.py'
+        return original_resolve(path,*args,**kwargs)
+    monkeypatch.setattr(os,'open',mapped);monkeypatch.setattr(Path,'resolve',resolve)
+    monkeypatch.setattr(sys,'argv',list(sys.argv));monkeypatch.setitem(sys.modules,'__main__',ModuleType('__main__'))
+    backend.physical_occupancy(hashlib.sha256(raw).hexdigest())
+    output=capsys.readouterr().out
+    assert 'active_lanes_status=known\n' in output and 'active_lanes=0\n' in output
+    after={p.relative_to(root):(p.stat().st_ino,p.read_bytes()) for p in root.rglob('*') if p.is_file()}
+    assert before==after
