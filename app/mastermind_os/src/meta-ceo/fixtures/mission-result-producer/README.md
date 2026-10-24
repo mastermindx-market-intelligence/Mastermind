@@ -9,9 +9,11 @@
 `mission` and `role_result` are fields of that body. They are not separate
 raw HTTP responses.
 
-The TypeScript content-fallback case mutates the decoded role result in
-memory. It is consumer projection coverage. It is not a second captured HTTP
-response, and the captured `role_result.availability` stays `AVAILABLE`.
+The TypeScript content-fallback case in replay mutates this decoded role
+result in memory. It is consumer projection coverage. It is not a captured
+HTTP response, and this committed `role_result.availability` stays
+`AVAILABLE`. A genuine mounted `CONTENT_OVER_BUDGET` producer body is
+attempt-owned fresh output and is not stored in this directory.
 
 The proof ceiling is `SOURCE_ASSOCIATED_READ_QUALIFIED`. This export uses a
 test-owned Runtime, namespace, and signed bearer. It does not prove an

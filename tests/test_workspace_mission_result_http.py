@@ -39,10 +39,12 @@ from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceC
 from tests.test_mastermind_executive_app_asgi import _FakeJwksCache, _read_policy, _submit_policy
 from tests.test_workspace_read_app import NOW, _authenticator, _workspace_token, rsa_key
 from tests.test_workspace_read_socket import control, short_socket_root
+from tests.test_workspace_mission_result_service import content_owner
 from tests.test_workspace_result_service import result_owner
 
 ROUTE = "/workspace/mission-result/current"
 CAPTURE = os.environ.get("MISSION_RESULT_CAPTURE_DIR")
+FALLBACK_CAPTURE = os.environ.get("MISSION_RESULT_FALLBACK_CAPTURE_DIR")
 
 
 @asynccontextmanager
@@ -399,5 +401,122 @@ def test_permission_reload_hides_the_pair(
             assert seen["projected"]
             assert "role_result" not in response.text
             assert "reject" not in response.text
+
+    asyncio.run(run())
+
+
+def test_mounted_content_fallback_is_a_producer_body(
+    content_owner, rsa_key, tmp_path, short_socket_root, monkeypatch,
+):
+    """Large canonical role content is sealed by the test-owned Runtime.
+
+    The summary is enlarged before the real canonical encoder. Production
+    ceilings stay unchanged. The mounted compound stays AVAILABLE and keeps
+    the final Mission, the exact tuple, and the same observation. The nested
+    role result is the projector's CONTENT_OVER_BUDGET document.
+    """
+    owner = content_owner
+    for registry, method in (
+        (owner["reader"].jobs, "list_jobs"),
+        (owner["reader"].attempts, "list_attempts"),
+        (owner["reader"].events, "list_events"),
+    ):
+        monkeypatch.setattr(registry, method, lambda *args, **kwargs: pytest.fail("unbounded acquisition"))
+
+    async def run():
+        async with app_transport(owner, rsa_key, tmp_path, short_socket_root) as (
+            http, token, _slots, seen, client, principal, _mounted, sink,
+        ):
+            headers = {"Authorization": "Bearer " + token}
+            before = owner["namespace"].entries
+            response = await http.get(ROUTE, params=owner["selection"], headers=headers)
+            assert response.status_code == 200, response.text
+            assert response.headers["cache-control"] == "no-store"
+            body = response.json()
+            assert body["schema"] == "mastermind.workspace_mission_result.v1"
+            assert set(body) == {
+                "schema", "selection", "availability", "reason_codes", "mission", "role_result",
+            }
+            assert body["availability"] == "AVAILABLE"
+            assert body["reason_codes"] == []
+            mission, role = body["mission"], body["role_result"]
+            assert mission["schema"] == "mastermind.mission_workspace.v3"
+            assert mission["read_state"]["state"] == "CURRENT"
+            assert role["availability"] == "CONTENT_OVER_BUDGET"
+            assert role["reason_codes"] == ["CONTENT_OVER_BUDGET"]
+            assert role["result"]["availability"] == "CONTENT_OVER_BUDGET"
+            assert role["result"]["content"] is None
+            assert role["result"]["content_complete"] is False
+            assert role["result"]["omitted"] == ["role_result", "summary", "next_actions"]
+            assert role["result"]["review"]["verdict"] == "reject"
+            assert role["result"]["execution_status"] == "COMPLETED"
+            assert role["result"]["acceptance"] == "NOT_PROJECTED"
+            identity = role["source_observation"]["runtime"]["source_identity"]
+            assert mission["source"]["owner_observation"]["state"] == "SAME"
+            assert mission["source"]["owner_observation"]["runtime"]["source_identity"] == identity
+            assert mission["result_refs"]["generation"]["source_identity"] == identity
+            assert mission["result_refs"]["generation"]["state"] == "SAME"
+            assert any(
+                ref["root_job_id"] == owner["selection"]["root_job_id"]
+                and ref["job_id"] == owner["selection"]["job_id"]
+                and ref["attempt_id"] == owner["selection"]["attempt_id"]
+                and ref["result_envelope_digest"] == owner["selection"]["result_envelope_digest"]
+                for ref in mission["result_refs"]["refs"]
+            )
+            assert role["source_observation"]["control_room"] == mission["source"]["owner_observation"]["control_room"]
+            assert response.content == canonical(body)
+            assert len(canonical({"ok": True, "result": role})) + 1 <= 16384
+            assert len(canonical({"ok": True, "result": body})) + 1 <= 2_000_000
+            assert owner["namespace"].entries == before + 1 == owner["namespace"].exits
+            socket = await client.request(_frame(owner, principal))
+            assert socket["ok"] is True
+            unix_body = socket["result"]
+            assert unix_body["availability"] == "AVAILABLE"
+            assert unix_body["reason_codes"] == []
+            assert unix_body["role_result"]["availability"] == "CONTENT_OVER_BUDGET"
+            assert unix_body["mission"]["read_state"]["state"] == "CURRENT"
+            assert (
+                unix_body["role_result"]["source_observation"]["runtime"]["source_identity"]
+                != identity
+            )
+            assert seen["factory"] >= 1
+            assert any(event.accepted for event in sink.events)
+            if FALLBACK_CAPTURE:
+                destination = Path(FALLBACK_CAPTURE)
+                destination.mkdir(parents=True, exist_ok=True)
+                (destination / "actual-pair.json").write_bytes(response.content)
+                runtime = role["source_observation"]["runtime"]
+                provenance = {
+                    "proof_ceiling": "SOURCE_ASSOCIATED_READ_QUALIFIED",
+                    "brief_sha": "ba7c2be85d54fc6606e0d6c2e7ab2a4a47dafc45",
+                    "route": ROUTE,
+                    "transport": "build_executive_mcp_app+AuditedWorkspaceApp+WorkspaceApp",
+                    "content_fallback": "mounted_producer_CONTENT_OVER_BUDGET",
+                    "http_body_sha256": hashlib.sha256(response.content).hexdigest(),
+                    "http_body_bytes": len(response.content),
+                    "selection": body["selection"],
+                    "mission_schema": mission["schema"],
+                    "role_result_schema": role["schema"],
+                    "mission_read_state": mission["read_state"]["state"],
+                    "role_result_availability": role["availability"],
+                    "mission_runtime_source_identity": mission["source"]["owner_observation"]["runtime"]["source_identity"],
+                    "role_result_runtime_source_identity": runtime["source_identity"],
+                    "runtime_before": runtime["before"],
+                    "runtime_after": runtime["after"],
+                    "control_room": role["source_observation"]["control_room"],
+                    "review_verdict": role["result"]["review"]["verdict"],
+                    "execution_status": role["result"]["execution_status"],
+                    "acceptance": role["result"]["acceptance"],
+                    "mission_acceptance": mission["acceptance"]["state"],
+                    "note": (
+                        "http_body_sha256 is the whole mounted HTTP response body. "
+                        "The compound availability is AVAILABLE. The nested role_result "
+                        "availability is the Runtime-sealed content fallback "
+                        "CONTENT_OVER_BUDGET. These bytes are not a TypeScript mutation."
+                    ),
+                }
+                (destination / "fixture-provenance.json").write_text(
+                    json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+                )
 
     asyncio.run(run())

@@ -242,7 +242,7 @@ function resultPresentationClaim(
     /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(localAcquiredAt) &&
     Number.isFinite(Date.parse(localAcquiredAt));
   const qualified =
-    result.availability === "AVAILABLE" &&
+    (result.availability === "AVAILABLE" || result.availability === "CONTENT_OVER_BUDGET") &&
     observation.state === "SAME" &&
     control !== null &&
     control.document_digest !== null &&
@@ -476,9 +476,58 @@ function contentFallback(consumed: ConsumedExport): ResultEnvelopeDigestShape {
   return decoded;
 }
 
+function expectProducerContentOverBudget(consumed: ConsumedExport): void {
+  const identity = consumed.result.source_observation.runtime?.source_identity;
+  const view = consumed.result.result;
+  expect(consumed.result.availability).toBe("CONTENT_OVER_BUDGET");
+  expect(consumed.result.reason_codes).toEqual(["CONTENT_OVER_BUDGET"]);
+  expect(consumed.mission.read_state.state).toBe("CURRENT");
+  expect(consumed.mission.result_refs.generation.source_identity).toBe(identity);
+  expect(consumed.mission.result_refs.generation.state).toBe("SAME");
+  expect(
+    consumed.mission.result_refs.refs.some(
+      (ref) =>
+        ref.root_job_id === consumed.selection.root_job_id &&
+        ref.job_id === consumed.selection.job_id &&
+        ref.attempt_id === consumed.selection.attempt_id &&
+        ref.result_envelope_digest === consumed.selection.result_envelope_digest,
+    ),
+  ).toBe(true);
+  expect(consumed.projection.result.value).not.toBeNull();
+  expect(consumed.projection.result.reason).toBe("CONTENT_OVER_BUDGET");
+  expect(consumed.projection.result.source.state).toBe("CURRENT");
+  expect(consumed.projection.result.source.coverage).toBe("INCOMPLETE");
+  expect(consumed.projection.result.value?.availability).toBe("CONTENT_OVER_BUDGET");
+  expect(view?.content).toBeNull();
+  expect(view?.content_complete).toBe(false);
+  expect(view?.omitted).toEqual(["role_result", "summary", "next_actions"]);
+  expect(view?.review?.verdict).toBe("reject");
+  expect(view?.execution_status).toBe("COMPLETED");
+  expect(view?.acceptance).toBe("NOT_PROJECTED");
+  expect(consumed.projection.receipts.review).toBe("NOT_YET");
+  expect(consumed.projection.receipts.return).toBe("RETURNED");
+  expect(consumed.projection.receipts.acceptance).toBe("NOT_PROJECTED");
+  expect(consumed.mission.execution.state).toBe("NOT_STARTED");
+  expect(consumed.mission.acceptance.state).toBe("NOT_PROJECTED");
+}
+
+function expectProducerCase(consumed: ConsumedExport): void {
+  if (consumed.result.availability === "AVAILABLE") {
+    expectAssociated(consumed);
+    return;
+  }
+  if (consumed.result.availability === "CONTENT_OVER_BUDGET") {
+    expectProducerContentOverBudget(consumed);
+    return;
+  }
+  throw new Error(
+    `refusing to admit nested availability ${consumed.result.availability} as a pair`,
+  );
+}
+
 function expectContentFallback(consumed: ConsumedExport): void {
-  // Synthetic consumer projection only. The captured HTTP body stays AVAILABLE;
-  // this mutation is not a second mounted response.
+  // Synthetic consumer projection of the committed AVAILABLE export.
+  // This mutation is not a mounted producer capture.
   expect(consumed.result.availability).toBe("AVAILABLE");
   expect(consumed.result.reason_codes).toEqual([]);
   const decoded = contentFallback(consumed);
@@ -546,7 +595,13 @@ function expectRefusals(consumed: ConsumedExport): void {
   expect(noncurrent.result.reason).toBe("RESULT_TUPLE_NOT_ASSOCIATED");
   expect(noncurrent.result.value).toBeNull();
   expect(consumed.projection.result.value).not.toBeNull();
-  expect(consumed.projection.result.reason).toBeNull();
+  if (consumed.result.availability === "CONTENT_OVER_BUDGET") {
+    expect(consumed.projection.result.reason).toBe("CONTENT_OVER_BUDGET");
+    expect(consumed.projection.result.source.coverage).toBe("INCOMPLETE");
+    expect(consumed.projection.result.source.state).toBe("CURRENT");
+  } else {
+    expect(consumed.projection.result.reason).toBeNull();
+  }
 }
 
 function consumptionReport(consumed: ConsumedExport): Record<string, unknown> {
@@ -565,8 +620,10 @@ function consumptionReport(consumed: ConsumedExport): Record<string, unknown> {
     role_result_runtime_source_identity: identity,
     runtime_before: consumed.result.source_observation.runtime?.before ?? null,
     runtime_after: consumed.result.source_observation.runtime?.after ?? null,
+    result_availability: consumed.result.availability,
     projected_result_state: consumed.projection.result.source.state,
     projected_result_reason: consumed.projection.result.reason,
+    projected_result_coverage: consumed.projection.result.source.coverage,
     result_review_verdict: consumed.result.result?.review?.verdict ?? null,
     result_execution_status: consumed.result.result?.execution_status ?? null,
     result_acceptance: consumed.result.result?.acceptance ?? null,
@@ -584,13 +641,18 @@ function emitConsumptionReport(report: Record<string, unknown>): void {
   stdout.write(`FRESH_CONSUMED ${JSON.stringify(report)}\n`);
 }
 
-function registerConsumer(get: () => ConsumedExport): void {
-  it("decodes the compound HTTP body and associates the nested pair", () => {
-    expectAssociated(get());
+function registerConsumer(get: () => ConsumedExport, kind: "replay" | "fresh"): void {
+  it("decodes the compound HTTP body and admits the explicit producer case", () => {
+    const consumed = get();
+    if (kind === "fresh") expectProducerCase(consumed);
+    else expectAssociated(consumed);
   });
-  it("projects a synthetic content-fallback mutation; the captured export stays AVAILABLE", () => {
-    expectContentFallback(get());
-  });
+  if (kind === "replay") {
+    it("projects a synthetic content-fallback mutation; this is not a producer capture", () => {
+      expect(get().result.availability).toBe("AVAILABLE");
+      expectContentFallback(get());
+    });
+  }
   it("refuses a noncurrent mission, a crossed tuple, and a changed observation", () => {
     expectRefusals(get());
   });
@@ -606,7 +668,7 @@ describe("mission-result producer consumer", () => {
         if (GATE.mode !== "fresh") throw new Error("fresh gate required");
         consumed = await consumeExport(GATE.path, "fresh");
       });
-      registerConsumer(() => consumed);
+      registerConsumer(() => consumed, "fresh");
       it("reports identities and hashes from the consumed directory", () => {
         const report = consumptionReport(consumed);
         expect(report.mode).toBe("fresh");
@@ -615,7 +677,15 @@ describe("mission-result producer consumer", () => {
           report.role_result_runtime_source_identity,
         );
         expect(report.projected_result_state).toBe("CURRENT");
-        expect(report.projected_result_reason).toBeNull();
+        if (consumed.result.availability === "CONTENT_OVER_BUDGET") {
+          expect(report.result_availability).toBe("CONTENT_OVER_BUDGET");
+          expect(report.projected_result_reason).toBe("CONTENT_OVER_BUDGET");
+          expect(report.projected_result_coverage).toBe("INCOMPLETE");
+        } else {
+          expect(report.result_availability).toBe("AVAILABLE");
+          expect(report.projected_result_reason).toBeNull();
+          expect(report.projected_result_coverage).toBe("COMPLETE");
+        }
         emitConsumptionReport(report);
       });
     },
@@ -639,7 +709,7 @@ describe("mission-result producer consumer", () => {
       );
     });
 
-    registerConsumer(() => consumed);
+    registerConsumer(() => consumed, "replay");
 
     it("rejects a malformed wrapper even when the nested documents stay valid", async () => {
       const fs = await realFs();
