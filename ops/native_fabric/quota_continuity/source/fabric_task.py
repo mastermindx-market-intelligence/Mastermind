@@ -537,6 +537,34 @@ def request(
     # economic metadata. Selection and launch see the same exact witness.
     complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
+    # One batched Jev semantic judgment, before route, lease or worker execution.
+    # The incumbent Fabric policy retains all authority and explicit constraints.
+    jev_mode = env.get("FABRIC_JEV_MODE", "off").strip().lower()
+    if jev_mode not in ("off", "shadow", "assist"):
+        raise FabricTaskError("FABRIC_JEV_MODE must be off, shadow, or assist")
+    if jev_mode != "off":
+        import jev_advisory
+        try:
+            preview = (_bounded_regular(packet, jev_advisory.MAX_STATE_BYTES)
+                       if packet is not None else (stdin_bytes or b""))
+            if len(preview) > jev_advisory.MAX_STATE_BYTES:
+                raise jev_advisory.JevUnavailable("STATE_TOO_LARGE")
+            timeout = float(env.get("FABRIC_JEV_TIMEOUT_S", "3.0"))
+            advice = jev_advisory.evaluate(
+                "task", {"task_class": task_class,
+                         "work_packet": preview.decode("utf-8", "replace")},
+                timeout_s=timeout)
+            print("JEV_ADVISORY=" + json.dumps(advice, sort_keys=True),
+                  file=sys.stderr)
+            if jev_mode == "assist":
+                complexity = jev_advisory.select_complexity(advice, complexity)
+        except jev_advisory.JevUnavailable as exc:
+            if exc.code == "FRONTIER_NEEDS_EXPLICIT_REASON":
+                raise FabricTaskError("JEV_FRONTIER_NEEDS_EXPLICIT_ESCALATION") from None
+            print("JEV_UNAVAILABLE=" + exc.code, file=sys.stderr)
+        except (OSError, ValueError, UnicodeError):
+            # Advisory outage falls back to unchanged routing; never retry/switch keys.
+            print("JEV_UNAVAILABLE=INPUT_OR_TRANSPORT", file=sys.stderr)
     if artifact_names:
         import artifact_production
     if qualification_host:
@@ -805,6 +833,15 @@ def main(argv: list[str] | None = None) -> int:
     p_result = sub.add_parser("result")
     p_result.add_argument("run_id")
     p_result.add_argument("--max-bytes", type=int, default=DEFAULT_RESULT_BYTES)
+    p_result.add_argument("--jev-triage", action="store_true",
+                          help="Explicit optional result advice on stderr, without changing stdout")
+
+    p_jev = sub.add_parser("jev-advice", help="Read-only Jev advice, no worker action")
+    p_jev.add_argument("--kind", required=True, choices=("task", "result", "skills"))
+    p_jev.add_argument("--stdin", action="store_true", required=True)
+    p_jev.add_argument("--class", dest="task_class", default="unknown")
+    p_jev.add_argument("--candidate", action="append")
+    p_jev.add_argument("--packet", help="Original work packet for result triage")
 
     p_artifacts = sub.add_parser("artifacts")
     p_artifacts.add_argument("run_id")
@@ -930,6 +967,25 @@ def main(argv: list[str] | None = None) -> int:
             command.extend(["--path", path])
         return subprocess.run(command).returncode
     try:
+        if args.cmd == "jev-advice":
+            import jev_advisory
+            raw = sys.stdin.buffer.read(jev_advisory.MAX_STATE_BYTES + 1)
+            if len(raw) > jev_advisory.MAX_STATE_BYTES:
+                raise FabricTaskError("JEV_STATE_TOO_LARGE")
+            text = raw.decode("utf-8", "replace")
+            if args.kind == "task":
+                advice = jev_advisory.evaluate_task_packet(text, args.task_class)
+            elif args.kind == "skills":
+                advice = jev_advisory.evaluate("skills",
+                    {"task_class": args.task_class, "work_packet": text},
+                    candidates=args.candidate)
+            else:
+                original = (_bounded_regular(Path(args.packet),
+                    jev_advisory.MAX_STATE_BYTES // 2).decode("utf-8", "replace")
+                    if args.packet else "")
+                advice = jev_advisory.evaluate_result_packet(original, text)
+            _json(advice)
+            return 0
         if args.cmd == "reconcile-completed":
             try:
                 _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))
@@ -997,6 +1053,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "result":
             sys.stdout.buffer.write(read_result(args.run_id, max_bytes=args.max_bytes))
+            return 0        if args.cmd == "result":
+            delivered = read_result(args.run_id, max_bytes=args.max_bytes)
+            if args.jev_triage:
+                import jev_advisory
+                try:
+                    advice = jev_advisory.evaluate_result_packet(
+                        "", delivered[:jev_advisory.MAX_STATE_BYTES // 2].decode("utf-8", "replace"))
+                    print("JEV_RESULT_ADVISORY=" + json.dumps(advice, sort_keys=True),
+                          file=sys.stderr)
+                except jev_advisory.JevUnavailable as exc:
+                    print("JEV_UNAVAILABLE=" + exc.code, file=sys.stderr)
+            sys.stdout.buffer.write(delivered)
             return 0
         if args.cmd == "reclaim-plan":
             _json(plan_accepted_macro_worktree_release(
