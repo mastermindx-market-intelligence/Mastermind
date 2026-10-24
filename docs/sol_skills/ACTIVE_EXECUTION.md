@@ -85,6 +85,17 @@ bounded call history/status/readback when available. If the refused call is prov
 the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
 do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
 
+**Action-scoped refusal is not mission-wide refusal.** If one tool request is denied, record the
+precise action, target, originating carrier, receipt, and whether any effect dispatched. Hold that
+specific denied action. Do not treat the refusal as proof that all other tasks, repositories,
+read-only inspections, or Fabric operations are barred. Continue the highest-value independent
+task using an admitted worker where allowed, with a distinct task identity and no replay of the
+denied effect. A different task must be genuinely separable in authority, target, and intended
+effect—not a decomposed substitute for the rejected operation. A request confirmed pre-dispatch
+with `EFFECT_NONE` may be recovered only within the bounds already allowed for that failure
+category. `EFFECT_UNKNOWN` must be reconciled at the original target before any further operation
+depending on it.
+
 Establish refusal provenance before projecting it onto another session. Identify the actual
 tool/provider receipt, originating surface/carrier, action/target, and dispatch/effect state.
 A handoff's claim, an assistant's own refusal, a current system/developer policy restriction,
