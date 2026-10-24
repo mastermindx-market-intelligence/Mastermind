@@ -136,8 +136,12 @@ def package_busy() -> bool:
                 continue
             try:
                 cmd = (proc / "cmdline").read_bytes()[:500].replace(b"\x00", b" ").lower()
-            except (OSError, PermissionError):
+            except FileNotFoundError:
+                # A process that exited while observed is no longer a cache user.
                 continue
+            except (OSError, PermissionError):
+                # An unreadable live process could be a package writer.
+                return True
             if any(key in cmd for key in
                    (b"pip install", b"pip3 install", b"uv pip", b"uv sync",
                     b"npm install", b"npm ci", b"pnpm install", b"yarn install")):
@@ -174,7 +178,7 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
         try:
             started = time.monotonic()
             proc = subprocess.run(argv, cwd=str(root), capture_output=True,
-                                  text=True, timeout=150)
+                                  text=True, timeout=90)
             results.append({"cache": name, "state": "OK" if proc.returncode == 0 else "FAILED",
                             "exit_code": proc.returncode,
                             "duration_sec": round(time.monotonic() - started, 2),
@@ -200,6 +204,7 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
               "epoch": time.time(), "host": socket.gethostname(),
               "mode": mode, "root": before, "lanes": lanes, "memory": mem,
               "fabric_reserve": configured,
+              "fabric_admission": "UNVERIFIED",  # only the incumbent host picker can admit
               "worktrees": candidates(root, 1 if mode == "CRITICAL" else 3),
               "cleanup": []}
     if apply_safe_caches and mode in ("CAUTION", "CRITICAL"):
