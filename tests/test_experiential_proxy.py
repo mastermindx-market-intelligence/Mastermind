@@ -209,3 +209,36 @@ async def test_raw_sse_passthrough_no_chunks_transformed(tmp_path):
             assert response.status_code == 200
             assert response.text == original
             assert response.headers["content-type"].startswith("text/event-stream")
+
+
+@pytest.mark.asyncio
+async def test_compressed_upstream_error_is_not_double_decoded(tmp_path):
+    import gzip
+
+    body = json.dumps({"error": {"code": "insufficient_quota", "message": "not transient"}}).encode()
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: httpx.Response(429, headers={"content-type": "application/json", "content-encoding": "gzip"},
+                                   stream=httpx.ByteStream(gzip.compress(body)))
+    ))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            response = await session.post("/v1/responses", headers={"Authorization": f"Bearer {TOKEN}"}, json={})
+            assert response.status_code == 429
+            assert "content-encoding" not in response.headers
+            assert response.json()["error"]["code"] == "insufficient_quota"
+
+
+@pytest.mark.asyncio
+async def test_upstream_redirect_is_refused_without_following(tmp_path):
+    seen = []
+
+    def redirect(req):
+        seen.append(req.url)
+        return httpx.Response(302, headers={"location": "https://unexpected.invalid/"})
+
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(redirect))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            r = await session.get("/v1/models", headers={"Authorization": f"Bearer {TOKEN}"})
+            assert r.status_code == 502
+    assert len(seen) == 1
