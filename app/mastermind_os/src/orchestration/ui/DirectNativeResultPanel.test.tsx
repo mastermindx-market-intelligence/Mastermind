@@ -38,6 +38,40 @@ function result(consumed = false) {
 }
 afterEach(cleanup);
 describe("direct native result interaction", () => {
+  it("keeps keyboard focus on the pending and settled outcome of explicit actions", async () => {
+    let complete!: (outcome: { status: "accepted" | "refused" }) => void;
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(result())
+      .mockResolvedValueOnce(result(true));
+    render(
+      <DirectNativeResultPanel
+        selection={selection}
+        read={read}
+        held={false}
+        onConsume={(_selection, _digest, callback) => {
+          complete = callback;
+        }}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "Read current result" }),
+    );
+    expect(await screen.findByText("Retained analysis")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("status"));
+    await user.click(
+      screen.getByRole("button", { name: "Acknowledge this result" }),
+    );
+    expect(document.activeElement).toBe(screen.getByRole("status"));
+    complete({ status: "accepted" });
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(
+        "original commissioning parent acknowledged",
+      ),
+    );
+    expect(document.activeElement).toBe(screen.getByRole("status"));
+  });
   it.each([
     ["en", "dark"],
     ["en", "light"],

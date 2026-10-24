@@ -34,11 +34,14 @@ export function DirectNativeResultPanel({
     seq = useRef(0),
     latch = useRef(false),
     mounted = useRef(true);
+  const statusFocus = useRef<HTMLParagraphElement>(null),
+    actionFocus = useRef(false);
   useEffect(() => {
     mounted.current = true;
     seq.current++;
     request.current?.abort();
     latch.current = false;
+    actionFocus.current = false;
     setState(null);
     setFailed(false);
     setReading(false);
@@ -49,6 +52,11 @@ export function DirectNativeResultPanel({
       request.current?.abort();
     };
   }, [selection.work_ref, selection.job_id, selection.attempt_id]);
+  useEffect(() => {
+    if (!actionFocus.current) return;
+    statusFocus.current?.focus();
+    if (!reading && !consuming && !held) actionFocus.current = false;
+  }, [reading, consuming, held, failed, state]);
   const words =
     locale === "zh-CN"
       ? {
@@ -60,6 +68,7 @@ export function DirectNativeResultPanel({
           consume: "确认接收此结果",
           consuming: "正在确认接收…",
           consumed: "原发起方已确认接收此确切结果。",
+          unconsumed: "结果已保留，尚未记录接收确认。",
           pending: "接收结果尚不确定。仅检查原操作状态；不要重新提交。",
           state: "当前状态",
           steps: "已完成事项",
@@ -81,6 +90,8 @@ export function DirectNativeResultPanel({
           consuming: "Acknowledging…",
           consumed:
             "The original commissioning parent acknowledged this exact result.",
+          unconsumed:
+            "The result is retained; acknowledgment has not been recorded.",
           pending:
             "Acknowledgment is unresolved. Check the original operation only; do not submit again.",
           state: "Current state",
@@ -98,6 +109,7 @@ export function DirectNativeResultPanel({
     const controller = new AbortController();
     request.current = controller;
     const ticket = ++seq.current;
+    actionFocus.current = true;
     setReading(true);
     setFailed(false);
     setState(null);
@@ -133,6 +145,7 @@ export function DirectNativeResultPanel({
     )
       return;
     latch.current = true;
+    actionFocus.current = true;
     setConsuming(true);
     const ticket = seq.current;
     onConsume(
@@ -159,9 +172,22 @@ export function DirectNativeResultPanel({
       >
         {reading ? words.reading : words.read}
       </button>
-      <div role="status" aria-live="polite">
-        {!state && !failed ? <p>{read ? words.unknown : words.unavailable}</p> : null}
-        {failed || state?.availability === "UNAVAILABLE" ? (
+      <p ref={statusFocus} tabIndex={-1} role="status" aria-live="polite">
+        {reading
+          ? words.reading
+          : held || consuming
+            ? words.pending
+            : failed || state?.availability === "UNAVAILABLE" || !read
+              ? words.unavailable
+              : state?.consumption?.state === "CONSUMED"
+                ? words.consumed
+                : state?.availability === "AVAILABLE"
+                  ? words.unconsumed
+                  : words.unknown}
+      </p>
+      <div>
+        {(held || consuming) &&
+        (failed || state?.availability === "UNAVAILABLE") ? (
           <p>{words.unavailable}</p>
         ) : null}
         {state?.availability === "AVAILABLE" && state.result ? (
@@ -189,9 +215,7 @@ export function DirectNativeResultPanel({
             ) : (
               <p>{words.noneNext}</p>
             )}
-            {state.consumption?.state === "CONSUMED" ? (
-              <p>{words.consumed}</p>
-            ) : (
+            {state.consumption?.state === "UNCONSUMED" ? (
               <button
                 type="button"
                 disabled={held || consuming || reading}
@@ -199,10 +223,9 @@ export function DirectNativeResultPanel({
               >
                 {consuming ? words.consuming : words.consume}
               </button>
-            )}
+            ) : null}
           </>
         ) : null}
-        {held ? <p>{words.pending}</p> : null}
       </div>
       {recovery}
       <details className="reason-details">
