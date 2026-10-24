@@ -49,3 +49,7 @@ CI test-fixture preparation PID 46951 completed exit 0/APPLIED: exact Macro engi
 Remaining: #656 repair/integration under its custody; public two-Attempt lifecycle and continuation-bearing delivery/ACK integration (Task 5); qualified provider/binding coverage; independent review; source release, installation/selection and installed native/cross-provider canaries; original dialogue/result acceptance. Runbook and provider matrix: `docs/runbooks/portable-agent-continuity.md`.
 
 DO_NOT_REDO: source recovery, managed allocation, unchanged-head #656 reproduction, AgentOS overrun observation and unchanged successful scoped tests. No active child or automatic return is claimed. Checkpoints are saves: continue safe independent work while gates are pending.
+
+## 2026-10-24 refresh
+
+The implementation commits above were rebased onto current master without changing the PREPARE/ACK patch. #656 now carries the reviewed Git-identity refusal at its refreshed head. This carrier still skips the three source-contract cases. #1676 stacks the repaired builder snapshot and the public lifecycle proof on this head. Draft and production HOLD stay in force.

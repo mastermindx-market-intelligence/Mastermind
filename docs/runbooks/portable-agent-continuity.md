@@ -14,7 +14,7 @@ Status: **candidate source capability; production HOLD**. Parent: existing Opera
 
 The attempt-bound `ExecutiveOperatorHarnessPort` exposes `prepare_operator_continuation(attempt_id, draft)` and `acknowledge_operator_continuation(attempt_id, ack)`. These are internal Runtime methods, not newly published external tools. The port supplies its existing lease token and fence; no model supplies an authoritative timestamp, capsule identity, provider-account grant, or replacement lease.
 
-1. Compile current source material through the accepted source-builder owner. PR #656 is still a held integration dependency; its missing/malformed Git-identity refusal tests are currently red. Do not feed an arbitrary model-authored mapping to production as a substitute.
+1. Compile current source material through the accepted source-builder owner. PR #656 remains that owner and is not vendored into this branch. Its missing/malformed Git-identity refusal is repaired on the refreshed #656 head; the three source-contract tests here still skip while the module is absent. Do not feed an arbitrary model-authored mapping to production as a substitute.
 2. PREPARE rechecks source/target identity, grant, current admitted binding, exact checkpoint-derived material and predecessor process/writer evidence in one existing SQLite transaction. Missing predecessor process evidence, unreleased writer/process state and operation `EFFECT_UNKNOWN` refuse. This conservative candidate does not interpret an unrelated later observation as reconciliation.
 3. The Executive clock finalizes one immutable capsule. Command identity is `operator-continuation:prepare:<target-attempt-id>`. `OPERATOR_CONTINUATION_PREPARED` stores the full bounded capsule plus semantic digest and exact epoch/provider-session binding in the existing Events table. There is no capsule file, cache, queue or second database.
 4. Same-semantic replay returns the same bytes and identity. A different draft, provider session, epoch, capsule, command owner or event identity conflicts. External source movement never silently edits an existing capsule.
@@ -54,6 +54,10 @@ Run positive native-resume, cold recovery, non-modifying two-realm rollover, rep
 
 ## Release boundary and next owner actions
 
-This source candidate must remain draft/held until the source-builder regression is repaired under #656 custody, the public two-Attempt lifecycle-to-delivery chain is integrated, required exact-head hosted CI passes and independent review returns. Installation, runtime selection, provider availability and production canaries are separately owed.
+This source candidate remains draft and production-held. The source-builder regression is repaired under #656 custody and is not copied onto this branch. The public two-Attempt lifecycle proof is #1676. Delivery, required exact-head hosted CI, and independent review are still owed. Installation, runtime selection, provider availability and production canaries are separately owed.
 
 The observed installed Executive source differs from protected master. At 2026-10-09T03:09:45Z its read interface reported `ceo_submit_armed: false`; no submission, dispatch, provider session, or production configuration change was attempted here. The existing release/admission owner must supply a qualified execution path, not a workaround that bypasses that setting. A GitHub review request is not a started worker or completed review.
+
+## 2026-10-24 carrier refresh
+
+This branch is rebased onto current master. The Git-identity refusal is repaired on #656, which remains the source-builder owner. This branch still does not contain `operator_continuation_sources`, so its three source-contract tests skip until that module is present. The public two-Attempt PREPARE proof is #1676, stacked on this head. Production HOLD remains: delivery, ACK consumption, native resume, and release are not claimed.
