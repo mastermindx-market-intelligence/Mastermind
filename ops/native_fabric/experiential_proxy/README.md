@@ -31,10 +31,11 @@ python -m uvicorn ops.native_fabric.experiential_proxy.gateway:app --app-dir ../
 
 This uses a **single instance** (not `--reload`, not `--workers 2+`). Source keys from a local `0600` env file or an existing secrets manager; do not commit secrets. Each additional credential uses `EXPLABS_KEY_2`, `_3`, and `_4` (remove the comment marker in `.env` and restart the gateway). Existing SQLite admissions per key remain in `.state` across restart, so the rolling cap is preserved if a process is restarted. Never copy this state directory to other active proxy processes.
 
-Check without spending inference credits:
+Check without spending inference credits (the authenticated status endpoint is local-only and exposes no provider tokens):
 
 ```bash
 curl -fsS http://127.0.0.1:8311/healthz
+curl -fsS http://127.0.0.1:8311/statusz -H "Authorization: Bearer $FABRIC_PROXY_TOKEN"
 curl -fsS http://127.0.0.1:8311/v1/models -H "Authorization: Bearer $FABRIC_PROXY_TOKEN"
 ```
 

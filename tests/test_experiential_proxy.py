@@ -141,7 +141,10 @@ async def test_auth_and_allowlist_and_no_direct_upstream_contact(tmp_path):
 
 @pytest.mark.asyncio
 async def test_openai_async_sdk_chat_and_sse(tmp_path):
-    AsyncOpenAI = pytest.importorskip("openai", reason="OpenAI SDK unavailable in isolated test container").AsyncOpenAI
+    openai = pytest.importorskip("openai", reason="OpenAI SDK unavailable in isolated test container")
+    AsyncOpenAI = getattr(openai, "AsyncOpenAI", None)
+    if AsyncOpenAI is None:
+        pytest.skip("OpenAI SDK is an uninstalled namespace package in this test environment")
     chat_reply = {"id": "reply", "object": "chat.completion", "created": 1, "model": "exact-slug",
                   "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}]}
 
@@ -285,3 +288,66 @@ async def test_key_fingerprints_are_salted_and_durable_without_plain_secrets(tmp
     second = SlidingWindowAdmissions(cfg)
     assert second.ids[0] == first_hash
     second.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_on", ["http.response.start", "http.response.body"])
+async def test_disconnect_before_first_stream_byte_releases_slot(tmp_path, fail_on):
+    """ASGI failures before or during first body send cannot strand a slot."""
+    provider_reads = []
+
+    async def mock(req):
+        provider_reads.append(req.url.path)
+        return streamed_json({"ok": True})
+
+    app = create_app(settings(tmp_path, api_keys=("upstream-A",)),
+                     transport=httpx.MockTransport(mock))
+    token = f"Bearer {TOKEN}".encode()
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "scheme": "http", "method": "POST", "path": "/v1/responses",
+        "raw_path": b"/v1/responses", "query_string": b"",
+        "headers": [(b"authorization", token), (b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 12345), "server": ("127.0.0.1", 8311),
+    }
+    received = False
+
+    async def receive():
+        nonlocal received
+        if not received:
+            received = True
+            return {"type": "http.request", "body": b'{}', "more_body": False}
+        await asyncio.Future()
+
+    async def disconnected_send(message):
+        if message["type"] == fail_on:
+            raise RuntimeError("client disconnected during response")
+
+    async with app.router.lifespan_context(app):
+        with pytest.raises(RuntimeError, match="client disconnected"):
+            await asyncio.wait_for(app(scope, receive, disconnected_send), 1)
+        assert provider_reads == ["/v1/responses"]
+        assert app.state.admissions._inflight == [0]
+
+
+@pytest.mark.asyncio
+async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: streamed_json({"ok": True})
+    ))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            assert (await session.get("/statusz")).status_code == 401
+            headers = {"Authorization": f"Bearer {TOKEN}"}
+            initial = (await session.get("/statusz", headers=headers)).json()
+            assert initial["pending"] == 0
+            assert initial["slots"] == [
+                {"slot": 1, "used_in_window": 0, "remaining_in_window": 1, "inflight": 0},
+                {"slot": 2, "used_in_window": 0, "remaining_in_window": 1, "inflight": 0},
+            ]
+            assert (await session.get("/v1/models", headers=headers)).status_code == 200
+            status = (await session.get("/statusz", headers=headers)).json()
+            assert status["slots"][0]["used_in_window"] == 1
+            assert status["slots"][1]["remaining_in_window"] == 1
+            assert "upstream-A" not in json.dumps(status)
+            assert "upstream-B" not in json.dumps(status)

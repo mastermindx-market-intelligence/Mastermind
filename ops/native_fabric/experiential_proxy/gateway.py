@@ -221,6 +221,26 @@ class SlidingWindowAdmissions:
             self._inflight[slot] -= 1
             self._condition.notify_all()
 
+    async def snapshot(self) -> dict:
+        """Read-only, credential-free local admission gauges for operator canaries."""
+        async with self._condition:
+            now = self.clock()
+            slots = []
+            for i, events in enumerate(self.events):
+                used = sum(event > now - self.settings.window_s for event in events)
+                slots.append({
+                    "slot": i + 1,
+                    "used_in_window": used,
+                    "remaining_in_window": max(0, self.settings.safe_rpm - used),
+                    "inflight": self._inflight[i],
+                })
+            return {
+                "pending": len(self._waiters),
+                "safe_rpm_per_key": self.settings.safe_rpm,
+                "window_seconds": self.settings.window_s,
+                "slots": slots,
+            }
+
     @property
     def pending(self) -> int:
         return len(self._waiters)
@@ -229,6 +249,30 @@ class SlidingWindowAdmissions:
         self.db.close()
         fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
         os.close(self._lock_fd)
+
+
+class ReleasingStreamingResponse(StreamingResponse):
+    """Release a sent request's in-flight lease even if streaming never starts.
+
+    Closing in the iterator's finally alone is insufficient: if ASGI send raises
+    while sending response.start, Starlette may never enter the body iterator.
+    """
+
+    def __init__(self, *args, upstream_response: httpx.Response,
+                 admissions: SlidingWindowAdmissions, slot: int, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._upstream_response = upstream_response
+        self._admissions = admissions
+        self._slot = slot
+
+    async def __call__(self, scope, receive, send):
+        try:
+            return await super().__call__(scope, receive, send)
+        finally:
+            try:
+                await self._upstream_response.aclose()
+            finally:
+                await self._admissions.release(self._slot)
 
 
 def create_app(
@@ -258,6 +302,14 @@ def create_app(
     async def healthz(request: Request) -> Response:
         # Unauthenticated, non-sensitive: safe for loopback liveness probes.
         return JSONResponse({"ok": True, "key_slots": len(request.app.state.settings.api_keys)})
+
+    @app.get("/statusz")
+    async def statusz(request: Request) -> Response:
+        cfg: Settings = request.app.state.settings
+        scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(candidate, cfg.proxy_token):
+            return JSONResponse({"error": {"message": "unauthorized", "type": "authentication_error"}}, status_code=401)
+        return JSONResponse(await request.app.state.admissions.snapshot())
 
     @app.api_route("/v1/{endpoint:path}", methods=["POST", "GET"])
     async def proxy(endpoint: str, request: Request) -> Response:
@@ -339,17 +391,16 @@ def create_app(
             return Response(content=data, status_code=upstream_response.status_code, headers=response_headers)
 
         async def stream_bytes():
-            try:
-                async for part in upstream_response.aiter_raw():
-                    yield part
-            finally:
-                await upstream_response.aclose()
-                await request.app.state.admissions.release(slot)
+            async for part in upstream_response.aiter_raw():
+                yield part
 
-        return StreamingResponse(
+        return ReleasingStreamingResponse(
             stream_bytes(),
             status_code=upstream_response.status_code,
             headers=response_headers,
+            upstream_response=upstream_response,
+            admissions=request.app.state.admissions,
+            slot=slot,
         )
 
     return app
