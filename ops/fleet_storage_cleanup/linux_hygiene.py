@@ -135,7 +135,7 @@ def package_busy() -> bool:
             if not proc.name.isdigit() or int(proc.name) == os.getpid():
                 continue
             try:
-                cmd = (proc / "cmdline").read_bytes()[:500].replace(b"\\x00", b" ").lower()
+                cmd = (proc / "cmdline").read_bytes()[:500].replace(b"\x00", b" ").lower()
             except (OSError, PermissionError):
                 continue
             if any(key in cmd for key in
@@ -181,7 +181,7 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
                             "stderr_tail": proc.stderr[-160:] if proc.returncode else ""})
         except (subprocess.TimeoutExpired, OSError) as exc:
             # A timed-out subprocess is not proof its descendants had no effects.
-            (state / HOLD).write_text(f"{time.time()}: {name}: {type(exc).__name__}\\n")
+            (state / HOLD).write_text(f"{time.time()}: {name}: {type(exc).__name__}\n")
             results.append({"cache": name, "state": "EFFECT_UNVERIFIED",
                             "error": type(exc).__name__})
             break
