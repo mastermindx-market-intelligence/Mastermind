@@ -137,14 +137,15 @@ test('provider text cannot fabricate a Desktop Commander controller process hand
  const observed=unwrap(await f.call('fabric_controller_output',{...id,controller_pid:424242}));assert.equal(observed.error,'CONTROLLER_NOT_BOUND');assert.equal(e.calls.length,2);
 });
 test('one globally keyed run ID cannot dispatch concurrently under different roots',async()=>{
- const calls=[];const waiting=[];let requestStarts=0;let nextPid=600;
+ const calls=[];let requestStarts=0;let nextPid=600;
  const e={calls,async callTool(req){calls.push(req);const command=req.arguments.command;
-  if(command.includes("'status' 'web-fabric-001'")) return await new Promise(resolve=>{waiting.push(resolve);if(waiting.length===2){for(const release of waiting) release(capturedJSON(absent));}});
+  if(command.includes("'status' 'web-fabric-001'")) return capturedJSON(absent);
   if(command.includes("'request' '--id' 'web-fabric-001'")){requestStarts+=1;return pending(++nextPid);}
   throw new Error('unexpected engine call');
  }};
  const f=facade(e);const other={...packet,root_id:'mission-002',parent_id:'mission-002'};
  const results=(await Promise.all([f.call('fabric_request',packet),f.call('fabric_request',other)])).map(unwrap);
+ assert.equal(calls.filter(x=>x.arguments.command.includes("'status' 'web-fabric-001'")).length,1);
  assert.equal(requestStarts,1);assert.equal(results.filter(x=>x.delivery==='CONTROLLER_CREATED').length,1);assert.equal(results.filter(x=>x.error==='REQUEST_ALREADY_ATTEMPTED').length,1);
 });
 test('an already accepted run is observed without modifying acceptance again',async()=>{
