@@ -2,9 +2,11 @@
 
 Prepares the exact replacement of the installed public OS edge asset routes in
 two phases: a prepare config admitting both the retired and candidate asset
-paths, and a final config admitting only the candidate paths. Configs are
-transformed in memory only; staging writes plan/candidate JSON under an
-existing sealed parent. No network, SSH, subprocess, daemon, environment
+paths plus the new fixed authenticated Control Room GET/POST routes, and a final
+config admitting only candidate assets plus those same closed new routes. Both
+the incumbent and expanded observed method-specific profiles are admitted;
+mixed or extra routes fail closed. Configs are transformed only in memory;
+staging writes plan/candidate JSON under an existing sealed parent. No network, SSH, subprocess, daemon, environment
 override, ``caddy load``/reload or production write exists here.
 """
 from __future__ import annotations
@@ -18,7 +20,9 @@ from pathlib import Path
 import re
 import stat
 
-from ops.executive_os.os_public_edge import GET_ROUTES, HOST, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import (
+    GET_ROUTES, HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, POST_ROUTES, asset_routes,
+)
 
 PLAN_SCHEMA = "mastermind.os_public_edge_transition.plan.v1"
 PREPARE_CHECK_SCHEMA = "mastermind.os_public_edge_transition.prepare_check.v1"
@@ -151,9 +155,16 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
         path += (0, "handle", 0, "routes")
     if len(inner) != 3:
         raise ValueError("OS edge transition inner route set refused")
-    expected = sorted(set(GET_ROUTES) | set(current_routes))
-    legacy = sorted(list(GET_ROUTES) + list(current_routes))
-    get_path = None
+    # A live edge may be either exact fixed-route generation; mixed
+    # generations cannot qualify as the source for a protected publication.
+    profiles = {
+        "incumbent": (sorted(set(LEGACY_GET_ROUTES) | set(current_routes)),
+                      sorted(list(LEGACY_GET_ROUTES) + list(current_routes))),
+        "expanded": (sorted(set(GET_ROUTES) | set(current_routes)),
+                     sorted(list(GET_ROUTES) + list(current_routes))),
+    }
+    get_path = post_path = None
+    get_profile = post_profile = None
     methods = set()
     for position, item in enumerate(inner):
         if type(item) is not dict:
@@ -179,29 +190,40 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
         methods.add(method[0])
         handlers = _branch_handlers(item["handle"])
         if method == ["GET"]:
-            if sorted(paths) not in (expected, legacy) or len(handlers) != 1:
+            get_profile = next((name for name, admitted in profiles.items()
+                                if sorted(paths) in admitted), None)
+            if get_profile is None or len(handlers) != 1:
                 raise ValueError("OS edge transition observed GET routes differ")
             get_path = path + (position, "match", 0, "path")
         else:
-            if (sorted(paths) != sorted(POST_ROUTES) or len(handlers) != 2
+            if (len(handlers) != 2
                     or handlers[0] != {"handler": "request_body", "max_size": 64000}
                     or type(handlers[0].get("max_size")) is not int):
                 raise ValueError("OS edge transition observed POST route differs")
+            if sorted(paths) == sorted(LEGACY_POST_ROUTES):
+                post_profile = "incumbent"
+            elif sorted(paths) == sorted(POST_ROUTES):
+                post_profile = "expanded"
+            else:
+                raise ValueError("OS edge transition observed POST route differs")
+            post_path = path + (position, "match", 0, "path")
         proxy = handlers[-1]
         if (proxy.get("handler") != "reverse_proxy"
                 or proxy.get("upstreams") != [{"dial": f"127.0.0.1:{relay_port}"}]):
             raise ValueError("OS edge transition relay upstream refused")
-    if methods != {"GET", "POST"} or get_path is None:
-        raise ValueError("OS edge transition branch set refused")
-    return get_path
+    if (methods != {"GET", "POST"} or get_path is None or post_path is None
+            or get_profile != post_profile):
+        raise ValueError("OS edge transition mixed or incomplete route profile")
+    return get_path, post_path
 
 
 def _transition(*, fullconfig: object, current_manifest: object,
                 candidate_manifest: object, relay_port: int) -> dict:
     current_routes, candidate_routes, shared = _asset_pair(current_manifest, candidate_manifest)
-    position = _locate(fullconfig, current_routes, relay_port)
+    position, post_position = _locate(fullconfig, current_routes, relay_port)
     return {
         "position": position,
+        "post_position": post_position,
         "retired": list(current_routes),
         "candidate": list(candidate_routes),
         "shared": shared,
@@ -211,12 +233,14 @@ def _transition(*, fullconfig: object, current_manifest: object,
     }
 
 
-def _rebuild(fullconfig: object, position: tuple, paths: list[str]) -> dict:
+def _rebuild(fullconfig: object, position: tuple, paths: list[str],
+             *, post_position: tuple, post_paths: tuple[str, ...]) -> dict:
     rebuilt = copy.deepcopy(fullconfig)
-    target = rebuilt
-    for key in position[:-1]:
-        target = target[key]
-    target[position[-1]] = list(paths)
+    for field_path, values in ((position, paths), (post_position, post_paths)):
+        target = rebuilt
+        for key in field_path[:-1]:
+            target = target[key]
+        target[field_path[-1]] = list(values)
     return rebuilt
 
 
@@ -236,8 +260,10 @@ def plan(*, old_source: str, new_source: str, fullconfig: object, current_manife
             "observed_fullconfig_sha256": _sha256(fullconfig),
             "current_manifest_sha256": _sha256(current_manifest),
             "candidate_manifest_sha256": _sha256(candidate_manifest),
-            "prepare_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["prepare"])),
-            "final_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["final"])),
+            "prepare_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["prepare"],
+                                                    post_position=data["post_position"], post_paths=POST_ROUTES)),
+            "final_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["final"],
+                                                  post_position=data["post_position"], post_paths=POST_ROUTES)),
         },
         "get_routes": {
             "fixed": list(GET_ROUTES),
@@ -257,14 +283,16 @@ def prepare_config(*, fullconfig: object, current_manifest: object,
                    candidate_manifest: object, relay_port: int) -> dict:
     data = _transition(fullconfig=fullconfig, current_manifest=current_manifest,
                        candidate_manifest=candidate_manifest, relay_port=relay_port)
-    return _rebuild(fullconfig, data["position"], data["prepare"])
+    return _rebuild(fullconfig, data["position"], data["prepare"],
+                                                    post_position=data["post_position"], post_paths=POST_ROUTES)
 
 
 def final_config(*, fullconfig: object, current_manifest: object,
                  candidate_manifest: object, relay_port: int) -> dict:
     data = _transition(fullconfig=fullconfig, current_manifest=current_manifest,
                        candidate_manifest=candidate_manifest, relay_port=relay_port)
-    return _rebuild(fullconfig, data["position"], data["final"])
+    return _rebuild(fullconfig, data["position"], data["final"],
+                                                  post_position=data["post_position"], post_paths=POST_ROUTES)
 
 
 def preparation_complete(*, observed: object, prepared: object) -> dict:
