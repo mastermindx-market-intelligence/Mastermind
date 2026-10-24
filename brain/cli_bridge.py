@@ -466,6 +466,15 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
 _SDK_TERMINAL_ERROR = "sdk_terminal_error"
 
 
+class _SDKTerminalAfterToolUse(Exception):
+    """Carry an owned terminal outcome and its original iterator exception."""
+
+    def __init__(self, result: dict, original_exception: Exception):
+        super().__init__(_SDK_TERMINAL_ERROR)
+        self.result = result
+        self.original_exception = original_exception
+
+
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   system: str | None = None, append_system: str | None = None,
                   allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -704,6 +713,24 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
+            except _SDKTerminalAfterToolUse as _terminal:
+                # The handler already saw tool use and an error terminal before
+                # its iterator raised. Preserve that owned outcome; exception
+                # prose cannot authorize replay of the potentially applied turn.
+                result = _terminal.result
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "raised", _terminal.original_exception,
+                        )
+                    except BaseException:
+                        # A diagnostic failure cannot replace the owned terminal.
+                        pass
+                used_key_id = _key_id
+                # Evidence-only attachment, not the condition for this fence.
+                result["provider_failure_evidence"] = dict(_failure_box)
+                break
             except ProviderStartRefused as _refusal:
                 _bind_provider_refusal_run(_refusal, _run_id, book, role)
                 if not _sdk_call_finished:
@@ -1055,7 +1082,23 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         except Exception:
             pass
     _observe_sdk_diagnostic(_diagnostic, query_entered=True)
-    async for msg in _sdk_query(prompt=prompt, options=opts):
+    _sdk_stream = aiter(_sdk_query(prompt=prompt, options=opts))
+    _terminal_iterator_exception = None
+    while True:
+        try:
+            msg = await anext(_sdk_stream)
+        except StopAsyncIteration:
+            break
+        except ProviderStartRefused:
+            raise
+        except Exception as exc:
+            # These are existing handler-owned operational fields, independent
+            # of failure_out. No tool use or no failed terminal keeps the legacy
+            # exception path. Handler/observer errors are outside this catch.
+            if not (terminal_error and used):
+                raise
+            _terminal_iterator_exception = exc
+            break
         try:
             if hasattr(msg, "result"):                         # ResultMessage
                 # Preserve an explicit error even if a later terminal says success.
@@ -1169,11 +1212,14 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         thinking_out.append(_think)
     # LEAK LAW: `_think` must never be added to this result dict — callers feed
     # result["text"] into decision paths, and thinking is log-only by contract.
-    return {"ok": bool(text) and not terminal_error, "text": text,
-            "model": mdl, "role": role, "armed": arm,
-            "tools_used": used, "cost_usd": cost, "session_id": sid,
-            "usage": _as_dict(usage), "backend": "sdk",
-            **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    result = {"ok": bool(text) and not terminal_error, "text": text,
+              "model": mdl, "role": role, "armed": arm,
+              "tools_used": used, "cost_usd": cost, "session_id": sid,
+              "usage": _as_dict(usage), "backend": "sdk",
+              **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    if _terminal_iterator_exception is not None:
+        raise _SDKTerminalAfterToolUse(result, _terminal_iterator_exception) from _terminal_iterator_exception
+    return result
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
