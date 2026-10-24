@@ -27,11 +27,39 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 3. Retain the returned controller PID together with run/root and connection generation. `CONTROLLER_CREATED` is delivery to the process owner, **not proof of worker START**. A started provider must be established by actual Fabric evidence.
 4. Observe the same run with `fabric_status`, bounded `fabric_wait` (at most ten seconds), or the original `fabric_controller_output`. A `NOT_FOUND` observation after an interrupted request never proves no effect. A new backend generation cannot reconstruct the original PID binding.
 5. Retrieve only an available result whose ledger root matches. The adapter response must fit the requested result limit (default 8 KiB; maximum 64 KiB). The facade captures the original CLI stdout bytes on M2 before process-output formatting, verifies byte count/base64/SHA-256, and returns those bytes as UTF-8 plus their digest.
-6. Review the result and real evidence. Only then call `fabric_accept` with the reviewed digest, verification summary, and actual deterministic/reviewer method. It re-reads the current complete response and rejects a changed digest before calling incumbent acceptance; it verifies the ledger's accepted state afterward.
+6. Review the result and real evidence. Only then call `fabric_accept` with the reviewed digest, verification summary, and actual deterministic/reviewer method. Use one fixed `verification_summary` evidence-basis code: deterministic_test_evidence, artifact_digest_comparison (with `by=deterministic`), manual_result_review or independent_review_evidence (with `by=reviewer`). No free-text review summary is accepted by the MCP boundary, so this field cannot carry classifier or workflow instructions. Preserve detailed review observations in the existing source/review evidence; the code is only caller-attested metadata and does not replace evidence or independent review. This does not guarantee every platform warning disappears. It re-reads the current complete response and rejects a changed digest before calling incumbent acceptance; it verifies the ledger's accepted state afterward.
 
 **Acceptance limit:** this digest identifies the complete adapter CLI response, not every referenced artifact. It does not make the legacy acceptance operation atomic or cryptographically attest the bytes originally reviewed. Do not claim stronger guarantees than the existing ledger supplies.
 
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
+
+## Optional per-request turn ceiling
+
+`fabric_request.max_turns` is an integer from 1 through 400. It narrows one new
+commission through the incumbent native `request --max-turns` and Claude wrapper;
+it does not change fleet defaults, model tiers, admission, leases or acceptance.
+The effective limit is the smaller of this request ceiling and the existing
+model/complexity/operator profile. An omitted value preserves existing behavior.
+A turn is not a tool-call count, token allowance or dollar budget.
+
+Before creating a controller, the facade verifies that the native request help
+advertises `--max-turns`. An older adapter returns
+`ADAPTER_TURN_LIMIT_UNAVAILABLE` rather than silently discarding the constraint.
+The existing router considers only qualified `glm`/`minimax` modes for a capped
+request; another mode is refused before launch. This filter is not admission or
+permission to use a new provider. Unsupported modes remain available to requests
+without this option under their unchanged rules.
+
+The native owner retains the requested ceiling with the original request. Its
+existing foreground quota continuation preserves that same ceiling, root, parent
+and deadline, and still requires its original pre-task rejection proof. Reaching
+the turn limit is not a capacity rejection and does not authorize another attempt.
+A returned controller receipt reports the requested value, not proven worker START
+or acceptance. Inspect the actual terminal result and retain partial work.
+
+Roll out the complete protected native generation before the same-account facade
+release. Until both are qualified, the new opt-in must fail closed. Existing
+controllers remain on their original code and cannot be retroactively capped.
 
 ## Quota continuity
 

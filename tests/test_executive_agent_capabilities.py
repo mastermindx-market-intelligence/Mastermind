@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -720,8 +721,14 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
     del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
     del protected_raw["profiles"]["fabric.attended.claude.bounded.v1"]
+    del protected_raw["profiles"]["fabric.paid.glm.sealed-input.v1"]
     del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
     del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    # The new ACP read-only generation is independent of the frozen
+    # predecessor too; remove it only for this historical digest assertion.
+    # Default policy still tests both the protected attended and ACP profiles.
+    del protected_raw["profiles"]["worker.acp.providerfree.readonly.v1"]
+    del protected_raw["mcp_servers"]["mastermind-acp-workspace-read-v1"]
     protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
     protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
     assert default.policy_digest != protected_previous.policy_digest
@@ -987,3 +994,54 @@ def test_bounded_policy_source_capability_keeps_encoding_refusals(tmp_path, raw,
 def test_bounded_policy_source_capability_missing_path_keeps_resolve_exception(tmp_path):
     with pytest.raises(FileNotFoundError):
         ExecutionCapabilityRegistry.load(tmp_path / "missing-capabilities.json")
+
+
+def test_checked_in_provider_free_acp_profile_uses_exact_workspace_read_grant():
+    from control_plane.executive_agent_capabilities import (
+        ACP_EXECUTION_SURFACE,
+        ACP_PROVIDER_FREE_AUTH_REALM,
+        ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        ACP_WORKSPACE_READ_MCP_COMMAND,
+        ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST,
+    )
+
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("worker.acp.providerfree.readonly.v1")
+    assert profile.enabled is True
+    assert profile.execution_surface == ACP_EXECUTION_SURFACE == "acp-agent"
+    assert profile.auth_realm == ACP_PROVIDER_FREE_AUTH_REALM == "dedicated-worker-no-auth"
+    assert profile.write_capable is False
+    assert profile.network_policy == "disabled"
+    assert profile.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert profile.skills == profile.plugins == profile.resource_grants == ()
+    assert len(profile.mcp_server_grants) == 1
+    grant = profile.mcp_server_grants[0]
+    assert grant.capability_id == ACP_WORKSPACE_READ_MCP_CAPABILITY_ID
+    assert grant.transport == "stdio"
+    assert grant.command == ACP_WORKSPACE_READ_MCP_COMMAND
+    assert grant.args == ()
+    assert grant.auth_status == "unsupported"
+    assert grant.enabled_tools == ("read_file", "search_text")
+    assert grant.tool_schema_digest == ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST
+    projection = profile.acp_config_projection()
+    assert projection["execution_surface"] == "acp-agent"
+    assert projection["auth_realm"] == "dedicated-worker-no-auth"
+    assert projection["mcp_servers"] == [{
+        "capability_id": ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        "grant_digest": grant.grant_digest,
+    }]
+    assert profile.expected_config_digest == hashlib.sha256(
+        json.dumps(
+            projection,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
+    assert registry.production_armed is False
+
+
+def test_acp_projection_refuses_non_acp_surface():
+    profile = ExecutionCapabilityRegistry.load().profiles["operator.appserver.readonly.v1"]
+    with pytest.raises(CapabilityPolicyError, match="not an ACP profile"):
+        profile.acp_config_projection()

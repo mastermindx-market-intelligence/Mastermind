@@ -91,11 +91,11 @@ class TestHKCalendar:
         assert cc.is_trading_day(xmas, venue="CN") is True
 
     def test_hkex_goodfriday_2026_closed(self):
-        """Good Friday 2026 (2026-04-06) is an HKEX holiday, not a CN holiday."""
-        good_friday = date(2026, 4, 6)
+        """Good Friday 2026 (2026-04-03) is an HKEX holiday, not a CN holiday."""
+        good_friday = date(2026, 4, 3)
         assert cc.is_trading_day(good_friday, venue="HK") is False
 
-    def test_hkex_easter_monday_2026_closed(self):
+    def test_hkex_day_following_easter_monday_2026_closed(self):
         easter_mon = date(2026, 4, 7)
         assert cc.is_trading_day(easter_mon, venue="HK") is False
 
@@ -112,8 +112,8 @@ class TestHKCalendar:
         assert cc.is_trading_day(monday, venue="CN") is True
 
     def test_unknown_venue_falls_back_to_cn(self):
-        """An unrecognised venue label degrades to the CN gate (fail-safe: coarsen, never unlock)."""
-        # HK SAR Day — CN open, HK closed. An unknown venue must NOT unlock HK's closure.
+        """An unrecognised venue retains the legacy CN fallback, without validation."""
+        # HK SAR Day — the legacy CN fallback is open despite HK's closure.
         hk_sar = date(2026, 7, 1)
         # Unknown venue → behaves like CN (open on HK SAR Day).
         assert cc.is_trading_day(hk_sar, venue="UNKNOWN") is True

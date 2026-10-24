@@ -30,7 +30,7 @@ import re
 import statistics
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -42,6 +42,14 @@ STATUS_SCHEMA = "mastermind.portfolio_forward_evaluation.status.v1"
 START_SCHEMA = "mastermind.portfolio_forward_evaluation.start.v1"
 ACTIVE_BOOKS = ("autonomous", "china", "hk")
 PROPHET_MIN_GROUP_SAMPLE = 30
+_NAV_DATE_BASIS_SCHEMA = "mastermind.portfolio_forward_evaluation.nav_date_basis.v1"
+_MAX_NAV_DATE_LABELS = 4096
+_NAV_DATE_BASIS_FIELDS = frozenset({
+    "schema", "book", "evaluation_start", "asof", "deployment_sha",
+    "selection_rule", "fingerprint_method", "selected_row_count",
+    "forward_duplicate_date_rows", "date_labels", "marker_fingerprint",
+    "selected_rows_fingerprint", "fingerprint", "status", "missing_reason",
+})
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -1003,6 +1011,65 @@ def _count_with_reporting(decisions: list[dict[str, Any]], kind: str,
                    f"{kind}_count_unreported_for_some_decisions" if partial else None)
 
 
+def _observational_fingerprint(value: Any) -> str | None:
+    """Best-effort metadata only; failure cannot change original cohort accounting."""
+    try:
+        return _digest(value)
+    except Exception:
+        return None
+
+
+def _capture_nav_date_basis(book: str, begin: str, end: str,
+                            marker: dict[str, Any], rows: list[dict[str, Any]],
+                            source_status: str, duplicate_rows: int) -> dict[str, Any]:
+    """Freeze the selected NAV date basis while the original inputs are in memory.
+
+    The fingerprints identify content; they do not authenticate a source or
+    establish when prices became available. Original cohort selection is upstream.
+    """
+    basis = {
+        "schema": _NAV_DATE_BASIS_SCHEMA,
+        "book": book,
+        "evaluation_start": begin,
+        "asof": end,
+        "deployment_sha": marker.get("deployment_sha"),
+        "selection_rule": "baseline_exclusion_then_last_row_per_date",
+        "fingerprint_method": "forward_evaluation._digest.v1",
+        "selected_row_count": len(rows),
+        "forward_duplicate_date_rows": duplicate_rows,
+        "date_labels": None,
+        "marker_fingerprint": None,
+        "selected_rows_fingerprint": None,
+        "fingerprint": None,
+        "status": "unavailable",
+        "missing_reason": None,
+    }
+    if source_status not in {"available", "partial"}:
+        return {**basis, "missing_reason": "nav_artifact_unavailable"}
+    if len(rows) > _MAX_NAV_DATE_LABELS:
+        return {**basis, "missing_reason": "date_label_limit_exceeded"}
+    dates = [_day(row.get("date")) for row in rows]
+    if (any(day is None or not begin <= day <= end for day in dates)
+            or dates != sorted(set(dates))):
+        return {**basis, "missing_reason": "selected_date_basis_invalid"}
+    try:
+        captured = {
+            **basis,
+            "date_labels": dates,
+            "marker_fingerprint": _digest(marker),
+            "selected_rows_fingerprint": _digest(rows),
+            "status": source_status,
+            "missing_reason": "partial_nav_artifact" if source_status == "partial" else None,
+        }
+        captured["fingerprint"] = _digest(
+            {key: value for key, value in captured.items() if key != "fingerprint"})
+        return captured
+    except Exception:
+        # Additional observation metadata must not turn a usable legacy snapshot
+        # into a failed evaluation. No exception or input contents are projected.
+        return {**basis, "missing_reason": "source_fingerprint_unavailable"}
+
+
 def build_snapshot(book: str, asof: str | date,
                    *, start: dict[str, Any] | None = None) -> dict[str, Any]:
     """Purely assemble one forward snapshot from local artifacts; perform no writes."""
@@ -1434,6 +1501,8 @@ def build_snapshot(book: str, asof: str | date,
             "last_forward_mark": last_mark,
         },
         "benchmark": benchmark,
+        "nav_date_basis": _capture_nav_date_basis(
+            b, begin, end, marker, nav_rows, statuses["nav"], forward_nav_duplicates),
         "sample_counts": sample_counts,
         "prophet_context": {
             "authority": "context_only_non_causal",
@@ -1657,10 +1726,264 @@ def _book_status(book: str, asof: str | date | None = None) -> dict[str, Any]:
         "evaluation_start": marker["evaluation_start"],
         "deployment_sha": marker["deployment_sha"],
         "latest_asof": snapshot.get("asof"),
+        "evaluation_marker_fingerprint": _observational_fingerprint(marker),
         "sample_counts": snapshot.get("sample_counts") or _zero_sample_counts(),
         "metric_status_counts": snapshot.get("metric_status_counts") or {},
         "evaluation_run": evaluation_run,
         "snapshot": snapshot,
+    }
+
+
+def _saved_nav_date_basis(book_status: dict[str, Any], snapshot: Any,
+                          count: int | None, count_status: str | None) -> dict[str, Any]:
+    """Validate only the captured snapshot basis; never reconstruct a live journal."""
+    def unavailable(reason: str) -> dict[str, Any]:
+        return {
+            "schema": _NAV_DATE_BASIS_SCHEMA,
+            "status": "unavailable",
+            "missing_reason": reason,
+            "date_labels": None,
+            "fingerprint": None,
+        }
+
+    if not isinstance(snapshot, dict):
+        return unavailable("stored_snapshot_unavailable")
+    basis = snapshot.get("nav_date_basis")
+    if basis is None:
+        return unavailable("not_recorded_with_snapshot")
+    if (not isinstance(basis, dict) or set(basis) != _NAV_DATE_BASIS_FIELDS
+            or basis.get("schema") != _NAV_DATE_BASIS_SCHEMA
+            or basis.get("book") != book_status.get("book")
+            or snapshot.get("book") != book_status.get("book")):
+        return unavailable("stored_date_basis_invalid")
+    if type(count) is not int or count < 0:
+        return unavailable("snapshot_count_or_identity_unverified")
+    if basis.get("status") == "unavailable":
+        reason = basis.get("missing_reason")
+        return unavailable(reason if type(reason) is str and reason in {
+            "nav_artifact_unavailable", "date_label_limit_exceeded",
+            "selected_date_basis_invalid", "source_fingerprint_unavailable",
+        } else "stored_date_basis_invalid")
+    cohort = snapshot.get("cohort")
+    if not isinstance(cohort, dict):
+        return unavailable("stored_date_basis_cohort_unverified")
+    begin, end = basis.get("evaluation_start"), basis.get("asof")
+    deployment = basis.get("deployment_sha")
+    dates = basis.get("date_labels")
+    duplicates = basis.get("forward_duplicate_date_rows")
+    valid = (
+        type(begin) is str and _day(begin) == begin
+        and type(end) is str and _day(end) == end and begin <= end
+        and begin == cohort.get("evaluation_start") == book_status.get("evaluation_start")
+        and end == snapshot.get("asof") == book_status.get("latest_asof")
+        and type(deployment) is str and _SHA_RE.fullmatch(deployment) is not None
+        and deployment == cohort.get("deployment_sha") == book_status.get("deployment_sha")
+        and basis.get("selection_rule") == "baseline_exclusion_then_last_row_per_date"
+        and basis.get("fingerprint_method") == "forward_evaluation._digest.v1"
+        and type(basis.get("selected_row_count")) is int
+        and basis["selected_row_count"] == count
+        and type(duplicates) is int and 0 <= duplicates <= 2**53 - 1
+        and type(dates) is list and len(dates) == count <= _MAX_NAV_DATE_LABELS
+        and all(type(day) is str and _day(day) == day and begin <= day <= end for day in dates)
+        and dates == sorted(set(dates))
+        and type(basis.get("status")) is str
+        and basis["status"] in {"available", "partial"}
+        and basis["status"] == count_status
+        and basis.get("missing_reason") == (
+            "partial_nav_artifact" if basis["status"] == "partial" else None)
+    )
+    if not valid:
+        return unavailable("stored_date_basis_invalid")
+    for field in ("marker_fingerprint", "selected_rows_fingerprint", "fingerprint"):
+        value = basis.get(field)
+        if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            return unavailable("stored_date_basis_invalid")
+    if basis["marker_fingerprint"] != book_status.get("evaluation_marker_fingerprint"):
+        return unavailable("stored_date_basis_cohort_unverified")
+    try:
+        fingerprint = _digest({key: value for key, value in basis.items() if key != "fingerprint"})
+    except Exception:
+        return unavailable("stored_date_basis_invalid")
+    if fingerprint != basis["fingerprint"]:
+        return unavailable("stored_date_basis_fingerprint_mismatch")
+    # Rebuild the only mutable child to avoid aliasing the saved snapshot.
+    return {**basis, "date_labels": list(dates)}
+
+
+def _qualify_calendar_dates(book: str, date_basis: dict[str, Any]) -> dict[str, Any]:
+    """Join a saved date basis to explicitly covered, current calendar evidence.
+
+    This is a versioned interpretation of saved observations, not a rewrite of
+    the original cohort or proof of actual trading, prices, cutoffs or returns.
+    """
+    def unavailable(reason: str, status: str = "not_checked") -> dict[str, Any]:
+        return {
+            "calendar_session_count": None,
+            "calendar_status": status,
+            "calendar_missing_reason": reason,
+            "calendar_count_unit": "selected_nav_dates_on_scheduled_cash_sessions",
+            "calendar_basis": None,
+        }
+
+    if date_basis.get("status") not in {"available", "partial"}:
+        return unavailable("saved_nav_date_basis_unavailable")
+    venue = {"autonomous": "US", "china": "CN", "hk": "HK"}.get(book)
+    if venue is None:
+        return unavailable("calendar_book_unavailable")
+    try:
+        from portfolio import china_calendar, market_calendar
+        owner = market_calendar if venue == "US" else china_calendar
+        reader = getattr(owner, "session_date_evidence", None)
+        if not callable(reader):
+            return unavailable("calendar_evidence_contract_unavailable")
+        begin = date.fromisoformat(date_basis["evaluation_start"])
+        end = date.fromisoformat(date_basis["asof"])
+        if not 0 <= (end - begin).days < _MAX_NAV_DATE_LABELS:
+            return unavailable("calendar_window_limit_exceeded", "unavailable")
+        raw = (reader(begin, end) if venue == "US"
+               else reader(begin, end, venue=venue))
+    except Exception:
+        return unavailable("calendar_source_failed", "unavailable")
+
+    try:
+        fields = {
+            "schema", "calendar_owner", "venue", "start", "end", "coverage_start",
+            "coverage_end", "source_checked_on", "source_refs", "scope",
+            "exceptional_closures", "price_or_cutoff_qualified", "rule_version",
+            "full_day_closures", "scheduled_dates", "status", "missing_reason",
+        }
+        expected_owner = ("portfolio.market_calendar" if venue == "US"
+                          else "portfolio.china_calendar")
+        if (type(raw) is not dict or set(raw) != fields
+                or raw["schema"] != "mastermind.cash_session_date_evidence.v1"
+                or raw["calendar_owner"] != expected_owner or raw["venue"] != venue
+                or raw["start"] != begin.isoformat() or raw["end"] != end.isoformat()
+                or raw["scope"] != "published_static_cash_session_dates"
+                or raw["exceptional_closures"] != "listed_only"
+                or raw["price_or_cutoff_qualified"] is not False
+                or raw["rule_version"] != "monday_friday_excluding_listed_closures.v1"):
+            return unavailable("calendar_source_invalid", "unavailable")
+        for key in ("coverage_start", "coverage_end", "source_checked_on"):
+            if type(raw[key]) is not str or _day(raw[key]) != raw[key]:
+                return unavailable("calendar_source_invalid", "unavailable")
+        coverage_start = date.fromisoformat(raw["coverage_start"])
+        coverage_end = date.fromisoformat(raw["coverage_end"])
+        if coverage_start > coverage_end:
+            return unavailable("calendar_source_invalid", "unavailable")
+        sources = raw["source_refs"]
+        closures = raw["full_day_closures"]
+        if (type(sources) is not list or not 1 <= len(sources) <= 8
+                or not all(type(ref) is str and ref.startswith("https://")
+                           and len(ref) <= 1024 for ref in sources)
+                or type(closures) is not list or len(closures) > _MAX_NAV_DATE_LABELS
+                or not all(type(day) is str and _day(day) == day
+                           and raw["coverage_start"] <= day <= raw["coverage_end"]
+                           for day in closures)
+                or closures != sorted(set(closures))):
+            return unavailable("calendar_source_invalid", "unavailable")
+        covered = coverage_start <= begin <= end <= coverage_end
+        if not covered:
+            if (raw["status"] == "unavailable" and raw["scheduled_dates"] is None
+                    and raw["missing_reason"] == "outside_published_calendar_coverage"):
+                return unavailable("outside_published_calendar_coverage", "unavailable")
+            return unavailable("calendar_source_invalid", "unavailable")
+        scheduled = raw["scheduled_dates"]
+        if (raw["status"] != "available" or raw["missing_reason"] is not None
+                or type(scheduled) is not list or len(scheduled) > _MAX_NAV_DATE_LABELS
+                or not all(type(day) is str and _day(day) == day for day in scheduled)
+                or scheduled != sorted(set(scheduled))):
+            return unavailable("calendar_source_invalid", "unavailable")
+        # Validate completeness against the owner's declared, closed v1 rule.
+        # A truncated or internally inconsistent schedule is not a denominator.
+        closed = set(closures)
+        window = [begin + timedelta(days=i) for i in range((end - begin).days + 1)]
+        expected = [day.isoformat() for day in window
+                    if day.weekday() < 5 and day.isoformat() not in closed]
+        if scheduled != expected:
+            return unavailable("calendar_source_invalid", "unavailable")
+        # Copy the bounded wire value before hashing or returning mutable children.
+        calendar = json.loads(_canonical(raw))
+        selected, scheduled_set = set(date_basis["date_labels"]), set(scheduled)
+        matched = sorted(selected & scheduled_set)
+        projection = {
+            "schema": "mastermind.portfolio_forward_evaluation.calendar_basis.v1",
+            "interpretation": "current_published_calendar_on_saved_nav_dates",
+            "book": book,
+            "nav_date_basis_fingerprint": date_basis["fingerprint"],
+            "nav_date_basis_status": date_basis["status"],
+            "calendar_content_fingerprint": _digest(calendar),
+            "calendar_evidence": calendar,
+            "selected_session_dates": matched,
+            "non_session_mark_dates": sorted(selected - scheduled_set),
+            "scheduled_dates_without_forward_mark": sorted(scheduled_set - selected),
+            "scheduled_session_count": len(scheduled),
+        }
+        projection["fingerprint"] = _digest(projection)
+    except Exception:
+        return unavailable("calendar_source_invalid", "unavailable")
+    partial = date_basis["status"] == "partial"
+    return {
+        "calendar_session_count": len(matched),
+        "calendar_status": "partial" if partial else "available",
+        "calendar_missing_reason": "partial_nav_date_basis" if partial else None,
+        "calendar_count_unit": "selected_nav_dates_on_scheduled_cash_sessions",
+        "calendar_basis": projection,
+    }
+
+
+def _qualify_mark_observations(book_status: dict[str, Any]) -> dict[str, Any]:
+    """Qualify the saved count without recomputing or rewriting its snapshot.
+
+    The legacy marked_session_count is a count of recorded NAV date labels.
+    Its presence does not certify exchange sessions, point-in-time prices, or
+    eligibility for an evaluation horizon. Missing qualifications remain unknown.
+    """
+    book = book_status.get("book")
+    if book not in ACTIVE_BOOKS:
+        return book_status
+    snapshot = book_status.get("snapshot")
+    identity_matches = (
+        isinstance(snapshot, dict)
+        and snapshot.get("schema") == SCHEMA
+        and snapshot.get("book") == book
+    )
+    metrics = snapshot.get("metrics") if isinstance(snapshot, dict) else None
+    metric = metrics.get("marked_session_count") if isinstance(metrics, dict) else None
+    value = metric.get("value") if isinstance(metric, dict) else None
+    source_status = metric.get("status") if isinstance(metric, dict) else None
+    usable = (identity_matches and type(value) is int and value >= 0
+              and type(source_status) is str and source_status in {"available", "partial"})
+    if not isinstance(snapshot, dict):
+        reason = "stored_snapshot_unavailable"
+    elif not identity_matches:
+        reason = "stored_snapshot_identity_unverified"
+    elif not usable:
+        reason = "reported_mark_count_unavailable"
+    else:
+        reason = None
+    date_basis = _saved_nav_date_basis(
+        book_status, snapshot, value if usable else None, source_status if usable else None)
+    calendar = _qualify_calendar_dates(book, date_basis)
+    return {
+        **book_status,
+        "observation_qualification": {
+            "schema": "mastermind.portfolio_forward_evaluation.observation_qualification.v2",
+            "source_metric": "marked_session_count",
+            "source_scope": "stored_snapshot_and_current_calendar_evidence",
+            "reported_mark_count": value if usable else None,
+            "reported_mark_count_status": source_status if usable else "unavailable",
+            "reported_mark_count_missing_reason": reason,
+            "count_unit": "recorded_nav_date_labels",
+            "date_basis": date_basis,
+            **calendar,
+            "price_qualified_session_count": None,
+            "price_status": "not_checked",
+            "eligible_for_session_gate": False,
+            "qualification_reason": (
+                "point_in_time_prices_not_verified"
+                if calendar["calendar_status"] in {"available", "partial"}
+                else "exchange_sessions_and_point_in_time_prices_not_verified"),
+        },
     }
 
 
@@ -1687,9 +2010,9 @@ def status(book: str | None = None, asof: str | date | None = None) -> dict[str,
                 "sample_counts": _zero_sample_counts(),
                 "snapshot": None,
             }
-        return {"schema": STATUS_SCHEMA, **_book_status(b, asof)}
+        return {"schema": STATUS_SCHEMA, **_qualify_mark_observations(_book_status(b, asof))}
     marker = load_start()
-    books = [_book_status(item, asof) for item in ACTIVE_BOOKS]
+    books = [_qualify_mark_observations(_book_status(item, asof)) for item in ACTIVE_BOOKS]
     active = bool(marker and marker.get("release_state") == "active")
     return {
         "schema": STATUS_SCHEMA,

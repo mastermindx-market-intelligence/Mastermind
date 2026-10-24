@@ -623,6 +623,9 @@ const RESULT_RESPONSE_CAP: usize = 16_384;
 const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
 const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
 const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
+const PLAN_DETAIL_PATH: &str = "/workspace/plan/current";
+const PLAN_RESPONSE_CAP: usize = 16_384;
+const PLAN_SCHEMA: &str = "mastermind.workspace_admitted_execution_plan.v1";
 const WORK_PATH: &str = "/workspace/work/current";
 const MISSION_V3_SCHEMA: &str = "mastermind.mission_workspace.v3";
 const RESULT_SCHEMA: &str = "mastermind.workspace_role_result.v1";
@@ -751,6 +754,108 @@ pub async fn read_mission(app: AppHandle, selection: MissionSelection) -> Result
     )
     .await
 }
+#[tauri::command]
+pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    // Original Workspace selection grammar is narrower than legacy Mission selection.
+    validate_workspace_pair(&selection.work_ref, &selection.root_job_id)?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PLAN_DETAIL_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (inner.token(Resource::Acquisition)
+            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
+    };
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PLAN_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PLAN_SCHEMA, false))
+    } else {
+        bounded_json(response, PLAN_RESPONSE_CAP).await
+    };
+    // A completed HTTP request is not publication permission after identity rotation.
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PLAN_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Exact fields, source observation, availability, and selectors are decoded in
+    // the existing frontend Plan consumer; no private response fields are projected.
+    Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedActivitySelection {
+    work_ref: String,
+    root_job_id: String,
+    job_id: String,
+    attempt_id: String,
+}
+impl RetainedActivitySelection {
+    fn validate(&self) -> Result<()> {
+        validate_workspace_pair(&self.work_ref, &self.root_job_id)?;
+        validate_workspace_pair(&self.work_ref, &self.job_id)?;
+        if self.job_id == self.root_job_id
+            || !self.attempt_id.strip_prefix("ATT-")
+                .is_some_and(|v| lowercase_hex(v, 32)) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+const RETAINED_ACTIVITY_PATH: &str = "/workspace/operator/activity/current";
+const RETAINED_ACTIVITY_SCHEMA: &str = "mastermind.workspace_retained_activity.v1";
+const RETAINED_ACTIVITY_CAP: usize = 16_384;
+
+/// Same fixed public Workspace acquisition bearer and owner-issued generation
+/// fence as admitted plan; never pass private keys, native Fabric run IDs or
+/// raw Event rows into the webview. A 503 must keep the closed typed schema.
+#[tauri::command]
+pub async fn read_retained_activity(app: AppHandle, selection: RetainedActivitySelection) -> Result<Value> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{RETAINED_ACTIVITY_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (inner.token(Resource::Acquisition)
+            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
+    };
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, RETAINED_ACTIVITY_CAP).await
+            .and_then(|value| typed_unavailable(value, RETAINED_ACTIVITY_SCHEMA, false))
+    } else {
+        bounded_json(response, RETAINED_ACTIVITY_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(RETAINED_ACTIVITY_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host's strict DTO decoder removes unrecognized fields.
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_mission_v3(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     let mut url =
@@ -1560,4 +1665,46 @@ mod tests {
         }
     }
 
+}
+
+#[cfg(test)]
+mod retained_activity_selection_tests {
+    use super::*;
+
+    fn selection() -> RetainedActivitySelection {
+        RetainedActivitySelection {
+            work_ref: "WS:ORIGINAL".into(),
+            root_job_id: "JOB-123".into(),
+            job_id: "JOB-124".into(),
+            attempt_id: format!("ATT-{}", "a".repeat(32)),
+        }
+    }
+
+    #[test]
+    fn accepts_only_exact_original_executor_selection() {
+        assert!(selection().validate().is_ok());
+        let mut invalid = selection();
+        invalid.job_id = invalid.root_job_id.clone();
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.attempt_id = format!("ATT-{}", "A".repeat(32));
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.attempt_id = "ATT-123".into();
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.work_ref = "WS:foreign!".into();
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.job_id = "JOB-123/../private".into();
+        assert!(invalid.validate().is_err());
+    }
+    #[test]
+    fn retained_activity_never_reuses_executive_or_native_fabric_resource() {
+        assert_eq!(Resource::Acquisition.audience(), "https://mcp.mastermind-x.com/workspace/read");
+        assert_eq!(Resource::Acquisition.scope(), "mastermind.workspace.read");
+        assert_eq!(RETAINED_ACTIVITY_PATH, "/workspace/operator/activity/current");
+        assert_eq!(RETAINED_ACTIVITY_SCHEMA, "mastermind.workspace_retained_activity.v1");
+        assert_eq!(RETAINED_ACTIVITY_CAP, PLAN_RESPONSE_CAP);
+    }
 }
