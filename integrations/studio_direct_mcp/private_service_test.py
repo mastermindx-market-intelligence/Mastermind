@@ -4207,6 +4207,40 @@ class TestSealedV2FleetGatewayManifestRoster(unittest.TestCase):
                     self.assertFalse(helper(account, manifest, roots, expected, historical))
 
 
+class TestFabricCurrentEpochRegistry(unittest.TestCase):
+    def test_source_pins_match_closed_observed_ten_seats(self):
+        self.assertEqual(
+            svc.FABRIC_POOL_SELECTED_CURRENT_SHA256,
+            "8533800b5abf8334a1cf6cc081322f16799ac5ef89e4deeea577f3a8217d8d1b",
+        )
+        self.assertEqual(len(svc.FABRIC_POOL_PIN_MIGRATION), 10)
+        self.assertEqual(set(svc.FABRIC_POOL_PIN_MIGRATION_CURRENT),
+                         set(svc.FABRIC_POOL_PIN_MIGRATION))
+        for account, pins in svc.FABRIC_POOL_PIN_MIGRATION_CURRENT.items():
+            with self.subTest(account=account):
+                self.assertEqual(len(pins), 6)
+                self.assertTrue(all(isinstance(x, str) and len(x) == 64
+                                    and all(c in "0123456789abcdef" for c in x)
+                                    for x in pins))
+                self.assertNotEqual(pins[0], pins[2])
+                self.assertNotEqual(pins[1], pins[3])
+        # Two installed predecessors changed independently of the native
+        # pool SHA and therefore require distinct publisher-generation seals.
+        self.assertEqual(
+            svc.FABRIC_POOL_PIN_MIGRATION_CURRENT["chatgpt1"][0],
+            "6dfe4388e7c1cd97d5c130c23a2f4a4c18f57041a852a33ab9c415b29e4abd15",
+        )
+        self.assertEqual(
+            svc.FABRIC_POOL_PIN_MIGRATION_CURRENT["chatgpt2-business"][0],
+            "7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421",
+        )
+        self.assertNotEqual(
+            svc.FABRIC_POOL_PIN_MIGRATION_CURRENT["chatgpt1"][0],
+            svc.FABRIC_POOL_PIN_MIGRATION["chatgpt1"][0],
+        )
+
+
+
 class TestFabricPoolPinMigration(unittest.TestCase):
     """Synthetic owner-bound CAS tests. Live M2 evidence is separately retained."""
 
@@ -4540,6 +4574,54 @@ class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "busy"):
                 wrapper(type("Args", (), {"account": "chatgpt1"})())
         self.assertEqual(observed, [])
+
+    def test_current_epoch_round_trip_keeps_legacy_selection_disjoint(self):
+        # Install only a fabricated *current* epoch; the historical registry
+        # deliberately has no record for this fresh fixture. It cannot
+        # authorize the same CAS via the old selected launcher hash.
+        current = (*self.pins, svc._canonical_json_sha256(self.original_manifest))
+        self.patch("FABRIC_POOL_PIN_MIGRATION_CURRENT", {self.account: current})
+        self.patch("FABRIC_POOL_SELECTED_CURRENT_SHA256", self.selected_pool_pin)
+        self.patch("FABRIC_POOL_PIN_MIGRATION", {})
+        self.patch("FABRIC_POOL_SELECTED_SHA256", "c" * 64)
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True)), 0)
+        receipt = json.loads(stdout.getvalue())
+        self.assertEqual(receipt["effect"], "NOT_APPLIED")
+        self.assertEqual(receipt["targetConfigSha256"], self.pins[3])
+        self.assert_original()
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.successor_manifest_bytes)
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True)), 0)
+        self.assert_original()
+
+    def test_current_epoch_predecessor_and_successor_raw_tamper_refuse(self):
+        current = (*self.pins, svc._canonical_json_sha256(self.original_manifest))
+        self.patch("FABRIC_POOL_PIN_MIGRATION_CURRENT", {self.account: current})
+        self.patch("FABRIC_POOL_SELECTED_CURRENT_SHA256", self.selected_pool_pin)
+        self.patch("FABRIC_POOL_PIN_MIGRATION", {})
+        self.patch("FABRIC_POOL_SELECTED_SHA256", "c" * 64)
+        self.assertEqual(
+            svc._read_manifest(self.roots["manifest"], self.account, self.label),
+            self.original_manifest,
+        )
+        # Same JSON meaning but non-reviewed *raw* bytes cannot pass.
+        self.roots["manifest"].write_text(json.dumps(self.original_manifest, sort_keys=True))
+        with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+            svc._read_manifest(self.roots["manifest"], self.account, self.label)
+        self.roots["manifest"].write_bytes(self.original_manifest_bytes)
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        self.assertEqual(
+            svc._read_manifest(self.roots["manifest"], self.account, self.label),
+            self.successor_manifest,
+        )
+        self.roots["manifest"].write_text(json.dumps(self.successor_manifest, sort_keys=True))
+        with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+            svc._read_manifest(self.roots["manifest"], self.account, self.label)
+
 
     def test_unrelated_fabric_backend_uses_its_original_outer_mutex_only(self):
         original_backend = next(iter(svc.FABRIC_BACKEND_ACCOUNTS))
