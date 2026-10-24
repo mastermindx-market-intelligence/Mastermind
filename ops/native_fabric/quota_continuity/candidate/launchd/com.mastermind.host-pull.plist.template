@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.mastermind.host-pull</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/lockf</string>
+    <string>-t</string>
+    <string>0</string>
+    <string>__LOCK__</string>
+    <string>/bin/bash</string>
+    <string>__HOST_PULL__</string>
+  </array>
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ExitTimeOut</key>
+  <integer>5</integer>
+  <key>AbandonProcessGroup</key>
+  <false/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>__STDOUT_LOG__</string>
+  <key>StandardErrorPath</key>
+  <string>__STDERR_LOG__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__PATH__</string>
+  </dict>
+</dict>
+</plist>
