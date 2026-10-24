@@ -107,7 +107,8 @@ def file_name(relative):
     parts = relative.split("/") if isinstance(relative, str) else []
     if (len(parts) != 2 or parts[0] != "ext" or not NAME.fullmatch(parts[1])
             or not (parts[1].endswith((".py", ".sh"))
-                    or parts[1] in {"yes", "host_pull_probe.template"})
+                    or parts[1] in {"yes", "host_pull_probe.template",
+                        "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json"})
             or parts[1] in EXT_BINDINGS):
         raise ValueError("manifest must explicitly name flat code files")
     # Deliberately no ext/pools.yaml: its presence invokes the *remote-support*

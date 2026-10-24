@@ -1252,9 +1252,65 @@ class CeoIngressReadGateway:
             return False
 
     @staticmethod
+    def _valid_requeued_lost_error(value: object) -> bool:
+        """Admit only the Runtime's bounded, typed LOST reconciliation errors.
+
+        They are not JobPayload documents and do not relax sealed results.
+        """
+        if type(value) is not dict:
+            return False
+        reason = value.get("reason")
+        from control_plane.executive_readback_contract import valid_lost_reason
+
+        if not valid_lost_reason(reason):
+            return False
+        if set(value) == {"reason", "expired_at_ms"}:
+            return (
+                reason in {"lease_expired", "ohf_lease_expired_fenced"}
+                and type(value["expired_at_ms"]) is int
+                and 0 <= value["expired_at_ms"] < 2**63
+            )
+        if set(value) == {"reason", "verified_process_absent"}:
+            return value["verified_process_absent"] is True
+        return False
+
+    @staticmethod
     def _valid_sha256(value: object) -> bool:
         import re
         return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    @staticmethod
+    def _valid_runtime_utc_timestamp(
+        value: object, *, optional: bool = False, deadline: bool = False
+    ) -> bool:
+        # Runtime serializes absent Attempt timestamps as "", and present
+        # ones as UTC ISO-8601. Never certify arbitrary text as lease evidence.
+        from control_plane.executive_readback_contract import valid_runtime_instant
+
+        return (
+            type(value) is str
+            and ((optional and value == "") or (
+                CeoIngressReadGateway._valid_generated_at(value)
+                and valid_runtime_instant(value, deadline=deadline)
+            ))
+        )
+
+    @staticmethod
+    def _valid_runtime_timestamp_order(earlier: object, later: object) -> bool:
+        from datetime import datetime
+
+        if not (
+            CeoIngressReadGateway._valid_runtime_utc_timestamp(earlier, optional=True)
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(later, optional=True)
+        ):
+            return False
+        if not earlier or not later:
+            return True
+        def parse(value: str):
+            return datetime.fromisoformat(
+                value[:-1] + "+00:00" if value.endswith("Z") else value
+            )
+        return parse(earlier) <= parse(later)
 
     @staticmethod
     def _valid_job_constraints(value: object, *, orchestration_role: object) -> bool:
@@ -1415,6 +1471,101 @@ class CeoIngressReadGateway:
             return False
 
     @staticmethod
+    def _valid_runtime_remote_launch_pin(attempt: Mapping[str, Any]) -> bool:
+        """Read the Runtime's exact opaque remote launch pin in any lifecycle phase.
+
+        A pre-start pin is never a sealed-worker launch attestation or start
+        authority.  The lifecycle's active lease remains owned by Runtime.
+        """
+        from control_plane.executive_runtime import (
+            REMOTE_LAUNCH_IDENTITY_KEY, REMOTE_LAUNCH_IDENTITY_SCHEMA,
+        )
+
+        metadata = attempt.get("launch_metadata")
+        if not (
+            attempt.get("execution_mode") == "SEALED_WORKER"
+            and attempt.get("result") is None
+            and type(metadata) is dict
+            and set(metadata) == {REMOTE_LAUNCH_IDENTITY_KEY}
+        ):
+            return False
+        pin = metadata[REMOTE_LAUNCH_IDENTITY_KEY]
+        return (
+            type(pin) is dict
+            and set(pin) == {"schema_version", "sha256"}
+            and pin["schema_version"] == REMOTE_LAUNCH_IDENTITY_SCHEMA
+            and CeoIngressReadGateway._valid_sha256(pin["sha256"])
+        )
+
+    @staticmethod
+    def _same_attempt_projection(
+        history: object, latest: object,
+    ) -> bool:
+        """Require the two Runtime projections to agree despite separate bounds.
+
+        The canonical MCP producer repeats the same Attempt, but bounds the
+        paths independently.  A wrapper's path is not semantic payload; its
+        preview and exact byte counts must match the unbounded counterpart or
+        the other's separately receipted wrapper.  Each projection and receipt
+        is independently validated by _valid_attempt_row before this check.
+        """
+        from integrations.executive_mcp.schemas import (
+            BOUND_PREVIEW_CHARS, canonical_json,
+        )
+
+        if type(history) is not dict or type(latest) is not dict:
+            return False
+        if set(history) != set(latest):
+            return False
+        aggregate_fields = {
+            "checkpoint", "result", "error", "launch_metadata",
+            "requested_execution_profile", "effective_grant",
+            "placement_snapshot", "execution_principal_snapshot",
+        }
+        wrapper_keys = {
+            "bounded", "original_bytes", "returned_bytes",
+            "field", "preview",
+        }
+
+        def is_wrapper(value: object) -> bool:
+            return (
+                type(value) is dict
+                and set(value) == wrapper_keys
+                and value["bounded"] is True
+            )
+
+        for field, old in history.items():
+            new = latest[field]
+            if old == new:
+                continue
+            if field not in aggregate_fields:
+                return False
+            old_bounded, new_bounded = is_wrapper(old), is_wrapper(new)
+            if not old_bounded and not new_bounded:
+                return False
+            if old_bounded and new_bounded:
+                if any(
+                    old[key] != new[key]
+                    for key in ("bounded", "original_bytes",
+                                "returned_bytes", "preview")
+                ):
+                    return False
+                continue
+            wrapper = old if old_bounded else new
+            original = new if old_bounded else old
+            if type(original) not in {dict, list}:
+                return False
+            encoded = canonical_json(original)
+            preview = encoded.decode("utf-8")[:BOUND_PREVIEW_CHARS]
+            if (
+                wrapper["original_bytes"] != len(encoded)
+                or wrapper["preview"] != preview
+                or wrapper["returned_bytes"] != len(preview.encode("utf-8"))
+            ):
+                return False
+        return True
+
+    @staticmethod
     def _valid_requested_profile(value: object, digest: object) -> bool:
         from control_plane import operator_harness_wire
         from control_plane.operator_materialization_receipt import (
@@ -1562,7 +1713,9 @@ class CeoIngressReadGateway:
         receipts: Mapping[str, Mapping[str, Any]],
         consumed: set[str],
     ) -> bool:
-        from control_plane.executive_runtime import AttemptStatus
+        from control_plane.executive_runtime import (
+            AttemptStatus, _TERMINAL_ATTEMPT_STATUSES,
+        )
         from control_plane.operator_harness_contract import AttemptExecutionMode
 
         if not (
@@ -1582,12 +1735,23 @@ class CeoIngressReadGateway:
             and attempt["fence_generation"] >= 0
             and type(attempt.get("lease_owner")) is str
             and bool(attempt["lease_owner"])
-            and type(attempt.get("lease_expires_at")) is str
-            and type(attempt.get("heartbeat_at")) is str
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("lease_expires_at"), optional=True, deadline=True
+            )
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("heartbeat_at"), optional=True
+            )
             and type(attempt.get("checkpoint_sequence")) is int
             and attempt["checkpoint_sequence"] >= 0
-            and type(attempt.get("started_at")) is str
-            and type(attempt.get("finished_at")) is str
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("started_at"), optional=True
+            )
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("finished_at"), optional=True
+            )
+            and CeoIngressReadGateway._valid_runtime_timestamp_order(
+                attempt.get("started_at"), attempt.get("finished_at")
+            )
             and type(attempt.get("version")) is int
             and attempt["version"] >= 0
             and CeoIngressReadGateway._valid_sha256(
@@ -1629,9 +1793,46 @@ class CeoIngressReadGateway:
         ):
             return False
 
+        # Mirror Runtime's persisted status/finished_at_ms CHECK in both
+        # directions. Active OHF expiry fences write an error, not a finish.
+        if (
+            (AttemptStatus(attempt["status"]) in _TERMINAL_ATTEMPT_STATUSES)
+            != bool(attempt["finished_at"])
+        ):
+            return False
+
+        # Runtime terminal completions always have a non-null result. Do not
+        # certify a missing payload through the optional JobPayload fallback.
+        if attempt.get("status") == "COMPLETED" and attempt.get("result") is None:
+            return False
         for field in ("checkpoint", "result", "error"):
             if field == "result" and CeoIngressReadGateway._valid_terminal_result(
                 attempt.get(field), job=job, attempt=attempt,
+            ):
+                continue
+            if (
+                field == "error"
+                and CeoIngressReadGateway._valid_requeued_lost_error(
+                    attempt.get("error")
+                )
+                and (
+                    attempt.get("status") == "LOST"
+                    or (
+                        # The OPERATOR_HARNESS expiry fence is deliberately
+                        # written before the Runtime transitions this active
+                        # Attempt to LOST. It must keep its original pointer.
+                        attempt.get("execution_mode") == "OPERATOR_HARNESS"
+                        and attempt.get("error", {}).get("reason")
+                        == "ohf_lease_expired_fenced"
+                        and job.get("current_attempt_id") == attempt.get("attempt_id")
+                        and job.get("status") == {
+                            "CLAIMED": "RUNNING",
+                            "RUNNING": "RUNNING",
+                            "CHECKPOINTED": "CHECKPOINTED",
+                            "CANCEL_REQUESTED": "CANCEL_REQUESTED",
+                        }.get(attempt.get("status"))
+                    )
+                )
             ):
                 continue
             if not CeoIngressReadGateway._valid_payload_or_bound(
@@ -1646,6 +1847,7 @@ class CeoIngressReadGateway:
         if not (
             launch_metadata == {}
             or CeoIngressReadGateway._valid_sealed_launch_metadata(attempt)
+            or CeoIngressReadGateway._valid_runtime_remote_launch_pin(attempt)
             or CeoIngressReadGateway._valid_bounded_aggregate(
                 launch_metadata,
                 field=f"{prefix}.launch_metadata",
@@ -1745,8 +1947,11 @@ class CeoIngressReadGateway:
             and re.fullmatch(r"A[0-7]", job["authority_level"]) is not None
             and (job.get("branch") is None or type(job["branch"]) is str)
             and (job.get("worktree") is None or type(job["worktree"]) is str)
-            and type(job.get("created_at")) is str
-            and type(job.get("updated_at")) is str
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(job.get("created_at"))
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(job.get("updated_at"))
+            and CeoIngressReadGateway._valid_runtime_timestamp_order(
+                job.get("created_at"), job.get("updated_at")
+            )
             and type(job.get("attempt_count")) is int
             and job["attempt_count"] >= 0
             and type(job.get("attempt_limit")) is int
@@ -1812,6 +2017,8 @@ class CeoIngressReadGateway:
         ):
             return False
 
+        if job.get("status") == "COMPLETED" and job.get("result") is None:
+            return False
         for field in ("checkpoint", "result"):
             if (
                 field == "result"
@@ -1868,7 +2075,30 @@ class CeoIngressReadGateway:
             and latest.get("attempt_id") == attempts[-1].get("attempt_id")
             and latest.get("job_id") == requested
             and latest.get("attempt_number") == attempts[-1].get("attempt_number")
-            and job.get("current_attempt_id") == attempts[-1].get("attempt_id")
+            and (
+                job.get("current_attempt_id") == attempts[-1].get("attempt_id")
+                or (
+                    # Runtime legitimately requeues after a LOST Attempt and
+                    # clears the current pointer. Preserve the last historical
+                    # Attempt for READ without presenting it as still active.
+                    job.get("current_attempt_id") is None
+                    and job.get("status") == "QUEUED"
+                    and job.get("assigned_worker_id") is None
+                    and job.get("assigned_quota_class") is None
+                    and job.get("result") is None
+                    and attempts[-1].get("status") in {
+                        "LOST", "FAILED", "RATE_LIMITED"
+                    }
+                    and job["attempt_count"] < job["attempt_limit"]
+                    # Requeue admits exactly these terminal predecessor states.
+                    # CANCELLED, COMPLETED and live leases cannot occur anywhere
+                    # in a producer-reachable QUEUED history.
+                    and all(
+                        row.get("status") in {"LOST", "FAILED", "RATE_LIMITED"}
+                        for row in attempts
+                    )
+                )
+            )
             and CeoIngressReadGateway._valid_attempt_row(
                 latest,
                 prefix="latest_attempt",
@@ -1877,6 +2107,9 @@ class CeoIngressReadGateway:
                 expected_number=attempts[-1]["attempt_number"],
                 receipts=receipts,
                 consumed=consumed,
+            )
+            and CeoIngressReadGateway._same_attempt_projection(
+                attempts[-1], latest,
             )
         ):
             return False

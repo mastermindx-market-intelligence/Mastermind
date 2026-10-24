@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
+from datetime import datetime
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
@@ -150,6 +151,21 @@ def validate_bindings(
     bindings = document.get("bindings")
     if not isinstance(bindings, Mapping) or not bindings:
         raise HarnessBindingError("harness bindings are required")
+    verified_at = document.get("verified_at")
+    if not isinstance(verified_at, str):
+        raise HarnessBindingError("binding verified_at must be UTC timestamp")
+    try:
+        reviewed_timestamp = datetime.strptime(verified_at, "%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError) as exc:
+        raise HarnessBindingError("binding verified_at must be valid UTC timestamp") from exc
+    if reviewed_timestamp.strftime("%Y-%m-%dT%H:%M:%SZ") != verified_at:
+        raise HarnessBindingError("binding verified_at must be valid UTC timestamp")
+    if "byteplus-coding-plan-personal.claude-code-anthropic" in bindings:
+        source_verified = profiles["verified_at"]
+        if verified_at < source_verified:
+            raise HarnessBindingError(
+                "BytePlus harness review is older than provider-profile review"
+            )
     for binding_id, row in bindings.items():
         _identifier(binding_id, "binding id")
         if not isinstance(row, Mapping):
@@ -183,6 +199,17 @@ def validate_bindings(
             _safe_https(endpoint.get("base_url"))
         else:
             raise HarnessBindingError(f"binding {binding_id!r} endpoint source is invalid")
+        if profile_id == "byteplus-coding-plan-personal" and (
+            binding_id != "byteplus-coding-plan-personal.claude-code-anthropic"
+            or provider != "byteplus"
+            or harness_id != "claude-code"
+            or adapter_id != "claude-compatible-subscription"
+            or protocol != "anthropic"
+            or source != "reviewed_override"
+            or endpoint.get("base_url") != profile.base_url
+            or endpoint.get("base_url") != "https://ark.ap-southeast.bytepluses.com/api/coding"
+        ):
+            raise HarnessBindingError("reviewed BytePlus Coding Plan harness/endpoint required")
         model_classes = row.get("model_classes")
         if (
             not isinstance(model_classes, list)

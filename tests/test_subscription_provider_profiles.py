@@ -11,9 +11,9 @@ def _catalog() -> dict:
     return copy.deepcopy(load_profiles())
 
 
-def test_all_three_subscription_providers_are_reviewed_and_inert_by_default():
+def test_all_four_subscription_providers_are_reviewed_and_inert_by_default():
     catalog = load_profiles()
-    assert set(catalog["profiles"]) == {"glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan"}
+    assert set(catalog["profiles"]) == {"glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan", "byteplus-coding-plan-personal"}
     for profile_id in catalog["profiles"]:
         profile = get_profile(profile_id, document=catalog)
         assert profile.autonomous_allowed is False
@@ -50,7 +50,7 @@ def test_subagent_topology_cannot_silently_upgrade_model():
 
 
 def test_purchased_subscription_profiles_are_not_eligible_for_unattended_production():
-    for profile_id in ("glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan"):
+    for profile_id in ("glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan", "byteplus-coding-plan-personal"):
         profile = get_profile(profile_id)
         assert profile.usage_policy["supported_harness_required"] is True
         assert profile.usage_policy["interactive_only"] is True
@@ -335,6 +335,7 @@ def test_catalog_base_urls_use_canonical_dns_authorities():
         "https://api.z.ai/api/anthropic",
         "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
         "https://api.minimax.io/anthropic",
+        "https://ark.ap-southeast.bytepluses.com/api/coding",
     }
 
 
@@ -387,3 +388,103 @@ def test_closed_model_entry_and_empty_metadata_are_accepted():
     catalog["profiles"]["glm-coding-plan"]["models"]["routine"] = {"id": "GLM-5.3-Flash"}
     validate_profiles(catalog)
     assert get_profile("glm-coding-plan", document=catalog).model_for("routine") == "GLM-5.3-Flash"
+
+
+
+def test_byteplus_rejects_payg_endpoint_and_preserves_attended_policy():
+    reviewed = _catalog()
+    row = reviewed["profiles"]["byteplus-coding-plan-personal"]
+    assert row["quota_profile"]["tier"] is None
+    assert row["supported_tool_only"] is True
+    assert row["usage_policy"]["single_user_only"] is True
+    assert row["usage_policy"]["supported_harness_required"] is True
+    assert row["usage_policy"]["interactive_only"] is True
+    assert row["usage_policy"]["unattended_background_allowed"] is False
+    assert row["usage_policy"]["production_backend_allowed"] is False
+    for wrong_url in (
+        "https://ark.ap-southeast.bytepluses.com/api/v3",
+        "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+        "https://evil.example/api/coding",
+    ):
+        altered = _catalog()
+        altered["profiles"]["byteplus-coding-plan-personal"]["base_url"] = wrong_url
+        with pytest.raises(ProviderProfileError, match="reviewed BytePlus Coding Plan endpoint"):
+            validate_profiles(altered)
+
+
+
+def test_byteplus_rejects_unreviewed_model_entitlement_and_tool_use():
+    name = "byteplus-coding-plan-personal"
+    for field, illegal, message in (
+        ("models", {"routine": "glm-5.3"}, "unsupported BytePlus Coding Plan model"),
+        ("product", "payg_inference", "reviewed BytePlus Coding Plan identity"),
+        ("protocol", "openai-chat", "reviewed BytePlus Coding Plan identity"),
+        ("supported_tool_only", False, "requires supported coding tools"),
+    ):
+        changed = _catalog()
+        if field == "models":
+            changed["profiles"][name]["models"].update(illegal)
+        else:
+            changed["profiles"][name][field] = illegal
+        with pytest.raises(ProviderProfileError, match=message):
+            validate_profiles(changed)
+    changed = _catalog()
+    changed["profiles"][name]["usage_policy"]["single_user_only"] = False
+    with pytest.raises(ProviderProfileError, match="single-user"):
+        validate_profiles(changed)
+    changed = _catalog()
+    changed["profiles"][name]["quota_profile"]["tier"] = "pro"
+    with pytest.raises(ProviderProfileError, match="requires observed entitlement"):
+        validate_profiles(changed)
+    changed = _catalog()
+    changed["profiles"]["different-byteplus-plan"] = changed["profiles"].pop(name)
+    with pytest.raises(ProviderProfileError, match="reviewed BytePlus Coding Plan identity"):
+        validate_profiles(changed)
+
+
+
+def test_byteplus_published_model_upper_bound_is_reviewed():
+    # A schema allowlist is not evidence that the subscription's region
+    # currently entitles the account to each model.
+    allowed = (
+        "ark-code-latest",
+        "dola-seed-2.0-pro",
+        "dola-seed-2.0-lite",
+        "dola-seed-2.0-code",
+        "glm-5.3-flash",
+        "glm-5.2",
+        "deepseek-v4.1-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    )
+    for model in allowed:
+        changed = _catalog()
+        changed["profiles"]["byteplus-coding-plan-personal"]["models"]["hard"] = model
+        validate_profiles(changed)
+
+
+
+@pytest.mark.parametrize(
+    "deprecated",
+    ["bytedance-seed-code", "glm-5.1", "kimi-k2.5", "gpt-oss-120b"],
+)
+def test_byteplus_deprecated_models_are_unselectable(deprecated):
+    changed = _catalog()
+    changed["profiles"]["byteplus-coding-plan-personal"]["models"]["hard"] = deprecated
+    with pytest.raises(ProviderProfileError, match="unsupported BytePlus Coding Plan model"):
+        validate_profiles(changed)
+
+
+
+def test_byteplus_specialist_models_are_selectable_only_inside_explicit_harness_roles():
+    profile = get_profile("byteplus-coding-plan-personal")
+    assert profile.model_for("backend_coding") == "deepseek-v4.1-flash"
+    assert profile.model_for("frontend_visual") == "dola-seed-2.0-code"
+    assert profile.model_for("adversarial_review") == "deepseek-v4-pro"
+    assert profile.model_for("routine") == profile.model_for("subagent") == "glm-5.3-flash"
+    assert not profile.autonomous_allowed
+    # Specialist model classes do not become universal subscriptions roles.
+    mutated = _catalog()
+    mutated["profiles"]["glm-coding-plan"]["models"]["backend_coding"] = "GLM-5.3"
+    with pytest.raises(ProviderProfileError, match="BytePlus specialist"):
+        validate_profiles(mutated)

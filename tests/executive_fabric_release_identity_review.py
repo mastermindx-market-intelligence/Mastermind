@@ -279,9 +279,194 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # _PREPROOF_RECEIPT_KEYS comments were replaced by qualified producer names);
 # token sites are unchanged in kind, spelling, and count.
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
+# Re-pinned for the explicit unstarted PREPROOF successor mode; same three
+# guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "3c45fc1c851576e5260f4544c3329915b4b3ce0efdaadf8d3ad002546acd4bc6",
-    "sites": ((73, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (903, 46, 49, "int", "400"),
-              (903, 66, 69, "int", "500")),
+    "sha256": 'fe9cb8e7abf68730023f4aeebb1eb480c5ff3f787ccefb62b3d520db70568074',
+    "sites": ((96, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1733, 46, 49, 'int', '400'), (1733, 66, 69, 'int', '500')),
+}
+
+
+# PR #1813: unchanged independently reviewed migration-evidence helper 8c7f1584.
+# This exact token is the Root config-directory permission mode, not a UID.
+# Source, path, AST location and complete token must all match; scanner unchanged.
+REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
+    "sha256": 'd667f7028932ff89502649543fa3699f6961e1df5a522a2ffb1fa91367376844',
+    "sites": ((347, 46, 51, 'int', '0o755'),),
+}
+
+
+# PR #1794 source-risk review 5a342984: exact paid source bytes and
+# literal sites (including two precise docstring account-name examples). No
+# caller identity, permission or runtime admission is granted; any source/token
+# drift exposes these sites to the unchanged guard again.
+REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe372eb5c3e292524957ba6b57d79cc5a9326e2563207cb1daa283a69f475',
+                                          'sites': ((120, 73, 76, 'int', '501'),
+                                                    (303, 78, 81, 'int', '450'),
+                                                    (398, 83, 86, 'int', '501'))},
+ 'control_plane/paid_fabric_wire.py': {'sha256': '5315eb7578cf49c0c405d7d7ae3b52d6ad3056c47f9d8f440008297b52e3004c',
+                                       'sites': ((56, 35, 38, 'int', '501'),)},
+ 'control_plane/paid_model_execution_principal.py': {'sha256': 'a20a4115599d93cb8a9c5397a84a58624f9cd24bb5ee00e219add653f832e79c',
+                                                     'sites': ((63, 18, 21, 'int', '512'),)},
+ 'control_plane/paid_model_terminal_evidence.py': {'sha256': '81eade4a8dc6739508d94292df5430a3bf6d0da016194990a2057ace6ced98ac',
+                                                   'sites': ((838, 24, 29, 'int', '0o777'),)},
+ 'control_plane/paid_quiesce_transport.py': {'sha256': 'ce1ce7afcd1f26d9202e2e7376159218e80052c0a36c6e99868d56707befce27',
+                                             'sites': ((162, 128, 131, 'int', '450'),
+                                                       (162, 132, 137, 'int', '0o660'),
+                                                       (183, 34, 37, 'int', '501'))},
+ 'control_plane/worker_execution_contract.py': {'sha256': '07621e74ea343f2c0ad320a8f019e55365b14b1ad988e5d1145ba1d7c2344da2',
+                                                'sites': ((60, 33, 36, 'int', '512'),)},
+ 'ops/executive_os/canonical_paid_actions.py': {'sha256': '957b4a04432ca5ebbb954f4fa76ab74e4d383f233a58449ffc3cf6c1294212c9',
+                                                'sites': ((56, 71, 74, 'int', '501'),)},
+ 'ops/executive_os/canonical_paid_definition.py': {'sha256': 'a2009ce6c555d7de9bd6a9497871a33f1edb7d2bffe19f38ffbf91790f64349f',
+                                                   'sites': ((17, 45, 57, 'str', '_mastermind_'),
+                                                             (91, 18, 21, 'int', '501'),
+                                                             (158, 49, 54, 'int', '0o755'),
+                                                             (164,
+                                                              4,
+                                                              24,
+                                                              'str',
+                                                              "'_mastermind_worker'"),
+                                                             (164,
+                                                              26,
+                                                              47,
+                                                              'str',
+                                                              "'_mastermind_minimax'"),
+                                                             (166, 32, 46, 'str', "'_mastermind_'"),
+                                                             (252, 13, 25, 'str', '_mastermind_'),
+                                                             (335, 58, 63, 'int', '0o660'),
+                                                             (745, 54, 59, 'int', '0o700'),
+                                                             (745, 61, 66, 'int', '0o755'),
+                                                             (772, 45, 50, 'int', '0o755'),
+                                                             (825, 29, 34, 'int', '0o700'),
+                                                             (831, 28, 33, 'int', '0o700'),
+                                                             (834, 88, 93, 'int', '0o700'),
+                                                             (887, 71, 76, 'int', '0o700'),
+                                                             (896, 28, 33, 'int', '0o755'),
+                                                             (904, 75, 80, 'int', '0o755'),
+                                                             (916, 60, 65, 'int', '0o700'))},
+ 'ops/executive_os/canonical_paid_lifecycle.py': {'sha256': '94be5849ac3b87d3ba1eeec382529869b72fd9a1e4e2b920db09e49f753b0236',
+                                                  'sites': ((56, 13, 16, 'int', '501'),
+                                                            (57, 14, 17, 'int', '450'),
+                                                            (458, 53, 58, 'int', '0o660'),
+                                                            (546, 48, 53, 'int', '0o660'),
+                                                            (752, 53, 58, 'int', '0o755'),
+                                                            (790, 84, 89, 'int', '0o755'))},
+ 'ops/executive_os/canonical_paid_qualification.py': {'sha256': 'fedc7c3f892bcbbe4c8335641c83a7037d233ea69b44605a614bf310ce3e52b8',
+                                                      'sites': ((161, 48, 53, 'int', '0o755'),
+                                                                (610, 22, 27, 'int', '0o700'),
+                                                                (615, 22, 27, 'int', '0o755'),
+                                                                (624, 82, 87, 'int', '0o755'))},
+ 'ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py': {'sha256': '93267de79c92231f853fc16e03f939e8d52d3322d19a828a568ffcb5d7a7f867',
+                                                                'sites': ((1280,
+                                                                           46,
+                                                                           49,
+                                                                           'int',
+                                                                           '503'),
+                                                                          (1288,
+                                                                           42,
+                                                                           45,
+                                                                           'int',
+                                                                           '401'),
+                                                                          (1338,
+                                                                           38,
+                                                                           41,
+                                                                           'int',
+                                                                           '502'),
+                                                                          (1446,
+                                                                           20,
+                                                                           23,
+                                                                           'int',
+                                                                           '401'),
+                                                                          (1491,
+                                                                           24,
+                                                                           27,
+                                                                           'int',
+                                                                           '401'),
+                                                                          (1521,
+                                                                           24,
+                                                                           27,
+                                                                           'int',
+                                                                           '401'),
+                                                                          (1693,
+                                                                           39,
+                                                                           42,
+                                                                           'int',
+                                                                           '502'),
+                                                                          (1697,
+                                                                           34,
+                                                                           37,
+                                                                           'int',
+                                                                           '502'),
+                                                                          (1699,
+                                                                           32,
+                                                                           35,
+                                                                           'int',
+                                                                           '502'))},
+ 'ops/native_fabric/paid_canonical_glm/source/glm_shim.py': {'sha256': '020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc',
+                                                             'sites': ((1217, 46, 49, 'int', '503'),
+                                                                       (1225, 42, 45, 'int', '401'),
+                                                                       (1275, 38, 41, 'int', '502'),
+                                                                       (1375, 20, 23, 'int', '401'),
+                                                                       (1420, 24, 27, 'int', '401'),
+                                                                       (1450, 24, 27, 'int', '401'),
+                                                                       (1578, 39, 42, 'int', '502'),
+                                                                       (1582, 34, 37, 'int', '502'),
+                                                                       (1584,
+                                                                        32,
+                                                                        35,
+                                                                        'int',
+                                                                        '502'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': 'd2f5be14f345cf00b4bd4357d705713a24e373a7d1675229aab6202f0d500cad',
+                                                                             'sites': ((34,
+                                                                                        17,
+                                                                                        20,
+                                                                                        'int',
+                                                                                        '501'),
+                                                                                       (382,
+                                                                                        85,
+                                                                                        90,
+                                                                                        'int',
+                                                                                        '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': 'a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c',
+                                                                      'sites': ((138,
+                                                                                 32,
+                                                                                 37,
+                                                                                 'int',
+                                                                                 '0o700'),
+                                                                                (220,
+                                                                                 68,
+                                                                                 73,
+                                                                                 'int',
+                                                                                 '0o700'))},
+ 'scripts/executive_paid_fabric_shim.py': {'sha256': 'e80b95a09ce31153e7bff2ea7b85dd1eb8d8850d4d6029ec27250cd8f13228f1',
+                                           'sites': ((43, 81, 84, 'int', '450'),)}})
+
+# Gateway fixed Studio UID, incumbent config/plist mode, and the normal
+# installer's exact /Library/Application Support 0:80:0755 ancestor.
+# Exact source and Constant-token sites are frozen for the final changed-risk
+# review; this does not authorize publication, runtime admission or release.
+# No generic numeric exception is added: source/path/site drift exposes all
+# literals again through the existing D8 scanner.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
+    'sha256': 'e68f6df4d70ca6bc68260bfbd9b64d95a0209926ca70fb9dda9872915739093a',
+    'sites': ((335, 24, 27, 'int', '501'),
+              (6535, 35, 37, 'int', '80'),
+              (6536, 50, 55, 'int', '0o755'),
+              (7073, 41, 46, 'int', '0o644')),
+}
+
+# The same closed Studio reader's fixed observed UID. Frozen corrected helper
+# bytes are subject to the integrated G1-G3 review, not an activation grant.
+REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
+    'sha256': '13ffc81477c6f57fdbb345bfed3f2142af6a5485f887a845d9e19ef4bfaa6587',
+    'sites': ((55, 21, 24, 'int', '501'),),
+}
+
+
+# Fixed pre-census ancestor permission modes; not account UIDs. Only the
+# exact reviewed source, AST Constant and complete token qualify.
+REVIEWED_FILES['control_plane/executive_backup.py'] = {
+    'sha256': '058965ae78b61f072ba3720f877bac7b54538a6e06f296db7135217cf05721cd',
+    'sites': ((3505, 39, 44, 'int', '0o711'), (3507, 43, 48, 'int', '0o700'), (3509, 39, 44, 'int', '0o755')),
 }

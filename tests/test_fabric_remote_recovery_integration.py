@@ -93,6 +93,7 @@ def test_recomputed_public_context_hash_cannot_bypass_original_pin_or_open_promp
 
 @pytest.mark.parametrize('damage', ['input_root', 'source_workspace', 'cleanup'])
 def test_supervisor_rejects_foreign_control_coordinates_before_prompt_read(tmp_path, monkeypatch, damage):
+    from control_plane.executive_runtime import Runtime
     spec, ref, prompt, context = remote_fixture(tmp_path)
     original = dict(context)
     if damage != 'cleanup':
@@ -105,9 +106,19 @@ def test_supervisor_rejects_foreign_control_coordinates_before_prompt_read(tmp_p
     material['control_recovery'] = context
     material['control_recovery_sha256'] = contract._control_recovery_digest(
         raw['launch_spec_sha256'], material)
-    supervisor = object.__new__(ExecutiveSupervisor)
-    supervisor.cleanup_policy = (CleanupPolicy.FABRIC_PROCESS_GROUP if damage != 'cleanup'
-                                 else CleanupPolicy.DEDICATED_UID)
+    runtime = Runtime.at(tmp_path / 'runtime')
+    def unused_binding_source(*_args, **_kwargs):
+        raise AssertionError('attended transport must not be contacted by a coordinate refusal')
+    # Genuine reviewed LEGACY attended boundary: the real constructor refuses
+    # Fabric cleanup for any other type, and its transport is never reached
+    # before the retained coordinate refusal.
+    adapter = adapter_module.AttendedFabricWorkerAdapter(runtime, unused_binding_source)
+    supervisor = ExecutiveSupervisor(
+        runtime, adapter,
+        cleanup_policy=(CleanupPolicy.FABRIC_PROCESS_GROUP if damage != 'cleanup'
+                        else CleanupPolicy.DEDICATED_UID),
+        require_complete_launch_attestation=True,
+    )
     supervisor._job = lambda job_id: SimpleNamespace(worktree=original['source_workspace'])
     supervisor._run_dir = lambda run_id: Path(original['input_root']).parent
     attempt = SimpleNamespace(attempt_id=spec.run_id, job_id=spec.job_id,
@@ -149,10 +160,22 @@ def test_finite_profile_is_not_runtime_admission_and_native_profile_is_preserved
     assert not adapter_supports_execution_surface('attended-fabric', 'codex-app-server')
 
 
-def test_attended_worker_cannot_take_legacy_missing_profile_exemption():
-    supervisor = object.__new__(ExecutiveSupervisor)
-    supervisor.runtime = SimpleNamespace(workers=SimpleNamespace(
-        get_worker=lambda worker_id: SimpleNamespace(worker_type='attended-fabric')))
+class _InertDataBoundary:
+    """Test-only inert DATA boundary: no provider start, no transport, never paid."""
+
+    adapter_id = "fixture"
+
+
+def test_attended_worker_cannot_take_legacy_missing_profile_exemption(tmp_path):
+    supervisor = ExecutiveSupervisor(
+        SimpleNamespace(store=SimpleNamespace(lease_seconds=30.0),
+                        workers=SimpleNamespace(
+                            get_worker=lambda worker_id: SimpleNamespace(
+                                worker_type='attended-fabric'))),
+        _InertDataBoundary(),
+        runs_root=tmp_path / 'runs',
+        inspector=SimpleNamespace(),
+    )
     with pytest.raises(SupervisorError, match='exact finite attended read-only profile'):
         supervisor._validate_execution_profile(SimpleNamespace(constraints={}),
             SimpleNamespace(attempt=SimpleNamespace(worker_id='worker-1')))
