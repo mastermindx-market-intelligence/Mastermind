@@ -226,13 +226,14 @@ Do not solve the question by expanding the Skillpack with live company state.
 ### Project-plan continuity check
 
 For a multi-phase project, verify that the same-pinned
-`docs/CEO_PROJECT_PLAN_CONTINUITY.md` is satisfied: the current versioned master plan
-lists stable step/substep IDs, accepted versus incomplete evidence, unchanged
-`DO_NOT_REDO` work and precise ready/blocked dependencies, and the *existing*
-Agent OS cumulative frontier points at its correct GitHub revision with readback.
-Report the exact plan path/SHA, the organizational checkpoint revision, and any
-unresolved cross-owner projection or effect explicitly. Do not create a second
-`latest` store or overclaim an unmerged plan as adopted organizational truth.
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` is satisfied: workstream waves and the latest
+dated handoff are the pinned plan; the versioned master plan is the task tree and
+lists stable step/substep IDs with editorial labels only. `DO_NOT_REDO`, the next
+action, and live effects stay on the handoff and `control_plane`. Report the
+workstream key, the handoff path, the task-tree path/SHA, and any unresolved
+cross-owner projection or effect explicitly. Do not create a second `latest`
+store, require a plan-SHA field the handoff schema does not have, or overclaim
+an unmerged plan as adopted organizational truth.
 
 ## Step 11 — State the next action precisely
 

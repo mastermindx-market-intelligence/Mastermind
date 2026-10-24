@@ -54,9 +54,11 @@ evidence completes it.
 
 For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
 `docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
-existing versioned GitHub master plan and one Agent OS cumulative frontier; if none
-exists, create and read back a useful plan with stable task/subtask IDs, dependencies,
-acceptance evidence and next action **before major delegation or implementation**.
+Agent OS workstream waves and latest dated handoff as the pinned plan, and the
+versioned GitHub master plan as the task tree only. If no task tree exists, create
+and read back one with stable task/subtask IDs, dependencies and acceptance evidence
+**before major delegation or implementation**. The next action stays on the workstream
+and handoff.
 At material changes and risky chat boundaries, persist the affected nodes and Agent OS
 checkpoint through their existing writers, verify exact revisions, and keep the active
 worker/lease/effect boundary. Do not create a new plan database, claim source custody

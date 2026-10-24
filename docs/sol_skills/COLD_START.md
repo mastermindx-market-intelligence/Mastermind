@@ -66,15 +66,16 @@ by the host and remains advisory. A new chat does not transfer a lease, STARTed 
 ### Multi-phase project plan recovery
 
 For a substantial newly assigned or recovered project, also follow the same-pinned
-`docs/CEO_PROJECT_PLAN_CONTINUITY.md`. From the verified Agent OS workstream/frontier,
-resolve the **exact** source-controlled master-plan path and committed revision before
-choosing a new task. Compare its hierarchy/dependencies/accepted proof to relevant
-GitHub, Executive and active dialogue owners, not to remembered chat narrative.
-If no plan exists, locate the rightful owner/source scope and establish a source-bound
-plan with readback **before substantial execution or worker delegation**, allowing
-only the minimum permitted investigation needed to scope it. Never create a second plan,
-guess current task status, displace a STARTed worker or call a GitHub draft an accepted
-Agent OS checkpoint. If the writer is genuinely unavailable, report the precise
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md`. Read the workstream waves and the latest dated
+handoff first. Open the task tree at the workstream artifact path and the commit that
+contains it. A schema-valid handoff with no master-plan SHA field is still usable.
+Compare wave status, task-tree labels, and Executive Job/Attempt state as separate
+facts, not to remembered chat narrative.
+If no task tree exists, locate the rightful owner/source scope and establish one
+source-bound task tree with readback **before substantial execution or worker delegation**,
+allowing only the minimum permitted investigation needed to scope it. Never create a
+second workstream or a second task registry, guess wave or Job status from a task-tree
+label, displace a STARTed worker, or call a GitHub draft an Agent OS checkpoint. If the writer is genuinely unavailable, report the precise
 persistence gap and continue independent safe scope.
 
 ### Project bootstrap projection

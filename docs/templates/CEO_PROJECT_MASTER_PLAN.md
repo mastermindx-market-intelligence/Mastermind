@@ -10,12 +10,12 @@
 | Field | Replace with project-specific value |
 |---|---|
 | Chairman objective | [one-sentence outcome] |
-| Project/workstream | [existing WS/operation ID or explicitly unregistered] |
+| Pinned plan | [existing `WS:<KEY>` and wave IDs; not this file] |
 | Accountable CEO function | [real assigned responsibility, not an assumed lease] |
-| Source and current revision | [owning repo, exact plan path, branch/PR, commit SHA] |
+| Task tree and revision | [owning repo, exact path of this file, branch/PR, commit SHA] |
 | Protected procedure pin | [repo / protected branch / compatible commit] |
-| Plan status | PROPOSED until accepted by the relevant source/decision owner |
-| Cross-system Agent OS reference | [one verified existing workstream/checkpoint ref, or PENDING] |
+| Latest handoff | [one `agentos/handoffs/<WS-KEY>-<YYYY-MM-DD>.md` path, or PENDING] |
+| Cross-system Agent OS reference | [that workstream plus the handoff path; a missing plan SHA is normal] |
 | Current approved scope | [precise in/out] |
 | Required real-path acceptance | [what a real user and system must demonstrably achieve] |
 | Created / last materially revised | [UTC timestamps from actual records] |
@@ -36,9 +36,11 @@
 
 ## Work breakdown and dependency graph
 
-Phases and tasks are editorial planning nodes, **not** Executive Job/Attempt IDs.
+Phases and tasks are the **task tree**, not Agent OS waves and not Executive Job/Attempt IDs.
 Use the incumbent project's existing identifiers when available; these examples
 are not globally reserved. Add as many hierarchical levels as needed.
+The Editorial state column uses only the labels defined in the continuity contract.
+It does not copy workstream status, wave status, or Job state.
 
 | ID | Parent | Depends on | Outcome | Evidence / DONE_WHEN | Editorial state |
 |---|---|---|---|---|---|
@@ -61,7 +63,7 @@ For each ready nontrivial task maintain a short detailed record:
 - **DONE_WHEN / independent review:** [tests, product proof, failure case]
 - **Risk, rollback and effects:** [reversibility, any pending effect and original carrier]
 - **Evidence:** [PRs, commits, results, real-path URLs or exact proof absence]
-- **State:** proposed / ready / blocked / in_progress / implementation_complete / reviewed / accepted / superseded (editorial only)
+- **State:** `proposed` / `ready` / `blocked` / `in_progress` / `implementation_complete` / `reviewed` / `accepted` / `superseded` (task-tree editorial label only; see the contract table)
 - **Decision/notes:** [dated source-backed result, hypothesis or falsifier, not hidden reasoning]
 
 ## Accepted progress and outstanding gates
@@ -76,27 +78,25 @@ or user acceptance.
 
 ## Changes and supersession
 
-| Plan revision | Changed task IDs | Decision/reason | Impact / dependencies | Kept DO_NOT_REDO |
+| Plan revision | Changed task IDs | Decision/reason | Impact / dependencies | Unchanged task IDs |
 |---|---|---|---|---|
-| [commit SHA] | [stable IDs] | [source-backed rationale] | [impacted exact next tasks] | [accepted unchanged IDs] |
+| [commit SHA] | [stable IDs] | [source-backed rationale] | [impacted exact next tasks] | [IDs left as they were] |
+
+`do_not_redo` stays on the workstream and the latest handoff. This column only lists task-tree IDs this revision did not change.
 
 Current version changes do not silently revise a STARTed worker's admitted contract.
 
-## Cumulative recovery frontier (navigation, not a new latest-state store)
+## Where the frontier lives (do not copy it into this file)
 
-Authoritative cumulative checkpoint stays with the **existing Agent OS owner**.
-The fields below are reminders for what that one checkpoint must point to,
-not an independent checkpoint that replaces it.
+The pinned plan is the Agent OS workstream waves. The cumulative checkpoint is the
+latest dated handoff, amended in place on the same day. Live Jobs and Attempts
+live in Executive OS `control_plane`. This section is a read list, not a second
+frontier and not a `latest` store.
 
-- **Exact Agent OS cumulative checkpoint/ref + committed revision:** [verified / unavailable]
-- **Plan revision:** [path, SHA, accepted/proposed state]
-- **Current phase / ready task IDs:** [exact]
-- **DONE/DO_NOT_REDO with proofs:** [IDs and refs]
-- **In-flight children and exact original carriers:** [IDs, START truth, awaited return]
-- **Unresolved effects and source-writer custody:** [identities and reconciliation action]
-- **Blockers, assumptions, falsifiers:** [only still material]
-- **Exact next bounded action and DONE_WHEN:** [one action + independent safe parallel phase]
-- **Readback proof/time and known degraded inputs:** [actual observations]
-- **Continuation is authorized only after:** [real next-action gates]
+- **Workstream and wave statuses:** [read `WS:<KEY>`; do not restate them as task labels]
+- **Latest handoff path:** [the `<WS-KEY>-<YYYY-MM-DD>.md` file `compile-context` would select]
+- **Task-tree revision:** [this file's path and commit SHA]
+- **Next action:** [read workstream `next_action` and handoff `next_actions`; the workstream value is often newer]
+- **DO_NOT_REDO, children, unresolved effects:** [read the handoff and `control_plane`; do not duplicate them here]
 
 Do not put tokens, passwords, transcripts, full logs or personal secrets here.
