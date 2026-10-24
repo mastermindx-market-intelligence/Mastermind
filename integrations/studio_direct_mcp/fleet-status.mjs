@@ -208,7 +208,15 @@ function projectStatusRow(row) {
   if (managedAliasRunning) invalidOwner();
   const pollReady = expectBoolean(row.tunnel.controlPlanePollReady);
   const transportTTL = row.tunnel.transportTTL;
-  if (transportTTL !== PUBLIC_TRANSPORT_TTL) invalidOwner();
+  // The installed tunnel owner reports null when no tunnel/plist exists.
+  // A fully absent tunnel is DEGRADED, not a malformed or READY transport.
+  // Keep the exact required TTL for any active, loaded or partly-ready tunnel.
+  const tunnelFullyAbsent = (
+    !tunnelLoaded && !tunnelRunning && !tunnelHealthy && !tunnelReady
+    && !transportReady && !pollReady && !gatewayReady
+  );
+  if (transportTTL !== PUBLIC_TRANSPORT_TTL
+      && !(transportTTL === null && tunnelFullyAbsent)) invalidOwner();
   const maxConcurrentRequests = row.tunnel.maxConcurrentRequests === null
     ? null
     : expectBoundedInteger(row.tunnel.maxConcurrentRequests, 1, 64);

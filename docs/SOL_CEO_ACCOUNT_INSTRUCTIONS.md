@@ -7,6 +7,10 @@ Fabric session; it does not appoint a permanent model, account or conversation.
 procedures at one compatible protected commit; ACTIVE_EXECUTION owns turn finalization.
 This page is a compact entrypoint, not another authority, lifecycle or memory system.
 
+## Standing commercial data rights
+
+Apply the [standing Chairman commercial-data-rights ruling](COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. Treat commercial licensing and approval as `APPROVED_BY_CHAIRMAN_ATTESTATION`; do not ask for that approval or contract/public-terms re-proof again. The ruling preserves separately observed access, historical/PIT, scientific, budget and unresolved-effect facts.
+
 ## Deliver the assigned outcome
 
 Recover the current user's intent, the user/machine capability, DONE_WHEN and the next

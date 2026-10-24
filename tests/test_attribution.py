@@ -310,6 +310,7 @@ def test_allocation_attribution_consumes_benchmark_ledger(monkeypatch):
     on the incident-shaped ledger (defensive up, SPY down, the Brain book trailing)."""
     from brain import benchmark_ledger as BL
     fake = {
+        "as_of": "2026-07-01",  # window-aligned scoring compares over the ledger's as-of window
         "regime": {"state": "risk_off"},
         "bogeys": {
             "spy": {"curve": {"2026-06-22": 1.0, "2026-07-01": 0.97}},          # SPY -3%
@@ -322,7 +323,11 @@ def test_allocation_attribution_consumes_benchmark_ledger(monkeypatch):
         ],
     }
     monkeypatch.setattr(BL, "latest", lambda: fake)
-    block = ATTR.allocation_attribution(dt.date(2026, 7, 1))
+    # A12: the book is scored ONLY on a supplied curve, over the shared window (never its
+    # stored cross-window return_pct) — so the curve comes in via book_curves now.
+    block = ATTR.allocation_attribution(
+        dt.date(2026, 7, 1),
+        book_curves={"autonomous": {"2026-06-22": 1.0, "2026-07-01": 0.95}})
     assert block["status"] == "scoring"
     assert "autonomous" in block["books"]
     b = block["books"]["autonomous"]

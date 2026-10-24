@@ -1006,16 +1006,48 @@ def _glm_pick_model(task_class: Optional[str],
 
 
 def _parked_bailian_keys() -> set:
-    """Keys parked due to high usage."""
+    """Keys parked due to high usage.
+
+    Only a fresh, applicable usage row with a literal parked=True parks its
+    account; stale, future, expired, malformed or missing usage facts stay
+    UNKNOWN and leave the key eligible (unknown usage never fabricates
+    exhaustion). Reads the same existing BAILIAN_USAGE document through the
+    shared bailian_keys.read_usage_eligibility helper; an unreadable document
+    or an unavailable helper parks nothing (previous behavior).
+    """
     parked = set()
     try:
-        with open(BAILIAN_USAGE, encoding="utf-8") as fh:
-            data = json.load(fh)
-        for name, info in data.get("keys", {}).items():
-            if info.get("parked"):
-                parked.add(name)
+        with open(BAILIAN_USAGE, "rb") as fh:
+            raw = fh.read(1048577)
+        if len(raw) > 1048576:
+            return parked
+        data = json.loads(raw)
     except Exception:
-        pass
+        return parked
+    try:
+        import os as _os
+        import sys as _sys
+
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        import bailian_keys
+
+        _reader = bailian_keys.read_usage_eligibility
+    except Exception:
+        return parked
+    if not isinstance(data, dict):
+        return parked
+    keys_map = data.get("keys")
+    if not isinstance(keys_map, dict):
+        return parked
+    for _name in list(keys_map):
+        try:
+            _info = _reader(_name, path=BAILIAN_USAGE)
+        except Exception:
+            continue
+        if _info.get("state") == "CURRENT" and _info.get("parked") is True:
+            parked.add(_name)
     return parked
 
 
@@ -1091,7 +1123,7 @@ def _default_model(pool: str, task_class: Optional[str] = None) -> str:
             return _glm_model_for_class(task_class)
         return _glm_model()
     MODELS = {
-        "grok":    "grok-4.6",
+        "grok":    "grok-4.7",
         "cursor":  "composer-2.5",
         "codex-native": "gpt-6.1-sol",
         "claude-native": "opus",
@@ -1578,7 +1610,11 @@ def _selection_model(pool: str, task_class: str,
             suffix += "+glm_credit_promo"
         return resolved_model, suffix
     spec = ((doc or load_pools()).get("pools") or {}).get(pool) or {}
-    model = (model if pool == "cursor" and model == "cursor-grok-4.6-high" else None) or spec.get("default_model") or _default_model(pool, task_class)
+    # Preserve the exact caller-authorized Grok Build version. A default
+    # upgrade must never relabel a historical explicitly pinned 4.6 job.
+    pinned = ((pool == "grok" and model in ("grok-4.6", "grok-4.7"))
+              or (pool == "cursor" and model == "cursor-grok-4.6-high"))
+    model = (model if pinned else None) or spec.get("default_model") or _default_model(pool, task_class)
     if pool == "bailian" and task_class.lower() == "review":
         model = spec.get("review_model") or "qwen3.8-max"
     return model, suffix
@@ -1601,9 +1637,11 @@ def _emit(pool: str, reason: str, task_class: str,
                           escalation_reason=escalation_reason)
     if not guard.get("allowed"):
         return "NONE reason=" + str(guard.get("reason") or "launch_policy_refused")
-    key = _bailian_key_name() if pool == "bailian" else "-"
+    # Account identity belongs to the incumbent lease broker. The advisory
+    # picker must never print names supplied by an account/credential source,
+    # even when one happens to resemble a harmless label.
     reason += suffix
-    line = f"POOL={pool} KEY={key} MODEL={resolved_model} REASON={reason}"
+    line = f"POOL={pool} KEY=- MODEL={resolved_model} REASON={reason}"
     if is_execute_class(task_class, doc):
         escalate = next_escalate(
             pool, doc, model=resolved_model, task_class=task_class
@@ -1874,19 +1912,25 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
                   required_platforms=required_platforms)
     if excluded_hosts is not None:
         common["excluded_hosts"] = excluded_hosts
-    affinity = (requested_model == "grok-4.6" and canonical_pool(pool) in (None, "grok")) or (
+    affinity = (requested_model in ("grok-4.6", "grok-4.7") and canonical_pool(pool) in (None, "grok")) or (
         canonical_pool(pool) == "grok" and requested_model is None)
     if not affinity:
         return _format_pick_host(task_class, pool=pool, requested_model=requested_model, **common)
-    primary = _format_pick_host(task_class, pool="grok", **common)
-    if primary.startswith("POOL=") or not _grok_exhausted():
+    primary = _format_pick_host(task_class, pool="grok", requested_model=requested_model, **common)
+    # A caller's exact Grok Build version is a model-identity constraint,
+    # not a transferable quality/affinity hint. Cursor's similarly named
+    # model and all other pools are distinct; never substitute for an explicit
+    # requested_model, even when the weekly Grok pool is exhausted. The
+    # existing monthly Cursor failover remains for *unpinned* Grok affinity.
+    if (primary.startswith("POOL=") or not _grok_exhausted()
+            or requested_model in ("grok-4.6", "grok-4.7")):
         return primary
     same = _format_pick_host(task_class, pool="cursor", requested_model="cursor-grok-4.6-high", **common)
     if same.startswith("POOL="):
-        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
+        return same + " AFFINITY=grok QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true"
     other = _format_pick_host(task_class, **common)
     if other.startswith("POOL="):
-        return other + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-exhausted MODEL_CHANGED=true"
+        return other + " AFFINITY=grok QUOTA_FAILOVER=grok-exhausted MODEL_CHANGED=true"
     return other
 
 
@@ -1927,7 +1971,8 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
     if host is not None:
         try:
             glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
-                model=requested_model if requested_model != "cursor-grok-4.6-high" else None)[0]
+                model=(requested_model if requested_model not in
+                       ("cursor-grok-4.6-high", "grok-4.6", "grok-4.7") else None))[0]
             qwen_candidate_model = _selection_model("bailian", task_class, load_pools(), needs)[0]
             routes = _eligible_host_routes(
                 host, glm_model=glm_candidate_model,
@@ -1984,10 +2029,15 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
     explicit_model = str(requested_model or "").strip().casefold()
     forced = canonical_pool(pool)
     if complexity and complexity not in TASK_COMPLEXITY_CLASSES:
-        return f"NONE reason=unknown_task_complexity ({complexity})"
+        return "NONE reason=unknown_task_complexity"
     # Complexity alone is classification, never permission to upgrade. Only
     # the existing full-GLM C2 build escalation is admitted by this narrow API.
     native_alias = explicit_model == "cursor-grok-4.6-high"
+    grok_pin = explicit_model in ("grok-4.6", "grok-4.7")
+    if grok_pin:
+        if forced not in (None, "grok"):
+            return "NONE reason=exact Grok Build model requires grok pool"
+        forced = "grok"
     if native_alias:
         if forced != "cursor":
             return "NONE reason=exact native alias requires cursor pool"
@@ -2002,11 +2052,11 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
         # This exact high-effort alias was observed in the authenticated Cursor
         # catalog. Capability/host, economic, quality and independence gates
         # below are still required; catalog presence is not worker admission.
-    if explicit_model and not native_alias:
+    if explicit_model and not native_alias and not grok_pin:
         models = {str(value).casefold() for value in _glm_models(doc).values()}
         full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
         if explicit_model not in models:
-            return f"NONE reason=unknown requested_model ({explicit_model})"
+            return "NONE reason=unknown requested_model"
         effective_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
         if forced and effective_pool != "glm":
             return f"NONE reason=requested_model contradicts pool={pool!r}"
@@ -2024,7 +2074,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
     if forced:
         forced = ROUTING_TOKEN_POOLS.get(forced, forced)
         if forced not in (doc.get("pools") or {}):
-            return f"NONE reason=unknown forced pool={pool!r}"
+            return "NONE reason=unknown forced pool"
     prefer_c = canonical_pool(prefer)
     needs = [n.lower().strip() for n in (needs or []) if n and n.strip()]
 
@@ -2033,7 +2083,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             return "NONE reason=go_short_capability_only_for_c0_c1"
         if host_modes is not None and forced not in host_modes:
             return f"NONE reason=pool {forced} has no eligible mode on requested host"
-        selected_model = (explicit_model or None) if forced == "glm" or native_alias else None
+        selected_model = (explicit_model or None) if forced in ("glm", "grok") or native_alias else None
         ok, reason = policy_allows(forced, tc, doc, model=selected_model)
         if not ok:
             return f"NONE reason={reason}"
@@ -2177,7 +2227,7 @@ def _cursor_grok_after_quota(tc, *, needs=None, subject_pool=None, host_modes=No
         needs=needs, subject_pool=subject_pool, host_modes=host_modes,
         task_complexity=task_complexity, escalation_reason=escalation_reason)
     if same.startswith("POOL="):
-        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
+        return same + " AFFINITY=grok QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true"
     return same
 
 
@@ -2550,7 +2600,7 @@ def launch_policy(mode: str, task_class: str, model: str,
         result["reason"] = "frontier_witness_recorded"
         return result
 
-    if (normalized_mode == "grok" and normalized_model == "grok-4.6"
+    if (normalized_mode == "grok" and normalized_model in ("grok-4.6", "grok-4.7")
             and model_tier.CLASS_TIER.get(normalized_task) == "leaf-labor"
             and _grok_priority_active(policy_doc, normalized_task)):
         result.update(reason="grok_expiring_quota_authorization", tier="leaf-labor")
@@ -2587,7 +2637,9 @@ def pick(task_class: str, prefer: Optional[str] = None,
         escalation_reason=escalation_reason, requested_model=requested_model,
         route_key=route_key,
     )
-    print(line)
+    # This is a bounded CLI result, not an application logger. Do not log
+    # arbitrarily supplied model/pool strings or a credential's value.
+    sys.stdout.write(line + "\n")
     if explain:
         print("REASON_CHAIN")
         for reason in _explain_pick(task_class, line, doc):

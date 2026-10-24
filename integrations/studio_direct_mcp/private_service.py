@@ -201,6 +201,17 @@ FLEET_V10_PUBLISHER_PATCH_SHA256 = {
 # second-stage predecessor. No arbitrary closed publisher may be overwritten.
 FLEET_V10_PREVIOUS_CLOSED_PUBLISHER_SHA256 = "72faf293d9c0a90c45ab442821e26f199f5ea406a091a7aed7ebce3519e55f69"
 
+# Exact sealed index-sync predecessor observed on enrolled fleet seats. Keep
+# this pair independent from both historical targets and the merge target.
+FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+    "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
+    "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+}
+
 # Exact sealed C2 predecessor observed for the one-seat Paper v10 -> v12 repair.
 # These are reviewed installation identity pins, never caller-selectable source or runtime paths.
 # The fleet bundle remains installed byte-for-byte; only Paper configuration moves.
@@ -1706,12 +1717,19 @@ def _upgrade_fleet_v10_publisher_only(
             or "commissionPublication" in old_config
             or "modernFabricProtocol" in old_config):
         raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
-    # Preserve the first-stage legacy install path, and admit only the exact
-    # already-installed PR #1535 closed publisher for an index-sync hotfix.
-    # The manifest is sealed first; no caller may choose a publisher identity.
+    # Preserve the historical legacy/index-sync transitions. The merge update
+    # admits only its exact observed module pair under the existing closed
+    # profile. The sealed manifest, not the caller, chooses the transition.
     original_publisher = old_config.get("gitPublish")
     expected_closed = _typed_git_config(user_root, closed_repositories=True)
-    if original_publisher == _typed_git_config(user_root):
+    patch_hashes = FLEET_V10_PUBLISHER_PATCH_SHA256
+    preserve_config_bytes = False
+    if (original_publisher == expected_closed and all(
+            prior["files"].get(name) == digest
+            for name, digest in FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256.items())):
+        patch_hashes = FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256
+        preserve_config_bytes = True
+    elif original_publisher == _typed_git_config(user_root):
         pass  # existing legacy-to-closed upgrade
     elif (original_publisher == expected_closed
             and prior["files"].get("git-publish.mjs") ==
@@ -1726,8 +1744,9 @@ def _upgrade_fleet_v10_publisher_only(
     if ({k: v for k, v in new_config.items() if k != "gitPublish"}
             != {k: v for k, v in old_config.items() if k != "gitPublish"}):
         raise SystemExit("fleet publisher compatibility: unrelated config change")
-    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
-    names = tuple(FLEET_V10_PUBLISHER_PATCH_SHA256)
+    config_bytes = (old_config_bytes if preserve_config_bytes else
+                    json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8"))
+    names = tuple(patch_hashes)
     old_files = {}
     new_files = {}
     for name in names:
@@ -1739,7 +1758,7 @@ def _upgrade_fleet_v10_publisher_only(
         original = installed.read_bytes()
         modified = incoming.read_bytes()
         if (hashlib.sha256(original).hexdigest() != prior["files"][name]
-                or hashlib.sha256(modified).hexdigest() != FLEET_V10_PUBLISHER_PATCH_SHA256[name]):
+                or hashlib.sha256(modified).hexdigest() != patch_hashes[name]):
             raise SystemExit("fleet publisher compatibility: source or installed module hash mismatch")
         old_files[name] = original
         new_files[name] = modified

@@ -106,20 +106,26 @@ def deadline_command():
 def support_meta():
     import hashlib, json, pathlib, sys
     root, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+    policy = root.parent / "orch/fabric/pools.yaml"
+    policy_raw = None
+    import os
+    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') is not None:
+        from paid_incumbent_state import policy_source, read_policy
+        policy = policy_source(root)
+        policy_raw = read_policy()
     files = {}
     for name in sys.argv[3:]:
-        path = root.parent / "orch/fabric/pools.yaml" if name == "pools.yaml" else root / name
+        path = policy if name == "pools.yaml" else root / name
         if not path.is_file() or path.is_symlink():
             raise SystemExit("SUPPORT_SOURCE_NOT_REGULAR " + name)
-        files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        files[name] = hashlib.sha256(policy_raw if name == "pools.yaml" and policy_raw is not None else path.read_bytes()).hexdigest()
     manifest = {"schema": "remote-support-code.v1", "files": files}
     code_digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    policy = root.parent / "orch/fabric/pools.yaml"
     if not policy.is_file() or policy.is_symlink():
         raise SystemExit("SUPPORT_POLICY_NOT_REGULAR")
     import provider_outcome
     provider_outcome.write_new(target,files)
-    print(code_digest, hashlib.sha256(policy.read_bytes()).hexdigest())
+    print(code_digest, hashlib.sha256(policy_raw if policy_raw is not None else policy.read_bytes()).hexdigest())
 
 
 def controller_source_sha():
@@ -150,7 +156,11 @@ def glm_cap_sha():
 
 def routing_env():
     import os, shlex
-    names = ("POOL_CAPACITY_PREFLIGHT", "POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS", "POOL_TASK_COMPLEXITY", "POOL_ESCALATION_REASON", "POOL_MAX_CONTEXT_TOKENS", "POOL_AUTO_COMPACT_WINDOW_TOKENS", "POOL_MAX_TURNS")
+    names = ("POOL_CAPACITY_PREFLIGHT", "POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS", "POOL_TASK_COMPLEXITY", "POOL_ESCALATION_REASON", "POOL_MAX_CONTEXT_TOKENS", "POOL_AUTO_COMPACT_WINDOW_TOKENS", "POOL_MAX_TURNS", "POOL_REQUEST_MAX_TURNS")
+    if "POOL_CALLER_NOT_BEFORE" in os.environ:
+        from commission_deadline import validate_not_before
+        validate_not_before(os.environ["POOL_CALLER_NOT_BEFORE"])
+        names += ("POOL_CALLER_NOT_BEFORE",)
     print(" ".join(shlex.quote(name + "=" + os.environ.get(name, "")) for name in names))
 
 
@@ -194,6 +204,12 @@ def validate_usage():
     def integer(value):
         return type(value) is int and 0 <= value <= 2**53
 
+    # No three-argument escape hatch: even read-only callers must identify
+    # the original controller's exact mode and model for truthful accounting.
+    if len(sys.argv) != 5:
+        raise SystemExit(2)
+    expected_mode = sys.argv[3]
+    expected_model = sys.argv[4]
     path = pathlib.Path(sys.argv[1])
     valid = False
     usage = None
@@ -208,16 +224,28 @@ def validate_usage():
             }
             if isinstance(usage, dict):
                 schema = usage.get("schema")
-                grok = schema == "mastermind.grok_usage.v1"
+                grok = schema in ("mastermind.grok_usage.v1", "mastermind.grok_usage.v2")
+                grok_v2 = schema == "mastermind.grok_usage.v2"
+                supported_grok = ("grok-4.6", "grok-4.7")
                 valid_schema = (
                     (schema in ("mastermind.codex_usage.v1", "mastermind.grok_usage.v1")
                      and set(usage) == required)
+                    or (schema == "mastermind.grok_usage.v2"
+                        and set(usage) == required | {"requested_model", "model_identity_source"})
                     or (schema == "mastermind.codex_usage.v2"
                         and set(usage) == required | {"native_compaction_records"})
                 )
                 valid_source = (
-                    (grok and usage.get("source") == "grok_native_headless"
+                    (schema == "mastermind.grok_usage.v1"
+                     and usage.get("source") == "grok_native_headless"
                      and usage.get("served_model") == "grok-4.6")
+                    or (grok_v2 and usage.get("source") == "grok_native_headless"
+                        and type(usage.get("requested_model")) is str
+                        and usage["requested_model"] in supported_grok
+                        and ((usage.get("served_model") is None
+                              and usage.get("model_identity_source") == "requested_cli_only")
+                             or (usage.get("served_model") == usage["requested_model"]
+                                 and usage.get("model_identity_source") == "native_headless_final_model_field")))
                     or (not grok and usage.get("source") == "codex_native_session"
                         and usage.get("served_model") is None)
                 )
@@ -227,6 +255,12 @@ def validate_usage():
                     and isinstance(usage.get("reason"), str)
                     and valid_source
                     and usage.get("run_id") == sys.argv[2]
+                    and (
+                        (grok and expected_mode == "grok"
+                         and (usage.get("requested_model") if grok_v2 else usage.get("served_model"))
+                         == expected_model)
+                        or (not grok and expected_mode in (
+                            "codex-native", "go-codex", "glm-codex", "minimax-codex")))
                     and isinstance(usage.get("session_ids"), list)
                     and len(usage["session_ids"]) == 1
                     and isinstance(usage["session_ids"][0], str)
