@@ -541,6 +541,8 @@ class _Walk:
 
     def register_tool_prefixes(self, components: tuple[str, ...]) -> None:
         """Only manifest-selected traversal ancestors; strict roles always win."""
+        if len(components) > _PREFIX_DIRECTORY_LIMIT:
+            _refuse()
         for length in range(len(components)):
             path = components[:length]
             if (path in self._strict_directories or any(
@@ -1246,6 +1248,8 @@ def observe_studio_files(
     home_parts = tuple(
         part for part in home_path.parts if part not in ("/", "")
     )
+    if len(home_parts) > _PREFIX_DIRECTORY_LIMIT:
+        _refuse()
     plist_name = "com.mastermind.studio-direct-private.%s.plist" % (
         STUDIO_INSTANCE_KEY,
     )

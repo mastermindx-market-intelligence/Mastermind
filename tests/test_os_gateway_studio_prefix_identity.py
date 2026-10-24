@@ -126,6 +126,18 @@ class PrefixGuardTests(unittest.TestCase):
         with mock.patch.object(reader,'_PREFIX_DIRECTORY_LIMIT',2),mock.patch.object(os,'dup') as dup:
             with self.assertRaises(reader.StudioObservationError):self.walk._prefix_guard.watch(('overflow',),self.child_fd,self.child_stat)
             dup.assert_not_called()
+    def test_manifest_prefix_depth_refuses_before_prefix_set_growth(self):
+        before=set(self.walk._traversal_prefixes)
+        with self.assertRaises(reader.StudioObservationError):
+            self.walk.register_tool_prefixes(('part',)*(reader._PREFIX_DIRECTORY_LIMIT+1))
+        self.assertEqual(self.walk._traversal_prefixes,before)
+    def test_home_depth_refuses_before_monitor_or_open(self):
+        home=Path('/').joinpath(*(['part']*(reader._PREFIX_DIRECTORY_LIMIT+1)))
+        with mock.patch.object(os,'open') as opened:
+            with self.assertRaises(reader.StudioObservationError):
+                reader.observe_studio_files(home=home,uid=reader.FIXED_OBSERVED_UID,
+                    gid=os.getgid(),source_file_names=('app.py',))
+            opened.assert_not_called()
     def test_unavailable_native_monitor_has_no_fallback(self):
         with mock.patch.object(select,'kqueue',side_effect=AttributeError('unavailable')):
             with self.assertRaises(reader.StudioObservationError):reader._PrefixMutationGuard()
