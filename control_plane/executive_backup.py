@@ -3425,6 +3425,11 @@ PRE_CENSUS_CENSUS_SCHEMA = "mastermind.executive_schema_upgrade_quiesce/pre_cens
 PRE_CENSUS_INSPECTION_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_inspection/v1"
 PRE_CENSUS_QUALIFICATION_NAME = "executive-schema-upgrade.v5-to-v6.pre-census-qualification.json"
 PRE_CENSUS_CONTINUATION_NAME = "executive-schema-upgrade.v5-to-v6.pre-census-continuation.json"
+SPENT_PRE_CENSUS_CTIME_RECONCILIATION_SCHEMA = "mastermind.executive_schema_upgrade_spent_pre_census_ctime_reconciliation/v1"
+SPENT_PRE_CENSUS_CTIME_CONTINUATION_SCHEMA = "mastermind.executive_schema_upgrade_spent_pre_census_ctime_continuation/v1"
+SPENT_PRE_CENSUS_CTIME_PREFLIGHT_SCHEMA = "mastermind.executive_schema_upgrade_spent_pre_census_ctime_preflight/v1"
+SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME = "executive-schema-upgrade.v5-to-v6.spent-pre-census-ctime-reconciliation.json"
+SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME = "executive-schema-upgrade.v5-to-v6.spent-pre-census-ctime-continuation.json"
 _PRE_CENSUS_DATABASE = Path("/private/var/db/mastermind-executive/control/db/data/control_plane/executive.sqlite3")
 _PRE_CENSUS_RELEASES = Path("/Library/Application Support/MastermindExecutive/releases")
 _PRE_CENSUS_LIMIT = 64 * 1024
@@ -3828,6 +3833,134 @@ def _pre_census_backup_inventory(backup_root: Path) -> dict[str, Any]:
     if backup_root != expected:
         raise ExecutiveSchemaUpgradeError("pre-census backup root is not fixed")
     return inventory([backup_root])
+
+
+def _spent_receipt_identity(value: Any, payload: Mapping[str, Any], name: str) -> dict[str, Any]:
+    identity = _pre_census_closed(value, _PRE_CENSUS_IDENTITY_KEYS, "spent receipt identity")
+    raw = _upgrade_receipt_bytes(payload)
+    if (identity["path"] != str(_PRE_CENSUS_DATABASE.parent / name)
+            or identity["size"] != len(raw) or identity["sha256"] != hashlib.sha256(raw).hexdigest()
+            or identity["payload_digest"] != _upgrade_digest(payload)):
+        raise ExecutiveSchemaUpgradeError("spent pre-census receipt identity differs")
+    for key in ("device", "inode", "size"):
+        if type(identity[key]) is not int or identity[key] < 0:
+            raise ExecutiveSchemaUpgradeError("spent pre-census receipt metadata is malformed")
+    return identity
+
+
+def _validate_spent_pre_census_sources(*, barrier_payload: Any, barrier_identity: Any,
+        qualification_payload: Any, qualification_identity: Any,
+        spent_continuation_payload: Any, spent_continuation_identity: Any) -> dict[str, Any]:
+    q = _validate_pre_census_qualification(qualification_payload)
+    if q["original_barrier"] != {"payload": barrier_payload, "identity": barrier_identity}:
+        raise ExecutiveSchemaUpgradeError("spent pre-census original barrier differs")
+    qi = _spent_receipt_identity(qualification_identity, q, PRE_CENSUS_QUALIFICATION_NAME)
+    i = _pre_census_closed(spent_continuation_payload, frozenset({"schema_version", "operation_id",
+        "original_barrier_identity", "qualification_identity", "recovery_tool", "created_at"}), "spent intent")
+    expected = {"schema_version": PRE_CENSUS_CONTINUATION_SCHEMA, "operation_id": q["operation_id"],
+        "original_barrier_identity": barrier_identity, "qualification_identity": qi,
+        "recovery_tool": q["recovery_tool"], "created_at": i["created_at"]}
+    _pre_census_time(i["created_at"])
+    if i != expected:
+        raise ExecutiveSchemaUpgradeError("spent pre-census immutable intent differs")
+    _spent_receipt_identity(spent_continuation_identity, i, PRE_CENSUS_CONTINUATION_NAME)
+    return q
+
+
+def _validate_spent_pre_census_ctime_origin(original: Any, current: Any) -> dict[str, Any]:
+    """Pure DATA: a different ctime epoch permits no other origin or byte change."""
+    old = _pre_census_closed(original, _PRE_CENSUS_ORIGIN_KEYS, "original database origin")
+    new = _pre_census_closed(current, _PRE_CENSUS_ORIGIN_KEYS, "current database origin")
+    for record in (old, new):
+        for key in _PRE_CENSUS_ORIGIN_KEYS - {"path", "sha256"}:
+            if type(record[key]) is not int or record[key] < 0:
+                raise ExecutiveSchemaUpgradeError("spent pre-census database metadata is malformed")
+        if record["path"] != str(_PRE_CENSUS_DATABASE):
+            raise ExecutiveSchemaUpgradeError("spent pre-census database path differs")
+        _pre_census_hash(record["sha256"])
+    if (old["ctime_ns"] == new["ctime_ns"]
+            or any(old[key] != new[key] for key in _PRE_CENSUS_ORIGIN_KEYS - {"ctime_ns"})):
+        raise ExecutiveSchemaUpgradeError("spent pre-census requires exact bytes and custody except new ctime")
+    return json.loads(json.dumps(new))
+
+
+def _validate_spent_pre_census_ctime_reconciliation(value: Any, *, barrier_payload: Any,
+        barrier_identity: Any, qualification_payload: Any, qualification_identity: Any,
+        spent_continuation_payload: Any, spent_continuation_identity: Any) -> dict[str, Any]:
+    q = _validate_spent_pre_census_sources(barrier_payload=barrier_payload,
+        barrier_identity=barrier_identity, qualification_payload=qualification_payload,
+        qualification_identity=qualification_identity, spent_continuation_payload=spent_continuation_payload,
+        spent_continuation_identity=spent_continuation_identity)
+    value = _pre_census_closed(value, frozenset({"schema_version", "operation_id",
+        "original_barrier_identity", "qualification_identity", "spent_continuation_identity",
+        "recovery_tool", "database", "created_at"}), "ctime reconciliation")
+    if (value["schema_version"] != SPENT_PRE_CENSUS_CTIME_RECONCILIATION_SCHEMA
+            or value["operation_id"] != q["operation_id"]
+            or value["original_barrier_identity"] != barrier_identity
+            or value["qualification_identity"] != qualification_identity
+            or value["spent_continuation_identity"] != spent_continuation_identity):
+        raise ExecutiveSchemaUpgradeError("spent pre-census reconciliation links differ")
+    tool = _pre_census_tool(value["recovery_tool"])
+    if tool["sha"] in {q["original_tool"]["sha"], q["recovery_tool"]["sha"]}:
+        raise ExecutiveSchemaUpgradeError("spent pre-census requires an honestly distinct executor")
+    _validate_spent_pre_census_ctime_origin(q["database"], value["database"])
+    _pre_census_time(value["created_at"])
+    return json.loads(json.dumps(value))
+
+
+class _SpentPreCensusObservation:
+    """Held immutable old barrier/Q/I DATA, never proof that effects may resume."""
+    def __init__(self):
+        self.stack = ExitStack()
+        try:
+            uid, gid = _pre_census_control_identity()
+            self.alias_identity = _pre_census_alias_identity()
+            self.barrier = _PreCensusBarrierObservation()
+            self.stack.callback(self.barrier.close)
+            self.qualification = _PreCensusReceiptObservation(
+                _PRE_CENSUS_DATABASE.parent / PRE_CENSUS_QUALIFICATION_NAME, uid=0, gid=gid, mode=0o440)
+            self.stack.callback(self.qualification.close)
+            self.spent_continuation = _PreCensusReceiptObservation(
+                _PRE_CENSUS_DATABASE.parent / PRE_CENSUS_CONTINUATION_NAME, uid=uid, gid=gid, mode=0o600)
+            self.stack.callback(self.spent_continuation.close)
+            self.check()
+        except BaseException:
+            self.stack.close()
+            raise
+
+    def source_arguments(self) -> dict[str, Any]:
+        return {"barrier_payload": self.barrier.payload, "barrier_identity": self.barrier.identity,
+            "qualification_payload": self.qualification.payload, "qualification_identity": self.qualification.identity,
+            "spent_continuation_payload": self.spent_continuation.payload,
+            "spent_continuation_identity": self.spent_continuation.identity}
+
+    def check(self) -> None:
+        if _pre_census_alias_identity() != self.alias_identity:
+            raise ExecutiveSchemaUpgradeError("spent pre-census fixed alias changed")
+        for obs in (self.barrier, self.qualification, self.spent_continuation):
+            obs.check()
+        q = _validate_spent_pre_census_sources(**self.source_arguments())
+        _pre_census_prove_original_tool(q["original_tool"])
+        _pre_census_prove_original_tool(q["recovery_tool"])
+
+    def close(self) -> None:
+        self.stack.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *unused):
+        self.close()
+
+
+@contextmanager
+def _open_spent_pre_census_for_root_issuer(database_path: str | Path) -> Iterator[_SpentPreCensusObservation]:
+    if os.geteuid() != 0:
+        raise ExecutiveSchemaUpgradeError("spent pre-census issuer requires actual Root")
+    _pre_census_argument(database_path, _PRE_CENSUS_DATABASE)
+    with _SpentPreCensusObservation() as observation:
+        yield observation
+        observation.check()
 
 
 class _PreCensusContinuation:
