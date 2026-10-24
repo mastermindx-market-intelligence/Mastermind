@@ -4623,6 +4623,22 @@ class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):
             svc._read_manifest(self.roots["manifest"], self.account, self.label)
 
 
+    def test_shared_predecessor_selects_one_epoch_from_installed_pool(self):
+        current = (*self.pins, svc._canonical_json_sha256(self.original_manifest))
+        self.patch("FABRIC_POOL_PIN_MIGRATION_CURRENT", {self.account: current})
+        self.patch("FABRIC_POOL_SELECTED_CURRENT_SHA256", self.selected_pool_pin)
+        # Both source cohorts have the *same* predecessor identity, but the
+        # currently installed pool bytes authorize only the newer one.
+        self.patch("FABRIC_POOL_SELECTED_SHA256", "d" * 64)
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True)), 0)
+        self.assertEqual(json.loads(stdout.getvalue())["targetManifestSha256"], self.pins[2])
+        self.assert_original()
+        self.pool.write_bytes(b"foreign-unreviewed-pool\n")
+        with self.assertRaisesRegex(SystemExit, "unrecognized or ambiguous source cohort"):
+            svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True))
+        self.assert_original()
+
     def test_unrelated_fabric_backend_uses_its_original_outer_mutex_only(self):
         original_backend = next(iter(svc.FABRIC_BACKEND_ACCOUNTS))
         self.assertNotIn(original_backend, svc.FABRIC_POOL_PIN_MIGRATION)
