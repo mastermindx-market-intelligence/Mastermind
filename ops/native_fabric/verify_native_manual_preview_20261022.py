@@ -17,18 +17,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-GENERATION = "09b1ff4204c49acc71bb228751c4efefc22c70c89092734d9ea2fafe3fff1a49"
+GENERATION = "6957399841a2913d5a32deedd633e4c4b5124c3199d0e804fc8a6abe69e8ef51"
 INPUT = {
-    "ext/fabric_task.py": "2294bbcf537ebc7fb91ab03a71f7de85b4c1c8f697932c9e3c8865983dc2633d",
+    "ext/fabric_task.py": "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b",
     "pool": "4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059",
-    "ext/pick.py": "a776ed140a051e7ac899a5f4b7c641d3d6e46456db287e914a154b3b93e57423",
+    "ext/pick.py": "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee",
 }
 OUTPUT = {
-    "ext/fabric_task.py": "b49bd2f92a0394fd3779d132708f00ace89b22669e2264417d089da36dd2579f",
+    "ext/fabric_task.py": "4a37990f0a132bf96f8fbd658452b29472716ba4b544ca73272a2c542c5eee43",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
-    "ext/pick.py": "34cc6c128b52fdc76d8ebf5d652008cc69381fb4eb042768f5fce50d4df322ea",
+    "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
 }
-PATCH_SHA256 = "1c30952c04e6d130eeae0121cb17e9fb25683cc5eea61c45157967c2ab0f1cdd"
+PATCH_SHA256 = "b678fa16bc04a075cc87272a30f7ca4a11a9e60391e99c0b44fa46df032376ca"
 FIXTURE_SHA256 = "dd2bf01f597b6749d08ebc30092aa59ef9318a8de837c2eaec8504d9e1204f30"
 REPO = Path(__file__).resolve().parents[2]
 PATCH = REPO / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"

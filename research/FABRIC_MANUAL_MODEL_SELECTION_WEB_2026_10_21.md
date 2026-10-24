@@ -101,3 +101,34 @@ Node backend; its preimages are historical, not current release instructions.
 provider-specific entitlements, independent review and Web seat installation remain
 separate held gates. A synthetic `grok-4.7` test token never establishes that model
 is offered or may be routed. Do not issue retries for earlier Qwen 429 operations.
+
+## 2026-10-23 forward qualification against actually selected native generation 21
+
+Fresh same-host `native-code-releases/CURRENT.json` readback selected immutable
+**sequence 21** generation `6957399841a2913d5a32deedd633e4c4b5124c3199d0e804fc8a6abe69e8ef51`.
+The previous sequence-16 native patch source preimage was no longer applicable.
+The *same* existing native patch file `ops/native_fabric/patches/native_generation_manual_preview_20261022.patch`
+was forward-ported **in an isolated uninstalled copy only**, preserving current
+native request `not_before`, per-request `max_turns`, lease, quota, and source policy.
+`verify_native_manual_preview_20261022.py` now pins generation 21, three exact input
+hashes, resulting output hashes and new patch SHA256
+`b678fa16bc04a075cc87272a30f7ca4a11a9e60391e99c0b44fa46df032376ca`.
+Native source qualification readback: **12/12 provider-free tests green**, exact
+three-file source preimages valid, `sealed_generation_unchanged=true`,
+`current_selected_at_end=true`, `live_install_performed=false`,
+`provider_call_performed=false`, and `worker_start_proven=false`.
+This supersedes the older generation-16 patch as an installation candidate;
+commit history retains the old evidence. Merging this source does not install or
+select the native generation. Its publisher/owner must reconcile later movement
+again and perform the normal immutable qualification/selection path.
+
+A new independent native `--pool glm` review request of source head `2ffeac8e`
+was refused **before worker launch** due zero eligible GLM hosts; the original
+run was canonically `REQUEST_REFUSED_BEFORE_LAUNCH`,
+`execution_absence_proven=true` and `same_run_replay_allowed=false`. Source
+separation and original-root retention were preserved. Host qualification showed
+Ubuntu0–3 `probe_exit_1` despite plain M2 SSH reachability for Ubuntu1, while
+M1/Ubuntu4 remain explicit-canary-only. No qualification bypass or second
+review launch was attempted. A new independent Fabric review can begin only
+when a lawful non-Qwen provider/host is actually eligible. GitHub human reviewer
+requests are still awaiting a verdict.
