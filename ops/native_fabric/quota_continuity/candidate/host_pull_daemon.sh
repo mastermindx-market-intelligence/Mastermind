@@ -21,6 +21,15 @@
 # This lifecycle does not use a pid-file check-then-write. Launchd state is
 # loaded, definitively service-not-found, or uncertain. Uncertain fails closed
 # (78) and is never treated as an absent label.
+#
+# .publication.lock is held by the same process that runs bootout, plist
+# replacement, and bootstrap, from the moment the command is allowed until
+# that command returns. The parent does not run the command itself. If that
+# holder dies before the command, the parent writes EFFECT_UNKNOWN and does
+# not issue the command. A kill during the launchctl syscall can still let
+# that one in-flight call finish after the lock drops; the parent does not
+# issue a second bootout or bootstrap. A nonzero bootout is never retried
+# and is never followed by bootstrap.
 
 set -u
 set -o pipefail
@@ -129,6 +138,48 @@ def lstat_nofollow(path):
     if stat.S_ISLNK(st.st_mode):
         fail("symlink refused: " + path)
     return st
+
+def perform_install(src, dest, fault):
+    if fault not in ("", "before-replace", "after-replace"):
+        fail("install fault")
+    require_safe(src, "rendered")
+    require_safe(dest, "plist")
+    st = lstat_nofollow(src)
+    if not stat.S_ISREG(st.st_mode):
+        fail("rendered kind")
+    raw = open(src, "rb").read()
+    if fault == "before-replace":
+        fail("injected install failure before replace")
+    if os.path.lexists(dest):
+        st_dest = lstat_nofollow(dest)
+        if not stat.S_ISREG(st_dest.st_mode):
+            fail("plist kind")
+    parent = os.path.dirname(dest)
+    temporary = parent + "/.host-pull.plist." + str(os.getpid())
+    if os.path.lexists(temporary):
+        fail("plist temporary exists")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, raw)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(temporary, dest)
+    if fault == "after-replace":
+        fail("injected install failure after replace")
+    fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+        installed = os.read(fd, len(raw) + 1)
+    finally:
+        os.close(fd)
+    if installed != raw:
+        fail("plist readback")
+    dirfd = os.open(parent, os.O_RDONLY)
+    try:
+        os.fsync(dirfd)
+    finally:
+        os.close(dirfd)
 
 if cmd == "check-pin":
     store, generation, expect, publisher, pin = sys.argv[2:7]
@@ -297,46 +348,7 @@ elif cmd == "backup":
 elif cmd == "install-rendered":
     src, dest = sys.argv[2:4]
     fault = sys.argv[4] if len(sys.argv) > 4 else ""
-    if fault not in ("", "before-replace", "after-replace"):
-        fail("install fault")
-    require_safe(src, "rendered")
-    require_safe(dest, "plist")
-    st = lstat_nofollow(src)
-    if not stat.S_ISREG(st.st_mode):
-        fail("rendered kind")
-    raw = open(src, "rb").read()
-    if fault == "before-replace":
-        fail("injected install failure before replace")
-    if os.path.lexists(dest):
-        st_dest = lstat_nofollow(dest)
-        if not stat.S_ISREG(st_dest.st_mode):
-            fail("plist kind")
-    parent = os.path.dirname(dest)
-    temporary = parent + "/.host-pull.plist." + str(os.getpid())
-    if os.path.lexists(temporary):
-        fail("plist temporary exists")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    try:
-        os.write(fd, raw)
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(temporary, dest)
-    if fault == "after-replace":
-        fail("injected install failure after replace")
-    fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        os.fsync(fd)
-        installed = os.read(fd, len(raw) + 1)
-    finally:
-        os.close(fd)
-    if installed != raw:
-        fail("plist readback")
-    dirfd = os.open(parent, os.O_RDONLY)
-    try:
-        os.fsync(dirfd)
-    finally:
-        os.close(dirfd)
+    perform_install(src, dest, fault)
 
 elif cmd == "atomic-restore":
     src, dest = sys.argv[2:4]
@@ -489,37 +501,44 @@ elif cmd == "under-root":
     if not os.path.isfile(found_real) or not os.access(found_real, os.X_OK):
         fail("tool")
 
-elif cmd == "admit-hold":
-    # Hold the original publication lock (store/.publication.lock, exclusive,
-    # non-blocking, mode 0600) across one effect and prove CURRENT still names
-    # this generation. Verify goes through the publisher CLI so a wrapper is
-    # exercised as a program, not imported. This does not select or publish.
-    store, generation, expect, publisher, held_path, release_path = sys.argv[2:8]
+elif cmd == "locked-effect":
+    # This process holds .publication.lock while it performs the one effect.
+    # Exit 76: bootout returned nonzero and the same pid is still loaded.
+    # Exit 77: bootout returned nonzero and the result is not that proof.
+    # The parent must not issue another bootout or a bootstrap for either.
+    store, generation, expect, publisher, work, pause, kind = sys.argv[2:9]
+    effect_args = sys.argv[9:]
     require_safe(store, "store")
     require_safe(publisher, "publisher")
-    require_safe(held_path, "admit held")
-    require_safe(release_path, "admit release")
+    require_safe(work, "lock work")
+    if pause != "-":
+        require_safe(pause, "lock hold")
+        require_safe(pause + ".holder", "lock holder")
     if HEX.fullmatch(generation) is None or HEX.fullmatch(expect) is None:
         fail("generation identity")
     if os.path.basename(publisher) != "native_generation.py":
         fail("publisher name")
     if os.path.basename(store) != "native-code-releases":
         fail("store name")
-    lock_path = store + "/.publication.lock"
-    try:
-        lock_fd = os.open(
-            lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
-    except OSError as exc:
-        fail("admission refused: " + str(exc))
-    try:
-        observed = os.fstat(lock_fd)
-        if (not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid()
-                or stat.S_IMODE(observed.st_mode) != 0o600):
-            fail("admission refused: invalid publication lock")
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            fail("admission refused: native publication already in progress")
+    if kind not in {"bootout", "bootstrap", "install"}:
+        fail("locked effect")
+    if kind == "bootout" and len(effect_args) != 4:
+        fail("bootout args")
+    if kind == "install" and len(effect_args) != 3:
+        fail("install args")
+    purpose = ""
+    if kind == "bootstrap":
+        if len(effect_args) != 4:
+            fail("bootstrap args")
+        purpose = effect_args[3]
+        if purpose not in {"new", "rollback"}:
+            fail("bootstrap purpose")
+    # Rollback restores the preimage after the selector has already moved.
+    # It still holds this lock for the whole command. It does not require
+    # CURRENT to name the generation being abandoned.
+    enforce_generation = purpose != "rollback"
+
+    def read_selected():
         current_path = store + "/CURRENT.json"
         st_cur = lstat_nofollow(current_path)
         if (not stat.S_ISREG(st_cur.st_mode) or stat.S_IMODE(st_cur.st_mode) != 0o600
@@ -531,7 +550,15 @@ elif cmd == "admit-hold":
                 or selected.get("generation") != expect
                 or type(selected.get("sequence")) is not int or selected["sequence"] < 1
                 or set(selected) != {"schema", "generation", "sequence", "previous"}):
+            # A token file, not stderr. A killed holder dumps this source
+            # into the shell's death message, which also contains the words.
+            fd = os.open(work + "/reason", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            os.write(fd, b"selector-moved\n")
+            os.fsync(fd)
+            os.close(fd)
             fail("selector moved")
+
+    def verify_publisher():
         verified = subprocess.run(
             [sys.executable, publisher, "verify", "--store", store, "--generation", generation],
             check=False, capture_output=True, text=True)
@@ -543,12 +570,86 @@ elif cmd == "admit-hold":
             fail("admission refused: publisher verify output")
         if body.get("digest") != generation or not str(body.get("path", "")):
             fail("admission refused: publisher verify output")
-        held_fd = os.open(held_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        os.close(held_fd)
-        while not os.path.exists(release_path):
-            if os.getppid() == 1:
-                break
-            time.sleep(0.05)
+
+    def mark_started():
+        fd = os.open(work + "/started", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+
+    def same_pid_still_running(launchctl, ps_bin, target, pid):
+        if re.fullmatch(r"[1-9][0-9]*", pid or "") is None:
+            return False
+        proc = subprocess.run([launchctl, "print", target], check=False, capture_output=True, text=True)
+        out, err = proc.stdout, proc.stderr
+        if proc.returncode != 0 or err.strip():
+            return False
+        if re.search(r"not found|Could not find service", out, re.IGNORECASE):
+            return False
+        v1 = ("HOST_PULL_LAUNCHCTL_V1\n" in out and "\nstate=loaded\n" in "\n" + out
+              and "\nactivity=running\n" in "\n" + out and ("\npid=%s\n" % pid) in "\n" + out)
+        pid_lines = re.findall(r"(?m)^\s*pid = ([0-9]+)\s*$", out)
+        prod = bool(re.search(
+            r"(?m)^(?:gui/[0-9]+|user/[0-9]+|system)/com\.mastermind\.host-pull = \{$", out)) and bool(
+            re.search(r"(?m)^\s*state = running\s*$", out)) and "state = not running" not in out and pid_lines == [pid]
+        if not (v1 or prod):
+            return False
+        ps = subprocess.run([ps_bin, "-p", pid, "-o", "pid="], check=False, capture_output=True, text=True)
+        observed = "".join(ch for ch in ps.stdout if ch.isdigit())
+        return ps.returncode == 0 and observed == pid
+
+    # O_CLOEXEC keeps the lock on this process across the effect subprocess.
+    # The open mode and flock match native_generation.publication_lock.
+    lock_fd = os.open(store + "/.publication.lock",
+                      os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
+    try:
+        observed = os.fstat(lock_fd)
+        if (not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid()
+                or stat.S_IMODE(observed.st_mode) != 0o600):
+            fail("admission refused: invalid publication lock")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fail("admission refused: native publication already in progress")
+        if enforce_generation:
+            read_selected()
+            verify_publisher()
+        if pause != "-":
+            holder = os.open(pause + ".holder", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            os.write(holder, str(os.getpid()).encode("ascii") + b"\n")
+            os.fsync(holder)
+            os.close(holder)
+            while os.path.exists(pause):
+                time.sleep(0.05)
+            if enforce_generation:
+                read_selected()
+        mark_started()
+        if kind == "bootout":
+            launchctl, ps_bin, target, expected_pid = effect_args
+            require_safe(launchctl, "launchctl")
+            require_safe(ps_bin, "ps")
+            if re.fullmatch(r"gui/[0-9]+/com\.mastermind\.host-pull", target) is None:
+                fail("bootout target")
+            proc = subprocess.run([launchctl, "bootout", target], check=False)
+            if proc.returncode != 0:
+                # One classification read. Never a second bootout.
+                if same_pid_still_running(launchctl, ps_bin, target, expected_pid):
+                    raise SystemExit(76)
+                raise SystemExit(77)
+        elif kind == "bootstrap":
+            launchctl, domain, dest, _purpose = effect_args
+            require_safe(launchctl, "launchctl")
+            require_safe(dest, "plist")
+            if re.fullmatch(r"gui/[0-9]+", domain) is None:
+                fail("bootstrap domain")
+            proc = subprocess.run([launchctl, "bootstrap", domain, dest], check=False)
+            if proc.returncode != 0:
+                raise SystemExit(proc.returncode if proc.returncode != 76 else 1)
+        else:
+            src, dest, fault = effect_args
+            if fault == "-":
+                fault = ""
+            perform_install(src, dest, fault)
+        if enforce_generation:
+            read_selected()
     finally:
         os.close(lock_fd)
 
@@ -557,7 +658,7 @@ elif cmd == "write-receipt":
     require_safe(directory, "receipt dir")
     if HEX.fullmatch(generation) is None:
         fail("generation identity")
-    if outcome not in {"RECOVERED", "EFFECT_UNKNOWN"}:
+    if outcome not in {"RECOVERED", "EFFECT_UNKNOWN", "NO_EFFECT"}:
         fail("receipt outcome")
     if re.fullmatch(r"[A-Za-z0-9._+-]{1,80}", phase) is None:
         fail("receipt phase")
@@ -566,7 +667,12 @@ elif cmd == "write-receipt":
     st_dir = lstat_nofollow(directory)
     if not stat.S_ISDIR(st_dir.st_mode) or stat.S_IMODE(st_dir.st_mode) != 0o700:
         fail("receipt dir mode")
-    service = "restored" if outcome == "RECOVERED" else "stopped-uncertain"
+    if outcome == "RECOVERED":
+        service = "restored"
+    elif outcome == "NO_EFFECT":
+        service = "still-loaded"
+    else:
+        service = "stopped-uncertain"
     body = json.dumps({
         "schema": "host-pull-lifecycle-receipt.v1",
         "outcome": outcome,
@@ -760,30 +866,35 @@ recover_or_stop() {
   die 78 "recovered original service: $reason"
 }
 
-admit_effect() {
-  local dir held i
-  release_admission
-  dir=$(mktemp -d "${TMPDIR:-/tmp}/host-pull-admit.XXXXXX") || return 1
-  ADMIT_RELEASE="$dir/release"
-  held="$dir/held"
-  py admit-hold "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" "$held" "$ADMIT_RELEASE" &
-  ADMIT_PID=$!
-  i=0
-  while [ ! -f "$held" ]; do
-    # Signal 0 probes the admission helper only. It is not a collector pid check.
-    if ! kill -s 0 -- "$ADMIT_PID" 2>/dev/null; then
-      wait "$ADMIT_PID" 2>/dev/null || true
-      ADMIT_PID=""
-      return 1
-    fi
-    i=$((i + 1))
-    if [ "$i" -ge 200 ]; then
-      release_admission
-      return 1
-    fi
-    sleep 0.05
-  done
-  return 0
+run_locked() {
+  local kind=$1
+  shift
+  local pause rc
+  LOCKED_DIR=$(mktemp -d "${TMPDIR:-/tmp}/host-pull-lock.XXXXXX") || return 78
+  LOCKED_DETAIL=""
+  STOP_LOCKED=0
+  pause="${HOLD_DURING_LOCK:-"-"}"
+  [ -n "$pause" ] || pause="-"
+  py locked-effect "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" \
+    "$LOCKED_DIR" "$pause" "$kind" "$@" 2>"$LOCKED_DIR/err"
+  rc=$?
+  LOCKED_DETAIL=$(cat "$LOCKED_DIR/err" 2>/dev/null || true)
+  if [ -n "$LOCKED_DETAIL" ]; then
+    printf '%s\n' "$LOCKED_DETAIL" >&2
+  fi
+  if [ "$rc" -ne 0 ] && [ ! -f "$LOCKED_DIR/started" ]; then
+    STOP_LOCKED=1
+  fi
+  return "$rc"
+}
+
+effect_was_not_started() {
+  [ "${STOP_LOCKED:-0}" -eq 1 ]
+}
+
+selector_moved_before_effect() {
+  [ "${STOP_LOCKED:-0}" -eq 1 ] && [ -f "${LOCKED_DIR:-}/reason" ] \
+    && grep -qx 'selector-moved' "$LOCKED_DIR/reason"
 }
 
 expected_argv() {
@@ -803,13 +914,14 @@ bootstrap_once() {
     [ "$BOOTSTRAP_NEW" -eq 0 ] || die 78 "second bootstrap refused"
     BOOTSTRAP_NEW=1
     PHASE=BOOTSTRAP_STARTED
-    "$LAUNCHCTL" bootstrap "$DOMAIN" "$DEST_PLIST"
-    return $?
+  else
+    [ "$BOOTSTRAP_ROLLBACK" -eq 0 ] || die 78 "second rollback bootstrap refused"
+    BOOTSTRAP_ROLLBACK=1
+    PHASE=ROLLING_BACK
   fi
-  [ "$BOOTSTRAP_ROLLBACK" -eq 0 ] || die 78 "second rollback bootstrap refused"
-  BOOTSTRAP_ROLLBACK=1
-  PHASE=ROLLING_BACK
-  "$LAUNCHCTL" bootstrap "$DOMAIN" "$DEST_PLIST"
+  # One bootstrap inside the lock holder. A holder death before the command
+  # sets STOP_LOCKED so the caller does not issue another one.
+  HOLD_DURING_LOCK="" run_locked bootstrap "$LAUNCHCTL" "$DOMAIN" "$DEST_PLIST" "$kind"
   return $?
 }
 
@@ -861,6 +973,7 @@ HOLD_MUTATION=""
 HOLD_BOOTSTRAP=""
 HOLD_BOOTOUT=""
 HOLD_PLIST=""
+HOLD_DURING_LOCK=""
 EXPECT_OWNER_UID=""
 
 while [ "$#" -gt 0 ]; do
@@ -880,6 +993,7 @@ while [ "$#" -gt 0 ]; do
     --hold-before-bootout) HOLD_BOOTOUT=${2:-}; shift 2 ;;
     --hold-before-plist) HOLD_PLIST=${2:-}; shift 2 ;;
     --hold-before-bootstrap) HOLD_BOOTSTRAP=${2:-}; shift 2 ;;
+    --hold-during-lock) HOLD_DURING_LOCK=${2:-}; shift 2 ;;
     --expect-owner-uid) EXPECT_OWNER_UID=${2:-}; shift 2 ;;
     --fault) FAULT=${2:-}; shift 2 ;;
     --wait-limit) WAIT_LIMIT=${2:-}; shift 2 ;;
@@ -904,7 +1018,8 @@ if [ "$HERMETIC" -eq 1 ]; then
 else
   [ -z "$FIXTURE_ROOT" ] || die 78 "fixture root is hermetic-only"
   [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
-    && [ -z "$HOLD_PLIST" ] && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] \
+    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$EXPECT_OWNER_UID" ] \
+    && [ -z "$FAULT" ] \
     || die 78 "test hooks are hermetic-only"
   [ "$WAIT_LIMIT" -eq 50 ] || die 78 "wait limit"
 fi
@@ -981,48 +1096,67 @@ case "$COMMAND" in
     PHASE=BACKED_UP
     if [ "$NEED_BOOTOUT" -eq 1 ]; then
       hold_if_requested "$HOLD_BOOTOUT"
-      if ! admit_effect; then
-        die 78 "selector moved before bootout"
-      fi
-      OLD_PID=$LC_PID
+      OLD_PID=${LC_PID:-"-"}
+      [ -n "$OLD_PID" ] || OLD_PID="-"
       PHASE=BOOTOUT_STARTED
-      "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" || die 78 "bootout failed"
-      release_admission
-      BOOTED=1
-      PHASE=BOOTED_OUT
-      if [ "$LC_CLASS" = "loaded-running" ]; then
-        wait_pid_dead "$OLD_PID"
-        wait_rc=$?
-        if [ "$wait_rc" -eq 2 ]; then
-          stop_uncertain WAIT_PID "process state uncertain"
+      # The holder performs the one bootout. Nonzero is never retried.
+      run_locked bootout "$LAUNCHCTL" "$PS" "$DOMAIN/$LABEL" "$OLD_PID"
+      boot_rc=$?
+      if [ "$boot_rc" -eq 0 ]; then
+        BOOTED=1
+        PHASE=BOOTED_OUT
+        if [ "$LC_CLASS" = "loaded-running" ]; then
+          wait_pid_dead "$OLD_PID"
+          wait_rc=$?
+          if [ "$wait_rc" -eq 2 ]; then
+            stop_uncertain WAIT_PID "process state uncertain"
+          fi
+          if [ "$wait_rc" -ne 0 ]; then
+            stop_uncertain WAIT_PID "old pid did not exit"
+          fi
         fi
-        if [ "$wait_rc" -ne 0 ]; then
-          stop_uncertain WAIT_PID "old pid did not exit"
+        if [ "$FAULT" = "post-bootout-print" ]; then
+          stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
         fi
+        launchctl_print || stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
+        [ "$LC_CLASS" = "absent" ] || stop_uncertain POST_BOOTOUT_PRINT "service still loaded after bootout"
+      elif [ "$boot_rc" -eq 76 ]; then
+        write_receipt NO_EFFECT BOOTOUT_NO_EFFECT \
+          "bootout returned nonzero and the same pid is still loaded" \
+          || die 78 "receipt failed"
+        die 78 "bootout had no effect"
+      elif selector_moved_before_effect; then
+        die 78 "selector moved before bootout"
+      elif effect_was_not_started; then
+        write_receipt EFFECT_UNKNOWN BOOTOUT "admission holder died before bootout" || true
+        die 78 "EFFECT_UNKNOWN service stopped pending repair: admission holder died before bootout"
+      else
+        write_receipt EFFECT_UNKNOWN BOOTOUT "bootout failed" || true
+        die 78 "EFFECT_UNKNOWN service stopped pending repair: bootout failed"
       fi
-      if [ "$FAULT" = "post-bootout-print" ]; then
-        stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
-      fi
-      launchctl_print || stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
-      [ "$LC_CLASS" = "absent" ] || stop_uncertain POST_BOOTOUT_PRINT "service still loaded after bootout"
     fi
     PHASE=PID_GONE
     hold_if_requested "$HOLD_PLIST"
-    if ! admit_effect; then
-      if [ "$BOOTED" -eq 1 ]; then
-        recover_or_stop PLIST_ADMIT "selector moved before plist replace"
-      fi
-      die 78 "selector moved before plist replace"
-    fi
-    install_fault=""
+    install_fault="-"
     case "$FAULT" in
       install-before-replace) install_fault=before-replace ;;
       install-after-replace) install_fault=after-replace ;;
     esac
-    py install-rendered "$RENDERED" "$DEST_PLIST" "$install_fault"
+    run_locked install "$RENDERED" "$DEST_PLIST" "$install_fault"
     install_rc=$?
-    release_admission
     if [ "$install_rc" -ne 0 ]; then
+      if selector_moved_before_effect; then
+        if [ "$BOOTED" -eq 1 ]; then
+          recover_or_stop PLIST_ADMIT "selector moved before plist replace"
+        fi
+        die 78 "selector moved before plist replace"
+      fi
+      if effect_was_not_started; then
+        if [ "$BOOTED" -eq 1 ]; then
+          stop_uncertain INSTALL "admission holder died before plist replace"
+        fi
+        die 78 "EFFECT_UNKNOWN service stopped pending repair: admission holder died before plist replace"
+      fi
       if [ "$BOOTED" -eq 1 ]; then
         recover_or_stop INSTALL "plist install failed"
       fi
@@ -1042,16 +1176,14 @@ case "$COMMAND" in
     if [ "$LC_CLASS" != "absent" ]; then
       stop_uncertain PRE_BOOTSTRAP_PRINT "service still loaded"
     fi
-    if ! admit_effect; then
-      if [ "$BOOTED" -eq 1 ]; then
-        recover_or_stop BOOTSTRAP_ADMIT "selector moved before bootstrap"
-      fi
-      restore_plist || die 78 "rollback restore failed"
-      die 78 "selector moved before bootstrap"
-    fi
     bootstrap_once new
     new_rc=$?
-    release_admission
+    if [ "$new_rc" -ne 0 ] && effect_was_not_started; then
+      if selector_moved_before_effect; then
+        recover_or_stop BOOTSTRAP_ADMIT "selector moved before bootstrap"
+      fi
+      recover_or_stop BOOTSTRAP_ADMIT "admission holder died before bootstrap"
+    fi
     if [ "$new_rc" -ne 0 ]; then
       if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
         stop_uncertain BOOTSTRAP "bootstrap failed"

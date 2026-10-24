@@ -193,6 +193,15 @@ case "$cmd" in
         sleep 0.05
       done
     fi
+    # Nonzero after the label has already transitioned. The daemon must not
+    # retry bootout or follow this with bootstrap.
+    if [ -f "$STUB_STATE/bootout-fail-after-effect" ]; then
+      if [ ! -f "$STUB_STATE/bootout-keep-alive" ]; then
+        rm -f "$STUB_STATE/ps-alive"
+      fi
+      printf 'absent\n' > "$STUB_STATE/print-mode"
+      exit 1
+    fi
     if [ -f "$STUB_STATE/bootout-rc" ]; then
       exit "$(cat "$STUB_STATE/bootout-rc")"
     fi
@@ -1045,4 +1054,146 @@ def test_selector_move_before_bootstrap_restores_original_service(workspace):
     assert receipt["outcome"] == "RECOVERED"
     current = json.loads((ctx["store"] / "CURRENT.json").read_text())
     assert current["generation"] == other.name
+    assert_not_executed(ctx)
+
+
+def test_bootout_nonzero_after_effect_is_effect_unknown(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    (ctx["stub"] / "bootout-fail-after-effect").write_text("")
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert "bootout failed" in result.stderr
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert receipt["phase"] == "BOOTOUT"
+    assert ctx["plist"].read_bytes() == original
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert "bootstrap " not in log
+    assert_not_executed(ctx)
+
+
+def test_bootout_nonzero_without_effect_is_no_effect(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    (ctx["stub"] / "bootout-rc").write_text("1\n")
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "bootout had no effect" in result.stderr
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "NO_EFFECT"
+    assert receipt["service"] == "still-loaded"
+    assert receipt["phase"] == "BOOTOUT_NO_EFFECT"
+    assert ctx["plist"].read_bytes() == original
+    assert (ctx["stub"] / "print-mode").read_text().strip() == "running"
+    assert (ctx["stub"] / "ps-alive").exists()
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert log.count("print ") == 2
+    assert "bootstrap " not in log
+    assert_not_executed(ctx)
+
+
+def test_holder_death_before_effect_allows_select_and_does_not_mutate(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    _store, other = publish(workspace, b"#!/bin/bash\nexit 92\n", False)
+    hold = workspace / "hold-lock"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_during_lock=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    holder = Path(str(hold) + ".holder")
+    deadline = time.time() + 8
+    while time.time() < deadline and not holder.exists():
+        if proc.poll() is not None:
+            raise AssertionError(proc.stderr.read())
+        time.sleep(0.05)
+    assert holder.exists()
+    pid = int(holder.read_text().strip())
+    os.kill(pid, signal.SIGKILL)
+    gone = time.time() + 8
+    while time.time() < gone:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("lock holder still alive")
+    GENERATION.select(ctx["store"], other.name, ctx["release"].name)
+    hold.unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "EFFECT_UNKNOWN" in err
+    assert "holder died" in err
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == other.name
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert "holder died" in receipt["reason"]
+    assert_not_executed(ctx)
+
+
+def test_holder_death_during_bootout_does_not_mutate_again(workspace):
+    """The in-flight bootout can finish after the holder dies. The parent
+    must not issue a second bootout or a bootstrap, and the receipt is
+    EFFECT_UNKNOWN."""
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    _store, other = publish(workspace, b"#!/bin/bash\nexit 92\n", False)
+    hold = workspace / "hold-lock"
+    hold.write_text("")
+    (ctx["stub"] / "pause-bootout").write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_during_lock=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    holder = Path(str(hold) + ".holder")
+    deadline = time.time() + 8
+    while time.time() < deadline and not holder.exists():
+        if proc.poll() is not None:
+            raise AssertionError(proc.stderr.read())
+        time.sleep(0.05)
+    pid = int(holder.read_text().strip())
+    hold.unlink()
+    entered = ctx["stub"] / "bootout-entered"
+    deadline = time.time() + 8
+    while time.time() < deadline and not entered.exists():
+        if proc.poll() is not None:
+            raise AssertionError(proc.stderr.read())
+        time.sleep(0.05)
+    assert entered.exists()
+    os.kill(pid, signal.SIGKILL)
+    gone = time.time() + 8
+    while time.time() < gone:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("lock holder still alive")
+    GENERATION.select(ctx["store"], other.name, ctx["release"].name)
+    (ctx["stub"] / "pause-bootout").unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "EFFECT_UNKNOWN" in err
+    assert "bootout failed" in err
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert "bootstrap " not in log
+    assert ctx["plist"].read_bytes() == original
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == other.name
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert receipt["phase"] == "BOOTOUT"
     assert_not_executed(ctx)
