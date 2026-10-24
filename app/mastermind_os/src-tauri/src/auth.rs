@@ -1089,9 +1089,91 @@ pub async fn executive_status(app: AppHandle, intent_id: String) -> Result<Value
     result
 }
 
+// Read-only original-answer transport on the existing Executive token and
+// generation. These commands do not originate or ACK a CONTINUE; in particular
+// there is deliberately no executive_session_send native command. The separate
+// original F2 review of executive_submit remains held and unmodified.
+fn valid_original_operation_key(key: &str) -> bool {
+    key.strip_prefix("session-continue-")
+        .is_some_and(|suffix| lowercase_hex(suffix, 64))
+}
+fn valid_reference_cursor(cursor: &str) -> bool {
+    !cursor.is_empty() && cursor.len() <= 2048 &&
+        cursor.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-=".contains(&b))
+}
+fn original_reference_args(
+    selection: &MissionSelection, page_size: Option<u8>, cursor: Option<&str>,
+) -> Result<Value> {
+    selection.validate()?;
+    let size = page_size.unwrap_or(16);
+    if !(1..=32).contains(&size) ||
+       cursor.is_some_and(|value| !valid_reference_cursor(value)) {
+        return Err("SESSION_REFERENCES_INVALID".into());
+    }
+    let mut args = serde_json::json!({
+        "work_ref": selection.work_ref, "root_job_id": selection.root_job_id,
+        "page_size": size,
+    });
+    if let Some(cursor) = cursor {
+        args["cursor"] = Value::String(cursor.to_owned());
+    }
+    Ok(args)
+}
+#[tauri::command]
+pub async fn executive_session_context(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    selection.validate()?;
+    // The Session context endpoint requires the selected pair directly,
+    // whereas replies/references use the existing arguments envelope.
+    let result = executive_post(app.clone(), "/os/executive/session/context",
+        serde_json::json!({ "selection": {
+            "work_ref": selection.work_ref, "root_job_id": selection.root_job_id
+        }})).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_session_reply(app: AppHandle, operation_key: String) -> Result<Value> {
+    if !valid_original_operation_key(&operation_key) {
+        return Err("SESSION_OPERATION_INVALID".into());
+    }
+    let result = executive_post(app.clone(), "/os/executive/session/reply",
+        serde_json::json!({ "arguments": { "operation_key": operation_key } })).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_session_references(
+    app: AppHandle, selection: MissionSelection, page_size: Option<u8>, cursor: Option<String>,
+) -> Result<Value> {
+    let args = original_reference_args(&selection, page_size, cursor.as_deref())?;
+    let result = executive_post(app.clone(), "/os/executive/session/references",
+        serde_json::json!({ "arguments": args })).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_original_reads_admit_only_closed_selection_operation_and_cursor() {
+        let selected = MissionSelection { work_ref: "WS:ORIGINAL".into(), root_job_id: "JOB-1".into() };
+        let args = original_reference_args(&selected, None, None).unwrap();
+        assert_eq!(args["page_size"], 16);
+        assert!(args.get("cursor").is_none());
+        let args = original_reference_args(&selected, Some(32), Some("YWJjZA==")).unwrap();
+        assert_eq!(args["cursor"], "YWJjZA==");
+        assert!(original_reference_args(&selected, Some(0), None).is_err());
+        assert!(original_reference_args(&selected, Some(33), None).is_err());
+        assert!(original_reference_args(&selected, Some(16), Some("abc/..")).is_err());
+        assert!(original_reference_args(&selected, None, Some(&"A".repeat(2049))).is_err());
+        assert!(original_reference_args(&MissionSelection {
+            work_ref: "WS:BAD?".into(), root_job_id: "JOB-1".into(),
+        }, None, None).is_err());
+        assert!(valid_original_operation_key(&format!("session-continue-{}", "a".repeat(64))));
+        assert!(!valid_original_operation_key(&format!("session-continue-{}", "A".repeat(64))));
+        assert!(!valid_original_operation_key("session-continue-invalid"));
+    }
     fn inner() -> Inner {
         Inner::new(Some("public-client"))
     }

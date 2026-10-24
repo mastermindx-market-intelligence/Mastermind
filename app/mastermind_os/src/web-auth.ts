@@ -604,7 +604,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "direct-native/result" | "direct-native/consume",
+    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume",
     arguments_: unknown,
     signal: AbortSignal,
   ) {
@@ -708,6 +708,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       },
       send: (arguments_, signal) => executivePost("session/send", arguments_, signal),
       reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
+      references: (arguments_, signal) => executivePost("session/references", arguments_, signal),
     } satisfies ExecutiveSessionTransport,
     // Same existing OAuth generation used by every bounded acquisition read.
     // The MissionHost requires this proof before it mounts the plan port.

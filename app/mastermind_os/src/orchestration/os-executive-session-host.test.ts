@@ -92,6 +92,7 @@ function fixture() {
     reply: vi.fn(async () => {
       throw new Error("not used here");
     }),
+    references: vi.fn(async () => ({ reference_only: true })),
   };
   return {
     transport,
@@ -122,6 +123,90 @@ function mount(f: ReturnType<typeof fixture>) {
 }
 
 describe("selected-session host lifecycle", () => {
+  it("binds historical reference READ to the verified selection before starting HTTP", async () => {
+    const f = fixture();
+    const store = memStore();
+    const reservedB = { operationKey: OPKEY, targetKey: REF, kind: "message" as const };
+    expect((await store.reserve(SCOPE, reservedB)).reserved).toBe(true);
+    const clear = vi.spyOn(store, "clearIfEqual");
+    const reserve = vi.spyOn(store, "reserve");
+    const host = createOsExecutiveSessionHost(f.transport, store);
+    disposables.push(host.dispose);
+    const controller = new AbortController();
+    const read = host.binding.port.readOriginalReferences!;
+    await expect(read({ workRef: WS, rootJobId: ROOT }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).not.toHaveBeenCalled();
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    await expect(read({ workRef: "WS:OTHER", rootJobId: ROOT }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    await expect(read({ workRef: WS, rootJobId: "JOB-OTHER" }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).not.toHaveBeenCalled();
+    const result = await read({ workRef: WS, rootJobId: ROOT }, controller.signal, "YQ==");
+    expect(result).toEqual({ reference_only: true });
+    expect(f.transport.references).toHaveBeenCalledWith(
+      { work_ref: WS, root_job_id: ROOT, page_size: 16, cursor: "YQ==" },
+      controller.signal,
+    );
+    expect(await store.read(SCOPE)).toEqual(reservedB);
+    expect(reserve).toHaveBeenCalledTimes(0);
+    expect(clear).not.toHaveBeenCalled();
+    expect(f.transport.send).not.toHaveBeenCalled();
+    await host.refresh(null);
+    await expect(read({ workRef: WS, rootJobId: ROOT }, controller.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a historical READ reply from an abandoned A-B-A session", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    const read = host.binding.port.readOriginalReferences!;
+    let resolve!: (value: unknown) => void;
+    const old = new Promise<unknown>(done => { resolve = done; });
+    vi.mocked(f.transport.references!).mockImplementationOnce(async () => old);
+    const original = read({ workRef: WS, rootJobId: ROOT }, new AbortController().signal);
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+    await host.refresh({ workRef: "WS:OTHER", rootJobId: ROOT });
+    await host.refresh({ workRef: WS, rootJobId: ROOT });
+    resolve({ foreign_stale_body: "must not reach Office" });
+    await expect(original).rejects.toThrow("session_references_unavailable");
+    expect(f.transport.send).not.toHaveBeenCalled();
+    // New owner generation may read afresh, but the old read must not revive.
+    await expect(read({ workRef: WS, rootJobId: ROOT }, new AbortController().signal))
+      .resolves.toEqual({ reference_only: true });
+    expect(f.transport.references).toHaveBeenCalledTimes(2);
+  });
+
+  it("withholds post-request replies on auth disappearance or abort", async () => {
+    const f = fixture();
+    const host = mount(f);
+    await host.ready;
+    const read = host.binding.port.readOriginalReferences!;
+    const cancelled = new AbortController();
+    cancelled.abort();
+    await expect(read({ workRef: WS, rootJobId: ROOT }, cancelled.signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).not.toHaveBeenCalled();
+    let resolve!: (value: unknown) => void;
+    vi.mocked(f.transport.references!).mockImplementationOnce(
+      () => new Promise<unknown>(done => { resolve = done; }),
+    );
+    const controller = new AbortController();
+    const pending = read({ workRef: WS, rootJobId: ROOT }, controller.signal);
+    f.setAvailable(false); // credential is invalidated while the READ is in flight
+    resolve({ stale_foreign_data: "private" });
+    await expect(pending).rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+    expect(f.transport.send).not.toHaveBeenCalled();
+    await expect(read({ workRef: WS, rootJobId: ROOT }, new AbortController().signal))
+      .rejects.toThrow("session_references_unavailable");
+    expect(f.transport.references).toHaveBeenCalledTimes(1);
+    host.dispose();
+  });
+
   it("does not advertise SEND for a resolved read-only target", async () => {
     const f = fixture();
     const raw = await f.transport.context({ workRef: WS, rootJobId: ROOT }, new AbortController().signal) as { data: { capabilities: { send: boolean } } };
