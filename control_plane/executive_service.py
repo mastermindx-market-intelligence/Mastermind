@@ -2890,6 +2890,9 @@ class ExecutiveControlService:
             review = self._paid_subject_review_registration(router)
             binding["paid_subject_review_binding"] = review[2]
             expected_keys.add("paid_subject_review_binding")
+            from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY, CHILD_WORKSPACE_POLICY_KEY
+            binding[CHILD_WORKSPACE_POLICY_KEY] = CHILD_WORKSPACE_POLICY
+            expected_keys.add(CHILD_WORKSPACE_POLICY_KEY)
         if set(binding) != expected_keys:
             raise ValueError("configured COO host binding fields drifted")
         binding[HOST_EXECUTION_BINDING_VERSION_KEY] = HOST_EXECUTION_BINDING_V3
@@ -6675,6 +6678,10 @@ class ExecutiveControlService:
     def _coo_binding_for_root(self, root: Job) -> dict[str, Any]:
         from ops.executive_os.acceptance_maintenance import MaintenanceError, frozen_binding
         raw = self._require_current_coo_binding()
+        from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY_KEY
+        if CHILD_WORKSPACE_POLICY_KEY not in root.constraints:
+            # Existing roots keep their original workspace assignment forever.
+            raw = {key: value for key, value in raw.items() if key != CHILD_WORKSPACE_POLICY_KEY}
         normalized = _normalise_constraints(raw, host_admitted_placement_union=True)
         normalized["work_placement_union"] = _normalise_work_placement_union(raw["work_placement_union"])
         creator = self._coo_root_creator(root)
@@ -6896,22 +6903,28 @@ class ExecutiveControlService:
         for key, value in expected.items():
             if job.constraints.get(key) != value:
                 raise StateConflict(f"COO Job host binding drifted at {key}")
-        if job.worktree != root.worktree or job.branch != root.branch:
+        from control_plane.executive_runtime import _coo_child_workspace_binding
+        with self._require_runtime().store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job.job_id,)).fetchone()
+            assignment = _coo_child_workspace_binding(connection, row)
+        if assignment is None and (job.worktree != root.worktree or job.branch != root.branch):
             raise StateConflict("COO Job workspace/branch differs from its strict-v2 root")
         return root
 
     def _require_coo_workspace(self, job: Job) -> dict[str, Any]:
         root = self._require_bound_coo_job(job)
         assert root.worktree is not None and root.branch is not None
-        workspace = Path(root.worktree).resolve(strict=False)
+        assignment = self._require_runtime().jobs.coo_child_workspace_completion(job.job_id)
+        workspace = Path(job.worktree if assignment is not None else root.worktree).resolve(strict=False)
+        branch = job.branch if assignment is not None else root.branch
         if workspace.parent != self.config.proof_workspace_root:
             raise StateConflict("COO workspace is not a direct reviewed-root assignment")
         observation = self._workspace_observation(
             workspace,
             require_fresh=False,
-            expected_branch=root.branch,
+            expected_branch=branch,
         )
-        if observation["branch"] != root.branch or observation["remote_count"] != 0:
+        if observation["branch"] != branch or observation["remote_count"] != 0:
             raise ServiceError("COO workspace must remain branch-bound and credentialless")
         if (
             job.orchestration_role == "plan"
@@ -7153,6 +7166,9 @@ class ExecutiveControlService:
                     return terminal
                 self._require_foreground_only_source(root.job_id)
                 if job.status is JobStatus.QUEUED:
+                    await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
+                        source_repository=self.config.proof_source_repository,
+                        shared_gid=self.config.proof_shared_gid)
                     self._require_coo_workspace(job)
                 if runtime.operator_harness.is_interactive_job(job.job_id):
                     raise StateConflict(
