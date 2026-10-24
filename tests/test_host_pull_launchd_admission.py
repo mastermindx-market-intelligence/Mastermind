@@ -20,7 +20,7 @@ TEMPLATE = CANDIDATE / "host_pull_launchd.plist.template"
 PUBLISHER = ROOT / "ops/native_fabric/quota_continuity/rollout/native_generation.py"
 MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manifest.json"
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
-HOST_PULL_SHA = "eba14f067f9dd1a3f2d19e0c1204340fd0af560c03372ff6c5e68d22aa9b763a"
+HOST_PULL_SHA = "53156165c211599e47df95b465cf6257231adaed6a93f7a092b493e4f51f2858"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
@@ -120,7 +120,7 @@ def test_manifest_enrolls_the_pair_without_an_installed_preimage():
     host = inventory["files"]["ext/host_pull.sh"]
     assert host["sha256"] == HOST_PULL_SHA
     assert host["installed_preimage_sha256"] == HOST_PULL_PREIMAGE
-    assert host["bytes"] == 11854
+    assert host["bytes"] == 12148
     assert manifest["ext/host_pull.sh"] == HOST_PULL_SHA
     assert not (CANDIDATE / "launchd").exists()
     daemon = DAEMON.read_text()
