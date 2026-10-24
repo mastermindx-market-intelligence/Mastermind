@@ -4,9 +4,9 @@
 >
 > This is a **research-to-implementation addendum** to the already-existing Meta-CEO R2 and DeepSeek Harness (DSH) work, not a second executive program, an approved change to protected source law, or a deployed system.
 >
-> Operation \`meta-ceo-open-harness-convergence-20261024-sol-001\`; Chairman's request: preserve research in GitHub, first examine lawfully reusable Grok Bot / Dots-style OSS harnesses, then initiate a plan to create an owned always-on Meta-CEO without reimplementing already-existing substrate.
+> Operation `meta-ceo-open-harness-convergence-20261024-sol-001`; Chairman's request: preserve research in GitHub, first examine lawfully reusable Grok Bot / Dots-style OSS harnesses, then initiate a plan to create an owned always-on Meta-CEO without reimplementing already-existing substrate.
 >
-> Current protected pin \`mastermindx-market-intelligence/Mastermind@e00e97b81a5d41cb8a570ad080316279a0f3853f\`; Skillpack \`mastermind.sol_skillpack.v1\` 1.0.1, bootstrap-major 1. Reconcile material new commits, active original writers and the specific integration owner before any dependent source effect or installation.
+> Current protected pin `mastermindx-market-intelligence/Mastermind@e00e97b81a5d41cb8a570ad080316279a0f3853f`; Skillpack `mastermind.sol_skillpack.v1` 1.0.1, bootstrap-major 1. Reconcile material new commits, active original writers and the specific integration owner before any dependent source effect or installation.
 
 ## 0. Outcome, product job and 10/10 ruler
 
@@ -33,7 +33,7 @@ Sources of actual state: original owner PRs and protected repository. This docum
 
 ## 2. Proposed architecture: own the UX/harness, preserve company authority
 
-\`\`\`text
+```text
 Chairman (one Mastermind office; web/desktop/mobile)
        |
 Existing authenticated app / Conversation / MissionHost
@@ -58,7 +58,7 @@ Existing response/office projection -> correct Chairman conversation
 Model transport below admitted route:
 Current Z.AI pooled GLM subscriptions -> provider-qualified endpoint
 Qualified API models / Grok / Cursor / optional local GLM -> same Model Router
-\`\`\`
+```
 
 **Critical distinction:** Native DSH conversations/transcripts, model context, temporary sandbox files, and UI caches are allowed as *subordinate execution and presentation state*. They are not the canonical source of responsibility, company decisions, grant status, worker acceptance, missing obligations or provider account balances.
 
@@ -72,7 +72,7 @@ See [dated donor assessment](../../../research/META_CEO_OPEN_SOURCE_HARNESS_DONO
 | --- | --- | --- |
 | **ADOPT candidate, incumbent owner** | DSH web/session/agent plugins via PR #1717 | Already selected as full-application donor; MIT; modular; least duplicate-source investment if product-compatible. |
 | **CHALLENGE, not automatic replacement** | Rakazo web/mobile/persistent-bot/computer product | Most directly realizes the Grok Bot experience; Apache-2.0; beta. Qualify actual app journey against DSH and source ownership. |
-| **ADAPT only if portable** | OpenMausBot OSS provider SPI, canonical event mapping, error-state/fake-driver test practice | Small, bounded contracts that can add capability without another server. Exclude its restricted \`enterprise/\` directory. |
+| **ADAPT only if portable** | OpenMausBot OSS provider SPI, canonical event mapping, error-state/fake-driver test practice | Small, bounded contracts that can add capability without another server. Exclude its restricted `enterprise/` directory. |
 | **PATTERN ONLY** | Hermes Agent memory/skills/routines; Rome reusable Actions/Apps; OpenGrokBot per-bot VM design | Useful independent engineering examples; do not launch separate authoritative queues or memory. |
 | **NO CODE IMPORT on current evidence** | Small unlicensed OpenDot; retained-code brok-pot-harness | No verified redistributable rights for the specific source, or retained Grok Bot upstream proprietary material. |
 
@@ -111,7 +111,7 @@ Upstream product docs do not establish security, production readiness or measure
 **Owner:** existing ACP Worker/OHF + Fabric/MCP owners (#687/#1790 and their accepted successors).
 - Implement the minimum DSH-to-existing typed contract adapter; **not** a new northbound Harness ABI, Worker store or arbitrary shell gateway.
 - Render scope-specific Agent OS context and versioned Skill/Craft method through existing Session Truth/RequestedExecutionProfile; attest what the native harness actually loaded.
-- Admit one bounded child operation through the current Executive owner, emit exact original Job/Attempt/root/capability identities, and return existing \`CandidateResult\` / \`WorkerResult\` plus acceptance and review independently.
+- Admit one bounded child operation through the current Executive owner, emit exact original Job/Attempt/root/capability identities, and return existing `CandidateResult` / `WorkerResult` plus acceptance and review independently.
 - Prove denied tool, changed auth, duplicate send, cancelled in-flight read, effect-unknown write and mismatched recipient reject without side effects.
 - A native subagent is a provider-internal helper unless independent company responsibility requires new *existing Executive child-Job admission*.
 
@@ -168,7 +168,7 @@ Upstream product docs do not establish security, production readiness or measure
 | Attacker text on a webpage says to change model/grants | Treated as data; no authority escalates, no host/action executed |
 | Two office requests overlap then switch current project | Reply remains bound to original audience/request; no stale overwrite |
 | Provider/CLI auth or quota fails before model work | No Job START or tool effect; honest typed error |
-| Remote write succeeds but network reply is lost | Preserve \`EFFECT_UNKNOWN\` and original carrier; no replay/failover |
+| Remote write succeeds but network reply is lost | Preserve `EFFECT_UNKNOWN` and original carrier; no replay/failover |
 | Worker finishes but parent has not consumed result | Completion is not claimed; original consumer can consume once |
 | Long-running child returns a question | Exact responsible owner answers, worker actually continues or STOPs |
 | Local model changes or route serves unknown model | Attestation records mismatch/UNKNOWN; cannot claim model-parity score |
@@ -180,7 +180,7 @@ Upstream product docs do not establish security, production readiness or measure
 
 ## 6. Dependency summary, ownership, and first actionable slice
 
-\`\`\`text
+```text
 Research + rights audit (THIS BRANCH)
        |
        v
@@ -204,7 +204,7 @@ P0 current #1717 owner/source/collision reconciliation
              P7 observed 7-day accept/reliability
                       |
                   P8 optional local/less-refusal model
-\`\`\`
+```
 
 **Immediate highest-leverage next implementation action** (to be performed by the **incumbent #1717 source owner**, not by replacing its branch): reconcile its exact current head, local DSH full-app build/start proof and #1790 ACP governed MCP conformance. Complete one *disposable, no-company-credentials* DSH native app send/stream/resume/schedule smoke and record the exact failure if unavailable. Then compare the same minimal reference Bot turn in Rakazo under an isolated stack before choosing to graft individual donor UI components.
 
