@@ -31,6 +31,7 @@ LEGACY_GET_ROUTES = (
 GET_ROUTES = LEGACY_GET_ROUTES + (
     "/workspace/control-room/state/current",
     "/workspace/control-room/discover/current",
+    "/workspace/mission/v4/current",
 )
 _TEMPLATE = Path(__file__).with_name("os_public_edge.caddy.template")
 
