@@ -7166,9 +7166,12 @@ class ExecutiveControlService:
                     return terminal
                 self._require_foreground_only_source(root.job_id)
                 if job.status is JobStatus.QUEUED:
-                    await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
-                        source_repository=self.config.proof_source_repository,
-                        shared_gid=self.config.proof_shared_gid)
+                    from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY, CHILD_WORKSPACE_POLICY_KEY
+                    if (job.orchestration_role in {"work", "review", "repair"}
+                            and root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY):
+                        await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
+                            source_repository=self.config.proof_source_repository,
+                            shared_gid=self.config.proof_shared_gid)
                     self._require_coo_workspace(job)
                 if runtime.operator_harness.is_interactive_job(job.job_id):
                     raise StateConflict(
