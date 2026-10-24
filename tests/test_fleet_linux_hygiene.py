@@ -28,7 +28,7 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             p = Path(d) / "meminfo"
             p.write_text("MemTotal: 100000 kB\nMemFree: 90000 kB\n")
             self.assertEqual(h.memory(p)["state"], "UNVERIFIED")
-            p.write_text("MemTotal: 100000 kB\nMemAvailable: 10000 kB\nSwapTotal: 8000 kB\nSwapFree: 7000 kB\n")
+            p.write_text("MemTotal: 100000 kB\nMemAvailable: 10000 kB\nSwapTotal: 8388608 kB\nSwapFree: 7340032 kB\n")
             self.assertEqual(h.memory(p)["pressure"], "CRITICAL")
             self.assertGreater(h.memory(p)["swap_used_gib"], 0)
 
