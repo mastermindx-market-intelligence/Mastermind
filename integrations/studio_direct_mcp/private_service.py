@@ -191,6 +191,10 @@ C2_BUSINESS_TARGET_PATCH_SHA256 = {
 
 # Only existing reviewed, closed-profile enrolled fleet-v0.1.10 seats.
 # Other installed gateways differ in bundle/permissions and are NOT eligible.
+# Exact observed enrolled C2 Business v2/12-file installation, not a fleet grant.
+# This byte pin binds every module, config, plist, runtime seal and source identity.
+C2_BUSINESS_MERGE_MANIFEST_SHA256 = "7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421"
+
 FLEET_V10_ENROLLED_ACCOUNTS = frozenset(("chatgpt1", "chatgpt3"))
 
 FLEET_V10_PUBLISHER_PATCH_SHA256 = {
@@ -1651,6 +1655,7 @@ def _verify_upgrade_preserves_installed_fleet_capabilities(
 def _upgrade_fleet_v10_publisher_only(
     args, source: Path, node_abs: Path, backend_abs: Path,
     account: str, label: str, port: int, roots: dict,
+    *, c2_business_merge: bool = False,
 ) -> int:
     """Replace only the two reviewed publisher modules on the sealed fleet 0.1.10.
 
@@ -1660,7 +1665,16 @@ def _upgrade_fleet_v10_publisher_only(
     """
     expected = getattr(args, "publisher_expected_manifest_sha256", None)
     preview = getattr(args, "publisher_preflight_only", False)
-    if (account not in FLEET_V10_ENROLLED_ACCOUNTS or type(preview) is not bool
+    if c2_business_merge:
+        if (account != "chatgpt2-business"
+                or expected != C2_BUSINESS_MERGE_MANIFEST_SHA256
+                or any(getattr(args, flag, False) is True for flag in (
+                    "publisher_only_fleet_v10", "c2_business_fleet_compat",
+                    "c2_personal_closed_publisher", "c2_business_repository_enrollment",
+                    "c2_personal_git_timeout_only"))):
+            raise SystemExit("C2 Business merge publisher requires exact predecessor CAS and exclusive mode")
+    eligible = account == "chatgpt2-business" if c2_business_merge else account in FLEET_V10_ENROLLED_ACCOUNTS
+    if (not eligible or type(preview) is not bool
             or not _sha256_hex(expected)
             or getattr(args, "fabric_only", False)
             or getattr(args, "enable_repository_workspaces", False)
@@ -1678,7 +1692,7 @@ def _upgrade_fleet_v10_publisher_only(
             or prior.get("host") != "127.0.0.1"
             or prior.get("port") != port):
         raise SystemExit("fleet publisher compatibility: original sealed identity does not match")
-    for name, expected_blob in FLEET_V10_PRESERVED_GIT_BLOBS.items():
+    for name, expected_blob in (() if c2_business_merge else FLEET_V10_PRESERVED_GIT_BLOBS.items()):
         candidate = roots["base"] / name
         _assert_dest_safe(candidate)
         data = candidate.read_bytes()
@@ -1718,6 +1732,11 @@ def _upgrade_fleet_v10_publisher_only(
     # profile. The sealed manifest, not the caller, chooses the transition.
     original_publisher = old_config.get("gitPublish")
     expected_closed = _typed_git_config(user_root, closed_repositories=True)
+    if c2_business_merge and not (
+            original_publisher == expected_closed and all(
+                prior["files"].get(n) == d
+                for n, d in FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256.items())):
+        raise SystemExit("C2 Business merge publisher: unrecognized prior publisher identity")
     patch_hashes = FLEET_V10_PUBLISHER_PATCH_SHA256
     preserve_config_bytes = False
     if (original_publisher == expected_closed and all(
@@ -1777,19 +1796,25 @@ def _upgrade_fleet_v10_publisher_only(
             "existingBundleRetained": True,
         }, sort_keys=True))
         return 0
-    if _launchd_inspect(label) is not None:
+    def service_state():
+        return (_lifecycle_inspect(account, label, roots, require_positive=True)
+                if c2_business_merge else _launchd_inspect(label))
+
+    if service_state() is not None:
         raise SystemExit("refusing fleet publisher upgrade while service is loaded; stop first")
     # Reconfirm all observed bytes immediately before the first effect.
     if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
             or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
             or any(_sha256_file(roots["base"] / n) != prior["files"][n] for n in names)):
         raise SystemExit("fleet publisher compatibility: original installation changed")
+    if c2_business_merge:
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
     # All new source was hash-pinned before entry. Manifest is written LAST:
     # interrupted installation fails the existing manifest/hash gate closed.
     old_bytes = {**{roots["base"] / n: old_files[n] for n in names},
                  config_path: old_config_bytes, manifest_path: old_manifest_bytes}
     planned = {**{roots["base"] / n: new_files[n] for n in names},
-               config_path: config_bytes,
+               **({} if c2_business_merge else {config_path: config_bytes}),
                manifest_path: json.dumps(future, indent=2, sort_keys=True).encode("utf-8")}
     committed = False
     try:
@@ -1807,7 +1832,7 @@ def _upgrade_fleet_v10_publisher_only(
             # os.replace may have succeeded even when a later fsync failed.
             # Thus a return-code ledger cannot prove which files changed.
             # Reconcile *every* planned path by bytes before safe rollback.
-            if _launchd_inspect(label) is not None:
+            if service_state() is not None:
                 raise RuntimeError("service became loaded during transaction")
             observed = {target: target.read_bytes() for target in planned}
             if any(observed[t] not in (old_bytes[t], planned[t]) for t in planned):
@@ -2365,10 +2390,17 @@ def cmd_upgrade(args) -> int:
     source = Path(args.source)
     if source.is_symlink() or not source.is_dir():
         raise SystemExit(f"source dir invalid: {source}")
+    c2_merge = getattr(args, "c2_business_merge_publisher_only", False) is True
+    if c2_merge and any(getattr(args, flag, False) is True for flag in (
+            "publisher_only_fleet_v10", "c2_business_fleet_compat",
+            "c2_personal_closed_publisher", "c2_business_repository_enrollment",
+            "c2_personal_git_timeout_only")):
+        raise SystemExit("C2 Business merge publisher requires exclusive mode")
     # C2 fleet predecessor migration is a tightly hash-pinned three-module
     # compatibility package, NOT the incompatible current STAGE_FILES bundle.
     if not (
-        getattr(args, "c2_business_fleet_compat", False) is True
+        c2_merge
+        or getattr(args, "c2_business_fleet_compat", False) is True
         or getattr(args, "c2_personal_closed_publisher", False) is True
         or getattr(args, "c2_personal_git_timeout_only", False) is True
         or getattr(args, "c2_business_repository_enrollment", False) is True
@@ -2380,6 +2412,16 @@ def cmd_upgrade(args) -> int:
     _validate_port(port)
 
     roots = _build_runtime_roots(account)
+    if c2_merge:
+        if (account == "chatgpt2-business"
+                and getattr(args, "publisher_preflight_only", False) is False):
+            with _c2_lifecycle_mutex(account):
+                return _upgrade_fleet_v10_publisher_only(
+                    args, source, node_abs, backend_abs, account, label, port, roots,
+                    c2_business_merge=True)
+        return _upgrade_fleet_v10_publisher_only(
+            args, source, node_abs, backend_abs, account, label, port, roots,
+            c2_business_merge=True)
     if getattr(args, "c2_personal_git_timeout_only", False) is True:
         # The C2 Personal timeout migration shares the exact same installed
         # files/manifest with Paper and publisher writers. Retain the protected
@@ -3149,6 +3191,8 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--enable-repository-workspaces", action="store_true",
                        help="enable the closed installed repository-workspace consumer")
         if name == "upgrade":
+            s.add_argument("--c2-business-merge-publisher-only", action="store_true",
+                           help="exact sealed C2 Business 12-file merge-publisher patch; no config or grants change")
             s.add_argument("--c2-business-fleet-compat", action="store_true",
                            help="exact hash-pinned C2 11-to-12-file gateway compatibility; no new repo grants")
             s.add_argument("--c2-personal-closed-publisher", action="store_true")
