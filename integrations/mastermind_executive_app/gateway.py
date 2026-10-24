@@ -3203,6 +3203,9 @@ class CeoIngressReadGateway:
         elif schema == ceo_intent.RECEIPT_SCHEMA_V2:
             if keys not in (base_keys, base_keys | {"work_ref"}):
                 return False
+        elif schema == ceo_intent.RECEIPT_SCHEMA_DIRECT:
+            if keys != base_keys | {"work_ref"} or type(value.get("status")) is not str:
+                return False
         elif schema == ceo_intent.RECEIPT_SCHEMA_PRINCIPAL:
             if keys != base_keys | {"principal", "request_ref"}:
                 return False
@@ -3250,10 +3253,15 @@ class CeoIngressReadGateway:
             )
         ):
             return False
-        if schema == ceo_intent.RECEIPT_SCHEMA_V2:
+        if schema == ceo_intent.RECEIPT_SCHEMA_DIRECT and (
+            len(authority["requested"]) != 2
+            or set(authority["requested"]) != {"READ", "RESEARCH"}
+        ):
+            return False
+        if schema in {ceo_intent.RECEIPT_SCHEMA_V2, ceo_intent.RECEIPT_SCHEMA_DIRECT}:
             work_ref = value.get("work_ref")
             return (
-                work_ref is None
+                (schema == ceo_intent.RECEIPT_SCHEMA_V2 and work_ref is None)
                 or (
                     type(work_ref) is str
                     and re.fullmatch(r"WS:[A-Z0-9][A-Za-z0-9._-]{1,63}", work_ref)

@@ -73,10 +73,15 @@ async def dispatch_direct_native(owner, scope, body, principal, *, consume):
         return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", 202 if consume else 503)
     if response.ok is not True:
         code = response.error.get("code") if isinstance(response.error, dict) else None
-        reason = "AUTHORITY_UNAVAILABLE" if code in {"authority_refused", "authentication_required"} else "SOURCE_UNAVAILABLE"
+        if code in {"authority_refused", "authentication_required"}:
+            return unavailable("AUTHORITY_UNAVAILABLE")
         if code in {"state_conflict", "consumption_conflict"}:
-            reason = "CONSUMPTION_CONFLICT"
-        return unavailable(reason)
+            return unavailable("CONSUMPTION_CONFLICT")
+        # A clean dependency/size error can follow the actual commit. It is
+        # not a receipt proving the acknowledgment absent; retain the original
+        # selection for read-only reconciliation, never another mutation send.
+        return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE",
+                           202 if consume else 503)
     try:
         value = contract.validate_response(response.result)
         if (any(value["selection"][k] != selection[k] for k in ("work_ref", "job_id"))

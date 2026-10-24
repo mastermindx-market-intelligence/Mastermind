@@ -125,6 +125,24 @@ class DirectResultHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["reason_codes"], ["EFFECT_UNKNOWN"])
         self.assertIsNone(response.json()["consumption"])
 
+    async def test_clean_dependency_error_after_consume_preserves_unknown_but_read_is_unavailable(self):
+        request=dict(self.body,operation_key="consume-h2",result_digest="a"*64)
+        for code in ("backend_unavailable", "response_too_large"):
+            with self.subTest(code=code), patch.object(self.client,"send_frame",new=AsyncMock(
+                    return_value=CeoIngressResponse(transport=TRANSPORT_SENT_OK,ok=False,
+                        error={"code":code,"message":"DO_NOT_RETURN"}))) as send:
+                consume=await self.post(c.CONSUME_PATH,request)
+                read=await self.post(c.RESULT_PATH,self.body)
+                self.assertEqual(send.await_count,2)  # Two explicit operations, never a transport retry.
+                self.assertEqual([call.args[1]["operation"] for call in send.await_args_list],["consume","result"])
+                self.assertEqual(consume.status_code,202)
+                self.assertEqual(consume.json()["reason_codes"],["EFFECT_UNKNOWN"])
+                self.assertIsNone(consume.json()["consumption"])
+                self.assertIsNone(consume.json()["result"])
+                self.assertEqual(read.status_code,503)
+                self.assertEqual(read.json()["reason_codes"],["SOURCE_UNAVAILABLE"])
+                self.assertNotIn("DO_NOT_RETURN",consume.text+read.text)
+
     async def test_late_expiry_withholds_completed_consumption_reply(self):
         consumed = dict(self.result, consumption=dict(state="CONSUMED", receipt_digest="d" * 64))
         async def late(*_):
