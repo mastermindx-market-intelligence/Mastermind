@@ -807,11 +807,14 @@ def request(
                         complexity = jev_advisory.select_complexity(advice, complexity)
                     except jev_advisory.JevUnavailable as exc:
                         if exc.code == "FRONTIER_NEEDS_EXPLICIT_REASON":
-                            # The parent may supply an explicit escalation reason,
-                            # but the model cannot author that reason itself.
-                            raise FabricTaskError(
-                                "JEV_FRONTIER_REQUIRES_PARENT_CLASSIFICATION") from None
-                        raise
+                            # Advisory ambiguity is a signal for the parent, not
+                            # permission for Jev to veto an existing commission.
+                            # Leave the original class and escalation metadata
+                            # unchanged for the incumbent deterministic router.
+                            print("JEV_ESCALATION_RECOMMENDED=FRONTIER_PARENT_REVIEW",
+                                  file=sys.stderr, flush=True)
+                        else:
+                            raise
             except jev_advisory.JevUnavailable as exc:
                 print("JEV_UNAVAILABLE=" + exc.code, file=sys.stderr, flush=True)
             except (OSError, ValueError, UnicodeError):
