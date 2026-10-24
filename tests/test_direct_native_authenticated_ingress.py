@@ -13,7 +13,7 @@ import json
 import subprocess
 import pytest
 from pathlib import Path
-from control_plane import executive_runtime as er
+from control_plane import executive_runtime as er, ceo_request
 from control_plane.executive_service import ExecutiveControlService,CeoIngressAppBinding
 from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
 from integrations.mastermind_executive_app.gateway import AppPolicies
@@ -63,7 +63,7 @@ process.stdout.write(JSON.stringify(intent.payload));
     return json.loads(completed.stdout)
 
 
-@pytest.mark.parametrize('execution',['closed','publication-loss','full','late-loss'])
+@pytest.mark.parametrize('execution',['closed','publication-loss','admission-loss','full','late-loss'])
 def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_key,tmp_path,short_socket_root,monkeypatch,execution):
     mastermind=tmp_path/'mastermind';macro=tmp_path/'macro'
     commit=auth._git_repo(mastermind)
@@ -111,6 +111,11 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
                     return [dict(q) for q in connection.execute('SELECT * FROM worker_quota_classes ORDER BY worker_id,quota_class')]
             before_quotas=quota_rows()
             native=service.supervisor.primary
+            if execution=='admission-loss':
+                from control_plane import ceo_intent
+                original_receipt=ceo_intent.build_receipt
+                def lost_after_commit(*args,**kwargs):raise OSError('inert post-admission receipt loss')
+                monkeypatch.setattr(ceo_intent,'build_receipt',lost_after_commit)
             if execution=='publication-loss':
                 original_create=er.JobRegistry._create_job_in_transaction
                 def revoke_before_commit(registry,*args,**kwargs):
@@ -139,6 +144,19 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
                 manifest=dict(app.MANIFEST_PROJECTION,profiles=[*app.MANIFEST_PROJECTION['profiles'],dict(ref='native_research_only',label='Native research only')])
                 payload=app.actual_launch_payload(tmp_path,context.json()['principal_scope'],profile_ref='native_research_only',manifest_projection=manifest)
                 response=await http.post('/os/executive/submit',headers=headers(token),json={'arguments':payload})
+                if execution=='admission-loss':
+                    assert response.status_code==202 and response.json()['status']=='effect_unknown',response.text
+                    assert len(service.runtime.jobs.list_jobs())==1 and service.runtime.attempts.list_attempts()==[]
+                    assert native.adapter.start_count==0
+                    monkeypatch.setattr(ceo_intent,'build_receipt',original_receipt)
+                    # Original status lookup learns durable mode/Job from its
+                    # actual admitted Event; no submit or launch is repeated.
+                    recovered=await http.post('/os/executive/status',headers=headers(token),json={'arguments':{'intent_id':ceo_request.automated_intent_id(response.json()['request_ref'])}})
+                    assert recovered.status_code==200,recovered.text
+                    assert recovered.json()['data']['schema']=='mastermind.ceo_direct_native_receipt.v1'
+                    assert recovered.json()['data']['job_id']==service.runtime.jobs.list_jobs()[0].job_id
+                    assert native.adapter.start_count==0
+                    return
                 if not armed or execution=='publication-loss':
                     assert response.status_code!=200 or response.json()['status']!='accepted',response.text
                     assert service.runtime.jobs.list_jobs()==[] and service.runtime.attempts.list_attempts()==[]
@@ -192,5 +210,30 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
                 assert acknowledged['consumption']['state']=='CONSUMED'
                 assert acknowledged['result']==view['result']
                 assert native.adapter.start_count==1 and len(service.runtime.jobs.list_jobs())==1
+        finally:await service.close()
+    asyncio.run(exercise())
+
+
+def test_normal_installed_factory_closed_arm_startup_creates_no_native_quota(tmp_path,short_socket_root,monkeypatch):
+    """Real normal factory+Service start; only launchd activation is inert.
+
+    No Worker broker call, account read, live path or provider is available.
+    The configured direct callable itself must confer no registration effect.
+    """
+    from tests.test_ceo_submit_armed_composition import _module,_raw,_write
+    module=_module()
+    raw=_raw(tmp_path,control_socket_path=str(short_socket_root/'closed-factory.sock'),
+        shared_run_gid=os.getegid(),ceo_submit_armed=False,coo_autonomy_armed=False,coo_operator_harness_armed=False)
+    loaded=module.load_control_config(_write(tmp_path,raw))
+    monkeypatch.setattr(module,'activate_launchd_socket',lambda _:None)
+    service=module._service_from_config(loaded,direct_native_generation_provider=lambda:'a'*64)
+    async def exercise():
+        await service.start()
+        try:
+            assert service.service_state=='AWAITING_CANARY'
+            assert service.runtime.workers.list_workers()==[] and service.runtime.jobs.list_jobs()==[]
+            service._register_worker()
+            assert service.runtime.workers.get_quota_class(service.config.worker_id,
+                service.config.coo_default_quota_class+'.review') is None
         finally:await service.close()
     asyncio.run(exercise())

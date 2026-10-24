@@ -2501,6 +2501,9 @@ class CurrentCapacityCommitmentFacts:
 def _direct_native_provenance(connection, row, *, required=False):
     if row is None:
         raise StateConflict("direct native Job is unavailable")
+    if row["orchestration_role"] is not None:
+        if required: raise StateConflict("direct native Job cannot have an orchestration role")
+        return None
     # Legacy rows gain no new canonical-format requirement. A new direct
     # record cannot be demoted by deleting its marker, however.
     hinted = _json_loads(row["constraints_json"],fallback={})
@@ -5264,6 +5267,10 @@ def _decode_orchestration_job_fields(
 def _direct_attempt_view(connection, row):
     """Internal Event-validated view; schema7 role-null columns stay NULL."""
     if row is None: return row
+    # Schema7's enforced role floor makes an actual persisted orchestration
+    # grant an incumbent row, never this Event-backed role-null variant.
+    if row["effective_grant_json"] is not None:
+        return row
     job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(row["job_id"],)).fetchone()
     admission=_direct_native_provenance(connection,job)
     if admission is None: return row

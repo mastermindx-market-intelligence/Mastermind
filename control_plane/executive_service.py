@@ -5706,11 +5706,15 @@ class ExecutiveControlService:
                     result=await self._handle_direct_native_app_frame(parsed,app_binding=app_binding)
                     await self._send_ceo_ingress_response(writer,{"ok":True,"result":result})
                 except ceo_ingress.CeoIngressError as exc:
+                    if parsed.get("schema")==direct.SUBMIT_SCHEMA and exc.code in {"backend_unavailable","internal_error"}:
+                        # The sink may have committed. Closing the same sent
+                        # frame preserves incumbent SENT_UNKNOWN transport law.
+                        return
                     await self._send_ceo_ingress_error(writer,exc.code,exc.message)
                 except Exception:
-                    # A lost launch/commit response is not a proven no-effect
-                    # refusal. The HTTP owner retains its original request.
-                    await self._send_ceo_ingress_error(writer,"backend_unavailable","direct native original operation requires reconciliation")
+                    # No ordinary refusal can prove that a committed admission
+                    # or launch did not happen. Retain the original pointer.
+                    return
                 return
             principal_frame = (
                 isinstance(parsed, Mapping) and isinstance(parsed.get("schema"), str)
@@ -6651,10 +6655,10 @@ class ExecutiveControlService:
             # claimed/unknown operation after response loss or service restart.
             if result.get("duplicate") is False:
                 intent_id=result["intent_id"]
-                access,_,_=await asyncio.to_thread(self._direct_native_access,
-                    principal_scope=parsed["principal_scope"],work_ref=result["work_ref"],
-                    intent_id=intent_id,app_binding=app_binding)
                 try:
+                    access,_,_=await asyncio.to_thread(self._direct_native_access,
+                        principal_scope=parsed["principal_scope"],work_ref=result["work_ref"],
+                        intent_id=intent_id,app_binding=app_binding)
                     if self._service_state != "READY":
                         raise StateConflict("direct native worker is not READY")
                     execution=self._direct_native_execution_access(access)

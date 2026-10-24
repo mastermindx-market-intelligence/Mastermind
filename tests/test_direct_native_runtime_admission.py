@@ -9,8 +9,12 @@ from control_plane import direct_native_execution as dn, executive_runtime as er
 
 def fixture(tmp_path):
     source=tmp_path/'source';source.mkdir()
+    home=tmp_path/'git-home';home.mkdir()
+    env=dict(PATH='/usr/bin:/bin',HOME=str(home),LANG='C',LC_ALL='C',GIT_CONFIG_GLOBAL='/dev/null',
+        GIT_CONFIG_NOSYSTEM='1',GIT_TERMINAL_PROMPT='0')
     def git(*argv):
-        return subprocess.check_output(['git','-C',str(source),*argv],text=True).strip()
+        return subprocess.check_output(['git','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',
+            '-C',str(source),*argv],text=True,env=env).strip()
     git('init','-q');git('config','user.name','Offline');git('config','user.email','offline@example.invalid')
     (source/'commission.md').write_text('Read the inert fixture only.\n')
     git('add','commission.md');git('commit','-qm','fixture')
