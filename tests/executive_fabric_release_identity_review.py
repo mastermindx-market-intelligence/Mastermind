@@ -475,8 +475,6 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
 REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
-    'sha256': '12db4f85bdbfaf9fd504bb4520b2e9f3cb015e0df0c2684e98d01a03ac3f35fe',
-    'sites': ((224, 76, 79, 'int', '587'),
-              (224, 107, 112, 'int', '0o755'),
-              (236, 124, 127, 'int', '501')),
+    'sha256': '454d4dc06c30cd4c91f623f3a4765b18b1fd8ff13cbbe1003a72d47ac45949ac',
+    'sites': ((243, 76, 79, 'int', '587'), (243, 107, 112, 'int', '0o755'), (256, 124, 127, 'int', '501')),
 }

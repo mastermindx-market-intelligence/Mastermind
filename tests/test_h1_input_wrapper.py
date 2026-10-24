@@ -19,6 +19,15 @@ CANARY=b'0123456789abcdef0123456789abcdef'
 RAW=b'export GLM_SHIM_TOKEN="'+CANARY+b'"\n'
 
 
+def model_existing_policy(monkeypatch):
+    # Explicit in-process test model. Real early placement is tested separately
+    # in genuine isolated local CPython children using the exact pinned literal.
+    from types import SimpleNamespace
+    monkeypatch.setattr(sys,'flags',SimpleNamespace(isolated=1,no_site=1))
+    monkeypatch.setattr(sys,'dont_write_bytecode',True)
+    for name in ('site','sitecustomize','usercustomize'):monkeypatch.setitem(sys.modules,name,None)
+
+
 def data():
     return {'schema_version':w.SCHEMA,'host_ref':'ubuntu0','transport_alias':'mmx-ubuntu0',
        'account':dict(uid=1000,gid=1000,user='ubuntu0',home=w.HOME),
@@ -162,6 +171,7 @@ def test_packet_fixed_route_no_execution():
 
 
 def test_public_acquire_platform_refusal_before_any_access(monkeypatch):
+    model_existing_policy(monkeypatch)
     monkeypatch.setattr(sys,'platform','unsupported')
     monkeypatch.setattr(w.os,'open',lambda *a,**k:pytest.fail('filesystem accessed'))
     monkeypatch.setattr(w.os,'pread',lambda *a,**k:pytest.fail('credential read'))
@@ -217,7 +227,8 @@ def test_packet_body_never_imports_remote_mutable_search_path():
     assert 'run_bootstrap(' not in PATH.read_text()
 
 
-def test_actual_acquisition_codec_private_credential_canary(monkeypatch,local):
+@pytest.mark.parametrize('policy_drift',[None,'after_package','after_image','on_context_close'])
+def test_actual_acquisition_codec_private_credential_canary(monkeypatch,local,policy_drift):
     # Explicit platform/account/image/ACL/seal test models. Actual private
     # grammar, file pread, fingerprint, context codec and closed output run.
     from contextlib import contextmanager
@@ -228,19 +239,31 @@ def test_actual_acquisition_codec_private_credential_canary(monkeypatch,local):
         raw=os.pread(fd,expected['size']+1,0);token.parse_helper_data(raw)
         assert hashlib.sha256(raw).hexdigest()==expected['sha256']
         seen.append(True)
-        yield SimpleNamespace(fingerprint={'schema_version':token.SCHEMA,**expected},check=lambda:None)
+        try:
+            yield SimpleNamespace(fingerprint={'schema_version':token.SCHEMA,**expected},check=lambda:None)
+        finally:
+            if policy_drift=='on_context_close':sys.modules.pop('sitecustomize',None)
     monkeypatch.setattr(token,'freeze_helper_data',mechanical_seal)
-    monkeypatch.setattr(w,'package',lambda:modules)
+    def package_return():
+        if policy_drift=='after_package':sys.modules.pop('sitecustomize',None)
+        return modules
+    monkeypatch.setattr(w,'package',package_return)
     monkeypatch.setattr(sys,'platform','linux')
-    monkeypatch.setattr(sys,'flags',SimpleNamespace(isolated=1,no_site=1))
-    monkeypatch.setattr(sys,'dont_write_bytecode',True)
+    model_existing_policy(monkeypatch)
     monkeypatch.setattr(w.pwd,'getpwuid',lambda _:SimpleNamespace(pw_name=w.USER,pw_dir=w.HOME))
     monkeypatch.setattr(w.os.path,'realpath',lambda _:w.BOOT)
     monkeypatch.setattr(w,'first_python',lambda _:('/usr/bin/python3','/usr/bin'))
-    monkeypatch.setattr(w,'image',lambda c,path:({'path':path,'real_path':w.BOOT,'sha256':w.IMAGE_SHA},[]))
+    def image_return(c,path):
+        if policy_drift=='after_image' and path=='/usr/bin/python3':sys.modules.pop('sitecustomize',None)
+        return {'path':path,'real_path':w.BOOT,'sha256':w.IMAGE_SHA},[]
+    monkeypatch.setattr(w,'image',image_return)
     monkeypatch.setenv('HOME',w.HOME);monkeypatch.delenv('GLM_CONFIG',raising=False)
     monkeypatch.setattr(w.os.path,'isfile',lambda p:p=='/usr/bin/python3')
     monkeypatch.setattr(w.os,'access',lambda *_:True)
+    if policy_drift:
+        with pytest.raises(Exception):w.acquire()
+        assert seen==([] if policy_drift in ('after_package','after_image') else [True])
+        return
     result=w.acquire();encoded=w.canonical(result)
     assert seen==[True] and CANARY not in encoded and RAW not in encoded
     assert result['selectors']['glm_config']==w.HOME+'/.glm/config.json'
@@ -269,3 +292,58 @@ def test_root_anchor_predicate_before_leaf_private_read(monkeypatch,change):
     with pytest.raises(w.Refused):
         with w.Custody() as c:c.open(w.HELPER,owners={0,w.UID})
     assert opened==['/'] and closed==[90]
+
+
+def test_old_acquisition_data_never_promoted(monkeypatch):
+    value=data();value['schema_version']='mastermind.h1_initializer_input_acquisition/v1'
+    monkeypatch.setattr(w,'package',lambda:pytest.fail('old DATA reached new validator'))
+    with pytest.raises(w.Refused):w.assemble(value)
+
+
+def test_new_profile_and_parent_pin_are_explicit_and_local_modes_preserve_site():
+    before={n:sys.modules.get(n,'ABSENT') for n in ('site','sitecustomize','usercustomize')}
+    parent=w.package()['paid_initializer.py'];result=w.assemble(data());packet=w.packet(PATH.read_bytes())
+    assert result['commitment']['startup']['profile']==parent.NO_SITE_PROFILE=='cpython-3.12-linux-root-prefix-nosite.v1'
+    assert w.SCHEMA=='mastermind.h1_initializer_input_acquisition/nosite_v1'
+    assert w.PINS['paid_initializer.py']=='2d34fa0ef1353c991783574e6a7af4f3011ecbea1f07caed3e967c5f1e6b2f7c'
+    assert w.PINS['paid_initializer_token_data.py']=='7a3e5d2642df12c48769490c6cb86301bad1843088bf2dae48181c7a307e2dfe'
+    assert w.PINS['paid_initializer_nested_data.py']=='47c476deedd42231206d528b656664c8b590414ea905ee2fe91571a90454d073'
+    assert packet['stdin_utf8'].startswith(parent.NO_SITE_PREAMBLE+'import base64\n')
+    assert before=={n:sys.modules.get(n,'ABSENT') for n in before}
+
+
+def test_missing_policy_direct_acquire_refuses_without_backfill(monkeypatch):
+    before={n:sys.modules.get(n,'ABSENT') for n in ('site','sitecustomize','usercustomize')}
+    monkeypatch.setattr(w,'package',lambda:pytest.fail('missing policy loaded private package'))
+    with pytest.raises(SystemExit) as error:w.acquire()
+    assert error.value.code==78
+    assert before=={n:sys.modules.get(n,'ABSENT') for n in before}
+
+
+def local_isolated_child(source):
+    import subprocess,shutil
+    executable=shutil.which('python3.12') or sys.executable
+    # No remote call; fixed source and synthetic in-memory payload only.
+    return subprocess.run([executable,'-I','-S','-B','-'],input=source.encode(),capture_output=True,timeout=5)
+
+
+def test_genuine_early_preamble_before_first_decoded_statement():
+    payload=b"import sys\nassert all(n in sys.modules and sys.modules[n] is None for n in ('site','sitecustomize','usercustomize'))\ndef main(args):\n    assert args==['--acquire']\n    print('INERT_POLICY_PRESENT')\n    return 0\n"
+    packet=w.packet(payload);result=local_isolated_child(packet['stdin_utf8'])
+    assert result.returncode==0 and result.stdout==b'INERT_POLICY_PRESENT\n' and result.stderr==b''
+
+
+@pytest.mark.parametrize('name',['site','sitecustomize','usercustomize'])
+def test_genuine_preamble_preloaded_module_refuses_before_payload(name):
+    payload=b"raise AssertionError('INERT_PAYLOAD_MUST_NOT_RUN')\n"
+    body="import sys,types\nsys.modules["+repr(name)+"]=types.ModuleType("+repr(name)+")\n"+w.packet(payload)['stdin_utf8']
+    result=local_isolated_child(body)
+    assert result.returncode==78 and not result.stdout and not result.stderr
+
+
+def test_decoded_entry_refuses_before_base64_import_without_policy():
+    # Execute the actual decoded module with no preamble, observing imports.
+    source=PATH.read_text()
+    body="import sys,builtins\n_seen=[]\n_import=builtins.__import__\ndef traced(name,*a,**k):\n    _seen.append(name)\n    return _import(name,*a,**k)\nbuiltins.__import__=traced\ntry:\n    exec(compile("+repr(source)+",'<actual-decoded-wrapper>','exec'),{'__name__':'_h1_acquisition_packet'})\nexcept SystemExit as error:\n    assert error.code==78 and 'base64' not in _seen\n    assert all(n not in sys.modules for n in ('site','sitecustomize','usercustomize'))\nelse:raise AssertionError('missing policy admitted')\nprint('REFUSED_BEFORE_BASE64')\n"
+    result=local_isolated_child(body)
+    assert result.returncode==0 and result.stdout==b'REFUSED_BEFORE_BASE64\n' and result.stderr==b''
