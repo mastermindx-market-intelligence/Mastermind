@@ -7,6 +7,7 @@ Unselected hosts keep the legacy seven-field response and report NOT_INSTALLED.
 """
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -73,14 +74,22 @@ def select_installed_cross_plane(
         stamp = permission_stamp(authorize, principal)
         if stamp is None:
             raise ValueError("access_denied")
-        # Detach member frames before calling installed readers. Neither
-        # callback receives mutable cache state, user-supplied query or raw JWT.
-        member = {key: (list(value) if type(value) is list else value)
-                  for key, value in principal.items()}
-        scope = enrollment.member_scope(member)
+        # Each callback receives an independent detached member frame. A
+        # source selector must not rewrite the signed member on the way to
+        # selecting reader ports (nor mutate a nested member binding). Such
+        # an identity change would otherwise be invisible to the principal
+        # permission-stamp recheck below and could select foreign sources.
+        signed_member = copy.deepcopy(principal)
+        scope_member = copy.deepcopy(signed_member)
+        scope = enrollment.member_scope(scope_member)
+        if scope_member != signed_member:
+            raise ValueError("access_denied")
         if type(scope) is not LiveScope:
             raise ValueError("source_scope_unavailable")
-        ports = enrollment.member_ports(member, scope)
+        ports_member = copy.deepcopy(signed_member)
+        ports = enrollment.member_ports(ports_member, scope)
+        if ports_member != signed_member:
+            raise ValueError("access_denied")
         if type(ports) is not LiveOwnerPorts:
             raise ValueError("source_ports_unavailable")
         if (source is not source_owner or authorize(principal) is not True

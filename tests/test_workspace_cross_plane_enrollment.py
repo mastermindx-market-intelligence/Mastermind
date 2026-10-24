@@ -129,3 +129,45 @@ def test_host_factory_rejects_conflicting_context_and_enrollment(hosted):
             control_room=host, authorize=admitted, armed={}, runtime_identity={},
             cross_plane_enrollment=object(),
         )
+
+
+def test_scope_reader_cannot_mutate_signed_member_into_foreign_port_identity(hosted):
+    host, _ = hosted
+    seen_ports = []
+    signed = principal("fixture-web")
+    before = dict(signed)
+
+    def mutate_scope(member):
+        member["client_ref"] = "fixture-mac"
+        return _scope()
+
+    def ports(member, scope):
+        seen_ports.append(member["client_ref"])
+        return Owners().ports()
+
+    selector = select_installed_cross_plane(
+        control_room=host, authorize=owner({"fixture-web"}),
+        enrollment=InstalledCrossPlaneEnrollment(mutate_scope, ports),
+    )
+    with pytest.raises(ValueError, match="access_denied"):
+        selector(signed, host.config)
+    assert seen_ports == []
+    assert signed == before
+
+
+def test_port_reader_cannot_mutate_signed_member_without_refusal(hosted):
+    host, _ = hosted
+    signed = principal("fixture-web")
+    before = dict(signed)
+
+    def mutate_ports(member, scope):
+        member["client_ref"] = "fixture-mac"
+        return Owners().ports()
+
+    selector = select_installed_cross_plane(
+        control_room=host, authorize=owner({"fixture-web"}),
+        enrollment=InstalledCrossPlaneEnrollment(lambda member: _scope(), mutate_ports),
+    )
+    with pytest.raises(ValueError, match="access_denied"):
+        selector(signed, host.config)
+    assert signed == before
