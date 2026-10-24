@@ -6,7 +6,8 @@ collector.
 
 The candidate under test is admitted as two flat manifest members. Admission
 is not selection and is not an install. These tests do not select or install
-a live native generation.
+a live native generation. Advance tests call the original publisher select
+only against the temporary store in the fixture.
 """
 from __future__ import annotations
 
@@ -1527,6 +1528,231 @@ def test_holder_death_before_arm_does_not_mutate_after_peer_install(workspace):
         if proc.poll() is None:
             os.kill(proc.pid, signal.SIGKILL)
             proc.communicate(timeout=5)
+
+
+def _selection(ctx):
+    return json.loads((ctx["store"] / "CURRENT.json").read_text())
+
+
+def _reviewed_target(ctx, workspace, body):
+    store, release = publish(workspace, body, False)
+    assert store == ctx["store"]
+    return release
+
+
+def _wait_for(proc, path):
+    deadline = time.time() + 8
+    while time.time() < deadline and not path.exists():
+        if proc.poll() is not None:
+            out, err = proc.communicate()
+            raise AssertionError(err or out)
+        time.sleep(0.05)
+    assert path.exists()
+
+
+def test_advance_rebinds_launchd_only_after_old_pid_settles(workspace):
+    """Selector CAS and the launchd pin move together, and only after the old pid is dead."""
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 7\n")
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 8\n")
+    pin = target / "ext" / "host_pull.sh"
+    original = b"OLD-LAUNCHD-8458592a\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").write_text("")
+    (ctx["stub"] / "pause-pid").write_text("")
+    (ctx["stub"] / "argv").write_text("/bin/bash\n/generations/8458592a/ext/host_pull.sh\n")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name, advance_from=selector.name),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _wait_for(proc, ctx["stub"] / "ps-entered")
+    mid = _selection(ctx)
+    assert mid["generation"] == target.name
+    assert mid["previous"] == selector.name
+    assert mid["sequence"] == before["sequence"] + 1
+    assert ctx["plist"].read_bytes() == original
+    paused = launch_log(ctx)
+    assert "bootout " in paused
+    assert "bootstrap " not in paused
+    assert paused.count("print ") == 1
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], pin))
+    (ctx["stub"] / "pause-pid").unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 0, err
+    final = _selection(ctx)
+    assert final["generation"] == target.name
+    assert final["previous"] == selector.name
+    assert final["sequence"] == before["sequence"] + 1
+    plist = plistlib.loads(ctx["plist"].read_bytes())
+    assert plist["ProgramArguments"][-1] == str(pin)
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert log.count("bootstrap ") == 1
+    assert log.index("bootout ") < log.index("bootstrap ")
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert_not_executed(ctx)
+
+
+def test_rebind_without_advance_does_not_touch_launchd(workspace):
+    ctx = prepare(workspace)
+    selector = ctx["release"].name
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 9\n")
+    original = arm_running(ctx, workspace)
+    result = run(ctx, generation=target.name, expect=selector)
+    assert result.returncode == 78, result.stderr
+    assert "pin checks failed" in result.stderr
+    assert launch_log(ctx) == ""
+    assert _selection(ctx) == before
+    assert ctx["plist"].read_bytes() == original
+    assert "bootout " not in launch_log(ctx)
+    assert_not_executed(ctx)
+
+
+def test_advance_from_must_name_the_live_selector(workspace):
+    ctx = prepare(workspace)
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 10\n")
+    original = arm_running(ctx, workspace)
+    other = "ab" * 32
+    result = run(ctx, generation=target.name, expect=other, advance_from=other)
+    assert result.returncode == 78, result.stderr
+    assert "pin checks failed" in result.stderr
+    assert "generation is not the selected current" in result.stderr
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert _selection(ctx) == before
+    assert ctx["plist"].read_bytes() == original
+    assert_not_executed(ctx)
+
+
+def test_advance_target_equal_to_current_is_refused(workspace):
+    ctx = prepare(workspace)
+    before = _selection(ctx)
+    name = ctx["release"].name
+    result = run(ctx, advance_from=name)
+    assert result.returncode == 78, result.stderr
+    assert "advance target is already current" in result.stderr
+    assert launch_log(ctx) == ""
+    assert _selection(ctx) == before
+    assert_not_executed(ctx)
+
+
+def test_advance_refuses_while_publication_lock_is_held(workspace):
+    ctx = prepare(workspace)
+    selector = ctx["release"].name
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 11\n")
+    original = arm_running(ctx, workspace)
+    lock = ctx["store"] / ".publication.lock"
+    fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = run(ctx, generation=target.name, expect=selector, advance_from=selector)
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    assert result.returncode == 78, result.stderr
+    assert "selector advance refused" in result.stderr
+    assert "native publication already in progress" in result.stderr
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert _selection(ctx) == before
+    assert ctx["plist"].read_bytes() == original
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert_not_executed(ctx)
+
+
+def test_advance_rolls_selector_back_when_bootstrap_fails(workspace):
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 12\n")
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 13\n")
+    original = b"OLD-LAUNCHD-PIN\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").write_text("")
+    (ctx["stub"] / "pause-pid").write_text("")
+    (ctx["stub"] / "bootstrap-fail-left").write_text("1\n")
+    (ctx["stub"] / "argv").write_text("/bin/bash\n/old/generation/ext/host_pull.sh\n")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name, advance_from=selector.name),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _wait_for(proc, ctx["stub"] / "ps-entered")
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    assert _selection(ctx)["generation"] == target.name
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], target / "ext" / "host_pull.sh"))
+    (ctx["stub"] / "pause-pid").unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "recovered original service" in err
+    assert ctx["plist"].read_bytes() == original
+    final = _selection(ctx)
+    assert final["generation"] == selector.name
+    assert final["previous"] == target.name
+    assert final["sequence"] == before["sequence"] + 2
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert log.count("bootstrap ") == 2
+    assert log.index("bootout ") < log.index("bootstrap ")
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "RECOVERED"
+    assert receipt["service"] == "restored"
+    assert_not_executed(ctx)
+
+
+def test_advance_no_effect_bootout_rolls_selector_back(workspace):
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 14\n")
+    original = arm_running(ctx, workspace)
+    (ctx["stub"] / "bootout-rc").write_text("1\n")
+    result = run(ctx, generation=target.name, expect=selector.name, advance_from=selector.name)
+    assert result.returncode == 78, result.stderr
+    assert "bootout had no effect" in result.stderr
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "NO_EFFECT"
+    assert receipt["service"] == "still-loaded"
+    assert ctx["plist"].read_bytes() == original
+    final = _selection(ctx)
+    assert final["generation"] == selector.name
+    assert final["previous"] == target.name
+    assert final["sequence"] == before["sequence"] + 2
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert "bootstrap " not in log
+    assert_not_executed(ctx)
+
+
+def test_advance_effect_unknown_does_not_roll_the_selector_back(workspace):
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 15\n")
+    original = arm_running(ctx, workspace)
+    result = run(
+        ctx, generation=target.name, expect=selector.name, advance_from=selector.name,
+        fault="post-bootout-print")
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert "roll" not in receipt["reason"]
+    final = _selection(ctx)
+    assert final["generation"] == target.name
+    assert final["previous"] == selector.name
+    assert final["sequence"] == before["sequence"] + 1
+    assert ctx["plist"].read_bytes() == original
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert "bootstrap " not in log
+    assert_not_executed(ctx)
 
 
 def test_ready_before_watch_registration_is_refused(workspace):

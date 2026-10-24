@@ -16,6 +16,18 @@
 # original publication lock immediately before each effect, and owner, mode,
 # path, and RELEASE descriptor checks.
 #
+# --advance-from HEX is the only way to move the selector and the launchd
+# service together. It must equal --expect-current and must differ from
+# --generation. Before any effect, CURRENT must still be that prior generation
+# and the target generation must verify. After the install marker is armed,
+# and before bootout, this process calls the original publisher select CLI.
+# That call is not nested under .publication.lock. Bootstrap is refused until
+# the old pid is dead and the label is absent. A later path that restores the
+# old plist and proves the service CAS-selects back to --advance-from. An
+# unknown service state leaves the selector where the first CAS put it and
+# records EFFECT_UNKNOWN. Rebinding launchd while CURRENT names a different
+# generation, without --advance-from, fails before launchctl.
+#
 # Single-collector exclusion is /usr/bin/lockf -t 0 (contention status 75).
 # This lifecycle does not use a pid-file check-then-write. Launchd state is
 # loaded, definitively service-not-found, or uncertain. Uncertain fails closed
@@ -78,6 +90,8 @@ FAULT=""
 MARKER_OWNED=0
 INSTALL_HOLDER_PID=""
 INSTALL_FENCE=""
+ADVANCE_FROM=""
+SELECTED_ADVANCE=0
 
 release_install_holder() {
   if [ -z "${INSTALL_HOLDER_PID:-}" ]; then
@@ -155,6 +169,14 @@ on_signal() {
       exit "$code"
       ;;
     BACKED_UP)
+      # Select may already have moved CURRENT. Launchd has not been booted
+      # out, so a proven pre-effect signal rolls that CAS back. A failed
+      # rollback is not claimed as a restored pair.
+      if [ "${SELECTED_ADVANCE:-0}" -eq 1 ]; then
+        rollback_advanced_selector \
+          || write_receipt EFFECT_UNKNOWN "signal-$PHASE" "selector rollback failed" \
+          || true
+      fi
       release_install_holder
       exit "$code"
       ;;
@@ -271,9 +293,10 @@ def perform_install(src, dest, fault):
     finally:
         os.close(dirfd)
 
-if cmd == "check-pin":
+if cmd == "check-pin" or cmd == "check-advance":
     store, generation, expect, publisher, pin = sys.argv[2:7]
     owner_required = int(sys.argv[7])
+    advancing = cmd == "check-advance"
     require_safe(store, "store")
     require_safe(pin, "pin")
     require_safe(publisher, "publisher")
@@ -304,8 +327,11 @@ if cmd == "check-pin":
     if st_cur.st_uid != os.geteuid():
         fail("current owner")
     current = json.loads(open(current_path, "rb").read().decode("utf-8"))
+    wanted = expect if advancing else generation
     if (not isinstance(current, dict) or current.get("schema") != "native-code-selection.v1"
-            or current.get("generation") != generation or current.get("generation") != expect
+            or current.get("generation") != wanted
+            or (not advancing and current.get("generation") != expect)
+            or (advancing and generation == expect)
             or type(current.get("sequence")) is not int or current["sequence"] < 1
             or set(current) != {"schema", "generation", "sequence", "previous"}):
         fail("generation is not the selected current")
@@ -1278,6 +1304,11 @@ recover_or_stop() {
       die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
       ;;
   esac
+  # The service preimage is proven. Only then is the selector CAS reversed.
+  if ! rollback_advanced_selector; then
+    write_receipt EFFECT_UNKNOWN "$phase" "selector rollback failed" || true
+    die 78 "EFFECT_UNKNOWN service stopped pending repair: selector rollback failed"
+  fi
   write_receipt RECOVERED "$phase" "$reason" || die 78 "receipt failed"
   die 78 "recovered original service: $reason"
 }
@@ -1345,6 +1376,107 @@ bootstrap_once() {
   return $?
 }
 
+confirm_selection_json() {
+  "$PYTHON" -c 'import json,sys
+body=json.loads(sys.argv[1])
+if (body.get("schema")!="native-code-selection.v1"
+        or body.get("generation")!=sys.argv[2]
+        or body.get("previous")!=sys.argv[3]
+        or type(body.get("sequence")) is not int
+        or body["sequence"]<1
+        or set(body)!={"schema","generation","sequence","previous"}):
+    raise SystemExit(78)' "$1" "$2" "$3"
+}
+
+# Publisher select is a separate process. Call it only while this installer
+# does not hold .publication.lock. A refused CAS before bootout has not
+# changed launchd, so the install marker is cleared and the caller may retry.
+advance_selector() {
+  local out verr
+  [ -n "$ADVANCE_FROM" ] || return 0
+  [ "$SELECTED_ADVANCE" -eq 0 ] || die 78 "selector already advanced"
+  prove_install_holder
+  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select.XXXXXX")
+  out=$("$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$GENERATION" --expect "$ADVANCE_FROM" 2>"$verr") || {
+    printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
+    rm -f -- "$verr"
+    if [ "$BOOTED" -eq 0 ] && [ "$PHASE" != "PLIST_REPLACED" ] \
+        && [ "$PHASE" != "BOOTSTRAP_STARTED" ] && [ "$PHASE" != "BOOTOUT_STARTED" ] \
+        && [ "$PHASE" != "BOOTED_OUT" ] && [ "$PHASE" != "PID_GONE" ] \
+        && [ "$PHASE" != "ROLLING_BACK" ]; then
+      if [ "$MARKER_OWNED" -eq 1 ] && [ -n "$STORE" ]; then
+        py install-transaction-complete "$STORE" || true
+        MARKER_OWNED=0
+      fi
+    fi
+    die 78 "selector advance refused"
+  }
+  rm -f -- "$verr"
+  if ! confirm_selection_json "$out" "$GENERATION" "$ADVANCE_FROM"; then
+    # The publisher process already returned the CAS. Remember that before
+    # refusing the output, so a bad body cannot leave the selector forward
+    # with no rollback attempt. Launchd has not moved yet.
+    SELECTED_ADVANCE=1
+    EXPECT_CURRENT=$GENERATION
+    if ! rollback_advanced_selector; then
+      write_receipt EFFECT_UNKNOWN SELECT_ADVANCE "selector advance output" || true
+      die 78 "EFFECT_UNKNOWN service stopped pending repair: selector advance output"
+    fi
+    die 78 "selector advance output"
+  fi
+  EXPECT_CURRENT=$GENERATION
+  SELECTED_ADVANCE=1
+}
+
+# CAS back to the generation we advanced from. The caller may invoke this
+# only after the old service state is proven. Failure leaves SELECTED_ADVANCE
+# set so the receipt stays EFFECT_UNKNOWN instead of RECOVERED.
+rollback_advanced_selector() {
+  local out verr
+  [ "$SELECTED_ADVANCE" -eq 1 ] || return 0
+  prove_install_holder
+  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select-back.XXXXXX")
+  out=$("$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") || {
+    printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
+    rm -f -- "$verr"
+    return 1
+  }
+  rm -f -- "$verr"
+  confirm_selection_json "$out" "$ADVANCE_FROM" "$GENERATION" || return 1
+  EXPECT_CURRENT=$ADVANCE_FROM
+  SELECTED_ADVANCE=0
+}
+
+require_advance_pin() {
+  local owner
+  local verr verify_out
+  [ -n "$ADVANCE_FROM" ] || die 78 "advance-from required"
+  [ "$ADVANCE_FROM" = "$EXPECT_CURRENT" ] || die 78 "advance-from must be the expected current generation"
+  [ "$ADVANCE_FROM" != "$GENERATION" ] || die 78 "advance target is already current"
+  owner=$(id -u)
+  if [ "$HERMETIC" -eq 1 ] && [ -n "${EXPECT_OWNER_UID:-}" ]; then
+    owner=$EXPECT_OWNER_UID
+  fi
+  case $owner in
+    ''|*[!0-9]*) die 78 "owner uid" ;;
+  esac
+  PIN="$STORE/$GENERATION/ext/host_pull.sh"
+  py check-advance "$STORE" "$GENERATION" "$ADVANCE_FROM" "$PUBLISHER" "$PIN" "$owner" >/dev/null \
+    || die 78 "pin checks failed"
+  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-verify.XXXXXX")
+  verify_out=$("$PYTHON" "$PUBLISHER" verify --store "$STORE" --generation "$GENERATION" 2>"$verr") \
+    || { rm -f -- "$verr"; die 78 "publisher verify failed"; }
+  rm -f -- "$verr"
+  "$PYTHON" -c 'import json,sys
+body=json.loads(sys.argv[1])
+if body.get("digest")!=sys.argv[2] or not str(body.get("path","")):
+    raise SystemExit(78)' "$verify_out" "$GENERATION" \
+    || die 78 "publisher verify output"
+  py check-advance "$STORE" "$GENERATION" "$ADVANCE_FROM" "$PUBLISHER" "$PIN" "$owner" >/dev/null \
+    || die 78 "pin checks failed after verify"
+  PHASE=VERIFIED
+}
+
 require_verified_pin() {
   local owner
   local verr verify_out
@@ -1398,12 +1530,15 @@ HOLD_ARM=""
 LOCK_DESCENDANT=""
 HOLDER_REPORT=""
 EXPECT_OWNER_UID=""
+ADVANCE_FROM=""
+SELECTED_ADVANCE=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --store) STORE=${2:-}; shift 2 ;;
     --generation) GENERATION=${2:-}; shift 2 ;;
     --expect-current) EXPECT_CURRENT=${2:-}; shift 2 ;;
+    --advance-from) ADVANCE_FROM=${2:-}; shift 2 ;;
     --publisher) PUBLISHER=${2:-}; shift 2 ;;
     --plist) DEST_PLIST=${2:-}; shift 2 ;;
     --log) LOG_PATH=${2:-}; shift 2 ;;
@@ -1430,6 +1565,14 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$STORE" ] && [ -n "$GENERATION" ] && [ -n "$EXPECT_CURRENT" ] && [ -n "$PUBLISHER" ] || usage
+if [ -n "$ADVANCE_FROM" ]; then
+  case "$ADVANCE_FROM" in
+    *[!0-9a-f]*) die 78 "advance-from identity" ;;
+  esac
+  [ "${#ADVANCE_FROM}" -eq 64 ] || die 78 "advance-from identity"
+  [ "$ADVANCE_FROM" = "$EXPECT_CURRENT" ] || die 78 "advance-from must be the expected current generation"
+  [ "$ADVANCE_FROM" != "$GENERATION" ] || die 78 "advance target is already current"
+fi
 PYTHON=$(command -v python3) || die 78 "python3 required"
 case $WAIT_LIMIT in
   ''|*[!0-9]*) die 78 "wait limit" ;;
@@ -1459,6 +1602,7 @@ esac
 
 case "$COMMAND" in
   collect)
+    [ -z "$ADVANCE_FROM" ] || die 78 "advance-from is install-agent only"
     [ -n "$LOCK" ] || usage
     [ -z "$DEST_PLIST" ] && [ -z "$LOG_PATH" ] && [ -z "$SERVICE_PATH" ] || usage
     require_verified_pin
@@ -1490,7 +1634,11 @@ case "$COMMAND" in
       die 78 "template path"
     fi
     TEMPLATE=$ADMITTED_TEMPLATE
-    require_verified_pin
+    if [ -n "$ADVANCE_FROM" ]; then
+      require_advance_pin
+    else
+      require_verified_pin
+    fi
     py paths-ready "$LOCK" "$LOG_PATH" || die 78 "lock or log path"
     RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH") \
       || die 78 "render failed"
@@ -1501,6 +1649,11 @@ case "$COMMAND" in
         ps_state "$LC_PID"
         [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
         if argv_matches && py same-file "$RENDERED" "$DEST_PLIST"; then
+          # Launchd already runs the target collector. Pair the selector
+          # without a second bootout. A refused CAS leaves both sides as found.
+          if [ -n "$ADVANCE_FROM" ]; then
+            advance_selector
+          fi
           rm -f -- "$RENDERED"
           RENDERED=""
           finish_install_success
@@ -1539,6 +1692,11 @@ case "$COMMAND" in
       die 78 "running service has no plist preimage"
     fi
     PHASE=BACKED_UP
+    # One publisher CAS, then the launchd rebind. The publication lock is
+    # free here. Later effects refuse to run unless CURRENT is the target.
+    if [ -n "$ADVANCE_FROM" ]; then
+      advance_selector
+    fi
     if [ "$NEED_BOOTOUT" -eq 1 ]; then
       hold_if_requested "$HOLD_BOOTOUT"
       OLD_PID=${LC_PID:-"-"}
@@ -1566,6 +1724,14 @@ case "$COMMAND" in
         launchctl_print || stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
         [ "$LC_CLASS" = "absent" ] || stop_uncertain POST_BOOTOUT_PRINT "service still loaded after bootout"
       elif [ "$boot_rc" -eq 76 ]; then
+        # The same pid is still loaded, so launchd did not move. Roll the
+        # selector back. If that CAS fails, the pair is unknown.
+        if ! rollback_advanced_selector; then
+          write_receipt EFFECT_UNKNOWN BOOTOUT_ROLLBACK \
+            "selector rollback failed after bootout had no effect" \
+            || die 78 "receipt failed"
+          die 78 "EFFECT_UNKNOWN service stopped pending repair: selector rollback failed"
+        fi
         write_receipt NO_EFFECT BOOTOUT_NO_EFFECT \
           "bootout returned nonzero and the same pid is still loaded" \
           || die 78 "receipt failed"
@@ -1606,6 +1772,10 @@ case "$COMMAND" in
         recover_or_stop INSTALL "plist install failed"
       fi
       restore_plist || die 78 "rollback restore failed"
+      if ! rollback_advanced_selector; then
+        write_receipt EFFECT_UNKNOWN INSTALL "selector rollback failed" || true
+        die 78 "EFFECT_UNKNOWN service stopped pending repair: selector rollback failed"
+      fi
       die 78 "plist install failed"
     fi
     rm -f -- "$RENDERED"
@@ -1649,6 +1819,9 @@ case "$COMMAND" in
         loaded-running|loaded-idle) ;;
         *) stop_uncertain BOOTSTRAP "recovered bootstrap unproven" ;;
       esac
+      if ! rollback_advanced_selector; then
+        stop_uncertain BOOTSTRAP "selector rollback failed"
+      fi
       write_receipt RECOVERED BOOTSTRAP "bootstrap failed" || die 78 "receipt failed"
       die 78 "recovered original service: bootstrap failed"
     fi
