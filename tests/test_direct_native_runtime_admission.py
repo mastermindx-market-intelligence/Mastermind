@@ -17,7 +17,7 @@ def fixture(tmp_path):
     base=git('rev-parse','HEAD')
     source_data=dict(schema_version=er.EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,work_ref='WS:H2',watch_mode=None,
         commission_ref=dict(repository='w13ss/Mastermind',commit=base,path='commission.md',content_sha256=dn.hashlib.sha256((source/'commission.md').read_bytes()).hexdigest()))
-    binding=dict(base_sha=base,eligible_quota_classes=['default'],provider='codex',model='gpt-5.4',effort='high',cost_class='default',
+    binding=dict(worker_id='codex-offline',base_sha=base,eligible_quota_classes=['default'],provider='codex',model='gpt-5.4',effort='high',cost_class='default',
         routing_policy_version='routing-v1',execution_profile_id='sealed.worker.readonly.no-extensions.v1',execution_profile_digest='a'*64,
         capability_policy_version='capability-v1',capability_policy_digest='b'*64)
     generation=['c'*64]
@@ -113,3 +113,27 @@ def test_final_launch_reuses_exact_live_lease_predicate(tmp_path,mutation):
     with pytest.raises(er.StateConflict):
         runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,dn._issue_execution_access(access,lambda:None),lease=lease)
     assert len(runtime.attempts.list_attempts())==1
+
+
+@pytest.mark.parametrize('part',['source','binding'])
+def test_mutating_issued_admission_dto_does_not_mint_new_authority(tmp_path,part):
+    f=fixture(tmp_path)
+    if part=='source':f[2].source['work_ref']='WS:FOREIGN'
+    else:f[2].binding['worker_id']='foreign-worker'
+    with pytest.raises(ValueError,match='material changed'):create(f)
+    assert f[0].jobs.list_jobs()==[]
+
+
+def test_private_admission_only_record_is_not_execution_authority(tmp_path):
+    f=fixture(tmp_path);runtime,_,_,access,source,_,_=f;job=create(f)
+    with pytest.raises(er.StateConflict,match='execution access'):
+        runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=access)
+    with pytest.raises(er.StateConflict,match='exact host dispatch'):
+        runtime.attempts.claim_job(job.job_id,command_id=f'direct-native-dispatch:{job.job_id}',_direct_native_access=access)
+    assert runtime.attempts.list_attempts()==[] and not Path(job.worktree).exists()
+
+
+def test_actual_source_release_must_match_grounding(tmp_path):
+    f=fixture(tmp_path);f[1]['grounding']['mastermind_sha']='e'*40
+    with pytest.raises(er.StateConflict,match='grounding'):create(f)
+    assert f[0].jobs.list_jobs()==[]

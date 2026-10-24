@@ -6604,7 +6604,7 @@ class ExecutiveControlService:
             # Reuse the existing sealed readonly alias and the SAME physical
             # Worker view. No paid lease/capacity/provider operation is needed.
             _quota,_registration,recipe=self._paid_subject_review_registration(ModelRouter.load(),direct_native=True)
-            native=direct.normalize_binding({key:(self.config.proof_base_sha if key=="base_sha" else recipe[key])
+            native=direct.normalize_binding({key:(self.config.proof_base_sha if key=="base_sha" else self.config.worker_id if key=="worker_id" else recipe[key])
                 for key in direct._BINDING_KEYS})
             source=normalize_executive_dialogue_source(source_provider(intent_id,work_ref),work_ref=work_ref).to_dict()
             self._require_ceo_submit_admission()
@@ -6642,8 +6642,8 @@ class ExecutiveControlService:
                     raise StateConflict("direct native admission requires genuine READY")
                 access,binding,source=self._direct_native_access(principal_scope=parsed["principal_scope"],
                     work_ref=work_ref,intent_id=intent_id,app_binding=app_binding)
-                self._direct_native_execution_access(access).check()
-                return direct._issue_admission(access,source,binding)
+                execution=self._direct_native_execution_access(access)
+                return direct._issue_admission(access,source,binding,execution_access=execution)
             result=await ceo_ingress.handle_direct_native_submit(parsed,runtime=runtime,
                 grounding_provider=app_binding.grounding_provider,workspace_root=self.config.proof_workspace_root,
                 admission_provider=admission_provider)
@@ -6713,10 +6713,16 @@ class ExecutiveControlService:
                     shared_gid=self.config.proof_shared_gid,access=access)
                 # Reserve/claim/unknown evidence remains owned by Runtime on
                 # every failure. No startup scan or generic dispatcher retries.
-                active=await self._require_supervisor().start_direct_native_job(job_id,access=access)
+                from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+                from control_plane.executive_supervisor import ExecutiveSupervisor
+                mounted=self._require_supervisor()
+                owner=mounted.primary if type(mounted) is MixedExecutionOwnerSupervisor else mounted
+                if type(owner) is not ExecutiveSupervisor or owner.runtime is not runtime:
+                    raise StateConflict("direct dispatch requires its genuine mounted native Supervisor")
+                active=await owner.start_direct_native_job(job_id,access=access)
                 if not hasattr(active,"lease"):
                     raise StateConflict("direct native dispatch is already owned; no relaunch")
-                task=asyncio.create_task(self._finish_dispatched(job_id,active),name=f"executive-direct-finish-{job_id}")
+                task=asyncio.create_task(self._finish_dispatched(job_id,active,_direct_owner=owner),name=f"executive-direct-finish-{job_id}")
                 self._dispatch_tasks[job_id]=task
 
     def _observe_ceo_submit_admission(self) -> dict[str, str]:
@@ -8092,9 +8098,13 @@ class ExecutiveControlService:
                         # or turn the same tick into an unbounded retry loop.
                         pass
 
-    async def _finish_dispatched(self, job_id: str, active: Any) -> None:
+    async def _finish_dispatched(self, job_id: str, active: Any, *, _direct_owner=None) -> None:
         try:
-            await self._require_supervisor().finish_job(active)
+            if _direct_owner is not None:
+                from control_plane.executive_supervisor import ExecutiveSupervisor
+                if type(_direct_owner) is not ExecutiveSupervisor or _direct_owner.runtime is not self._require_runtime():
+                    raise StateConflict("direct finisher lost its exact mounted native owner")
+            await (_direct_owner if _direct_owner is not None else self._require_supervisor()).finish_job(active)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

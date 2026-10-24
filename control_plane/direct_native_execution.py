@@ -92,7 +92,7 @@ def receiver_binding(principal_scope: str, source: Mapping[str, Any]) -> str:
     return digest({"principal_scope": principal_scope, "work_ref": source["work_ref"],
                    "commission_ref": source["commission_ref"]})
 
-_BINDING_KEYS = frozenset({'base_sha','eligible_quota_classes','provider','model','effort','cost_class',
+_BINDING_KEYS = frozenset({'worker_id','base_sha','eligible_quota_classes','provider','model','effort','cost_class',
     'routing_policy_version','execution_profile_id','execution_profile_digest',
     'capability_policy_version','capability_policy_digest'})
 
@@ -100,7 +100,8 @@ _BINDING_KEYS = frozenset({'base_sha','eligible_quota_classes','provider','model
 def normalize_binding(value):
     if type(value) is not dict or set(value) != _BINDING_KEYS:
         raise ValueError('direct native host binding is not closed')
-    if (type(value['base_sha']) is not str or re.fullmatch('[0-9a-f]{40}',value['base_sha']) is None
+    if (type(value['worker_id']) is not str or re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}',value['worker_id']) is None
+            or type(value['base_sha']) is not str or re.fullmatch('[0-9a-f]{40}',value['base_sha']) is None
             or value['provider'] != 'codex' or type(value['eligible_quota_classes']) is not list
             or not value['eligible_quota_classes'] or len(value['eligible_quota_classes']) > 2
             or len(set(value['eligible_quota_classes'])) != len(value['eligible_quota_classes'])):
@@ -118,20 +119,30 @@ class DirectNativeAdmission:
     source: dict
     binding: dict
     _capability: object = dataclasses.field(repr=False, compare=False)
+    _material_digest: str = dataclasses.field(repr=False)
+    _execution_access: DirectNativeExecutionAccess | None = dataclasses.field(default=None,repr=False,compare=False)
 
     def check(self):
         from control_plane.executive_runtime import normalize_executive_dialogue_source
         if self._capability is not _ADMISSION or type(self.access) is not DirectNativeAccess:
             raise ValueError('direct native admission is not host-issued')
         self.access.check()
+        if digest(dict(source=self.source,binding=self.binding)) != self._material_digest:
+            raise ValueError('issued direct admission material changed')
+        if self._execution_access is not None:
+            if type(self._execution_access) is not DirectNativeExecutionAccess or self._execution_access.access is not self.access:
+                raise ValueError('direct admission execution binding changed')
+            self._execution_access.check()
         normalize_binding(self.binding)
         source = normalize_executive_dialogue_source(self.source, work_ref=self.access.work_ref).to_dict()
         if source != self.source:
             raise ValueError('direct native source is not canonical')
 
 
-def _issue_admission(access, source, binding):
-    value = DirectNativeAdmission(access, copy.deepcopy(source), normalize_binding(binding), _ADMISSION)
+def _issue_admission(access, source, binding, *, execution_access=None):
+    source=copy.deepcopy(source);binding=normalize_binding(binding)
+    value = DirectNativeAdmission(access, source, binding, _ADMISSION,
+        digest(dict(source=source,binding=binding)),execution_access)
     value.check()
     return value
 

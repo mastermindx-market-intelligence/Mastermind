@@ -747,6 +747,10 @@ def _normalise_constraints(
         if raw[direct_native.POLICY_KEY] != direct_native.POLICY:
             raise StateConflict("direct native policy is invalid")
         direct_fields[direct_native.POLICY_KEY] = direct_native.POLICY
+        token=raw.get("direct_native_worker_id")
+        if type(token) is not str or _WORKER_ID_RE.fullmatch(token) is None:
+            raise StateConflict("direct native configured Worker identity is invalid")
+        direct_fields["direct_native_worker_id"]=token
     role_fields: dict[str, Any] = {}
     if "responsibility_intent" in raw or "responsibility_intent_digest" in raw:
         from control_plane.executive_responsibility import (
@@ -2524,7 +2528,8 @@ def _direct_native_provenance(connection, row, *, required=False):
     binding = direct_native.normalize_binding(value["binding"])
     if (source != value["source"] or orchestration_digest(source) != value["source_digest"]
             or value["receiver_binding_digest"] != direct_native.receiver_binding(value["principal_scope"],source)
-            or any(constraints.get(k) != v for k,v in binding.items())
+            or any(constraints.get(k) != v for k,v in binding.items() if k!="worker_id")
+            or constraints.get("direct_native_worker_id") != binding["worker_id"]
             or row["branch"] != f"codex/job-{row['job_id'].lower()}"
             or Path(row["worktree"]).name != row["job_id"].lower()
             or created.get("direct_workspace") != dict(worktree=row["worktree"],branch=row["branch"],base_sha=binding["base_sha"])):
@@ -5288,7 +5293,7 @@ def _direct_attempt_view(connection, row):
             or value["placement_snapshot_digest"]!=orchestration_digest(value["placement_snapshot"])):
         raise StateConflict("direct Attempt immutable grant/claim join changed")
     placement=validate_placement_snapshot(value["placement_snapshot"])
-    if (placement["worker_id"]!=row["worker_id"] or placement["quota_class"]!=row["quota_class"]
+    if (placement["worker_id"]!=row["worker_id"] or row["worker_id"]!=admission["binding"]["worker_id"] or placement["quota_class"]!=row["quota_class"]
             or placement["provider"]!="codex" or placement["provider"]!=admission["binding"]["provider"]):
         raise StateConflict("direct Attempt placement differs from actual native claim")
     result=dict(row)
@@ -16340,9 +16345,12 @@ class JobRegistry:
         if not root.is_absolute() or root != root.resolve(strict=True):
             raise StateConflict("direct workspace root must be an existing canonical owner directory")
         material=direct_native.admission_material(admission)
+        if intent["grounding"]["mastermind_sha"] != material["binding"]["base_sha"]:
+            raise StateConflict("direct native grounding differs from the actual host source release")
         provenance=_provenance(intent,fingerprint)
         provenance["direct_native"]=material
-        constraints=dict(material["binding"],required_capabilities=["read"],**{direct_native.POLICY_KEY:direct_native.POLICY})
+        constraints=dict(material["binding"],required_capabilities=["read"],direct_native_worker_id=material["binding"]["worker_id"],
+            **{direct_native.POLICY_KEY:direct_native.POLICY})
         return self.create_job(intent["objective"],department=intent["department"],priority=intent["priority"],
             worktree=str(root / intent["intent_id"]),branch=f"codex/{intent['intent_id']}",
             constraints=constraints,attempt_limit=1,requested_authorities=["READ","RESEARCH"],
@@ -17553,6 +17561,10 @@ class AttemptRegistry:
                         or _coo_cycle_dispatch_capability is not None or exact_target is not None):
                     raise StateConflict("direct native Job requires its exact host dispatch")
                 _direct_native_access.check()
+                expected_worker=direct_provenance["binding"]["worker_id"]
+                if worker_id not in (None,expected_worker):
+                    raise StateConflict("direct dispatch Worker differs from its actual configured owner")
+                worker_id=expected_worker
                 if (direct_provenance["principal_scope"] != _direct_native_access.principal_scope
                         or direct_provenance["source"]["work_ref"] != _direct_native_access.work_ref
                         or direct_provenance["authority_generation_digest"] != _direct_native_access.authority_generation_digest):
