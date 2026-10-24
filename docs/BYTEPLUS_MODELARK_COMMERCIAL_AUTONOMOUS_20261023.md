@@ -138,6 +138,32 @@ Vendor:
 - https://console.byteplus.com/ark/region%3Aap-southeast-1/docs/model-pricing
 - https://docs.byteplus.com/en/docs/modelark/deep-thinking
 
+## Credential-owner and actual Worker/Capacity preparation (October 24)
+
+A source-only, **key-free** diagnostic is now available at
+scripts/byteplus_modelark_commercial_preflight.py, with regression coverage in
+tests/test_byteplus_modelark_commercial_preflight.py. Its sole CLI mode reports
+inert commercial Codex Responses configuration, exact proposed model IDs and
+held source identities. No credential, provider endpoint, account, Worker
+registry, native release, or Executive action is read or contacted. Every
+report retains production_start_authorized=false and source-only scope.
+
+The function capacity_identity_preflight(registry, candidate_keys,
+expected_worker_source_config_digest=...) is an owner-callable *read* adapter
+to the existing executive_capacity_join reader. It requires actual registered
+Worker quota identities under provider byteplus-modelark, exact installed
+config digest and remote host identity, but it never certifies issuer headroom
+or START. Its successful result still says production_start_authorized=false.
+
+See docs/runbooks/BYTEPLUS_MODELARK_COMMERCIAL_CANARY_HANDOFF.md for exact
+credential-owner canary obligations, issuer evidence requirements, real
+Worker/Capacity receipt checks and one-job Executive acceptance gates.
+This does not replace independent semantic review, source CI, selected native
+generation, account-secret custody or provider-origin billing. A forced
+non-Qwen Fabric review request was NOT launched on October 24 because the
+installed native Fabric router reported no eligible host for the inspected
+non-Qwen pools; eligibility must recover without overriding host gates.
+
 ## Completion gates
 
 Source CI and independent review; native commercial transport canary;
