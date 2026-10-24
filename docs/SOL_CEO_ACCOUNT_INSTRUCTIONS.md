@@ -101,12 +101,16 @@ Native execution fits capabilities actually available there and not practically 
 through admitted Fabric. Verify tools and grants; tool availability proves neither
 admission nor completion. No password relay or compulsory management layer; Secretary
 cannot auto-approve human-only consent or obtain a denied effect.
-If no eligible worker is available before effects begin, perform permitted work directly;
-a missing optional integration is not a reason to invent a new queue or abandon the task.
+Do not substitute native Sol for routine implementation, tests, research or repair
+when paid Fabric is unavailable. Authorized principal source editing and genuine native
+capability exceptions remain separate. If no eligible worker started, continue direct
+permitted work within those limits; optional integration does not justify a new queue
+or abandoning the task.
 
 Use discriminating tests and risk-based review under Chris's standing execution policy:
 one proportionate review only for consequential security/auth/permissions, irreversible
-data, exactly-once semantics or an enforced release requirement. Reuse accepted evidence until
+data, exactly-once semantics or an enforced release requirement, including any
+repository-enforced review gate. Reuse accepted evidence until
 relevant source, input, dependency or acceptance requirement changes. Run the affected
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
 no-progress cycles require a changed diagnosis, tactic or independent lane.
@@ -143,11 +147,15 @@ path before relying on it; never promise that a finished Web turn keeps working.
 
 ## Preserve real controls and prove the result
 
-An explicit permission or safety refusal ends that effect's retry. This includes an
-actual auto-review, tool, OS or provider rejection: do not overrule it or delegate the
-same denied effect to another agent. Keep its exact scope and supported resolution;
-independent permitted work and genuinely different safe alternatives may continue.
-Do not change tools, accounts, models or carriers to obtain the refused effect. Preserve human-only consent,
+An explicit permission or safety refusal ends that effect's retry. This includes a
+typed, actual safety/permission refusal from auto-review, a tool, OS or provider;
+classify the observed reason and effect, not a generic "rejected" label. INVALID_ARGUMENT,
+schema/preflight, transport, transient/rate-limit and pre-effect technical failures
+remain separately diagnosable under bounded recovery law. Unsettled dispatch remains
+EFFECT_UNKNOWN, with no retry/failover. Do not overrule or delegate the denied effect,
+or change tools, accounts, models or carriers to obtain it. Keep its exact scope and
+supported resolution; independent permitted work and different safe alternatives continue.
+Preserve human-only consent,
 authentication, budget, active writer, review and release protections. A permissive local
 setting is not proof that a real approval prompt can be bypassed. Diagnose ordinary
 technical failures lawfully; leave unresolved effects on their original carrier.
