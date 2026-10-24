@@ -1097,7 +1097,10 @@ def test_t11_real_protected_read_refuses_symlink_and_wrong_mode(
     monkeypatch.setattr(
         readiness, "receipt_storage_contract",
         lambda *, workspace_binding_class=None, worker_gid=readiness.WORKER_GID:
-        (os.getuid(), os.getgid(), 0o400),
+        # On the managed macOS test volume, new files inherit the test
+        # directory's GID, not necessarily os.getgid(). Keep the real
+        # receipt lstat/group/mode checks and match that actual custody.
+        (os.getuid(), tmp_path.stat().st_gid, 0o400),
     )
     # Restore the real implementations that the autouse fixture bypasses.
     monkeypatch.setattr(readiness, "_read_protected_receipt", ORIGINAL_READ_PROTECTED_RECEIPT)
@@ -1232,7 +1235,7 @@ def test_t12_superseded_sibling_symlink_blocks_refresh(
     monkeypatch.setattr(
         readiness, "receipt_storage_contract",
         lambda *, workspace_binding_class=None, worker_gid=readiness.WORKER_GID:
-        (os.getuid(), os.getgid(), 0o400),
+        (os.getuid(), tmp_path.stat().st_gid, 0o400),
     )
     monkeypatch.setattr(readiness, "_read_protected_receipt", ORIGINAL_READ_PROTECTED_RECEIPT)
     monkeypatch.setattr(readiness, "lstat_identity", ORIGINAL_LSTAT_IDENTITY)
