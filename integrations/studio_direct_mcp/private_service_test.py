@@ -4635,7 +4635,7 @@ class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):
         self.assertEqual(json.loads(stdout.getvalue())["targetManifestSha256"], self.pins[2])
         self.assert_original()
         self.pool.write_bytes(b"foreign-unreviewed-pool\n")
-        with self.assertRaisesRegex(SystemExit, "unrecognized or ambiguous source cohort"):
+        with self.assertRaisesRegex(SystemExit, "selected native launcher bytes drifted"):
             svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True))
         self.assert_original()
 
