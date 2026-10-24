@@ -347,3 +347,25 @@ def test_decoded_entry_refuses_before_base64_import_without_policy():
     body="import sys,builtins\n_seen=[]\n_import=builtins.__import__\ndef traced(name,*a,**k):\n    _seen.append(name)\n    return _import(name,*a,**k)\nbuiltins.__import__=traced\ntry:\n    exec(compile("+repr(source)+",'<actual-decoded-wrapper>','exec'),{'__name__':'_h1_acquisition_packet'})\nexcept SystemExit as error:\n    assert error.code==78 and 'base64' not in _seen\n    assert all(n not in sys.modules for n in ('site','sitecustomize','usercustomize'))\nelse:raise AssertionError('missing policy admitted')\nprint('REFUSED_BEFORE_BASE64')\n"
     result=local_isolated_child(body)
     assert result.returncode==0 and result.stdout==b'REFUSED_BEFORE_BASE64\n' and result.stderr==b''
+
+
+def test_selector_policy_revocation_refuses_before_private_package():
+    from types import SimpleNamespace
+    called=[];exit_code=None;error_type=None
+    with pytest.MonkeyPatch.context() as m:
+        model_existing_policy(m)
+        m.setattr(sys,'platform','linux')
+        for name in ('getuid','geteuid','getgid','getegid'):m.setattr(w.os,name,lambda:1000)
+        m.setattr(w.pwd,'getpwuid',lambda _:SimpleNamespace(pw_name=w.USER,pw_dir=w.HOME))
+        m.setattr(w.os.path,'realpath',lambda _:w.BOOT)
+        def selector(_):
+            sys.modules.pop('sitecustomize',None)
+            return '/usr/bin/python3','/usr/bin'
+        def forbidden_package():
+            called.append(True)
+            raise RuntimeError('INERT_PACKAGE_EDGE_REACHED')
+        m.setattr(w,'first_python',selector);m.setattr(w,'package',forbidden_package)
+        try:w.acquire()
+        except SystemExit as error:exit_code=error.code
+        except Exception as error:error_type=type(error).__name__
+    assert exit_code==78 and not called, (exit_code,error_type,called)

@@ -202,6 +202,7 @@ def acquire():
     account=pwd.getpwuid(UID)
     if (account.pw_name,account.pw_dir)!=(USER,HOME) or os.path.realpath('/proc/self/exe')!=BOOT:refuse()
     selected,final_path=first_python(os.environ)
+    _require_early_no_site_policy()
     modules=package();parent=modules['paid_initializer.py'];parent.require_no_site_policy()
     token=modules['paid_initializer_token_data.py'];nested=modules['paid_initializer_nested_data.py']
     with Custody() as custody, ExitStack() as contexts:
