@@ -12,9 +12,12 @@ trusting a pathname:
   compared against the parent-relative nofollow pre-open ``os.stat``, and the
   descriptor-bound macOS ACL observation from ``control_plane.fs_security``
   runs against that same pre-open identity, failing closed;
-* identities and descriptors are rechecked before and after every read, and
-  the whole held ancestry is rechecked deterministically while descending, so
-  concurrent mutation refuses instead of being observed;
+* leaves, symlinks, fixed publication namespaces and enumerated directories
+  retain their full version checks; explicit shared traversal prefixes retain
+  all other identity fields plus a descriptor-bound Darwin vnode history, so
+  benign timestamp churn cannot conceal rename/delete/attribute changes;
+* identities, ACLs and named/held descriptor bindings are rechecked before and
+  after reads, with prefix watch duplicates retained through final disposal;
 * every refusal is the fixed, non-echo ``StudioObservationError``
   (``gateway_studio_invalid``); no errno, path, or content is ever echoed.
 
@@ -403,6 +406,109 @@ def _make_dispatch_dir_policy(
     return _policy
 
 
+_PREFIX_DIRECTORY_LIMIT = 512
+_DIRECTORY_CUSTODY_FIELDS = _IDENTITY_FIELDS[:-2]
+
+
+def _require_directory_custody(pre: os.stat_result, post: os.stat_result) -> None:
+    for field_name in _DIRECTORY_CUSTODY_FIELDS:
+        if getattr(pre, field_name) != getattr(post, field_name):
+            _refuse()
+
+
+class _PrefixMutationGuard:
+    """One observation's finite Darwin vnode history, retained until disposal.
+
+    WRITE is deliberately not subscribed: unrelated sibling writes may change
+    a traversal prefix's timestamps. Every returned event (including unknown,
+    error or revoked events) refuses. Private duplicates keep registrations
+    alive when ordinary traversal descriptors close; no process-lifetime state
+    or unsupported-platform fallback exists.
+    """
+
+    def __init__(self) -> None:
+        import select
+        self._held: dict[tuple[str, ...], tuple[int, os.stat_result]] = {}
+        self._closed = False
+        queue = None
+        try:
+            self._select = select
+            self._mask = (select.KQ_NOTE_RENAME | select.KQ_NOTE_DELETE
+                          | select.KQ_NOTE_REVOKE | select.KQ_NOTE_ATTRIB)
+            queue = self._queue = select.kqueue()
+            if os.get_inheritable(queue.fileno()):
+                _refuse()
+        except BaseException:
+            if queue is not None:
+                try:
+                    queue.close()
+                finally:
+                    _refuse()
+            _refuse()
+
+    def watch(self, path: tuple[str, ...], fd: int, expected: os.stat_result) -> None:
+        self.check()
+        if path in self._held:
+            return
+        if len(self._held) >= _PREFIX_DIRECTORY_LIMIT:
+            _refuse()
+        _require_same_object(expected, os.fstat(fd))
+        owned = os.dup(fd)
+        try:
+            if os.get_inheritable(owned):
+                _refuse()
+            event = self._select.kevent(owned, filter=self._select.KQ_FILTER_VNODE,
+                flags=self._select.KQ_EV_ADD | self._select.KQ_EV_CLEAR,
+                fflags=self._mask)
+            # Any synchronous registration result is ambiguous/error or an
+            # already-observed mutation, never permission to refresh a baseline.
+            if self._queue.control([event], 1, 0):
+                _refuse()
+            _require_same_object(expected, os.fstat(fd))
+            _require_same_object(expected, os.fstat(owned))
+            self._held[path] = (owned, expected)
+        except BaseException:
+            os.close(owned)
+            raise
+        self.check()
+
+    def check(self) -> None:
+        if self._closed:
+            _refuse()
+        try:
+            if self._queue.fileno() < 0:
+                _refuse()
+            for fd, expected in self._held.values():
+                _require_directory_custody(expected, os.fstat(fd))
+                if os.get_inheritable(fd):
+                    _refuse()
+            # Vnode events coalesce their subscribed bits per registration;
+            # a single returned event suffices to refuse, so no finite-buffer
+            # truncation can turn a nonempty result into an accepted snapshot.
+            if self._queue.control(None, 1, 0):
+                _refuse()
+        except (OSError, ValueError):
+            _refuse()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        failed = False
+        for fd, _ in self._held.values():
+            try:
+                os.close(fd)
+            except OSError:
+                failed = True
+        self._held.clear()
+        try:
+            self._queue.close()
+        except (OSError, ValueError):
+            failed = True
+        if failed:
+            _refuse()
+
+
 class _Walk:
     """Holds every descriptor opened during one observation; closes all.
 
@@ -417,6 +523,8 @@ class _Walk:
         self,
         home_exception_parts: tuple[str, ...] | None,
         revalidate_home_exception: Callable[[], None],
+        traversal_prefixes: frozenset[tuple[str, ...]] = frozenset(),
+        protected_directories: frozenset[tuple[str, ...]] = frozenset(),
     ) -> None:
         self._fds: list[int] = []
         self._bindings: dict[int, tuple[int, str, os.stat_result]] = {}
@@ -426,13 +534,56 @@ class _Walk:
         self._home_exception_parts = home_exception_parts
         self._revalidate_home_exception = revalidate_home_exception
         self._exception_used = False
+        self._prefix_guard = _PrefixMutationGuard()
+        self._traversal_prefixes = set(traversal_prefixes)
+        self._protected_directories = protected_directories
+        self._strict_directories: set[tuple[str, ...]] = set()
+
+    def register_tool_prefixes(self, components: tuple[str, ...]) -> None:
+        """Only manifest-selected traversal ancestors; strict roles always win."""
+        if len(components) > _PREFIX_DIRECTORY_LIMIT:
+            _refuse()
+        for length in range(len(components)):
+            path = components[:length]
+            if (path in self._strict_directories or any(
+                    path[:len(root)] == root for root in self._protected_directories)):
+                continue
+            self._traversal_prefixes.add(path)
+
+    def _traversal_only(self, path: tuple[str, ...] | None) -> bool:
+        return (path is not None and path in self._traversal_prefixes
+                and path not in self._strict_directories
+                and not any(path[:len(root)] == root
+                            for root in self._protected_directories))
+
+    def _require_identity(self, pre, post, path) -> None:
+        self._prefix_guard.check()
+        if self._traversal_only(path) and path in self._prefix_guard._held:
+            _require_directory_custody(pre, post)
+        else:
+            _require_same_object(pre, post)
+
+    def _watch_directory(self, path, fd, pre) -> None:
+        if self._traversal_only(path):
+            self._prefix_guard.watch(path, fd, pre)
+        else:
+            self._strict_directories.add(path)
 
     def exception_was_used(self) -> bool:
         """Whether a fixed directory ACL exception was applied at least once."""
 
         return self._exception_used
 
-    def _observe_object_acl(
+    def _observe_object_acl(self, name, fd, pre, path) -> None:
+        # Classifier identities remain genuine fresh full stat snapshots. Long
+        # traversal-prefix tolerance never feeds stale/fabricated stamps to ACL.
+        current = os.fstat(fd)
+        self._require_identity(pre, current, path)
+        self._observe_object_acl_value(name, fd, current, path)
+        _require_same_object(current, os.fstat(fd))
+        self._prefix_guard.check()
+
+    def _observe_object_acl_value(
         self,
         name: str,
         fd: int,
@@ -497,12 +648,22 @@ class _Walk:
 
     def close_all(self) -> None:
         failed = False
+        try:
+            self._prefix_guard.check()
+        except BaseException:
+            failed = True
         for fd in reversed(self._fds):
             try:
                 os.close(fd)
             except OSError:
                 failed = True
         self._fds.clear()
+        try:
+            self._prefix_guard.check()
+        except BaseException:
+            failed = True
+        finally:
+            self._prefix_guard.close()
         if failed:
             _refuse()
 
@@ -523,6 +684,7 @@ class _Walk:
             post = os.fstat(fd)
             _require_same_object(pre, post)
             _policy_root_prefix_dir(post)
+            self._watch_directory((), fd, post)
             self._observe_object_acl("/", fd, pre, ())
         except BaseException:
             self.close(fd)
@@ -571,6 +733,8 @@ class _Walk:
             post = os.fstat(fd)
             _require_same_object(pre, post)
             policy(post)
+            if directory:
+                self._watch_directory(path, fd, post)
             self._observe_object_acl(name, fd, pre, path)
         except BaseException:
             self.close(fd)
@@ -579,8 +743,10 @@ class _Walk:
         self._paths[fd] = path
         previous = self._records.get(path)
         if previous is not None:
-            _require_same_object(previous[0], post)
-        self._records[path] = (post, directory, policy)
+            self._require_identity(previous[0], post, path)
+        # Keep the ORIGINAL version even for relaxed prefixes. A later strict
+        # role can never adopt refreshed timestamps as its sealed baseline.
+        self._records[path] = (previous[0] if previous else post, directory, policy)
         return fd, post
 
     def _recheck_binding(self, fd: int) -> None:
@@ -589,10 +755,10 @@ class _Walk:
             parent_fd, name, expected = binding
             self._recheck_binding(parent_fd)
             current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-            _require_same_object(expected, current)
-            _require_same_object(expected, os.fstat(fd))
+            self._require_identity(expected, current, self._paths.get(fd))
+            self._require_identity(expected, os.fstat(fd), self._paths.get(fd))
         else:
-            _require_same_object(self._root_info, os.fstat(fd))
+            self._require_identity(self._root_info, os.fstat(fd), ())
 
     def recheck_all(self) -> None:
         """Reopen recorded names through anchored descriptors, without payload IO."""
@@ -611,17 +777,17 @@ class _Walk:
                     continue
                 expected, directory, policy = self._records[path]
                 current = os.stat(path[-1], dir_fd=parent_fd, follow_symlinks=False)
-                _require_same_object(expected, current)
+                self._require_identity(expected, current, path)
                 flags = _DIR_FLAGS if directory else _LEAF_FLAGS
                 fd = os.open(path[-1], flags, dir_fd=parent_fd)
                 try:
-                    _require_same_object(expected, os.fstat(fd))
+                    self._require_identity(expected, os.fstat(fd), path)
                     policy(os.fstat(fd))
                     self._observe_object_acl(path[-1], fd, expected, path)
                     if directory:
                         visit(fd, path)
-                    _require_same_object(expected, os.fstat(fd))
-                    _require_same_object(expected, os.stat(path[-1], dir_fd=parent_fd, follow_symlinks=False))
+                    self._require_identity(expected, os.fstat(fd), path)
+                    self._require_identity(expected, os.stat(path[-1], dir_fd=parent_fd, follow_symlinks=False), path)
                 finally:
                     os.close(fd)
         visit(self._root_fd, ())
@@ -636,8 +802,7 @@ class _Walk:
                 observed = os.fstat(fd)
             except OSError:
                 _refuse()
-            if not _same_object(expected, observed):
-                _refuse()
+            self._require_identity(expected, observed, self._paths.get(fd))
 
     def read_bounded(
         self,
@@ -1083,6 +1248,8 @@ def observe_studio_files(
     home_parts = tuple(
         part for part in home_path.parts if part not in ("/", "")
     )
+    if len(home_parts) > _PREFIX_DIRECTORY_LIMIT:
+        _refuse()
     plist_name = "com.mastermind.studio-direct-private.%s.plist" % (
         STUDIO_INSTANCE_KEY,
     )
@@ -1098,7 +1265,17 @@ def observe_studio_files(
         if _pwd_home_components(observed_uid, gid_value) != exception_parts:
             _refuse()
 
-    walk = _Walk(exception_parts, _revalidate_home_exception)
+    # These are traversal-only shared prefixes, never an enumerated or fixed
+    # publication namespace. The LaunchAgents directory and fixed seat stay
+    # strict even though the reader selects named children rather than listdir.
+    prefixes = {home_parts[:length] for length in range(len(home_parts) + 1)}
+    prefixes.update(home_parts + _METADATA_PATH_PARTS[:length]
+                    for length in range(1, len(_METADATA_PATH_PARTS) + 1))
+    prefixes.add(home_parts + ("Library",))
+    protected = frozenset({home_parts + _METADATA_PATH_PARTS + (STUDIO_INSTANCE_KEY,),
+                           home_parts + _PLIST_DIRECTORY_PARTS})
+    walk = _Walk(exception_parts, _revalidate_home_exception,
+                 frozenset(prefixes), protected)
     try:
         root_fd, _root_info = walk.open_root()
 
@@ -1135,6 +1312,8 @@ def observe_studio_files(
             base_chain, _CONFIG_NAME, policy=metadata_leaf
         )
         node_components, backend_components = _decode_manifest(manifest_bytes)
+        walk.register_tool_prefixes(node_components)
+        walk.register_tool_prefixes(backend_components)
 
         installed_file_hashes: dict[str, str] = {}
         for name in sorted(staged_names):
