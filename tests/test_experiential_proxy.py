@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from ops.native_fabric.experiential_proxy.gateway import (
+    QueueFull,
     QueueExpired,
     Settings,
     SlidingWindowAdmissions,
@@ -401,3 +402,22 @@ async def test_shared_org_ceiling_counts_retired_key_admissions_after_rotation(t
     slot = await new.acquire(time.monotonic() + 0.05)
     await new.release(slot)
     new.close()
+
+
+@pytest.mark.asyncio
+async def test_pending_byte_budget_rejects_oversized_queued_body(tmp_path):
+    cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=1,
+                   window_s=0.5, max_queue_wait_s=0.12, max_pending_bytes=5)
+    limiter = SlidingWindowAdmissions(cfg)
+    assert await limiter.acquire(time.monotonic() + 0.05) == 0
+    await limiter.release(0)
+    pending = asyncio.create_task(limiter.acquire(time.monotonic() + 0.10, weight=4))
+    await asyncio.sleep(0.02)
+    assert limiter.pending == 1
+    with pytest.raises(QueueFull):
+        await limiter.acquire(time.monotonic() + 0.03, weight=4)
+    with pytest.raises(QueueExpired):
+        await pending
+    assert limiter.pending == 0
+    assert (await limiter.snapshot())["pending_bytes"] == 0
+    limiter.close()

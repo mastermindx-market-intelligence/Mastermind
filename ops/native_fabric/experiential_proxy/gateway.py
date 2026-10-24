@@ -41,6 +41,7 @@ class Settings:
     safe_rpm_shared: int | None = None  # optional shared organization-wide ceiling
     window_s: float = 60.0
     max_pending: int = 2000
+    max_pending_bytes: int = 64 * 1024 * 1024
     max_inflight_per_key: int = 128
     max_queue_wait_s: float = 600.0
     max_body_bytes: int = 8 * 1024 * 1024
@@ -58,7 +59,7 @@ class Settings:
             raise ValueError("SAFE_RPM_SHARED must be positive when configured")
         if not (0 < self.window_s <= 60.0):
             raise ValueError("window_s must be within (0, 60]")
-        if self.max_pending < 1 or self.max_inflight_per_key < 1 or self.max_queue_wait_s <= 0 or self.max_body_bytes < 1:
+        if self.max_pending < 1 or self.max_pending_bytes < 1 or self.max_inflight_per_key < 1 or self.max_queue_wait_s <= 0 or self.max_body_bytes < 1:
             raise ValueError("queue and body limits must be positive")
 
     @classmethod
@@ -71,6 +72,7 @@ class Settings:
             safe_rpm=int(os.environ.get("SAFE_RPM_PER_KEY", "1000")),
             safe_rpm_shared=(int(v) if (v := os.environ.get("SAFE_RPM_SHARED", "").strip()) else None),
             max_pending=int(os.environ.get("FABRIC_MAX_PENDING", "2000")),
+            max_pending_bytes=int(os.environ.get("FABRIC_MAX_PENDING_BYTES", str(64 * 1024 * 1024))),
             max_inflight_per_key=int(os.environ.get("FABRIC_MAX_INFLIGHT_PER_KEY", "128")),
             max_queue_wait_s=float(os.environ.get("FABRIC_MAX_QUEUE_WAIT_S", "600")),
             max_body_bytes=int(os.environ.get("FABRIC_MAX_BODY_BYTES", str(8 * 1024 * 1024))),
@@ -147,6 +149,7 @@ class SlidingWindowAdmissions:
             raise
         self._condition = asyncio.Condition()
         self._waiters: deque[object] = deque()
+        self._pending_bytes = 0
         self._cursor = 0
         self._inflight = [0 for _ in self.ids]
         self._last_prune = self.clock()
@@ -178,13 +181,17 @@ class SlidingWindowAdmissions:
                 next_ready = min(next_ready, q[0] + self.settings.window_s)
         return None, next_ready
 
-    async def acquire(self, deadline: float) -> int:
+    async def acquire(self, deadline: float, weight: int = 0) -> int:
         """Wait for permission; never emit a 429 merely for local saturation."""
+        if weight < 0:
+            raise ValueError("negative request size")
         ticket = object()
         async with self._condition:
-            if len(self._waiters) >= self.settings.max_pending:
+            if (len(self._waiters) >= self.settings.max_pending or
+                    self._pending_bytes + weight > self.settings.max_pending_bytes):
                 raise QueueFull
             self._waiters.append(ticket)
+            self._pending_bytes += weight
             try:
                 while True:
                     if time.monotonic() >= deadline:
@@ -213,6 +220,7 @@ class SlidingWindowAdmissions:
                             self._inflight[slot] += 1
                             self._cursor = (slot + 1) % len(self.ids)
                             self._waiters.popleft()
+                            self._pending_bytes -= weight
                             self._condition.notify_all()
                             return slot
                         # A follower waits for the head; the head wakes on the quota reset.
@@ -227,6 +235,7 @@ class SlidingWindowAdmissions:
             finally:
                 if ticket in self._waiters:
                     self._waiters.remove(ticket)
+                    self._pending_bytes -= weight
                     self._condition.notify_all()
 
     async def release(self, slot: int) -> None:
@@ -257,6 +266,7 @@ class SlidingWindowAdmissions:
             ).fetchone()[0]
             return {
                 "pending": len(self._waiters),
+                "pending_bytes": self._pending_bytes,
                 "safe_rpm_per_key": self.settings.safe_rpm,
                 "shared_rpm_cap": self.settings.safe_rpm_shared,
                 "shared_used_in_window": shared_used,
@@ -358,7 +368,7 @@ def create_app(
 
         try:
             slot = await request.app.state.admissions.acquire(
-                time.monotonic() + cfg.max_queue_wait_s
+                time.monotonic() + cfg.max_queue_wait_s, weight=len(body)
             )
         except QueueFull:
             # Hard overload protection; NOT a provider or per-key 429.
