@@ -2676,13 +2676,19 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
     )
     if not any(account in registry for _, registry in cohorts):
         raise SystemExit("Fabric pool pin: unrecognized account")
+    # The same exact predecessor may occur in two reviewed epochs. Bind the
+    # immutable *installed* launcher before selecting the matching source CAS.
+    pool_path = _user_root() / ".local" / "bin" / "pool"
+    _assert_no_symlink_ancestors(pool_path)
+    observed_pool_sha = _stable_regular_file_hash(pool_path, label="selected native Fabric launcher")
     matching = [(selected, registry[account]) for selected, registry in cohorts
-                if account in registry and args.expected_manifest_sha256
+                if selected == observed_pool_sha and account in registry
+                and args.expected_manifest_sha256
                 in (registry[account][0], registry[account][2])]
     if len(matching) != 1:
         raise SystemExit("Fabric pool pin: unrecognized or ambiguous source cohort")
     selected_launcher_sha, pins = matching[0]
-    original_manifest_sha, original_config_sha, selected_manifest_sha, selected_config_sha, _ = pins
+    original_manifest_sha, original_config_sha, selected_manifest_sha, selected_config_sha, _ = pins[:5]
     before_manifest_sha = selected_manifest_sha if reverse else original_manifest_sha
     before_config_sha = selected_config_sha if reverse else original_config_sha
     target_manifest_sha = original_manifest_sha if reverse else selected_manifest_sha
