@@ -154,3 +154,30 @@ def test_cancel_terminates_foreground_and_background_probe_subprocesses(tmp_path
                 for stream in (child.stdin, child.stdout, child.stderr):
                     if stream and not stream.closed:
                         stream.close()
+
+
+def test_python_supervisor_resolves_home_local_bin_before_probe_path(tmp_path):
+    """Non-login SSH may start with empty PATH; the probe cannot repair it first."""
+    home = tmp_path / "Home With Spaces"
+    home.mkdir()
+    local_bin = home / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    marker = home / "python_resolution.txt"
+    stub = local_bin / "python3"
+    stub.write_text(
+        '#!/bin/sh\n'
+        'printf "HOME_LOCAL_PYTHON\n" > "$HOME/python_resolution.txt"\n'
+        f'exec "{sys.executable}" "$@"\n')
+    stub.chmod(0o700)
+    wrapper = _fixed_remote_wrapper(home)
+    assert "command -v python3" in wrapper
+    env = {"HOME": str(home), "PATH": ""}
+    payload = ('printf "NONLOGIN_PATH_OK\\n"\n'
+               'exit 17\n#' + 'X' * 140_500 + '\n')
+    result = subprocess.run(
+        ['/bin/sh', '-c', 'export TMPDIR="$HOME"; ' + wrapper],
+        input=payload, env=env, capture_output=True, text=True, timeout=12)
+    assert result.returncode == 17, result.stderr
+    assert result.stdout == "NONLOGIN_PATH_OK\n"
+    assert marker.read_text().strip() == "HOME_LOCAL_PYTHON"
+    assert list(home.glob("host_pull_probe.*")) == []
