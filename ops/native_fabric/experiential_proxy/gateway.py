@@ -296,7 +296,14 @@ def create_app(
         response_headers = {
             k: v for k, v in upstream_response.headers.items() if k.lower() in RESPONSE_HEADERS
         }
+        if 300 <= upstream_response.status_code < 400:
+            # An unexpected redirect must not send a worker (or its token) elsewhere.
+            await upstream_response.aclose()
+            await request.app.state.admissions.release(slot)
+            return JSONResponse({"error": {"message": "upstream redirect refused"}}, status_code=502)
         if upstream_response.status_code >= 400:
+            # httpx.aread() decodes compressed bodies; never pass the old encoding header.
+            response_headers.pop("content-encoding", None)
             try:
                 data = await upstream_response.aread()
             except httpx.RequestError:
