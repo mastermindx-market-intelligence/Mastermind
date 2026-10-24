@@ -4216,6 +4216,173 @@ class _PreCensusContinuation:
         self.stack.close()
 
 
+class _SpentPreCensusCtimeContinuation(_PreCensusContinuation):
+    """Distinct current-state admission; it never reuses or resets the old intent."""
+    def __init__(self, database: Path, backup_root: Path, release_sha: str,
+            operation_id: str, barrier_sha256: str, spent_sha256: str,
+            reconciliation_sha256: str, lock_fd: int):
+        from ops.executive_os.acceptance_maintenance import (
+            _RootConfig, require_disarmed, _require_pre_census_stopped, digest)
+        self.stack = ExitStack()
+        self.intent = None
+        self.phase = "SOURCE"
+        self.normal_artifacts: set[str] = set()
+        self.connection = None
+        self.journal_names: set[str] = set()
+        self.sidecar_fds: dict[str, tuple[int, int, int]] = {}
+        self.stack.callback(self._close_transaction_sidecars)
+        self.database, self.backup_root, self.release_sha = database, backup_root, release_sha
+        self.lock_fd = lock_fd
+        self.lock = database.parent / DEFAULT_SERVICE_LOCK_NAME
+        self.marker = database.parent / DEFAULT_SERVICE_MARKER_NAME
+        self.intent_path = database.parent / SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME
+        try:
+            self.uid, self.gid = _pre_census_control_identity()
+            if (os.geteuid(), os.getegid()) != (self.uid, self.gid):
+                raise ExecutiveSchemaUpgradeError("ctime continuation requires fixed Control caller")
+            if os.path.lexists(self.intent_path):
+                raise ExecutiveSchemaUpgradeError("ctime continuation already reserved; execution is not replayable")
+            self.lock_identity = _held_service_lock_identity(self.lock, lock_fd)
+            if os.fstat(lock_fd).st_gid != self.gid:
+                raise ExecutiveSchemaUpgradeError("ctime continuation canonical lock group differs")
+            self.original = self.stack.enter_context(_SpentPreCensusObservation())
+            self.barrier = self.original.barrier
+            self.qualification = self.original.qualification
+            self.spent_continuation = self.original.spent_continuation
+            self.payload = _validate_pre_census_qualification(self.qualification.payload)
+            if (self.barrier.payload["operation_id"] != operation_id
+                    or self.barrier.identity["sha256"] != barrier_sha256
+                    or self.spent_continuation.identity["sha256"] != spent_sha256):
+                raise ExecutiveSchemaUpgradeError("ctime continuation original operation CAS differs")
+            self.reconciliation = _PreCensusReceiptObservation(
+                database.parent / SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME,
+                uid=0, gid=self.gid, mode=0o440)
+            self.stack.callback(self.reconciliation.close)
+            self.reconciled = _validate_spent_pre_census_ctime_reconciliation(
+                self.reconciliation.payload, **self.original.source_arguments())
+            if (self.reconciliation.identity["sha256"] != reconciliation_sha256
+                    or self.reconciled["recovery_tool"] != _pre_census_release_record(_prove_upgrade_release(release_sha))):
+                raise ExecutiveSchemaUpgradeError("ctime continuation reconciliation/executor CAS differs")
+            self.config = self.stack.enter_context(_RootConfig())
+            require_disarmed(self.config.value)
+            _require_pre_census_stopped()
+            if (str(self.config.path) != self.payload["source_control_config"]["path"]
+                    or hashlib.sha256(self.config.raw).hexdigest() != self.payload["source_control_config"]["sha256"]
+                    or self.config.value.get("proof_base_sha") != self.payload["selected_source"]["sha"]
+                    or _pre_census_argument(self.config.value["runtime_root"], database.parents[2]) != database.parents[2]
+                    or _pre_census_argument(self.config.value["backup_root"], backup_root) != backup_root):
+                raise ExecutiveSchemaUpgradeError("ctime continuation qualified config differs")
+            self.database_fd = os.open(database, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+            self.stack.callback(os.close, self.database_fd)
+            self.database_identity = _pre_census_database_origin(database, self.database_fd, self.uid, self.gid)
+            if self.database_identity != self.reconciled["database"]:
+                raise ExecutiveSchemaUpgradeError("ctime continuation current database epoch differs")
+            self.backup_inventory = _pre_census_backup_inventory(backup_root)
+            if digest(self.backup_inventory) != self.payload["backup_inventory_sha256"]:
+                raise ExecutiveSchemaUpgradeError("ctime continuation permitted backup inventory differs")
+            self.names = set(os.listdir(database.parent))
+            if any(name.startswith('.executive.sqlite3.restore-') for name in self.names):
+                raise ExecutiveSchemaUpgradeError("ctime continuation has unexplained restore residue")
+            self.check()
+        except BaseException:
+            self.stack.close()
+            raise
+
+    def check(self) -> None:
+        from ops.executive_os.acceptance_maintenance import require_disarmed, _require_pre_census_stopped
+        if _marker_exists(self.marker):
+            raise ExecutiveSchemaUpgradeError("ctime continuation service marker is present")
+        _held_service_lock_identity(self.lock, self.lock_fd, self.lock_identity)
+        if self.phase == "COMPLETE":
+            # All three old files remain held; only the original barrier has
+            # undergone this owner's exact unlink transition.
+            self._check_removed_barrier()
+            self.qualification.check()
+            self.spent_continuation.check()
+            if _pre_census_alias_identity() != self.original.alias_identity:
+                raise ExecutiveSchemaUpgradeError("ctime continuation fixed alias changed")
+        else:
+            self.original.check()
+        self.reconciliation.check()
+        self.config.check()
+        require_disarmed(self.config.value)
+        _require_pre_census_stopped()
+        if self.intent is not None:
+            self.intent.check()
+        if set(os.listdir(self.database.parent)) != self.names | self._transaction_sidecars():
+            raise ExecutiveSchemaUpgradeError("ctime continuation state namespace changed")
+        if _pre_census_backup_inventory(self.backup_root) != self.backup_inventory:
+            raise ExecutiveSchemaUpgradeError("ctime continuation backup namespace changed")
+        info = _pre_census_database_metadata(self.database, self.database_fd, self.uid, self.gid)
+        if (info.st_dev, info.st_ino) != (self.database_identity["device"], self.database_identity["inode"]):
+            raise ExecutiveSchemaUpgradeError("ctime continuation authoritative database was replaced")
+        if self.phase in {"SOURCE", "RESERVED"}:
+            for name in (_UPGRADE_V5_TO_V6_PREFLIGHT_NAME, _UPGRADE_V5_TO_V6_COMPLETION_NAME,
+                         _UPGRADE_V6_TO_V7_PREFLIGHT_NAME, _UPGRADE_V6_TO_V7_COMPLETION_NAME):
+                if os.path.lexists(self.database.parent / name) and name not in self.normal_artifacts:
+                    raise ExecutiveSchemaUpgradeError("ctime continuation normal receipt already exists")
+            if any(os.path.lexists(_sidecar(self.database, suffix)) for suffix in _SIDECAR_SUFFIXES):
+                raise ExecutiveSchemaUpgradeError("ctime continuation source has a sidecar")
+            if _pre_census_database_origin(self.database, self.database_fd, self.uid, self.gid) != self.reconciled["database"]:
+                raise ExecutiveSchemaUpgradeError("ctime continuation source epoch changed after admission")
+            before = _upgrade_v5_retained_state(self.database, version=5)
+            for key in ("normalized_schema_digest", "full_v5_content_digest", "migration_vector"):
+                if before[key] != self.payload[key]:
+                    raise ExecutiveSchemaUpgradeError("ctime continuation exact-v5 source differs")
+        _pre_census_prove_original_tool(self.payload["original_tool"])
+        _pre_census_prove_original_tool(self.payload["recovery_tool"])
+        if _pre_census_release_record(_prove_upgrade_release(self.release_sha)) != self.reconciled["recovery_tool"]:
+            raise ExecutiveSchemaUpgradeError("ctime continuation executor seal changed")
+
+    def reserve(self) -> None:
+        if self.intent is not None or self.phase != "SOURCE":
+            raise ExecutiveSchemaUpgradeError("ctime continuation cannot be reserved twice")
+        self.check()
+        value = {"schema_version": SPENT_PRE_CENSUS_CTIME_CONTINUATION_SCHEMA,
+            "operation_id": self.barrier.payload["operation_id"],
+            "original_barrier_identity": self.barrier.identity,
+            "qualification_identity": self.qualification.identity,
+            "spent_continuation_identity": self.spent_continuation.identity,
+            "reconciliation_identity": self.reconciliation.identity,
+            "recovery_tool": self.reconciled["recovery_tool"], "created_at": _upgrade_now()}
+        _write_private_json(self.intent_path, value)
+        if set(os.listdir(self.database.parent)) != self.names | {self.intent_path.name}:
+            raise ExecutiveSchemaUpgradeError("ctime continuation reservation namespace differs")
+        self.names.add(self.intent_path.name)
+        self.intent = _PreCensusReceiptObservation(self.intent_path, uid=self.uid, gid=self.gid, mode=0o600)
+        self.stack.callback(self.intent.close)
+        if self.intent.payload != value:
+            raise ExecutiveSchemaUpgradeError("ctime continuation consumed reservation differs")
+        self.phase = "RESERVED"
+        self.check()
+
+
+def continue_spent_v5_to_v6_pre_census_ctime(database_path: str | Path, backup_directory: str | Path, *,
+        release_sha: str, expected_operation_id: str, expected_barrier_sha256: str,
+        expected_spent_continuation_sha256: str, expected_reconciliation_sha256: str) -> SchemaUpgradeV5ToV6Receipt:
+    """Consume ONE fresh current-state authority; never replay the spent operation."""
+    _pre_census_hash(expected_operation_id, length=32)
+    for value in (expected_barrier_sha256, expected_spent_continuation_sha256, expected_reconciliation_sha256):
+        _pre_census_hash(value)
+    uid, gid = _pre_census_control_identity()
+    if (os.geteuid(), os.getegid()) != (uid, gid):
+        raise ExecutiveSchemaUpgradeError("ctime continuation requires fixed Control caller")
+    database = _pre_census_argument(database_path, _PRE_CENSUS_DATABASE)
+    backup_root = _pre_census_argument(backup_directory, database.parents[3] / "backups")
+    if os.path.lexists(database.parent / SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME):
+        raise ExecutiveSchemaUpgradeError("ctime continuation is already spent; inspection only")
+    lock, marker = database.parent / DEFAULT_SERVICE_LOCK_NAME, database.parent / DEFAULT_SERVICE_MARKER_NAME
+    with _offline_restore_lock(lock, marker, require_existing=True) as lock_fd:
+        continuation = _SpentPreCensusCtimeContinuation(database, backup_root, release_sha,
+            expected_operation_id, expected_barrier_sha256, expected_spent_continuation_sha256,
+            expected_reconciliation_sha256, lock_fd)
+        try:
+            continuation.reserve()
+            return _upgrade_v5_to_v6_impl(database, backup_root, release_sha=release_sha, _recovery=continuation)
+        finally:
+            continuation.close()
+
+
 def _pre_census_upgrade_census(recovery: _PreCensusContinuation) -> dict[str, Any]:
     if not isinstance(recovery, _PreCensusContinuation):
         raise RestoreSafetyError("recovered census requires the internally qualified owner")
@@ -4239,6 +4406,9 @@ def resume_v5_to_v6_pre_census(database_path: str | Path, backup_directory: str 
         raise ExecutiveSchemaUpgradeError("pre-census continuation requires fixed Control caller")
     database = _pre_census_argument(database_path, _PRE_CENSUS_DATABASE)
     backup_root = _pre_census_argument(backup_directory, database.parents[3] / "backups")
+    if any(os.path.lexists(database.parent / name) for name in (
+            SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME, SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME)):
+        raise ExecutiveSchemaUpgradeError("ctime reconciliation residue forbids the old continuation")
     if os.path.lexists(database.parent / PRE_CENSUS_CONTINUATION_NAME):
         raise ExecutiveSchemaUpgradeError("pre-census intent already exists; same-operation execution is not replayable")
     lock, marker = database.parent / DEFAULT_SERVICE_LOCK_NAME, database.parent / DEFAULT_SERVICE_MARKER_NAME
@@ -4286,7 +4456,9 @@ def _upgrade_v5_to_v6_impl(
     preflight_path = state_directory / _UPGRADE_V5_TO_V6_PREFLIGHT_NAME
     completion_path = state_directory / _UPGRADE_V5_TO_V6_COMPLETION_NAME
     if _recovery is None and any(os.path.lexists(state_directory / name) for name in
-                                  (PRE_CENSUS_QUALIFICATION_NAME, PRE_CENSUS_CONTINUATION_NAME)):
+                                  (PRE_CENSUS_QUALIFICATION_NAME, PRE_CENSUS_CONTINUATION_NAME,
+                                   SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME,
+                                   SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME)):
         raise ExecutiveSchemaUpgradeError("pre-census recovery residue forbids a new v5-to-v6 operation")
     if _recovery is None and any(os.path.lexists(path) for path in (barrier, preflight_path, completion_path)):
         raise ExecutiveSchemaUpgradeError(
@@ -4337,9 +4509,11 @@ def _upgrade_v5_to_v6_impl(
             if _marker_exists(marker):
                 raise RestoreSafetyError("Executive service marker appeared before census")
             census = current_census()
-            _checkpoint_quiesced_wal(database)
+            if not isinstance(_recovery, _SpentPreCensusCtimeContinuation):
+                _checkpoint_quiesced_wal(database)
             if current_census() != census:
-                raise RestoreSafetyError("writer census changed across WAL checkpoint")
+                raise RestoreSafetyError("writer census changed across current-state admission" if isinstance(
+                    _recovery, _SpentPreCensusCtimeContinuation) else "writer census changed across WAL checkpoint")
             before = _upgrade_v5_retained_state(database, version=5)
             v5_backup = create_offline_backup(
                 database, backup_directory, expected_schema_version=5
@@ -4401,6 +4575,12 @@ def _upgrade_v5_to_v6_impl(
                     "qualification_identity": dict(_recovery.qualification.identity),
                     "continuation_identity": dict(_recovery.intent.identity),
                 }
+                if isinstance(_recovery, _SpentPreCensusCtimeContinuation):
+                    preflight["schema_version"] = SPENT_PRE_CENSUS_CTIME_PREFLIGHT_SCHEMA
+                    preflight["pre_census_reconciliation"].update({
+                        "spent_continuation_identity": dict(_recovery.spent_continuation.identity),
+                        "reconciliation_identity": dict(_recovery.reconciliation.identity),
+                    })
             _write_private_json(preflight_path, preflight)
             if _recovery is not None:
                 _recovery.accept_state_artifact(preflight_path)
@@ -4799,7 +4979,9 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
     All immutable origins stay held while the normal next owner executes.
     """
     names = (PRE_CENSUS_QUALIFICATION_NAME, PRE_CENSUS_CONTINUATION_NAME)
-    if not any(os.path.lexists(database.parent / name) for name in names):
+    spent_names = (SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME, SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME)
+    spent = any(os.path.lexists(database.parent / name) for name in spent_names)
+    if not any(os.path.lexists(database.parent / name) for name in names + spent_names):
         yield None
         return
     uid, gid = _pre_census_control_identity()
@@ -4809,7 +4991,10 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
         raise ExecutiveSchemaUpgradeError("recovered completion backup root differs")
     with ExitStack() as stack:
         held = []
-        for name, owner, mode in ((names[0], 0, 0o440), (names[1], uid, 0o600),
+        origins = ((names[0], 0, 0o440), (names[1], uid, 0o600))
+        if spent:
+            origins += ((spent_names[0], 0, 0o440), (spent_names[1], uid, 0o600))
+        for name, owner, mode in origins + (
                 (_UPGRADE_V5_TO_V6_PREFLIGHT_NAME, uid, 0o600),
                 (_UPGRADE_V5_TO_V6_COMPLETION_NAME, uid, 0o600)):
             try:
@@ -4817,7 +5002,8 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
             except (OSError, BackupVerificationError) as exc:
                 raise ExecutiveSchemaUpgradeError("recovered completion receipt is missing or unsafe") from exc
             stack.callback(obs.close); held.append(obs)
-        qualification, intent, preflight, completion = held
+        qualification, intent = held[:2]
+        preflight, completion = held[-2:]
         q = _validate_pre_census_qualification(qualification.payload)
         i, p, c = intent.payload, preflight.payload, completion.payload
         expected_i = {"schema_version": PRE_CENSUS_CONTINUATION_SCHEMA,
@@ -4826,6 +5012,28 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
             "created_at": i.get("created_at")}
         _pre_census_time(i.get("created_at"))
         refs = {"qualification_identity": qualification.identity, "continuation_identity": intent.identity}
+        expected_tool, expected_schema = q["recovery_tool"], PRE_CENSUS_PREFLIGHT_SCHEMA
+        if spent:
+            reconciliation, current_intent = held[2:4]
+            reconciled = _validate_spent_pre_census_ctime_reconciliation(reconciliation.payload,
+                barrier_payload=q["original_barrier"]["payload"],
+                barrier_identity=q["original_barrier"]["identity"],
+                qualification_payload=q, qualification_identity=qualification.identity,
+                spent_continuation_payload=i, spent_continuation_identity=intent.identity)
+            new_i = current_intent.payload
+            _pre_census_time(new_i.get("created_at"))
+            expected_tool, expected_schema = reconciled["recovery_tool"], SPENT_PRE_CENSUS_CTIME_PREFLIGHT_SCHEMA
+            expected_new_i = {"schema_version": SPENT_PRE_CENSUS_CTIME_CONTINUATION_SCHEMA,
+                "operation_id": q["operation_id"], "original_barrier_identity": q["original_barrier"]["identity"],
+                "qualification_identity": qualification.identity, "spent_continuation_identity": intent.identity,
+                "reconciliation_identity": reconciliation.identity, "recovery_tool": expected_tool,
+                "created_at": new_i["created_at"]}
+            if new_i != expected_new_i:
+                raise ExecutiveSchemaUpgradeError("spent completed continuation reservation differs")
+            refs = {"qualification_identity": qualification.identity,
+                "spent_continuation_identity": intent.identity,
+                "reconciliation_identity": reconciliation.identity,
+                "continuation_identity": current_intent.identity}
         common = {"schema_version", "operation_id", "source_schema_version", "target_schema_version",
             "tool_release_root", "tool_release_tree_sha", "tool_release_manifest_sha256", "release_sha"}
         pk = common | {"database", "migration_vector", "normalized_schema_digest", "barrier_identity",
@@ -4837,12 +5045,12 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
             "post_v5_migration_receipt_digest", "full_v4_content_equal", "pre_v4_legacy_content_digest",
             "post_v4_legacy_content_digest", "legacy_content_equal", "v6_backup"}
         if (set(p) != pk or set(c) != ck or i != expected_i
-                or p["schema_version"] != PRE_CENSUS_PREFLIGHT_SCHEMA
+                or p["schema_version"] != expected_schema
                 or c["schema_version"] != UPGRADE_COMPLETION_SCHEMA
                 or p["pre_census_reconciliation"] != refs
                 or p["barrier_identity"] != q["original_barrier"]["identity"]
                 or p["created_at"] != q["original_barrier"]["payload"]["created_at"]
-                or q["recovery_tool"] != _pre_census_release_record(release)
+                or expected_tool != _pre_census_release_record(release)
                 or p["database"] != {key: q["database"][key] for key in ("path", "device", "inode", "size", "sha256")}
                 or p["migration_vector"] != q["migration_vector"]
                 or p["normalized_schema_digest"] != q["normalized_schema_digest"]
@@ -4853,7 +5061,7 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
                     or receipt["source_schema_version"] != 5 or receipt["target_schema_version"] != 6
                     or _pre_census_release_record({"release_root": receipt["tool_release_root"],
                         "release_sha": receipt["release_sha"], "release_tree_sha": receipt["tool_release_tree_sha"],
-                        "release_manifest_sha256": receipt["tool_release_manifest_sha256"]}) != q["recovery_tool"]):
+                        "release_manifest_sha256": receipt["tool_release_manifest_sha256"]}) != expected_tool):
                 raise ExecutiveSchemaUpgradeError("recovered completion operation/tool differs")
         census = p["quiesce_writer_census"]
         census_keys = {"schema_version", "control_uids", "upgrader_pid", "inspected_paths",
@@ -4926,6 +5134,8 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
                 if _pre_census_database_origin(path, fd, uid, gid) != origin:
                     raise ExecutiveSchemaUpgradeError("recovered completion immutable backup changed")
             _pre_census_prove_original_tool(q["original_tool"])
+            if spent:
+                _pre_census_prove_original_tool(q["recovery_tool"])
         check()
         yield check
         check()
