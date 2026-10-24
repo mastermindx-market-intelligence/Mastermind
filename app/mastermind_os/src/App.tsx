@@ -37,6 +37,8 @@ import {
   type OrchestratorCommandBinding,
 } from "./orchestration/host-command-bindings";
 import { SelectedSessionContinuation } from "./orchestration/ui/SelectedSessionContinuation";
+import { DirectNativeResultPanel } from "./orchestration/ui/DirectNativeResultPanel";
+import { directLocationInput } from "./direct-native-location";
 import {
   completeExecutiveSessionBinding,
   readSessionOwnerContext,
@@ -46,11 +48,9 @@ import {
   allEvidence,
   decodeMission,
   decodeMissionv3,
-  locationSelectionInput,
   normalizeSelection,
   programsFromControlRoom,
   relationshipsForMission,
-  selectionFromLocation,
   unavailableMission,
   type MissionDocument,
   type MissionSelection,
@@ -1270,7 +1270,7 @@ export interface AppProps {
 }
 export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const native = "__TAURI_INTERNALS__" in window,
-    initialLocation = useMemo(() => locationSelectionInput(), []),
+    initialLocation = useMemo(() => directLocationInput(), []),
     initial = useMemo(
       () =>
         initialLocation.hasIdentity
@@ -1279,8 +1279,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       [initialLocation],
     ),
     [selection, setSelection] = useState<MissionSelection | null>(initial),
-    [active, setActive] = useState<View>("Today"),
-    [projectTab, setProjectTab] = useState<ProjectTab | null>(null),
+    [active, setActive] = useState<View>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Projects" : "Today"),
+    [projectTab, setProjectTab] = useState<ProjectTab | null>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Overview" : null),
     [index, setIndex] = useState<ProgramIndex>({
       programs: [],
       state: "PENDING",
@@ -2062,7 +2062,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   }, [native, authRevision, authState?.acquisition, workRevision]);
   useEffect(() => {
     const restoreSelection = () => {
-      const next = selectionFromLocation();
+      const next = directLocationInput().selection;
       office.clearSelection(next);
       observedConversation.clear();
       selectionSeq.current += 1;
@@ -2339,7 +2339,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             : active === "Fleet & Capacity"
               ? "Capacity source not connected. No host readiness was inferred."
               : notice,
-    open = (w: string, r: string | null) => {
+    open = (w: string, r: string | null, direct = false) => {
       if (r) {
         office.clearSelection({ workRef: w, rootJobId: r });
         observedConversation.clear();
@@ -2356,6 +2356,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           work_ref: next.workRef,
           root_job_id: next.rootJobId,
         }).toString();
+        // Read-selection hint only; the authenticated direct endpoint still
+        // proves the Job, original principal, receiver and terminal identity.
+        if(direct)location.searchParams.set("direct_native_job",r);
         window.history.pushState(
           null,
           "",
@@ -2440,7 +2443,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       const sel = state.missionSelection
         ? normalizeSelection(state.missionSelection)
         : null;
-      if (sel) open(sel.workRef, sel.rootJobId);
+      if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
     }
     pending.complete({ status: state.status });
     pendingCommand.current = null;
@@ -2560,7 +2563,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           // mission selection, including when initial discovery had failed.
           if (state.status === "accepted") {
             const next = state.missionSelection ? normalizeSelection(state.missionSelection) : null;
-            if (next) open(next.workRef, next.rootJobId);
+            if (next) open(next.workRef, next.rootJobId,binding.directNative?.isDirectSelection(next)===true);
           }
         } else {
           setReopenedOperation({ ...restored, pointer: state.pointer ?? restored.pointer, reason: state.reason });
@@ -2752,6 +2755,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          locale={locale}
           key={JSON.stringify([
             ownerContext?.principalScope,
             ownerContext?.generation,
@@ -2764,7 +2768,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               : "Launch choices are unavailable. Your draft is retained."
           }
           submitting={heldKind === "launch" && commandBusy}
-          blocked={!!currentReopened}
+          blocked={!!currentReopened || heldKind === "consume"}
           error={
             currentRefusal?.kind === "launch"
               ? currentRefusal.reason
@@ -2970,6 +2974,21 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     // unavailable code as Work, with no fabricated session or dispatch state.
     sessionUnavailableCard
   );
+  const directSelected = !!selection && new URL(window.location.href).searchParams.get("direct_native_job")===selection.rootJobId;
+  const directResultPanel = directSelected && selection ? <DirectNativeResultPanel
+    key={JSON.stringify([ownerContext?.principalScope,ownerContext?.generation,selection.workRef,selection.rootJobId,commandSelectionRevision])}
+    locale={locale} selection={{work_ref:selection.workRef,job_id:selection.rootJobId,attempt_id:null}}
+    read={commandReady ? commandBinding?.directNative?.read : undefined}
+    held={heldKind==="consume" || currentReopened?.pointer?.kind==="consume"}
+    recovery={heldKind==="consume" ? checkStatusControl : null}
+    onConsume={(selected,digest,complete)=>{
+      const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const ctx=live ? readOwnerContext(live.port) : null;
+      if(commandSelectionRevision!==selectionSeq.current||!live||live!==commandBinding||!ctx||
+        ctx.principalScope!==ownerContext?.principalScope||ctx.generation!==ownerContext?.generation){complete({status:"refused"});return;}
+      const intent=live.directNative?.makeConsumeIntent(selected,digest)??null;
+      beginCommand("consume",intent,complete);
+    }} /> : null;
   const pickResult = (sel: ResultSelection) => {
     const valid = normalizeResultSelection(sel);
     if (!valid) return;
@@ -3153,7 +3172,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     content = (
       <>
         {programsRefreshControl}
-        {projectTab && selection ? (
+        {(projectTab || directSelected) && selection ? (
         <>
           <section className="hero">
             <div>
@@ -3185,8 +3204,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               </div>
             </div>
           </section>
-          <ProjectTabs active={projectTab} onChange={setProjectTab} />
-          {!d ? (
+          {!directSelected ? <ProjectTabs active={projectTab ?? "Overview"} onChange={setProjectTab} /> : null}
+          {directSelected ? directResultPanel : !d ? (
             <section className="card empty-panel">
               <h2>{projectTab}</h2>
               <State value="UNAVAILABLE" />
@@ -3361,6 +3380,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   else if (active === "Mission Workspace")
     content = (
       <>
+        {directResultPanel}
         <Mission d={d} />
         {missionV3 && isDocv3(missionV3) ? (
           <ResultRefs
