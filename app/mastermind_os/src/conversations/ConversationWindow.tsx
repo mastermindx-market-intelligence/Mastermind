@@ -1,3 +1,4 @@
+import { ObservedTranscript } from "./ObservedTranscript";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { observedMissionAssociation } from "../workspace-contract";
 import type { OfficeProjection, SourceClaim } from "../meta-ceo/projection";
@@ -210,14 +211,9 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
             <p>{association!.job_id} · {association!.attempt_id}</p>
             <p>{ui(locale, "Session identity has not been supplied for this window.")}</p></details>
           {state === "STALE" && <p className="conversation-history">{ui(locale, "Retained window; current conversation state is not established.")}</p>}
-          <section className="conversation-transcript" aria-label={ui(locale, "Observed responses")}>
-            {document.view.items.map(item => <article key={item.id} className="conversation-response">
-              <p className="conversation-eyebrow">{item.kind === "withheld" ? ui(locale, "Content withheld") : ui(locale, "Owner-visible response")} · {item.state}</p>
-              {item.kind === "withheld" ? <p>{ui(locale, "Content withheld by its owner.")}</p> : <p className="conversation-answer">{item.text}</p>}
-            </article>)}
-            {!document.view.items.length && <p>{ui(locale, "No visible response was supplied in this observed window.")}</p>}
-            {!!document.view.gaps.length && <p className="conversation-history">{ui(locale, "The owner reported gaps in this window.")}</p>}
-          </section>
+          <ObservedTranscript key={JSON.stringify([read.source.ref, document.view.source_ref, document.view.epoch,
+            association!.job_id, association!.attempt_id])} items={document.view.items} locale={locale} />
+          {!!document.view.gaps.length && <p className="conversation-history">{ui(locale, "The owner reported gaps in this window.")}</p>}
           <section className="conversation-result" aria-label={ui(locale, "Returned evidence")}>
             <div><p className="conversation-eyebrow">{ui(locale, "Returned evidence")}</p><h2>{resultSummary ? ui(locale, "A source-backed result is available.") : ui(locale, "Inspect the supplied sources.")}</h2>
               {resultSummary && <p>{resultSummary}</p>}

@@ -239,8 +239,27 @@ CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
     "mastermind.executive_control_env_probe/v1"
 )
 _CANONICAL_AGENT_RELAY_SOCKET = Path(
+    "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
+)
+# Explicit stopped/disarmed recovery of an already-enrolled historical A2
+# generation. Never a candidate for an armed return or ordinary install.
+_LEGACY_A2_RECOVERY_SOCKET = Path(
     "/var/run/mastermind-agent-relay/agent-relay.sock"
 )
+
+
+def _agent_relay_readside_socket_for_control(config):
+    # Only the already-validated, wholly disarmed legacy recovery profile
+    # redirects existing consumers of the A2 socket. Normal installations
+    # continue to bind exclusively to the canonical persistent socket.
+    # load_control_config / ServiceConfig normalize through the macOS
+    # /var -> /private/var symlink. Compare the same normalized identity;
+    # keep the original lexical constant for exact config-wire validation.
+    legacy = _LEGACY_A2_RECOVERY_SOCKET.resolve(strict=False)
+    if (config.terminal_return_armed is False
+            and config.terminal_return_socket_path == legacy):
+        return legacy
+    return _CANONICAL_AGENT_RELAY_SOCKET
 _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
@@ -325,6 +344,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bindings_path",
         "fabric_bindings_sha256",
         "fabric_bridge_armed",
+        "canonical_paid_fabric",
         "fabric_attended_probe",
         "native_capacity_v2",
     }
@@ -452,7 +472,9 @@ def _parser() -> argparse.ArgumentParser:
         ("activate-canary", "Validate and activate the current PID-bound canary."),
         ("workers", "List durable worker identities."),
         ("jobs", "List durable Jobs."),
-        ("register-worker", "Register the single configured Codex worker."),
+        ("register-worker", "Register the configured identities; paid source begins OFFLINE."),
+        ("paid-capacity-observe", "Observe existing paid state only; never refresh provider quota."),
+        ("paid-capacity-bootstrap", "Explicit bounded original-owner paid quota status operation."),
         ("create-proof-job", "Create the fixed harmless Phase 1C-A proof Job."),
         ("reconcile", "Reconcile durable attempts without automatic requeue."),
         ("backup", "Create an online DB backup in the configured backup root."),
@@ -1080,10 +1102,20 @@ def load_control_config(
             terminal_return_socket,
             "terminal_return_socket_path",
         )
-        if terminal_return_socket != os.fspath(_CANONICAL_AGENT_RELAY_SOCKET):
+        is_current = terminal_return_socket == os.fspath(_CANONICAL_AGENT_RELAY_SOCKET)
+        legacy_disarmed = (
+            terminal_return_socket == os.fspath(_LEGACY_A2_RECOVERY_SOCKET)
+            and config.get("terminal_return_armed") is False
+            and config.get("ceo_submit_armed") is False
+            and config.get("coo_autonomy_armed") is False
+            and config.get("coo_operator_harness_armed") is False
+            and config.get("coo_foreground_only", False) is False
+            and config.get("fabric_bridge_armed", False) is False
+        )
+        if not is_current and not legacy_disarmed:
             raise ServiceError(
-                "control config terminal_return_socket_path must be exactly "
-                f"{_CANONICAL_AGENT_RELAY_SOCKET}"
+                "control config terminal_return_socket_path must be the "
+                "persistent path, or the exact disarmed legacy A2 recovery path"
             )
     if observation_present:
         observation_socket = config["dialogue_observation_socket_path"]
@@ -1786,6 +1818,7 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     ceo_submit_admission_guard: Callable[[], None] | None = None,
+    direct_native_generation_provider: Callable[[], str] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
     content_profile_loader: Callable[[], Any] | None = None,
     workspace_acquisition_loader: Callable[[], Any] | None = None,
@@ -1800,6 +1833,7 @@ def _service_from_config(
     fabric_worker_binding_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
+    paid_worker_binding_source: Any | None = None,
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1853,6 +1887,22 @@ def _service_from_config(
         router = ModelRouter.load()
         for placement in attended_work_placements:
             placement_member(router, placement)
+    paid_work_placements=()
+    if paid_worker_binding_source is not None:
+        from control_plane.executive_paid_fabric_composition import PaidBindingSource,PaidWorkPlacement
+        if (type(paid_worker_binding_source) is not PaidBindingSource
+                or fabric_worker_binding_source is not None or attended_work_placements):
+            raise ServiceError('paid and attended owner compositions cannot mix')
+        paid_worker_binding_source._current()
+        identities=set()
+        placements=[]
+        for physical in paid_worker_binding_source.bindings:
+            if physical.worker_id in identities or physical.worker_id==str(raw.get('worker_id') or 'codex-01'):
+                raise ServiceError('paid physical owner conflicts with another Worker')
+            identities.add(physical.worker_id)
+            placements.append(PaidWorkPlacement('glm.paid.sealed-input',
+                paid_worker_binding_source.quota_for(physical)))
+        paid_work_placements=tuple(dict.fromkeys(placements))
     if (remote_worker_binding_source is not None
             and not callable(remote_worker_binding_source)):
         raise ServiceError("remote worker binding source must be callable")
@@ -1955,6 +2005,7 @@ def _service_from_config(
             "coo_operator_harness_armed", False
         ),
         coo_attended_work_placements=attended_work_placements,
+        coo_paid_work_placements=paid_work_placements,
         coo_tick_interval_seconds=float(
             raw.get("coo_tick_interval_seconds", 15.0)
         ),
@@ -1979,6 +2030,10 @@ def _service_from_config(
         subscription_canary_realm_generation=realm_generation,
         subscription_canary_realm_config_sha256=realm_config_sha256,
     )
+    # Keep all existing A2 read-side consumers on the same socket selected
+    # by validated Control. A returned old A2 daemon listens only on /var/run,
+    # so a hard-coded /var/db consumer would silently miss native replies.
+    relay_readside_socket_path = _agent_relay_readside_socket_for_control(config)
     # A persisted receipt from another service instance is never startup
     # authority. Every new PID starts quarantined and can activate only after a
     # fresh same-PID worker probe followed by the private activation command.
@@ -2126,6 +2181,27 @@ def _service_from_config(
             product_acceptance_context_reader=(product_acceptance_basis_reader()
                 if product_acceptance_context_owner is not None else None),
         )
+        if paid_worker_binding_source is not None:
+            from control_plane.executive_paid_fabric_adapter import CanonicalPaidFabricWorkerAdapter
+            from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+            paid_adapter=CanonicalPaidFabricWorkerAdapter(runtime,paid_worker_binding_source)
+            owners={config.worker_id:primary}
+            for physical in paid_worker_binding_source.bindings:
+                owners[physical.worker_id]=ExecutiveSupervisor(runtime,paid_adapter,
+                    runs_root=raw['worker_runs_root'],
+                    isolation_roots=(raw['proof_workspace_root'],raw['worker_runs_root']),
+                    receipts_root=raw['receipts_root'],worker_user=physical.worker_user,
+                    worker_uid=physical.worker_uid,worker_gid=physical.worker_gid,
+                    shared_run_gid=None,secret_canary_verdict=None,
+                    require_complete_launch_attestation=True,
+                    cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+                    process_controller=paid_adapter,instance_id=primary.instance_id,
+                    product_acceptance_macro_root=product_acceptance_macro_root,
+                    product_acceptance_context_reader=(product_acceptance_basis_reader()
+                        if product_acceptance_context_owner is not None else None))
+            mixed=MixedExecutionOwnerSupervisor(primary,owners)
+            recovery_controller['owners']=mixed.owners
+            return mixed
         if fabric_worker_binding_source is None:
             return primary
         from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
@@ -2446,7 +2522,7 @@ def _service_from_config(
                     service._namespace_custody.bound_runtime(runtime)
                     authority = coo_factory(runtime)
                     return PrincipalDialogueAppReceiver(runtime, authority,
-                        _CANONICAL_AGENT_RELAY_SOCKET,
+                        relay_readside_socket_path,
                         HostLocalDialogueObservationReader(service, runtime),
                         product_acceptance_reader=product_acceptance_basis_reader())
 
@@ -2590,7 +2666,7 @@ def _service_from_config(
                     return w3c_plist_configured(release_sha=config.proof_base_sha)
 
                 return build_runtime_session_bridge(
-                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    runtime, dialogue_socket_path=relay_readside_socket_path,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
@@ -2688,12 +2764,12 @@ def _service_from_config(
                 service._namespace_custody.bound_runtime(runtime)
                 acceptance_host = ProductAcceptanceRequestHost(
                     runtime=runtime, reader=acceptance_reader, worker_uid=company_worker_uid,
-                    relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    relay_socket_path=relay_readside_socket_path,
                     workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                     armed=True, principal_authority=coo_factory(runtime))
             return CompanyConsultationHost(
                 runtime=runtime, repository_root=company_repository,
-                worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                worker_uid=company_worker_uid, relay_socket_path=relay_readside_socket_path,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                 requester_answer_wake_dispatch=dispatch_answer,
                 product_acceptance_host=acceptance_host,
@@ -2742,6 +2818,7 @@ def _service_from_config(
         config,
         supervisor_factory=supervisor_factory,
         attended_worker_registration=attended_registration,
+        paid_worker_binding_source=paid_worker_binding_source,
         privileged_readiness_controller_factory=readiness_factory,
         proof_capacity_recovery_observer=proof_capacity_recovery_observer,
         proof_capacity_recovery_worker_uid=(
@@ -2755,6 +2832,7 @@ def _service_from_config(
         ),
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=ceo_submit_admission_guard,
+        direct_native_generation_provider=direct_native_generation_provider,
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
@@ -2848,6 +2926,10 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     # Only a fixed host composition may select typed placements. Merely
     # staging a file or setting a JSON flag cannot activate its worker owners.
     physical_source = _staged_fabric_binding_source(raw)
+    from control_plane.executive_paid_fabric_composition import installed_paid_source
+    paid_source=installed_paid_source(raw,installed_control=_installed_control)
+    if paid_source is not None and (physical_source is not None or attended_work_placements):
+        raise ServiceError('installed paid source cannot replace or mix an attended owner')
     if _installed_control:
         if attended_work_placements:
             raise ServiceError('installed Control cannot replace its fixed source composition')
@@ -2986,11 +3068,22 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
     require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
+    def direct_native_generation():
+        # The incumbent guard proves exact running configuration and its
+        # root-owned admission receipt. This digest binds that actual epoch;
+        # bearer renewal contributes no permanent jti/expiration authority.
+        require_ceo_admission()
+        attestation=content_attestation_loader()
+        from control_plane.direct_native_execution import digest
+        value=digest(dict(config_sha256=attestation["config_sha256"],release_sha=raw["proof_base_sha"]))
+        require_ceo_admission()
+        return value
     from control_plane.fabric_attended_canary import AttendedControlProbeSource
 
     service = _service_from_config(
         raw,
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        paid_worker_binding_source=paid_source,
         attended_work_placements=attended_work_placements,
         fabric_attended_probe_source=(
             AttendedControlProbeSource.from_startup(config_path, raw, control_attestation)
@@ -3000,6 +3093,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=require_ceo_admission,
+        direct_native_generation_provider=direct_native_generation,
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
@@ -3030,6 +3124,8 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         "workers",
         "jobs",
         "register-worker",
+        "paid-capacity-observe",
+        "paid-capacity-bootstrap",
         "create-proof-job",
         "reconcile",
         "backup",

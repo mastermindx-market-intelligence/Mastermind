@@ -182,6 +182,40 @@ def validate_v3_frame(frame):
     return frame
 
 
+def validate_available_plan_observation(value, selected):
+    """Validate the existing finalized public receipt without acquiring a source."""
+    selected = v3_selection(selected)
+    if (type(value) is not dict
+            or set(value) != {"schema", "state", "selection", "control_room", "runtime"}
+            or value["schema"] != PLAN_OBSERVATION_SCHEMA or value["state"] != "SAME"
+            or type(value["selection"]) is not dict or value["selection"] != selected):
+        raise ValueError("invalid_input")
+    runtime, control_room = value["runtime"], value["control_room"]
+    if (type(runtime) is not dict
+            or set(runtime) != {"schema", "state", "source_identity", "before", "after"}
+            or runtime["schema"] != "mastermind.runtime_read_observation.v1"
+            or runtime["state"] != "SAME"
+            or type(runtime["source_identity"]) is not str
+            or re.fullmatch(r"[0-9a-f]{32}", runtime["source_identity"]) is None
+            or type(runtime["before"]) is not int or runtime["before"] < 0
+            or type(runtime["after"]) is not int or runtime["before"] != runtime["after"]):
+        raise ValueError("invalid_input")
+    if (type(control_room) is not dict
+            or set(control_room) != {
+                "instance_before", "instance_after", "publication_before", "publication_after",
+                "document_digest", "source_validity_digest", "cache_currentness_digest"}
+            or type(control_room["instance_before"]) is not str or not control_room["instance_before"]
+            or type(control_room["instance_after"]) is not str
+            or control_room["instance_before"] != control_room["instance_after"]
+            or type(control_room["publication_before"]) is not int or control_room["publication_before"] <= 0
+            or type(control_room["publication_after"]) is not int
+            or control_room["publication_before"] != control_room["publication_after"]
+            or any(type(control_room[key]) is not str
+                   or _DIGEST_64.fullmatch(control_room[key]) is None
+                   for key in ("document_digest", "source_validity_digest", "cache_currentness_digest"))):
+        raise ValueError("invalid_input")
+
+
 def plan_unavailable(selected, reason):
     """Small closed refusal shared by the producer and transport budget fences."""
     if reason not in PLAN_REFUSAL_REASONS:

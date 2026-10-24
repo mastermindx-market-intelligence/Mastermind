@@ -1025,8 +1025,8 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
                 "liquidity_transmission unavailable")
 
     # —— E0.5: perception runlog step — P5: perception logged BEFORE any position decision ——
-    # Assemble + PUBLISH THE one market view (P7: data/market_view/latest.json, all books read the
-    # one artifact) before the book is touched.  Read-only enrichment — the wave contract is ZERO
+    # Assemble a local preview only. Canonical paired publication is owned by the
+    # existing macro-refresh job; this retained legacy path must never race its writes. ZERO
     # behaviour change: nothing downstream sizes off this in W-E.0.  Lazy import so this degrades
     # gracefully if brain/market_view.py (E0.3) is absent; any failure logs "unavailable" and the
     # build proceeds unchanged (a perception organ never blocks the book — masterplan §4).
@@ -1037,15 +1037,14 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
         _nw_out_for_build = _nw_plane if _nw_plane else None
         _pv = _mv_mod.build(
             "us",
-            write=True,
+            write=False,
             distribution_tells_out=_mv_inputs.get("distribution_tells"),
             liquidity_quality_out=_mv_inputs.get("liquidity_quality"),
             regime_nowcast_out=_mv_inputs.get("regime_nowcast"),
             neural_web_out=_nw_out_for_build,
             liquidity_transmission_out=_glt_plane if _glt_plane else None,
         )
-        # Publish the typed AI-facing contract beside market_view.v1.  This is read-only and
-        # preserves every existing authority boundary.
+        # Preview the typed contract without changing canonical publication or history.
         try:
             from brain import decision_context as _dc
 
@@ -1054,7 +1053,7 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
                 regime=regime,
                 market_view=_pv,
                 neural_web=_nwc_mod.context() if "_nwc_mod" in locals() else {},
-                write=True,
+                write=False,
                 seq=int(_pv.get("seq") or 0),
             )
         except Exception:
@@ -1063,7 +1062,7 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
         _pv_conflict = (_pv.get("label_vs_planes") or {}).get("conflict", False)
         _pv_coverage = (_pv.get("assembly") or {}).get("fresh", "?")
         _rl_log(_run_id, "perception", "market_view",
-                f"conflict={_pv_conflict} coverage_fresh={_pv_coverage} | {_pv_brief}",
+                f"unpublished preview: conflict={_pv_conflict} coverage_fresh={_pv_coverage} | {_pv_brief}",
                 conflict=_pv_conflict,
                 coverage_fresh=_pv_coverage,
                 label_vs_planes=_pv.get("label_vs_planes"),

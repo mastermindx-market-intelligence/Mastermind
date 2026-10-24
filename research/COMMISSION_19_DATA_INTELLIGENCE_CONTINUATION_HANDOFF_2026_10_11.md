@@ -799,3 +799,60 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 1. Land this PR (merge queue) and Macro #9636 (merge-on-green; hand-merge `--match-head-commit` only on the inherited-RIG basis).
 2. The WP31 live read after the first eligible release; its counts go in r14.
 3. Nothing else is owed by the seat until the clock or the Chairman moves; the seat ends on `DURABLE_EXECUTION_RUNNING` while the PRs are in flight and on `PROVEN_OUTCOME` for the seat's lane once they land.
+
+#### r14 cycle 2026-10-22 03:4xZ (seat 7ab343c8, Fable 5.1) — wave 13: G9 / WP32 P2 PROVEN (entitled 200 for AAPL + MSFT with private headers), P3 free-tier still unproven, WP31 natural clock unfired (watcher armed), W9 → done
+
+**FACTS**
+- **Entitled-path proof (WP32 P2 / G9 / WP33 "P0 real capability").** Performed in the Chairman's own Chrome profile through Claude in Chrome (Chairman ruling 2026-10-22: 1Password is not used; the profile's saved session is the permitted route). No credential was typed, seen or printed: the `www.mastermind-x.com` origin was already signed in as a `mastermind-x.com` account (cookie storage `sb-<ref>-auth-token.0/.1`), the bearer was obtained in-page via `window.MDXAuth.client()` → `auth.getSession()` and used only inside same-origin `fetch` calls (`Authorization: Bearer`, `credentials: omit`, `cache: no-store`). Only status, timing, header names/values and body key names + byte lengths were read — no body values (exposure protocol; no universe issuer has released since registration).
+  - 03:30Z cold: `/api/health` **200** in 0.85 s (keys `status, commit, checkout, fif_financial_dataset_mode`); `/api/integrated-answer/v1/AAPL` **524** after 30.6 s (`server: TencentEdgeOne`, empty body, no private headers) — the first authenticated compose after idle exceeded the edge's ~30 s origin budget; two earlier attempts had been aborted client-side at 15 s.
+  - 03:32Z warm, in parallel: **AAPL 200 in 8.2 s**, 29 404 B, keys `as_of, composed_at, coverage_note, display_only, footer, legs, schema, stance, ticker`; **MSFT 200 in 2.1 s**, 27 001 B, same keys. Headers on both: `cache-control: private, no-store`; `vary: Authorization, Accept-Encoding`; `content-type: application/json`; `eo-cache-status: MISS`; `x-integrated-answer-sha256` present (value not recorded). `x-consumed-receipts` was NOT visible to the browser fetch (absent at the edge, stripped, or renamed — owner to confirm from the origin).
+  - The Terminal origin `app.mastermind-x.com` does not serve the path (Next.js 404 document, `vary: rsc, next-router-…`), stores no Supabase token in localStorage, and a cross-origin fetch from it to www fails (no CORS): the entitled contract is a www-origin contract.
+- **WP32 P3 (free-tier 403): NOT proven.** The only saved session is entitled; no free-tier account exists in the profile. The seat creates no account.
+- **WP31 natural clock unfired.** EDGAR submission headers (form / filingDate / items only) for AAPL, DHI, PHM, KBH, TOL show no 8-K item 2.02, 10-Q or 10-K dated ≥ 2026-10-19 through 2026-10-22T03:08Z (DHI last 8-K 2026-09-15; PHM 08-12; KBH 8-K 10-14 is pre-registration; TOL 10-Q 08-28). `scripts/c19_wp31_evaluate.py` was NOT run — `eligible` would be 0 and the single gated read is preserved. Seat watcher `$W5/wp31/edgar_watch.py` (30-min header polls, exits on `EVENT RELEASE`) arms the read; the evaluator's `--repo` tree is staged (below).
+- **Seat tree.** The session-root quarantine (detached HEAD on the SSD init tree) was self-remedied per the 10-10 ruling: storage helper mint → `/Volumes/Mastermind 2/agent-workspaces/claude/14851c4656838a3b/fable-ceo-project-init-9656b2-da5ad30a59bedaa7-e7739cb58a18e0b6`, branch `claude/ssd-fable-ceo-project-init-9656b2-da5ad30a59bedaa7-e7739cb58a18e0b6`, fast-forwarded to origin/main `562fc7dd02a9`, `data/` materialized (`data/trial_ledger.jsonl` 685 142 B, 2026-10-21). The `c19-ledger-r8` tree is retired.
+- 1Password `request_credentials` returned `not_connected` twice before the Chairman's ruling; never retried after it.
+
+**DECIDED**
+- D5 **The P0 proof lands now (r14), not with the WP31 read.** The first eligible release date is unknown; the entitled-path proof is the WP33 positive-proof item and waits for nothing. WP31's first counts become r15.
+- D6 **W9 → done; W10 opened** (Macro Agent OS, this cycle): W10 = the clock wave (WP31 first live read, counts only) plus WP32 P3 when a free-tier account exists.
+- D7 **Routed, not fixed by C19:** (a) cold-compose **524** at the edge's 30 s origin budget on the first authenticated compose after idle (warm 8.2 s / 2.1 s is inside budget) → composer/edge owner (pre-warm, longer private-route timeout, or a cache of the composed page are their calls); (b) `x-consumed-receipts` not visible at the edge → composer/edge owner; (c) r13 D4's "absent `Vary` on the 401 path" is narrowed: `Vary: Authorization, Accept-Encoding` IS present on the 200 path.
+- D8 **WP33 "P0 real capability" flips from one-human-step-away to PROVEN for the entitled 200 path**; the free-tier 403 half stays an open proof item with a named receiver (Chairman supplies a free-tier login, or the composer owner proves it from a test account).
+
+**OPEN** (owner → next action)
+- **WP31 first live read** — C19 seat → on `EVENT RELEASE`: evaluator once, counts only, prereg §7 residual caveats stated → r15 + W10.
+- **WP32 P3 free-tier 403** — Chairman / composer owner → a free-tier session; status/timing/headers only.
+- **Cold-compose 524; `x-consumed-receipts` at the edge** — composer/edge owner (D7).
+- Unchanged from r13: P4/P6/P5/P7; K1 Q2/Q3 residuals; WP18 UI (R-WP18); EDGAR clock gap; R2 source_clock regression; G10/G11; G3; G1/G8/WP28; Linear MAS-263 / Executive OAuth (human).
+
+**NEXT**
+1. Land this r14 (Mastermind merge queue) and the Macro Agent OS PR (W9 → done, W10 opened, handoff 2026-10-22).
+2. On `EVENT RELEASE`: the gated evaluator run → r15 + W10 (counts only).
+3. The seat ends this cycle on `DURABLE_EXECUTION_RUNNING` (watcher live) and on `PROVEN_OUTCOME` for the entitled-path proof.
+
+#### r15 cycle 2026-10-22 15:1xZ (seat 7ab343c8, Fable 5.1) — wave 14: WP31 natural clock FIRED (PHM 8-K item 2.02, 2026-10-22), first live read DONE — 1 eligible episode, label pending; read 1 voided by a transient reader failure, adapter repaired (Macro #10074), read 1b recovered it live
+
+**FACTS**
+- **Clock.** The re-armed EDGAR header watcher (30-min polls, submission headers only) exited at 2026-10-22T11:38:49Z on `PHM 8-K 2026-10-22 items 2.02, 9.01`. The filing's `-index-headers.html` manifest resolves (HTTP 200, 6 348 B) and lists `EX-99.1` — a prereg A3 release filing. No other universe issuer (AAPL, DHI, KBH, TOL) has filed an 8-K 2.02 / 10-Q / 10-K since registration.
+- **Read 1 (11:43Z → 12:18Z, rc 0, seat tree at main `0dc8ac5eeda1`-era sources, `data/trial_ledger.jsonl` of 2026-10-21).** Counts only: `episode_count=244`, `eligible=0`, `exposed=243`, `not_evaluable={pit_unrecoverable: 1}`, `label_pending=0`, `exhibit_failures=245`, verdict `MONITORING` (`monitoring_descriptive_only`), gates G-1 (frozen-prefix sha256 `44c9df65…`), G-2 (prereg commit `8e195093` is merged history), G-3 (budget row n≥6 beside 155 families) all passed. Adapter counts: submissions 10 requests / 0 shards missing, companyfacts 5 / 0 unavailable, k_inputs 244 / 0 unavailable, index_headers 500.
+- **Root cause of `pit_unrecoverable` (two observations).** The runner makes exactly ONE incumbent revisions-reader call (`engine.neuralweb.company_intelligence_reader.read_all_event_source_revisions`, a verified chain walk of up to 500 hops, one 8 s HTTP request per hop against the public R2 origin). It raised `CompanyIntelligenceReadError: Company Intelligence public source unavailable` (transport error on a generation-manifest hop; the origin served `manifest.json`, 531 KB, in 4.3 s and a 404 in 7.2 s during the window). By design every eligible S leg then became `chain_unreadable` and the one live episode was demoted to `NOT_EVALUABLE(pit_unrecoverable)`. A repeat probe of the same reader with a non-universe id (`MSFT:2026Q4`) succeeded → transient.
+- **`exhibit_failures=245`** are HTTP 404s on `-index-headers.html` for pre-2015 universe filings (sampled: KBH 2010, PHM 2011, TOL 2014 → 404; every 2015+ sample → 200). Those episodes are pre-registration and already EXPOSED; eligibility is unaffected. Recorded, not fixed.
+- **Repair — Macro PR #10074** (`claude/c19-w10-reader-retry-7ab343c8`, commit `0ae1f16d494d` off main `0dc8ac5eeda1`): `scripts/c19_wp31_production.py` `ProductionInputs.read_revisions()` performs the runner's one logical reader call with a bounded retry (3 attempts, 2 s × n backoff, same ids and same whole walk per attempt, the final exception propagates unchanged so `collect_s_legs` keeps its fail-closed path); counters `revisions_reader_attempts` / `revisions_reader_transient_failures`; the frozen reader module is untouched. Two synthetic, network-free tests; `tests/test_c19_wp31_production.py` 17 passed. merge-on-green armed; merge-queue-pilot is the only red (standing non-binding).
+- **Read 1b (12:31Z → 14:59Z, rc 0, head `0ae1f16d494d`).** Counts only: `episode_count=244`, **`eligible=1`, `label_pending=1`, `not_evaluable={}`**, `exposed=243`, `exhibit_failures=245`, verdict `MONITORING` (`monitoring_descriptive_only`; N = 1 < budget 6; `n_common_support=0`, `n_clusters=0`, `study_stopped=false`), arms emit A0=1, A1=0, A2=1, A2-K=1, A2-S=0 (the S leg abstained for the live episode — reason not opened). **`revisions_reader_attempts=2`, `revisions_reader_transient_failures=1`: the retry recovered a real transient failure during the read itself.** Exposure ledger: 184 lines (keys `at, issuer, q, reader`; values never opened). No episode, label, EPS or price value was printed or read outside the evaluator (PHM is now an exposure-risk issuer for the seat).
+- Read 1b is the SAME look as read 1, repaired: read 1 observed no label (PHM's 10-Q is not filed; §3.3 reads the label at the first run after that filing is accepted), so no episode was read twice.
+
+**DECIDED**
+- D9 **The first live read is DONE at the release rung:** one eligible episode minted with point-in-time features; the label look is the first evaluator run after PHM's 10-Q (prereg §3.3 / §9), recorded as r16. Nothing is declared: a look needs the §5 thresholds (40 episodes / 12 clusters, then 80 common-support); this is descriptive monitoring, N=1.
+- D10 **A transient transport error in the single reader call must not void a read.** Bounded retry in the C19 adapter (Macro #10074), never in the frozen reader; the fail-closed semantics are unchanged when every attempt fails.
+- D11 **Historical index-headers 404s stay recorded, not repaired:** they touch only pre-registration EXPOSED episodes and no eligible one.
+
+**OPEN** (owner → next action)
+- **Label look (r16)** — C19 seat → on the daily 10-Q/10-K header watcher's `EVENT LABEL_FILING` (universe, dated ≥ 2026-10-22): evaluator once from a tree carrying #10074, counts only.
+- **Macro #10074** — seat → merged and byte-verified (watcher armed).
+- **WP32 P3 free-tier 403** — Chairman / composer owner → a free-tier session; status/timing/headers only.
+- **Cold-compose 524; `x-consumed-receipts` at the edge** — composer/edge owner (r14 D7).
+- Unchanged from r14: P4/P6/P5/P7; K1 Q2/Q3 residuals; WP18 UI (R-WP18); EDGAR clock gap; R2 source_clock regression; G10/G11; G3; G1/G8/WP28; Linear MAS-263 / Executive OAuth (human).
+
+**NEXT**
+1. Land this r15 (Mastermind merge queue) and Macro #10074 (merge-on-green); W10 record updated on #10074.
+2. Daily 10-Q/10-K header watcher armed → r16 on `EVENT LABEL_FILING`.
+3. The seat ends this cycle on `DURABLE_EXECUTION_RUNNING` (two PR watchers + the label watcher live) and `PROVEN_OUTCOME` for the first live read.

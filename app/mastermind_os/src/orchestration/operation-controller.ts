@@ -53,7 +53,7 @@ import {
 
 // ── Frozen UI-local contract types ────────────────────────────────────────────
 
-export type OperationKind = "launch" | "message" | "stop";
+export type OperationKind = "launch" | "message" | "stop" | "consume";
 
 export interface CommandIntent {
   readonly kind: OperationKind;
@@ -242,7 +242,7 @@ export interface UnknownState {
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
-const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop"]);
+const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume"]);
 
 const POINTER_KEYS: ReadonlySet<string> = new Set([
   "operationKey",

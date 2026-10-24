@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { planObservationFixture } from "./plan-observation.fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { MissionDocument } from "../mission";
@@ -12,8 +13,7 @@ const hash = "a".repeat(64);
 const admitted = () => decodeAdmittedPlan({
   schema: "mastermind.workspace_admitted_execution_plan.v1",
   selection, availability: "AVAILABLE", reason_codes: [],
-  source_observation: { schema: "mastermind.workspace_plan_observation.v1",
-    selection, state: "SAME", control_room: {}, runtime: {} },
+  source_observation: planObservationFixture(selection),
   plan: { schema: "mastermind.admitted_execution_plan_view.v1",
     plan_schema_version: "mastermind.execution_plan/v3",
     admission_schema_version: "mastermind.coo_plan_admission/v2",
