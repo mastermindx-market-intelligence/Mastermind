@@ -562,7 +562,7 @@ def request(
             if exc.code == "FRONTIER_NEEDS_EXPLICIT_REASON":
                 raise FabricTaskError("JEV_FRONTIER_NEEDS_EXPLICIT_ESCALATION") from None
             print("JEV_UNAVAILABLE=" + exc.code, file=sys.stderr)
-        except (OSError, ValueError, UnicodeError):
+        except (OSError, ValueError, UnicodeError, FabricTaskError):
             # Advisory outage falls back to unchanged routing; never retry/switch keys.
             print("JEV_UNAVAILABLE=INPUT_OR_TRANSPORT", file=sys.stderr)
     if artifact_names:
@@ -969,21 +969,25 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "jev-advice":
             import jev_advisory
-            raw = sys.stdin.buffer.read(jev_advisory.MAX_STATE_BYTES + 1)
-            if len(raw) > jev_advisory.MAX_STATE_BYTES:
-                raise FabricTaskError("JEV_STATE_TOO_LARGE")
-            text = raw.decode("utf-8", "replace")
-            if args.kind == "task":
-                advice = jev_advisory.evaluate_task_packet(text, args.task_class)
-            elif args.kind == "skills":
-                advice = jev_advisory.evaluate("skills",
-                    {"task_class": args.task_class, "work_packet": text},
-                    candidates=args.candidate)
-            else:
-                original = (_bounded_regular(Path(args.packet),
-                    jev_advisory.MAX_STATE_BYTES // 2).decode("utf-8", "replace")
-                    if args.packet else "")
-                advice = jev_advisory.evaluate_result_packet(original, text)
+            try:
+                raw = sys.stdin.buffer.read(jev_advisory.MAX_STATE_BYTES + 1)
+                if len(raw) > jev_advisory.MAX_STATE_BYTES:
+                    raise jev_advisory.JevUnavailable("STATE_TOO_LARGE")
+                content = raw.decode("utf-8", "replace")
+                if args.kind == "task":
+                    advice = jev_advisory.evaluate_task_packet(content, args.task_class)
+                elif args.kind == "skills":
+                    advice = jev_advisory.evaluate("skills",
+                        {"task_class": args.task_class, "work_packet": content},
+                        candidates=args.candidate)
+                else:
+                    original = (_bounded_regular(Path(args.packet),
+                        jev_advisory.MAX_STATE_BYTES // 2).decode("utf-8", "replace")
+                        if args.packet else "")
+                    advice = jev_advisory.evaluate_result_packet(original, content)
+            except jev_advisory.JevUnavailable as exc:
+                print("JEV_UNAVAILABLE=" + exc.code, file=sys.stderr)
+                return 78
             _json(advice)
             return 0
         if args.cmd == "reconcile-completed":
