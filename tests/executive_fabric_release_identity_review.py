@@ -279,11 +279,20 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # _PREPROOF_RECEIPT_KEYS comments were replaced by qualified producer names);
 # token sites are unchanged in kind, spelling, and count.
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
+# Re-pinned for the explicit unstarted PREPROOF successor mode; same three
+# guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "3c45fc1c851576e5260f4544c3329915b4b3ce0efdaadf8d3ad002546acd4bc6",
-    "sites": ((73, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (903, 46, 49, "int", "400"),
-              (903, 66, 69, "int", "500")),
+    "sha256": '703470426984f995f39690aaf667c8d0ed5c98262f6e83224b201611d873a080',
+    "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1711, 46, 49, 'int', '400'), (1711, 66, 69, 'int', '500')),
+}
+
+
+# PR #1813: unchanged independently reviewed migration-evidence helper 8c7f1584.
+# This exact token is the Root config-directory permission mode, not a UID.
+# Source, path, AST location and complete token must all match; scanner unchanged.
+REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
+    "sha256": 'd7d4e069e76e689f2d476c1ec1c7289f3e5c700c26e9f7a55e0db3044fdcdfdd',
+    "sites": ((339, 46, 51, 'int', '0o755'),),
 }
 
 
@@ -440,11 +449,11 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': '0efe2564be088e4c3f9126cd1f9868367289a9e2d6ddc7139a6e43574b3a9972',
-    'sites': ((322, 24, 27, 'int', '501'),
-              (6493, 35, 37, 'int', '80'),
-              (6494, 50, 55, 'int', '0o755'),
-              (7031, 41, 46, 'int', '0o644')),
+    'sha256': 'e68f6df4d70ca6bc68260bfbd9b64d95a0209926ca70fb9dda9872915739093a',
+    'sites': ((335, 24, 27, 'int', '501'),
+              (6535, 35, 37, 'int', '80'),
+              (6536, 50, 55, 'int', '0o755'),
+              (7073, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
@@ -452,4 +461,14 @@ REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
     'sha256': 'aea09940df9475c571002309fa70eae88d19d2b2034b9f1a4700a3e86619534d',
     'sites': ((55, 21, 24, 'int', '501'),),
+}
+
+
+# Fixed pre-census ancestor permission modes; not account UIDs. Only the
+# exact reviewed source, AST Constant and complete token qualify.
+REVIEWED_FILES['control_plane/executive_backup.py'] = {
+    'sha256': 'e7f236811c233322e82792c151c694076c81b19c0067f113c77f6a4d0d27cc8a',
+    'sites': ((3500, 39, 44, 'int', '0o711'),
+              (3502, 43, 48, 'int', '0o700'),
+              (3504, 39, 44, 'int', '0o755')),
 }

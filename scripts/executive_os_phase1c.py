@@ -241,6 +241,25 @@ CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
 _CANONICAL_AGENT_RELAY_SOCKET = Path(
     "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
 )
+# Explicit stopped/disarmed recovery of an already-enrolled historical A2
+# generation. Never a candidate for an armed return or ordinary install.
+_LEGACY_A2_RECOVERY_SOCKET = Path(
+    "/var/run/mastermind-agent-relay/agent-relay.sock"
+)
+
+
+def _agent_relay_readside_socket_for_control(config):
+    # Only the already-validated, wholly disarmed legacy recovery profile
+    # redirects existing consumers of the A2 socket. Normal installations
+    # continue to bind exclusively to the canonical persistent socket.
+    # load_control_config / ServiceConfig normalize through the macOS
+    # /var -> /private/var symlink. Compare the same normalized identity;
+    # keep the original lexical constant for exact config-wire validation.
+    legacy = _LEGACY_A2_RECOVERY_SOCKET.resolve(strict=False)
+    if (config.terminal_return_armed is False
+            and config.terminal_return_socket_path == legacy):
+        return legacy
+    return _CANONICAL_AGENT_RELAY_SOCKET
 _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
@@ -1083,10 +1102,20 @@ def load_control_config(
             terminal_return_socket,
             "terminal_return_socket_path",
         )
-        if terminal_return_socket != os.fspath(_CANONICAL_AGENT_RELAY_SOCKET):
+        is_current = terminal_return_socket == os.fspath(_CANONICAL_AGENT_RELAY_SOCKET)
+        legacy_disarmed = (
+            terminal_return_socket == os.fspath(_LEGACY_A2_RECOVERY_SOCKET)
+            and config.get("terminal_return_armed") is False
+            and config.get("ceo_submit_armed") is False
+            and config.get("coo_autonomy_armed") is False
+            and config.get("coo_operator_harness_armed") is False
+            and config.get("coo_foreground_only", False) is False
+            and config.get("fabric_bridge_armed", False) is False
+        )
+        if not is_current and not legacy_disarmed:
             raise ServiceError(
-                "control config terminal_return_socket_path must be exactly "
-                f"{_CANONICAL_AGENT_RELAY_SOCKET}"
+                "control config terminal_return_socket_path must be the "
+                "persistent path, or the exact disarmed legacy A2 recovery path"
             )
     if observation_present:
         observation_socket = config["dialogue_observation_socket_path"]
@@ -2020,6 +2049,10 @@ def _service_from_config(
         subscription_canary_realm_generation=realm_generation,
         subscription_canary_realm_config_sha256=realm_config_sha256,
     )
+    # Keep all existing A2 read-side consumers on the same socket selected
+    # by validated Control. A returned old A2 daemon listens only on /var/run,
+    # so a hard-coded /var/db consumer would silently miss native replies.
+    relay_readside_socket_path = _agent_relay_readside_socket_for_control(config)
     # A persisted receipt from another service instance is never startup
     # authority. Every new PID starts quarantined and can activate only after a
     # fresh same-PID worker probe followed by the private activation command.
@@ -2509,7 +2542,7 @@ def _service_from_config(
                     service._namespace_custody.bound_runtime(runtime)
                     authority = coo_factory(runtime)
                     return PrincipalDialogueAppReceiver(runtime, authority,
-                        _CANONICAL_AGENT_RELAY_SOCKET,
+                        relay_readside_socket_path,
                         HostLocalDialogueObservationReader(service, runtime),
                         product_acceptance_reader=product_acceptance_basis_reader())
 
@@ -2654,7 +2687,7 @@ def _service_from_config(
                     return w3c_plist_configured(release_sha=config.proof_base_sha)
 
                 return build_runtime_session_bridge(
-                    runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    runtime, dialogue_socket_path=relay_readside_socket_path,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
@@ -2752,12 +2785,12 @@ def _service_from_config(
                 service._namespace_custody.bound_runtime(runtime)
                 acceptance_host = ProductAcceptanceRequestHost(
                     runtime=runtime, reader=acceptance_reader, worker_uid=company_worker_uid,
-                    relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    relay_socket_path=relay_readside_socket_path,
                     workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                     armed=True, principal_authority=coo_factory(runtime))
             return CompanyConsultationHost(
                 runtime=runtime, repository_root=company_repository,
-                worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                worker_uid=company_worker_uid, relay_socket_path=relay_readside_socket_path,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                 requester_answer_wake_dispatch=dispatch_answer,
                 product_acceptance_host=acceptance_host,
