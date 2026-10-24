@@ -191,6 +191,7 @@ def test_unsupported_acl_platform_has_no_fallback(monkeypatch):
 @pytest.mark.skipif(sys.platform!='linux',reason='real Linux memfd sealing required; no Darwin substitute')
 def test_real_private_helper_snapshot_on_linux(monkeypatch,local):
     token=w.package()['paid_initializer_token_data.py']
+    origin_mutated=False
     with w.Custody() as c:
         # A changed origin must refuse both the explicit check and the context's
         # mandatory final recheck. Cleanup must not be treated as success.
@@ -200,7 +201,10 @@ def test_real_private_helper_snapshot_on_linux(monkeypatch,local):
                 assert helper.fingerprint['sha256']==hashlib.sha256(RAW).hexdigest()
                 assert CANARY not in w.canonical(helper.fingerprint)
                 local.write_bytes(RAW.replace(b'0',b'1',1))
+                origin_mutated=True
                 with pytest.raises(token.TokenDataRefused):helper.check()
+    # A refusal during initial sealing cannot masquerade as this negative.
+    assert origin_mutated and helper._closed is True
 
 
 def test_packet_body_never_imports_remote_mutable_search_path():
