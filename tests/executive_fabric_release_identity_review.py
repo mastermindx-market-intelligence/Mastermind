@@ -459,8 +459,8 @@ REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
-    'sha256': '13ffc81477c6f57fdbb345bfed3f2142af6a5485f887a845d9e19ef4bfaa6587',
-    'sites': ((55, 21, 24, 'int', '501'),),
+    'sha256': 'afcbc0dc738424ec471a49477afb5da7e24c0e3d0d6cc238405a496289bd6a9e',
+    'sites': ((58, 21, 24, 'int', '501'),),
 }
 
 
