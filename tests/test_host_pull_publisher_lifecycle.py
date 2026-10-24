@@ -3,6 +3,10 @@
 PATH fixtures replace launchctl, lockf, and ps. These tests never call the
 real launchctl, the real lockf, the real ps, or the original host_pull
 collector.
+
+The candidate under test is not an installable sealed generation. The plist
+template is refused by native_generation.file_name(), and these tests do not
+admit it to the 95-member manifest.
 """
 from __future__ import annotations
 
@@ -97,55 +101,105 @@ def write_stubs(bin_dir, state):
 set -u
 printf '%s\n' "$*" >> "$STUB_STATE/launchctl.log"
 cmd=$1
-mode=$(cat "$STUB_STATE/print-mode" 2>/dev/null || echo stopped)
+mode=$(cat "$STUB_STATE/print-mode" 2>/dev/null || echo absent)
 style=$(cat "$STUB_STATE/print-style" 2>/dev/null || echo v1)
 pid=$(cat "$STUB_STATE/pid" 2>/dev/null || echo 4242)
-    case "$cmd" in
+print_running() {
+  if [ "$style" = "production" ]; then
+    printf 'gui/501/com.mastermind.host-pull = {\n'
+    printf '\tstate = running\n'
+    printf '\targuments = {\n'
+    while IFS= read -r arg; do
+      printf '\t\t%s\n' "$arg"
+    done < "$STUB_STATE/argv"
+    printf '\t}\n'
+    printf '\tpid = %s\n' "$pid"
+    printf '}\n'
+    return 0
+  fi
+  printf 'HOST_PULL_LAUNCHCTL_V1\n'
+  printf 'state=loaded\n'
+  printf 'activity=running\n'
+  printf 'pid=%s\n' "$pid"
+  while IFS= read -r arg; do
+    printf 'argv=%s\n' "$arg"
+  done < "$STUB_STATE/argv"
+}
+case "$cmd" in
   print)
-    if [ "$style" = "garbage" ]; then
-      printf 'hello\n'
-      exit 0
-    fi
-    if [ "$style" = "bad-exit" ]; then
-      printf 'launchctl failed\n' >&2
-      exit 9
-    fi
-    if [ "$mode" = "stopped" ]; then
-      if [ "$style" = "production" ]; then
+    case "$style" in
+      garbage)
+        printf 'hello\n'
+        exit 0
+        ;;
+      bad-exit)
+        printf 'launchctl failed\n' >&2
+        exit 9
+        ;;
+      not-found-noise)
+        printf 'helper: file not found\n' >&2
+        exit 9
+        ;;
+      wrong-label)
+        printf 'Could not find service "com.other.job" in domain for user gui: 501\n' >&2
+        exit 113
+        ;;
+      not-found-extra)
+        printf 'Could not find service "com.mastermind.host-pull" in domain for user gui: 501\n' >&2
+        printf 'also not found\n' >&2
+        exit 113
+        ;;
+      bare-not-running)
         printf '\tstate = not running\n'
         exit 0
-      fi
-      printf 'Could not find service "%s"\n' com.mastermind.host-pull >&2
-      exit 113
+        ;;
+      running-not-found)
+        printf 'gui/501/com.mastermind.host-pull = {\n'
+        printf '\tstate = running\n'
+        printf '\targuments = {\n'
+        printf '\t\t/bin/bash\n'
+        printf '\t}\n'
+        printf '\tpid = %s\n' "$pid"
+        printf '\tnote = not found\n'
+        printf '}\n'
+        exit 0
+        ;;
+    esac
+    if [ "$mode" = "running" ]; then
+      print_running
+      exit 0
     fi
-    if [ "$style" = "production" ]; then
-      printf 'gui/stub/com.mastermind.host-pull = {\n'
-      printf '\tstate = running\n'
+    if [ "$mode" = "idle" ]; then
+      printf 'gui/501/com.mastermind.host-pull = {\n'
+      printf '\tstate = not running\n'
       printf '\targuments = {\n'
-      while IFS= read -r arg; do
-        printf '\t\t%s\n' "$arg"
-      done < "$STUB_STATE/argv"
+      printf '\t\t/bin/bash\n'
+      printf '\t\t/old/generation/ext/host_pull.sh\n'
       printf '\t}\n'
-      printf '\tpid = %s\n' "$pid"
       printf '}\n'
       exit 0
     fi
-    printf 'HOST_PULL_LAUNCHCTL_V1\n'
-    printf 'state=running\n'
-    printf 'pid=%s\n' "$pid"
-    while IFS= read -r arg; do
-      printf 'argv=%s\n' "$arg"
-    done < "$STUB_STATE/argv"
-    exit 0
+    if [ "$mode" = "absent" ] || [ "$mode" = "stopped" ]; then
+      printf 'Bad request.\nCould not find service "%s" in domain for user gui: 501\n' com.mastermind.host-pull >&2
+      exit 113
+    fi
+    printf 'unrecognized stub mode\n' >&2
+    exit 78
     ;;
   bootout)
+    if [ -f "$STUB_STATE/pause-bootout" ]; then
+      : > "$STUB_STATE/bootout-entered"
+      while [ -f "$STUB_STATE/pause-bootout" ]; do
+        sleep 0.05
+      done
+    fi
     if [ -f "$STUB_STATE/bootout-rc" ]; then
       exit "$(cat "$STUB_STATE/bootout-rc")"
     fi
     if [ ! -f "$STUB_STATE/bootout-keep-alive" ]; then
       rm -f "$STUB_STATE/ps-alive"
     fi
-    printf 'stopped\n' > "$STUB_STATE/print-mode"
+    printf 'absent\n' > "$STUB_STATE/print-mode"
     exit 0
     ;;
   bootstrap)
@@ -388,7 +442,7 @@ def test_bootstrap_failure_restores_plist_and_is_not_green(workspace):
     assert ctx["plist"].read_bytes() == original
     assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
     assert launch_log(ctx).count("bootstrap ") == 2
-    backups = list(ctx["backup"].iterdir())
+    backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
     assert_not_executed(ctx)
@@ -479,9 +533,13 @@ def test_pid_that_does_not_exit_is_not_bootstrapped(workspace):
     result = run(ctx, wait_limit=2)
     assert result.returncode == 78, result.stderr
     assert "old pid did not exit" in result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
     assert ctx["plist"].read_bytes() == original
     assert "bootstrap " not in launch_log(ctx)
     assert "bootout " in launch_log(ctx)
+    receipt = json.loads(next(ctx["backup"].glob("*.receipt")).read_text())
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
     assert_not_executed(ctx)
 
 
@@ -743,13 +801,17 @@ def test_lockf_contention_returns_75(workspace):
 def test_production_launchctl_print_shape_is_accepted(workspace):
     ctx = prepare(workspace)
     (ctx["stub"] / "print-style").write_text("production\n")
-    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-mode").write_text("absent\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     result = run(ctx)
     assert result.returncode == 0, result.stderr
     plist = plistlib.loads(ctx["plist"].read_bytes())
     assert plist["ProgramArguments"][-1] == str(ctx["pin"])
     assert plist["EnvironmentVariables"]["PATH"] == SERVICE_PATH
+    (ctx["stub"] / "launchctl.log").write_text("")
+    second = run(ctx)
+    assert second.returncode == 0, second.stderr
+    assert "bootstrap " not in launch_log(ctx)
     assert_not_executed(ctx)
 
 
@@ -762,4 +824,225 @@ def test_release_descriptor_fields_are_the_ones_verify_seals(workspace):
     current = json.loads((ctx["store"] / "CURRENT.json").read_text())
     assert current["generation"] == ctx["release"].name
     assert current["schema"] == "native-code-selection.v1"
+    assert_not_executed(ctx)
+
+
+def test_candidate_is_not_an_installable_sealed_member():
+    daemon = DAEMON.read_text()
+    template = TEMPLATE.read_text()
+    for blob in (daemon, template):
+        assert "native-policy integration gate" in blob
+        assert "file_name()" in blob
+    assert "95-member" in daemon
+    assert "NOT INSTALLABLE" in daemon
+
+
+def arm_running(ctx, workspace):
+    original = b"OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").write_text("")
+    (ctx["stub"] / "argv").write_text("/bin/bash\n/old/generation/ext/host_pull.sh\n")
+    return original
+
+
+def receipt_body(ctx):
+    receipts = list(ctx["backup"].glob("*.receipt"))
+    assert len(receipts) == 1
+    return json.loads(receipts[0].read_text())
+
+
+@pytest.mark.parametrize(
+    ("fault", "outcome", "bootstraps", "snippet"),
+    [
+        ("wait-pid", "EFFECT_UNKNOWN", 0, "process state uncertain"),
+        ("post-bootout-print", "EFFECT_UNKNOWN", 0, "launchctl state uncertain"),
+        ("install-before-replace", "RECOVERED", 1, "recovered original service"),
+        ("install-after-replace", "RECOVERED", 1, "recovered original service"),
+        ("pre-bootstrap-print", "EFFECT_UNKNOWN", 0, "launchctl state uncertain"),
+    ],
+)
+def test_post_bootout_fault_injection(workspace, fault, outcome, bootstraps, snippet):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    result = run(ctx, fault=fault)
+    assert result.returncode == 78, result.stderr
+    assert snippet in result.stderr
+    assert ctx["plist"].read_bytes() == original
+    assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
+    assert launch_log(ctx).count("bootstrap ") == bootstraps
+    assert launch_log(ctx).count("bootout ") == 1
+    receipt = receipt_body(ctx)
+    assert receipt["schema"] == "host-pull-lifecycle-receipt.v1"
+    assert receipt["outcome"] == outcome
+    if outcome == "EFFECT_UNKNOWN":
+        assert "EFFECT_UNKNOWN" in result.stderr
+        assert "recovered original service" not in result.stderr
+        assert receipt["service"] == "stopped-uncertain"
+    else:
+        assert "recovered original service" in result.stderr
+        assert receipt["service"] == "restored"
+    assert_not_executed(ctx)
+
+
+@pytest.mark.parametrize("style", [
+    "not-found-noise",
+    "wrong-label",
+    "not-found-extra",
+    "bare-not-running",
+    "running-not-found",
+])
+def test_launchctl_lookalikes_fail_closed(workspace, style):
+    ctx = prepare(workspace)
+    original = b"UNTOUCHED\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-style").write_text(style + "\n")
+    if style == "running-not-found":
+        (ctx["stub"] / "print-mode").write_text("running\n")
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "uncertain" in result.stderr
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    assert_not_executed(ctx)
+
+
+def test_loaded_idle_is_booted_out_before_one_bootstrap(workspace):
+    ctx = prepare(workspace)
+    ctx["plist"].write_bytes(b"OLD-PLIST\n")
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("idle\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    result = run(ctx)
+    assert result.returncode == 0, result.stderr
+    log = launch_log(ctx)
+    assert log.index("bootout ") < log.index("bootstrap ")
+    assert log.count("bootstrap ") == 1
+    plist = plistlib.loads(ctx["plist"].read_bytes())
+    assert plist["ProgramArguments"][-1] == str(ctx["pin"])
+    assert_not_executed(ctx)
+
+
+def test_publication_lock_blocks_select_during_bootout(workspace):
+    ctx = prepare(workspace)
+    arm_running(ctx, workspace)
+    _store, other = publish(workspace, b"#!/bin/bash\nexit 92\n", False)
+    (ctx["stub"] / "pause-bootout").write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx), env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    entered = ctx["stub"] / "bootout-entered"
+    deadline = time.time() + 8
+    while time.time() < deadline and not entered.exists():
+        if proc.poll() is not None:
+            raise AssertionError(proc.stderr.read())
+        time.sleep(0.05)
+    assert entered.exists()
+    with pytest.raises(ValueError, match="native publication already in progress"):
+        GENERATION.select(ctx["store"], other.name, ctx["release"].name)
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    (ctx["stub"] / "pause-bootout").unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 0, err
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == ctx["release"].name
+    assert_not_executed(ctx)
+
+
+def _move_selector(ctx, workspace):
+    _store, other = publish(workspace, b"#!/bin/bash\nexit 92\n", False)
+    assert _store == ctx["store"]
+    GENERATION.select(ctx["store"], other.name, ctx["release"].name)
+    return other
+
+
+def _release_hold(proc, hold):
+    ready = Path(str(hold) + ".ready")
+    deadline = time.time() + 8
+    while time.time() < deadline and not ready.exists():
+        if proc.poll() is not None:
+            raise AssertionError(proc.stderr.read())
+        time.sleep(0.05)
+    assert ready.exists()
+    return proc
+
+
+def test_selector_move_before_bootout_does_not_bootout(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-bootout"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootout=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _release_hold(proc, hold)
+    other = _move_selector(ctx, workspace)
+    hold.unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "selector moved" in err
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == other.name
+    assert_not_executed(ctx)
+
+
+def test_selector_move_before_plist_replace_restores_original_service(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-plist"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_plist=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _release_hold(proc, hold)
+    assert "bootout " in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    other = _move_selector(ctx, workspace)
+    hold.unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "selector moved" in err
+    assert "recovered original service" in err
+    assert ctx["plist"].read_bytes() == original
+    assert launch_log(ctx).count("bootstrap ") == 1
+    assert launch_log(ctx).count("bootout ") == 1
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "RECOVERED"
+    assert receipt["service"] == "restored"
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == other.name
+    assert_not_executed(ctx)
+
+
+def test_selector_move_before_bootstrap_restores_original_service(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-bootstrap"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _release_hold(proc, hold)
+    assert ctx["plist"].read_bytes() != original
+    assert "bootstrap " not in launch_log(ctx)
+    other = _move_selector(ctx, workspace)
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    hold.unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 78, err
+    assert "selector moved" in err
+    assert "recovered original service" in err
+    assert ctx["plist"].read_bytes() == original
+    assert launch_log(ctx).count("bootstrap ") == 1
+    assert launch_log(ctx).count("bootout ") == 1
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "RECOVERED"
+    current = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    assert current["generation"] == other.name
     assert_not_executed(ctx)

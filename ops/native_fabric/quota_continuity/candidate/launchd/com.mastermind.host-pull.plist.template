@@ -1,5 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Source candidate only. Not a sealed native-code-releases member.
+  native_generation.file_name() rejects this template. This draft cannot be
+  installed until a separate native-policy integration gate admits it:
+  manifest admission plus a file_name() policy change. Do not copy this file
+  into a user LaunchAgents directory and do not bootstrap it from this PR.
+-->
 <plist version="1.0">
 <dict>
   <key>Label</key>

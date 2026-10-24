@@ -2,19 +2,25 @@
 # host_pull_daemon.sh — source-controlled candidate for the original Fabric
 # host-pull LaunchAgent lifecycle (flat ext/host_pull_daemon.sh).
 #
-# This candidate does not authorize a live install. install-agent never reads a
-# caller-supplied collector path. The only collector it will pin is
-#   <native-code-releases>/<verified-64hex>/ext/host_pull.sh
-# and only after native_generation.py verify, a CURRENT.json compare, and
-# owner, mode, path, and RELEASE descriptor checks.
+# NOT INSTALLABLE FROM THIS FILE ALONE. This candidate and its plist template
+# sit outside the sealed 95-member native manifest. native_generation.file_name()
+# rejects a plist template (it is not ext/*.py, ext/*.sh, or a named exception).
+# A separate native-policy integration gate — manifest admission plus a
+# file_name() policy change, reconciled with the open manifest pins — is
+# required before any host install. Running install-agent from this draft is
+# not authorized and is not a sealed generation install.
 #
-# The sealed 95-member native manifest is intentionally not extended here.
-# native_generation.file_name rejects a plist template, and adding members
-# would move whole-manifest pins owned by other open source PRs.
+# When that gate exists, install-agent still never reads a caller-supplied
+# collector path. The only collector it will pin is
+#   <native-code-releases>/<verified-64hex>/ext/host_pull.sh
+# and only after native_generation.py verify, a CURRENT.json compare under the
+# original publication lock immediately before each effect, and owner, mode,
+# path, and RELEASE descriptor checks.
 #
 # Single-collector exclusion is /usr/bin/lockf -t 0 (contention status 75).
-# This lifecycle does not use a pid-file check-then-write. Launchd or process
-# state that is not an exact running-or-stopped observation fails closed (78).
+# This lifecycle does not use a pid-file check-then-write. Launchd state is
+# loaded, definitively service-not-found, or uncertain. Uncertain fails closed
+# (78) and is never treated as an absent label.
 
 set -u
 set -o pipefail
@@ -29,11 +35,27 @@ DEST_PLIST=""
 RENDERED=""
 BOOTSTRAP_NEW=0
 BOOTSTRAP_ROLLBACK=0
+BOOTED=0
 WAIT_LIMIT=50
+ADMIT_PID=""
+ADMIT_RELEASE=""
+FAULT=""
+
+release_admission() {
+  if [ -n "${ADMIT_RELEASE:-}" ]; then
+    : > "$ADMIT_RELEASE" 2>/dev/null || true
+  fi
+  if [ -n "${ADMIT_PID:-}" ]; then
+    wait "$ADMIT_PID" 2>/dev/null || true
+    ADMIT_PID=""
+  fi
+  ADMIT_RELEASE=""
+}
 
 die() {
   local code=$1
   shift
+  release_admission
   if [ -n "${RENDERED:-}" ]; then
     rm -f -- "$RENDERED"
   fi
@@ -54,17 +76,22 @@ restore_plist() {
 on_signal() {
   local code=$1
   trap - TERM HUP INT
+  release_admission
   case "$PHASE" in
     START|VERIFIED|BACKED_UP)
       exit "$code"
       ;;
     PLIST_REPLACED)
-      restore_plist || exit 78
+      # The signal itself makes launchd timing uncertain. Restore the plist
+      # bytes and report a stopped receipt. Do not bootstrap.
+      restore_plist || true
+      write_receipt EFFECT_UNKNOWN "signal-$PHASE" "signal during $PHASE" || true
       exit 78
       ;;
     *)
       # Bootout, pid wait, or bootstrap already started. Another launchctl
       # call would be a second mutation against an unknown job state.
+      write_receipt EFFECT_UNKNOWN "signal-$PHASE" "signal during $PHASE" || true
       exit 78
       ;;
   esac
@@ -80,7 +107,7 @@ usage() {
 
 py() {
   python3 - "$@" <<'PY'
-import hashlib, json, os, re, stat, sys, tempfile
+import fcntl, hashlib, json, os, re, stat, subprocess, sys, tempfile, time
 
 cmd = sys.argv[1]
 SAFE = re.compile(r"/[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*\Z")
@@ -269,12 +296,17 @@ elif cmd == "backup":
 
 elif cmd == "install-rendered":
     src, dest = sys.argv[2:4]
+    fault = sys.argv[4] if len(sys.argv) > 4 else ""
+    if fault not in ("", "before-replace", "after-replace"):
+        fail("install fault")
     require_safe(src, "rendered")
     require_safe(dest, "plist")
     st = lstat_nofollow(src)
     if not stat.S_ISREG(st.st_mode):
         fail("rendered kind")
     raw = open(src, "rb").read()
+    if fault == "before-replace":
+        fail("injected install failure before replace")
     if os.path.lexists(dest):
         st_dest = lstat_nofollow(dest)
         if not stat.S_ISREG(st_dest.st_mode):
@@ -290,6 +322,8 @@ elif cmd == "install-rendered":
     finally:
         os.close(fd)
     os.replace(temporary, dest)
+    if fault == "after-replace":
+        fail("injected install failure after replace")
     fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         os.fsync(fd)
@@ -343,10 +377,20 @@ elif cmd == "same-file":
         fail("plist drift")
 
 elif cmd == "parse-launchctl":
+    # Tri-state only: loaded-running, loaded-idle, or absent. Anything else,
+    # including a loose "not found" and a bare "state = not running", is
+    # uncertain and fails closed. absent is only the exact service-not-found
+    # error for this label, or the hermetic V1 absent record.
     rc = int(sys.argv[2])
     out = open(sys.argv[3], "r", encoding="utf-8", errors="replace").read()
     err = open(sys.argv[4], "r", encoding="utf-8", errors="replace").read()
-    text = out + "\n" + err
+    absent_stderr = re.compile(
+        r"(?:Bad request\.\n)?"
+        r"Could not find service \"com\.mastermind\.host-pull\" "
+        r"in domain for user gui: [0-9]+\n?\Z")
+    header_re = re.compile(
+        r"(?m)^(?:gui/[0-9]+|user/[0-9]+|system)/com\.mastermind\.host-pull = \{$")
+
     def emit(state, pid, argv):
         sys.stdout.write(state + "\n")
         sys.stdout.write((pid or "") + "\n")
@@ -354,54 +398,72 @@ elif cmd == "parse-launchctl":
             if "\n" in arg or arg == "":
                 fail("launchctl argv")
             sys.stdout.write(arg + "\n")
-    if rc != 0:
-        if re.search(r"Could not find service|not found", text, re.IGNORECASE):
-            emit("stopped", "", [])
-        else:
-            fail("launchctl state uncertain")
-        raise SystemExit(0)
+
+    def refuse():
+        fail("launchctl state uncertain")
+
     lines = out.splitlines()
     if lines and lines[0] == "HOST_PULL_LAUNCHCTL_V1":
-        state = pid = None
+        if rc != 0 or err.strip():
+            refuse()
+        state = activity = pid = None
         argv = []
+        seen = set()
         for line in lines[1:]:
-            if line.startswith("state="):
-                if state is not None:
-                    fail("launchctl state uncertain")
-                state = line.split("=", 1)[1]
-            elif line.startswith("pid="):
-                if pid is not None:
-                    fail("launchctl state uncertain")
-                pid = line.split("=", 1)[1]
-            elif line.startswith("argv="):
+            if line.startswith("argv="):
                 argv.append(line.split("=", 1)[1])
+                continue
+            key, sep, value = line.partition("=")
+            if sep != "=" or key in seen or key not in {"state", "activity", "pid"}:
+                refuse()
+            seen.add(key)
+            if key == "state":
+                state = value
+            elif key == "activity":
+                activity = value
             else:
-                fail("launchctl state uncertain")
-        if state == "stopped" and pid == "" and not argv:
-            emit("stopped", "", [])
-        elif state == "running" and re.fullmatch(r"[1-9][0-9]*", pid or "") and argv:
-            emit("running", pid, argv)
+                pid = value
+        if seen != {"state", "activity", "pid"}:
+            refuse()
+        if state == "absent" and activity == "none" and pid == "" and not argv:
+            emit("absent", "", [])
+        elif (state == "loaded" and activity == "running"
+              and re.fullmatch(r"[1-9][0-9]*", pid or "") and argv):
+            emit("loaded-running", pid, argv)
+        elif state == "loaded" and activity == "idle" and pid == "" and not argv:
+            emit("loaded-idle", "", [])
         else:
-            fail("launchctl state uncertain")
+            refuse()
         raise SystemExit(0)
-    if out.count("arguments = {") > 1 or out.count("pid = ") > 1:
-        fail("launchctl state uncertain")
+    if rc != 0:
+        if out.strip() == "" and absent_stderr.fullmatch(err):
+            emit("absent", "", [])
+            raise SystemExit(0)
+        refuse()
+    if err.strip() or re.search(r"not found|Could not find service", out, re.IGNORECASE):
+        refuse()
+    headers = header_re.findall(out)
+    running_n = len(re.findall(r"(?m)^\s*state = running\s*$", out))
+    idle_n = len(re.findall(r"(?m)^\s*state = not running\s*$", out))
     pid_lines = re.findall(r"(?m)^\s*pid = ([0-9]+)\s*$", out)
+    if len(headers) != 1 or out.count("arguments = {") > 1 or len(pid_lines) > 1:
+        refuse()
     argv = []
     if "arguments = {" in out:
         block = out.split("arguments = {", 1)[1].split("}", 1)
         if len(block) != 2:
-            fail("launchctl state uncertain")
+            refuse()
         for line in block[0].splitlines():
             item = line.strip()
             if item:
                 argv.append(item)
-    if len(pid_lines) == 1 and int(pid_lines[0]) > 0 and argv:
-        emit("running", pid_lines[0], argv)
-    elif not pid_lines and re.search(r"(?m)^\s*state = not running\s*$", out) and "state = running" not in out:
-        emit("stopped", "", [])
+    if (running_n == 1 and idle_n == 0 and len(pid_lines) == 1
+            and int(pid_lines[0]) > 0 and argv):
+        emit("loaded-running", pid_lines[0], argv)
+    elif idle_n == 1 and running_n == 0 and not pid_lines:
+        emit("loaded-idle", "", [])
     else:
-        fail("launchctl state uncertain")
+        refuse()
 
 elif cmd == "paths-ready":
     for path in sys.argv[2:]:
@@ -426,6 +488,103 @@ elif cmd == "under-root":
         fail("tool escaped fixture")
     if not os.path.isfile(found_real) or not os.access(found_real, os.X_OK):
         fail("tool")
+
+elif cmd == "admit-hold":
+    # Hold the original publication lock (store/.publication.lock, exclusive,
+    # non-blocking, mode 0600) across one effect and prove CURRENT still names
+    # this generation. Verify goes through the publisher CLI so a wrapper is
+    # exercised as a program, not imported. This does not select or publish.
+    store, generation, expect, publisher, held_path, release_path = sys.argv[2:8]
+    require_safe(store, "store")
+    require_safe(publisher, "publisher")
+    require_safe(held_path, "admit held")
+    require_safe(release_path, "admit release")
+    if HEX.fullmatch(generation) is None or HEX.fullmatch(expect) is None:
+        fail("generation identity")
+    if os.path.basename(publisher) != "native_generation.py":
+        fail("publisher name")
+    if os.path.basename(store) != "native-code-releases":
+        fail("store name")
+    lock_path = store + "/.publication.lock"
+    try:
+        lock_fd = os.open(
+            lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    except OSError as exc:
+        fail("admission refused: " + str(exc))
+    try:
+        observed = os.fstat(lock_fd)
+        if (not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid()
+                or stat.S_IMODE(observed.st_mode) != 0o600):
+            fail("admission refused: invalid publication lock")
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fail("admission refused: native publication already in progress")
+        current_path = store + "/CURRENT.json"
+        st_cur = lstat_nofollow(current_path)
+        if (not stat.S_ISREG(st_cur.st_mode) or stat.S_IMODE(st_cur.st_mode) != 0o600
+                or st_cur.st_uid != os.geteuid()):
+            fail("admission refused: current")
+        selected = json.loads(open(current_path, "rb").read().decode("utf-8"))
+        if (not isinstance(selected, dict) or selected.get("schema") != "native-code-selection.v1"
+                or selected.get("generation") != generation
+                or selected.get("generation") != expect
+                or type(selected.get("sequence")) is not int or selected["sequence"] < 1
+                or set(selected) != {"schema", "generation", "sequence", "previous"}):
+            fail("selector moved")
+        verified = subprocess.run(
+            [sys.executable, publisher, "verify", "--store", store, "--generation", generation],
+            check=False, capture_output=True, text=True)
+        if verified.returncode != 0:
+            fail("admission refused: publisher verify failed")
+        try:
+            body = json.loads(verified.stdout)
+        except json.JSONDecodeError:
+            fail("admission refused: publisher verify output")
+        if body.get("digest") != generation or not str(body.get("path", "")):
+            fail("admission refused: publisher verify output")
+        held_fd = os.open(held_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        os.close(held_fd)
+        while not os.path.exists(release_path):
+            if os.getppid() == 1:
+                break
+            time.sleep(0.05)
+    finally:
+        os.close(lock_fd)
+
+elif cmd == "write-receipt":
+    directory, generation, outcome, phase, reason = sys.argv[2:7]
+    require_safe(directory, "receipt dir")
+    if HEX.fullmatch(generation) is None:
+        fail("generation identity")
+    if outcome not in {"RECOVERED", "EFFECT_UNKNOWN"}:
+        fail("receipt outcome")
+    if re.fullmatch(r"[A-Za-z0-9._+-]{1,80}", phase) is None:
+        fail("receipt phase")
+    if "\n" in reason or len(reason) > 200:
+        fail("receipt reason")
+    st_dir = lstat_nofollow(directory)
+    if not stat.S_ISDIR(st_dir.st_mode) or stat.S_IMODE(st_dir.st_mode) != 0o700:
+        fail("receipt dir mode")
+    service = "restored" if outcome == "RECOVERED" else "stopped-uncertain"
+    body = json.dumps({
+        "schema": "host-pull-lifecycle-receipt.v1",
+        "outcome": outcome,
+        "phase": phase,
+        "service": service,
+        "reason": reason,
+    }, separators=(",", ":")).encode("utf-8") + b"\n"
+    target = (directory + "/com.mastermind.host-pull.lifecycle-"
+              + generation + "-" + phase + ".receipt")
+    require_safe(target, "receipt")
+    if os.path.lexists(target):
+        fail("receipt already exists")
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, body)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 elif cmd == "not-user-launchagents":
     path = sys.argv[2]
@@ -465,10 +624,14 @@ resolve_tool() {
 parse_launchctl() {
   local rc=$1 out=$2 err=$3
   local parsed
-  parsed=$(py parse-launchctl "$rc" "$out" "$err") || die 78 "launchctl state uncertain"
-  LC_STATE=$(printf '%s\n' "$parsed" | sed -n '1p')
+  parsed=$(py parse-launchctl "$rc" "$out" "$err") || return 1
+  LC_CLASS=$(printf '%s\n' "$parsed" | sed -n '1p')
   LC_PID=$(printf '%s\n' "$parsed" | sed -n '2p')
   LC_ARGV=$(printf '%s\n' "$parsed" | sed -n '1,2d;p')
+  case "$LC_CLASS" in
+    absent|loaded-running|loaded-idle) return 0 ;;
+  esac
+  return 1
 }
 
 launchctl_print() {
@@ -477,8 +640,15 @@ launchctl_print() {
   err=$(mktemp "${TMPDIR:-/tmp}/host-pull-lc-err.XXXXXX")
   "$LAUNCHCTL" print "$DOMAIN/$LABEL" >"$out" 2>"$err"
   rc=$?
-  parse_launchctl "$rc" "$out" "$err"
+  if ! parse_launchctl "$rc" "$out" "$err"; then
+    rm -f -- "$out" "$err"
+    LC_CLASS=uncertain
+    LC_PID=""
+    LC_ARGV=""
+    return 1
+  fi
   rm -f -- "$out" "$err"
+  return 0
 }
 
 ps_state() {
@@ -489,7 +659,10 @@ ps_state() {
   if [ "$rc" -eq 0 ]; then
     observed=$(tr -cd '0-9' <"$out")
     rm -f -- "$out" "$out.err"
-    [ "$observed" = "$pid" ] || die 78 "process state uncertain"
+    if [ "$observed" != "$pid" ]; then
+      PS_RESULT=uncertain
+      return 0
+    fi
     PS_RESULT=alive
     return 0
   fi
@@ -499,20 +672,118 @@ ps_state() {
     return 0
   fi
   rm -f -- "$out" "$out.err"
-  die 78 "process state uncertain"
+  PS_RESULT=uncertain
+  return 0
 }
 
 wait_pid_dead() {
   local pid=$1 i=0
+  if [ "$FAULT" = "wait-pid" ]; then
+    return 2
+  fi
   while [ "$i" -lt "$WAIT_LIMIT" ]; do
     ps_state "$pid"
     [ "$PS_RESULT" = "dead" ] && return 0
+    [ "$PS_RESULT" = "uncertain" ] && return 2
     i=$((i + 1))
     if [ "$HERMETIC" -eq 0 ]; then
       sleep 0.1
     fi
   done
-  die 78 "old pid did not exit"
+  return 1
+}
+
+write_receipt() {
+  local outcome=$1 phase=$2
+  shift 2
+  [ -n "${BACKUP_DIR:-}" ] || return 1
+  py write-receipt "$BACKUP_DIR" "$GENERATION" "$outcome" "$phase" "$*"
+}
+
+stop_uncertain() {
+  local phase=$1
+  shift
+  local reason="$*"
+  release_admission
+  if [ "$PHASE" = "PLIST_REPLACED" ]; then
+    restore_plist || true
+  fi
+  write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+  die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+}
+
+recover_or_stop() {
+  local phase=$1
+  shift
+  local reason="$*"
+  local rc
+  release_admission
+  if [ "$BOOTED" -ne 1 ]; then
+    die 78 "admission refused: $reason"
+  fi
+  # A known-absent label can take the original plist back. Any other read
+  # is uncertain: restore bytes when we already replaced them, and do not
+  # bootstrap.
+  if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
+    if [ "$PHASE" = "PLIST_REPLACED" ]; then
+      restore_plist || true
+    fi
+    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+  fi
+  restore_plist || {
+    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+  }
+  if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
+    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+  fi
+  bootstrap_once rollback
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+    die 78 "EFFECT_UNKNOWN rollback bootstrap failed: $reason"
+  fi
+  if ! launchctl_print; then
+    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+  fi
+  case "$LC_CLASS" in
+    loaded-running|loaded-idle) ;;
+    *)
+      write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+      die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+      ;;
+  esac
+  write_receipt RECOVERED "$phase" "$reason" || die 78 "receipt failed"
+  die 78 "recovered original service: $reason"
+}
+
+admit_effect() {
+  local dir held i
+  release_admission
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/host-pull-admit.XXXXXX") || return 1
+  ADMIT_RELEASE="$dir/release"
+  held="$dir/held"
+  py admit-hold "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" "$held" "$ADMIT_RELEASE" &
+  ADMIT_PID=$!
+  i=0
+  while [ ! -f "$held" ]; do
+    # Signal 0 probes the admission helper only. It is not a collector pid check.
+    if ! kill -s 0 -- "$ADMIT_PID" 2>/dev/null; then
+      wait "$ADMIT_PID" 2>/dev/null || true
+      ADMIT_PID=""
+      return 1
+    fi
+    i=$((i + 1))
+    if [ "$i" -ge 200 ]; then
+      release_admission
+      return 1
+    fi
+    sleep 0.05
+  done
+  return 0
 }
 
 expected_argv() {
@@ -588,6 +859,8 @@ FIXTURE_ROOT=""
 TEMPLATE=""
 HOLD_MUTATION=""
 HOLD_BOOTSTRAP=""
+HOLD_BOOTOUT=""
+HOLD_PLIST=""
 EXPECT_OWNER_UID=""
 
 while [ "$#" -gt 0 ]; do
@@ -604,8 +877,11 @@ while [ "$#" -gt 0 ]; do
     --fixture-root) FIXTURE_ROOT=${2:-}; shift 2 ;;
     --template) TEMPLATE=${2:-}; shift 2 ;;
     --hold-before-mutation) HOLD_MUTATION=${2:-}; shift 2 ;;
+    --hold-before-bootout) HOLD_BOOTOUT=${2:-}; shift 2 ;;
+    --hold-before-plist) HOLD_PLIST=${2:-}; shift 2 ;;
     --hold-before-bootstrap) HOLD_BOOTSTRAP=${2:-}; shift 2 ;;
     --expect-owner-uid) EXPECT_OWNER_UID=${2:-}; shift 2 ;;
+    --fault) FAULT=${2:-}; shift 2 ;;
     --wait-limit) WAIT_LIMIT=${2:-}; shift 2 ;;
     --hermetic) HERMETIC=1; shift ;;
     --program|--pidfile) die 78 "program and pidfile inputs are refused" ;;
@@ -621,9 +897,15 @@ esac
 if [ "$HERMETIC" -eq 1 ]; then
   [ -n "$FIXTURE_ROOT" ] || die 78 "hermetic fixture root required"
   [ "$WAIT_LIMIT" -le 200 ] || die 78 "wait limit"
+  case "$FAULT" in
+    ""|wait-pid|post-bootout-print|install-before-replace|install-after-replace|pre-bootstrap-print) ;;
+    *) die 78 "unknown fault" ;;
+  esac
 else
   [ -z "$FIXTURE_ROOT" ] || die 78 "fixture root is hermetic-only"
-  [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$EXPECT_OWNER_UID" ] || die 78 "test hooks are hermetic-only"
+  [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
+    && [ -z "$HOLD_PLIST" ] && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] \
+    || die 78 "test hooks are hermetic-only"
   [ "$WAIT_LIMIT" -eq 50 ] || die 78 "wait limit"
 fi
 
@@ -663,61 +945,139 @@ case "$COMMAND" in
     fi
     RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH") \
       || die 78 "render failed"
-    launchctl_print
-    if [ "$LC_STATE" = "running" ]; then
-      ps_state "$LC_PID"
-      [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
-      if argv_matches && py same-file "$RENDERED" "$DEST_PLIST"; then
-        rm -f -- "$RENDERED"
-        exit 0
-      fi
-      if argv_matches; then
-        die 78 "launchctl and plist disagree"
-      fi
-    elif [ "$LC_STATE" != "stopped" ]; then
-      die 78 "launchctl state uncertain"
-    fi
+    launchctl_print || die 78 "launchctl state uncertain"
+    NEED_BOOTOUT=0
+    case "$LC_CLASS" in
+      loaded-running)
+        ps_state "$LC_PID"
+        [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
+        if argv_matches && py same-file "$RENDERED" "$DEST_PLIST"; then
+          rm -f -- "$RENDERED"
+          exit 0
+        fi
+        if argv_matches; then
+          die 78 "launchctl and plist disagree"
+        fi
+        NEED_BOOTOUT=1
+        ;;
+      loaded-idle)
+        NEED_BOOTOUT=1
+        ;;
+      absent)
+        NEED_BOOTOUT=0
+        ;;
+      *)
+        die 78 "launchctl state uncertain"
+        ;;
+    esac
     hold_if_requested "$HOLD_MUTATION"
     if [ -e "$DEST_PLIST" ]; then
       HAD_PLIST=1
       backup_out=$(py backup "$DEST_PLIST" "$BACKUP_DIR" "$GENERATION") || die 78 "backup failed"
       BACKUP=$(printf '%s\n' "$backup_out" | sed -n '1p')
-    elif [ "$LC_STATE" = "running" ]; then
+    elif [ "$NEED_BOOTOUT" -eq 1 ]; then
       die 78 "running service has no plist preimage"
     fi
     PHASE=BACKED_UP
-    if [ "$LC_STATE" = "running" ]; then
+    if [ "$NEED_BOOTOUT" -eq 1 ]; then
+      hold_if_requested "$HOLD_BOOTOUT"
+      if ! admit_effect; then
+        die 78 "selector moved before bootout"
+      fi
       OLD_PID=$LC_PID
       PHASE=BOOTOUT_STARTED
       "$LAUNCHCTL" bootout "$DOMAIN/$LABEL" || die 78 "bootout failed"
+      release_admission
+      BOOTED=1
       PHASE=BOOTED_OUT
-      wait_pid_dead "$OLD_PID"
-      launchctl_print
-      [ "$LC_STATE" = "stopped" ] || die 78 "launchctl state uncertain"
+      if [ "$LC_CLASS" = "loaded-running" ]; then
+        wait_pid_dead "$OLD_PID"
+        wait_rc=$?
+        if [ "$wait_rc" -eq 2 ]; then
+          stop_uncertain WAIT_PID "process state uncertain"
+        fi
+        if [ "$wait_rc" -ne 0 ]; then
+          stop_uncertain WAIT_PID "old pid did not exit"
+        fi
+      fi
+      if [ "$FAULT" = "post-bootout-print" ]; then
+        stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
+      fi
+      launchctl_print || stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
+      [ "$LC_CLASS" = "absent" ] || stop_uncertain POST_BOOTOUT_PRINT "service still loaded after bootout"
     fi
     PHASE=PID_GONE
-    py install-rendered "$RENDERED" "$DEST_PLIST" || die 78 "plist install failed"
+    hold_if_requested "$HOLD_PLIST"
+    if ! admit_effect; then
+      if [ "$BOOTED" -eq 1 ]; then
+        recover_or_stop PLIST_ADMIT "selector moved before plist replace"
+      fi
+      die 78 "selector moved before plist replace"
+    fi
+    install_fault=""
+    case "$FAULT" in
+      install-before-replace) install_fault=before-replace ;;
+      install-after-replace) install_fault=after-replace ;;
+    esac
+    py install-rendered "$RENDERED" "$DEST_PLIST" "$install_fault"
+    install_rc=$?
+    release_admission
+    if [ "$install_rc" -ne 0 ]; then
+      if [ "$BOOTED" -eq 1 ]; then
+        recover_or_stop INSTALL "plist install failed"
+      fi
+      restore_plist || die 78 "rollback restore failed"
+      die 78 "plist install failed"
+    fi
     rm -f -- "$RENDERED"
     RENDERED=""
     PHASE=PLIST_REPLACED
     hold_if_requested "$HOLD_BOOTSTRAP"
-    launchctl_print
-    [ "$LC_STATE" = "stopped" ] || {
+    if [ "$FAULT" = "pre-bootstrap-print" ]; then
+      stop_uncertain PRE_BOOTSTRAP_PRINT "launchctl state uncertain"
+    fi
+    if ! launchctl_print; then
+      stop_uncertain PRE_BOOTSTRAP_PRINT "launchctl state uncertain"
+    fi
+    if [ "$LC_CLASS" != "absent" ]; then
+      stop_uncertain PRE_BOOTSTRAP_PRINT "service still loaded"
+    fi
+    if ! admit_effect; then
+      if [ "$BOOTED" -eq 1 ]; then
+        recover_or_stop BOOTSTRAP_ADMIT "selector moved before bootstrap"
+      fi
       restore_plist || die 78 "rollback restore failed"
-      die 78 "launchctl state uncertain"
-    }
+      die 78 "selector moved before bootstrap"
+    fi
     bootstrap_once new
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-      restore_plist || die 78 "rollback restore failed"
+    new_rc=$?
+    release_admission
+    if [ "$new_rc" -ne 0 ]; then
+      if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
+        stop_uncertain BOOTSTRAP "bootstrap failed"
+      fi
+      restore_plist || stop_uncertain BOOTSTRAP "rollback restore failed"
+      if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
+        stop_uncertain BOOTSTRAP "bootstrap failed"
+      fi
       bootstrap_once rollback
-      rc=$?
-      [ "$rc" -eq 0 ] || die 78 "rollback bootstrap failed"
-      die 78 "bootstrap failed"
+      roll_rc=$?
+      if [ "$roll_rc" -ne 0 ]; then
+        stop_uncertain BOOTSTRAP "rollback bootstrap failed"
+      fi
+      if ! launchctl_print; then
+        stop_uncertain BOOTSTRAP "recovered bootstrap unproven"
+      fi
+      case "$LC_CLASS" in
+        loaded-running|loaded-idle) ;;
+        *) stop_uncertain BOOTSTRAP "recovered bootstrap unproven" ;;
+      esac
+      write_receipt RECOVERED BOOTSTRAP "bootstrap failed" || die 78 "receipt failed"
+      die 78 "recovered original service: bootstrap failed"
     fi
     PHASE=BOOTSTRAPPED
-    launchctl_print
-    [ "$LC_STATE" = "running" ] || die 78 "launchctl state uncertain"
+    launchctl_print || die 78 "launchctl state uncertain"
+    [ "$LC_CLASS" = "loaded-running" ] || die 78 "launchctl state uncertain"
     ps_state "$LC_PID"
     [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
     argv_matches || die 78 "bootstrap did not pin the verified collector"
