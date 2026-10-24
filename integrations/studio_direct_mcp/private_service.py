@@ -628,7 +628,7 @@ def _build_runtime_roots(account: str) -> dict:
 @contextmanager
 def _c2_lifecycle_mutex(account: str):
     """Keep the enrolled Studio account gate above the shared inode lock."""
-    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS):
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS | {"chatgpt2-business"}):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
     subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
@@ -2029,6 +2029,177 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
     return 0
 
 
+def _enroll_c2_business_closed_repositories(
+    args, node_abs: Path, backend_abs: Path, account: str,
+    label: str, port: int, roots: dict,
+) -> int:
+    """One existing-installer CAS grant, only after the reviewed C2 11->12 repair.
+
+    This does not replace a fleet gateway, switch a source/credential, create a
+    repository or execute Git. Only the existing closed profile and its exact
+    manifest hash may change. Caller-selected destinations remain impossible.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != "chatgpt2-business" or type(preview) is not bool
+            or not _sha256_hex(expected)
+            or getattr(args, "enable_repository_workspaces", False) is not True
+            or getattr(args, "publisher_only_fleet_v10", False) is True
+            or getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "fabric_only", False) is True
+            or getattr(args, "c2_personal_git_timeout_only", False) is True
+            or getattr(args, "os_commission_config_sha256", None) is not None):
+        raise SystemExit("C2 repository enrollment requires the exact Business profile, explicit opt-in and manifest CAS")
+
+    manifest_path, config_path = roots["manifest"], roots["config"]
+    for target in (manifest_path, config_path):
+        _assert_dest_safe(target)
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 repository enrollment: original manifest CAS mismatch")
+    prior = _verify_staged_install(
+        account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or not prior.get("dependencyTreeHash")
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+            or frozenset(prior["files"]) !=
+                (frozenset(C2_BUSINESS_V10_ORIGINAL_BLOBS) | {"workspace-access.mjs"})
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port):
+        raise SystemExit("C2 repository enrollment: reviewed installed generation does not match")
+
+    # The earlier C2 compatibility transaction pins all original unchanged
+    # modules and exactly three reviewed replacements, including the publisher.
+    # Never grant closed repository access to an unknown source generation.
+    for name in prior["files"]:
+        path = roots["base"] / name
+        _assert_dest_safe(path)
+        reviewed_digest = C2_BUSINESS_TARGET_PATCH_SHA256.get(name)
+        if reviewed_digest is not None:
+            if prior["files"][name] != reviewed_digest or _sha256_file(path) != reviewed_digest:
+                raise SystemExit("C2 repository enrollment: reviewed publisher source changed")
+        else:
+            raw = path.read_bytes()
+            blob = hashlib.sha1(
+                b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
+            ).hexdigest()
+            if blob != C2_BUSINESS_V10_ORIGINAL_BLOBS[name]:
+                raise SystemExit("C2 repository enrollment: original fleet source changed")
+
+    old_manifest = manifest_path.read_bytes()
+    old_config = config_path.read_bytes()
+    if (hashlib.sha256(old_manifest).hexdigest() != expected
+            or hashlib.sha256(old_config).hexdigest() != prior["configHash"]):
+        raise SystemExit("C2 repository enrollment: original snapshot changed")
+    try:
+        current = json.loads(old_config)
+    except (ValueError, UnicodeError) as exc:
+        raise SystemExit("C2 repository enrollment: original configuration unreadable") from exc
+    user_root = _user_root()
+    if (type(current) is not dict
+            or current.get("accountLabel") != account
+            or current.get("gitPublish") != _typed_git_config(user_root)
+            or "repositoryWorkspaces" in current
+            or current.get("fleetRouting", {}).get("enabled") is not True
+            or len(current["fleetRouting"].get("routes", [])) != 2
+            or current.get("maxPerSessionConcurrency") != 8
+            or current.get("maxQueuedPerSession") != 16
+            or type(current.get("fleetStatus")) is not dict
+            or type(current.get("paperDesign")) is not dict
+            or current.get("fabricOnly") is True
+            or "commissionPublication" in current
+            or "modernFabricProtocol" in current):
+        raise SystemExit("C2 repository enrollment: original Mastermind-only fleet profile changed")
+
+    future_config = dict(current)
+    future_config["gitPublish"] = _typed_git_config(
+        user_root, closed_repositories=True)
+    future_config["repositoryWorkspaces"] = {
+        "enabled": True,
+        "allowedRepositories": ["mastermind", "macro", "terminal"],
+    }
+    preserved = set(current) - {"gitPublish", "repositoryWorkspaces"}
+    if any(future_config[key] != current[key] for key in preserved):
+        raise SystemExit("C2 repository enrollment: unrelated configuration changed")
+    new_config = json.dumps(
+        future_config, indent=2, sort_keys=True).encode("utf-8")
+    future_manifest = dict(prior)
+    future_manifest["configHash"] = hashlib.sha256(new_config).hexdigest()
+    if not _valid_manifest(future_manifest, account, label):
+        raise SystemExit("C2 repository enrollment: proposed sealed manifest refused")
+    new_manifest = json.dumps(
+        future_manifest, indent=2, sort_keys=True).encode("utf-8")
+    target_sha = hashlib.sha256(new_manifest).hexdigest()
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 repository enrollment: manifest changed during preflight")
+    receipt = {
+        "account": account,
+        "originalManifestSha256": expected,
+        "targetManifestSha256": target_sha,
+        "closedRepositories": ["mastermind", "macro", "terminal"],
+        "fleetRoutesPreserved": 2,
+        "concurrencyPreserved": [8, 16],
+        "gatewayAndModuleBytesPreserved": True,
+        "serviceStarted": False,
+    }
+    if preview:
+        print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
+        return 0
+
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("refusing C2 repository enrollment while service is loaded; stop first")
+    if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+            or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]):
+        raise SystemExit("C2 repository enrollment: original state changed before write")
+
+    planned = {config_path: new_config, manifest_path: new_manifest}
+    original = {config_path: old_config, manifest_path: old_manifest}
+    committed = False
+    try:
+        _atomic_write_bytes(config_path, new_config)
+        if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+                or _stable_regular_file_hash(config_path, label="installed config") != future_manifest["configHash"]
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("C2 repository enrollment: original state changed before manifest commit")
+        _atomic_write_bytes(manifest_path, new_manifest)
+        committed = True
+        if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future_manifest
+                or _stable_regular_file_hash(manifest_path, label="installed manifest") != target_sha
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("C2 repository enrollment: committed identity mismatch")
+    except BaseException as exc:
+        if committed:
+            raise SystemExit(
+                "C2 repository enrollment: EFFECT_UNKNOWN after manifest commit; "
+                "reconcile exact original install before restart"
+            ) from exc
+        try:
+            if _lifecycle_inspect(account, label, roots) is not None:
+                raise RuntimeError("service became loaded during rollback")
+            for path in planned:
+                _assert_dest_safe(path)
+                observed = path.read_bytes()
+                if observed not in (planned[path], original[path]):
+                    raise RuntimeError("non-owned mutation during recovery")
+                if observed != original[path]:
+                    _atomic_write_bytes(path, original[path])
+            if (any(path.read_bytes() != original[path] for path in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("original state not restored")
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+        except BaseException as rollback_error:
+            raise SystemExit(
+                "C2 repository enrollment: EFFECT_UNKNOWN during rollback; "
+                "do not retry or restart without reconciliation"
+            ) from rollback_error
+        raise SystemExit("C2 repository enrollment: NOT_APPLIED original state restored") from exc
+
+    print(json.dumps({**receipt, "preflight": False, "effect": "APPLIED"}, sort_keys=True))
+    return 0
+
+
 def _upgrade_c2_personal_git_timeout_only(
     args, source: Path, node_abs: Path, backend_abs: Path,
     account: str, label: str, port: int, roots: dict,
@@ -2048,6 +2219,7 @@ def _upgrade_c2_personal_git_timeout_only(
             or expected != C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256
             or getattr(args, "c2_business_fleet_compat", False) is True
             or getattr(args, "c2_personal_closed_publisher", False) is True
+            or getattr(args, "c2_business_repository_enrollment", False) is True
             or getattr(args, "publisher_only_fleet_v10", False) is True
             or getattr(args, "enable_repository_workspaces", False) is True
             or getattr(args, "fabric_only", False) is True
@@ -2180,9 +2352,12 @@ def cmd_upgrade(args) -> int:
         raise SystemExit(f"source dir invalid: {source}")
     # C2 fleet predecessor migration is a tightly hash-pinned three-module
     # compatibility package, NOT the incompatible current STAGE_FILES bundle.
-    if not (getattr(args, "c2_business_fleet_compat", False) is True
-            or getattr(args, "c2_personal_closed_publisher", False) is True
-            or getattr(args, "c2_personal_git_timeout_only", False) is True):
+    if not (
+        getattr(args, "c2_business_fleet_compat", False) is True
+        or getattr(args, "c2_personal_closed_publisher", False) is True
+        or getattr(args, "c2_personal_git_timeout_only", False) is True
+        or getattr(args, "c2_business_repository_enrollment", False) is True
+    ):
         _check_source_files(source)
     node_abs = _resolve_abs("--node", args.node)
     backend_abs = _resolve_abs("--backend", args.backend)
@@ -2214,6 +2389,13 @@ def cmd_upgrade(args) -> int:
                     args, source, node_abs, backend_abs, account, label, port, roots)
         return _upgrade_c2_business_original_fleet_mastermind_only(
             args, source, node_abs, backend_abs, account, label, port, roots)
+    if getattr(args, "c2_business_repository_enrollment", False) is True:
+        if getattr(args, "publisher_preflight_only", False) is True:
+            return _enroll_c2_business_closed_repositories(
+                args, node_abs, backend_abs, account, label, port, roots)
+        with _c2_lifecycle_mutex(account):
+            return _enroll_c2_business_closed_repositories(
+                args, node_abs, backend_abs, account, label, port, roots)
     if getattr(args, "publisher_only_fleet_v10", False) is True:
         return _upgrade_fleet_v10_publisher_only(
             args, source, node_abs, backend_abs, account, label, port, roots)
@@ -2961,6 +3143,8 @@ def build_parser() -> argparse.ArgumentParser:
             s.add_argument("--c2-business-fleet-compat", action="store_true",
                            help="exact hash-pinned C2 11-to-12-file gateway compatibility; no new repo grants")
             s.add_argument("--c2-personal-closed-publisher", action="store_true")
+            s.add_argument("--c2-business-repository-enrollment", action="store_true",
+                           help="explicit closed Macro/Terminal opt-in after reviewed C2 11-to-12 migration; manifest CAS required")
             s.add_argument("--c2-personal-git-timeout-only", action="store_true",
                            help="exact sealed C2 Personal stopped-service Git command budget patch")
             s.add_argument("--publisher-only-fleet-v10", action="store_true",

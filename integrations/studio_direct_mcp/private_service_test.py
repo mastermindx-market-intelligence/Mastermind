@@ -3699,6 +3699,138 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
                     account, _label_for(account)))
 
 
+class TestC2BusinessClosedRepositoryEnrollment(unittest.TestCase):
+    """The existing C2 owner alone may grant a closed repo profile after 11->12."""
+
+    _legacy_11_set = staticmethod(
+        TestC2BusinessHistoricalCompatibility._legacy_11_set)
+    _installed_c2 = TestC2BusinessHistoricalCompatibility._installed_c2
+
+    @contextmanager
+    def _eligible_c2(self):
+        with self._installed_c2() as (args, roots, cfg, prior):
+            rc, _ = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            args.c2_business_fleet_compat = False
+            args.c2_business_repository_enrollment = True
+            args.enable_repository_workspaces = True
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(
+                roots["manifest"])
+            yield args, roots
+
+    def test_preflight_and_apply_preserve_fleet_paper_and_modules(self):
+        with self._eligible_c2() as (args, roots):
+            before_config = json.loads(roots["config"].read_text())
+            before_files = {n: (roots["base"] / n).read_bytes()
+                            for n in svc.V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR}
+            manifest = roots["manifest"].read_bytes()
+            lock = roots["state"] / svc.C2_LIFECYCLE_LOCK_NAME
+            # The protected 11->12 migration now retains the same lifecycle
+            # inode. Read-only enrollment preflight must not create or replace it.
+            lock_before = lock.stat().st_ino if lock.exists() else None
+            args.publisher_preflight_only = True
+            rc, output = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(output)["effect"], "NOT_APPLIED")
+            self.assertEqual(lock.stat().st_ino if lock.exists() else None, lock_before)
+            self.assertEqual(roots["manifest"].read_bytes(), manifest)
+            args.publisher_preflight_only = False
+            rc, output = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            receipt = json.loads(output)
+            self.assertEqual(receipt["effect"], "APPLIED")
+            self.assertTrue(lock.is_file())
+            self.assertEqual(receipt["closedRepositories"],
+                             ["mastermind", "macro", "terminal"])
+            after = json.loads(roots["config"].read_text())
+            self.assertEqual(after["repositoryWorkspaces"], {
+                "enabled": True,
+                "allowedRepositories": ["mastermind", "macro", "terminal"]})
+            self.assertEqual(after["gitPublish"],
+                             svc._typed_git_config(Path(os.environ["HOME"]),
+                                                   closed_repositories=True))
+            for key in set(before_config) - {"gitPublish"}:
+                self.assertEqual(after[key], before_config[key])
+            self.assertEqual(
+                before_files,
+                {n: (roots["base"] / n).read_bytes() for n in before_files})
+            after_manifest = svc._verify_staged_install(
+                args.account, _label_for(args.account), roots)
+            self.assertEqual(after_manifest["files"],
+                             json.loads(manifest)["files"])
+            self.assertEqual(after_manifest["dependencyTreeHash"],
+                             json.loads(manifest)["dependencyTreeHash"])
+            self.assertEqual(after_manifest["source"],
+                             json.loads(manifest)["source"])
+
+    def test_other_accounts_and_missing_explicit_grant_refused(self):
+        with self._eligible_c2() as (args, roots):
+            original = roots["manifest"].read_bytes()
+            args.enable_repository_workspaces = False
+            with self.assertRaisesRegex(SystemExit, "explicit opt-in"):
+                svc.cmd_upgrade(args)
+            args.enable_repository_workspaces = True
+            args.account = "chatgpt1"
+            with self.assertRaisesRegex(SystemExit, "exact Business profile"):
+                svc._enroll_c2_business_closed_repositories(
+                    args, Path(args.node), Path(args.backend), "chatgpt1",
+                    _label_for("chatgpt1"), args.port, roots)
+            args.account = "chatgpt2-business"
+            args.publisher_expected_manifest_sha256 = "0"*64
+            with self.assertRaisesRegex(SystemExit, "CAS mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(roots["manifest"].read_bytes(), original)
+
+    def test_competing_c2_upgrade_flags_cannot_cross_apply(self):
+        with self._eligible_c2() as (args, roots):
+            old_config = roots["config"].read_bytes()
+            old_manifest = roots["manifest"].read_bytes()
+            args.c2_personal_git_timeout_only = True
+            with self.assertRaisesRegex(SystemExit, "C2 Git timeout: original closed owner"):
+                svc.cmd_upgrade(args)
+            with self.assertRaisesRegex(SystemExit, "C2 repository enrollment requires"):
+                svc._enroll_c2_business_closed_repositories(
+                    args, Path(args.node), Path(args.backend), args.account,
+                    _label_for(args.account), args.port, roots)
+            self.assertEqual(roots["config"].read_bytes(), old_config)
+            self.assertEqual(roots["manifest"].read_bytes(), old_manifest)
+
+    def test_loaded_service_blocks_mutation_but_allows_readonly_preflight(self):
+        with self._eligible_c2() as (args, roots):
+            original = roots["manifest"].read_bytes()
+            recorder = CmdRecorder(handler=lambda c: FakeResult(
+                0, _print_running(str(roots["plist"]), _label_for(args.account)), "")
+                if c[:2] == ["launchctl", "print"] else None)
+            with mock.patch.object(svc, "_run", recorder):
+                args.publisher_preflight_only = True
+                rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(rc, 0)
+                self.assertEqual(json.loads(out)["effect"], "NOT_APPLIED")
+                args.publisher_preflight_only = False
+                with self.assertRaisesRegex(SystemExit, "service is loaded"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(roots["manifest"].read_bytes(), original)
+
+    def test_precommit_failure_rolls_back_without_new_grant(self):
+        with self._eligible_c2() as (args, roots):
+            original_config = roots["config"].read_bytes()
+            original_manifest = roots["manifest"].read_bytes()
+            real = svc._atomic_write_bytes
+            injected = [False]
+            def fail_after_config(path, data, mode=svc.FILE_MODE):
+                real(path, data, mode)
+                if Path(path) == roots["config"] and not injected[0]:
+                    injected[0] = True
+                    raise OSError("injected failure after atomic config rename")
+            with mock.patch.object(svc, "_atomic_write_bytes", fail_after_config):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(injected[0])
+            self.assertEqual(roots["config"].read_bytes(), original_config)
+            self.assertEqual(roots["manifest"].read_bytes(), original_manifest)
+            svc._verify_staged_install(args.account, _label_for(args.account), roots)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 
