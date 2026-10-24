@@ -1,0 +1,78 @@
+--- a/pick.py
++++ b/pick.py
+@@ -2043,6 +2043,15 @@
+                              task_complexity=complexity, escalation_reason=escalation_reason,
+                              route_key=route_key)
+     if is_judgment_class(tc, doc):
++        # A capped opt-in share of Grok-class judgment work may consume
++        # Cursor's separate monthly product after weekly Grok exhaustion.
++        # The existing native picker retains all admission/quality gates.
++        if _cursor_grok_monthly_share(tc, doc, route_key, prefer_c, complexity):
++            same = _cursor_grok_after_quota(
++                tc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
++                task_complexity=complexity, escalation_reason=escalation_reason)
++            if same.startswith("POOL="):
++                return same + " ROUTE_ALLOC=cursor_grok_monthly_share"
+         return _pick_scored(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
+                              task_complexity=complexity, escalation_reason=escalation_reason)
+ 
+@@ -2161,6 +2170,59 @@
+     return same
+ 
+ 
++def _cursor_grok_monthly_share(tc, doc, route_key, prefer, complexity):
++    """Opt-in deterministic judgment cohort, not quota or worker admission."""
++    cfg = _routing(doc).get("cursor_grok_monthly_share")
++    if not isinstance(cfg, dict) or cfg.get("enabled") is not True:
++        return False
++    # Legacy Cursor and new X subscriptions do not share the same economics.
++    # Unknown plan, stale proof, exhausted allowance or paid overflow fail closed.
++    proof = cfg.get("cursor_entitlement")
++    if (type(proof) is not dict
++            or proof.get("plan_type") != "legacy_independent_monthly"
++            or proof.get("source") != "account_dashboard_readback"
++            or proof.get("on_demand_enabled") is not False):
++        return False
++    remaining = proof.get("remaining_pct")
++    if (type(remaining) not in (int, float) or not math.isfinite(remaining)
++            or not 20.0 <= remaining <= 100.0):
++        return False
++    if any(type(proof.get(k)) is not str or not proof[k].endswith("Z")
++           for k in ("observed_at", "reset_at")):
++        return False
++    try:
++        observed = datetime.fromisoformat(proof["observed_at"][:-1] + "+00:00").timestamp()
++        reset = datetime.fromisoformat(proof["reset_at"][:-1] + "+00:00").timestamp()
++        now = datetime.now(timezone.utc).timestamp()
++    except (ValueError, OverflowError):
++        return False
++    if not (0 <= now - observed <= 6 * 3600
++            and now < reset <= observed + 35 * 86400):
++        return False
++    percent = cfg.get("percent")
++    if type(percent) is not int or not (1 <= percent <= 20):
++        return False
++    allowed = frozenset({"operator", "repair"})
++    classes = cfg.get("task_classes")
++    if (type(classes) is not list or not classes or len(classes) > len(allowed)
++            or any(type(c) is not str or c not in allowed for c in classes)
++            or len(classes) != len(set(classes))):
++        return False
++    if (tc not in classes or tc not in allowed or prefer not in (None, "")
++            or complexity != "C2_COMPLEX_BOUNDED"):
++        return False
++    if (type(route_key) is not str or
++            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", route_key) is None):
++        return False
++    if not _grok_exhausted():
++        return False
++    val = int.from_bytes(hashlib.sha256(
++        b"mastermind-cursor-grok-monthly-share-v1\0" + tc.encode("ascii") +
++        b"\0" + route_key.encode("ascii")
++    ).digest()[:8], "big") % 10000
++    return val < percent * 100
++
++
+ EXECUTOR_PROMOTABLE_R31 = frozenset({"minimax", "glm", "bailian"})
+ 
+ 
