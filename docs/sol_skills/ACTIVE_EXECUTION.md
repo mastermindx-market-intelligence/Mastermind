@@ -280,6 +280,41 @@ to keep a turn short. Prefer work that produces one of these observable deltas:
 Run the action through the canonical owner/tool. Preserve source-writer custody, one-carrier effect
 reconciliation, and all modification gates from `INDEX.md`.
 
+
+### Extra High execution-first rule for assigned delivery
+
+For a human-attended Extra High session assigned to **implement, repair, migrate, clean up or ship**,
+treat the requested delivered result—not the first plausible diagnosis—as the completion target.
+After the minimum necessary source/target recovery, **perform the next safe, authorized action** through
+the actually exposed tool, or its exact necessary non-mutating preflight, before composing a
+recommendation-only exit. A plan, options memo, inventory, screenshot, checkpoint or inability to use
+one preferred method does not silently convert an end-to-end assignment into an assessment.
+A genuinely bounded research/design-only assignment still closes at its own stated acceptance.
+Do not perform a dummy mutation merely to satisfy this rule.
+
+Ordinary reversible choices within the assigned scope (layout, sequencing, copy-versus-rebuild,
+validation approach or recovery of a known target) are execution decisions, not a fresh Chairman
+approval ceremony. Use the existing grant and observed tool/resource authority; preserve real
+platform confirmations, authentication, material scope/spend decisions, explicit denials and
+unknown effects. Never imply that Extra High's reasoning setting increases permissions.
+
+**Work backward from the user's acceptance, not the unavailable API method.** If the preferred
+operation is unavailable, first distinguish an explicitly required invariant from an incidental
+implementation detail. For example, an unavailable identity-preserving cross-file page move does
+not by itself show that an already-copied destination cannot be verified, that an authorized
+copy/reconstruction is impossible, or that directory/reference repair is blocked. Inspect the
+exact exposed action family, actual source/destination, and safe alternatives once. Preserve
+originals until destination quality and references are proven; never assume copying, deletion or
+cross-file operations exist in a tool schema. An explicit permission/safety refusal is not a
+fallback invitation, and an EFFECT_UNKNOWN edit stays on its original carrier.
+
+Before returning **"assessment complete; no content changed"** on an assigned delivery, ask whether
+a safe in-scope implementation, test, reference repair, or path-disjoint phase is still ready. If
+yes, execute it in the current healthy turn. If truly blocked, name the exact attempted action or
+preflight, observed refusal/schema limitation, effect state, independent lanes checked, and
+the genuinely required human/platform gate. Advice without that action evidence is not completion.
+
+
 ## Step 2A — Decide execution ownership before routine labor
 
 Default to the existing fabric for independently executable bounded outcomes when an eligible worker

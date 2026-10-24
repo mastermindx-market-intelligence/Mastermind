@@ -98,6 +98,29 @@ For native MCP clients, use only the Paper actions exposed and approved in that 
 never grants permission, and sealed workers do not inherit ambient plugins or Executive grants.
 
 
+## Non-destructive cross-file cleanup
+
+A user request to **relocate or consolidate** misplaced Paper pages is not automatically a
+requirement to preserve their internal page/artboard/node identities. First inspect the exact
+source and destination files and check whether the user or another admitted writer already
+copied the destination. Define acceptance in visible content, component quality, working
+navigation/references and absence of unwanted duplicates—not an identity-preserving transport
+API unless the assignment actually requires unchanged internal IDs.
+
+If the actual catalog supports an authorized direct move, use it. Otherwise, where already
+supported and permitted, **copy or reconstruct into the verified destination, compare and repair,
+then retire the old version only after destination verification and an authorized deletion path**.
+An unsupported cross-file move is a blocker for that method, not proof that destination inspection,
+existing-copy verification, in-place editing, reference repair or other in-scope cleanup cannot
+proceed. If the exposed Paper tool family cannot copy/create/delete, state that exact limitation;
+do not invent calls, switch carriers after a denial, or use raw filesystem/UI workarounds against
+the guarded bridge. Preserve originals and report any cleanup that remains unperformed.
+
+Do not require another human design-signoff for routine reversible choices already covered by
+the current assignment. When one target or operation is genuinely blocked, continue safe,
+path-disjoint approved Paper work or reference cleanup through its legitimate owner; do not
+declare the entire commissioned reorganization complete on the strength of an assessment.
+
 ## Scope the design
 
 Define the user's task, primary persona, target screen, meaningful states and
