@@ -75,6 +75,7 @@ _FAKE_MCP_PROJECTION = {
         "multi_agent": False,
         "multi_agent_v2": {
             "enabled": True,
+            "disable_direct_message": True,
             "hide_spawn_agent_metadata": True,
             "max_concurrent_threads_per_session": 2,
             "non_code_mode_only": False,
@@ -488,6 +489,12 @@ def _with_fake_reply(
         elif method == "config/read" and isinstance(result, dict):
             config = result.get("config")
             if isinstance(config, dict):
+                # W6B hermetic fake must reflect the reviewed native isolation
+                # bit; an old readback must remain REFUSE_CONFIG_DRIFT.
+                flags = config.get("features")
+                multi = flags.get("multi_agent_v2") if isinstance(flags, dict) else None
+                if isinstance(multi, dict):
+                    multi["disable_direct_message"] = True
                 config["mcp_servers"] = _FAKE_MCP_PROJECTION["mcp_servers"]
                 config["skills"] = _FAKE_MCP_PROJECTION["skills"]
         elif method == "mcpServerStatus/list" and isinstance(result, dict):

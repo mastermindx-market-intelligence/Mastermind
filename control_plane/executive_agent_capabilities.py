@@ -1003,6 +1003,9 @@ class ExecutionCapabilityProfile:
             }
             multi_agent_v2 = {
                 "enabled": True,
+                # Native helpers return through their original parent. Peer
+                # messaging is not a delegation or project-coordination grant.
+                "disable_direct_message": True,
                 "hide_spawn_agent_metadata": helper.hide_spawn_agent_metadata,
                 # V2 counts the root; the public agents setting above counts
                 # only spawned helpers.  Pin both interpretations.
@@ -1246,6 +1249,7 @@ class ExecutionCapabilityProfile:
                     "features.multi_agent=false",
                     (
                         "features.multi_agent_v2={enabled=true,"
+                        "disable_direct_message=true,"
                         "hide_spawn_agent_metadata=true,"
                         "max_concurrent_threads_per_session="
                         f"{helper.max_concurrent_helpers + 1},"

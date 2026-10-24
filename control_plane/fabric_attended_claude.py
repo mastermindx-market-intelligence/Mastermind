@@ -428,7 +428,8 @@ def _closed_settings(
         raise AttendedClaudePreparationError(
             "allowed permission rules must be scoped, never broad tool approval"
         )
-    deny = tuple(sorted(set((*_protected_deny_rules(tools), *forbidden))))
+    deny = tuple(sorted(set((*_protected_deny_rules(tools), *forbidden,
+                             "SendMessage", "ListAgents"))))
     return {
         "permissions": {
             "allow": allow,
@@ -439,6 +440,9 @@ def _closed_settings(
         "sandbox": _subprocess_sandbox_request(),
         "disableAllHooks": True,
         "enableAllProjectMcpServers": False,
+        # One finite assignment returns through its existing parent; native
+        # peer traffic must not inject unrelated work into this process.
+        "crossSessionInbound": "refuse",
     }
 
 
@@ -567,6 +571,12 @@ class AttendedClaudeLaunchPreparation:
             raise AttendedClaudePreparationError("descriptor must default to dontAsk")
         if permissions.get("disableBypassPermissionsMode") is not True:
             raise AttendedClaudePreparationError("descriptor must disable the bypass")
+        if self.settings.get("crossSessionInbound") != "refuse":
+            raise AttendedClaudePreparationError("descriptor must refuse native peer messages")
+        native_denies = permissions.get("deny")
+        if (not isinstance(native_denies, (list, tuple))
+                or not {"SendMessage", "ListAgents"}.issubset(native_denies)):
+            raise AttendedClaudePreparationError("descriptor must deny native peer tools")
         if self.settings.get("disableAllHooks") is not True:
             raise AttendedClaudePreparationError("descriptor must disable hooks")
         if self.settings.get("enableAllProjectMcpServers") is not False:
