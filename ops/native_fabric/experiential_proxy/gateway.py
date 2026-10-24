@@ -84,8 +84,8 @@ class QueueExpired(Exception):
 class SlidingWindowAdmissions:
     """FIFO waiting; SQLite commits each reservation before forwarding upstream.
 
-    The local SQLite file survives proxy restarts. Key identities are SHA-256 hashes,
-    not provider tokens. One active owner per state directory is enforced by flock.
+    The local SQLite file survives proxy restarts. Key identities are salted
+    PBKDF2-HMAC fingerprints, not provider tokens. One active owner is flocked.
     Multiple hosts/state dirs are NOT a shared quota domain.
     """
 
@@ -108,9 +108,26 @@ class SlidingWindowAdmissions:
             os.chmod(db_path, 0o600)
             self.db.execute("CREATE TABLE IF NOT EXISTS admissions (key_hash TEXT NOT NULL, sent_at REAL NOT NULL)")
             self.db.execute("CREATE INDEX IF NOT EXISTS idx_admission_key_time ON admissions (key_hash, sent_at)")
+            self.db.execute("CREATE TABLE IF NOT EXISTS admission_meta (name TEXT PRIMARY KEY, value BLOB NOT NULL)")
+            salt_row = self.db.execute(
+                "SELECT value FROM admission_meta WHERE name='credential_hash_salt'"
+            ).fetchone()
+            if salt_row is None:
+                salt = os.urandom(32)
+                self.db.execute(
+                    "INSERT INTO admission_meta(name, value) VALUES('credential_hash_salt', ?)",
+                    (salt,),
+                )
+            else:
+                salt = salt_row[0]
             self.db.execute("DELETE FROM admissions WHERE sent_at <= ?", (self.clock() - settings.window_s,))
             self.db.commit()
-            self.ids = [hashlib.sha256(k.encode("utf-8")).hexdigest() for k in settings.api_keys]
+            # High-entropy provider keys stay outside SQLite. Use a durable random
+            # salt and password-hardening KDF instead of raw SHA-256 fingerprints.
+            self.ids = [
+                hashlib.pbkdf2_hmac("sha256", key.encode("utf-8"), salt, 200_000).hex()
+                for key in settings.api_keys
+            ]
             self.events: list[deque[float]] = [deque() for _ in self.ids]
             for i, key_hash in enumerate(self.ids):
                 self.events[i].extend(

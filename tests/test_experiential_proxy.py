@@ -246,7 +246,6 @@ async def test_upstream_redirect_is_refused_without_following(tmp_path):
     assert len(seen) == 1
 
 
-
 @pytest.mark.asyncio
 async def test_cancelled_upstream_connect_releases_inflight_slot(tmp_path):
     started = asyncio.Event()
@@ -267,3 +266,22 @@ async def test_cancelled_upstream_connect_releases_inflight_slot(tmp_path):
             with pytest.raises(asyncio.CancelledError):
                 await task
             assert app.state.admissions._inflight == [0]
+
+
+@pytest.mark.asyncio
+async def test_key_fingerprints_are_salted_and_durable_without_plain_secrets(tmp_path):
+    import hashlib
+    import sqlite3
+
+    cfg = settings(tmp_path, api_keys=("a-high-entropy-test-secret",))
+    first = SlidingWindowAdmissions(cfg)
+    first_hash = first.ids[0]
+    first.close()
+    with sqlite3.connect(tmp_path / "admissions.sqlite3") as db:
+        salt, = db.execute("SELECT value FROM admission_meta WHERE name='credential_hash_salt'").fetchone()
+        assert len(salt) == 32
+        assert first_hash == hashlib.pbkdf2_hmac("sha256", b"a-high-entropy-test-secret", salt, 200_000).hex()
+        assert b"a-high-entropy-test-secret" not in (tmp_path / "admissions.sqlite3").read_bytes()
+    second = SlidingWindowAdmissions(cfg)
+    assert second.ids[0] == first_hash
+    second.close()
