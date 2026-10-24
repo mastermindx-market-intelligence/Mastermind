@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 85695,
+      "bytes": 85869,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "3b447a0e2285e1c707408c32aadd82285d8c5663b1117d2c7400c8bcaf831ea1",
+      "sha256": "616718444dc542eaa24e26c161c66618f2fd8296c61fb505d6a8838c75d457d6",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
