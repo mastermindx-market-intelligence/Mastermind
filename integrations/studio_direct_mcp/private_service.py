@@ -1282,11 +1282,20 @@ def _read_manifest(
         expected_bytes_sha = SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][1]
         if _sha256_file(manifest_path) != expected_bytes_sha:
             raise SystemExit("corrupt manifest")
-    # Current publisher-era predecessor may include independently sealed files.
-    # Its installed raw bytes must match, not just reserialized canonical JSON.
-    if _sealed_fabric_pool_current_predecessor(data, account):
-        if _stable_regular_file_hash(manifest_path, label="manifest") != FABRIC_POOL_PIN_MIGRATION_CURRENT[account][0]:
-            raise SystemExit("corrupt manifest")
+    # A known predecessor config hash is not permission to accept a modified
+    # predecessor manifest. Historical and current publisher generations may
+    # share that config hash, so compare the *raw* manifest against every
+    # source-pinned predecessor for the exact account, never just the canonical
+    # current record (which otherwise lets a generic valid fileset bypass the
+    # seal by changing an unrelated field).
+    predecessors = [
+        pins for registry in (FABRIC_POOL_PIN_MIGRATION, FABRIC_POOL_PIN_MIGRATION_CURRENT)
+        if (pins := registry.get(account)) is not None
+        and data.get("configHash") == pins[1]
+    ]
+    if (predecessors and _stable_regular_file_hash(manifest_path, label="manifest")
+            not in {pins[0] for pins in predecessors}):
+        raise SystemExit("corrupt manifest")
     # Exact successor config hashes are never accepted via a generic fileset.
     for registry in (FABRIC_POOL_PIN_MIGRATION, FABRIC_POOL_PIN_MIGRATION_CURRENT):
         pins = registry.get(account)
