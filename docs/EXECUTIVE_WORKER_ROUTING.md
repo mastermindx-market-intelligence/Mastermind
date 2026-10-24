@@ -71,6 +71,38 @@ The loader fails closed unless:
 - every worker alias belongs to an enabled, autonomous-allowed provider;
 - every route's aliases have the declared task capabilities.
 
+### Explicit logical frontier selection
+
+`ModelRouter.route(..., frontier_model_alias=...)` and `route_work(...)`
+accept an optional logical alias for work that already requires a frontier
+lead: planning, judgment, escalation, critical risk, or high ambiguity.
+`resolve_frontier_model_alias(...)` resolves the same registry used by worker
+routing. The selected entry must be non-worker and declare all three lead
+capabilities: planning, judgment, and escalation. Explicitly requested
+capabilities must also be present. Unknown aliases, worker aliases, and
+insufficient capabilities refuse without substituting the default.
+
+The selected alias and its exact execution-profile and capability-policy
+digests appear in the existing `FRONTIER_LEAD` decision. Its
+`job_constraints()` still refuses: logical cognition selection does not create
+an Executive worker claim. Provider enablement, account availability, capacity,
+and autonomous execution qualification remain with their existing owners.
+A disabled worker provider may therefore have a valid logical lead entry
+without becoming available for execution. The existing included-Chat, metered
+receipt, and Pro-mode receipt requirements still apply.
+
+Omitting the argument preserves the existing `frontier.orchestrator` default.
+An explicit frontier selection on ordinary worker work refuses; it cannot
+convert that work into lead work or be silently ignored. The worker suitability
+tiers, model catalogue, production-arm flags, and admission rules are unchanged.
+
+This API is a source capability for explicit selection. Project launch still
+requires a selected logical reference to be bound into the authenticated
+request, idempotency fingerprint, and immutable root execution binding before
+an app can offer it as an executable CEO choice. Reconciliation must use that
+root's admitted binding. Successful logical resolution alone is not evidence
+that a named model, provider, or app launch path is installed or ready.
+
 ### RF1 — provider-neutral suitability tiers
 
 `config/executive_worker_routes.json` is now

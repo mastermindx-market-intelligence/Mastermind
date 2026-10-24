@@ -64,9 +64,13 @@ Before substantial independently checkable C0/C1/C2 implementation, tests,
 research and repair, evaluate paid Subagent Fabric delegation. An enrolled
 Codex seat should use its **existing** `mastermind-fabric-delegate` skill and
 `fabric_task.py` adapter with the verified current `CODEX_THREAD_ID` root,
-stable child ID and original parent. Claude uses its already authorized
-Executive/Fabric path; native Agent/Task or Codex spawn_agent workers are not
-silently equivalent to paid Fabric. No separate broker, new queue, raw SSH
+stable child ID and original parent. An assigned M2 Claude principal should
+load `skills/mastermind-claude-fabric-delegation/SKILL.md` (also installed in
+`~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md`) for the exact
+existing CLI/MCP child workflow and verified-root checks, never guess a parent.
+A spawned admitted operator receives its distinct `fabric_operator_scope` /
+`fabric_child_*` instructions through the existing launch packet. Native
+Agent/Task or Codex spawn_agent workers are not silently equivalent to paid Fabric. No separate broker, new queue, raw SSH
 fallback, model downgrade or inherited frontier worker is authorized here.
 Existing Executive/Capacity grants and provider/host controls stay controlling.
 

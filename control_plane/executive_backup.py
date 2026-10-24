@@ -25,9 +25,10 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -72,6 +73,8 @@ _NORMALIZED_SCHEMA_DIGESTS = {
     3: "4d20a48aee0a47b568f7ec49cf67d5e8a4f9a42217088462b370e6e753d23c92",
     4: "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4",
     5: "b2fe4455306b2bdcf4f698d958e420e4f885e941dc1f0b8db602cbb39edcedbd",
+    6: "4ed21db1880afe43bdab58ea07da335c2db60a218ccdedee44eaefd1d2175c05",
+    7: "7692d62bd4126dd6fcaec2873ee9506a1faac96b3246684366e1dfa6e34c6a87",
 }
 # Full-v4 content preservation: the same eight retained tables as the closed
 # v1-v3 projection, but carrying every v4 column (including the v4-only
@@ -93,7 +96,47 @@ _FULL_V4_TABLE_COLUMNS: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...]
     for name, columns, primary_key in _LEGACY_TABLE_COLUMNS
 )
 
+FULL_V5_CONTENT_PROJECTION_SCHEMA = (
+    "mastermind.executive_full_v5_content_projection/v1"
+)
+FULL_V6_CONTENT_PROJECTION_SCHEMA = (
+    "mastermind.executive_full_v6_content_projection/v1"
+)
+PHYSICAL_HISTORY_PROJECTION_SCHEMA = (
+    "mastermind.executive_physical_history_projection/v1"
+)
+_PHYSICAL_HISTORY_TABLE_COLUMNS = (
+    (
+        "physical_resource_commitments",
+        (
+            "commitment_id", "host_id", "operation_key", "phase_key", "owner_id",
+            "carrier_id", "allocation_generation", "revision", "state",
+            "request_fingerprint", "bundle_fingerprint", "bundle_manifest_json",
+            "caller_binding_json", "source_binding_json", "policy_binding_json",
+            "pool_binding_json", "phase_scope_json", "decision_event_id",
+            "begin_event_id", "last_observation_event_id", "settlement_event_id",
+            "created_at_ms", "updated_at_ms",
+        ),
+        ("commitment_id",),
+    ),
+    (
+        "physical_resource_demands",
+        (
+            "commitment_id", "allocation_generation", "dimension", "capacity_pool_id",
+            "window_binding_json", "qualified_incremental_peak", "remaining_charge",
+            "attributed_materialized_or_active", "attribution_json", "observed_revision",
+        ),
+        ("commitment_id", "allocation_generation", "dimension", "capacity_pool_id"),
+    ),
+    _LEGACY_TABLE_COLUMNS[4],  # All columns of every physical Event, including refusals.
+)
+_PHYSICAL_EVENT_PREDICATE = (
+    "aggregate_type='physical_resource_operation' "
+    "OR event_type GLOB 'PHYSICAL_RESOURCE_*'"
+)
+
 UPGRADE_BARRIER_SCHEMA = "mastermind.executive_schema_upgrade_barrier/v1"
+RESTORE_BARRIER_SCHEMA = "mastermind.executive_restore_barrier/v1"
 UPGRADE_PREFLIGHT_SCHEMA = "mastermind.executive_schema_upgrade_preflight/v1"
 UPGRADE_COMPLETION_SCHEMA = "mastermind.executive_schema_upgrade_completion/v1"
 UPGRADE_CENSUS_SCHEMA = "mastermind.executive_schema_upgrade_quiesce/v1"
@@ -102,6 +145,10 @@ _UPGRADE_PREFLIGHT_NAME = "executive-schema-upgrade.preflight.json"
 _UPGRADE_COMPLETION_NAME = "executive-schema-upgrade.completion.json"
 _UPGRADE_V4_TO_V5_PREFLIGHT_NAME = "executive-schema-upgrade.v4-to-v5.preflight.json"
 _UPGRADE_V4_TO_V5_COMPLETION_NAME = "executive-schema-upgrade.v4-to-v5.completion.json"
+_UPGRADE_V5_TO_V6_PREFLIGHT_NAME = "executive-schema-upgrade.v5-to-v6.preflight.json"
+_UPGRADE_V5_TO_V6_COMPLETION_NAME = "executive-schema-upgrade.v5-to-v6.completion.json"
+_UPGRADE_V6_TO_V7_PREFLIGHT_NAME = "executive-schema-upgrade.v6-to-v7.preflight.json"
+_UPGRADE_V6_TO_V7_COMPLETION_NAME = "executive-schema-upgrade.v6-to-v7.completion.json"
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -170,6 +217,67 @@ class SchemaUpgradeV4ToV5Receipt:
     v4_backup_manifest_path: str
     v5_backup_path: str
     v5_backup_manifest_path: str
+    completed_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class SchemaUpgradeV5ToV6Receipt:
+    """Evidence for the exact-v5 -> v6 upgrade, including retained v5 history."""
+
+    schema_version: str
+    database_path: str
+    database_identity: dict[str, Any]
+    release_sha: str
+    preflight_receipt_path: str
+    preflight_receipt_digest: str
+    completion_receipt_path: str
+    completion_receipt_digest: str
+    source_schema_version: int
+    target_schema_version: int
+    pre_full_v4_content_digest: str
+    post_full_v4_content_digest: str
+    pre_v5_migration_receipt_digest: str
+    post_v5_migration_receipt_digest: str
+    full_v4_content_equal: bool
+    v5_backup_path: str
+    v5_backup_manifest_path: str
+    v6_backup_path: str
+    v6_backup_manifest_path: str
+    completed_at: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class SchemaUpgradeV6ToV7Receipt:
+    """Receipt for the closed offline exact-v6 to v7 transition.
+
+    It binds preserved full-v6 content, the exact physical-history postimage,
+    and both source and target backup/drill proofs under the incumbent owner.
+    """
+
+    schema_version: str
+    database_path: str
+    database_identity: dict[str, Any]
+    release_sha: str
+    preflight_receipt_path: str
+    preflight_receipt_digest: str
+    completion_receipt_path: str
+    completion_receipt_digest: str
+    source_schema_version: int
+    target_schema_version: int
+    pre_full_v6_content_digest: str
+    post_full_v6_content_digest: str
+    full_v6_content_equal: bool
+    physical_history_digest: str
+    v6_backup_path: str
+    v6_backup_manifest_path: str
+    v7_backup_path: str
+    v7_backup_manifest_path: str
     completed_at: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -277,6 +385,7 @@ class RestoreReceipt:
     source_backup_sha256: str | None = None
     final_runtime_sha256: str | None = None
     ohf_invalidated_attempts: int = 0
+    physical_history_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -403,9 +512,9 @@ def _copy_private_file(source: Path, destination: Path) -> None:
 
 
 def _closed_schema_version(value: int) -> int:
-    if type(value) is not int or value not in {3, 4, 5}:
+    if type(value) is not int or value not in {3, 4, 5, 6, 7}:
         raise BackupVerificationError(
-            "expected schema version must be exactly 3, 4, or 5"
+            "expected schema version must be exactly 3, 4, 5, 6, or 7"
         )
     return value
 
@@ -736,6 +845,130 @@ def full_v4_content_digest(connection: sqlite3.Connection) -> str:
     return hashlib.sha256(
         _canonical_bytes(full_v4_content_projection(connection))
     ).hexdigest()
+
+
+
+def full_v5_content_projection(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Preserve every v5 cell and all five original migration timestamps.
+
+    Migrations 6 and 7 and the new physical tables are outside this projection.
+    The existing full-v4 projection already covers every retained table column.
+    """
+    prior = full_v4_content_projection(connection)
+    rows = connection.execute(
+        "SELECT typeof(version),version,typeof(name),name,typeof(checksum),checksum,"
+        "typeof(applied_at_ms),applied_at_ms FROM schema_migrations WHERE version=5"
+    ).fetchall()
+    expected = _expected_migrations(5)[4]
+    if len(rows) != 1:
+        raise BackupVerificationError("full v5 projection requires migration 5")
+    row = rows[0]
+    if (
+        row[0] != "integer" or type(row[1]) is not int or row[1] != 5
+        or row[2] != "text" or row[3] != expected.name
+        or row[4] != "text" or row[5] != expected.checksum
+        or row[6] != "integer" or type(row[7]) is not int
+    ):
+        raise BackupVerificationError("full v5 migration identity/storage class is invalid")
+    last = [_tagged_cell(str(row[index]), row[index + 1]) for index in (0, 2, 4, 6)]
+    return {
+        "schema_version": FULL_V5_CONTENT_PROJECTION_SCHEMA,
+        "source_schema_version": 5,
+        "tables": prior["tables"],
+        "v5_migration_vector": [*prior["v4_migration_vector"], last],
+    }
+
+
+def full_v5_content_digest(connection: sqlite3.Connection) -> str:
+    return hashlib.sha256(_canonical_bytes(full_v5_content_projection(connection))).hexdigest()
+
+
+def full_v6_content_projection(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Preserve every v6 cell and all six original migration timestamps.
+
+    Migration 7 and its two new physical tables are outside this projection.
+    The existing full-v4 projection already covers every retained table column.
+    """
+    prior = full_v5_content_projection(connection)
+    rows = connection.execute(
+        "SELECT typeof(version),version,typeof(name),name,typeof(checksum),checksum,"
+        "typeof(applied_at_ms),applied_at_ms FROM schema_migrations WHERE version=6"
+    ).fetchall()
+    expected = _expected_migrations(6)[5]
+    if len(rows) != 1:
+        raise BackupVerificationError("full v6 projection requires migration 6")
+    row = rows[0]
+    if (
+        row[0] != "integer" or type(row[1]) is not int or row[1] != 6
+        or row[2] != "text" or row[3] != expected.name
+        or row[4] != "text" or row[5] != expected.checksum
+        or row[6] != "integer" or type(row[7]) is not int
+    ):
+        raise BackupVerificationError("full v6 migration identity/storage class is invalid")
+    last = [_tagged_cell(str(row[index]), row[index + 1]) for index in (0, 2, 4, 6)]
+    return {
+        "schema_version": FULL_V6_CONTENT_PROJECTION_SCHEMA,
+        "source_schema_version": 6,
+        "tables": prior["tables"],
+        "v6_migration_vector": [*prior["v5_migration_vector"], last],
+    }
+
+
+def full_v6_content_digest(connection: sqlite3.Connection) -> str:
+    return hashlib.sha256(_canonical_bytes(full_v6_content_projection(connection))).hexdigest()
+
+
+def physical_history_projection(connection: sqlite3.Connection) -> dict[str, Any]:
+    """Return exact physical rows and Events, not an aggregate charge total.
+
+    Includes every commitment state, terminal tombstone, demand attribution,
+    refusal/replay Event, storage class, identity, revision and causal Event ID.
+    The caller separately verifies the complete schema and database custody.
+    """
+    tables: list[dict[str, Any]] = []
+    for name, columns, primary_key in _PHYSICAL_HISTORY_TABLE_COLUMNS:
+        actual = tuple(str(row[1]) for row in connection.execute(f'PRAGMA table_info("{name}")'))
+        if actual != columns:
+            raise BackupVerificationError(f"{name} columns differ from physical history schema")
+        select_parts = [
+            part for column in columns
+            for part in (f'typeof("{column}")', f'"{column}"')
+        ]
+        order = ",".join(f'"{column}" COLLATE BINARY' for column in primary_key)
+        where = f" WHERE {_PHYSICAL_EVENT_PREDICATE}" if name == "events" else ""
+        raw_rows = connection.execute(
+            f'SELECT {",".join(select_parts)} FROM "{name}"{where} ORDER BY {order}'
+        ).fetchall()
+        rows = [
+            [_tagged_cell(str(row[index * 2]), row[index * 2 + 1]) for index in range(len(columns))]
+            for row in raw_rows
+        ]
+        keys = [
+            tuple(tuple(row[columns.index(key)]) for key in primary_key)
+            for row in rows
+        ]
+        if len(set(keys)) != len(keys):
+            raise BackupVerificationError(f"{name} has duplicate physical history identity")
+        tables.append({"name": name, "columns": list(columns),
+                       "primary_key": list(primary_key), "rows": rows})
+    return {"schema_version": PHYSICAL_HISTORY_PROJECTION_SCHEMA, "tables": tables}
+
+
+def physical_history_digest(connection: sqlite3.Connection) -> str:
+    return hashlib.sha256(_canonical_bytes(physical_history_projection(connection))).hexdigest()
+
+
+def _require_no_physical_events(connection: sqlite3.Connection) -> None:
+    if connection.execute(f"SELECT 1 FROM events WHERE {_PHYSICAL_EVENT_PREDICATE} LIMIT 1").fetchone():
+        raise ExecutiveSchemaUpgradeError("initial physical migration refuses preexisting physical Events")
+
+
+def _require_initial_physical_history(connection: sqlite3.Connection) -> str:
+    _require_no_physical_events(connection)
+    for name, _columns, _key in _PHYSICAL_HISTORY_TABLE_COLUMNS[:2]:
+        if connection.execute(f'SELECT 1 FROM "{name}" LIMIT 1').fetchone():
+            raise ExecutiveSchemaUpgradeError("initial physical migration requires empty physical tables")
+    return physical_history_digest(connection)
 
 
 def _expected_migrations(
@@ -1431,6 +1664,41 @@ def _restore_rollback_set(target: Path, rollback: Path) -> None:
     _fsync_directory(target.parent)
 
 
+
+def _physical_restore_state(path: Path) -> dict[str, Any]:
+    """Read a stable, sidecar-free exact-v7 state without writable SQLite.
+
+    The immutable reader cannot account for a live WAL. A checkpoint must be
+    established by the incumbent stopped-owner procedure before restore; this
+    reader never checkpoints, removes a sidecar, or repairs an unreadable store.
+    """
+    def require_sidecar_absence() -> None:
+        if any(os.path.lexists(_sidecar(path, suffix)) for suffix in _SIDECAR_SUFFIXES):
+            raise RestoreSafetyError(
+                "physical history restore requires a verified sidecar-free database"
+            )
+
+    def identity(info: os.stat_result) -> tuple[int, ...]:
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    require_sidecar_absence()
+    before = _assert_private_regular_file(path, label="physical history database")
+    verified = _verify_database_file(path, expected_schema_version=7)
+    with _readonly_database(path) as connection:
+        _verify_connection(connection, expected_schema_version=7)
+        history = physical_history_digest(connection)
+    after = _assert_private_regular_file(path, label="physical history database")
+    require_sidecar_absence()
+    if identity(before) != identity(after) or _sha256_path(path) != verified.database_sha256:
+        raise RestoreSafetyError("physical history database changed during observation")
+    return {
+        "identity": identity(after),
+        "database_sha256": verified.database_sha256,
+        "physical_history_digest": history,
+    }
+
+
 def restore_backup_offline(
     store: RuntimeStore | str | Path,
     database_path: str | Path,
@@ -1442,8 +1710,9 @@ def restore_backup_offline(
     """Atomically restore a verified backup while the Executive service is offline.
 
     The service marker must be absent and the service advisory lock must be
-    acquirable.  The prior main database and sidecars remain beside the restored
-    database under the returned rollback path after success.
+    acquirable. The live exact-v7 database must be sidecar-free, and its complete
+    physical history must exactly equal the backup and TX-9 stage. The prior
+    main database remains under the returned rollback path after success.
     """
 
     verified = verify_backup(database_path, manifest_path)
@@ -1504,10 +1773,31 @@ def restore_backup_offline(
     rollback = runtime_directory / f"{target.name}.pre-restore-{operation_id}"
     copied_rollback: tuple[Path, ...] = ()
     live_mutated = False
-    # Always hold the canonical lock.  The schema upgrader uses the same inode,
-    # so it cannot create its barrier between our last check and the live swap.
-    with _offline_restore_lock(lock, marker):
+    barrier_started = False
+    preserve_artifacts = False
+    barrier_payload: dict[str, Any] | None = None
+    barrier_identity: dict[str, Any] | None = None
+    # The existing schema-upgrade barrier is the canonical writer exclusion.
+    # Runtime refuses its presence regardless of the closed restore discriminator.
+    with _offline_restore_lock(lock, marker) as lock_fd:
+        lock_identity = _held_service_lock_identity(lock, lock_fd)
+        target_before = _physical_restore_state(target)
+        source_state = _physical_restore_state(source)
+        if source_state["database_sha256"] != verified.database_sha256:
+            raise BackupVerificationError("physical restore source changed after verification")
+        physical_history = target_before["physical_history_digest"]
+        if source_state["physical_history_digest"] != physical_history:
+            raise RestoreSafetyError("backup would change retained physical history")
         runtime_directory = _ensure_private_directory(target.parent)
+
+        def require_restore_custody() -> None:
+            _held_service_lock_identity(lock, lock_fd, lock_identity)
+            if _marker_exists(marker):
+                raise RestoreSafetyError("Executive service marker appeared during restore")
+            if barrier_identity is not None and barrier_payload is not None:
+                _artifact_identity(canonical_upgrade_barrier,
+                                   expected_payload=barrier_payload, expected=barrier_identity)
+
         try:
             if os.path.lexists(canonical_upgrade_barrier):
                 raise RestoreSafetyError(
@@ -1520,79 +1810,140 @@ def restore_backup_offline(
                 or staged_verification.database_size != verified.database_size
                 or staged_verification.migrations != verified.migrations
             ):
-                raise BackupVerificationError(
-                    "staged restore differs from the verified backup"
-                )
-            # TX-9 is deliberately applied to the staged copy, before any live
-            # filename changes.  A controller crash can therefore leave either
-            # the old authority or an already-invalidated replacement, never a
-            # raw restored OHF writer authority at the live path.
-            staged_store = RuntimeStore(
-                runtime_root,
-                busy_timeout_ms=busy_timeout_ms,
-                database_path=staged,
-            )
-            invalidated = Runtime.from_store(
-                staged_store
-            ).operator_harness.invalidate_after_restore()
+                raise BackupVerificationError("staged restore differs from the verified backup")
+            # Finish TX-9 before publishing the shared barrier: this staged
+            # RuntimeStore correctly observes the same state-directory barrier.
+            staged_store = RuntimeStore(runtime_root, busy_timeout_ms=busy_timeout_ms,
+                                        database_path=staged)
+            invalidated = Runtime.from_store(staged_store).operator_harness.invalidate_after_restore()
             final_staged = _verify_database_file(staged)
+            staged_state = _physical_restore_state(staged)
+            if (
+                staged_state["database_sha256"] != final_staged.database_sha256
+                or staged_state["physical_history_digest"] != physical_history
+            ):
+                raise RestoreSafetyError("TX-9 stage changed retained physical history")
+            if _physical_restore_state(target) != target_before:
+                raise RestoreSafetyError("live physical history source changed before rollback copy")
             copied_rollback = _preserve_rollback_set(target, rollback)
-            if _marker_exists(marker):
-                raise RestoreSafetyError(
-                    "Executive service marker appeared before database replacement"
-                )
+            rollback_state = _physical_restore_state(rollback)
+            if (
+                rollback_state["database_sha256"] != target_before["database_sha256"]
+                or rollback_state["physical_history_digest"] != physical_history
+            ):
+                raise RestoreSafetyError("rollback copy changed retained physical history")
+            require_restore_custody()
             if os.path.lexists(canonical_upgrade_barrier):
                 raise RestoreSafetyError(
                     "Executive schema upgrade barrier appeared before database replacement"
                 )
-            # From this point onward any failure must restore the rollback set.
-            # Removing a WAL/SHM/journal mutates durable state even if the main
-            # database os.replace() has not happened yet.
+            if _physical_restore_state(target) != target_before:
+                raise RestoreSafetyError("live physical history changed before database replacement")
+            barrier_payload = {
+                "schema_version": RESTORE_BARRIER_SCHEMA,
+                "operation_id": operation_id,
+                "database_path": str(target),
+                "target_preimage": target_before,
+                "source_backup_path": str(source),
+                "source_backup_sha256": verified.database_sha256,
+                "manifest_sha256": verified.manifest_sha256,
+                "staged_path": str(staged),
+                "staged_state": staged_state,
+                "rollback_path": str(rollback),
+                "rollback_state": rollback_state,
+                "physical_history_digest": physical_history,
+                "control_uid": os.geteuid(),
+                "created_at": _utc_now(),
+            }
+            # Once publication may begin, an incomplete barrier stays occupied.
+            # A crash also retains both staged and rollback evidence.
+            barrier_started = True
+            preserve_artifacts = True
+            _write_private_json(canonical_upgrade_barrier, barrier_payload)
+            barrier_identity = _artifact_identity(
+                canonical_upgrade_barrier, expected_payload=barrier_payload
+            )
+            require_restore_custody()
+            if _physical_restore_state(target) != target_before:
+                raise RestoreSafetyError("live source changed after restore barrier publication")
+            if _physical_restore_state(staged) != staged_state:
+                raise RestoreSafetyError("qualified restore stage changed before replacement")
+            if _physical_restore_state(rollback) != rollback_state:
+                raise RestoreSafetyError("qualified rollback changed before replacement")
+            # No sidecars are removed. Their absence is proved and the barrier
+            # prevents ordinary Runtime writers from recreating one.
             live_mutated = True
-            for suffix in _SIDECAR_SUFFIXES:
-                try:
-                    _sidecar(target, suffix).unlink()
-                except FileNotFoundError:
-                    pass
             os.replace(staged, target)
             target.chmod(0o600)
             _fsync_directory(runtime_directory)
             restored = _verify_database_file(target)
-            if restored.database_sha256 != final_staged.database_sha256:
-                raise BackupVerificationError(
-                    "restored database hash differs from staged invalidated runtime"
-                )
+            restored_state = _physical_restore_state(target)
+            if (
+                restored.database_sha256 != final_staged.database_sha256
+                or restored_state["database_sha256"] != final_staged.database_sha256
+                or restored_state["physical_history_digest"] != physical_history
+            ):
+                raise BackupVerificationError("restored database differs from qualified TX-9 stage")
+            require_restore_custody()
+            _unlink_exact_upgrade_artifact(
+                canonical_upgrade_barrier, expected_payload=barrier_payload,
+                expected=barrier_identity,
+            )
+            preserve_artifacts = False
             if existing_store is not None:
                 existing_store._schema_ready = False
             return RestoreReceipt(
                 restored_database_path=str(target),
                 restored_sha256=restored.database_sha256,
                 rollback_database_path=str(rollback),
-                rollback_sidecar_paths=tuple(
-                    str(path) for path in copied_rollback if path != rollback
-                ),
-                rollback_sha256=_sha256_path(rollback),
+                rollback_sidecar_paths=tuple(str(path) for path in copied_rollback if path != rollback),
+                rollback_sha256=rollback_state["database_sha256"],
                 manifest_sha256=verified.manifest_sha256,
                 restored_at=_utc_now(),
                 source_backup_sha256=verified.database_sha256,
                 final_runtime_sha256=restored.database_sha256,
                 ohf_invalidated_attempts=invalidated,
+                physical_history_digest=physical_history,
             )
         except Exception as exc:
-            if live_mutated and rollback.exists():
+            if barrier_started:
                 try:
-                    _restore_rollback_set(target, rollback)
-                    if existing_store is not None:
-                        existing_store._schema_ready = False
-                    with _readonly_database(target) as rollback_connection:
-                        _verify_connection(rollback_connection)
-                except (OSError, sqlite3.Error, RuntimeProofError) as rollback_exc:
+                    if barrier_identity is None or barrier_payload is None:
+                        raise RestoreSafetyError("restore barrier publication is incomplete")
+                    # A lost canonical lock never authorizes destructive rollback.
+                    require_restore_custody()
+                    if live_mutated:
+                        if _physical_restore_state(rollback) != rollback_state:
+                            raise RestoreSafetyError("rollback artifact changed before recovery")
+                        require_restore_custody()
+                        _restore_rollback_set(target, rollback)
+                        if existing_store is not None:
+                            existing_store._schema_ready = False
+                        rollback_proof = _physical_restore_state(target)
+                        if (
+                            rollback_proof["database_sha256"] != target_before["database_sha256"]
+                            or rollback_proof["physical_history_digest"] != physical_history
+                        ):
+                            raise BackupVerificationError("rollback failed physical history conservation")
+                    elif _physical_restore_state(target) != target_before:
+                        raise RestoreSafetyError("pre-effect restore target changed")
+                    require_restore_custody()
+                    _unlink_exact_upgrade_artifact(
+                        canonical_upgrade_barrier, expected_payload=barrier_payload,
+                        expected=barrier_identity,
+                    )
+                except Exception as guard_exc:
+                    preserve_artifacts = True
+                    if barrier_payload is not None:
+                        _ensure_upgrade_quarantine_barrier(canonical_upgrade_barrier, barrier_payload)
                     raise RestoreRollbackError(
-                        f"restore failed and rollback also failed: {type(rollback_exc).__name__}: {rollback_exc}"
+                        "restore effect or custody remains unknown; writer barrier and evidence retained"
+                    ) from guard_exc
+                preserve_artifacts = False
+                if live_mutated:
+                    raise RestoreRollbackError(
+                        "restore mutation failed; previous database bytes were restored"
                     ) from exc
-                raise RestoreRollbackError(
-                    f"restore mutation failed; previous database bytes were restored: {type(exc).__name__}: {exc}"
-                ) from exc
             for path in copied_rollback:
                 try:
                     path.unlink()
@@ -1600,10 +1951,11 @@ def restore_backup_offline(
                     pass
             raise
         finally:
-            try:
-                staged.unlink()
-            except FileNotFoundError:
-                pass
+            if not preserve_artifacts:
+                try:
+                    staged.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 def _upgrade_now() -> str:
@@ -1855,8 +2207,31 @@ def _run_census_command(argv: list[str]) -> tuple[int, str, str, int]:
     return int(process.returncode), stdout, stderr, int(process.pid)
 
 
-def _default_upgrade_census(
-    database: Path, lock: Path, barrier: Path, lock_fd: int
+def _parse_census_ps_uid(value: str) -> int:
+    """Decode ps presentation into the exact unsigned 32-bit kernel UID.
+
+    Darwin ps uses signed decimal UIDFMT for uid_t fields.  Normalizing that
+    representation preserves UID equality; it never excludes a process row.
+    Other platforms retain unsigned-only input.  Bounds precede int parsing.
+    """
+    if re.fullmatch(r"[0-9]{1,10}", value) is not None:
+        uid = int(value)
+        if uid <= 0xFFFFFFFF:
+            return uid
+    elif sys.platform == "darwin" and re.fullmatch(r"-[1-9][0-9]{0,9}", value) is not None:
+        uid = int(value)
+        if -(1 << 31) <= uid < 0:
+            return uid + (1 << 32)
+    raise RestoreSafetyError("independent process census is malformed")
+
+
+def _default_upgrade_census(database: Path, lock: Path, barrier: Path, lock_fd: int) -> Mapping[str, Any]:
+    return _default_upgrade_census_with_context(database, lock, barrier, lock_fd)
+
+
+def _default_upgrade_census_with_context(
+    database: Path, lock: Path, barrier: Path, lock_fd: int,
+    _recovery: _PreCensusContinuation | None = None,
 ) -> Mapping[str, Any]:
     control_uids = sorted(
         set(
@@ -1881,10 +2256,12 @@ def _default_upgrade_census(
     sensor_child_observed = False
     for line in ps_output.splitlines():
         parts = line.strip().split(None, 4)
-        if len(parts) != 5 or any(not parts[index].isdigit() for index in range(4)):
+        if len(parts) != 5 or re.fullmatch(r"[0-9]{1,10}", parts[0]) is None:
             raise RestoreSafetyError("independent process census is malformed")
         pid = int(parts[0])
-        observed_uids = {int(parts[1]), int(parts[2]), int(parts[3])}
+        if not 0 < pid < (1 << 31):
+            raise RestoreSafetyError("independent process census is malformed")
+        observed_uids = {_parse_census_ps_uid(value) for value in parts[1:4]}
         if pid == os.getpid():
             if upgrader_observed or not observed_uids & set(control_uids):
                 raise RestoreSafetyError("process census upgrader sentinel is malformed")
@@ -1959,28 +2336,32 @@ def _default_upgrade_census(
             file_rows.append(row)
         else:
             raise RestoreSafetyError("file census contains an unknown field")
-    if len(file_rows) != 1:
-        raise RestoreSafetyError(
-            "independent file census omitted or duplicated the held lock sentinel"
-        )
-    allowed_fd = re.fullmatch(r"[0-9]+", str(lock_fd))
+    expected_rows = ([{"pid": os.getpid(), "uid": os.geteuid(),
+                       "fd": str(lock_fd), "path": str(lock)}]
+                     if _recovery is None else _recovery.census_rows())
+    expected_by_fd = {int(row["fd"]): row for row in expected_rows}
+    if len(file_rows) != len(expected_rows):
+        raise RestoreSafetyError("independent file census omitted or duplicated a held sentinel")
     for row in file_rows:
         fd_number = re.match(r"[0-9]+", str(row["fd"]))
         if (
-            row["pid"] != os.getpid()
-            or row["uid"] != os.geteuid()
-            or row["path"] != str(lock)
-            or fd_number is None
-            or allowed_fd is None
-            or int(fd_number.group()) != lock_fd
+            fd_number is None
+            or int(fd_number.group()) not in expected_by_fd
+            or any(row[key] != expected_by_fd[int(fd_number.group())][key]
+                   for key in ("pid", "uid", "path"))
         ):
             raise RestoreSafetyError("independent file census found another open runtime file")
         # lsof decorates descriptors with access-mode suffixes (for example
         # ``3u``).  Persist the closed numeric identity used by repeated census
         # comparison rather than a presentation detail of the sensor.
-        row["fd"] = str(lock_fd)
+        row["fd"] = str(int(fd_number.group()))
+    file_rows.sort(key=lambda row: int(row["fd"]))
+    if file_rows != expected_rows:
+        raise RestoreSafetyError("independent file census repeated or changed a held sentinel")
+    if _recovery is not None:
+        _recovery.census_rows()
     return {
-        "schema_version": UPGRADE_CENSUS_SCHEMA,
+        "schema_version": UPGRADE_CENSUS_SCHEMA if _recovery is None else PRE_CENSUS_CENSUS_SCHEMA,
         "control_uids": control_uids,
         "upgrader_pid": os.getpid(),
         "inspected_paths": inspected,
@@ -2003,6 +2384,11 @@ def _upgrade_census(
 ) -> dict[str, Any]:
     observer = _SCHEMA_UPGRADE_CENSUS_OBSERVER or _default_upgrade_census
     raw = observer(database, lock, barrier, lock_fd)
+    return _validate_upgrade_census(raw, database, lock, barrier, lock_fd)
+
+
+def _validate_upgrade_census(raw: Any, database: Path, lock: Path, barrier: Path,
+                            lock_fd: int, _recovery: _PreCensusContinuation | None = None) -> dict[str, Any]:
     if not isinstance(raw, Mapping) or set(raw) != {
         "schema_version",
         "control_uids",
@@ -2022,7 +2408,7 @@ def _upgrade_census(
         str(barrier),
     ]
     if (
-        material["schema_version"] != UPGRADE_CENSUS_SCHEMA
+        material["schema_version"] != (UPGRADE_CENSUS_SCHEMA if _recovery is None else PRE_CENSUS_CENSUS_SCHEMA)
         or material["control_uids"]
         != sorted(
             set(
@@ -2045,15 +2431,9 @@ def _upgrade_census(
         }
         or material["processes"] != []
         or material["inspected_paths"] != expected_paths
-        or material["open_files"]
-        != [
-            {
-                "pid": os.getpid(),
-                "uid": os.geteuid(),
-                "fd": str(lock_fd),
-                "path": str(lock),
-            }
-        ]
+        or material["open_files"] != (
+            [{"pid": os.getpid(), "uid": os.geteuid(), "fd": str(lock_fd), "path": str(lock)}]
+            if _recovery is None else _recovery.census_rows())
     ):
         raise RestoreSafetyError("writer census material is adverse")
     for row in material["open_files"]:
@@ -2094,6 +2474,12 @@ def _upgrade_database_state(database: Path, *, version: int) -> dict[str, Any]:
     if version >= 4:
         with _readonly_database(database) as connection:
             state["full_v4_content_digest"] = full_v4_content_digest(connection)
+            if version >= 5:
+                state["full_v5_content_digest"] = full_v5_content_digest(connection)
+            if version >= 6:
+                state["full_v6_content_digest"] = full_v6_content_digest(connection)
+            if version >= 7:
+                state["physical_history_digest"] = physical_history_digest(connection)
     return state
 
 
@@ -2115,6 +2501,9 @@ def _rollback_reproduces_preflight(
         and current.get("legacy_content_digest") == before.get("legacy_content_digest")
         and current.get("full_v4_content_digest")
         == before.get("full_v4_content_digest")
+        and current.get("full_v5_content_digest") == before.get("full_v5_content_digest")
+        and current.get("full_v6_content_digest") == before.get("full_v6_content_digest")
+        and current.get("physical_history_digest") == before.get("physical_history_digest")
     )
 
 
@@ -2999,11 +3388,1903 @@ def upgrade_v4_to_v5(
             ) from exc
 
 
+
+def _require_retained_backup_sidecar_absence(path: str | Path) -> None:
+    database = Path(path)
+    if any(os.path.lexists(_sidecar(database, suffix)) for suffix in _SIDECAR_SUFFIXES):
+        raise ExecutiveSchemaUpgradeError("retained upgrade backup has a SQLite sidecar")
+
+
+def _v5_migration_receipt_digest(connection: sqlite3.Connection) -> str:
+    """Preserve migration 5's exact receipt, outside the full-v4 projection."""
+    rows = connection.execute(
+        "SELECT typeof(version),version,typeof(name),name,typeof(checksum),checksum,"
+        "typeof(applied_at_ms),applied_at_ms FROM schema_migrations WHERE version=5"
+    ).fetchall()
+    expected = _expected_migrations(5)[-1]
+    if (len(rows) != 1 or tuple(rows[0][:6]) != (
+            "integer", 5, "text", expected.name, "text", expected.checksum)
+            or rows[0][6] != "integer" or type(rows[0][7]) is not int):
+        raise BackupVerificationError("migration 5 receipt identity/storage class is invalid")
+    return _upgrade_digest(list(rows[0]))
+
+
+def _upgrade_v5_retained_state(database: Path, *, version: int) -> dict[str, Any]:
+    state = _upgrade_database_state(database, version=version)
+    with _readonly_database(database) as connection:
+        state["v5_migration_receipt_digest"] = _v5_migration_receipt_digest(connection)
+    return state
+
+
+# Closed, fixed-original-operation recovery wire. Ordinary upgrades do not
+# consume these receipts and retain their existing barrier-refusal behavior.
+PRE_CENSUS_QUALIFICATION_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_qualification/v1"
+PRE_CENSUS_CONTINUATION_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_continuation/v1"
+PRE_CENSUS_PREFLIGHT_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_preflight/v1"
+PRE_CENSUS_CENSUS_SCHEMA = "mastermind.executive_schema_upgrade_quiesce/pre_census_recovery_v1"
+PRE_CENSUS_INSPECTION_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_inspection/v1"
+PRE_CENSUS_QUALIFICATION_NAME = "executive-schema-upgrade.v5-to-v6.pre-census-qualification.json"
+PRE_CENSUS_CONTINUATION_NAME = "executive-schema-upgrade.v5-to-v6.pre-census-continuation.json"
+_PRE_CENSUS_DATABASE = Path("/private/var/db/mastermind-executive/control/db/data/control_plane/executive.sqlite3")
+_PRE_CENSUS_RELEASES = Path("/Library/Application Support/MastermindExecutive/releases")
+_PRE_CENSUS_LIMIT = 64 * 1024
+_PRE_CENSUS_BARRIER_KEYS = frozenset({
+    "schema_version", "operation_id", "database_path", "tool_release_root",
+    "tool_release_tree_sha", "tool_release_manifest_sha256", "release_sha",
+    "control_uid", "created_at",
+})
+_PRE_CENSUS_QUALIFICATION_KEYS = frozenset({
+    "schema_version", "operation_id", "original_barrier", "original_tool",
+    "recovery_tool", "database", "normalized_schema_digest",
+    "full_v5_content_digest", "migration_vector", "selected_source",
+    "source_control_config", "host", "created_at", "backup_inventory_sha256",
+})
+_PRE_CENSUS_IDENTITY_KEYS = frozenset({"path", "device", "inode", "size", "sha256", "payload_digest"})
+_PRE_CENSUS_ORIGIN_KEYS = frozenset({
+    "path", "device", "inode", "uid", "gid", "mode", "nlink", "size",
+    "mtime_ns", "ctime_ns", "sha256",
+})
+
+
+def _pre_census_closed(value: Any, keys: frozenset[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != keys:
+        raise ExecutiveSchemaUpgradeError(f"pre-census {label} has an unsupported shape")
+    return dict(value)
+
+
+def _pre_census_hash(value: Any, *, length: int = 64) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{" + str(length) + "}", value) is None:
+        raise ExecutiveSchemaUpgradeError("pre-census digest or identity is malformed")
+    return value
+
+
+def _pre_census_time(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ExecutiveSchemaUpgradeError("pre-census timestamp is malformed")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ExecutiveSchemaUpgradeError("pre-census timestamp is malformed") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise ExecutiveSchemaUpgradeError("pre-census timestamp is not explicit UTC")
+    return value
+
+
+def _pre_census_control_identity() -> tuple[int, int]:
+    import pwd
+    import grp
+    from ops.executive_os.autonomy_control import CONTROL_USER, CONTROL_GROUP
+    user, group = pwd.getpwnam(CONTROL_USER), grp.getgrnam(CONTROL_GROUP)
+    if (user.pw_name != CONTROL_USER or group.gr_name != CONTROL_GROUP
+            or type(user.pw_uid) is not int or user.pw_uid <= 0
+            or type(group.gr_gid) is not int or group.gr_gid <= 0
+            or user.pw_gid != group.gr_gid):
+        raise ExecutiveSchemaUpgradeError("pre-census fixed Control identity is ambiguous")
+    return user.pw_uid, group.gr_gid
+
+
+def _pre_census_stat(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _pre_census_ancestors(path: Path, uid: int, gid: int) -> tuple:
+    """Known-ancestor metadata only: never directory READ, enumeration or ACL open."""
+    if path.parent != _PRE_CENSUS_DATABASE.parent:
+        raise ExecutiveSchemaUpgradeError("pre-census leaf is outside the fixed namespace")
+    top = _PRE_CENSUS_DATABASE.parents[4]
+    result = []
+    for ancestor in reversed(path.parents):
+        info = os.lstat(ancestor)
+        if ancestor == top:
+            owner, group, mode = 0, 0, 0o711
+        elif top in ancestor.parents:
+            owner, group, mode = uid, gid, 0o700
+        else:
+            owner, group, mode = 0, 0, 0o755
+        if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != owner or info.st_gid != group
+                or stat.S_IMODE(info.st_mode) != mode):
+            raise ExecutiveSchemaUpgradeError("pre-census ancestor metadata is unqualified")
+        result.append((str(ancestor), info.st_dev, info.st_ino, info.st_uid,
+                       info.st_gid, info.st_mode))
+    return tuple(result)
+
+
+def _pre_census_leaf(path: Path, fd: int, *, uid: int, gid: int, mode: int) -> os.stat_result:
+    from control_plane.fs_security import has_macos_acl
+    info, named = os.fstat(fd), os.lstat(path)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != uid or info.st_gid != gid
+            or stat.S_IMODE(info.st_mode) != mode or info.st_nlink != 1
+            or not 0 < info.st_size <= _PRE_CENSUS_LIMIT
+            or _pre_census_stat(named) != _pre_census_stat(info)
+            or has_macos_acl(path, descriptor=fd, expected_identity=info)):
+        raise ExecutiveSchemaUpgradeError("pre-census leaf custody is unqualified")
+    return info
+
+
+def _pre_census_read(path: Path, fd: int, *, uid: int, gid: int, mode: int) -> tuple[bytes, os.stat_result]:
+    before = _pre_census_leaf(path, fd, uid=uid, gid=gid, mode=mode)
+    chunks, total = [], 0
+    while True:
+        chunk = os.read(fd, min(64 * 1024, _PRE_CENSUS_LIMIT + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > _PRE_CENSUS_LIMIT:
+            raise ExecutiveSchemaUpgradeError("pre-census artifact exceeds its bound")
+    raw = b"".join(chunks)
+    after = _pre_census_leaf(path, fd, uid=uid, gid=gid, mode=mode)
+    if len(raw) != before.st_size or _pre_census_stat(after) != _pre_census_stat(before):
+        raise ExecutiveSchemaUpgradeError("pre-census leaf changed during read")
+    return raw, after
+
+
+def _pre_census_artifact_identity(path: Path, *, uid: int, gid: int, mode: int) -> dict[str, Any]:
+    """Descriptor-qualified finite receipt identity; never pathname-hash fallback."""
+    path = Path(path)
+    ancestors = _pre_census_ancestors(path, *_pre_census_control_identity())
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    try:
+        raw, info = _pre_census_read(path, fd, uid=uid, gid=gid, mode=mode)
+        value = _strict_json(raw)
+        if not isinstance(value, dict) or _upgrade_receipt_bytes(value) != raw:
+            raise ExecutiveSchemaUpgradeError("pre-census receipt is not canonical JSON")
+        result = {"path": str(path), "device": info.st_dev, "inode": info.st_ino,
+                  "size": info.st_size, "sha256": hashlib.sha256(raw).hexdigest(),
+                  "payload_digest": _upgrade_digest(value)}
+        if ancestors != _pre_census_ancestors(path, *_pre_census_control_identity()):
+            raise ExecutiveSchemaUpgradeError("pre-census artifact ancestry changed")
+        _pre_census_leaf(path, fd, uid=uid, gid=gid, mode=mode)
+        return result
+    finally:
+        os.close(fd)
+
+
+def _pre_census_tool(value: Any) -> dict[str, str]:
+    tool = _pre_census_closed(value, frozenset({"root", "sha", "tree_sha", "manifest_sha256"}), "tool")
+    _pre_census_hash(tool["sha"], length=40)
+    _pre_census_hash(tool["tree_sha"], length=40)
+    _pre_census_hash(tool["manifest_sha256"])
+    if tool["root"] != str(_PRE_CENSUS_RELEASES / tool["sha"]):
+        raise ExecutiveSchemaUpgradeError("pre-census tool root is not the fixed sealed release")
+    return tool
+
+
+def _validate_pre_census_barrier(value: Any, uid: int) -> dict[str, Any]:
+    payload = _pre_census_closed(value, _PRE_CENSUS_BARRIER_KEYS, "original barrier")
+    if (payload["schema_version"] != UPGRADE_BARRIER_SCHEMA
+            or payload["database_path"] != str(_PRE_CENSUS_DATABASE)
+            or type(payload["control_uid"]) is not int or payload["control_uid"] != uid):
+        raise ExecutiveSchemaUpgradeError("pre-census original barrier binding differs")
+    _pre_census_hash(payload["operation_id"], length=32)
+    _pre_census_time(payload["created_at"])
+    _pre_census_tool({"root": payload["tool_release_root"], "sha": payload["release_sha"],
+                      "tree_sha": payload["tool_release_tree_sha"],
+                      "manifest_sha256": payload["tool_release_manifest_sha256"]})
+    return payload
+
+
+class _PreCensusBarrierObservation:
+    """Held leaf plus metadata-bracketed ancestry, not an ancestor-FD lock."""
+    def __init__(self):
+        self.uid, self.gid = _pre_census_control_identity()
+        self.path = _PRE_CENSUS_DATABASE.parent / _UPGRADE_BARRIER_NAME
+        self.ancestors = _pre_census_ancestors(self.path, self.uid, self.gid)
+        self.fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+        try:
+            self.raw, info = _pre_census_read(self.path, self.fd, uid=self.uid, gid=self.gid, mode=0o600)
+            self.initial = _pre_census_stat(info)
+            self.payload = _validate_pre_census_barrier(_strict_json(self.raw), self.uid)
+            if self.raw != _upgrade_receipt_bytes(self.payload):
+                raise ExecutiveSchemaUpgradeError("pre-census original barrier is not canonical")
+            self.identity = {"path": str(self.path), "device": info.st_dev, "inode": info.st_ino,
+                             "size": info.st_size, "sha256": hashlib.sha256(self.raw).hexdigest(),
+                             "payload_digest": _upgrade_digest(self.payload)}
+            self.check()
+        except BaseException:
+            os.close(self.fd)
+            self.fd = -1
+            raise
+
+    def check(self) -> None:
+        info = _pre_census_leaf(self.path, self.fd, uid=self.uid, gid=self.gid, mode=0o600)
+        if (_pre_census_stat(info) != self.initial
+                or self.ancestors != _pre_census_ancestors(self.path, self.uid, self.gid)):
+            raise ExecutiveSchemaUpgradeError("pre-census original barrier identity changed")
+        if os.geteuid() == self.uid:
+            actual = _artifact_identity(self.path, expected_payload=self.payload, expected=self.identity)
+        else:
+            actual = _pre_census_artifact_identity(self.path, uid=self.uid, gid=self.gid, mode=0o600)
+        if actual != self.identity:
+            raise ExecutiveSchemaUpgradeError("pre-census original barrier bytes changed")
+        if (_pre_census_stat(_pre_census_leaf(self.path, self.fd, uid=self.uid, gid=self.gid, mode=0o600)) != self.initial
+                or self.ancestors != _pre_census_ancestors(self.path, self.uid, self.gid)):
+            raise ExecutiveSchemaUpgradeError("pre-census original barrier changed at return")
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
+
+
+@contextmanager
+def _open_pre_census_barrier_for_root_issuer(database_path: Path) -> Iterator[_PreCensusBarrierObservation]:
+    if os.geteuid() != 0 or Path(database_path) != _PRE_CENSUS_DATABASE:
+        raise ExecutiveSchemaUpgradeError("pre-census issuer requires Root at the fixed database")
+    value = _PreCensusBarrierObservation()
+    try:
+        yield value
+        value.check()
+    finally:
+        value.close()
+
+
+def inspect_v5_to_v6_pre_census_barrier() -> dict[str, Any]:
+    """Read-only fixed-leaf DATA; no database, service, lock or migration access."""
+    uid, gid = _pre_census_control_identity()
+    if os.geteuid() != uid or os.getegid() != gid:
+        raise ExecutiveSchemaUpgradeError("pre-census inspection requires the fixed Control caller")
+    value = _PreCensusBarrierObservation()
+    try:
+        result = {"schema_version": PRE_CENSUS_INSPECTION_SCHEMA,
+                  "original_barrier": {"payload": dict(value.payload), "identity": dict(value.identity)},
+                  "custody": {"uid": uid, "gid": gid, "mode": 0o600, "nlink": 1}}
+        value.check()
+        return result
+    finally:
+        value.close()
+
+
+def _validate_pre_census_qualification(value: Any) -> dict[str, Any]:
+    """Pure closed-wire DATA validation; this is not Root authority or a reader."""
+    payload = _pre_census_closed(value, _PRE_CENSUS_QUALIFICATION_KEYS, "qualification")
+    if payload["schema_version"] != PRE_CENSUS_QUALIFICATION_SCHEMA:
+        raise ExecutiveSchemaUpgradeError("pre-census qualification schema differs")
+    host = _pre_census_closed(payload["host"], frozenset({"runtime_root", "backup_root", "control_uid", "control_gid"}), "host")
+    for name in ("control_uid", "control_gid"):
+        if type(host[name]) is not int or host[name] <= 0:
+            raise ExecutiveSchemaUpgradeError("pre-census qualification principal is malformed")
+    if host["runtime_root"] != str(_PRE_CENSUS_DATABASE.parents[2]) or host["backup_root"] != str(_PRE_CENSUS_DATABASE.parents[3] / "backups"):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification roots differ")
+    original = _pre_census_closed(payload["original_barrier"], frozenset({"payload", "identity"}), "barrier observation")
+    barrier = _validate_pre_census_barrier(original["payload"], host["control_uid"])
+    identity = _pre_census_closed(original["identity"], _PRE_CENSUS_IDENTITY_KEYS, "barrier identity")
+    raw = _upgrade_receipt_bytes(barrier)
+    if (identity["path"] != str(_PRE_CENSUS_DATABASE.parent / _UPGRADE_BARRIER_NAME)
+            or identity["size"] != len(raw) or identity["sha256"] != hashlib.sha256(raw).hexdigest()
+            or identity["payload_digest"] != _upgrade_digest(barrier)
+            or payload["operation_id"] != barrier["operation_id"]):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification original barrier differs")
+    for name in ("device", "inode"):
+        if type(identity[name]) is not int or identity[name] < 0:
+            raise ExecutiveSchemaUpgradeError("pre-census barrier identity is malformed")
+    old = _pre_census_tool(payload["original_tool"])
+    if old != {"root": barrier["tool_release_root"], "sha": barrier["release_sha"], "tree_sha": barrier["tool_release_tree_sha"], "manifest_sha256": barrier["tool_release_manifest_sha256"]}:
+        raise ExecutiveSchemaUpgradeError("pre-census qualification original tool differs")
+    new = _pre_census_tool(payload["recovery_tool"])
+    if old["sha"] == new["sha"]:
+        raise ExecutiveSchemaUpgradeError("pre-census corrected executor must be a distinct sealed release")
+    database = _pre_census_closed(payload["database"], _PRE_CENSUS_ORIGIN_KEYS, "database origin")
+    if (database["path"] != str(_PRE_CENSUS_DATABASE) or database["uid"] != host["control_uid"]
+            or database["gid"] != host["control_gid"] or database["mode"] != 0o600 or database["nlink"] != 1):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification database custody differs")
+    for name in _PRE_CENSUS_ORIGIN_KEYS - {"path", "sha256"}:
+        if type(database[name]) is not int or database[name] < 0:
+            raise ExecutiveSchemaUpgradeError("pre-census database identity is malformed")
+    for name in ("normalized_schema_digest", "full_v5_content_digest", "backup_inventory_sha256"):
+        _pre_census_hash(payload[name])
+    _pre_census_hash(database["sha256"])
+    if not isinstance(payload["migration_vector"], list) or len(payload["migration_vector"]) != 5:
+        raise ExecutiveSchemaUpgradeError("pre-census qualification migration vector is malformed")
+    for version, item in enumerate(payload["migration_vector"], start=1):
+        record = _pre_census_closed(item, frozenset({"version", "name", "checksum"}), "migration")
+        if (type(record["version"]) is not int or record["version"] != version
+                or not isinstance(record["name"], str) or not record["name"]):
+            raise ExecutiveSchemaUpgradeError("pre-census qualification migration vector differs")
+        _pre_census_hash(record["checksum"])
+    selected = _pre_census_closed(payload["selected_source"], frozenset({"sha", "descriptor_raw_sha256", "descriptor_sha256", "source_backup_sha256", "baseline_sha256", "inventory_sha256", "prior_canary_sha256"}), "selected source")
+    for name, item in selected.items():
+        _pre_census_hash(item, length=40 if name == "sha" else 64)
+    config = _pre_census_closed(payload["source_control_config"], frozenset({"path", "sha256"}), "source config")
+    if config["path"] != str(_PRE_CENSUS_RELEASES.parent / "config" / "control.json"):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification source config differs")
+    _pre_census_hash(config["sha256"])
+    _pre_census_time(payload["created_at"])
+    return json.loads(json.dumps(payload))
+
+
+def _pre_census_argument(value: str | Path, fixed: Path) -> Path:
+    candidate = Path(value)
+    if candidate == fixed:
+        return fixed
+    if str(fixed).startswith("/private/var/") and candidate == Path(str(fixed)[8:]):
+        alias = os.lstat("/var")
+        if (not stat.S_ISLNK(alias.st_mode) or alias.st_uid != 0 or alias.st_gid != 0
+                or os.readlink("/var") not in ("private/var", "/private/var")):
+            raise ExecutiveSchemaUpgradeError("pre-census fixed /var alias is unqualified")
+        return fixed
+    raise ExecutiveSchemaUpgradeError("pre-census argument is outside the fixed namespace")
+
+
+def _pre_census_alias_identity() -> tuple | None:
+    """Only the production Darwin /var alias, never arbitrary resolution."""
+    if not str(_PRE_CENSUS_DATABASE).startswith("/private/var/"):
+        return None
+    info = os.lstat("/var")
+    target = os.readlink("/var")
+    if (not stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or target not in ("private/var", "/private/var")):
+        raise ExecutiveSchemaUpgradeError("pre-census fixed system alias is unqualified")
+    return (_pre_census_stat(info), target)
+
+
+def _pre_census_release_record(release: Mapping[str, str]) -> dict[str, str]:
+    return {"root": release["release_root"], "sha": release["release_sha"],
+            "tree_sha": release["release_tree_sha"],
+            "manifest_sha256": release["release_manifest_sha256"]}
+
+
+def _pre_census_prove_original_tool(tool: Mapping[str, str]) -> None:
+    from ops.executive_os import autonomy_control, release_manifest
+    tool = _pre_census_tool(tool)
+    actual = dict(release_manifest.verify(Path(tool["root"]), tool["sha"], tool["tree_sha"]))
+    actual["manifest_sha256"] = hashlib.sha256(autonomy_control._release_manifest_bytes(tool["sha"])).hexdigest()
+    if (actual.get("commit_sha") != tool["sha"] or actual.get("tree_sha") != tool["tree_sha"]
+            or actual.get("manifest_sha256") != tool["manifest_sha256"]):
+        raise ExecutiveSchemaUpgradeError("pre-census original sealed tool proof differs")
+
+
+class _PreCensusReceiptObservation:
+    def __init__(self, path: Path, *, uid: int, gid: int, mode: int):
+        self.path, self.uid, self.gid, self.mode = path, uid, gid, mode
+        control_uid, control_gid = _pre_census_control_identity()
+        self.ancestors = _pre_census_ancestors(path, control_uid, control_gid)
+        self.fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+        try:
+            self.raw, info = _pre_census_read(path, self.fd, uid=uid, gid=gid, mode=mode)
+            self.initial = _pre_census_stat(info)
+            self.payload = _strict_json(self.raw)
+            if not isinstance(self.payload, dict) or _upgrade_receipt_bytes(self.payload) != self.raw:
+                raise ExecutiveSchemaUpgradeError("pre-census receipt is not closed canonical data")
+            self.identity = {"path": str(path), "device": info.st_dev, "inode": info.st_ino,
+                             "size": info.st_size, "sha256": hashlib.sha256(self.raw).hexdigest(),
+                             "payload_digest": _upgrade_digest(self.payload)}
+            self.check()
+        except BaseException:
+            os.close(self.fd)
+            self.fd = -1
+            raise
+
+    def check(self) -> None:
+        info = _pre_census_leaf(self.path, self.fd, uid=self.uid, gid=self.gid, mode=self.mode)
+        if (_pre_census_stat(info) != self.initial
+                or self.ancestors != _pre_census_ancestors(self.path, *_pre_census_control_identity())
+                or _pre_census_artifact_identity(self.path, uid=self.uid, gid=self.gid, mode=self.mode) != self.identity):
+            raise ExecutiveSchemaUpgradeError("pre-census authority receipt changed while held")
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
+
+
+def _pre_census_database_metadata(path: Path, fd: int, uid: int, gid: int) -> os.stat_result:
+    from control_plane.fs_security import has_macos_acl
+    info, named = os.fstat(fd), os.lstat(path)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != uid or info.st_gid != gid
+            or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
+            or _pre_census_stat(info) != _pre_census_stat(named)
+            or has_macos_acl(path, descriptor=fd, expected_identity=info)):
+        raise ExecutiveSchemaUpgradeError("pre-census authoritative database custody differs")
+    return info
+
+
+def _pre_census_database_origin(path: Path, fd: int, uid: int, gid: int) -> dict[str, Any]:
+    info = _pre_census_database_metadata(path, fd, uid, gid)
+    digest, offset = hashlib.sha256(), 0
+    while True:
+        chunk = os.pread(fd, min(64 * 1024, info.st_size + 1 - offset), offset)
+        if not chunk:
+            break
+        offset += len(chunk)
+        if offset > info.st_size:
+            raise ExecutiveSchemaUpgradeError("pre-census database grew during qualification")
+        digest.update(chunk)
+    after = _pre_census_database_metadata(path, fd, uid, gid)
+    if offset != info.st_size or _pre_census_stat(info) != _pre_census_stat(after):
+        raise ExecutiveSchemaUpgradeError("pre-census database changed during qualification")
+    return {"path": str(path), "device": info.st_dev, "inode": info.st_ino,
+            "uid": info.st_uid, "gid": info.st_gid, "mode": stat.S_IMODE(info.st_mode),
+            "nlink": info.st_nlink, "size": info.st_size,
+            "mtime_ns": info.st_mtime_ns, "ctime_ns": info.st_ctime_ns,
+            "sha256": digest.hexdigest()}
+
+
+def _pre_census_backup_inventory(backup_root: Path) -> dict[str, Any]:
+    from ops.executive_os.acceptance_maintenance import inventory
+    expected = _PRE_CENSUS_DATABASE.parents[3] / "backups"
+    if backup_root != expected:
+        raise ExecutiveSchemaUpgradeError("pre-census backup root is not fixed")
+    return inventory([backup_root])
+
+
+class _PreCensusContinuation:
+    """Internally qualified, one-use Control operation, never a caller bypass DTO."""
+    def __init__(self, database: Path, backup_root: Path, release_sha: str,
+                 operation_id: str, barrier_sha256: str, lock_fd: int):
+        from ops.executive_os.acceptance_maintenance import _RootConfig, require_disarmed
+        self.stack = ExitStack()
+        self.intent = None
+        self.phase = "SOURCE"
+        self.normal_artifacts: set[str] = set()
+        self.connection = None
+        self.journal_names: set[str] = set()
+        self.sidecar_fds: dict[str, tuple[int, int, int]] = {}
+        self.stack.callback(self._close_transaction_sidecars)
+        self.alias_identity = _pre_census_alias_identity()
+        self.database, self.backup_root, self.release_sha = database, backup_root, release_sha
+        self.lock_fd = lock_fd
+        self.lock = database.parent / DEFAULT_SERVICE_LOCK_NAME
+        self.marker = database.parent / DEFAULT_SERVICE_MARKER_NAME
+        self.intent_path = database.parent / PRE_CENSUS_CONTINUATION_NAME
+        try:
+            self.uid, self.gid = _pre_census_control_identity()
+            if os.geteuid() != self.uid or os.getegid() != self.gid:
+                raise ExecutiveSchemaUpgradeError("pre-census continuation requires fixed Control caller")
+            if os.path.lexists(self.intent_path):
+                raise ExecutiveSchemaUpgradeError("pre-census intent already exists; execution cannot be replayed")
+            self.lock_identity = _held_service_lock_identity(self.lock, lock_fd)
+            if os.fstat(lock_fd).st_gid != self.gid:
+                raise ExecutiveSchemaUpgradeError("pre-census canonical lock group differs")
+            self.barrier = _PreCensusBarrierObservation()
+            self.stack.callback(self.barrier.close)
+            if self.barrier.payload["operation_id"] != operation_id or self.barrier.identity["sha256"] != barrier_sha256:
+                raise ExecutiveSchemaUpgradeError("pre-census original operation CAS differs")
+            self.qualification = _PreCensusReceiptObservation(
+                database.parent / PRE_CENSUS_QUALIFICATION_NAME, uid=0, gid=self.gid, mode=0o440)
+            self.stack.callback(self.qualification.close)
+            self.payload = _validate_pre_census_qualification(self.qualification.payload)
+            if (self.payload["original_barrier"] != {"payload": self.barrier.payload, "identity": self.barrier.identity}
+                    or self.payload["host"]["control_uid"] != self.uid
+                    or self.payload["host"]["control_gid"] != self.gid
+                    or self.payload["recovery_tool"] != _pre_census_release_record(_prove_upgrade_release(release_sha))):
+                raise ExecutiveSchemaUpgradeError("pre-census Root qualification does not bind this operation")
+            self.config = self.stack.enter_context(_RootConfig())
+            require_disarmed(self.config.value)
+            if (str(self.config.path) != self.payload["source_control_config"]["path"]
+                    or hashlib.sha256(self.config.raw).hexdigest() != self.payload["source_control_config"]["sha256"]
+                    or self.config.value.get("proof_base_sha") != self.payload["selected_source"]["sha"]
+                    or _pre_census_argument(self.config.value["runtime_root"], database.parents[2]) != database.parents[2]
+                    or _pre_census_argument(self.config.value["backup_root"], backup_root) != backup_root):
+                raise ExecutiveSchemaUpgradeError("pre-census qualified config preimage differs")
+            self.database_fd = os.open(database, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+            self.stack.callback(os.close, self.database_fd)
+            self.database_identity = _pre_census_database_origin(database, self.database_fd, self.uid, self.gid)
+            if self.database_identity != self.payload["database"]:
+                raise ExecutiveSchemaUpgradeError("pre-census current database origin differs")
+            self.backup_inventory = _pre_census_backup_inventory(backup_root)
+            from ops.executive_os.acceptance_maintenance import digest
+            if digest(self.backup_inventory) != self.payload["backup_inventory_sha256"]:
+                raise ExecutiveSchemaUpgradeError("pre-census backup namespace differs from qualification")
+            self.names = set(os.listdir(database.parent))
+            self.check()
+        except BaseException:
+            self.stack.close()
+            raise
+
+    def check(self) -> None:
+        if _pre_census_alias_identity() != self.alias_identity:
+            raise ExecutiveSchemaUpgradeError("pre-census fixed system alias changed")
+        if _marker_exists(self.marker):
+            raise ExecutiveSchemaUpgradeError("pre-census service marker is present")
+        _held_service_lock_identity(self.lock, self.lock_fd, self.lock_identity)
+        if self.phase == "COMPLETE":
+            self._check_removed_barrier()
+        else:
+            self.barrier.check()
+        self.qualification.check()
+        self.config.check()
+        if self.intent is not None:
+            self.intent.check()
+        current_names = set(os.listdir(self.database.parent))
+        journal_names = self._transaction_sidecars()
+        if current_names != self.names | journal_names:
+            raise ExecutiveSchemaUpgradeError("pre-census state namespace changed unexpectedly")
+        if _pre_census_backup_inventory(self.backup_root) != self.backup_inventory:
+            raise ExecutiveSchemaUpgradeError("pre-census backup namespace changed unexpectedly")
+        info = _pre_census_database_metadata(self.database, self.database_fd, self.uid, self.gid)
+        if (info.st_dev, info.st_ino) != (self.database_identity["device"], self.database_identity["inode"]):
+            raise ExecutiveSchemaUpgradeError("pre-census authoritative database was replaced")
+        if self.phase in {"SOURCE", "RESERVED"}:
+            for name in (_UPGRADE_V5_TO_V6_PREFLIGHT_NAME, _UPGRADE_V5_TO_V6_COMPLETION_NAME,
+                         _UPGRADE_V6_TO_V7_PREFLIGHT_NAME, _UPGRADE_V6_TO_V7_COMPLETION_NAME):
+                if os.path.lexists(self.database.parent / name) and name not in self.normal_artifacts:
+                    raise ExecutiveSchemaUpgradeError("pre-census normal receipt already exists")
+            if any(os.path.lexists(_sidecar(self.database, suffix)) for suffix in _SIDECAR_SUFFIXES):
+                raise ExecutiveSchemaUpgradeError("pre-census source database has a sidecar")
+            if _pre_census_database_origin(self.database, self.database_fd, self.uid, self.gid) != self.payload["database"]:
+                raise ExecutiveSchemaUpgradeError("pre-census current source database changed")
+            before = _upgrade_v5_retained_state(self.database, version=5)
+            for name in ("normalized_schema_digest", "full_v5_content_digest", "migration_vector"):
+                if before[name] != self.payload[name]:
+                    raise ExecutiveSchemaUpgradeError("pre-census exact-v5 source differs from qualification")
+        _pre_census_prove_original_tool(self.payload["original_tool"])
+        if _pre_census_release_record(_prove_upgrade_release(self.release_sha)) != self.payload["recovery_tool"]:
+            raise ExecutiveSchemaUpgradeError("pre-census executor seal changed")
+
+    def attach_transaction(self, connection: sqlite3.Connection) -> None:
+        if self.phase != "DDL" or self.connection is not None or not isinstance(connection, sqlite3.Connection) or not connection.in_transaction:
+            raise ExecutiveSchemaUpgradeError("pre-census sidecar scope requires the actual exclusive transaction")
+        rows = [tuple(row) for row in connection.execute("PRAGMA database_list")]
+        if rows != [(0, "main", str(self.database))]:
+            raise ExecutiveSchemaUpgradeError("pre-census SQLite transaction targets another database")
+        mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+        if mode not in {"delete", "wal"}:
+            raise ExecutiveSchemaUpgradeError("pre-census SQLite journal mode is unsupported")
+        self.connection = connection
+        self.journal_names = ({self.database.name + "-journal"} if mode == "delete" else
+                              {self.database.name + "-wal", self.database.name + "-shm"})
+        self.check()
+
+    def _transaction_sidecars(self) -> set[str]:
+        present = {self.database.name + suffix for suffix in _SIDECAR_SUFFIXES
+                   if os.path.lexists(_sidecar(self.database, suffix))}
+        if set(self.sidecar_fds) - present:
+            raise ExecutiveSchemaUpgradeError("pre-census active transaction sidecar lost its name")
+        if not present:
+            return set()
+        if (self.phase != "DDL" or self.connection is None
+                or not self.connection.in_transaction or not present <= self.journal_names):
+            raise ExecutiveSchemaUpgradeError("pre-census sidecar is not owned by the active transaction")
+        from control_plane.fs_security import has_macos_acl
+        for name in present:
+            path = self.database.parent / name
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+            try:
+                info, named = os.fstat(fd), os.lstat(path)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != self.uid or info.st_gid != self.gid
+                        or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600
+                        or _pre_census_stat(info) != _pre_census_stat(named)
+                        or has_macos_acl(path, descriptor=fd, expected_identity=info)):
+                    raise ExecutiveSchemaUpgradeError("pre-census transaction sidecar custody differs")
+                pinned = self.sidecar_fds.get(name)
+                if pinned is not None and (info.st_dev, info.st_ino) != pinned[1:]:
+                    raise ExecutiveSchemaUpgradeError("pre-census transaction sidecar was replaced")
+                if pinned is None:
+                    self.sidecar_fds[name] = (fd, info.st_dev, info.st_ino)
+                    fd = -1
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+        return present
+
+    def _close_transaction_sidecars(self) -> None:
+        for fd, _device, _inode in self.sidecar_fds.values():
+            os.close(fd)
+        self.sidecar_fds.clear()
+
+    def detach_transaction(self, connection: sqlite3.Connection) -> None:
+        if self.connection is not connection:
+            raise ExecutiveSchemaUpgradeError("pre-census transaction owner changed")
+        try:
+            connection.in_transaction
+        except sqlite3.ProgrammingError:
+            pass
+        else:
+            raise ExecutiveSchemaUpgradeError("pre-census transaction is still open")
+        self.connection = None
+        self.journal_names = set()
+        self._close_transaction_sidecars()
+        if any(os.path.lexists(_sidecar(self.database, suffix)) for suffix in _SIDECAR_SUFFIXES):
+            raise ExecutiveSchemaUpgradeError("pre-census transaction left a sidecar after close")
+
+    def census_rows(self) -> list[dict[str, Any]]:
+        if self.intent is None or self.phase not in {"RESERVED", "DDL"}:
+            raise RestoreSafetyError("recovered census requires its consumed typed operation")
+        self.check()
+        for path, fd in ((self.barrier.path, self.barrier.fd), (self.database, self.database_fd)):
+            if fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY:
+                raise RestoreSafetyError("recovered census retained artifact FD is not read-only")
+            info, named = os.fstat(fd), os.lstat(path)
+            if ((info.st_dev, info.st_ino) != (named.st_dev, named.st_ino)
+                    or info.st_uid != self.uid or info.st_gid != self.gid
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+                raise RestoreSafetyError("recovered census retained artifact FD custody changed")
+        rows = [{"pid": os.getpid(), "uid": self.uid, "fd": str(fd), "path": str(path)}
+                for path, fd in ((self.lock, self.lock_fd), (self.barrier.path, self.barrier.fd),
+                                 (self.database, self.database_fd))]
+        if len({row["fd"] for row in rows}) != 3:
+            raise RestoreSafetyError("recovered census descriptor identity is ambiguous")
+        return sorted(rows, key=lambda row: int(row["fd"]))
+
+    def reserve(self) -> None:
+        if self.intent is not None or self.phase != "SOURCE":
+            raise ExecutiveSchemaUpgradeError("pre-census intent cannot be reserved twice")
+        self.check()
+        value = {"schema_version": PRE_CENSUS_CONTINUATION_SCHEMA,
+                 "operation_id": self.barrier.payload["operation_id"],
+                 "original_barrier_identity": self.barrier.identity,
+                 "qualification_identity": self.qualification.identity,
+                 "recovery_tool": self.payload["recovery_tool"], "created_at": _upgrade_now()}
+        _write_private_json(self.intent_path, value)
+        if set(os.listdir(self.database.parent)) != self.names | {PRE_CENSUS_CONTINUATION_NAME}:
+            raise ExecutiveSchemaUpgradeError("pre-census intent namespace transition differs")
+        self.names.add(PRE_CENSUS_CONTINUATION_NAME)
+        self.intent = _PreCensusReceiptObservation(self.intent_path, uid=self.uid, gid=self.gid, mode=0o600)
+        self.stack.callback(self.intent.close)
+        if self.intent.payload != value:
+            raise ExecutiveSchemaUpgradeError("pre-census consumed intent differs")
+        self.phase = "RESERVED"
+        self.check()
+
+    def accept_state_artifact(self, path: Path) -> None:
+        if path.parent != self.database.parent or path.name not in {_UPGRADE_V5_TO_V6_PREFLIGHT_NAME, _UPGRADE_V5_TO_V6_COMPLETION_NAME}:
+            raise ExecutiveSchemaUpgradeError("pre-census unexpected state artifact")
+        if set(os.listdir(path.parent)) != self.names | {path.name}:
+            raise ExecutiveSchemaUpgradeError("pre-census state publication changed another name")
+        self.names.add(path.name)
+        self.normal_artifacts.add(path.name)
+
+    def accept_backup(self, receipt: Any) -> None:
+        current = _pre_census_backup_inventory(self.backup_root)
+        paths = {receipt.database_path, receipt.manifest_path}
+        if set(current) != set(self.backup_inventory) | paths:
+            raise ExecutiveSchemaUpgradeError("pre-census backup publication changed another name")
+        if any(current[path] != value for path, value in self.backup_inventory.items()):
+            raise ExecutiveSchemaUpgradeError("pre-census retained backup changed")
+        for path, sha in ((receipt.database_path, receipt.database_sha256), (receipt.manifest_path, receipt.manifest_sha256)):
+            row = current[path]
+            if row != {"uid": self.uid, "gid": self.gid, "mode": 0o600, "nlink": 1, "sha256": sha}:
+                raise ExecutiveSchemaUpgradeError("pre-census produced backup custody differs")
+        self.backup_inventory = current
+
+    def begin_ddl(self) -> None:
+        if self.phase != "RESERVED" or self.intent is None:
+            raise ExecutiveSchemaUpgradeError("pre-census DDL requires the consumed intent")
+        # P56 was just written by this owner, so its expected name is retained;
+        # all immutable source proof was checked before that publication.
+        self.check()
+        self.phase = "DDL"
+
+    def _check_removed_barrier(self) -> None:
+        held = os.fstat(self.barrier.fd)
+        if (held.st_dev, held.st_ino) != (self.barrier.identity["device"], self.barrier.identity["inode"]) or held.st_nlink != 0 or os.path.lexists(self.barrier.path):
+            raise ExecutiveSchemaUpgradeError("pre-census final removal did not remove original held barrier")
+
+    def mark_barrier_removed(self) -> None:
+        self._check_removed_barrier()
+        self.names.remove(self.barrier.path.name)
+        self.phase = "COMPLETE"
+        self.check()
+
+    def close(self) -> None:
+        self.stack.close()
+
+
+def _pre_census_upgrade_census(recovery: _PreCensusContinuation) -> dict[str, Any]:
+    if not isinstance(recovery, _PreCensusContinuation):
+        raise RestoreSafetyError("recovered census requires the internally qualified owner")
+    recovery.census_rows()
+    raw = _default_upgrade_census_with_context(recovery.database, recovery.lock,
+            recovery.barrier.path, recovery.lock_fd, recovery)
+    material = _validate_upgrade_census(raw, recovery.database, recovery.lock,
+                                      recovery.barrier.path, recovery.lock_fd, recovery)
+    recovery.census_rows()
+    return material
+
+
+def resume_v5_to_v6_pre_census(database_path: str | Path, backup_directory: str | Path, *,
+                              release_sha: str, expected_operation_id: str,
+                              expected_barrier_sha256: str) -> SchemaUpgradeV5ToV6Receipt:
+    """Consume one Root qualification for the SAME original fixed operation."""
+    _pre_census_hash(expected_operation_id, length=32)
+    _pre_census_hash(expected_barrier_sha256)
+    uid, gid = _pre_census_control_identity()
+    if os.geteuid() != uid or os.getegid() != gid:
+        raise ExecutiveSchemaUpgradeError("pre-census continuation requires fixed Control caller")
+    database = _pre_census_argument(database_path, _PRE_CENSUS_DATABASE)
+    backup_root = _pre_census_argument(backup_directory, database.parents[3] / "backups")
+    if os.path.lexists(database.parent / PRE_CENSUS_CONTINUATION_NAME):
+        raise ExecutiveSchemaUpgradeError("pre-census intent already exists; same-operation execution is not replayable")
+    lock, marker = database.parent / DEFAULT_SERVICE_LOCK_NAME, database.parent / DEFAULT_SERVICE_MARKER_NAME
+    with _offline_restore_lock(lock, marker, require_existing=True) as lock_fd:
+        continuation = _PreCensusContinuation(database, backup_root, release_sha,
+                                              expected_operation_id, expected_barrier_sha256, lock_fd)
+        try:
+            continuation.reserve()
+            return _upgrade_v5_to_v6_impl(database, backup_root, release_sha=release_sha, _recovery=continuation)
+        finally:
+            continuation.close()
+
+
+def upgrade_v5_to_v6(
+    database_path: str | Path, backup_directory: str | Path, *, release_sha: str,
+) -> SchemaUpgradeV5ToV6Receipt:
+    """Ordinary new-operation transition; existing barrier/receipt always refuses."""
+    return _upgrade_v5_to_v6_impl(database_path, backup_directory, release_sha=release_sha)
+
+
+def _upgrade_v5_to_v6_impl(
+    database_path: str | Path,
+    backup_directory: str | Path,
+    *,
+    release_sha: str,
+    _recovery: _PreCensusContinuation | None = None,
+) -> SchemaUpgradeV5ToV6Receipt:
+    """Upgrade one exact offline v5 store to v6 using the retained custody chain.
+
+    Installed release, canonical service lock, writer census, source and target
+    backups with restore drills, exclusive DDL, and quarantine rules match the
+    v4-to-v5 transition. Only migration 6 is executed; no caller-supplied SQL or
+    arbitrary source/target version is accepted. All eight retained tables and
+    original migration receipts 1-5 must remain byte-for-byte logically equal.
+    """
+
+    release = _prove_upgrade_release(release_sha)
+    candidate = Path(database_path).expanduser()
+    _assert_private_regular_file(candidate, label="Executive exact-v5 database")
+    database = candidate.resolve(strict=True)
+    state_directory = database.parent
+    marker = state_directory / DEFAULT_SERVICE_MARKER_NAME
+    lock = state_directory / DEFAULT_SERVICE_LOCK_NAME
+    barrier = state_directory / _UPGRADE_BARRIER_NAME
+    preflight_path = state_directory / _UPGRADE_V5_TO_V6_PREFLIGHT_NAME
+    completion_path = state_directory / _UPGRADE_V5_TO_V6_COMPLETION_NAME
+    if _recovery is None and any(os.path.lexists(state_directory / name) for name in
+                                  (PRE_CENSUS_QUALIFICATION_NAME, PRE_CENSUS_CONTINUATION_NAME)):
+        raise ExecutiveSchemaUpgradeError("pre-census recovery residue forbids a new v5-to-v6 operation")
+    if _recovery is None and any(os.path.lexists(path) for path in (barrier, preflight_path, completion_path)):
+        raise ExecutiveSchemaUpgradeError(
+            "v5-to-v6 upgrade barrier/receipt already exists; explicit operator "
+            "reconciliation required before another attempt"
+        )
+    operation_id = uuid4().hex if _recovery is None else _recovery.barrier.payload["operation_id"]
+    created_at = _upgrade_now() if _recovery is None else _recovery.barrier.payload["created_at"]
+    barrier_payload = {
+        "schema_version": UPGRADE_BARRIER_SCHEMA,
+        "operation_id": operation_id,
+        "database_path": str(database),
+        "tool_release_root": release["release_root"],
+        "tool_release_tree_sha": release["release_tree_sha"],
+        "tool_release_manifest_sha256": release["release_manifest_sha256"],
+        "release_sha": release["release_sha"],
+        "control_uid": os.geteuid(),
+        "created_at": created_at,
+    }
+    if _recovery is not None:
+        barrier_payload = dict(_recovery.barrier.payload)
+    before: dict[str, Any] | None = None
+    preflight: dict[str, Any] | None = None
+    barrier_identity: dict[str, Any] | None = None
+    preflight_identity: dict[str, Any] | None = None
+    census: dict[str, Any] | None = None
+    committed_v6 = False
+    recovered_completion_identity = None
+    with (_offline_restore_lock(lock, marker, require_existing=True) if _recovery is None else nullcontext(_recovery.lock_fd)) as lock_fd:
+        lock_identity = _held_service_lock_identity(lock, lock_fd)
+        def current_census() -> dict[str, Any]:
+            return (_upgrade_census(database, lock, barrier, lock_fd) if _recovery is None
+                    else _pre_census_upgrade_census(_recovery))
+        if _recovery is None:
+            _write_private_json(barrier, barrier_payload)
+        else:
+            _recovery.check()
+        barrier_identity = _artifact_identity(
+            barrier, expected_payload=barrier_payload
+        )
+        try:
+            _upgrade_hook("barrier_persisted")
+            _artifact_identity(
+                barrier,
+                expected_payload=barrier_payload,
+                expected=barrier_identity,
+            )
+            if _marker_exists(marker):
+                raise RestoreSafetyError("Executive service marker appeared before census")
+            census = current_census()
+            _checkpoint_quiesced_wal(database)
+            if current_census() != census:
+                raise RestoreSafetyError("writer census changed across WAL checkpoint")
+            before = _upgrade_v5_retained_state(database, version=5)
+            v5_backup = create_offline_backup(
+                database, backup_directory, expected_schema_version=5
+            )
+            v5_drill = verify_restore_drill(
+                v5_backup.database_path,
+                v5_backup.manifest_path,
+                expected_schema_version=5,
+            )
+            with _readonly_database(Path(v5_backup.database_path)) as connection:
+                backup_full_v4 = full_v4_content_digest(connection)
+                backup_m5 = _v5_migration_receipt_digest(connection)
+            if (
+                v5_backup.legacy_content_digest != before["legacy_content_digest"]
+                or v5_drill.legacy_content_digest != before["legacy_content_digest"]
+                or v5_backup.normalized_schema_digest
+                != before["normalized_schema_digest"]
+                or v5_drill.normalized_schema_digest
+                != before["normalized_schema_digest"]
+                or backup_full_v4 != before["full_v4_content_digest"]
+                or backup_m5 != before["v5_migration_receipt_digest"]
+            ):
+                raise ExecutiveSchemaUpgradeError("v5 source/backup/drill proof differs")
+            preflight = {
+                "schema_version": UPGRADE_PREFLIGHT_SCHEMA,
+                "operation_id": operation_id,
+                "source_schema_version": 5,
+                "target_schema_version": 6,
+                "database": before["database"],
+                "migration_vector": before["migration_vector"],
+                "normalized_schema_digest": before["normalized_schema_digest"],
+                "full_v4_content_digest": before["full_v4_content_digest"],
+                "v5_migration_receipt_digest": before["v5_migration_receipt_digest"],
+                "barrier_identity": barrier_identity,
+                "v5_backup": {
+                    "database_path": v5_backup.database_path,
+                    "database_sha256": v5_backup.database_sha256,
+                    "manifest_path": v5_backup.manifest_path,
+                    "manifest_sha256": v5_backup.manifest_sha256,
+                    "restore_drill_receipt": v5_drill.to_dict(),
+                    "restore_drill_digest": _upgrade_digest(v5_drill.to_dict()),
+                    "full_v4_content_digest": backup_full_v4,
+                },
+                "quiesce_writer_census": census,
+                "quiesce_writer_census_digest": _upgrade_digest(census),
+                "tool_release_root": release["release_root"],
+                "tool_release_tree_sha": release["release_tree_sha"],
+                "tool_release_manifest_sha256": release[
+                    "release_manifest_sha256"
+                ],
+                "release_sha": release["release_sha"],
+                "created_at": created_at,
+            }
+            if _recovery is not None:
+                _recovery.accept_backup(v5_backup)
+                _recovery.check()
+                preflight["schema_version"] = PRE_CENSUS_PREFLIGHT_SCHEMA
+                preflight["pre_census_reconciliation"] = {
+                    "qualification_identity": dict(_recovery.qualification.identity),
+                    "continuation_identity": dict(_recovery.intent.identity),
+                }
+            _write_private_json(preflight_path, preflight)
+            if _recovery is not None:
+                _recovery.accept_state_artifact(preflight_path)
+            preflight_identity = _artifact_identity(
+                preflight_path, expected_payload=preflight
+            )
+            preflight_digest = _upgrade_digest(preflight)
+            if _recovery is not None:
+                _recovery.begin_ddl()
+            _upgrade_hook("preflight_persisted")
+
+            def revalidate_control_artifacts() -> None:
+                if _recovery is not None:
+                    _recovery.check()
+                if _marker_exists(marker):
+                    raise RestoreSafetyError(
+                        "Executive service marker appeared during schema upgrade"
+                    )
+                _held_service_lock_identity(lock, lock_fd, lock_identity)
+                _artifact_identity(
+                    barrier,
+                    expected_payload=barrier_payload,
+                    expected=barrier_identity,
+                )
+                _artifact_identity(
+                    preflight_path,
+                    expected_payload=preflight,
+                    expected=preflight_identity,
+                )
+                if _prove_upgrade_release(release_sha) != release:
+                    raise ExecutiveSchemaUpgradeError("tool release identity changed")
+                _assert_upgrade_database_inode(database, before)
+
+            def revalidate_v5_backup_proof() -> None:
+                checked = verify_backup(
+                    v5_backup.database_path,
+                    v5_backup.manifest_path,
+                    expected_schema_version=5,
+                )
+                checked_drill = verify_restore_drill(
+                    v5_backup.database_path,
+                    v5_backup.manifest_path,
+                    expected_schema_version=5,
+                )
+                with _readonly_database(Path(v5_backup.database_path)) as connection:
+                    checked_full_v4 = full_v4_content_digest(connection)
+                    checked_m5 = _v5_migration_receipt_digest(connection)
+                if (
+                    checked.database_sha256 != v5_backup.database_sha256
+                    or checked.manifest_sha256 != v5_backup.manifest_sha256
+                    or checked.normalized_schema_digest
+                    != v5_backup.normalized_schema_digest
+                    or checked.legacy_content_digest
+                    != v5_backup.legacy_content_digest
+                    or checked_full_v4 != backup_full_v4
+                    or checked_m5 != backup_m5
+                    or checked_drill.to_dict() != v5_drill.to_dict()
+                    or _upgrade_digest(checked_drill.to_dict())
+                    != preflight["v5_backup"]["restore_drill_digest"]
+                ):
+                    raise ExecutiveSchemaUpgradeError(
+                        "v5 backup or restore-drill proof changed after preflight"
+                    )
+
+            revalidate_control_artifacts()
+            revalidate_v5_backup_proof()
+            if _upgrade_v5_retained_state(database, version=5) != before:
+                raise ExecutiveSchemaUpgradeError("v5 source changed after preflight")
+            if current_census() != census:
+                raise RestoreSafetyError("writer census changed before migration")
+
+            connection = sqlite3.connect(database, isolation_level=None, timeout=5.0)
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("BEGIN EXCLUSIVE")
+                if _recovery is not None:
+                    _recovery.attach_transaction(connection)
+                revalidate_control_artifacts()
+                _verify_connection(connection, expected_schema_version=5)
+                if (full_v4_content_digest(connection) != before["full_v4_content_digest"]
+                        or _v5_migration_receipt_digest(connection)
+                        != before["v5_migration_receipt_digest"]):
+                    raise ExecutiveSchemaUpgradeError("in-transaction v5 content changed")
+                _upgrade_hook("exclusive_v5_verified")
+                revalidate_control_artifacts()
+                version, name, statements = _MIGRATIONS[5]
+                if version != 6:
+                    raise ExecutiveSchemaUpgradeError("reviewed migration 6 is unavailable")
+                for ordinal, statement in enumerate(statements, 1):
+                    connection.execute(statement)
+                    if _recovery is not None:
+                        _recovery._transaction_sidecars()
+                    _upgrade_hook(f"after_m6_statement:{ordinal:02d}")
+                    revalidate_control_artifacts()
+                connection.execute(
+                    """
+                    INSERT INTO schema_migrations(version,name,checksum,applied_at_ms)
+                    VALUES(?,?,?,?)
+                    """,
+                    (
+                        version,
+                        name,
+                        _migration_checksum(statements),
+                        int(datetime.now(UTC).timestamp() * 1000),
+                    ),
+                )
+                _upgrade_hook("after_m6_receipt")
+                revalidate_control_artifacts()
+                _verify_connection(connection, expected_schema_version=6)
+                if (full_v4_content_digest(connection) != before["full_v4_content_digest"]
+                        or _v5_migration_receipt_digest(connection)
+                        != before["v5_migration_receipt_digest"]):
+                    raise ExecutiveSchemaUpgradeError("migration changed full v4 content")
+                _upgrade_hook("before_v6_commit")
+                revalidate_control_artifacts()
+                _verify_connection(connection, expected_schema_version=6)
+                if (full_v4_content_digest(connection) != before["full_v4_content_digest"]
+                        or _v5_migration_receipt_digest(connection)
+                        != before["v5_migration_receipt_digest"]):
+                    raise ExecutiveSchemaUpgradeError("precommit full v4 content drifted")
+                connection.commit()
+                committed_v6 = True
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+            finally:
+                connection.close()
+                if _recovery is not None and _recovery.connection is connection:
+                    _recovery.detach_transaction(connection)
+
+            _upgrade_hook("after_v6_commit_before_checkpoint")
+            revalidate_control_artifacts()
+            _checkpoint_quiesced_wal(database)
+            _upgrade_hook("after_v6_checkpoint")
+            revalidate_control_artifacts()
+            verified_v6 = _upgrade_v5_retained_state(database, version=6)
+            if verified_v6["legacy_content_digest"] != before["legacy_content_digest"]:
+                raise ExecutiveSchemaUpgradeError("committed v6 legacy content differs")
+            with _readonly_database(database) as connection:
+                committed_full_v4 = full_v4_content_digest(connection)
+            if (committed_full_v4 != before["full_v4_content_digest"]
+                    or verified_v6["v5_migration_receipt_digest"]
+                    != before["v5_migration_receipt_digest"]):
+                raise ExecutiveSchemaUpgradeError("committed v6 full v4 content differs")
+            v6_backup = create_offline_backup(
+                database, backup_directory, expected_schema_version=6
+            )
+            v6_drill = verify_restore_drill(
+                v6_backup.database_path,
+                v6_backup.manifest_path,
+                expected_schema_version=6,
+            )
+            with _readonly_database(Path(v6_backup.database_path)) as connection:
+                v6_backup_full_v4 = full_v4_content_digest(connection)
+                v6_backup_m5 = _v5_migration_receipt_digest(connection)
+            if (
+                v6_backup.legacy_content_digest != before["legacy_content_digest"]
+                or v6_drill.legacy_content_digest != before["legacy_content_digest"]
+                or v6_backup.normalized_schema_digest
+                != verified_v6["normalized_schema_digest"]
+                or v6_drill.normalized_schema_digest
+                != verified_v6["normalized_schema_digest"]
+                or v6_backup_full_v4 != before["full_v4_content_digest"]
+                or v6_backup_m5 != before["v5_migration_receipt_digest"]
+            ):
+                raise ExecutiveSchemaUpgradeError("v6 source/backup/drill proof differs")
+            if _recovery is not None:
+                _recovery.accept_backup(v6_backup)
+            if current_census() != census:
+                raise RestoreSafetyError("writer census changed before completion")
+            revalidate_control_artifacts()
+            completed_at = _upgrade_now()
+            completion = {
+                "schema_version": UPGRADE_COMPLETION_SCHEMA,
+                "operation_id": operation_id,
+                "source_schema_version": 5,
+                "target_schema_version": 6,
+                "preflight_receipt_digest": preflight_digest,
+                "authoritative_v6_database": verified_v6["database"],
+                "authoritative_v6_schema_digest": verified_v6[
+                    "normalized_schema_digest"
+                ],
+                "migration_vector": verified_v6["migration_vector"],
+                "pre_full_v4_content_digest": before["full_v4_content_digest"],
+                "post_full_v4_content_digest": committed_full_v4,
+                "pre_v5_migration_receipt_digest": before["v5_migration_receipt_digest"],
+                "post_v5_migration_receipt_digest": verified_v6["v5_migration_receipt_digest"],
+                "full_v4_content_equal": True,
+                "pre_v4_legacy_content_digest": before["legacy_content_digest"],
+                "post_v4_legacy_content_digest": verified_v6[
+                    "legacy_content_digest"
+                ],
+                "legacy_content_equal": True,
+                "v6_backup": {
+                    "database_path": v6_backup.database_path,
+                    "database_sha256": v6_backup.database_sha256,
+                    "manifest_path": v6_backup.manifest_path,
+                    "manifest_sha256": v6_backup.manifest_sha256,
+                    "restore_drill_receipt": v6_drill.to_dict(),
+                    "restore_drill_digest": _upgrade_digest(v6_drill.to_dict()),
+                    "full_v4_content_digest": v6_backup_full_v4,
+                },
+                "quiesce_writer_census_digest": _upgrade_digest(census),
+                "tool_release_root": release["release_root"],
+                "tool_release_tree_sha": release["release_tree_sha"],
+                "tool_release_manifest_sha256": release[
+                    "release_manifest_sha256"
+                ],
+                "release_sha": release["release_sha"],
+                "completed_at": completed_at,
+            }
+            if _recovery is None:
+                _write_private_json(completion_path, completion)
+                completion_identity = _artifact_identity(
+                    completion_path, expected_payload=completion
+                )
+                _upgrade_hook("completion_persisted")
+            else:
+                # A recovered C56 is a durable completion fact only AFTER
+                # final proof and exact removal of the held original barrier.
+                _recovery.check()
+            # The final adversarial seam is deliberately placed before the
+            # complete authoritative/backup/drill/census proof.  Nothing after
+            # this hook may escape revalidation before the barrier is removed.
+            _upgrade_hook("before_barrier_unlink")
+            revalidate_control_artifacts()
+            if _recovery is None:
+                _artifact_identity(
+                    completion_path,
+                    expected_payload=completion,
+                    expected=completion_identity,
+                )
+            final_v6 = _upgrade_v5_retained_state(database, version=6)
+            final_v6_backup = verify_backup(
+                v6_backup.database_path,
+                v6_backup.manifest_path,
+                expected_schema_version=6,
+            )
+            final_v6_drill = verify_restore_drill(
+                v6_backup.database_path,
+                v6_backup.manifest_path,
+                expected_schema_version=6,
+            )
+            with _readonly_database(database) as connection:
+                final_full_v4 = full_v4_content_digest(connection)
+            if (
+                final_v6 != verified_v6
+                or final_full_v4 != before["full_v4_content_digest"]
+                or final_v6_backup.database_sha256 != v6_backup.database_sha256
+                or final_v6_backup.manifest_sha256 != v6_backup.manifest_sha256
+                or final_v6_backup.normalized_schema_digest
+                != v6_backup.normalized_schema_digest
+                or final_v6_backup.legacy_content_digest
+                != v6_backup.legacy_content_digest
+                or final_v6_drill.to_dict() != v6_drill.to_dict()
+                or _upgrade_digest(final_v6_drill.to_dict())
+                != completion["v6_backup"]["restore_drill_digest"]
+            ):
+                raise ExecutiveSchemaUpgradeError(
+                    "completion v6 source/backup/drill proof changed"
+                )
+            # The retained source backup stays in custody after the commit, so
+            # it is revalidated beside the final v6 proof before release.
+            revalidate_v5_backup_proof()
+            if current_census() != census:
+                raise RestoreSafetyError("writer census changed before barrier release")
+            revalidate_control_artifacts()
+            if _recovery is None:
+                _artifact_identity(
+                    completion_path,
+                    expected_payload=completion,
+                    expected=completion_identity,
+                )
+            _unlink_exact_upgrade_artifact(
+                barrier,
+                expected_payload=barrier_payload,
+                expected=barrier_identity,
+            )
+            if _recovery is not None:
+                _recovery.mark_barrier_removed()
+                _upgrade_hook("recovered_barrier_removed_before_completion")
+                _recovery.check()
+                final_origin = _pre_census_database_origin(database, _recovery.database_fd,
+                    _recovery.uid, _recovery.gid)
+                if {key: final_origin[key] for key in ("path", "device", "inode", "size", "sha256")} != verified_v6["database"]:
+                    raise ExecutiveSchemaUpgradeError("recovered final database changed before completion")
+                _write_private_json(completion_path, completion)
+                _recovery.accept_state_artifact(completion_path)
+                recovered_completion_identity = _artifact_identity(completion_path, expected_payload=completion)
+                _recovery.check()
+                _upgrade_hook("completion_persisted")
+            return SchemaUpgradeV5ToV6Receipt(
+                schema_version=UPGRADE_COMPLETION_SCHEMA,
+                database_path=str(database),
+                database_identity=dict(verified_v6["database"]),
+                release_sha=release["release_sha"],
+                preflight_receipt_path=str(preflight_path),
+                preflight_receipt_digest=preflight_digest,
+                completion_receipt_path=str(completion_path),
+                completion_receipt_digest=_upgrade_digest(completion),
+                source_schema_version=5,
+                target_schema_version=6,
+                pre_full_v4_content_digest=before["full_v4_content_digest"],
+                post_full_v4_content_digest=committed_full_v4,
+                pre_v5_migration_receipt_digest=before["v5_migration_receipt_digest"],
+                post_v5_migration_receipt_digest=verified_v6["v5_migration_receipt_digest"],
+                full_v4_content_equal=True,
+                v5_backup_path=v5_backup.database_path,
+                v5_backup_manifest_path=v5_backup.manifest_path,
+                v6_backup_path=v6_backup.database_path,
+                v6_backup_manifest_path=v6_backup.manifest_path,
+                completed_at=completed_at,
+            )
+        except Exception as exc:
+            if _recovery is not None:
+                if recovered_completion_identity is not None:
+                    raise ExecutiveSchemaUpgradeError(
+                        "recovered v6 completion is durable; same-operation result inspection only"
+                    ) from exc
+                # The consumed one-use intent is the quarantine even if an
+                # external actor removed the original barrier. Never recreate,
+                # rewrite or unlink it and never enter ordinary rollback cleanup.
+                raise ExecutiveSchemaUpgradeError(
+                    "pre-census continuation failed; intent retained, same-operation inspection only"
+                ) from exc
+            if committed_v6:
+                _ensure_upgrade_quarantine_barrier(barrier, barrier_payload)
+                raise ExecutiveSchemaUpgradeError(
+                    "v6 committed but completion failed; barrier remains for forward fix"
+                ) from exc
+            if before is None or barrier_identity is None or census is None:
+                _ensure_upgrade_quarantine_barrier(barrier, barrier_payload)
+                raise ExecutiveSchemaUpgradeError(
+                    "precommit upgrade failed before exact rollback proof; barrier remains"
+                ) from exc
+            try:
+                _upgrade_hook("after_precommit_rollback_before_guard")
+                current = _upgrade_v5_retained_state(database, version=5)
+                if (not _rollback_reproduces_preflight(current, before)
+                        or current["v5_migration_receipt_digest"]
+                        != before["v5_migration_receipt_digest"]):
+                    raise ExecutiveSchemaUpgradeError(
+                        "rolled-back v5 state differs from frozen preflight"
+                    )
+                if _prove_upgrade_release(release_sha) != release:
+                    raise ExecutiveSchemaUpgradeError(
+                        "tool release identity changed before rollback cleanup"
+                    )
+                if current_census() != census:
+                    raise RestoreSafetyError(
+                        "writer census changed before rollback barrier release"
+                    )
+                if _marker_exists(marker):
+                    raise RestoreSafetyError(
+                        "Executive service marker appeared before rollback cleanup"
+                    )
+                _held_service_lock_identity(lock, lock_fd, lock_identity)
+                _artifact_identity(
+                    barrier,
+                    expected_payload=barrier_payload,
+                    expected=barrier_identity,
+                )
+                if preflight is not None and preflight_identity is not None:
+                    _artifact_identity(
+                        preflight_path,
+                        expected_payload=preflight,
+                        expected=preflight_identity,
+                    )
+                    _unlink_exact_upgrade_artifact(
+                        preflight_path,
+                        expected_payload=preflight,
+                        expected=preflight_identity,
+                    )
+                _unlink_exact_upgrade_artifact(
+                    barrier,
+                    expected_payload=barrier_payload,
+                    expected=barrier_identity,
+                )
+            except Exception as guard_exc:
+                _ensure_upgrade_quarantine_barrier(barrier, barrier_payload)
+                raise ExecutiveSchemaUpgradeError(
+                    "v5 rollback did not reproduce preflight; barrier remains"
+                ) from guard_exc
+            raise ExecutiveSchemaUpgradeError(
+                f"v5 migration rolled back without v6 commit: {type(exc).__name__}: {exc}"
+            ) from exc
+
+
+@contextmanager
+def _completed_pre_census_recovery(database: Path, backup_root: Path, release: Mapping[str, str]) -> Iterator[Any]:
+    """Allow normal 6→7 only after the one-use recovered 5→6 actually completed.
+
+    This Control-owned finite gate does not import the Root four-receipt helper.
+    All immutable origins stay held while the normal next owner executes.
+    """
+    names = (PRE_CENSUS_QUALIFICATION_NAME, PRE_CENSUS_CONTINUATION_NAME)
+    if not any(os.path.lexists(database.parent / name) for name in names):
+        yield None
+        return
+    uid, gid = _pre_census_control_identity()
+    if (os.geteuid(), os.getegid()) != (uid, gid) or database != _PRE_CENSUS_DATABASE:
+        raise ExecutiveSchemaUpgradeError("recovered completion requires the fixed Control owner/database")
+    if backup_root != database.parents[3] / "backups":
+        raise ExecutiveSchemaUpgradeError("recovered completion backup root differs")
+    with ExitStack() as stack:
+        held = []
+        for name, owner, mode in ((names[0], 0, 0o440), (names[1], uid, 0o600),
+                (_UPGRADE_V5_TO_V6_PREFLIGHT_NAME, uid, 0o600),
+                (_UPGRADE_V5_TO_V6_COMPLETION_NAME, uid, 0o600)):
+            try:
+                obs = _PreCensusReceiptObservation(database.parent / name, uid=owner, gid=gid, mode=mode)
+            except (OSError, BackupVerificationError) as exc:
+                raise ExecutiveSchemaUpgradeError("recovered completion receipt is missing or unsafe") from exc
+            stack.callback(obs.close); held.append(obs)
+        qualification, intent, preflight, completion = held
+        q = _validate_pre_census_qualification(qualification.payload)
+        i, p, c = intent.payload, preflight.payload, completion.payload
+        expected_i = {"schema_version": PRE_CENSUS_CONTINUATION_SCHEMA,
+            "operation_id": q["operation_id"], "original_barrier_identity": q["original_barrier"]["identity"],
+            "qualification_identity": qualification.identity, "recovery_tool": q["recovery_tool"],
+            "created_at": i.get("created_at")}
+        _pre_census_time(i.get("created_at"))
+        refs = {"qualification_identity": qualification.identity, "continuation_identity": intent.identity}
+        common = {"schema_version", "operation_id", "source_schema_version", "target_schema_version",
+            "tool_release_root", "tool_release_tree_sha", "tool_release_manifest_sha256", "release_sha"}
+        pk = common | {"database", "migration_vector", "normalized_schema_digest", "barrier_identity",
+            "quiesce_writer_census", "quiesce_writer_census_digest", "created_at",
+            "full_v4_content_digest", "v5_migration_receipt_digest", "v5_backup", "pre_census_reconciliation"}
+        ck = common | {"preflight_receipt_digest", "migration_vector", "quiesce_writer_census_digest",
+            "completed_at", "authoritative_v6_database", "authoritative_v6_schema_digest",
+            "pre_full_v4_content_digest", "post_full_v4_content_digest", "pre_v5_migration_receipt_digest",
+            "post_v5_migration_receipt_digest", "full_v4_content_equal", "pre_v4_legacy_content_digest",
+            "post_v4_legacy_content_digest", "legacy_content_equal", "v6_backup"}
+        if (set(p) != pk or set(c) != ck or i != expected_i
+                or p["schema_version"] != PRE_CENSUS_PREFLIGHT_SCHEMA
+                or c["schema_version"] != UPGRADE_COMPLETION_SCHEMA
+                or p["pre_census_reconciliation"] != refs
+                or p["barrier_identity"] != q["original_barrier"]["identity"]
+                or p["created_at"] != q["original_barrier"]["payload"]["created_at"]
+                or q["recovery_tool"] != _pre_census_release_record(release)
+                or p["database"] != {key: q["database"][key] for key in ("path", "device", "inode", "size", "sha256")}
+                or p["migration_vector"] != q["migration_vector"]
+                or p["normalized_schema_digest"] != q["normalized_schema_digest"]
+                or c["preflight_receipt_digest"] != _upgrade_digest(p)):
+            raise ExecutiveSchemaUpgradeError("recovered 5-to-6 completion wire differs")
+        for receipt in (p, c):
+            if (receipt["operation_id"] != q["operation_id"]
+                    or receipt["source_schema_version"] != 5 or receipt["target_schema_version"] != 6
+                    or _pre_census_release_record({"release_root": receipt["tool_release_root"],
+                        "release_sha": receipt["release_sha"], "release_tree_sha": receipt["tool_release_tree_sha"],
+                        "release_manifest_sha256": receipt["tool_release_manifest_sha256"]}) != q["recovery_tool"]):
+                raise ExecutiveSchemaUpgradeError("recovered completion operation/tool differs")
+        census = p["quiesce_writer_census"]
+        census_keys = {"schema_version", "control_uids", "upgrader_pid", "inspected_paths",
+            "process_sensor", "file_sensor", "processes", "open_files"}
+        expected_paths = [str(database), *(str(_sidecar(database, x)) for x in _SIDECAR_SUFFIXES),
+            str(database.parent / DEFAULT_SERVICE_LOCK_NAME), str(database.parent / _UPGRADE_BARRIER_NAME)]
+        if (not isinstance(census, dict) or set(census) != census_keys
+                or census["schema_version"] != PRE_CENSUS_CENSUS_SCHEMA
+                or census["control_uids"] != [uid] or type(census["upgrader_pid"]) is not int
+                or census["upgrader_pid"] <= 0 or census["processes"] != []
+                or census["inspected_paths"] != expected_paths
+                or census["process_sensor"] != {"binary": "/bin/ps", "upgrader_observed": True, "sensor_child_observed": True}
+                or census["file_sensor"] != {"binary": "/usr/sbin/lsof", "held_lock_observed": True}):
+            raise ExecutiveSchemaUpgradeError("recovered completion census differs")
+        rows = census["open_files"]
+        if (not isinstance(rows, list) or len(rows) != 3
+                or any(not isinstance(row, dict) or set(row) != {"pid", "uid", "fd", "path"}
+                    or row["pid"] != census["upgrader_pid"] or type(row["pid"]) is not int
+                    or row["uid"] != uid or type(row["uid"]) is not int
+                    or not isinstance(row["fd"], str) or re.fullmatch(r"[0-9]+", row["fd"]) is None for row in rows)
+                or len({int(row["fd"]) for row in rows}) != 3
+                or rows != sorted(rows, key=lambda row: int(row["fd"]))
+                or {row["path"] for row in rows} != {str(database), expected_paths[-2], expected_paths[-1]}
+                or p["quiesce_writer_census_digest"] != _upgrade_digest(census)
+                or c["quiesce_writer_census_digest"] != _upgrade_digest(census)):
+            raise ExecutiveSchemaUpgradeError("recovered completion held census differs")
+        backups = []
+        for version, receipt in ((5, p), (6, c)):
+            pair = _pre_census_closed(receipt[f"v{version}_backup"], frozenset({"database_path", "database_sha256",
+                "manifest_path", "manifest_sha256", "restore_drill_receipt", "restore_drill_digest", "full_v4_content_digest"}), "completion backup")
+            for key, hashkey in (("database_path", "database_sha256"), ("manifest_path", "manifest_sha256")):
+                path = Path(pair[key])
+                if path.parent != backup_root or path.name in {"", ".", ".."}:
+                    raise ExecutiveSchemaUpgradeError("recovered completion backup origin differs")
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+                stack.callback(os.close, fd)
+                origin = _pre_census_database_origin(path, fd, uid, gid)
+                if origin["sha256"] != pair[hashkey]:
+                    raise ExecutiveSchemaUpgradeError("recovered completion backup hash differs")
+                backups.append((path, fd, origin))
+            verified = verify_backup(pair["database_path"], pair["manifest_path"], expected_schema_version=version)
+            drill = verify_restore_drill(pair["database_path"], pair["manifest_path"], expected_schema_version=version)
+            if (_upgrade_digest(drill.to_dict()) != pair["restore_drill_digest"]
+                    or json.loads(json.dumps(drill.to_dict())) != pair["restore_drill_receipt"]
+                    or verified.database_sha256 != pair["database_sha256"]
+                    or verified.manifest_sha256 != pair["manifest_sha256"]):
+                raise ExecutiveSchemaUpgradeError("recovered completion backup/drill differs")
+            with _readonly_database(Path(pair["database_path"])) as connection:
+                full4, m5 = full_v4_content_digest(connection), _v5_migration_receipt_digest(connection)
+                if version == 5 and full_v5_content_digest(connection) != q["full_v5_content_digest"]:
+                    raise ExecutiveSchemaUpgradeError("recovered completion original full-v5 differs")
+            if (full4 != pair["full_v4_content_digest"] or full4 != p["full_v4_content_digest"]
+                    or m5 != p["v5_migration_receipt_digest"]):
+                raise ExecutiveSchemaUpgradeError("recovered completion retained content differs")
+        current = _upgrade_v5_retained_state(database, version=6)
+        if (current["database"] != c["authoritative_v6_database"]
+                or current["normalized_schema_digest"] != c["authoritative_v6_schema_digest"]
+                or current["migration_vector"] != c["migration_vector"]
+                or c["full_v4_content_equal"] is not True or c["legacy_content_equal"] is not True
+                or any(c[key] != p["full_v4_content_digest"] for key in ("pre_full_v4_content_digest", "post_full_v4_content_digest"))
+                or any(c[key] != p["v5_migration_receipt_digest"] for key in ("pre_v5_migration_receipt_digest", "post_v5_migration_receipt_digest"))
+                or any(c[key] != current["legacy_content_digest"] for key in ("pre_v4_legacy_content_digest", "post_v4_legacy_content_digest"))):
+            raise ExecutiveSchemaUpgradeError("recovered completion current exact-v6 differs")
+        alias_identity = _pre_census_alias_identity()
+        def check():
+            if _pre_census_alias_identity() != alias_identity:
+                raise ExecutiveSchemaUpgradeError("recovered completion fixed alias changed")
+            for obs in held: obs.check()
+            for path, fd, origin in backups:
+                if _pre_census_database_origin(path, fd, uid, gid) != origin:
+                    raise ExecutiveSchemaUpgradeError("recovered completion immutable backup changed")
+            _pre_census_prove_original_tool(q["original_tool"])
+        check()
+        yield check
+        check()
+
+
+def upgrade_v6_to_v7(
+    database_path: str | Path,
+    backup_directory: str | Path,
+    *,
+    release_sha: str,
+) -> SchemaUpgradeV6ToV7Receipt:
+    """Perform only the explicit offline exact-v6 to v7 transition.
+
+    Reuses the incumbent installed-release proof, canonical offline service lock,
+    quarantine barrier, stable writer census, checkpoint, source backup/drill,
+    immutable receipts, exclusive SQLite transaction and custody revalidation.
+    Only the reviewed physical-resource DDL executes. Every prior v6 cell and
+    migration timestamp is conserved; all new physical tables begin empty.
+    Preexisting physical Events refuse. No policy, caller or provider is armed.
+    """
+
+    release = _prove_upgrade_release(release_sha)
+    candidate = Path(database_path).expanduser()
+    _assert_private_regular_file(candidate, label="Executive exact-v6 database")
+    database = candidate.resolve(strict=True)
+    state_directory = database.parent
+    marker = state_directory / DEFAULT_SERVICE_MARKER_NAME
+    lock = state_directory / DEFAULT_SERVICE_LOCK_NAME
+    barrier = state_directory / _UPGRADE_BARRIER_NAME
+    preflight_path = state_directory / _UPGRADE_V6_TO_V7_PREFLIGHT_NAME
+    completion_path = state_directory / _UPGRADE_V6_TO_V7_COMPLETION_NAME
+    if any(os.path.lexists(path) for path in (barrier, preflight_path, completion_path)):
+        raise ExecutiveSchemaUpgradeError(
+            "v6-to-v7 upgrade barrier/receipt already exists; explicit operator "
+            "reconciliation required before another attempt"
+        )
+    operation_id = uuid4().hex
+    created_at = _upgrade_now()
+    barrier_payload = {
+        "schema_version": UPGRADE_BARRIER_SCHEMA,
+        "operation_id": operation_id,
+        "database_path": str(database),
+        "tool_release_root": release["release_root"],
+        "tool_release_tree_sha": release["release_tree_sha"],
+        "tool_release_manifest_sha256": release["release_manifest_sha256"],
+        "release_sha": release["release_sha"],
+        "control_uid": os.geteuid(),
+        "created_at": created_at,
+    }
+    before: dict[str, Any] | None = None
+    preflight: dict[str, Any] | None = None
+    barrier_identity: dict[str, Any] | None = None
+    preflight_identity: dict[str, Any] | None = None
+    census: dict[str, Any] | None = None
+    committed_v7 = False
+    with _offline_restore_lock(lock, marker, require_existing=True) as lock_fd, \
+            _completed_pre_census_recovery(database, Path(backup_directory), release) as recovered_check:
+        lock_identity = _held_service_lock_identity(lock, lock_fd)
+        _write_private_json(barrier, barrier_payload)
+        barrier_identity = _artifact_identity(
+            barrier, expected_payload=barrier_payload
+        )
+        try:
+            _upgrade_hook("barrier_persisted")
+            _artifact_identity(
+                barrier,
+                expected_payload=barrier_payload,
+                expected=barrier_identity,
+            )
+            if _marker_exists(marker):
+                raise RestoreSafetyError("Executive service marker appeared before census")
+            census = _upgrade_census(database, lock, barrier, lock_fd)
+            _checkpoint_quiesced_wal(database)
+            if _upgrade_census(database, lock, barrier, lock_fd) != census:
+                raise RestoreSafetyError("writer census changed across WAL checkpoint")
+            before = _upgrade_database_state(database, version=6)
+            with _readonly_database(database) as connection:
+                _require_no_physical_events(connection)
+            v6_backup = create_offline_backup(
+                database, backup_directory, expected_schema_version=6
+            )
+            _require_retained_backup_sidecar_absence(v6_backup.database_path)
+            v6_drill = verify_restore_drill(
+                v6_backup.database_path,
+                v6_backup.manifest_path,
+                expected_schema_version=6,
+            )
+            with _readonly_database(Path(v6_backup.database_path)) as connection:
+                backup_full_v6 = full_v6_content_digest(connection)
+            _require_retained_backup_sidecar_absence(v6_backup.database_path)
+            if (
+                v6_backup.legacy_content_digest != before["legacy_content_digest"]
+                or v6_drill.legacy_content_digest != before["legacy_content_digest"]
+                or v6_backup.normalized_schema_digest
+                != before["normalized_schema_digest"]
+                or v6_drill.normalized_schema_digest
+                != before["normalized_schema_digest"]
+                or backup_full_v6 != before["full_v6_content_digest"]
+            ):
+                raise ExecutiveSchemaUpgradeError("v6 source/backup/drill proof differs")
+            preflight = {
+                "schema_version": UPGRADE_PREFLIGHT_SCHEMA,
+                "operation_id": operation_id,
+                "source_schema_version": 6,
+                "target_schema_version": 7,
+                "database": before["database"],
+                "migration_vector": before["migration_vector"],
+                "normalized_schema_digest": before["normalized_schema_digest"],
+                "full_v6_content_digest": before["full_v6_content_digest"],
+                "barrier_identity": barrier_identity,
+                "v6_backup": {
+                    "database_path": v6_backup.database_path,
+                    "database_sha256": v6_backup.database_sha256,
+                    "manifest_path": v6_backup.manifest_path,
+                    "manifest_sha256": v6_backup.manifest_sha256,
+                    "restore_drill_receipt": v6_drill.to_dict(),
+                    "restore_drill_digest": _upgrade_digest(v6_drill.to_dict()),
+                    "full_v6_content_digest": backup_full_v6,
+                },
+                "quiesce_writer_census": census,
+                "quiesce_writer_census_digest": _upgrade_digest(census),
+                "tool_release_root": release["release_root"],
+                "tool_release_tree_sha": release["release_tree_sha"],
+                "tool_release_manifest_sha256": release[
+                    "release_manifest_sha256"
+                ],
+                "release_sha": release["release_sha"],
+                "created_at": created_at,
+            }
+            _write_private_json(preflight_path, preflight)
+            preflight_identity = _artifact_identity(
+                preflight_path, expected_payload=preflight
+            )
+            preflight_digest = _upgrade_digest(preflight)
+            _upgrade_hook("preflight_persisted")
+
+            def revalidate_control_artifacts() -> None:
+                if recovered_check is not None:
+                    recovered_check()
+                if _marker_exists(marker):
+                    raise RestoreSafetyError(
+                        "Executive service marker appeared during schema upgrade"
+                    )
+                _held_service_lock_identity(lock, lock_fd, lock_identity)
+                _artifact_identity(
+                    barrier,
+                    expected_payload=barrier_payload,
+                    expected=barrier_identity,
+                )
+                _artifact_identity(
+                    preflight_path,
+                    expected_payload=preflight,
+                    expected=preflight_identity,
+                )
+                if _prove_upgrade_release(release_sha) != release:
+                    raise ExecutiveSchemaUpgradeError("tool release identity changed")
+                _assert_upgrade_database_inode(database, before)
+
+            def revalidate_v6_backup_proof() -> None:
+                _require_retained_backup_sidecar_absence(v6_backup.database_path)
+                checked = verify_backup(
+                    v6_backup.database_path,
+                    v6_backup.manifest_path,
+                    expected_schema_version=6,
+                )
+                checked_drill = verify_restore_drill(
+                    v6_backup.database_path,
+                    v6_backup.manifest_path,
+                    expected_schema_version=6,
+                )
+                with _readonly_database(Path(v6_backup.database_path)) as connection:
+                    checked_full_v6 = full_v6_content_digest(connection)
+                _require_retained_backup_sidecar_absence(v6_backup.database_path)
+                if (
+                    checked.database_sha256 != v6_backup.database_sha256
+                    or checked.manifest_sha256 != v6_backup.manifest_sha256
+                    or checked.normalized_schema_digest
+                    != v6_backup.normalized_schema_digest
+                    or checked.legacy_content_digest
+                    != v6_backup.legacy_content_digest
+                    or checked_full_v6 != backup_full_v6
+                    or checked_drill.to_dict() != v6_drill.to_dict()
+                    or _upgrade_digest(checked_drill.to_dict())
+                    != preflight["v6_backup"]["restore_drill_digest"]
+                ):
+                    raise ExecutiveSchemaUpgradeError(
+                        "v6 backup or restore-drill proof changed after preflight"
+                    )
+
+            revalidate_control_artifacts()
+            revalidate_v6_backup_proof()
+            if _upgrade_database_state(database, version=6) != before:
+                raise ExecutiveSchemaUpgradeError("v6 source changed after preflight")
+            if _upgrade_census(database, lock, barrier, lock_fd) != census:
+                raise RestoreSafetyError("writer census changed before migration")
+
+            connection = sqlite3.connect(database, isolation_level=None, timeout=5.0)
+            connection.row_factory = sqlite3.Row
+            try:
+                connection.execute("PRAGMA foreign_keys=ON")
+                connection.execute("BEGIN EXCLUSIVE")
+                revalidate_control_artifacts()
+                _verify_connection(connection, expected_schema_version=6)
+                _require_no_physical_events(connection)
+                if full_v6_content_digest(
+                    connection
+                ) != before["full_v6_content_digest"]:
+                    raise ExecutiveSchemaUpgradeError("in-transaction v6 content changed")
+                _upgrade_hook("exclusive_v6_verified")
+                revalidate_control_artifacts()
+                version, name, statements = _MIGRATIONS[6]
+                if version != 7:
+                    raise ExecutiveSchemaUpgradeError("reviewed migration 7 is unavailable")
+                for ordinal, statement in enumerate(statements, 1):
+                    connection.execute(statement)
+                    _upgrade_hook(f"after_m7_statement:{ordinal:02d}")
+                    revalidate_control_artifacts()
+                connection.execute(
+                    """
+                    INSERT INTO schema_migrations(version,name,checksum,applied_at_ms)
+                    VALUES(?,?,?,?)
+                    """,
+                    (
+                        version,
+                        name,
+                        _migration_checksum(statements),
+                        int(datetime.now(UTC).timestamp() * 1000),
+                    ),
+                )
+                _upgrade_hook("after_m7_receipt")
+                revalidate_control_artifacts()
+                _verify_connection(connection, expected_schema_version=7)
+                initial_physical_history = _require_initial_physical_history(connection)
+                if full_v6_content_digest(
+                    connection
+                ) != before["full_v6_content_digest"]:
+                    raise ExecutiveSchemaUpgradeError("migration changed full v6 content")
+                _upgrade_hook("before_v7_commit")
+                revalidate_control_artifacts()
+                _verify_connection(connection, expected_schema_version=7)
+                if _require_initial_physical_history(connection) != initial_physical_history:
+                    raise ExecutiveSchemaUpgradeError("precommit physical history drifted")
+                if full_v6_content_digest(
+                    connection
+                ) != before["full_v6_content_digest"]:
+                    raise ExecutiveSchemaUpgradeError("precommit full v6 content drifted")
+                connection.commit()
+                committed_v7 = True
+            except Exception:
+                if connection.in_transaction:
+                    connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+            _upgrade_hook("after_v7_commit_before_checkpoint")
+            revalidate_control_artifacts()
+            _checkpoint_quiesced_wal(database)
+            _upgrade_hook("after_v7_checkpoint")
+            revalidate_control_artifacts()
+            verified_v7 = _upgrade_database_state(database, version=7)
+            if verified_v7["legacy_content_digest"] != before["legacy_content_digest"]:
+                raise ExecutiveSchemaUpgradeError("committed v7 legacy content differs")
+            with _readonly_database(database) as connection:
+                committed_full_v6 = full_v6_content_digest(connection)
+                committed_physical_history = _require_initial_physical_history(connection)
+            if (committed_full_v6 != before["full_v6_content_digest"]
+                    or committed_physical_history != initial_physical_history
+                    or verified_v7["physical_history_digest"] != initial_physical_history):
+                raise ExecutiveSchemaUpgradeError("committed v7 full v6 content differs")
+            v7_backup = create_offline_backup(
+                database, backup_directory, expected_schema_version=7
+            )
+            _require_retained_backup_sidecar_absence(v7_backup.database_path)
+            v7_drill = verify_restore_drill(
+                v7_backup.database_path,
+                v7_backup.manifest_path,
+                expected_schema_version=7,
+            )
+            with _readonly_database(Path(v7_backup.database_path)) as connection:
+                v7_backup_full_v6 = full_v6_content_digest(connection)
+                v7_backup_physical_history = _require_initial_physical_history(connection)
+            _require_retained_backup_sidecar_absence(v7_backup.database_path)
+            if (
+                v7_backup.legacy_content_digest != before["legacy_content_digest"]
+                or v7_drill.legacy_content_digest != before["legacy_content_digest"]
+                or v7_backup.normalized_schema_digest
+                != verified_v7["normalized_schema_digest"]
+                or v7_drill.normalized_schema_digest
+                != verified_v7["normalized_schema_digest"]
+                or v7_backup_full_v6 != before["full_v6_content_digest"]
+                or v7_backup_physical_history != initial_physical_history
+            ):
+                raise ExecutiveSchemaUpgradeError("v7 source/backup/drill proof differs")
+            if _upgrade_census(database, lock, barrier, lock_fd) != census:
+                raise RestoreSafetyError("writer census changed before completion")
+            revalidate_control_artifacts()
+            completed_at = _upgrade_now()
+            completion = {
+                "schema_version": UPGRADE_COMPLETION_SCHEMA,
+                "operation_id": operation_id,
+                "source_schema_version": 6,
+                "target_schema_version": 7,
+                "preflight_receipt_digest": preflight_digest,
+                "authoritative_v7_database": verified_v7["database"],
+                "authoritative_v7_schema_digest": verified_v7[
+                    "normalized_schema_digest"
+                ],
+                "migration_vector": verified_v7["migration_vector"],
+                "pre_full_v6_content_digest": before["full_v6_content_digest"],
+                "post_full_v6_content_digest": committed_full_v6,
+                "full_v6_content_equal": True,
+                "physical_history_digest": initial_physical_history,
+                "initial_physical_tables_empty": True,
+                "pre_v6_legacy_content_digest": before["legacy_content_digest"],
+                "post_v6_legacy_content_digest": verified_v7[
+                    "legacy_content_digest"
+                ],
+                "legacy_content_equal": True,
+                "v7_backup": {
+                    "database_path": v7_backup.database_path,
+                    "database_sha256": v7_backup.database_sha256,
+                    "manifest_path": v7_backup.manifest_path,
+                    "manifest_sha256": v7_backup.manifest_sha256,
+                    "restore_drill_receipt": v7_drill.to_dict(),
+                    "restore_drill_digest": _upgrade_digest(v7_drill.to_dict()),
+                    "full_v6_content_digest": v7_backup_full_v6,
+                    "physical_history_digest": v7_backup_physical_history,
+                },
+                "quiesce_writer_census_digest": _upgrade_digest(census),
+                "tool_release_root": release["release_root"],
+                "tool_release_tree_sha": release["release_tree_sha"],
+                "tool_release_manifest_sha256": release[
+                    "release_manifest_sha256"
+                ],
+                "release_sha": release["release_sha"],
+                "completed_at": completed_at,
+            }
+            _write_private_json(completion_path, completion)
+            completion_identity = _artifact_identity(
+                completion_path, expected_payload=completion
+            )
+            _upgrade_hook("completion_persisted")
+            # The final adversarial seam is deliberately placed before the
+            # complete authoritative/backup/drill/census proof.  Nothing after
+            # this hook may escape revalidation before the barrier is removed.
+            _upgrade_hook("before_barrier_unlink")
+            revalidate_control_artifacts()
+            _artifact_identity(
+                completion_path,
+                expected_payload=completion,
+                expected=completion_identity,
+            )
+            final_v7 = _upgrade_database_state(database, version=7)
+            _require_retained_backup_sidecar_absence(v7_backup.database_path)
+            final_v7_backup = verify_backup(
+                v7_backup.database_path,
+                v7_backup.manifest_path,
+                expected_schema_version=7,
+            )
+            final_v7_drill = verify_restore_drill(
+                v7_backup.database_path,
+                v7_backup.manifest_path,
+                expected_schema_version=7,
+            )
+            _require_retained_backup_sidecar_absence(v7_backup.database_path)
+            with _readonly_database(database) as connection:
+                final_full_v6 = full_v6_content_digest(connection)
+                final_physical_history = _require_initial_physical_history(connection)
+            if (
+                final_v7 != verified_v7
+                or final_full_v6 != before["full_v6_content_digest"]
+                or final_physical_history != initial_physical_history
+                or final_v7_backup.database_sha256 != v7_backup.database_sha256
+                or final_v7_backup.manifest_sha256 != v7_backup.manifest_sha256
+                or final_v7_backup.normalized_schema_digest
+                != v7_backup.normalized_schema_digest
+                or final_v7_backup.legacy_content_digest
+                != v7_backup.legacy_content_digest
+                or final_v7_drill.to_dict() != v7_drill.to_dict()
+                or _upgrade_digest(final_v7_drill.to_dict())
+                != completion["v7_backup"]["restore_drill_digest"]
+            ):
+                raise ExecutiveSchemaUpgradeError(
+                    "completion v7 source/backup/drill proof changed"
+                )
+            # The retained source backup stays in custody after the commit, so
+            # it is revalidated beside the final v7 proof before release.
+            revalidate_v6_backup_proof()
+            if _upgrade_census(database, lock, barrier, lock_fd) != census:
+                raise RestoreSafetyError("writer census changed before barrier release")
+            revalidate_control_artifacts()
+            _artifact_identity(
+                completion_path,
+                expected_payload=completion,
+                expected=completion_identity,
+            )
+            _unlink_exact_upgrade_artifact(
+                barrier,
+                expected_payload=barrier_payload,
+                expected=barrier_identity,
+            )
+            return SchemaUpgradeV6ToV7Receipt(
+                schema_version=UPGRADE_COMPLETION_SCHEMA,
+                database_path=str(database),
+                database_identity=dict(verified_v7["database"]),
+                release_sha=release["release_sha"],
+                preflight_receipt_path=str(preflight_path),
+                preflight_receipt_digest=preflight_digest,
+                completion_receipt_path=str(completion_path),
+                completion_receipt_digest=_upgrade_digest(completion),
+                source_schema_version=6,
+                target_schema_version=7,
+                pre_full_v6_content_digest=before["full_v6_content_digest"],
+                post_full_v6_content_digest=committed_full_v6,
+                full_v6_content_equal=True,
+                physical_history_digest=initial_physical_history,
+                v6_backup_path=v6_backup.database_path,
+                v6_backup_manifest_path=v6_backup.manifest_path,
+                v7_backup_path=v7_backup.database_path,
+                v7_backup_manifest_path=v7_backup.manifest_path,
+                completed_at=completed_at,
+            )
+        except Exception as exc:
+            if committed_v7:
+                _ensure_upgrade_quarantine_barrier(barrier, barrier_payload)
+                raise ExecutiveSchemaUpgradeError(
+                    "v7 committed but completion failed; barrier remains for forward fix"
+                ) from exc
+            if before is None or barrier_identity is None or census is None:
+                _ensure_upgrade_quarantine_barrier(barrier, barrier_payload)
+                raise ExecutiveSchemaUpgradeError(
+                    "precommit upgrade failed before exact rollback proof; barrier remains"
+                ) from exc
+            try:
+                _upgrade_hook("after_precommit_rollback_before_guard")
+                current = _upgrade_database_state(database, version=6)
+                if not _rollback_reproduces_preflight(current, before):
+                    raise ExecutiveSchemaUpgradeError(
+                        "rolled-back v6 state differs from frozen preflight"
+                    )
+                if _prove_upgrade_release(release_sha) != release:
+                    raise ExecutiveSchemaUpgradeError(
+                        "tool release identity changed before rollback cleanup"
+                    )
+                if _upgrade_census(database, lock, barrier, lock_fd) != census:
+                    raise RestoreSafetyError(
+                        "writer census changed before rollback barrier release"
+                    )
+                if _marker_exists(marker):
+                    raise RestoreSafetyError(
+                        "Executive service marker appeared before rollback cleanup"
+                    )
+                _held_service_lock_identity(lock, lock_fd, lock_identity)
+                _artifact_identity(
+                    barrier,
+                    expected_payload=barrier_payload,
+                    expected=barrier_identity,
+                )
+                if preflight is not None and preflight_identity is not None:
+                    _artifact_identity(
+                        preflight_path,
+                        expected_payload=preflight,
+                        expected=preflight_identity,
+                    )
+                    _unlink_exact_upgrade_artifact(
+                        preflight_path,
+                        expected_payload=preflight,
+                        expected=preflight_identity,
+                    )
+                _unlink_exact_upgrade_artifact(
+                    barrier,
+                    expected_payload=barrier_payload,
+                    expected=barrier_identity,
+                )
+            except Exception as guard_exc:
+                _ensure_upgrade_quarantine_barrier(barrier, barrier_payload)
+                raise ExecutiveSchemaUpgradeError(
+                    "v6 rollback did not reproduce preflight; barrier remains"
+                ) from guard_exc
+            raise ExecutiveSchemaUpgradeError(
+                f"v6 migration rolled back without v7 commit: {type(exc).__name__}: {exc}"
+            ) from exc
+
+
 __all__ = [
     "BACKUP_MANIFEST_SCHEMA_VERSION",
     "DEFAULT_SERVICE_LOCK_NAME",
     "DEFAULT_SERVICE_MARKER_NAME",
     "FULL_V4_CONTENT_PROJECTION_SCHEMA",
+    "FULL_V5_CONTENT_PROJECTION_SCHEMA",
+    "PHYSICAL_HISTORY_PROJECTION_SCHEMA",
     "BackupReceipt",
     "BackupVerification",
     "BackupVerificationError",
@@ -3016,16 +5297,26 @@ __all__ = [
     "RestoreSafetyError",
     "SchemaUpgradeReceipt",
     "SchemaUpgradeV4ToV5Receipt",
+    "SchemaUpgradeV5ToV6Receipt",
+    "SchemaUpgradeV6ToV7Receipt",
     "create_offline_backup",
     "create_online_backup",
     "full_v4_content_digest",
     "full_v4_content_projection",
+    "full_v5_content_digest",
+    "full_v6_content_projection",
+    "full_v6_content_digest",
+    "full_v5_content_projection",
     "legacy_content_digest",
     "legacy_content_projection",
     "normalized_schema_digest",
+    "physical_history_digest",
+    "physical_history_projection",
     "restore_backup_offline",
     "upgrade_v3_to_v4",
     "upgrade_v4_to_v5",
+    "upgrade_v5_to_v6",
+    "upgrade_v6_to_v7",
     "verify_backup",
     "verify_restore_drill",
 ]

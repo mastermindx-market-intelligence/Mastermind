@@ -93,6 +93,7 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
     parsed = parser.parse_args(["enroll", "--expected-bot-user-id", BOT])
     assert parsed.command == "enroll"
     assert parsed.expected_bot_user_id == BOT
+    assert not hasattr(parsed, "acknowledge_legacy_dedicated_app")
 
     options = {
         option
@@ -105,11 +106,55 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
             for action in subparser._actions
             for option in getattr(action, "option_strings", ())
         }
-    assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "enroll-shared", "verify", "rebind-release"}
+    assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "enroll-shared", "verify", "rebind-release", "reverse-rebind-release"}
     assert "--expected-bot-user-id" in options
+    assert "--acknowledge-legacy-dedicated-app" not in options
     assert {"--token", "--workspace", "--channel", "--config", "--plist"}.isdisjoint(
         options
     )
+
+
+@pytest.mark.parametrize("enable_w3c", [False, True])
+def test_new_dedicated_enrollment_is_closed_before_any_input(
+    monkeypatch, enable_w3c: bool
+):
+    enrollment = _module()
+    stdout = io.StringIO()
+    async def forbidden_enroll(**kwargs):
+        raise AssertionError("default dedicated enrollment must not call writer")
+    def forbidden_tty(_stdin):
+        raise AssertionError("default dedicated enrollment must not inspect TTY")
+    monkeypatch.setattr(enrollment, "_enroll", forbidden_enroll)
+    monkeypatch.setattr(enrollment, "_require_native_tty", forbidden_tty)
+    argv = ["enroll", "--expected-bot-user-id", BOT]
+    if enable_w3c:
+        argv.append("--enable-w3c")
+    rc = enrollment._run_invocation(
+        argv, stdin=_NoTokenRead(), stdout=stdout,
+        environ={"SAFE": "1"}, require_native_tty=True,
+    )
+    assert rc == 2
+    assert json.loads(stdout.getvalue()) == {
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
+        "schema": "mastermind.a2_agent_relay_enrollment.v1",
+        "status": "ERROR",
+    }
+    assert TOKEN not in stdout.getvalue()
+
+
+@pytest.mark.parametrize("verb", ["enroll", "enroll-shared", "verify", "rebind-release"])
+def test_removed_legacy_ack_flag_cannot_reactivate_any_enrollment_verb(
+    verb: str,
+):
+    enrollment = _module()
+    stdout = io.StringIO()
+    rc = enrollment.run(
+        [verb, "--expected-bot-user-id", BOT,
+         "--acknowledge-legacy-dedicated-app"],
+        stdin=_NoTokenRead(), stdout=stdout, environ={"SAFE": "1"},
+    )
+    assert rc == 2
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
 def test_token_input_reuses_bounded_one_line_no_echo_ceremony():
@@ -185,7 +230,7 @@ def test_production_main_refuses_piped_enroll_before_enroll(monkeypatch):
 
     assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
         "status": "ERROR",
     }
@@ -220,13 +265,13 @@ def test_production_main_refuses_missing_or_raising_fileno(
     assert enrollment.main() == 2
     assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
         "status": "ERROR",
     }
 
 
-def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
+def test_production_main_refuses_new_dedicated_enroll_even_with_tty(monkeypatch):
     enrollment = _module()
     stdout = io.StringIO()
     stdin = SimpleNamespace(fileno=lambda: 23)
@@ -247,13 +292,12 @@ def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
     monkeypatch.setattr(enrollment.os, "isatty", lambda descriptor: descriptor == 23)
     monkeypatch.setattr(enrollment, "_enroll", fake_enroll)
 
-    assert enrollment.main() == 0
-    assert enroll_calls == [(BOT, stdin)]
+    assert enrollment.main() == 2
+    assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "action": "enrolled",
-        "release_sha": "e" * 40,
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
-        "status": "PASS",
+        "status": "ERROR",
     }
 
 
@@ -338,7 +382,7 @@ def test_existing_c1_shared_token_requires_same_bot_identity(monkeypatch):
         enrollment._existing_c1_shared_token(bot_user_id=BOT)  # noqa: SLF001
 
 
-def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
+def test_injected_run_cannot_reactivate_new_dedicated_enroll(monkeypatch):
     enrollment = _module()
     stdin = io.BytesIO(b"hermetic-input\n")
     stdout = io.StringIO()
@@ -357,13 +401,13 @@ def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
             stdout=stdout,
             environ={"SAFE": "1"},
         )
-        == 0
+        == 2
     )
-    assert enroll_calls == [(BOT, stdin)]
-    assert json.loads(stdout.getvalue())["status"] == "PASS"
+    assert enroll_calls == []
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
-def test_enable_w3c_flag_reaches_only_the_enrollment_composition(monkeypatch):
+def test_enable_w3c_flag_cannot_reactivate_dedicated_enrollment(monkeypatch):
     enrollment = _module()
     stdin = io.BytesIO(b"hermetic-input\n")
     stdout = io.StringIO()
@@ -382,9 +426,10 @@ def test_enable_w3c_flag_reaches_only_the_enrollment_composition(monkeypatch):
             stdout=stdout,
             environ={"SAFE": "1"},
         )
-        == 0
+        == 2
     )
-    assert enroll_calls == [(BOT, stdin, True)]
+    assert enroll_calls == []
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
 def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
@@ -1325,6 +1370,9 @@ def _install_canonical_host_gate_fakes(
     )
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
+    # The socket parent is covered by separate mode/owner/symlink tests.
+    # These fixtures isolate principal and credential-host invariants.
+    monkeypatch.setattr(enrollment, "_socket_parent_prepared", lambda: True)
     return library, support, system_root
 
 

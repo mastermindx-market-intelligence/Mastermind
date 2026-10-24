@@ -895,6 +895,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "cost_usd": brain.get("cost_usd") if isinstance(brain, dict) else None,
         "model": brain.get("model") if isinstance(brain, dict) else None,
         "error": brain.get("error") if isinstance(brain, dict) else None,
+        "provider_failure": brain.get("provider_failure") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
         # Trusted runner output, never model-submitted source_provenance.
         "perception_input": copy.deepcopy(brain.get("perception_input"))

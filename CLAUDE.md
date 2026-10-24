@@ -189,6 +189,14 @@ Agenda remains the sole priority queue; the boot packet ignores legacy
 Use the existing admitted routing for this assignment. Portfolio model tiers in
 `config/agents.yml` describe application reasoning; they are not permission to spawn
 Claude-native children. Observe the host's actual native-model, capacity and tool grants.
-Prefer economical qualified Fabric workers for separable work. When no eligible route is
-available before effects begin, continue permitted direct work rather than inventing a
-new queue, forcing a forbidden native model, or waiting for a historical principal.
+Prefer economical qualified Fabric workers for separable work. For an **assigned M2
+Claude orchestrator**, first read the dedicated, executable invocation guidance
+in `skills/mastermind-claude-fabric-delegation/SKILL.md` (user-home installation:
+`~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md`). It names the
+incumbent M2 `fabric_task.py` adapter and actual tool sequence; a file or role
+alone cannot authenticate a root or grant admission. A Fabric-spawned operator
+with an admitted per-run capability receives its own `fabric_operator_scope` /
+`fabric_child_*` recipe automatically in the launch packet. Ordinary leaves do
+not delegate. When no eligible route is available before effects begin,
+continue permitted direct work rather than inventing a new queue, forcing a
+forbidden native model, or waiting for a historical principal.
