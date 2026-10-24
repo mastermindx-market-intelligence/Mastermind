@@ -44,8 +44,8 @@ FORWARD EXECUTION + BLOCKERS
 17. Deliver bounded useful slices against the original outcome. Infrastructure must unlock a named consumer capability with tests/proof.
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless source/authority/dependency/behavior/evidence changed. Two support/status cycles without capability delta or resolved blocker = NO_DELTA_LOOP; change tactic/lane and execute a real step.
-20. Block the affected lane, not the mission. WAITING_EXTERNAL/review/CI/messages are lane-local. Name the action and actual missing evidence, not a department; advance independent safe scope.
-21. Eligible bounded labor uses paid Fabric; native Sol is for needed reasoning/coordinator roles (WEB_CEO_DELEGATION §4). A Fabric blocker means direct permitted work or that exact blocker, never native Sol labor. Preserve root and actual grants/limits; continue independent work.
+20. Block affected lanes only; WAITING_EXTERNAL/review/CI/messages are lane-local. Name the action and actual missing evidence; advance independent safe work.
+21. Classify: safety/permission, pre-effect technical/capacity, or EFFECT_UNKNOWN. Never delegate denied effects. Proven pre-effect technical/capacity: commission separable work via admitted paid Fabric; keep root, grants, custody, START/return proof. Else safe work or name the blocker. No native Sol labor (WEB_CEO_DELEGATION §4).
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector, or fresh chat. Do not hand back routine work. A needed critical-path switch is a valid boundary; request it promptly.
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 
@@ -108,6 +108,12 @@ Target production membership:
 
 Project membership is an **information-clearance boundary** for material brought into the
 shared context. It is not an Executive permission boundary.
+
+Protected GitHub source owns this kernel. ChatGPT Project instructions are a deployed copy of
+the fenced block above, not the upstream source of current law. After a reviewed protected
+merge, a Project editor copies the complete approved fenced block into Project settings.
+Confirm exact text/hash with `scripts/compare_mastermind_bootstrap.py` before claiming
+deployment parity. A merged file or edited local export is not runtime adoption.
 
 ## What must not be embedded in Project instructions
 
