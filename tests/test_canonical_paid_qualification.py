@@ -260,8 +260,17 @@ def observation_document(request):
               'sha256': digest_raw(b'mechanical-python'),
               'team_identifier': None, 'size': 12345, 'device': 1, 'inode': 42,
               'mode': 0o100555, 'uid': 0, 'gid': 0, 'mtime_ns': 1}
+    pre=witness(request)
+    c=request['initializer_commitment']
+    if c['initialization_contract']==initializer_module.NESTED_CONTRACT:
+        from ops.native_fabric.quota_continuity.candidate import paid_initializer_nested_data as nested
+        helper=c['nested_helper']
+        pre.update(snapshot_sha256=nested.TRANSFORMED_SHA256,
+            nested_inputs=dict(schema_version=nested.INPUTS_SCHEMA,initialization_contract=nested.CONTRACT,legacy_outer_sha256=nested.LEGACY_SHA256,transformed_outer_sha256=nested.TRANSFORMED_SHA256,helper=dict(schema_version='mastermind.paid_helper_private_data/v1',**{k:v for k,v in helper.items() if k!='path'})),
+            helper_origin_identity=[1,43,0o100600,helper['uid'],helper['gid'],1,helper['size'],100,100])
+        pre['host_env_identity'][6]=c['host_env']['size']
     return {'schema': 'mastermind.paid_host_observation/v2', 'request': request,
-            'pre_execution':witness(request),
+            'pre_execution':pre,
             'binary': binary, 'worker_uid': 501, 'worker_gid': 20,
             'worker_user': 'chriswong',
             'boot_id': str(uuid.UUID(int=0x12345678123456781234567812345678)),
@@ -271,7 +280,7 @@ def observation_document(request):
             'context_identity': {
                 'profile': 'canonical-paid-physical-owner.v1',
                 'host_env_path': lane + '/ext/HOST_ENV.sh',
-                'host_env_sha256': digest_raw(b'HOST_ENV'),
+                'host_env_sha256': c['host_env']['sha256'],
                 'kernel_executable': request['python_path'], 'lane_root': lane}}
 
 
@@ -1134,3 +1143,37 @@ def test_reserved_identity_is_checked_before_initializer_transport(env,tmp_path,
     assert env.counts=={'qualify':0,'consume':0}
     assert (env.staging/'qualification-intent.json').exists()
     assert not env.swap_calls
+
+
+def test_new_nested_contract_real_root_publication_and_wire(env,tmp_path):
+    """Real Root owner/opaque qualifier/decoder; only host/transport are fixtures."""
+    from ops.native_fabric.quota_continuity.candidate import paid_initializer_nested_data as nested
+    from control_plane.paid_fabric_wire import require_paid_source, PaidWireRefused
+    import copy
+    capture='/Users/chriswong/lanes/ext/lanes'
+    c=commitment(host=HOST_KEY,alias=ALIAS,python=PYTHON_PATH,capture=capture,uid=501,gid=20,user='chriswong',home='/Users/chriswong',binary_sha=digest_raw(b'mechanical-python'),hook_sha=nested.LEGACY_SHA256)
+    c.update(initialization_contract=nested.CONTRACT,nested_helper=dict(path='/Users/chriswong/lanes/ext/.host_glm_token.sh',sha256='d'*64,size=57,uid=501,gid=20,mode=0o600))
+    c['host_env']['size']=len(nested._ORIGINAL)
+    c['initialized_context']['glm_config']='/Users/chriswong/.glm/config.json'
+    raw=initializer_module.canonical(c)
+    result=run_publish(env,tmp_path,capture_root=capture,initializer_raw=raw,expected_initializer_sha256=digest_raw(raw))
+    assert env.counts=={'qualify':1,'consume':1}
+    artifacts={name:(env.destination/name).read_bytes() for name in base.FILES}
+    verified=qual.verify_qualified_artifacts(artifacts)
+    binding=verified['bindings'][0];physical=binding['physical_binding'];source=binding['source_config']
+    assert require_paid_source(physical,source)==physical
+    q=source['qualification'];assert q['initializer_commitment']==c
+    assert set(q['qualifier_sources_sha256'])==qual.QUALIFIER_SOURCE_NAMES and len(qual.QUALIFIER_SOURCE_NAMES)==8
+    assert q['host_env_sha256']==nested.LEGACY_SHA256
+    for change in ('missing_peer','legacy_contract','helper_path'):
+        bad=copy.deepcopy(source)
+        if change=='missing_peer':bad['qualification']['qualifier_sources_sha256'].pop('paid_initializer_nested_data.py')
+        elif change=='legacy_contract':bad['qualification']['initializer_commitment']['initialization_contract']=initializer_module.CONTRACT
+        else:bad['qualification']['initializer_commitment']['nested_helper']['path']='/arbitrary/helper'
+        bad['qualification']['initializer_commitment_sha256']=contract.digest(bad['qualification']['initializer_commitment'])
+        badphysical={k:v for k,v in bad.items() if k not in ('schema_version','capacity_capability_id')}
+        badphysical.update(schema_version=qual.PHYSICAL_DOC_SCHEMA,worker_source_config_digest=contract.digest(bad))
+        with pytest.raises(PaidWireRefused):require_paid_source(badphysical,bad)
+    with pytest.raises(qual.CanonicalPaidQualificationRefused):
+        run_publish(env,tmp_path,capture_root=capture,initializer_raw=raw,expected_initializer_sha256=digest_raw(raw))
+    assert env.counts=={'qualify':1,'consume':1}

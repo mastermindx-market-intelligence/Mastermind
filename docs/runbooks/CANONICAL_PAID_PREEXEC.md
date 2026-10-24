@@ -23,7 +23,7 @@ it cannot enroll or update a host key. Ordinary telemetry policy is unchanged. T
 this source change, and are not a new human-only gate or a request to inspect a
 held remote operation.
 
-`mastermind.paid_initializer_commitment/v1` has exactly these fields:
+For `paid-host-env-held-fd.v1`, `mastermind.paid_initializer_commitment/v1` has exactly these fields:
 
 - `schema_version`, `host_ref`, `transport_alias`, `lane_root`;
 - `account`: UID, GID, user and home;
@@ -96,3 +96,69 @@ and loader-environment negatives must still refuse before a hook marker. This is
 not a production Root ownership/ACL/bootstrap receipt. Normal remote_sub/readiness and actual first paid START
 remain separate held consumers until their own same-context prerequisites are
 qualified. A protected source release alone does not authorize any of them.
+
+
+The explicit nested DATA variant
+-------------------------------
+
+`paid-host-env-held-fd-token-data.v1` is a separate closed variant of that same
+commitment schema. It adds only `nested_helper`: fixed path, expected SHA256,
+size, UID, GID and permission mode 0600. The fixed path is
+`account.home/lanes/ext/.host_glm_token.sh`; `lane_root` must be
+`account.home/lanes`. This input still requires the actual independent approval
+and custody facts. The current live helper bytes and their approval are UNKNOWN.
+No example or correct digest supplies approval, and no helper is read remotely
+merely to complete this source work.
+
+The variant admits only the exact 587-byte outer source with SHA256
+`c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0379b2f6`.
+Before any private helper bytes are read, the owner holds and revalidates its
+named ancestry, descriptors, native ACL absence, account, exact size and 0600
+mode. The helper parser accepts only the existing generated assignment grammar:
+`export GLM_SHIM_TOKEN="<32 lowercase hexadecimal characters>"` and one newline.
+Other retained formats refuse; this path does not rotate, mint or repair a token.
+
+The reviewed DATA component seals the private bytes and transforms only that
+outer source's sole final helper-source line into a no-op. The separately sealed
+572-byte execution source has SHA256
+`87198f3568e199c64a4deb2d41242a1c812dd65797f60ecc0db00fdf71b6e378`.
+The old contract never selects this transformation. The original outer and
+helper FD/name custody remain live checks; sealed snapshots supply immutable
+bytes, not authority. Only the initial child environment receives the parsed
+private value. Actual captured and final observer environments must retain that
+exact value; loss or change refuses without reinjection. No secret is included
+in evidence, errors, argv or the returned witness.
+
+For this variant, `initialized_context.glm_config` binds existing effective
+semantics: an existing nonempty GLM_CONFIG selector or HOME/.glm/config.json.
+The owner does not export a missing selector or read the config contents. It
+retains the incumbent lane-venv PATH prepend and checks the actual first
+executable python3 against the separately committed logical launch path. It
+never infers the launch selector from the bootstrap or overwrites a mismatch.
+The protected image/startup/actual-kernel proof is unchanged.
+
+The parent, token parser and nested-input module are exact hashed bytes in one
+private package with an empty search path, preloaded in that order. Current
+qualification binds eight fixed source files; the normal builder produces a
+98-member closure. Historical 95-member fixtures remain byte-exact. Old retained
+five-source DATA and old six-source pre-execution DATA remain readable under
+their own closed shapes; new nested DATA requires all eight sources. No retained
+DATA becomes a qualification grant.
+
+The new closed pre-execution witness retains the six old fields and adds only
+`nested_inputs` (the reviewed five-field transformation/helper fingerprint) and
+`helper_origin_identity` (the actual nine-field private origin stat identity).
+`context_identity.host_env_sha256` stays the original outer digest;
+`pre_execution.snapshot_sha256` is the transformed digest. The ordinary Root
+producer validates this join before publishing the existing four artifacts. Its
+original pre-transport one-use reservation and all post-entry UNKNOWN/no-replay
+semantics remain unchanged.
+
+Linux joined tests use disposable credentialless inputs and explicitly simulate
+protected platform metadata; they do not establish the current host's Root
+namespace, private helper, approval, credentials or provider readiness. The new
+case exercises the actual private-package loader, memfd snapshots, Bash capture,
+held-image child, effective default config, observation codec, and helper
+metadata/ACL-before-read and token-survival refusals. Darwin skips of that case
+and the component's sealing cases must be replaced by actual Linux CI evidence
+before protected delivery.

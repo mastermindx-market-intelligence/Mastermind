@@ -149,11 +149,12 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 raise AssertionError('historical paid qualifier preimage differs')
             (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
             cls.manifest['ext/' + name] = digest
-            added = cls.built / 'native-code-stage/ext/paid_initializer.py'
-            if g.digest(added.read_bytes()) != cls.manifest['ext/paid_initializer.py']:
-                raise AssertionError('current initializer differs before historical inverse')
-            added.unlink()
-            del cls.manifest['ext/paid_initializer.py']
+            for name in ('paid_initializer.py', 'paid_initializer_token_data.py', 'paid_initializer_nested_data.py'):
+                added = cls.built / 'native-code-stage/ext' / name
+                if g.digest(added.read_bytes()) != cls.manifest['ext/' + name]:
+                    raise AssertionError('current initializer differs before historical inverse')
+                added.unlink()
+                del cls.manifest['ext/' + name]
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')

@@ -100,8 +100,12 @@ def require_paid_source(physical,source):
                 or ci['mode'] & 0o022):_refuse()
         hashes=q['qualifier_sources_sha256']
         names={'host_pull.sh','host_pull_backend.py','host_pull_probe.template','paid_host_qualification.py','remote_sub.sh'}
-        if has_preexec:names=names|{'paid_initializer.py'}
-        if (type(hashes) is not dict or set(hashes)!=names
+        allowed_names=(names,)
+        if has_preexec:
+            names=names|{'paid_initializer.py'}
+            current=names|{'paid_initializer_token_data.py','paid_initializer_nested_data.py'}
+            allowed_names=(current,) if commitment['initialization_contract']=='paid-host-env-held-fd-token-data.v1' else (names,current)
+        if (type(hashes) is not dict or set(hashes) not in allowed_names
                 or any(type(v) is not str or not _SHA.fullmatch(v) for v in hashes.values())):_refuse()
         return json.loads(canonical(physical))
     except (KeyError,TypeError,ValueError,OverflowError):

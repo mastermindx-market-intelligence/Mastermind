@@ -13,6 +13,10 @@ import re
 
 SCHEMA = 'mastermind.paid_initializer_commitment/v1'
 CONTRACT = 'paid-host-env-held-fd.v1'
+NESTED_CONTRACT = 'paid-host-env-held-fd-token-data.v1'
+NESTED_OUTER_SHA256 = 'c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0379b2f6'
+NESTED_OUTER_SIZE = 587
+_TOKEN_DATA = _NESTED_DATA = None  # qualified private-package producer only
 PURPOSE = 'canonical-paid-qualification.v1'
 LIMIT = 16384
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
@@ -56,8 +60,10 @@ def integer(value,low,high):
 
 def validate_commitment(value, *, host_ref, transport_alias, python_path, capture_root):
     try:
-        closed(value,FIELDS)
-        if (value['schema_version']!=SCHEMA or value['initialization_contract']!=CONTRACT
+        if type(value) is not dict:refuse()
+        nested=value.get('initialization_contract')==NESTED_CONTRACT
+        closed(value,FIELDS|{'nested_helper'} if nested else FIELDS)
+        if (value['schema_version']!=SCHEMA or value['initialization_contract'] not in (CONTRACT,NESTED_CONTRACT)
                 or value['purpose']!=PURPOSE):refuse()
         for key,expected in (('host_ref',host_ref),('transport_alias',transport_alias)):
             if text(value[key],_ID)!=text(expected,_ID):refuse()
@@ -86,6 +92,16 @@ def validate_commitment(value, *, host_ref, transport_alias, python_path, captur
         context=closed(value['initialized_context'],('home','glm_config'))
         if path(context['home'])!=account['home']:refuse()
         path(context['glm_config'])
+        if nested:
+            helper=closed(value['nested_helper'],('path','sha256','size','uid','gid','mode'))
+            if (lane!=account['home']+'/lanes'
+                    or path(helper['path'])!=lane+'/ext/.host_glm_token.sh'
+                    or hook['sha256']!=NESTED_OUTER_SHA256 or hook['size']!=NESTED_OUTER_SIZE
+                    or integer(helper['mode'],0,0o777)!=0o600):refuse()
+            text(helper['sha256'],_SHA)
+            integer(helper['size'],1,4096)
+            for key in ('uid','gid'):
+                if integer(helper[key],1,2**31-1)!=account[key]:refuse()
         encoded=canonical(value)
         if len(encoded)>LIMIT:refuse()
         return json.loads(encoded)
@@ -143,7 +159,9 @@ def _initialized_environment(raw,commitment):
                     or name in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__')):refuse()
             result[name]=value.decode('utf-8','strict')
         expected=commitment['initialized_context']
-        if result.get('HOME')!=expected['home'] or result.get('GLM_CONFIG')!=expected['glm_config']:refuse()
+        if result.get('HOME')!=expected['home']:refuse()
+        nested=commitment['initialization_contract']==NESTED_CONTRACT
+        if not nested and result.get('GLM_CONFIG')!=expected['glm_config']:refuse()
         # Reproduce the incumbent post-initializer lane-prefix operation. The
         # observed PATH is otherwise retained; no fallback to another image.
         result['PATH']=commitment['lane_root']+'/venv/bin:'+result.get('PATH','')
@@ -153,6 +171,12 @@ def _initialized_environment(raw,commitment):
             if os.path.isfile(candidate) and os.access(candidate,os.X_OK):
                 selected=candidate;break
         if selected!=commitment['launch_python']['path']:refuse()
+        if nested:
+            if _NESTED_DATA is None:refuse()
+            _NESTED_DATA.bind_effective_context(result,expected_home=expected['home'],
+                expected_glm_config=expected['glm_config'],
+                expected_python=commitment['launch_python']['path'],lane_root=commitment['lane_root'],
+                contract=NESTED_CONTRACT)
         return result
     except (UnicodeError,ValueError,TypeError):refuse()
 
@@ -183,7 +207,7 @@ def _bounded_child(argv,*,timeout,**kwargs):
             child.kill();child.wait()
 
 
-def _capture_environment(snapshot,commitment):
+def _capture_environment(snapshot,commitment,environment=None):
     import shlex
     # Even a forged env emitter can supply only DATA. No expected request,
     # observer code or executable FD is inherited by the initializer shell.
@@ -192,7 +216,7 @@ def _capture_environment(snapshot,commitment):
         +'source /proc/self/fd/'+str(snapshot)+' >/dev/null 2>&1 || exit 78; '
         +'/usr/bin/env -0')
     return _bounded_child(['/bin/bash','--noprofile','--norc','-c',script],
-        pass_fds=(snapshot,),timeout=15)
+        pass_fds=(snapshot,),env=environment,timeout=15)
 
 
 def run_bootstrap(request, probe_source):
@@ -204,6 +228,7 @@ def run_bootstrap(request, probe_source):
     to the Root reservation owner; it never licenses a repeat.
     """
     import base64
+    from contextlib import ExitStack
     import errno
     import fcntl
     import pwd
@@ -222,7 +247,7 @@ def run_bootstrap(request, probe_source):
             or pwd.getpwnam(account['user']).pw_uid!=uid
             or pwd.getpwuid(uid).pw_dir!=account['home']
             or os.environ.get('HOME')!=account['home']):refuse()
-    held=[]; roots=[]
+    held=[]; roots=[]; contexts=ExitStack()
     def identity(s):
         return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
     def no_acl(fd):
@@ -231,7 +256,7 @@ def run_bootstrap(request, probe_source):
             except OSError as e:
                 if e.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):refuse()
             else:refuse()
-    def pin(name,*,directory=False,maximum=128*1024*1024,owners=None):
+    def pin(name,*,directory=False,maximum=128*1024*1024,owners=None,read_file=True):
         name=path(name)
         parent=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
         roots.append(parent)
@@ -249,7 +274,9 @@ def run_bootstrap(request, probe_source):
                     os.close(fd);refuse()
                 held.append((fd,parent,part,identity(info)))
                 parent=fd
-            if directory:return fd,b''
+            if directory or not read_file:
+                check()
+                return fd,b''
             raw=b''
             while len(raw)<=maximum:
                 chunk=os.read(fd,min(65536,maximum+1-len(raw)))
@@ -357,7 +384,26 @@ def run_bootstrap(request, probe_source):
         if (len(raw)!=expected['size'] or hashlib.sha256(raw).hexdigest()!=expected['sha256']
                 or hs.st_uid!=expected['uid'] or hs.st_gid!=expected['gid']
                 or stat.S_IMODE(hs.st_mode)!=expected['mode']):refuse()
-        snapshot=sealed_snapshot(raw);snapshots.append(snapshot)
+        prepared=None;helper_identity=None;initial_environment=None
+        if commitment['initialization_contract']==NESTED_CONTRACT:
+            if _TOKEN_DATA is None or _NESTED_DATA is None:refuse()
+            expected_helper=commitment['nested_helper']
+            # Open/hold the fixed private origin but read NO bytes until exact
+            # named/ancestor/ACL/account/mode metadata has been qualified.
+            helper_fd,_=pin(expected_helper['path'],maximum=4096,read_file=False)
+            private_info=os.fstat(helper_fd)
+            if (private_info.st_uid!=uid or private_info.st_gid!=gid
+                    or stat.S_IMODE(private_info.st_mode)!=expected_helper['mode']
+                    or private_info.st_size!=expected_helper['size']):refuse()
+            helper_identity=list(identity(private_info));check()
+            wanted={k:expected_helper[k] for k in ('sha256','size','uid','gid','mode')}
+            helper=contexts.enter_context(_TOKEN_DATA.freeze_helper_data(helper_fd,expected=wanted))
+            check()
+            prepared=contexts.enter_context(_NESTED_DATA.prepare_nested_inputs(raw,helper,contract=NESTED_CONTRACT))
+            snapshot=prepared.outer_fd
+            initial_environment=prepared.private_environment(os.environ)
+        else:
+            snapshot=sealed_snapshot(raw);snapshots.append(snapshot)
         pin(request['capture_root'],directory=True)
         check()
         # The post-initialization selector is observed, never overwritten. The
@@ -371,8 +417,9 @@ def run_bootstrap(request, probe_source):
         # trusted to launch/attest the observer. Its entire return is untrusted
         # environment DATA; only this still-running pinned Python parent can
         # validate it and launch the held image with the fixed probe source.
-        environment_raw=_capture_environment(snapshot,commitment)
+        environment_raw=_capture_environment(snapshot,commitment,initial_environment)
         initialized=_initialized_environment(environment_raw,commitment)
+        if prepared is not None:prepared.check_environment(initialized)
         check()
         child=_bounded_child([logical,'-I','-S','-B','-c',probe_source,encoded],
             executable='/proc/self/fd/'+str(launch_fd),pass_fds=(launch_fd,),
@@ -380,23 +427,28 @@ def run_bootstrap(request, probe_source):
         check()
         for name,before,target in bootstrap_links+launch_links:
             if identity(os.lstat(name))!=before or os.readlink(name)!=target:refuse()
+        if prepared is not None:prepared.check_environment(initialized)
         result=json.loads(child)
         result['pre_execution']={'commitment_sha256':request['initializer_commitment_sha256'],
-            'snapshot_sha256':expected['sha256'],'snapshot_sealed':True,
+            'snapshot_sha256':prepared.witness['transformed_outer_sha256'] if prepared is not None else expected['sha256'],'snapshot_sealed':True,
             'host_env_identity':list(identity(hs)),
             'bootstrap_sha256':commitment['bootstrap_python']['sha256'],
             'launch_sha256':commitment['launch_python']['sha256']}
+        if prepared is not None:
+            result['pre_execution'].update(nested_inputs=prepared.witness,helper_origin_identity=helper_identity)
         output=canonical(result)
         if len(output)>65536:refuse()
         return output
     finally:
-        for fd in snapshots:
-            os.close(fd)
-        closed_fds=set()
-        for fd,parent,_,_ in reversed(held):
-            for item in (fd,parent):
-                if item not in closed_fds:
-                    os.close(item);closed_fds.add(item)
-        for fd in roots:
-            if fd not in closed_fds:os.close(fd);closed_fds.add(fd)
-
+        try:
+            contexts.close()
+        finally:
+            for fd in snapshots:
+                os.close(fd)
+            closed_fds=set()
+            for fd,parent,_,_ in reversed(held):
+                for item in (fd,parent):
+                    if item not in closed_fds:
+                        os.close(item);closed_fds.add(item)
+            for fd in roots:
+                if fd not in closed_fds:os.close(fd);closed_fds.add(fd)

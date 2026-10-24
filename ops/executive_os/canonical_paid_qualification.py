@@ -57,6 +57,7 @@ QUALIFIER_EXT_RELATIVE = ('ops/native_fabric/quota_continuity/rollout/'
 QUALIFIER_SOURCE_NAMES = frozenset({'host_pull.sh', 'host_pull_backend.py',
                                     'host_pull_probe.template',
                                     'paid_host_qualification.py', 'paid_initializer.py',
+                                    'paid_initializer_token_data.py', 'paid_initializer_nested_data.py',
                                     'remote_sub.sh'})
 _REGISTRATION_FIELDS = frozenset({'worker_id', 'quota_class', 'account_label'})
 _V2_FIELDS = base._PAID_PROFILE_FIELDS | {'registration', 'bindings_sha256'}

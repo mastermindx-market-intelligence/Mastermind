@@ -304,7 +304,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                           'sites': ((120, 73, 76, 'int', '501'),
                                                     (303, 78, 81, 'int', '450'),
                                                     (398, 83, 86, 'int', '501'))},
- 'control_plane/paid_fabric_wire.py': {'sha256': '1d84eaaa26d7d4c08e1d9f587b718c79fabf5fce7a1bd462e9d816a94353656f',
+ 'control_plane/paid_fabric_wire.py': {'sha256': 'd006be7956f16497998a652c56a6c16d9eb00530c8ebd19fe07f90df8b13377f',
  'sites': ((56, 35, 38, 'int', '501'),)},
  'control_plane/paid_model_execution_principal.py': {'sha256': 'a20a4115599d93cb8a9c5397a84a58624f9cd24bb5ee00e219add653f832e79c',
                                                      'sites': ((63, 18, 21, 'int', '512'),)},
@@ -352,13 +352,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                             (546, 48, 53, 'int', '0o660'),
                                                             (752, 53, 58, 'int', '0o755'),
                                                             (790, 84, 89, 'int', '0o755'))},
- 'ops/executive_os/canonical_paid_qualification.py': {'sha256': '268ac1524db03372972117356c1933736e8d519da8e246e0eff97295f3bd6ac0',
- 'sites': ((161, 48, 53, 'int', '0o755'),
-           (612, 21, 26, 'int', '0o700'),
-           (630, 74, 79, 'int', '0o700'),
-           (642, 25, 30, 'int', '0o700'),
-           (652, 22, 27, 'int', '0o755'),
-           (660, 82, 87, 'int', '0o755'))},
+ 'ops/executive_os/canonical_paid_qualification.py': {'sha256': '9fe50017d44b9b9863ad08d2d85ea22c301f6975b7e91421379948dce7d7e1f4',
+ 'sites': ((162, 48, 53, 'int', '0o755'),
+           (613, 21, 26, 'int', '0o700'),
+           (631, 74, 79, 'int', '0o700'),
+           (643, 25, 30, 'int', '0o700'),
+           (653, 22, 27, 'int', '0o755'),
+           (661, 82, 87, 'int', '0o755'))},
  'ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py': {'sha256': '93267de79c92231f853fc16e03f939e8d52d3322d19a828a568ffcb5d7a7f867',
                                                                 'sites': ((1280,
                                                                            46,
@@ -419,8 +419,8 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                                         35,
                                                                         'int',
                                                                         '502'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': '260a456316eaabfecadb0edb79707f18fb3547705edeca569a7698fa35e1688c',
- 'sites': ((34, 17, 20, 'int', '501'), (396, 85, 90, 'int', '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': '5b70408225dda7a94270b00125a794978d7a9a28760b0ac6ece1b8085b9f69f3',
+ 'sites': ((34, 17, 20, 'int', '501'), (446, 85, 90, 'int', '0o700'))},
  'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': 'a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c',
                                                                       'sites': ((138,
                                                                                  32,
@@ -465,5 +465,5 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 }
 
 # Immutable input-mode mask only; not a new UID or execution grant.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '87db33039f70151c6ddeef46192525fc979880d337a26489420cf91f6ae0b1a5',
- 'sites': ((84, 36, 41, 'int', '0o777'),)}
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '14df9c41fd14125fa2407d4dc5ed2ff42ca3a6a69ffa34b005de45f458150559',
+ 'sites': ((90, 36, 41, 'int', '0o777'), (100, 48, 53, 'int', '0o777'))}

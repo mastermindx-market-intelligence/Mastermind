@@ -28,7 +28,7 @@ _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _RELEASE = re.compile(r"[0-9a-f]{40}\Z")
 SOURCE_NAMES = frozenset({"host_pull.sh", "host_pull_backend.py",
-    "host_pull_probe.template", "paid_host_qualification.py", "paid_initializer.py", "remote_sub.sh"})
+    "host_pull_probe.template", "paid_host_qualification.py", "paid_initializer.py", "paid_initializer_token_data.py", "paid_initializer_nested_data.py", "remote_sub.sh"})
 _SCHEMA = "mastermind.paid_host_observation/v2"
 _CONTEXT = "canonical-paid-physical-owner.v1"
 _TRANSPORT_UID = 501  # Same fixed owner as canonical_paid_definition.PAID_BRIDGE_UID.
@@ -339,6 +339,46 @@ def _initializer_module(expected_sha256):
     return module,raw
 
 
+_PACKAGE_LOADER = r"""
+def _load_qualified_package(sources,expected):
+    import hashlib,sys,types
+    names=('paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py')
+    if set(sources)!=set(names) or set(expected)!=set(names):raise ValueError('paid_initializer_source_refused')
+    for name in names:
+        if type(sources[name]) is not bytes or hashlib.sha256(sources[name]).hexdigest()!=expected[name]:raise ValueError('paid_initializer_source_refused')
+    package_name='_qualified_paid_initializer_peers'
+    package=types.ModuleType(package_name);package.__path__=[]
+    sys.modules[package_name]=package
+    modules={}
+    for name in names:
+        qualified=package_name+'.'+name[:-3]
+        module=types.ModuleType(qualified);module.__package__=package_name
+        module.__file__='<qualified-'+name+'>'
+        sys.modules[qualified]=module
+        exec(compile(sources[name],module.__file__,'exec'),module.__dict__)
+        modules[name]=module
+    parent=modules[names[0]];token=modules[names[1]];nested=modules[names[2]]
+    if (parent.NESTED_CONTRACT!=nested.CONTRACT or parent.NESTED_OUTER_SHA256!=nested.LEGACY_SHA256
+            or parent.NESTED_OUTER_SIZE!=len(nested._ORIGINAL)):
+        raise ValueError('paid_initializer_source_refused')
+    parent._TOKEN_DATA=token;parent._NESTED_DATA=nested
+    return parent
+"""
+
+
+def _initializer_bundle(expected_sources):
+    _module,parent=_initializer_module(expected_sources['paid_initializer.py'])
+    sources={'paid_initializer.py':parent}
+    for name in ('paid_initializer_token_data.py','paid_initializer_nested_data.py'):
+        raw,_info=_read_owned(Path(__file__).absolute().with_name(name),owners={0})
+        if hashlib.sha256(raw).hexdigest()!=_text(expected_sources[name],_SHA):_refuse()
+        sources[name]=raw
+    expected={name:expected_sources[name] for name in sources}
+    namespace={};exec(_PACKAGE_LOADER,namespace)
+    module=namespace['_load_qualified_package'](sources,expected)
+    return module,sources
+
+
 def build_paid_probe(value):
     """Compile only the expected unsourced bootstrap; absent binding refuses."""
     request = _request(value)
@@ -346,6 +386,16 @@ def build_paid_probe(value):
     encoded = base64.b64encode(_canonical(request)).decode("ascii")
     probe=base64.b64encode(_REMOTE_PROBE.encode()).decode("ascii")
     entry = source.decode()+"\nif __name__=='__main__':\n    import base64,sys\n    try:sys.stdout.buffer.write(run_bootstrap(json.loads(base64.b64decode(sys.argv[1],validate=True)),base64.b64decode(sys.argv[2],validate=True).decode()))\n    except Exception:sys.exit(78)\n"
+    if request['initializer_commitment']['initialization_contract']==_module.NESTED_CONTRACT:
+        _module,sources=_initializer_bundle(request['sources_sha256'])
+        encoded_sources=base64.b64encode(_canonical({name:base64.b64encode(raw).decode('ascii') for name,raw in sources.items()})).decode('ascii')
+        entry=(_PACKAGE_LOADER+"\nimport base64,json,sys\ntry:\n"
+            +"    request=json.loads(base64.b64decode(sys.argv[1],validate=True))\n"
+            +"    encoded=json.loads(base64.b64decode("+repr(encoded_sources)+",validate=True))\n"
+            +"    sources={name:base64.b64decode(raw,validate=True) for name,raw in encoded.items()}\n"
+            +"    module=_load_qualified_package(sources,{name:request['sources_sha256'][name] for name in sources})\n"
+            +"    sys.stdout.buffer.write(module.run_bootstrap(request,base64.b64decode(sys.argv[2],validate=True).decode()))\n"
+            +"except Exception:sys.exit(78)\n")
     command = shlex.quote(request["initializer_commitment"]["bootstrap_python"]["path"])+" -I -S -B -c "+shlex.quote(entry)+" "+shlex.quote(encoded)+" "+shlex.quote(probe)
     return request["transport_alias"], command
 
@@ -403,15 +453,35 @@ def _observation(raw, request):
         _refuse()
     _text(context["host_env_sha256"], _SHA)
     commitment=request["initializer_commitment"]
-    pre=_closed(value["pre_execution"],frozenset({"commitment_sha256","snapshot_sha256","snapshot_sealed","host_env_identity","bootstrap_sha256","launch_sha256"}))
+    nested=commitment['initialization_contract']=='paid-host-env-held-fd-token-data.v1'
+    prefields={'commitment_sha256','snapshot_sha256','snapshot_sealed','host_env_identity','bootstrap_sha256','launch_sha256'}
+    if nested:prefields|={'nested_inputs','helper_origin_identity'}
+    pre=_closed(value['pre_execution'],prefields)
+    snapshot_sha256=commitment['host_env']['sha256']
+    if nested:
+        witness=_closed(pre['nested_inputs'],{'schema_version','initialization_contract','legacy_outer_sha256','transformed_outer_sha256','helper'})
+        helper=commitment['nested_helper']
+        fingerprint=_closed(witness['helper'],{'schema_version','sha256','size','uid','gid','mode'})
+        if (witness['schema_version']!='mastermind.paid_nested_data_inputs/v1'
+                or witness['initialization_contract']!=commitment['initialization_contract']
+                or witness['legacy_outer_sha256']!=commitment['host_env']['sha256']
+                or witness['transformed_outer_sha256']!='87198f3568e199c64a4deb2d41242a1c812dd65797f60ecc0db00fdf71b6e378'
+                or fingerprint['schema_version']!='mastermind.paid_helper_private_data/v1'
+                or any(type(fingerprint[k]) is not type(helper[k]) or fingerprint[k]!=helper[k] for k in ('sha256','size','uid','gid','mode'))):_refuse()
+        info=pre['helper_origin_identity']
+        if type(info) is not list or len(info)!=9:_refuse()
+        for number in info:_integer(number)
+        if (not info[1] or info[2]!=(stat.S_IFREG|helper['mode']) or info[3]!=helper['uid']
+                or info[4]!=helper['gid'] or info[5]!=1 or info[6]!=helper['size']):_refuse()
+        snapshot_sha256=witness['transformed_outer_sha256']
     if (pre["commitment_sha256"]!=request["initializer_commitment_sha256"]
-            or pre["snapshot_sha256"]!=commitment["host_env"]["sha256"] or pre["snapshot_sealed"] is not True
+            or pre["snapshot_sha256"]!=snapshot_sha256 or pre["snapshot_sealed"] is not True
             or pre["bootstrap_sha256"]!=commitment["bootstrap_python"]["sha256"]
             or pre["launch_sha256"]!=commitment["launch_python"]["sha256"]
             or binary["real_path"]!=commitment["launch_python"]["real_path"]
             or binary["sha256"]!=commitment["launch_python"]["sha256"]
             or (uid,gid,value["worker_user"])!=(commitment["account"]["uid"],commitment["account"]["gid"],commitment["account"]["user"])
-            or context["host_env_sha256"]!=pre["snapshot_sha256"]
+            or context["host_env_sha256"]!=commitment["host_env"]["sha256"]
             or type(pre["host_env_identity"]) is not list or len(pre["host_env_identity"])!=9):_refuse()
     for number in pre["host_env_identity"]:_integer(number)
     info=pre["host_env_identity"];hook=commitment["host_env"]
