@@ -171,7 +171,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         actual=os.path.realpath('/proc/self/fd/'+str(name)) if isinstance(name,int) else str(name)
         modeled=distribution(actual) or actual in private or any(actual.startswith(p+'/') for p in private[-1:])
         if key in ('system.posix_acl_access','system.posix_acl_default') and modeled:
-            if fault_acl and actual==str(helper):return b'inert-extended-acl'
+            if fault_acl and actual==str(hook):return b'inert-extended-acl'
             import errno
             raise OSError(errno.ENODATA,'inert trusted metadata has no ACL')
         return rawxattr(name,key,*args,**kwargs)
