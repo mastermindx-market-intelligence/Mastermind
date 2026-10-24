@@ -792,9 +792,12 @@ def request(
         if jev_mode != "off":
             import jev_advisory
             try:
-                # packet is the already-retained, exact original request bytes,
-                # never a derived summary or a foreign historical parent.
-                preview = _bounded_regular(packet, jev_advisory.MAX_STATE_BYTES)
+                # Use the exact validated bytes frozen into the original
+                # retained packet. Oversize Jev context is an advisory miss,
+                # NOT a reason to reject a legal larger Fabric commission.
+                preview = source
+                if len(preview) > jev_advisory.MAX_STATE_BYTES:
+                    raise jev_advisory.JevUnavailable("STATE_TOO_LARGE")
                 timeout_s = float(env.get("FABRIC_JEV_TIMEOUT_S", "3.0"))
                 advice = jev_advisory.evaluate(
                     "task", {"task_class": task_class,
