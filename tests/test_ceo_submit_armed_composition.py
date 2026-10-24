@@ -1544,12 +1544,16 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
+    # PR #1805 A2 rollback consumer requalification: disarmed legacy A2
+    # read-side selection changed this module; the installed event-loop AST
+    # remains exactly the independently reviewed 060525... anchor below.
+    # Keep a pinned full-source digest. Never derive it during this test.
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
     from tests.executive_identity_review import _reviewed_ast_dump
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            '25ea0a86621c9a26fa55749efc326cc48e1135ed891d67f9efdd2b76b767b3e9'):
+            'e1900d67f7d1a9681f978cccdc625ad5347edfb3dc4e13fd71c1e63f87df9f50'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

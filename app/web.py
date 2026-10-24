@@ -1562,21 +1562,36 @@ def _portfolio_status(meta: dict) -> dict:
             })
         except Exception:
             pass
-        # vs_spy and vs_defensive: benchmark_ledger already computes these bogey returns; wire the
-        # read here so the leaderboard row for self_directed carries the same performance columns
-        # as the other books. Best-effort: skip cleanly if the ledger hasn't been built yet.
+        # vs_spy and vs_defensive: the ledger's stored bogey returns are each renormalized on that
+        # BOGEY's own inception, so subtracting them from the book's since-inception return compared
+        # different windows (#1433). Recompute every leg over ONE shared window at READ time via
+        # compare_book_to_ledger, so the Self-Directed row carries the same performance columns as
+        # the other books without the cross-window error. When the window is unsupported the deltas
+        # are WITHHELD: the keys are absent — never 0, never the stale cross-window number.
+        # total_return_pct stays the book's own since-inception return. Best-effort.
         try:
             from brain import benchmark_ledger
+            from portfolio import self_directed
             ledger = benchmark_ledger.latest()
-            bogeys = ledger.get("bogeys") or {}
-            spy_ret = (bogeys.get("spy") or {}).get("return_pct")
-            def_ret = (bogeys.get("defensive") or {}).get("return_pct")
-            own_ret = status.get("total_return_pct")
-            if own_ret is not None and spy_ret is not None:
-                status["vs_spy_pct"] = round(own_ret - spy_ret, 4)
+            cmp = benchmark_ledger.compare_book_to_ledger(
+                "self_directed",
+                benchmark_ledger.read_nav_history(self_directed._NAV_PATH),
+                ledger)
+            status["benchmark_window"] = {
+                "status": cmp.get("status"), "reason": cmp.get("reason"),
+                "start": cmp.get("start"), "end": cmp.get("end"),
+                "common_point_count": cmp.get("common_point_count"),
+                "endpoint_status": cmp.get("endpoint_status")}
+            if cmp.get("status") == "descriptive":
+                for d in cmp.get("deltas_pp") or []:
+                    if d.get("right_id") == "spy":
+                        status["vs_spy_pct"] = round(d.get("delta_pp"), 4)
+                    elif d.get("right_id") == "defensive":
+                        status["vs_defensive_pct"] = round(d.get("delta_pp"), 4)
                 status["vs_benchmark_pct"] = status["vs_spy_pct"]
-            if own_ret is not None and def_ret is not None:
-                status["vs_defensive_pct"] = round(own_ret - def_ret, 4)
+            else:
+                for k in ("vs_spy_pct", "vs_defensive_pct", "vs_benchmark_pct"):
+                    status.pop(k, None)
         except Exception:  # noqa: BLE001
             pass
         return {**{k: meta.get(k) for k in (
@@ -2421,13 +2436,27 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
-        return JSONResponse({"nav": 1_000_000.0, "cash": 1_000_000.0, "invested": 0.0,
-                             "positions": [], "pending": [],
-                             "allocation": {"cash_pct": 1.0, "gross": 0.0, "n_positions": 0,
-                                            "largest_weight": 0.0, "total_unrealized_pnl": 0.0,
-                                            "total_return_pct": 0.0},
-                             "market": {"is_open": False, "session": "closed"},
-                             "error": str(exc)})
+        # A read we could not perform renders `unavailable` — never a fabricated funded book
+        # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
+        try:
+            from portfolio import self_directed as _sd
+            market = _sd._market_status()
+        except Exception:  # noqa: BLE001 — the clock is independent of the failed account read
+            market = None
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_book_unreadable",
+                   "nav": None, "cash": None, "invested": None,
+                   "starting_nav": None, "positions": [], "pending": [],
+                   "allocation": None, "market": market, "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence instead
+        # of collapsing into the generic unreadable string.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/history")
@@ -2442,8 +2471,20 @@ def api_self_directed_history() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"history": [], "pending": [], "realized_total": 0.0,
-                             "n_closed": 0, "n_buys": 0, "win_rate": None, "error": str(exc)})
+        # Unreadable is not empty: a fabricated 0-fill blotter reads as "no trades yet".
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_history_unreadable",
+                   "history": [], "pending": [], "realized_total": None,
+                   "n_closed": None, "n_buys": None, "win_rate": None,
+                   "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/search")
@@ -2474,7 +2515,14 @@ def api_self_directed_order(req: _OrderReq) -> JSONResponse:
         return JSONResponse(self_directed.place_order(
             req.ticker, req.side, req.shares, notional=req.notional))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        payload = {"ok": False, "error": str(exc)}
+        # E13: the typed invalid-account error names itself; any other failure keeps the
+        # historical {ok, error} shape.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+        return JSONResponse(payload, status_code=500)
 
 
 @router.post("/api/self_directed/thesis")
