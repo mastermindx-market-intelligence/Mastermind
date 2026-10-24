@@ -282,8 +282,8 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '6dd17929930db909a6797218c4fc7252aa076527bbcc4cca3b1836d3fa11d7a2',
-    "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1715, 46, 49, 'int', '400'), (1715, 66, 69, 'int', '500')),
+    "sha256": 'fe9cb8e7abf68730023f4aeebb1eb480c5ff3f787ccefb62b3d520db70568074',
+    "sites": ((96, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1733, 46, 49, 'int', '400'), (1733, 66, 69, 'int', '500')),
 }
 
 
@@ -291,7 +291,7 @@ REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
 # This exact token is the Root config-directory permission mode, not a UID.
 # Source, path, AST location and complete token must all match; scanner unchanged.
 REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
-    "sha256": 'c046490d1d4f5932863d5f0c30609809714e89c794bd0ea61b94b27e4e93a91e',
+    "sha256": 'd667f7028932ff89502649543fa3699f6961e1df5a522a2ffb1fa91367376844',
     "sites": ((347, 46, 51, 'int', '0o755'),),
 }
 
@@ -459,7 +459,7 @@ REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
-    'sha256': 'aea09940df9475c571002309fa70eae88d19d2b2034b9f1a4700a3e86619534d',
+    'sha256': '13ffc81477c6f57fdbb345bfed3f2142af6a5485f887a845d9e19ef4bfaa6587',
     'sites': ((55, 21, 24, 'int', '501'),),
 }
 
