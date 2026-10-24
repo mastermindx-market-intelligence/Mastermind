@@ -358,6 +358,8 @@ class OsExecutiveTransportApp:
         "/os/executive/context",
         "/os/executive/submit",
         "/os/executive/status",
+        "/os/executive/direct-native/result",
+        "/os/executive/direct-native/consume",
     )
 
     def __init__(
@@ -368,6 +370,7 @@ class OsExecutiveTransportApp:
         submit_authenticator: JwtAuthenticator | tuple[JwtAuthenticator, ...],
         clock: Callable[[], int],
         commission_preparer: Any | None = None,
+        direct_result_client: Any | None = None,
     ) -> None:
         verifiers = submit_verifier if isinstance(submit_verifier, tuple) else (submit_verifier,)
         if not verifiers or any(type(v) is not MastermindTokenVerifier for v in verifiers):
@@ -393,6 +396,10 @@ class OsExecutiveTransportApp:
         if commission_preparer is not None and type(commission_preparer) is not StudioCommissionClient:
             raise TypeError("installed Studio commission client required")
         self._commission_preparer = commission_preparer
+        from integrations.mastermind_executive_app.direct_native import DirectNativeResultClient
+        if direct_result_client is not None and type(direct_result_client) is not DirectNativeResultClient:
+            raise TypeError("fixed direct-native client required")
+        self._direct_result_client = direct_result_client
 
     # ---------------------------------------------------------------- ASGI
 
@@ -489,7 +496,8 @@ class OsExecutiveTransportApp:
             return
 
         if (path == "/os/executive/context" and body_obj) or (
-            path != "/os/executive/context" and set(body_obj) != {"arguments"}
+            path not in {"/os/executive/context", "/os/executive/direct-native/result",
+                         "/os/executive/direct-native/consume"} and set(body_obj) != {"arguments"}
         ):
             await JSONResponse({"ok": False, "error": {"code": "invalid_input", "message": "fixed request body required"}},
                                status_code=HTTPStatus.BAD_REQUEST, headers=_OS_HTTP_HEADERS)(scope, receive, send)
@@ -551,6 +559,10 @@ class OsExecutiveTransportApp:
         body_obj: dict[str, Any],
         principal: VerifiedPrincipal,
     ) -> Response:
+        if path in {"/os/executive/direct-native/result", "/os/executive/direct-native/consume"}:
+            from integrations.mastermind_executive_app.direct_native import dispatch_direct_native
+            return await dispatch_direct_native(self, scope, body_obj, principal,
+                consume=path.endswith("/consume"))
         if path == "/os/executive/context":
             if not await self._still_current(scope, principal):
                 return JSONResponse({"ok": False, "error": {"code": "identity_unverified", "message": "context authorization changed"}}, status_code=HTTPStatus.UNAUTHORIZED, headers=_OS_HTTP_HEADERS)
@@ -567,9 +579,7 @@ class OsExecutiveTransportApp:
         principal: VerifiedPrincipal,
     ) -> Response:
         from control_plane.ceo_request import app_request_ref, automated_intent_id
-        from integrations.executive_mcp.schemas import (
-            ERROR_CODES, GatewayError, validate_tool_arguments,
-        )
+        from integrations.executive_mcp.schemas import ERROR_CODES
 
         arguments = body_obj.get("arguments")
         if not isinstance(arguments, dict):
@@ -579,9 +589,12 @@ class OsExecutiveTransportApp:
                 status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
+        from integrations.mastermind_executive_app.admission import (
+            AdmissionError, _validate_five_tool_shape,
+        )
         try:
-            validated = validate_tool_arguments("submit_ceo_intent", arguments)
-        except GatewayError as exc:
+            validated = _validate_five_tool_shape(arguments)
+        except AdmissionError as exc:
             if exc.code not in ERROR_CODES:
                 return JSONResponse(
                     {"ok": False, "error": {"code": "invalid_input",
