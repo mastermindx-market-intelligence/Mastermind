@@ -1,5 +1,7 @@
 # BytePlus ModelArk Commercial API - autonomous Fabric integration
 
+**Chairman follow-up decision (October 23, 2026):** Commercial Codex CLI use is also approved for this Mastermind integration. This approval is separate from observed availability of a host CLI, a commercial ModelArk API credential, supported model transport, issuer billing facts or governed Fabric worker START. Do not ask the Chairman to reconfirm Codex commercial-use approval.
+
 **Chairman decision (October 23, 2026):** The Chairman states that the
 separate commercial ModelArk entitlement is verified and explicitly authorizes
 autonomous usage and Fabric load balancing. Do not request another
