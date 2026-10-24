@@ -5898,7 +5898,7 @@ class ExecutiveControlService:
             and job.validation_commands == expected["validation_commands"]
         )
 
-    def _register_worker(self) -> Any:
+    def _register_worker(self, *, direct_native_access=None) -> Any:
         runtime = self._require_runtime()
         realm = self.config.subscription_canary_realm()
         if realm is not None:
@@ -5982,8 +5982,14 @@ class ExecutiveControlService:
             "harness_version": binding["operator_harness_version"],
         }
         proof_capabilities = ["code", "research", "tests"]
-        paid_review = self._paid_subject_review_registration(router,
-            direct_native=callable(self._direct_native_generation_provider))
+        direct_registration=False
+        if direct_native_access is not None:
+            from control_plane.direct_native_execution import DirectNativeAccess
+            if type(direct_native_access) is not DirectNativeAccess:
+                raise StateConflict("readonly native registration requires actual admitted access")
+            direct_native_access.check()
+            direct_registration=True
+        paid_review = self._paid_subject_review_registration(router,direct_native=direct_registration)
         existing = runtime.workers.get_worker(self.config.worker_id)
         if existing is not None:
             quota = runtime.workers.get_quota_class(
@@ -6033,7 +6039,7 @@ class ExecutiveControlService:
                         capabilities=operator_capabilities,
                         metadata=operator_metadata,
                     )
-            if (self.config.coo_autonomy_armed or callable(self._direct_native_generation_provider)) and paid_review is not None:
+            if (self.config.coo_autonomy_armed or direct_registration) and paid_review is not None:
                 runtime.workers.register_quota_class(
                     self.config.worker_id, paid_review[0], **paid_review[1])
             refreshed = runtime.workers.get_worker(self.config.worker_id)
@@ -6684,6 +6690,9 @@ class ExecutiveControlService:
                 if any(not task.done() for task in self._dispatch_tasks.values()):
                     raise StateConflict("serialized native Worker already has an active dispatch")
                 access.check()
+                # Reconcile the normal configured native Worker locally; this
+                # does not invoke the public paid-capacity observer or provider.
+                self._register_worker(direct_native_access=access)
                 runtime.jobs.prepare_direct_native_workspace(job_id,source_repository=self.config.proof_source_repository,
                     shared_gid=self.config.proof_shared_gid,access=access)
                 # Reserve/claim/unknown evidence remains owned by Runtime on

@@ -87,5 +87,29 @@ def test_genuine_sink_replay_and_private_direct_claim(tmp_path):
         lease_owner='offline-supervisor',_direct_native_access=access)
     assert type(replay) is er.OrchestrationDispatchOutcome and replay.attempt.attempt_id==lease.attempt.attempt_id
     assert len(runtime.attempts.list_attempts())==1
-    runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access)
+    runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access,lease=lease)
     assert runtime.read_direct_native_result_bounded(dict(work_ref='WS:H2',job_id=job.job_id,attempt_id=None),access=access)['availability']=='UNAVAILABLE'
+
+
+@pytest.mark.parametrize('mutation', ['expiry','token','fence','quota'])
+def test_final_launch_reuses_exact_live_lease_predicate(tmp_path,mutation):
+    f=fixture(tmp_path);runtime,_,_,access,source,_,_=f;job=create(f)
+    runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=access)
+    binding=f[2].binding
+    runtime.workers.register_worker('codex-offline',provider='codex',account_label='offline',worker_type='test',quota_classes={
+        'default':dict(provider='codex',model='gpt-5.4',effort='high',cost_class='default',capabilities=['read'],
+        metadata={k:binding[k] for k in ('routing_policy_version','execution_profile_id','execution_profile_digest','capability_policy_version','capability_policy_digest')})})
+    lease=runtime.attempts.claim_job(job.job_id,command_id=f'direct-native-dispatch:{job.job_id}',lease_owner='inert',_direct_native_access=access)
+    runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access,lease=lease)
+    if mutation=='expiry':
+        runtime.store.clock=lambda:10**15
+    elif mutation=='token':
+        lease=er.dataclasses.replace(lease,lease_token='foreign-token')
+    elif mutation=='fence':
+        lease=er.dataclasses.replace(lease,attempt=er.dataclasses.replace(lease.attempt,fence_generation=lease.attempt.fence_generation+1))
+    else:
+        with runtime.store.transaction() as connection:
+            connection.execute("UPDATE worker_quota_classes SET held_attempt_id=NULL,status='OFFLINE' WHERE worker_id='codex-offline'")
+    with pytest.raises(er.StateConflict):
+        runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access,lease=lease)
+    assert len(runtime.attempts.list_attempts())==1

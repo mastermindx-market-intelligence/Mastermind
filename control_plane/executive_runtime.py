@@ -2497,10 +2497,14 @@ class CurrentCapacityCommitmentFacts:
 def _direct_native_provenance(connection, row, *, required=False):
     if row is None:
         raise StateConflict("direct native Job is unavailable")
-    constraints = _strict_canonical_json_loads(str(row["constraints_json"]), name="direct Job constraints")
-    if constraints.get(direct_native.POLICY_KEY) != direct_native.POLICY:
-        if required: raise StateConflict("Job is not direct native")
+    # Legacy rows gain no new canonical-format requirement. A new direct
+    # record cannot be demoted by deleting its marker, however.
+    hinted = _json_loads(row["constraints_json"],fallback={})
+    if hinted.get(direct_native.POLICY_KEY) != direct_native.POLICY:
+        direct_origin=connection.execute("SELECT event_id FROM events WHERE event_type='JOB_CREATED' AND job_id=? AND json_type(payload_json,'$.provenance.direct_native') IS NOT NULL LIMIT 1",(row["job_id"],)).fetchone()
+        if required or direct_origin is not None: raise StateConflict("Job is not an intact direct native admission")
         return None
+    constraints = _strict_canonical_json_loads(str(row["constraints_json"]), name="direct Job constraints")
     events = connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2",(row["job_id"],)).fetchall()
     if len(events) != 1:
         raise StateConflict("direct native creation provenance is unavailable")
@@ -16390,6 +16394,10 @@ class JobRegistry:
                     or current["status"] != "QUEUED" or current["attempt_count"] != 0
                     or owner.child_workspace_directory_identity(source) != reservation["source_identity"]):
                 raise StateConflict("direct allocation source changed")
+            requested=connection.execute("SELECT event_type,job_id,payload_json FROM events WHERE command_id=?",(f"direct-workspace:{job_id}:requested",)).fetchone()
+            if (requested is None or requested["event_type"]!="DIRECT_NATIVE_WORKSPACE_REQUESTED"
+                    or requested["job_id"]!=job_id or json.loads(requested["payload_json"])!=reservation):
+                raise StateConflict("direct allocation reservation changed")
             access.check()
             owner.verify_child_clone_identity(Path(row["worktree"]),created.identity,control_uid=os.geteuid(),shared_gid=shared_gid)
             self.store.append_event(connection,aggregate_type="job",aggregate_id=job_id,job_id=job_id,
@@ -26453,14 +26461,25 @@ class Runtime:
         return {"principal_scope":admitted["principal_scope"],"receiver_binding_digest":admitted["receiver_binding_digest"],
                 "source_digest":admitted["source_digest"],"admission_digest":orchestration_digest(admitted)}
 
-    def require_direct_native_launch_access(self, job_id, attempt_id, access):
+    def require_direct_native_launch_access(self, job_id, attempt_id, access, *, lease):
+        if type(lease) is not AttemptLease or lease.attempt.attempt_id != attempt_id or lease.attempt.job_id != job_id:
+            raise StateConflict("direct native launch requires its actual fresh lease")
         with self.store.read() as connection:
             self.require_direct_result_access(connection,dict(job_id=job_id,work_ref=access.work_ref),access)
-            row=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(attempt_id,)).fetchone()
-            job=connection.execute("SELECT current_attempt_id FROM jobs WHERE job_id=?",(job_id,)).fetchone()
-            if (row is None or row["job_id"] != job_id or row["status"] != "CLAIMED"
-                    or row["lease_token"] is None or job["current_attempt_id"] != attempt_id):
-                raise StateConflict("direct native launch no longer owns its exact claim")
+            row=self.attempts._leased_row(connection,attempt_id=attempt_id,
+                fence_generation=lease.attempt.fence_generation,lease_token=lease.lease_token,
+                timestamp=self.store.now_ms(),statuses={AttemptStatus.CLAIMED})
+            view=_attempt_from_row(_direct_attempt_view(connection,row))
+            worker=connection.execute("SELECT * FROM workers WHERE worker_id=?",(row["worker_id"],)).fetchone()
+            placement=view.placement_snapshot
+            if (row["job_id"] != job_id or view.worker_id != lease.attempt.worker_id
+                    or view.quota_class != lease.attempt.quota_class
+                    or view.effective_grant != lease.attempt.effective_grant
+                    or view.placement_snapshot != lease.attempt.placement_snapshot
+                    or worker is None or worker["identity_status"] != "ONLINE"
+                    or worker["provider"] != placement["provider"]
+                    or worker["account_label"] != placement["account_label"]):
+                raise StateConflict("direct native launch lost actual worker/grant/placement custody")
             access.check()
 
     def validate_direct_completion(self, connection, selection):
@@ -26504,7 +26523,9 @@ class Runtime:
                 if self.require_direct_result_access(connection,selected,access) != identity:
                     raise StateConflict("direct result authority changed")
             return project_direct_native_result(snapshot,observation.receipt).complete
-        except (StateConflict,ValueError):
+        except RuntimeRoleResultOverBudget:
+            return wire.unavailable(selected,"CONTENT_OVER_BUDGET")
+        except (StateConflict,ValueError,RuntimeReadUnavailable,sqlite3.Error):
             return wire.unavailable(selected,"SOURCE_UNAVAILABLE")
 
     def consume_direct_native_result(self, selection, *, access):
