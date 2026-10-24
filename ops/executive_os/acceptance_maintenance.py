@@ -943,15 +943,18 @@ def _validate_v5_to_v7_material(material: Any) -> tuple[Path, Path]:
     original by being the same migration evidence.
     """
     owner = _evidence_owner()
+    spent_ctime = (isinstance(material, dict)
+                   and material.get("schema_version") == owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION)
     recovered = (isinstance(material, dict)
                  and material.get("schema_version") == owner.RECOVERED_MATERIAL_SCHEMA_VERSION)
     if (not isinstance(material, dict)
             or set(material) != {"schema_version", "phase", "host", "origin_records", "chain"}
             or material["schema_version"] not in {owner.MATERIAL_SCHEMA_VERSION,
-                                                  owner.RECOVERED_MATERIAL_SCHEMA_VERSION}
+                                                  owner.RECOVERED_MATERIAL_SCHEMA_VERSION,
+                                                  owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION}
             or material["phase"] != owner.EVIDENCE_PHASE_INITIAL
             or not isinstance(material["origin_records"], list)
-            or len(material["origin_records"]) != (14 if recovered else 12)):
+            or len(material["origin_records"]) != (16 if spent_ctime else 14 if recovered else 12)):
         raise MaintenanceError("schema upgrade evidence material is malformed")
     host = material["host"]
     if (not isinstance(host, dict)
@@ -981,7 +984,8 @@ def _validate_v5_to_v7_material(material: Any) -> tuple[Path, Path]:
 def _bind_pre_census_selected(evidence, selected_sha, selected, source_control):
     """Join recovery's held Root attestation to the real selected lineage."""
     owner = _evidence_owner()
-    if evidence.material["schema_version"] != owner.RECOVERED_MATERIAL_SCHEMA_VERSION:
+    if evidence.material["schema_version"] not in {owner.RECOVERED_MATERIAL_SCHEMA_VERSION,
+                                                  owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION}:
         return
     qualification = evidence.pre_census_qualification
     raw = (bundle_path(selected_sha)/"descriptor.json").read_bytes()
@@ -2955,7 +2959,9 @@ def _pre_census_absences(database: Path, *, own_qualification: bool = False) -> 
              backup._UPGRADE_V5_TO_V6_COMPLETION_NAME,
              backup._UPGRADE_V6_TO_V7_PREFLIGHT_NAME,
              backup._UPGRADE_V6_TO_V7_COMPLETION_NAME,
-             backup.PRE_CENSUS_CONTINUATION_NAME)
+             backup.PRE_CENSUS_CONTINUATION_NAME,
+             backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME,
+             backup.SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME)
     if not own_qualification:
         names += (backup.PRE_CENSUS_QUALIFICATION_NAME,)
     if any(os.path.lexists(database.parent / name) for name in names):
@@ -3119,13 +3125,169 @@ def _issue_pre_census_qualification(args: argparse.Namespace) -> dict:
                             operation_id=old['operation_id'], qualification_identity=identity)
 
 
+def _spent_ctime_absences(database: Path, *, own_reconciliation=False) -> None:
+    """The old three origins are retained; no later-phase residue is adopted."""
+    from control_plane import executive_backup as backup
+    forbidden = (backup._UPGRADE_V5_TO_V6_PREFLIGHT_NAME,
+                 backup._UPGRADE_V5_TO_V6_COMPLETION_NAME,
+                 backup._UPGRADE_V6_TO_V7_PREFLIGHT_NAME,
+                 backup._UPGRADE_V6_TO_V7_COMPLETION_NAME,
+                 backup.SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME)
+    if not own_reconciliation:
+        forbidden += (backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME,)
+    if any(os.path.lexists(database.parent/name) for name in forbidden):
+        raise MaintenanceError("spent ctime admission already has receipts or reservation")
+    if (any(os.path.lexists(database.with_name(database.name + suffix))
+            for suffix in ("-wal", "-shm", "-journal"))
+            or any(name.startswith('.executive.sqlite3.restore-')
+                   for name in os.listdir(database.parent))):
+        raise MaintenanceError("spent ctime admission has sidecars or restore residue")
+
+
+def _issue_spent_pre_census_ctime_reconciliation(args: argparse.Namespace) -> dict:
+    """Publish one fresh PRESENT proof, retaining the old qualification and intent.
+
+    This closed action does not prove a historical checkpoint phase, migrate,
+    checkpoint, clear quarantine, or issue a maintenance descriptor.  A partial
+    publication remains spent; no failure path deletes or regenerates it.
+    """
+    from datetime import datetime, timezone
+    from control_plane import executive_backup as backup
+    if os.geteuid() != 0 or sys.platform != 'darwin':
+        raise MaintenanceError("spent ctime reconciliation requires Root on macOS")
+    if (getattr(args, 'qualify_v5_source_only', False)
+            or getattr(args, 'qualify_v5_pre_census_continuation', False)):
+        raise MaintenanceError("spent ctime reconciliation cannot mix actions")
+    selected_sha = _v5_to_v7_selector(args)
+    if selected_sha is None:
+        raise MaintenanceError("spent ctime reconciliation requires exact selected v5 source")
+    with _RootConfig() as config_holder:
+        config = config_holder.value
+        _v5_to_v7_gates(args, config, selected_sha)
+        _require_pre_census_stopped()
+        database = _runtime_owner_path(Path(config['runtime_root']) /
+                                       'data/control_plane/executive.sqlite3')
+        with backup._open_spent_pre_census_for_root_issuer(database) as retained:
+            barrier = retained.barrier
+            qualification, spent = retained.qualification, retained.spent_continuation
+            q = backup._validate_pre_census_qualification(qualification.payload)
+            for selector, actual in (
+                    ('expected_operation_id', barrier.payload['operation_id']),
+                    ('expected_barrier_sha256', barrier.identity['sha256']),
+                    ('expected_spent_continuation_sha256', spent.identity['sha256'])):
+                if getattr(args, selector, None) not in (None, actual):
+                    raise MaintenanceError("spent ctime original operation CAS differs")
+            with _ServiceAdmissionLock(config, _pre_census_barrier=barrier) as lock, _UnstartedPreproofGuard() as guard:
+                database = _quiescent_database(config, lock, guard)
+                backup_root = _runtime_owner_path(Path(config['backup_root']), guard)
+                _spent_ctime_absences(database)
+
+                def requalify():
+                    proof = _qualify_v5_source_only(args, config, lock=lock,
+                                                    config_holder=config_holder)
+                    selected = descriptor_for(selected_sha)
+                    if selected is None:
+                        raise MaintenanceError("spent ctime selected source disappeared")
+                    view = _v5_to_v7_view_candidate(selected, selected_sha,
+                        args.superseded_descriptor_sha256, args.successor_sha,
+                        baseline_sha256=proof['source_baseline_sha256'],
+                        inventory_sha256=proof['source_inventory_sha256'],
+                        prior_canary_sha256=proof['source_canary_sha256'])
+                    guard.lineage(view)
+                    guard.file(Path(config['secret_canary_receipt_path']))
+                    source = _current_v5_qualification(database, guard)
+                    backup._validate_spent_pre_census_ctime_origin(q['database'], source['database'])
+                    if any(source[key] != q[key] for key in
+                           ('normalized_schema_digest', 'full_v5_content_digest', 'migration_vector')):
+                        raise MaintenanceError("spent ctime full v5 source differs")
+                    _selected_v5_backup(selected_sha, selected, guard, source['full_v5_content_digest'])
+                    descriptor_path = bundle_path(selected_sha)/'descriptor.json'
+                    descriptor_fd = guard._hold(descriptor_path, directory=False, exact=True)
+                    raw = os.pread(descriptor_fd, _MAX_DOCUMENT_BYTES + 1, 0)
+                    if len(raw) > _MAX_DOCUMENT_BYTES:
+                        raise MaintenanceError("spent ctime selected descriptor exceeds bound")
+                    selected_source = dict(sha=selected_sha,
+                        descriptor_raw_sha256=hashlib.sha256(raw).hexdigest(),
+                        descriptor_sha256=digest(selected), source_backup_sha256=selected['backup_sha256'],
+                        baseline_sha256=selected['baseline_sha256'], inventory_sha256=selected['inventory_sha256'],
+                        prior_canary_sha256=selected['prior_canary_sha256'])
+                    if (q['selected_source'] != selected_source
+                            or q['source_control_config'] != dict(path=str(config_holder.path),
+                                sha256=hashlib.sha256(config_holder.raw).hexdigest())
+                            or q['host'] != dict(runtime_root=str(database.parents[2]), backup_root=str(backup_root),
+                                control_uid=lock.control_uid, control_gid=lock.control_gid)
+                            or q['backup_inventory_sha256'] != digest(inventory([backup_root]))):
+                        raise MaintenanceError("spent ctime Root source commitments differ")
+                    seals = []
+                    for tool in (q['original_tool'], q['recovery_tool']):
+                        seal = _evidence_owner()._verify_pinned_release(
+                            Path(tool['root']), tool['sha'], tool['tree_sha'])
+                        if any(seal.get(key) != tool[field] for key, field in (
+                                ('commit_sha', 'sha'), ('tree_sha', 'tree_sha'),
+                                ('manifest_sha256', 'manifest_sha256'))):
+                            raise MaintenanceError("spent ctime historical tool seal differs")
+                        seals.append(seal)
+                    release = backup._prove_upgrade_release(args.successor_sha)
+                    tool = dict(root=release['release_root'], sha=release['release_sha'],
+                                tree_sha=release['release_tree_sha'], manifest_sha256=release['release_manifest_sha256'])
+                    retained.check(); config_holder.check(); guard.check(); lock.check()
+                    return proof, source, seals, tool
+
+                proof, source, seals, tool = requalify()
+                payload = dict(schema_version=backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_SCHEMA,
+                    operation_id=barrier.payload['operation_id'], original_barrier_identity=barrier.identity,
+                    qualification_identity=qualification.identity, spent_continuation_identity=spent.identity,
+                    recovery_tool=tool, database=source['database'], created_at=datetime.now(timezone.utc).isoformat())
+                backup._validate_spent_pre_census_ctime_reconciliation(payload,
+                    barrier_payload=barrier.payload, barrier_identity=barrier.identity,
+                    qualification_payload=q, qualification_identity=qualification.identity,
+                    spent_continuation_payload=spent.payload, spent_continuation_identity=spent.identity)
+                raw = backup._upgrade_receipt_bytes(payload)
+                if len(raw) > 64 * 1024:
+                    raise MaintenanceError("spent ctime reconciliation exceeds bound")
+                destination = database.parent/backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME
+                before_names = set(os.listdir(lock.state_fd))
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+                try:
+                    lock._accept_qualification_creation(destination, before_names)
+                    data = memoryview(raw)
+                    while data:
+                        count = os.write(fd, data)
+                        if count <= 0:
+                            raise MaintenanceError("spent ctime reconciliation write incomplete")
+                        data = data[count:]
+                    os.fchown(fd, _TRUSTED_UID, lock.control_gid); os.fsync(fd)
+                    if requalify() != (proof, source, seals, tool):
+                        raise MaintenanceError("spent ctime source changed before publication")
+                    _spent_ctime_absences(database, own_reconciliation=True)
+                    _require_pre_census_stopped()
+                    retained.check(); guard.check(); lock.check(); config_holder.check()
+                    os.fchmod(fd, 0o440); os.fsync(fd)
+                finally:
+                    os.close(fd)
+                backup._fsync_directory(database.parent)
+                identity = backup._pre_census_artifact_identity(destination,
+                    uid=_TRUSTED_UID, gid=lock.control_gid, mode=0o440)
+                retained.check(); guard.check(); lock.check(); config_holder.check()
+                return dict(action='reconcile-spent-v5-pre-census-ctime',
+                            operation_id=payload['operation_id'], reconciliation_identity=identity)
+
+
 def prepare(args: argparse.Namespace) -> Path:
+    if getattr(args, 'reconcile_spent_v5_pre_census_ctime', False):
+        result = _issue_spent_pre_census_ctime_reconciliation(args)
+        print(json.dumps(result, sort_keys=True))
+        return result
+    if getattr(args, 'expected_spent_continuation_sha256', None) is not None:
+        raise MaintenanceError("spent intent CAS requires the explicit ctime reconciliation action")
     if getattr(args, 'qualify_v5_pre_census_continuation', False):
         result = _issue_pre_census_qualification(args)
         print(json.dumps(result, sort_keys=True))
         return result
     if (getattr(args, 'expected_operation_id', None) is not None
-            or getattr(args, 'expected_barrier_sha256', None) is not None):
+            or getattr(args, 'expected_barrier_sha256', None) is not None
+            or getattr(args, 'expected_spent_continuation_sha256', None) is not None):
         raise MaintenanceError("barrier CAS selectors require the explicit qualification action")
     qualify = bool(getattr(args, "qualify_v5_source_only", False))
     v5_to_v7_sha = getattr(args, "supersede_unstarted_preproof_v5_to_v7_sha", None)
@@ -3685,6 +3847,10 @@ def main() -> int:
                         help="Read-only v5 source qualification paired only with --supersede-unstarted-preproof-v5-to-v7-sha; writes nothing and grants no write authority.")
     parser.add_argument("--qualify-v5-pre-census-continuation", action="store_true",
                         help="Issue one control-readable Root safe-present qualification for the retained original pre-census operation; never migrate, clear its barrier or issue a successor descriptor.")
+    parser.add_argument("--reconcile-spent-v5-pre-census-ctime", action="store_true",
+                        help="Issue one fixed fresh ctime-only same-operation reconciliation; never replay the spent continuation or checkpoint.")
+    parser.add_argument("--expected-spent-continuation-sha256",
+                        help="Optional CAS against the immutable spent Control continuation.")
     parser.add_argument("--expected-operation-id",
                         help="Optional CAS comparison against the actual retained barrier UUID.")
     parser.add_argument("--expected-barrier-sha256",
@@ -3695,7 +3861,8 @@ def main() -> int:
     try:
         bundle = prepare(args)
         if (getattr(args, "qualify_v5_source_only", False)
-                or getattr(args, "qualify_v5_pre_census_continuation", False)):
+                or getattr(args, "qualify_v5_pre_census_continuation", False)
+                or getattr(args, "reconcile_spent_v5_pre_census_ctime", False)):
             return 0
         descriptor = descriptor_for(args.successor_sha)
         print(json.dumps({"bundle":str(bundle),"descriptor_sha256":digest(descriptor)}))

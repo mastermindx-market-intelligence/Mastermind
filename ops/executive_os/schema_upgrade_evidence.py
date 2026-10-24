@@ -55,6 +55,8 @@ from ops.executive_os import release_manifest
 MATERIAL_SCHEMA_VERSION = "mastermind.executive_schema_upgrade_evidence_material/v1"
 RECOVERED_MATERIAL_SCHEMA_VERSION = "mastermind.executive_schema_upgrade_evidence/pre_census_recovery_v1"
 _RECOVERED_PREFLIGHT_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_preflight/v1"
+SPENT_CTIME_MATERIAL_SCHEMA_VERSION = "mastermind.executive_schema_upgrade_evidence/spent_pre_census_ctime_recovery_v1"
+_SPENT_CTIME_PREFLIGHT_SCHEMA = "mastermind.executive_schema_upgrade_spent_pre_census_ctime_preflight/v1"
 EVIDENCE_PHASE_INITIAL = "INITIAL"
 EVIDENCE_PHASE_HISTORICAL = "HISTORICAL"
 _EVIDENCE_PHASES = (EVIDENCE_PHASE_INITIAL, EVIDENCE_PHASE_HISTORICAL)
@@ -190,6 +192,12 @@ _EXPECTED_ROLES = (
 )
 _RECOVERY_ROLES = ("pre_census_qualification", "pre_census_continuation")
 _RECOVERED_ROLES = _EXPECTED_ROLES + _RECOVERY_ROLES
+_SPENT_CTIME_ROLES = _EXPECTED_ROLES + (
+    "pre_census_qualification", "spent_pre_census_continuation",
+    "spent_pre_census_ctime_reconciliation", "spent_pre_census_ctime_continuation")
+_SPENT_CTIME_REFERENCE_KEYS = frozenset({"qualification_identity", "spent_continuation_identity",
+                                        "reconciliation_identity", "continuation_identity"})
+_SPENT_CTIME_CHAIN_KEYS = _SPENT_CTIME_REFERENCE_KEYS | {"original_tool", "original_barrier"}
 _RECOVERY_REFERENCE_KEYS = frozenset({"qualification_identity", "continuation_identity"})
 _RECOVERY_CHAIN_KEYS = frozenset({"original_tool", "original_barrier",
                                   "qualification_identity", "continuation_identity"})
@@ -1091,10 +1099,10 @@ def _load_receipt(
     )
     payload = _strict_evidence_json(held.raw, role)
     recovered = (role == "P56" and isinstance(payload, dict)
-                 and payload.get("schema_version") == _RECOVERED_PREFLIGHT_SCHEMA)
+                 and payload.get("schema_version") in {_RECOVERED_PREFLIGHT_SCHEMA, _SPENT_CTIME_PREFLIGHT_SCHEMA})
     keys = _RECEIPT_KEYS[role] | {"pre_census_reconciliation"} if recovered else _RECEIPT_KEYS[role]
     payload = _require_closed(payload, keys, role)
-    if payload["schema_version"] != (_RECOVERED_PREFLIGHT_SCHEMA if recovered else schema):
+    if payload["schema_version"] not in ({_RECOVERED_PREFLIGHT_SCHEMA, _SPENT_CTIME_PREFLIGHT_SCHEMA} if recovered else {schema}):
         raise RetainedChainInvalid(f"{role} schema version is not the closed producer")
     if (
         payload["source_schema_version"] != source_version
@@ -1121,6 +1129,8 @@ def _artifact_reference(held: _HeldFile, payload: Mapping[str, Any]) -> dict[str
 
 def _load_pre_census_reconciliation(guard, preflight, state_directory):
     """Retain two explicit recovery origins without changing the normal wire."""
+    if preflight["schema_version"] == _SPENT_CTIME_PREFLIGHT_SCHEMA:
+        return _load_spent_ctime_reconciliation(guard, preflight, state_directory)
     if preflight["schema_version"] != _RECOVERED_PREFLIGHT_SCHEMA:
         return None
     refs = _require_closed(preflight["pre_census_reconciliation"],
@@ -1174,6 +1184,9 @@ def _validate_pre_census_reconciliation(recovery, receipts, pairs, chain,
     This is immutable provenance validation in both phases. It does not infer
     the original failed process's phase or read the present authoritative DB.
     """
+    if recovery.get("spent_ctime") is True:
+        return _validate_spent_ctime_reconciliation(recovery, receipts, pairs, chain,
+            runtime_root, backup_root, control_uid, control_gid)
     qualification = recovery["qualification"]
     preflight = receipts["P56"][0]
     original = qualification["original_barrier"]
@@ -1210,6 +1223,94 @@ def _validate_pre_census_reconciliation(recovery, receipts, pairs, chain,
     return {"original_tool": dict(tool), "original_barrier": dict(original),
             "qualification_identity": recovery["qualification_identity"],
             "continuation_identity": recovery["continuation_identity"]}
+
+
+def _load_spent_ctime_reconciliation(guard, preflight, state_directory):
+    """Load exactly four immutable authority origins; no current-state adoption."""
+    refs = _require_closed(preflight["pre_census_reconciliation"],
+                           _SPENT_CTIME_REFERENCE_KEYS, "spent ctime references")
+    specifications = (
+        ("pre_census_qualification", backup.PRE_CENSUS_QUALIFICATION_NAME,
+         "qualification_identity", True),
+        ("spent_pre_census_continuation", backup.PRE_CENSUS_CONTINUATION_NAME,
+         "spent_continuation_identity", False),
+        ("spent_pre_census_ctime_reconciliation", backup.SPENT_PRE_CENSUS_CTIME_RECONCILIATION_NAME,
+         "reconciliation_identity", True),
+        ("spent_pre_census_ctime_continuation", backup.SPENT_PRE_CENSUS_CTIME_CONTINUATION_NAME,
+         "continuation_identity", False))
+    records, payloads, identities = [], [], {}
+    for role, name, ref, root_owned in specifications:
+        profile = (_control_config_profile(guard.control_uid, guard.control_gid)
+                   if root_owned else _control_profile(guard.control_uid, guard.control_gid))
+        held = guard.hold(_qualify_control_file(state_directory / name,
+            role=role, kind="receipt", profile=profile, limit=_MAX_RECEIPT_BYTES))
+        value = _strict_evidence_json(held.raw, role)
+        if not isinstance(value, dict) or backup._upgrade_receipt_bytes(value) != held.raw:
+            raise RetainedChainInvalid("spent ctime origin is not canonical producer bytes")
+        held = dataclasses.replace(held, payload=value, payload_digest=backup._upgrade_digest(value))
+        guard.files[-1] = held
+        identity = _artifact_reference(held, value)
+        if refs[ref] != identity:
+            raise RetainedChainInvalid("spent ctime preflight origin differs")
+        identities[ref] = identity
+        records.append(held.origin_record()); payloads.append(value)
+    qualification, spent, reconciliation, continuation = payloads
+    original = qualification.get("original_barrier", {})
+    backup._validate_spent_pre_census_ctime_reconciliation(reconciliation,
+        barrier_payload=original.get("payload"), barrier_identity=original.get("identity"),
+        qualification_payload=qualification, qualification_identity=identities["qualification_identity"],
+        spent_continuation_payload=spent, spent_continuation_identity=identities["spent_continuation_identity"])
+    expected = dict(schema_version=backup.SPENT_PRE_CENSUS_CTIME_CONTINUATION_SCHEMA,
+        operation_id=qualification["operation_id"], original_barrier_identity=original["identity"],
+        qualification_identity=identities["qualification_identity"],
+        spent_continuation_identity=identities["spent_continuation_identity"],
+        reconciliation_identity=identities["reconciliation_identity"],
+        recovery_tool=reconciliation["recovery_tool"], created_at=continuation.get("created_at"))
+    if continuation != expected:
+        raise RetainedChainInvalid("spent ctime one-use continuation binding differs")
+    backup._pre_census_time(continuation.get("created_at"))
+    return dict(spent_ctime=True, qualification=qualification, spent_continuation=spent,
+                reconciliation=reconciliation, continuation=continuation,
+                records=records, **identities)
+
+
+def _validate_spent_ctime_reconciliation(recovery, receipts, pairs, chain,
+                                        runtime_root, backup_root, control_uid, control_gid):
+    """Immutable sixteen-origin history; never infer a checkpoint phase."""
+    q, r = recovery["qualification"], recovery["reconciliation"]
+    p = receipts["P56"][0]
+    original = q["original_barrier"]
+    if (p["schema_version"] != _SPENT_CTIME_PREFLIGHT_SCHEMA
+            or q["operation_id"] != p["operation_id"]
+            or p["barrier_identity"] != original["identity"]
+            or p["created_at"] != original["payload"]["created_at"]
+            or original["payload"]["database_path"] != chain["database_path"]
+            or q["host"] != dict(runtime_root=str(runtime_root), backup_root=str(backup_root),
+                                control_uid=control_uid, control_gid=control_gid)
+            or r["recovery_tool"] != chain["tool_release"]
+            or any(r["database"][key] != p["database"][key] for key in _DATABASE_KEYS)):
+        raise RetainedChainInvalid("spent ctime source, host, barrier or executor differs")
+    verified = pairs["P56"]["verification"]
+    if (q["full_v5_content_digest"] != chain["original_full_v5_content_digest"]
+            or q["normalized_schema_digest"] != verified.normalized_schema_digest
+            or q["migration_vector"] != [row.to_dict() for row in verified.migrations]
+            or q["source_control_config"]["path"] != str(_control_config_path())):
+        raise RetainedChainInvalid("spent ctime source backup or config origin differs")
+    old = q["original_tool"]
+    if old != dict(root=original["payload"]["tool_release_root"],
+                   sha=original["payload"]["release_sha"],
+                   tree_sha=original["payload"]["tool_release_tree_sha"],
+                   manifest_sha256=original["payload"]["tool_release_manifest_sha256"]):
+        raise RetainedChainInvalid("spent ctime original tool differs from barrier")
+    # The original barrier executor and the spent executor remain separately
+    # sealed.  Neither is relabelled as the actual current migration executor.
+    for tool in (old, q["recovery_tool"]):
+        seal = _verify_pinned_release(Path(tool["root"]), tool["sha"], tool["tree_sha"])
+        if any(seal.get(key) != tool[field] for key, field in (
+                ("commit_sha", "sha"), ("tree_sha", "tree_sha"), ("manifest_sha256", "manifest_sha256"))):
+            raise RetainedChainInvalid("spent ctime historical executor seal differs")
+    return dict(original_tool=dict(old), original_barrier=dict(original),
+                **{key: recovery[key] for key in _SPENT_CTIME_REFERENCE_KEYS})
 
 
 def _normalize_drill(drill: Mapping[str, Any]) -> dict[str, Any]:
@@ -1497,7 +1598,7 @@ def _validate_chain(
         _require_closed(payload["barrier_identity"], _BARRIER_IDENTITY_KEYS, "barrier")
         census = payload["quiesce_writer_census"]
         expected_schema = (backup.PRE_CENSUS_CENSUS_SCHEMA
-                           if payload is pre56 and pre56["schema_version"] == _RECOVERED_PREFLIGHT_SCHEMA
+                           if payload is pre56 and pre56["schema_version"] in {_RECOVERED_PREFLIGHT_SCHEMA, _SPENT_CTIME_PREFLIGHT_SCHEMA}
                            else backup.UPGRADE_CENSUS_SCHEMA)
         if not isinstance(census, Mapping) or census.get("schema_version") != expected_schema:
             raise RetainedChainInvalid("retained preflight census is not the closed wire")
@@ -1840,10 +1941,13 @@ def _verify_current_initial(
 
 def _validate_pinned_material(pinned: Mapping[str, Any]) -> dict[str, Any]:
     value = _require_closed(pinned, _MATERIAL_KEYS, "pinned material")
-    recovered = value["schema_version"] == RECOVERED_MATERIAL_SCHEMA_VERSION
-    if value["schema_version"] not in {MATERIAL_SCHEMA_VERSION, RECOVERED_MATERIAL_SCHEMA_VERSION}:
+    spent_ctime = value["schema_version"] == SPENT_CTIME_MATERIAL_SCHEMA_VERSION
+    recovered = value["schema_version"] == RECOVERED_MATERIAL_SCHEMA_VERSION or spent_ctime
+    if value["schema_version"] not in {MATERIAL_SCHEMA_VERSION, RECOVERED_MATERIAL_SCHEMA_VERSION,
+                                      SPENT_CTIME_MATERIAL_SCHEMA_VERSION}:
         raise RetainedChainInvalid("pinned material schema version is unsupported")
-    expected_roles = _RECOVERED_ROLES if recovered else _EXPECTED_ROLES
+    expected_roles = (_SPENT_CTIME_ROLES if spent_ctime else
+                      _RECOVERED_ROLES if recovered else _EXPECTED_ROLES)
     if value["phase"] != EVIDENCE_PHASE_INITIAL:
         raise RetainedChainInvalid("pinned material is not original INITIAL provenance")
     host = _require_closed(value["host"], _HOST_KEYS, "pinned host mapping")
@@ -1891,7 +1995,7 @@ def _validate_pinned_material(pinned: Mapping[str, Any]) -> dict[str, Any]:
         raise RetainedChainInvalid("pinned origin records are not the closed twelve roles")
     chain = _require_closed(value["chain"], _CHAIN_KEYS | ({"pre_census_reconciliation"} if recovered else set()), "pinned chain")
     if recovered:
-        _require_closed(chain["pre_census_reconciliation"], _RECOVERY_CHAIN_KEYS, "pinned recovery")
+        _require_closed(chain["pre_census_reconciliation"], _SPENT_CTIME_CHAIN_KEYS if spent_ctime else _RECOVERY_CHAIN_KEYS, "pinned recovery")
     if chain["source_schema_version"] != 5 or chain["target_schema_version"] != 7:
         raise RetainedChainInvalid("pinned chain does not prove the closed 5-to-7 span")
     _require_text(chain["database_path"], "pinned database path")
@@ -2307,7 +2411,9 @@ def _open_chain_evidence(
             "control_uid": control_uid,
             "control_gid": control_gid,
         }
-        expected_roles = _RECOVERED_ROLES if recovery is not None else _EXPECTED_ROLES
+        spent_ctime = recovery is not None and recovery.get("spent_ctime") is True
+        expected_roles = (_SPENT_CTIME_ROLES if spent_ctime else
+                          _RECOVERED_ROLES if recovery is not None else _EXPECTED_ROLES)
         order = {role: index for index, role in enumerate(expected_roles)}
         origin_records = sorted(
             [
@@ -2328,7 +2434,8 @@ def _open_chain_evidence(
         # phase of this opening is carried separately on the evidence object.
         material_phase = pinned["phase"] if pinned is not None else EVIDENCE_PHASE_INITIAL
         material = {
-            "schema_version": (RECOVERED_MATERIAL_SCHEMA_VERSION if recovery is not None
+            "schema_version": (SPENT_CTIME_MATERIAL_SCHEMA_VERSION if spent_ctime else
+                               RECOVERED_MATERIAL_SCHEMA_VERSION if recovery is not None
                                else MATERIAL_SCHEMA_VERSION),
             "phase": material_phase,
             "host": host,

@@ -34,8 +34,12 @@ def _parser() -> argparse.ArgumentParser:
                             help="Read only the fixed original barrier metadata; no database access.")
     transition.add_argument("--resume-v5-to-v6-pre-census", action="store_true",
                             help="Consume the fixed one-use qualification for the SAME operation.")
+    transition.add_argument("--continue-spent-v5-to-v6-pre-census-ctime", action="store_true",
+                            help="Consume one fresh exact-byte current-state reconciliation; never replay the spent intent.")
     parser.add_argument("--expected-operation-id")
     parser.add_argument("--expected-barrier-sha256")
+    parser.add_argument("--expected-spent-continuation-sha256")
+    parser.add_argument("--expected-reconciliation-sha256")
     parser.add_argument("--database", type=Path)
     parser.add_argument("--backup-directory", type=Path)
     parser.add_argument("--release-sha")
@@ -47,12 +51,27 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.inspect_v5_to_v6_pre_census_barrier:
         if any(value is not None for value in (args.database, args.backup_directory,
-                args.release_sha, args.expected_operation_id, args.expected_barrier_sha256)):
+                args.release_sha, args.expected_operation_id, args.expected_barrier_sha256,
+                args.expected_spent_continuation_sha256, args.expected_reconciliation_sha256)):
             parser.error("fixed-leaf inspection accepts no path, release or recovery selectors")
         print(json.dumps(inspect_v5_to_v6_pre_census_barrier(), sort_keys=True, separators=(",", ":")))
         return 0
     if any(value is None for value in (args.database, args.backup_directory, args.release_sha)):
         parser.error("a transition requires --database, --backup-directory and --release-sha")
+    if args.continue_spent_v5_to_v6_pre_census_ctime:
+        if any(value is None for value in (args.expected_operation_id, args.expected_barrier_sha256,
+                args.expected_spent_continuation_sha256, args.expected_reconciliation_sha256)):
+            parser.error("ctime continuation requires all four exact original/current authority CAS selectors")
+        from control_plane.executive_backup import continue_spent_v5_to_v6_pre_census_ctime
+        receipt = continue_spent_v5_to_v6_pre_census_ctime(args.database, args.backup_directory,
+            release_sha=args.release_sha, expected_operation_id=args.expected_operation_id,
+            expected_barrier_sha256=args.expected_barrier_sha256,
+            expected_spent_continuation_sha256=args.expected_spent_continuation_sha256,
+            expected_reconciliation_sha256=args.expected_reconciliation_sha256)
+        print(json.dumps(receipt.to_dict(), sort_keys=True, separators=(",", ":")))
+        return 0
+    if args.expected_spent_continuation_sha256 is not None or args.expected_reconciliation_sha256 is not None:
+        parser.error("spent authority CAS selectors are exclusive to the ctime continuation")
     if args.resume_v5_to_v6_pre_census:
         if args.expected_operation_id is None or args.expected_barrier_sha256 is None:
             parser.error("continuation requires exact original operation and barrier CAS selectors")
