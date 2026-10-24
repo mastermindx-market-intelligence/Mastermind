@@ -465,5 +465,5 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 }
 
 # Immutable input-mode mask only; not a new UID or execution grant.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '5bf44b1cb3af7539dc4c3d22bc9cc8325de950182054395e9f58f7dd36e8aeac',
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': 'da233ec83fe7aee0aa3be897eb2669478268f7178b0c1294e237cd63643ef747',
  'sites': ((84, 36, 41, 'int', '0o777'),)}

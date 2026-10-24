@@ -227,9 +227,9 @@ def run_bootstrap(request, probe_source):
         # 3.12 distribution, not a mutable account virtualenv. Do not rewrite
         # HOME/PATH/PYTHONHOME or infer equivalence from an ELF/argv0 alone.
         if sys.version_info[:2]!=(3,12):refuse()
-        for variable in ('BASH_ENV','ENV','LD_PRELOAD','LD_LIBRARY_PATH','PYTHONHOME'):
+        for variable in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             if variable in os.environ:refuse()
-        if any(k.startswith('BASH_FUNC_') for k in os.environ):refuse()
+        if any(k.startswith(('BASH_FUNC_','LD_')) for k in os.environ):refuse()
         for prefix in set(commitment['startup'][key] for key in
                           ('prefix','exec_prefix','base_prefix','base_exec_prefix')):
             library=prefix+'/lib/python3.12'
@@ -251,6 +251,15 @@ def run_bootstrap(request, probe_source):
             # An optional root-owned zip on sys.path is still startup code.
             zip_path=prefix+'/lib/python312.zip'
             if os.path.lexists(zip_path):pin(zip_path,owners={0})
+        # ._pth can replace import roots even in isolated mode. This finite
+        # profile admits none adjacent to the logical/real image or runtime
+        # library. All containing directories are Root-protected before this
+        # absence check; the account cannot race in a new entry.
+        selector_dirs={os.path.dirname(commitment['launch_python'][k]) for k in ('path','real_path')}
+        selector_dirs.update(commitment['startup'][k]+'/lib' for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix'))
+        for directory in selector_dirs:
+            pin(directory,directory=True,owners={0})
+            if any(name.endswith('._pth') for name in os.listdir(directory)):refuse()
         # pyvenv.cfg is startup code/configuration, not authenticated by the
         # executable digest. Only fixed Root-protected selectors are supported.
         logical=commitment['launch_python']['path']
@@ -265,7 +274,7 @@ def run_bootstrap(request, probe_source):
                         key=key.strip().lower()
                         if key in values:refuse()
                         values[key]=value.strip()
-                if 'home' not in values:refuse()
+                if values.get('home') not in {commitment['startup'][k]+'/bin' for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')}:refuse()
                 pin(path(values['home']),directory=True,owners={0})
         # Test actual CPython getpath before the initializer, through the held
         # kernel image. argv0 is compared as DATA; it is never image authority.
@@ -309,6 +318,8 @@ os.execve(fd,[c['launch_python']['path'],'-I','-S','-B','-c',sys.argv[4],sys.arg
         script=('export PATH='+shlex.quote(lane+'/venv/bin')+':"$HOME/.local/bin":/opt/homebrew/bin:"$PATH"; '
                 +'source /proc/self/fd/'+str(snapshot)+' >/dev/null 2>&1 || exit 78; '
                 +'export PATH='+shlex.quote(lane+'/venv/bin')+':"$PATH"; '
+                +'for _mm_ld in ${!LD_@}; do exit 78; done; '
+                +'[ -z "${BASH_ENV+x}${ENV+x}${PYTHONHOME+x}${PYTHONEXECUTABLE+x}${__PYVENV_LAUNCHER__+x}" ] || exit 78; '
                 +'selected=$(command -v python3) || exit 78; '
                 +'exec -a '+shlex.quote(commitment['bootstrap_python']['path'])+' /proc/self/fd/'+str(bootstrap_fd)
                 +' -I -S -B -c '+shlex.quote(bridge)+' '+shlex.quote(encoded)+' '+str(launch_fd)
