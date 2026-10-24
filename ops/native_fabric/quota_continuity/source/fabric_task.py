@@ -1052,8 +1052,6 @@ def main(argv: list[str] | None = None) -> int:
             _json(wait_for(args.run_id, timeout=args.timeout, interval=args.interval))
             return 0
         if args.cmd == "result":
-            sys.stdout.buffer.write(read_result(args.run_id, max_bytes=args.max_bytes))
-            return 0        if args.cmd == "result":
             delivered = read_result(args.run_id, max_bytes=args.max_bytes)
             if args.jev_triage:
                 import jev_advisory
