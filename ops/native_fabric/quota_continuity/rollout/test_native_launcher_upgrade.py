@@ -119,6 +119,22 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 raise AssertionError('historical task fixture reverse transform differs')
             task.write_bytes(prior_task)
             cls.manifest['ext/fabric_task.py'] = prior_task_sha
+            # This is the historical paired upgrade, not later diagnostic
+            # publication. Restore exact retained pre-diagnostic payloads only
+            # inside this disposable stage, with closed names and whole hashes.
+            import base64, zlib
+            fixture = Path(__file__).resolve().parents[4] / 'tests/fixtures/host-pull-prediagnostic-968e.json'
+            retained = json.loads(fixture.read_bytes())
+            if retained['source'] != '968e1a62842927dd763ac6041cf7312f4433ebb7' or set(retained['files']) != {'host_pull.sh', 'host_pull_backend.py'}:
+                raise AssertionError('historical collector fixture identity differs')
+            expected = {'host_pull.sh': '4671e6e3094ad4fdafa77f373648de66fabc866a8e6ec2f76da17215cdedb7cc',
+                        'host_pull_backend.py': 'b8629cee082334319391bf48285668c727150a7d20d5ae831497cbb10336b073'}
+            for name, digest in expected.items():
+                raw = zlib.decompress(base64.b64decode(retained['files'][name]['zlib_base64'], validate=True))
+                if retained['files'][name]['sha256'] != digest or g.digest(raw) != digest:
+                    raise AssertionError('historical collector preimage differs')
+                (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
+                cls.manifest['ext/' + name] = digest
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
