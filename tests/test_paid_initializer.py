@@ -709,7 +709,8 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     assert shlex.split(pre['run'])==['python','-m','pytest','-q','--tb=short','-p','scripts.ci_pytest_timing',
         'tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup',
         'tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook',
-        'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire']
+        'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
+        'tests/test_paid_initializer_nosite.py']
     assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}'
     assert full[0][1].get('if') is None
 
