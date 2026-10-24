@@ -288,3 +288,50 @@ def test_adopted_unix_room_reuses_config_and_never_constructs_tcp(tmp_path, monk
         assert fx.activated == ["Operator", "CeoIngress", cli._WORKSPACE_CONTROL_ROOM_SOCKET_NAME]
 
     asyncio.run(run())
+
+
+def test_original_executive_host_selects_only_sealed_member_scoped_cross_plane_ports(tmp_path, monkeypatch):
+    from control_plane.workspace_cross_plane_enrollment import InstalledCrossPlaneEnrollment
+    from tests.test_executive_cross_plane_live import Owners, _scope
+    fx = capture_composition(tmp_path, monkeypatch)
+    ports = Owners()
+    selected = []
+    enrollment = InstalledCrossPlaneEnrollment(
+        member_scope=lambda member: selected.append(("scope", member["client_ref"])) or _scope(),
+        member_ports=lambda member, scope: selected.append(("ports", member["client_ref"])) or ports.ports(),
+        stale_after_seconds=600,
+    )
+    cli._service_from_config(
+        fx.raw, workspace_acquisition_loader=fx.loader,
+        installed_cross_plane_enrollment=enrollment,
+    )
+    selector = fx.arguments["cross_plane_context"]
+    assert callable(selector)
+    assert "cross_plane_context" not in fx.raw
+    assert "installed_cross_plane_enrollment" not in fx.raw
+    assert fx.arguments["authorize"](principal(fx.authority)) is True
+    host = fx.captured["workspace_control_room"]
+    context = selector(principal(fx.authority), host.config)
+    assert context.scope == _scope()
+    assert context.ports == ports.ports()
+    assert selected == [("scope", principal(fx.authority)["client_ref"]),
+                        ("ports", principal(fx.authority)["client_ref"])]
+    assert host.config.port == 0 and host._server is None
+    assert fx.activated == ["Operator", "CeoIngress", cli._WORKSPACE_CONTROL_ROOM_SOCKET_NAME]
+
+
+def test_unenrolled_executive_host_does_not_mint_cross_plane_source(tmp_path, monkeypatch):
+    fx = capture_composition(tmp_path, monkeypatch)
+    cli._service_from_config(fx.raw, workspace_acquisition_loader=fx.loader)
+    assert fx.arguments["cross_plane_context"] is None
+
+
+def test_invalid_cross_plane_enrollment_is_refused_before_listener_activation(tmp_path, monkeypatch):
+    fx = capture_composition(tmp_path, monkeypatch)
+    with pytest.raises(cli.ServiceError, match="qualified installed cross-plane owner required"):
+        cli._service_from_config(
+            fx.raw, workspace_acquisition_loader=fx.loader,
+            installed_cross_plane_enrollment={"scope": ["WS:AGENT-OS"], "token": "none"},
+        )
+    assert fx.activated == []
+    assert fx.captured == fx.arguments == {}
