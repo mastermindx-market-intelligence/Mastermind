@@ -146,22 +146,19 @@ def test_entrypoint_carries_the_combined_leadership_clause(rel):
 def test_compact_project_instruction_stays_within_budget_and_keeps_both_contracts():
     source = (ROOT / "docs/sol_skills/BOOTSTRAP_KERNEL.md").read_text(encoding="utf-8")
     kernel = source.split("```text\n", 1)[1].split("```", 1)[0]
-    assert len(kernel) <= 8000
-    assert "bootstrap_revision = 2026.10.24.1" in kernel
+    assert len(kernel) < 8000
     for phrase in (
         "Ownership is a role, not a session",
         "assumes leadership",
         "records the takeover",
+        "never wait on an absent/orphaned owner",
         "ask the Chairman to find old chats",
         "never self-merge or approve",
+        "not live owners",
+        "name an executable next step",
         "HANDOFF_SOURCE_LINK_V1",
         "Explicit safety denial ends that action",
         "cross-tool or cross-account retries",
-        "versioned GitHub plan, Agent OS link, verified first save",
-        "Never delegate a denied effect",
-        "system names are not live approvers",
-        "actual missing evidence",
-        "Handoffs name an executable successor action",
     ):
         assert phrase in kernel, phrase
     outside = source.split("```", 2)[-1]

@@ -277,7 +277,7 @@ def test_handoff_writer_never_disclaims_to_ghost_parent():
         assert "When writing a handoff, name a safe next action" in source
         assert "original parent" in source
     kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    assert "Handoffs name an executable successor action" in kernel
+    assert "name an executable next step" in kernel
     import json
     cases = json.loads((ROOT / "tests/fixtures/web_ceo_skill_cases.json").read_text())["cases"]
     case = next(c for c in cases if c["id"] == "ceo-handoff-writer-no-ghost-receiver")

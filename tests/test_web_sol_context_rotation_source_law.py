@@ -570,12 +570,12 @@ def test_cross_phase_continuation_is_projected_into_session_reliability_and_kern
         assert phrase in skill
     for phrase in (
         "After any task/phase completes, verify/save it, reassess the mission",
-        "WAITING_EXTERNAL/review/CI/messages are lane-local",
-        "`DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return",
-        "Other Step-8 stops still apply",
+        "Block the affected lane, not the mission",
+        "DURABLE_EXECUTION_RUNNING requires proven STARTED/RUNNING and lawful return",
+        "messages/CI are not proof",
         "A clean phase boundary is not a stop",
         "MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains",
-        "task/phase/checkpoint completion alone never qualifies",
+        "a completed phase alone is insufficient",
     ):
         assert phrase in kernel
     project_block = kernel_raw.split("```text\n", 1)[1].split("```", 1)[0]
