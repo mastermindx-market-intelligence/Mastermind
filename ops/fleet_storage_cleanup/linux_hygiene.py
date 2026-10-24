@@ -175,29 +175,52 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
         if not cache.is_dir() or cache.is_symlink() or not shutil.which(argv[0]):
             results.append({"cache": name, "state": "SKIPPED_UNAVAILABLE"})
             continue
+        marker = state / HOLD
         try:
-            started = time.monotonic()
+            # Fail closed BEFORE entering the destructive package-manager API.
+            # A crash or interrupted parent then leaves a durable hold which
+            # refuses unattended retries until the exact effect is reconciled.
+            with marker.open("x") as intent:
+                intent.write(f"{time.time()}: PRE_EFFECT cache={name}\n")
+                intent.flush()
+                os.fsync(intent.fileno())
+            directory_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError as exc:
+            results.append({"cache": name, "state": "MARKER_UNAVAILABLE",
+                            "error": type(exc).__name__})
+            break
+        started = time.monotonic()
+        try:
             proc = subprocess.run(argv, cwd=str(root), capture_output=True,
                                   text=True, timeout=90)
-            if proc.returncode:
-                # Even a completed nonzero cache command may have changed part of
-                # its target. Do not run another cache command or retry next hour
-                # until the incumbent owner reconciles this exact effect.
-                (state / HOLD).write_text(
-                    f"{time.time()}: {name}: nonzero_exit={proc.returncode}\n")
-            results.append({"cache": name,
-                            "state": "EFFECT_UNVERIFIED" if proc.returncode else "OK",
-                            "exit_code": proc.returncode,
-                            "duration_sec": round(time.monotonic() - started, 2),
-                            "stderr_tail": proc.stderr[-160:] if proc.returncode else ""})
-            if proc.returncode:
-                break
         except (subprocess.TimeoutExpired, OSError) as exc:
-            # A timed-out subprocess is not proof its descendants had no effects.
-            (state / HOLD).write_text(f"{time.time()}: {name}: {type(exc).__name__}\n")
+            # The PRE_EFFECT hold remains. A timeout is not proof the child
+            # or its descendants performed no changes.
             results.append({"cache": name, "state": "EFFECT_UNVERIFIED",
                             "error": type(exc).__name__})
             break
+        if proc.returncode:
+            # Nonzero package-manager exit may include partial cache deletion.
+            results.append({"cache": name, "state": "EFFECT_UNVERIFIED",
+                            "exit_code": proc.returncode,
+                            "duration_sec": round(time.monotonic() - started, 2),
+                            "stderr_tail": proc.stderr[-160:]})
+            break
+        try:
+            marker.unlink()
+        except OSError as exc:
+            # Success without a verified hold clear is NOT a healthy tick.
+            results.append({"cache": name, "state": "EFFECT_UNVERIFIED",
+                            "error": type(exc).__name__})
+            break
+        results.append({"cache": name, "state": "OK",
+                        "exit_code": 0,
+                        "duration_sec": round(time.monotonic() - started, 2),
+                        "stderr_tail": ""})
     return results
 
 
@@ -224,7 +247,8 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
     result["finished_epoch"] = time.time()
     result["degraded"] = (mode == "UNVERIFIED" or mem.get("state") != "OK" or
                           any(x.get("state") in ("FAILED", "EFFECT_UNVERIFIED",
-                                                 "HELD_EFFECT_UNVERIFIED")
+                                                 "HELD_EFFECT_UNVERIFIED",
+                                                 "MARKER_UNAVAILABLE")
                               for x in result["cleanup"]))
     return result
 
