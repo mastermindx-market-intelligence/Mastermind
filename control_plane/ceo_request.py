@@ -193,11 +193,13 @@ AUTOMATED_REQUIRED_FIELDS = frozenset(
 AUTOMATED_OPTIONAL_FIELDS = OPTIONAL_FIELDS | frozenset({'frontier_model_alias'})
 VALIDATION_KEYS = frozenset({"pytest_targets", "compileall_paths", "git_diff_check"})
 
-#: §4.3 — exactly these two execution profiles.  Nothing here may ever grow
+#: Shared profile law, including the explicit authenticated App native choice.
+#: The legacy MCP adapter projects only its original two names. Nothing may grow
 #: ``OPEN_PR``, ``PUSH_BRANCH``, ``MERGE``, ``DEPLOY``, ``SERVICE_CONTROL``, or
 #: ``CROSS_REPO_PUBLISH``.
 EXECUTION_PROFILES: dict[str, tuple[str, ...]] = {
     "research_only": ("READ", "RESEARCH"),
+    "native_research_only": ("READ", "RESEARCH"),
     "bounded_code_change": ("READ", "RUN_TESTS", "WRITE_BRANCH"),
 }
 
@@ -446,7 +448,7 @@ def normalize_high_level_request(payload: Any) -> dict[str, Any]:
     )
 
     # --- profile coherence (§4.3) ------------------------------------------
-    if profile == "research_only":
+    if profile in {"research_only", "native_research_only"}:
         if paths:
             raise CeoRequestInvalid(
                 "execution_profile 'research_only' grants no write authority; "
@@ -457,6 +459,8 @@ def normalize_high_level_request(payload: Any) -> dict[str, Any]:
                 "execution_profile 'research_only' grants no test authority; "
                 "validation is refused"
             )
+        if profile == "native_research_only" and result["attempt_limit"] != 1:
+            raise CeoRequestInvalid("native_research_only requires attempt_limit=1")
     else:  # bounded_code_change
         if not paths:
             raise CeoRequestInvalid(

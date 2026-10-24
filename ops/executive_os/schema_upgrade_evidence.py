@@ -2062,8 +2062,10 @@ class RetainedV5ToV7Evidence:
         control_config_identity: dict[str, Any],
         backup_root: Path,
         pre_census_qualification: dict[str, Any] | None = None,
+        prepared_reader_record: dict[str, str] | None = None,
     ) -> None:
         self.phase = phase
+        self._prepared_reader_record = dict(prepared_reader_record) if prepared_reader_record is not None else None
         self.pre_census_qualification = (json.loads(json.dumps(pre_census_qualification))
                                          if pre_census_qualification is not None else None)
         self.material = material
@@ -2089,6 +2091,18 @@ class RetainedV5ToV7Evidence:
             "held_files": len(records),
             "held_directories": len(self._guard.dirs),
         }
+
+    def check_prepared_sources(self) -> None:
+        """Re-pin the actual reader and original executor at a new-mode write edge."""
+        if self._prepared_reader_record is None:
+            raise RetainedChainInvalid("prepared successor source proof is unavailable")
+        if _prove_current_release(self._prepared_reader_record["release_sha"]) != self._prepared_reader_record:
+            raise RetainedChainInvalid("prepared successor reader source changed")
+        tool = self.material["chain"]["tool_release"]
+        seal = _verify_pinned_release(Path(tool["root"]), tool["sha"], tool["tree_sha"])
+        if any(seal.get(key) != tool[field] for key, field in (
+                ("commit_sha", "sha"), ("tree_sha", "tree_sha"), ("manifest_sha256", "manifest_sha256"))):
+            raise RetainedChainInvalid("prepared successor migration source changed")
 
     def verify_v7_acceptance_backup(
         self,
@@ -2201,7 +2215,9 @@ def _validate_acceptance_name(database_name: str) -> str:
 
 
 def _open_chain_evidence(
-    runtime_root: Path, expected_release_sha: str, pinned_material: Mapping[str, Any] | None
+    runtime_root: Path, expected_release_sha: str, pinned_material: Mapping[str, Any] | None,
+    *, _prepared_reader_sha: str | None = None,
+    _prepared_material: Mapping[str, Any] | None = None,
 ) -> RetainedV5ToV7Evidence:
     if not isinstance(expected_release_sha, str) or _SHA_RE.fullmatch(
         expected_release_sha
@@ -2219,6 +2235,14 @@ def _open_chain_evidence(
         if pinned_material is not None
         else None
     )
+    if (_prepared_reader_sha is None) != (_prepared_material is None):
+        raise RetainedChainInvalid("prepared successor inputs must be complete")
+    prepared = _validate_pinned_material(_prepared_material) if _prepared_material is not None else None
+    if prepared is not None and (pinned_material is not None
+            or prepared["schema_version"] != SPENT_CTIME_MATERIAL_SCHEMA_VERSION
+            or prepared["chain"]["tool_release"]["sha"] != expected_release_sha
+            or _prepared_reader_sha == expected_release_sha):
+        raise RetainedChainInvalid("prepared successor requires distinct INITIAL sixteen-origin provenance")
     _root_darwin_gate()
     control_uid, control_gid = _control_identity()
     guard = _EvidenceGuard(control_uid, control_gid)
@@ -2275,8 +2299,23 @@ def _open_chain_evidence(
             raise EvidenceCustodyError("qualified control config changed during opening")
 
         expected_release: dict[str, str] | None = None
+        prepared_reader_record = None
         if phase == EVIDENCE_PHASE_INITIAL:
-            expected_release = _prove_current_release(expected_release_sha)
+            if prepared is None:
+                expected_release = _prove_current_release(expected_release_sha)
+            else:
+                # Reader identity is an independent actual running-code proof.
+                # The immutable migration executor is neither rewritten nor
+                # substituted for this source-origin check.
+                prepared_reader_record = _prove_current_release(_prepared_reader_sha)
+                tool = prepared["chain"]["tool_release"]
+                seal = _verify_pinned_release(Path(tool["root"]), tool["sha"], tool["tree_sha"])
+                if any(seal.get(key) != tool[field] for key, field in (
+                        ("commit_sha", "sha"), ("tree_sha", "tree_sha"),
+                        ("manifest_sha256", "manifest_sha256"))):
+                    raise RetainedChainInvalid("prepared migration executor seal differs")
+                expected_release = dict(release_root=tool["root"], release_sha=tool["sha"],
+                    release_tree_sha=tool["tree_sha"], release_manifest_sha256=tool["manifest_sha256"])
 
         db_path = runtime_physical / _DB_RELATIVE_PATH
         state_directory = db_path.parent
@@ -2447,6 +2486,9 @@ def _open_chain_evidence(
                 "retained evidence does not match the exact pinned material"
             )
 
+        if prepared is not None and material != prepared:
+            raise RetainedChainInvalid("prepared successor INITIAL evidence differs from the sealed preparation")
+
         # Later verification may have raced an earlier retained origin.  Never
         # expose qualified DATA before the full held-custody recheck succeeds.
         guard.check()
@@ -2462,6 +2504,7 @@ def _open_chain_evidence(
             control_config_identity=held_config.identity_record(),
             backup_root=backup_physical,
             pre_census_qualification=(recovery["qualification"] if recovery is not None else None),
+            prepared_reader_record=prepared_reader_record,
         )
     except BaseException:
         guard.close()
@@ -2531,4 +2574,34 @@ __all__ = [
     "V7AcceptanceBackupEvidence",
     "open_retained_v5_to_v7_evidence",
     "open_v5_to_v7_evidence",
+    "open_prepared_successor_v5_to_v7_evidence",
 ]
+
+
+@contextmanager
+def open_prepared_successor_v5_to_v7_evidence(
+    runtime_root: Path, expected_reader_release_sha: str,
+    prepared_material: Mapping[str, Any],
+) -> Iterator[RetainedV5ToV7Evidence]:
+    """Strict current INITIAL evidence under a separately sealed successor reader.
+
+    The material is expected DATA, never historical authority or a skip flag.
+    This finite entry admits only the existing sixteen-origin preparation;
+    all current target checks run and the returned material is identical.
+    The maintenance owner separately authenticates the actual unstarted
+    preparation bundle and its selected-source lineage.
+    """
+    prepared = _validate_pinned_material(prepared_material)
+    if prepared["schema_version"] != SPENT_CTIME_MATERIAL_SCHEMA_VERSION:
+        raise RetainedChainInvalid("prepared successor requires the closed sixteen-origin variant")
+    evidence = None
+    try:
+        evidence = _open_chain_evidence(runtime_root, prepared["chain"]["tool_release"]["sha"], None,
+            _prepared_reader_sha=expected_reader_release_sha, _prepared_material=prepared)
+        evidence.check_prepared_sources()
+        yield evidence
+        evidence.check_prepared_sources()
+        evidence.check()
+    finally:
+        if evidence is not None:
+            evidence._guard.close()

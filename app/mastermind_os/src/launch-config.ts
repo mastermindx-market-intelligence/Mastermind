@@ -14,7 +14,7 @@ function choices(x: unknown, profile: boolean): x is Array<{ ref: string; label:
   return Array.isArray(x) && x.length > 0 && x.length <= 16 &&
     x.every((c) => object(c) && Object.keys(c).length === 2 &&
       string(c.label, 120) && string(c.ref, 64) &&
-      (profile ? ["research_only", "bounded_code_change"].includes(c.ref) : /^[a-z][a-z0-9._-]{1,63}$/.test(c.ref))) &&
+      (profile ? ["research_only", "bounded_code_change", "native_research_only"].includes(c.ref) : /^[a-z][a-z0-9._-]{1,63}$/.test(c.ref))) &&
     new Set(x.map((c) => c.ref)).size === x.length;
 }
 function frontierChoices(x: unknown): boolean {
@@ -47,8 +47,12 @@ export function decodeLaunchBindingConfig(raw: unknown): LaunchBindingConfig | n
   const writeCount = (parsed.allowedWritePaths as string[] | undefined)?.length ?? 0;
   const validation = parsed.validation as LaunchBindingConfig["validation"];
   const hasValidation = !!(validation?.pytest_targets?.length || validation?.compileall_paths?.length || validation?.git_diff_check);
+  if (parsed.profiles.some(p => p.ref === "native_research_only") &&
+      (parsed.projects.length !== 1 || parsed.profiles.length !== 2 ||
+       parsed.profiles[0].ref !== "research_only" || parsed.profiles[1].ref !== "native_research_only")) return null;
   for (const profile of parsed.profiles) {
-    if (profile.ref === "research_only" && (writeCount || hasValidation)) return null;
+    if (["research_only", "native_research_only"].includes(profile.ref) && (writeCount || hasValidation)) return null;
+    if (profile.ref === "native_research_only" && parsed.attemptLimit !== 1) return null;
     if (profile.ref === "bounded_code_change" && (!writeCount || !hasValidation)) return null;
   }
   const { v: _version, ...config } = parsed;

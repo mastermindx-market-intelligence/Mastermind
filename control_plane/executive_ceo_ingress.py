@@ -442,6 +442,7 @@ async def _submit(
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
     fresh_admission_observer: Any = None,
+    direct_admission: Any = None,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
@@ -463,6 +464,8 @@ async def _submit(
                 principal_admission_guard=principal_admission_guard)
         if fresh_admission_observer is not None:
             submit_kwargs["fresh_admission_observer"] = fresh_admission_observer
+        if direct_admission is not None:
+            submit_kwargs["direct_admission"] = direct_admission
         return await asyncio.to_thread(
             ceo_intent.submit_intent,
             runtime,
@@ -506,6 +509,7 @@ def _build_envelope(
     workspace_root: "Path | str",
     grounding: Mapping[str, str],
     strict_v2: bool = False,
+    direct_native: bool = False,
     principal_context: Any = None,
     principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
@@ -530,6 +534,10 @@ def _build_envelope(
             workspace_root=str(workspace_root),
             grounding=grounding,
         )
+        if direct_native:
+            if strict_v2 or normalized.get("execution_profile") != "native_research_only":
+                raise ValueError("direct native envelope composition differs")
+            envelope.update(schema=ceo_intent.INTENT_SCHEMA_DIRECT,intent_kind="direct_native_readonly",business_impact="routine")
         if strict_v2:
             envelope["schema"] = ceo_intent.INTENT_SCHEMA_V2
             envelope["intent_kind"] = "executive_coo_cycle"
@@ -585,6 +593,24 @@ async def _handle_submit(
         workspace_root=workspace_root,
         admission_guard=admission_guard,
     )
+
+
+async def handle_direct_native_submit(parsed, *, runtime, grounding_provider, workspace_root, admission_provider):
+    from control_plane.direct_native_execution import SUBMIT_SCHEMA
+    _exact_top_keys(parsed,"direct native submit",frozenset({"schema","request_ref","observed_grounding","request","principal_scope"}))
+    if parsed["schema"] != SUBMIT_SCHEMA or not callable(admission_provider):
+        raise _dependency_failure("backend_refused")
+    observed=_validate_observed_grounding(parsed["observed_grounding"])
+    try:
+        normalized=ceo_request.normalize_automated_request(parsed["request"])
+        intent_id=ceo_request.automated_intent_id(parsed["request_ref"])
+        if normalized["execution_profile"] != "native_research_only":
+            raise ValueError()
+    except (ValueError,ceo_request.CeoRequestError) as exc:
+        raise _classification_failure("invalid_input") from exc
+    return await _handle_normalized_submit(normalized,observed=observed,intent_id=intent_id,
+        runtime=runtime,grounding_provider=grounding_provider,workspace_root=workspace_root,
+        direct_admission_provider=admission_provider)
 
 
 async def _handle_submit_v2(
@@ -671,6 +697,7 @@ async def _handle_normalized_submit(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
     fresh_admission_observer: Any = None,
+    direct_admission_provider: Any = None,
 ) -> dict[str, Any]:
     """Shared replay/grounding/sink law after version-specific validation.
 
@@ -683,6 +710,9 @@ async def _handle_normalized_submit(
     the legacy optional-guard behavior remains unchanged.
     """
 
+    if normalized.get("execution_profile") == "native_research_only" and direct_admission_provider is None:
+        raise _classification_failure("invalid_input")
+
     # 3. construct the candidate envelope using the CALLER's observed_grounding
     #    claim ONLY for identity comparison (never for a new submission).
     candidate_envelope = _build_envelope(
@@ -691,6 +721,7 @@ async def _handle_normalized_submit(
         workspace_root=workspace_root,
         grounding=observed,
         strict_v2=strict_v2,
+        direct_native=direct_admission_provider is not None,
         principal_context=principal_context, principal_request_ref=principal_request_ref,
     )
     if fresh_admission_observer is not None and not strict_v2:
@@ -698,6 +729,16 @@ async def _handle_normalized_submit(
     # 4. exact command-id lookup.
     command_id = ceo_intent.command_id_for(intent_id)
     existing = await _backend_call(runtime.store.find_event_by_command_id, command_id)
+    direct_admission = None
+    if direct_admission_provider is not None:
+        try:
+            from control_plane.direct_native_execution import DirectNativeAdmission
+            direct_admission = await asyncio.to_thread(direct_admission_provider,intent_id,normalized["workstream"])
+            if type(direct_admission) is not DirectNativeAdmission:
+                raise ValueError("missing direct native admission")
+            direct_admission.check()
+        except Exception as exc:
+            raise _dependency_failure("backend_refused") from exc
 
     # 5. a durable event already exists: re-enter the one canonical CeoIntent
     #    sink BEFORE any current grounding/source-provider call.  The sink's
@@ -708,7 +749,7 @@ async def _handle_normalized_submit(
             await _submit(runtime, candidate_envelope, workspace_root,
                 principal_context=principal_context, principal_request_ref=principal_request_ref,
                 principal_admission_guard=admission_guard,
-                fresh_admission_observer=fresh_admission_observer)
+                fresh_admission_observer=fresh_admission_observer, direct_admission=direct_admission)
         )
 
     with grounding_observation_scope():
@@ -727,6 +768,7 @@ async def _handle_normalized_submit(
             workspace_root=workspace_root,
             grounding=trusted,
             strict_v2=strict_v2,
+            direct_native=direct_admission_provider is not None,
             principal_context=principal_context, principal_request_ref=principal_request_ref,
         )
 
@@ -844,6 +886,7 @@ async def _handle_normalized_submit(
             principal_context=principal_context, principal_request_ref=principal_request_ref,
             principal_admission_guard=principal_guard,
             fresh_admission_observer=fresh_admission_observer,
+            direct_admission=direct_admission,
         )
         return _finalize_receipt(receipt)
 

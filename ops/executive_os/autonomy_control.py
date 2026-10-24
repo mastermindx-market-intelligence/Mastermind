@@ -767,7 +767,7 @@ class GatewayPreparation:
     launch_document: Mapping[str, Any]
     workspace_identity: Mapping[str, str]
     derived_principal_scope: str
-    commission_template: Mapping[str, Any]
+    commission_templates: tuple[Mapping[str, Any], ...]
     derived_policy: Mapping[str, Any]
     audit_directory: Mapping[str, Any]
     studio: GatewayStudioEvidence
@@ -5869,7 +5869,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
                 }
             )
         )
-        template = self._gateway_template(receipt["launch_config"])
+        templates = self._gateway_templates(receipt["launch_config"])
         document = {
             "schema": assets.LAUNCH_SCHEMA,
             "release_sha": expected_sha,
@@ -5879,17 +5879,15 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             "executive_resource": resource,
             "launch_config": receipt["launch_config"],
             "launch_config_sha256": receipt["launch_config_sha256"],
-            "commission_template": template,
+            "commission_templates": templates,
         }
         return receipt_bytes, document, bundle_digest
 
-    def _gateway_template(self, launch_config: str) -> dict[str, Any]:
-        """Derive the ONE Root-authorized single Research-only template.
+    def _gateway_templates(self, launch_config: str) -> tuple[dict[str, Any], ...]:
+        """Derive the closed legacy choice or ordered READ-only H2 pair.
 
-        Every field is an exact mapping from the qualified Launch receipt;
-        nothing is caller granted.  The department/execution-profile references
-        and their single-entry shape were already enforced by the incumbent
-        Launch decoder; the canonical CEO-request bounds are enforced here.
+        All fields and optional-field presence come from the same qualified
+        Launch receipt. Profile selection never supplies new grant authority.
         """
         from control_plane import ceo_request
 
@@ -5904,11 +5902,21 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             or len(projects) != 1
             or type(projects[0]) is not dict
             or type(profiles) is not list
-            or len(profiles) != 1
-            or type(profiles[0]) is not dict
+            or len(profiles) not in (1, 2)
+            or any(type(profile) is not dict for profile in profiles)
         ):
             raise GatewayPublicationError("gateway_template_refused")
-        if profiles[0].get("ref") != "research_only":
+        profile_refs = [profile.get("ref") for profile in profiles]
+        if profile_refs not in (
+            ["research_only"], ["research_only", "native_research_only"]
+        ):
+            raise GatewayPublicationError("gateway_template_refused")
+        if len(profile_refs) == 2 and (
+            type(values.get("attemptLimit")) is not int
+            or values["attemptLimit"] != 1
+            or values.get("allowedWritePaths", []) != []
+            or values.get("validation", {}) != {}
+        ):
             raise GatewayPublicationError("gateway_template_refused")
         priority = values.get("priority")
         from ops.executive_os.os_release_assets import _decode_launch_binding
@@ -5934,7 +5942,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             if source in values:
                 template[target] = copy.deepcopy(values[source])
         if (
-            template["execution_profile"] not in ceo_request.EXECUTION_PROFILES
+            any(profile not in ceo_request.EXECUTION_PROFILES for profile in profile_refs)
             or type(priority) is not int
             or not ceo_request.MIN_PRIORITY <= priority <= ceo_request.MAX_PRIORITY
             or type(attempt_limit) is not int
@@ -5943,7 +5951,15 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             <= ceo_request.MAX_ATTEMPT_LIMIT
         ):
             raise GatewayPublicationError("gateway_template_refused")
-        return template
+        return tuple({**copy.deepcopy(template), "execution_profile": profile}
+                     for profile in profile_refs)
+
+    def _gateway_template(self, launch_config: str) -> dict[str, Any]:
+        """Compatibility entry for the unchanged single-choice form only."""
+        templates = self._gateway_templates(launch_config)
+        if len(templates) != 1:
+            raise GatewayPublicationError("gateway_template_refused")
+        return templates[0]
 
     # ------------------------------------------------------------------
     # Namespace DATA derivation.  These are identity digests, never a live
@@ -7346,7 +7362,7 @@ def prepare_gateway_publication(
         expected_sha=request.expected_sha,
         studio_port=OS_GATEWAY_STUDIO_PORT,
     )
-    template = launch_document["commission_template"]
+    templates = launch_document["commission_templates"]
     helper_hashes = host._helper_hashes(request.expected_sha)
     # The ONE exact existing grant document the compiler accepts.  The
     # launch/source and Studio provenance stay in ``launch_document`` and the
@@ -7358,7 +7374,8 @@ def prepare_gateway_publication(
         "studio_account": OS_GATEWAY_STUDIO_ACCOUNT,
         "studio_port": OS_GATEWAY_STUDIO_PORT,
         "policy": derived_policy,
-        "grants": [{"principal_scope": scope, "template": template}],
+        "grants": [{"principal_scope": scope, "template": template}
+                   for template in templates],
         "base_sha": prior_release,
         "audit_directory": os.fspath(_GATEWAY_AUDIT_DIRECTORY),
         "auth_helper_sha256": helper_hashes["auth_helper_sha256"],
@@ -7381,7 +7398,7 @@ def prepare_gateway_publication(
         web_client_id=web_client_id,
         derived_scope=scope,
         derived_policy=derived_policy,
-        commission_template=template,
+        commission_templates=templates,
         helper_hashes=helper_hashes,
     )
     candidate_configs = CandidateConfigs(
@@ -7408,7 +7425,7 @@ def prepare_gateway_publication(
         launch_document=launch_document,
         workspace_identity=identity,
         derived_principal_scope=scope,
-        commission_template=template,
+        commission_templates=templates,
         derived_policy=derived_policy,
         audit_directory=audit_directory,
         studio=studio,
@@ -7425,7 +7442,7 @@ def _verify_gateway_postimages(
     web_client_id: str,
     derived_scope: str,
     derived_policy: Mapping[str, Any],
-    commission_template: Mapping[str, Any],
+    commission_templates: Sequence[Mapping[str, Any]],
     helper_hashes: Mapping[str, str],
 ) -> None:
     """Hold the publication's own preservation law before any target write.
@@ -7435,8 +7452,8 @@ def _verify_gateway_postimages(
     every current policy block and the same enrolled web identity, the plist
     postimage must join the fixed release entry point and config path, and the
     grant postimage must be the ONE exact existing grant document: the
-    derived canonical OS submit policy and the single Research-only template
-    grant carrying the Root-derived namespace scope.
+    derived canonical OS submit policy and exact ordered receipt-derived
+    templates carrying the Root-derived namespace scope.
     """
     from ops.executive_os import executive_mcp_entry
 
@@ -7500,12 +7517,10 @@ def _verify_gateway_postimages(
         or grant["auth_helper_sha256"] != helper_hashes["auth_helper_sha256"]
         or grant["file_helper_sha256"] != helper_hashes["file_helper_sha256"]
         or grant["policy"] != dict(derived_policy)
-        or type(grant["grants"]) is not list
-        or len(grant["grants"]) != 1
-        or type(grant["grants"][0]) is not dict
-        or set(grant["grants"][0]) != {"principal_scope", "template"}
-        or grant["grants"][0]["principal_scope"] != derived_scope
-        or grant["grants"][0]["template"] != dict(commission_template)
+        or compiler_canonical(grant["grants"]) != compiler_canonical([
+            {"principal_scope": derived_scope, "template": dict(template)}
+            for template in commission_templates
+        ])
     ):
         raise GatewayPublicationError("gateway_grant_invalid")
 

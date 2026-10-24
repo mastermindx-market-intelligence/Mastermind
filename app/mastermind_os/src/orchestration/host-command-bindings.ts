@@ -1,4 +1,5 @@
 import { normalizeSelection, type MissionSelection } from "../mission";
+import type { DirectSelection, DirectTerminalSelection } from "../direct-native-result";
 import type {
   CommandIntent,
   FiniteCommandPort,
@@ -58,6 +59,12 @@ export interface OrchestratorCommandBinding {
   makeLaunchIntent(form: LaunchForm): CommandIntent | null;
   makeMessageIntent(sessionKey: string, text: string): CommandIntent | null;
   makeStopIntent(sessionKey: string): CommandIntent | null;
+  /** Distinct direct terminal view; no role-envelope or product acceptance fallback. */
+  readonly directNative?: {
+    read(selection: DirectSelection, signal: AbortSignal): Promise<unknown>;
+    makeConsumeIntent(selection: DirectTerminalSelection, digest: string): CommandIntent | null;
+    isDirectSelection(selection: MissionSelection): boolean;
+  };
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

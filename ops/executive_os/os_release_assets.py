@@ -342,7 +342,7 @@ def _launch_choices(value, *, profile):
         if _launch_string(choice["label"], 120) is None or _launch_string(choice["ref"], 64) is None:
             return None
         if profile:
-            if choice["ref"] not in ("research_only", "bounded_code_change"):
+            if choice["ref"] not in ("research_only", "bounded_code_change", "native_research_only"):
                 return None
         elif re.fullmatch(r"[a-z][a-z0-9._-]{1,63}", choice["ref"]) is None:
             return None
@@ -410,8 +410,14 @@ def _decode_launch_binding(parsed):
     validation = parsed.get("validation") or {}
     has_validation = bool(validation.get("pytest_targets") or validation.get("compileall_paths")
                           or validation.get("git_diff_check"))
+    if any(p["ref"] == "native_research_only" for p in parsed["profiles"]):
+        if (len(parsed["projects"]) != 1 or
+                [p["ref"] for p in parsed["profiles"]] != ["research_only", "native_research_only"]):
+            return None
     for profile in parsed["profiles"]:
-        if profile["ref"] == "research_only" and (write_count or has_validation):
+        if profile["ref"] in ("research_only", "native_research_only") and (write_count or has_validation):
+            return None
+        if profile["ref"] == "native_research_only" and parsed.get("attemptLimit") != 1:
             return None
         if profile["ref"] == "bounded_code_change" and (not write_count or not has_validation):
             return None
