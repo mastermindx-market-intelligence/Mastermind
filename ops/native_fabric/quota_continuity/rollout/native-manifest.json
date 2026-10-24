@@ -38,7 +38,7 @@
   "ext/go_remote_run.py": "ca36b8867225d64d18606d13a56929e13aa086b8993d5e540f52d5594ad93d87",
   "ext/go_remote_transport.py": "a72be62874223a1526cfb0764835423f03d5a9f3d0078c51661bcf1946113ed0",
   "ext/host_pick.py": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
-  "ext/host_pull.sh": "eba14f067f9dd1a3f2d19e0c1204340fd0af560c03372ff6c5e68d22aa9b763a",
+  "ext/host_pull.sh": "d15cdb7c9a9bbf0adc9626d3269371eeec00afed5b60b8a83e20f70c448d9d3e",
   "ext/host_pull_backend.py": "742f0bf4f90d1ad4bd10851e3acec6564b9172d2c8185b013b58946071955659",
   "ext/host_pull_probe.template": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
   "ext/lane_runtime.py": "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329",

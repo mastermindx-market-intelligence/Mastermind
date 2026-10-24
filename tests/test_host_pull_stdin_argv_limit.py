@@ -95,6 +95,40 @@ def test_interrupts_fail_closed_and_remove_private_spool(tmp_path):
                 if stream and not stream.closed:
                     stream.close()
 
+def test_macos_bash32_unset_array_never_breaks_normal_probe_or_inspection():
+    """Exercise actual run_probe options without a network or provider effect.
+
+    macOS /bin/bash 3.2 with set -u throws on an empty "${array[@]}".
+    The default probe must have nonempty SSH flags even without key_guard.
+    """
+    source = SOURCE.read_text()
+    start = source.index('run_probe() {\n')
+    end = source.index('\n}\n', start) + 2
+    function = source[start:end]
+    command = ("    perl -e 'alarm 25; exec @ARGV' ssh "
+               '"${key_options[@]}" "$alias" "$HOST_PULL_REMOTE_STDIN_EXEC" '
+               '2>/dev/null <<< "$probe"')
+    assert function.count(command) == 1
+    function = function.replace(command, '    printf "<%s>\\n" "${key_options[@]}"', 1)
+    for guard, expected in (
+        ('', ['-o','BatchMode=yes','-o','ConnectTimeout=8']),
+        ('fixed-hook-inspection', ['-o','BatchMode=yes','-o','ConnectTimeout=8',
+                                   '-o','StrictHostKeyChecking=yes','-o','UpdateHostKeys=no']),
+    ):
+        call = 'run_probe 0 fixture-host inert' + (' ' + guard if guard else '')
+        run = subprocess.run(['/bin/bash', '--noprofile', '--norc', '-c',
+                              'set -u\nHOST_PULL_REMOTE_STDIN_EXEC=inert\n' + function +
+                              '\n' + call + '\n'], capture_output=True, text=True,
+                             timeout=5)
+        assert run.returncode == 0, run.stderr
+        assert [row[1:-1] for row in run.stdout.splitlines()] == expected
+    denied = subprocess.run(['/bin/bash', '--noprofile', '--norc', '-c',
+                             'set -u\nHOST_PULL_REMOTE_STDIN_EXEC=inert\n' + function +
+                             '\nrun_probe 0 fixture-host inert unsupported-guard\n'],
+                            capture_output=True, text=True, timeout=5)
+    assert denied.returncode == 78 and not denied.stdout
+
+
 def test_local_execution_and_strict_diagnostic_ssh_policy_unchanged():
     source = SOURCE.read_text()
     assert 'sh -c "$probe" 2>/dev/null' in source
