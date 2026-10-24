@@ -9,6 +9,8 @@ repository — is the *execution* plane. The boot packet is the read-only bridge
 the former into the latter: one deterministic document that lets the AI CEO seat (Sol)
 reconstruct organizational state from canonical stores instead of from chat memory.
 
+The text render always includes a `LEADERSHIP` section. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. That line is standing instruction, not a fact read from Agent OS.
+
 Module: `control_plane/ceo_boot_packet.py` · CLI: `scripts/ceo_boot_packet.py` ·
 tests: `tests/test_ceo_boot_packet.py` (wired into the hermetic governance gate in
 `.github/workflows/ci.yml`).

@@ -266,6 +266,7 @@ Executive authority. A later deployment or reciprocal-dialogue gate does not fre
 permitted source work. No new permission is created by this scoping rule: the applicable current
 assignment, source custody, protected procedure, resource permission and effect fences remain mandatory.
 Use ACTIVE_EXECUTION's start/recovery defaults; do not add a second Slack claim or human approval.
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve.
 
 The current assignment authorizes ordinary in-scope investigation, planning, edits, tests and
 reversible repair. Reuse it; do not ask for another approval or mandatory design-signoff. Check the

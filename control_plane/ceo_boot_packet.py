@@ -1121,6 +1121,14 @@ def _short(sha: str | None) -> str:
     return sha[:12] if sha else "?"
 
 
+LEADERSHIP_TAKEOVER = (
+    "Ownership is a role, not a session: never wait on an absent/orphaned owner "
+    "or ask the Chairman to find old chats. The current session assumes leadership, "
+    "records the takeover in the source-linked handoff, and proceeds. "
+    "Independent review is still required; never self-merge or approve."
+)
+
+
 def render_packet(packet: dict[str, Any]) -> str:
     """Human-readable form of a boot packet.
 
@@ -1141,7 +1149,11 @@ def render_packet(packet: dict[str, Any]) -> str:
         f"({mastermind.get('branch') or '?'}) · macro {macro_cell}",
         f"schema {packet.get('schema', '?')}",
         "",
+        "LEADERSHIP",
     ]
+    for segment in _wrap(LEADERSHIP_TAKEOVER, _WIDTH - 2):
+        out.append("  " + segment)
+    out.append("")
 
     # --- STRATEGY -----------------------------------------------------------
     if strategic is None:

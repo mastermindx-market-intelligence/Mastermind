@@ -42,3 +42,5 @@ which module to call to get a signal, how a new directional:false leaf would mir
 existing access pattern. Cite real file paths and symbols. You are read-only — you explain
 and plan; you do not edit files, submit a target book, or call a state-changing MCP in this
 reasoning layer.
+
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve.

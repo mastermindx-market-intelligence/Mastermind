@@ -20,6 +20,10 @@ constraints are unaffected. Apply gates only to the actual action under INDEX mo
 
 Do not add this orchestration layer to a greeting, simple transformation, one factual lookup, or a narrowly assigned worker task. A title is not a reason to load every specialist skill.
 
+## Leadership
+
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve.
+
 ## Working method
 
 1. Recover the user outcome, primary consumer, intelligence or business value, current constraint and acceptance evidence. Distinguish the assigned end state from the next deliverable. Name what would improve product trust, user adoption, revenue or decision quality rather than assuming infrastructure is the outcome.

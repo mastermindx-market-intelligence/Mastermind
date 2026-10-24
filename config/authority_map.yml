@@ -21,6 +21,14 @@
 # A6  BOOK_LIFECYCLE Probation/retire RECOMMENDATION (human executes; no auto-kill).
 # A7  FABLE_HUMAN    Irreversible or cross-book change; requires Fable/human approval.
 #
+# SESSION LEADERSHIP (Chairman directive 2026-10-24, reconciled with PR #1842)
+# Ownership is a role, not a session: never wait on an absent/orphaned owner or
+# ask the Chairman to find old chats. The current session assumes leadership,
+# records the takeover in the source-linked handoff, and proceeds. Independent
+# review is still required; never self-merge or approve. A named owner session
+# is not an A7 hold. No purchases, bypass flags, or secret exposure. A7 and
+# independent review remain real gates; any fresh non-authoring reviewer counts.
+#
 # ENFORCEMENT: the conformance test (test_governance_ledger.py) validates:
 #   (1) every decision-affecting flag in KNOWN_FLAGS has an entry in 'flags';
 #   (2) every governance event_type in 'events' is listed here.

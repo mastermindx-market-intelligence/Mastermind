@@ -52,6 +52,8 @@ worktree and move only the task's deliberate edits there.
    the assigned scope. While checks are queued/running, continue the highest-leverage safe
    independent implementation, tests, review or integration preparation. Do not duplicate an
    incumbent worker or mutate its frozen review candidate merely to appear busy.
+Independent review is still required before merge. Any fresh non-authoring reviewer, Fabric reviewer, or cloud agent counts. A named owner is never required. The author does not self-merge or self-approve. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. No purchases, bypass flags, or secret exposure.
+
 5. Offload the wait to one existing Class-E or Class-T observer through the current
    process/CI owner. Bind repository, PR, exact head SHA and workflow run IDs; retain the
    process/run handle and return location in the existing checkpoint. Reuse an observer rather

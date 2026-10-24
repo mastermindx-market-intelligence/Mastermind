@@ -46,7 +46,7 @@ browser planning subtask fully persisted. Independent packets continue normally.
 | --- | --- | --- |
 | `executive_agent_capabilities.py` and capability policy | H1, H2, H7 | Single registry writer; H2 consumes an immutable candidate interface and does not edit admission during proof. |
 | Native adapter/supervisor | H1, H7 | One coordinated profile/observation/resource integration candidate; restricted lane retained. |
-| COO MCP/app/ingress/root constructor | H3, H4 | H3 packages current six-tool version; H4 adds only its reviewed versioned operation after owner acceptance. |
+| COO MCP/app/ingress/root constructor | H3, H4 | H3 packages current six-tool version; H4 adds only its reviewed versioned operation after independent review. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. |
 | Neutral dialogue, gateway and runtime binding | H4, H6 | Root association and principal ruling semantics reviewed together; no independent role widening in the facade. |
 | Source publication and CI observer | H5, all source lanes | Frozen candidate reviewed once; observer never changes its head or publication authority. |
 | Agent OS records in Macro | H6 and program continuity | Separate Macro custody/procedure; no source checkout copied into Mastermind as a new store. |
