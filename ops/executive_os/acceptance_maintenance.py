@@ -2945,7 +2945,7 @@ def _require_pre_census_stopped() -> None:
     result = subprocess.run(['/bin/launchctl', 'print', 'system/' + label],
                             capture_output=True, timeout=10)
     absent = f'Could not find service "{label}" in domain for system\n'.encode('ascii')
-    if result.returncode != 113 or result.stdout or result.stderr != absent:
+    if result.returncode != 113 or result.stdout or result.stderr not in (absent, b"Bad request.\n" + absent):
         raise MaintenanceError("Executive relay absence could not be verified")
 
 

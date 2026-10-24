@@ -282,7 +282,7 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '703470426984f995f39690aaf667c8d0ed5c98262f6e83224b201611d873a080',
+    "sha256": '111c20b38b335741ad612b8f2fa69b6d672716d50d071286d978d6a4997ad495',
     "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1711, 46, 49, 'int', '400'), (1711, 66, 69, 'int', '500')),
 }
 
