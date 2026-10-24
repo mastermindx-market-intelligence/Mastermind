@@ -705,6 +705,22 @@ ALLOWED_PATHS = frozenset(
         "evidence/CHAIRMAN_C2_RULING_AND_SELF_REVIEW.md",
         "scripts/agent_eval/harness_convergence.py",
         "tests/test_agent_eval_harness_convergence.py",
+        # Harness2 evidence-only extension: direct Chairman integration
+        # commission 2026-10-21. Exact files only; no new execution scope.
+        "docs/superpowers/plans/2026-10-21-harness2-agentos-native-adaptation.md",
+        "scripts/agent_eval/harness2_bridge.py",
+        "tests/test_agent_eval_harness2_bridge.py",
+        # Same Chairman-authorized Harness2/1663 continuation: pure byte-bound
+        # importer plus tests. Runtime/provider/config restrictions stay intact.
+        "scripts/agent_eval/harness2_native.py",
+        "tests/test_agent_eval_harness2_native.py",
+        "scripts/agent_eval/harness2_context.py",
+        "tests/test_agent_eval_harness2_context.py",
+        # Same PR1663 native-method laboratory extension. The callback-based
+        # runner stays OUTSIDE the inert core; no provider/runtime import is
+        # admitted inside scripts/agent_eval and no control-plane file changes.
+        "scripts/ohf/harness2_recursion.py",
+        "tests/test_agent_eval_harness2_recursion.py",
     }
 )
 

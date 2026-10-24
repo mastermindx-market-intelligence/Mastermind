@@ -16,6 +16,8 @@ than as a clean success.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import os
 import sys
@@ -171,6 +173,75 @@ def _cmd_finalize_run(args: argparse.Namespace) -> int:
             "output": str(args.output),
         }
     )
+    return _EXIT_OK if run["validity"]["status"] == "VALID" else _EXIT_INCOMPLETE
+
+
+def _cmd_harness2_import(args: argparse.Namespace) -> int:
+    """Import explicit retained files into the incumbent store; never follow summary paths."""
+    from scripts.agent_eval.harness2_native import (
+        MAX_JSON_BYTES, Harness2ImportError, decode_json, finalize_selected_run,
+    )
+
+    def read_bounded(name: str) -> bytes:
+        path = Path(name)
+        if path.is_symlink() or not path.is_file():
+            raise CliUsageError("Harness2 inputs must be explicit regular non-symlink files")
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read(MAX_JSON_BYTES + 1)
+        except OSError as exc:
+            raise CliUsageError("Harness2 input file is unreadable") from exc
+        if not 0 < len(raw) <= MAX_JSON_BYTES:
+            raise CliUsageError("Harness2 input exceeds the nonempty one-MiB command bound")
+        return raw
+
+    try:
+        binding_bytes = read_bounded(args.binding)
+        summary_bytes = read_bounded(args.summary)
+        native_bytes = read_bounded(args.native_observation)
+        output_bytes = read_bounded(args.output_artifact)
+        encoded_files = decode_json(read_bounded(args.harness_files), canonical=True)
+        if not 0 < len(encoded_files) <= 128:
+            raise CliUsageError("Harness2 harness-files requires one to 128 files")
+        files = {}
+        for path, encoded in encoded_files.items():
+            if type(encoded) is not str:
+                raise CliUsageError("Harness2 harness-files values must be base64 strings")
+            try:
+                files[path] = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise CliUsageError("Harness2 harness-files contains invalid base64") from exc
+        draft = decode_json(native_bytes, canonical=True)
+        contracts.validate_run_draft_shape(draft)
+        artifact_store = store.ArtifactStore(args.root)
+        scenario = artifact_store.resolve_scenario(
+            draft["scenario"]["scenario_id"], draft["scenario"]["scenario_version"])
+        configuration = artifact_store.resolve_configuration(draft["configuration"]["configuration_id"])
+        experiment_id = draft["comparison"]["experiment_id"]
+        experiment = artifact_store.resolve_experiment(experiment_id) if experiment_id else None
+        if scenario is None or configuration is None or (experiment_id and experiment is None):
+            raise CliUsageError("Harness2 native inputs must already resolve through --root")
+        run = finalize_selected_run(
+            binding_bytes=binding_bytes, expected_binding_digest=args.binding_digest,
+            summary_bytes=summary_bytes, native_observation_bytes=native_bytes,
+            output_bytes=output_bytes, harness_files=files,
+            scenario=scenario, configuration=configuration, experiment=experiment,
+            validator_id=args.validator_id, validator_version=args.validator_version,
+            validator_code_ref=args.validator_code_ref, validated_at=args.validated_at,
+            created_at=args.created_at,
+        )
+        receipt = artifact_store.create(run)
+    except Harness2ImportError as exc:
+        raise CliUsageError(str(exc)) from exc
+    _print_json({
+        "scope": "EVALUATION_GRAPH_VERIFIED",
+        "artifact_check": "BYTE_AND_IDENTITY_CHECKED_NOT_AUTHENTICATED",
+        "run_id": run["run_id"], "run_digest": run["run_digest"],
+        "validity_status": run["validity"]["status"],
+        "reason_codes": list(run["validity"]["reason_codes"]),
+        "disposition": receipt.disposition.value, "path": receipt.path,
+        "promotion": "NONE", "runtime_authority": "NONE",
+    })
     return _EXIT_OK if run["validity"]["status"] == "VALID" else _EXIT_INCOMPLETE
 
 
@@ -382,6 +453,15 @@ def _build_parser() -> argparse.ArgumentParser:
     finalize_run.add_argument("--created-at", required=True)
     finalize_run.add_argument("--output", required=True)
     finalize_run.set_defaults(func=_cmd_finalize_run)
+
+    harness2_import = subparsers.add_parser(
+        "harness2-import", help="bind retained Harness2 bytes to native observations and publish an EVAL run; no promotion"
+    )
+    for flag in ("root", "binding", "binding-digest", "summary", "native-observation",
+                 "output-artifact", "harness-files", "validator-id", "validator-version",
+                 "validator-code-ref", "validated-at", "created-at"):
+        harness2_import.add_argument("--" + flag, required=True)
+    harness2_import.set_defaults(func=_cmd_harness2_import)
 
     score_integrity = subparsers.add_parser("score-integrity", help="append a technical-integrity scorer pass for one run")
     score_integrity.add_argument("--root", required=True)
