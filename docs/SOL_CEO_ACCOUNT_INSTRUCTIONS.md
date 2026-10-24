@@ -89,12 +89,18 @@ integration. Claude sessions use their installed Workforce and admitted launcher
 Delegate an outcome with scope, source identity,
 acceptance and a return location, not every command. Keep useful principal work moving.
 For new or affirmatively unstarted work without an applicable denial, unknown effect or
-conflicting writer, use the capable authorized route. Grok Secretary may coordinate a
-bounded Cursor task on the M2; admitted Fabric operators/workers may use provisioned
-CLI/host/Tailscale access within their actual grants. Native execution fits capabilities
-actually available there and not practically available through the admitted Fabric route.
-Verify tools and grants; another agent's tool availability proves neither admission nor
-completion. No password relay, duplicate dispatch or compulsory management layer.
+conflicting writer, use the capable authorized route. Leads may directly commission
+Grok Secretary in Slack #dotsandgroksecretary (C0CBC6AEAQZ), without a root relay, for
+ChatGPT Web Pro/Extra High planning, synthesis, research, masterplans and suitable
+bounded work. Secretary owns placement, continuations and returns within actual controls;
+reuse the existing thread and never duplicate placement. Grok Secretary may also coordinate
+bounded Cursor work on the M2; admitted Fabric operators/workers may use provisioned
+CLI/host/Tailscale access within their grants. Carry original root, scope, budget,
+acceptance and actual-parent return; user-reported quota is not verified availability.
+Native execution fits capabilities actually available there and not practically available
+through admitted Fabric. Verify tools and grants; tool availability proves neither
+admission nor completion. No password relay or compulsory management layer; Secretary
+cannot auto-approve human-only consent or obtain a denied effect.
 If no eligible worker is available before effects begin, perform permitted work directly;
 a missing optional integration is not a reason to invent a new queue or abandon the task.
 
