@@ -158,13 +158,16 @@ class SlidingWindowAdmissions:
         for q in self.events:
             while q and q[0] <= now - self.settings.window_s:
                 q.popleft()
-        # A provider may meter all keys in the same organization together.
-        # This optional stricter admission is computed from the same persistent
-        # per-key reservations, never from another uncoordinated token counter.
+        # Include reservations made by keys rotated out of the active config.
+        # The existing durable admission table is the single source for both
+        # per-key and shared caps; rotation cannot reset the organization's RPM.
         if self.settings.safe_rpm_shared is not None:
-            shared_used = sum(map(len, self.events))
+            shared_used, earliest = self.db.execute(
+                "SELECT COUNT(*), MIN(sent_at) FROM admissions WHERE sent_at > ?",
+                (now - self.settings.window_s,),
+            ).fetchone()
             if shared_used >= self.settings.safe_rpm_shared:
-                return None, min(q[0] for q in self.events if q) + self.settings.window_s
+                return None, earliest + self.settings.window_s
         for step in range(n):
             i = (self._cursor + step) % n
             q = self.events[i]
@@ -246,13 +249,19 @@ class SlidingWindowAdmissions:
                     "remaining_in_window": max(0, self.settings.safe_rpm - used),
                     "inflight": self._inflight[i],
                 })
+            # The shared count includes recent admissions from removed/rotated
+            # keys as well as configured keys, but exposes no key identities.
+            shared_used = self.db.execute(
+                "SELECT COUNT(*) FROM admissions WHERE sent_at > ?",
+                (now - self.settings.window_s,),
+            ).fetchone()[0]
             return {
                 "pending": len(self._waiters),
                 "safe_rpm_per_key": self.settings.safe_rpm,
                 "shared_rpm_cap": self.settings.safe_rpm_shared,
-                "shared_used_in_window": sum(x["used_in_window"] for x in slots),
+                "shared_used_in_window": shared_used,
                 "shared_remaining_in_window": (
-                    max(0, self.settings.safe_rpm_shared - sum(x["used_in_window"] for x in slots))
+                    max(0, self.settings.safe_rpm_shared - shared_used)
                     if self.settings.safe_rpm_shared is not None else None
                 ),
                 "window_seconds": self.settings.window_s,

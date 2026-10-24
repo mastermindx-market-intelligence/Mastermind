@@ -379,3 +379,25 @@ async def test_shared_org_ceiling_queues_across_keys_and_survives_restart(tmp_pa
 def test_shared_org_ceiling_rejects_nonpositive_values(tmp_path):
     with pytest.raises(ValueError, match="SAFE_RPM_SHARED"):
         settings(tmp_path, safe_rpm_shared=0)
+
+
+@pytest.mark.asyncio
+async def test_shared_org_ceiling_counts_retired_key_admissions_after_rotation(tmp_path):
+    fake_time = [1500.0]
+    first_config = settings(tmp_path, api_keys=("old-key", "shared-key"),
+                            safe_rpm=3, safe_rpm_shared=1, window_s=0.1)
+    first = SlidingWindowAdmissions(first_config, clock=lambda: fake_time[0])
+    assert await first.acquire(time.monotonic() + 0.05) == 0
+    await first.release(0)
+    first.close()
+
+    new_config = settings(tmp_path, api_keys=("replacement-key", "shared-key"),
+                          safe_rpm=3, safe_rpm_shared=1, window_s=0.1)
+    new = SlidingWindowAdmissions(new_config, clock=lambda: fake_time[0])
+    assert (await new.snapshot())["shared_used_in_window"] == 1
+    with pytest.raises(QueueExpired):
+        await new.acquire(time.monotonic() + 0.015)
+    fake_time[0] += 0.11
+    slot = await new.acquire(time.monotonic() + 0.05)
+    await new.release(slot)
+    new.close()
