@@ -1,0 +1,1679 @@
+{
+  "schema": "mastermind.paper-clone-prune-hierarchy.v1",
+  "classification": "READ_ONLY_PROPOSED_ALLOCATION_NO_ACTION_AUTHORITY",
+  "data_custody": {
+    "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+    "preexisting_verified_clone_id": "01M5HVW84WZFE62DREB6QB9ZDJ",
+    "preserve_original_and_preexisting_clone": true,
+    "copy_root_candidate_file_id": null,
+    "baseline_inventory_blob_sha": "ee85aecb7b3ee32728c3ba441f93bacfaf0d12c7",
+    "visibility_delta_blob_sha": "1811ea8cc0673d623ffbc57af66e1a3272be81e3",
+    "not_atomic_or_current": true
+  },
+  "safety": {
+    "source_may_have_changed_since_clone": true,
+    "observed_commodities_drift": {
+      "page_id": "p-L-0",
+      "source_nodes": 6078,
+      "old_clone_nodes": 6070,
+      "artboards_each": 41
+    },
+    "existing_clone_also_warns_too_large": true,
+    "first_party_exact_target_ui_deletion_not_production_qualified": true,
+    "no_source_delete": true,
+    "no_clones_or_prunes_performed": true,
+    "large_page_artboard_level_transfer_unavailable": true,
+    "do_not_execute_without_fresh_evidence": true
+  },
+  "cost_comparison": {
+    "total_historical_visible_pages": 57,
+    "leaf_buckets": 32,
+    "ordinary_whole_page_candidate_files": 26,
+    "held_one_page_buckets_requiring_artboard_level_split": 6,
+    "working_copy_files_needed_if_preserving_first_clone": 32,
+    "internal_split_steps": 31,
+    "naive_delete_page_calls_from_full_copy_for_every_leaf": 1767,
+    "hierarchical_delete_page_calls_on_copies": 275,
+    "estimated_page_delete_call_reduction_percent": 84.4,
+    "max_leaf_depth": 6
+  },
+  "algorithm": "Deterministic Huffman-weighted binary split by page count, treating entire candidate page groups as indivisible. At each split native-clone one already-verified parent work file, then prune complementary sets only in the two working child copies; keep the original and historical clone unchanged.",
+  "leaf_buckets": [
+    {
+      "bucket_id": "01 Design system/volume-01",
+      "page_ids": [
+        "p-1P-0",
+        "p-1Q-0",
+        "p-5-0"
+      ],
+      "baseline_nodes": 1290,
+      "baseline_artboards": 22,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "02 Shared shell/volume-01",
+      "page_ids": [
+        "p-18-0",
+        "p-23-0",
+        "p-D-0"
+      ],
+      "baseline_nodes": 4362,
+      "baseline_artboards": 31,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "03 Market memory/volume-01",
+      "page_ids": [
+        "p-22-0"
+      ],
+      "baseline_nodes": 574,
+      "baseline_artboards": 8,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "03 Shared market references/volume-01",
+      "page_ids": [
+        "p-1R-0"
+      ],
+      "baseline_nodes": 3925,
+      "baseline_artboards": 16,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "03 Shared market references/volume-02",
+      "page_ids": [
+        "p-1U-0"
+      ],
+      "baseline_nodes": 2877,
+      "baseline_artboards": 20,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "03 Shared market references/volume-03",
+      "page_ids": [
+        "p-1T-0"
+      ],
+      "baseline_nodes": 1956,
+      "baseline_artboards": 22,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "03 Shared market references/volume-04",
+      "page_ids": [
+        "p-1S-0"
+      ],
+      "baseline_nodes": 1423,
+      "baseline_artboards": 18,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "05 Sector R2 and references/volume-01",
+      "page_ids": [
+        "p-6-1",
+        "p-9-0",
+        "p-E-1",
+        "p-Y-0"
+      ],
+      "baseline_nodes": 3885,
+      "baseline_artboards": 29,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "06 Terminal/volume-01",
+      "page_ids": [
+        "p-15-0",
+        "p-1B-0",
+        "p-Q-0"
+      ],
+      "baseline_nodes": 1945,
+      "baseline_artboards": 18,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "07 Bonds current studies/volume-01",
+      "page_ids": [
+        "p-O-1"
+      ],
+      "baseline_nodes": 4299,
+      "baseline_artboards": 29,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "07 Bonds current studies/volume-02",
+      "page_ids": [
+        "p-1E-0",
+        "p-1H-0"
+      ],
+      "baseline_nodes": 4813,
+      "baseline_artboards": 23,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "08 Bonds archive - dedicated/volume-01",
+      "page_ids": [
+        "p-1Y-1"
+      ],
+      "baseline_nodes": 5121,
+      "baseline_artboards": 28,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "10 Forex archive/volume-01",
+      "page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0"
+      ],
+      "baseline_nodes": 4419,
+      "baseline_artboards": 30,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "10 Forex archive/volume-02",
+      "page_ids": [
+        "p-1X-1"
+      ],
+      "baseline_nodes": 2277,
+      "baseline_artboards": 15,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "11 Crypto/volume-01",
+      "page_ids": [
+        "p-10-0",
+        "p-11-0"
+      ],
+      "baseline_nodes": 3798,
+      "baseline_artboards": 31,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "12 Macro commodities/volume-01",
+      "page_ids": [
+        "p-1I-0",
+        "p-1W-1"
+      ],
+      "baseline_nodes": 516,
+      "baseline_artboards": 7,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "13 Intelligence Hub archive - dedicated/volume-01",
+      "page_ids": [
+        "p-7-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0"
+      ],
+      "baseline_nodes": 3523,
+      "baseline_artboards": 32,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "14 Catalyst and policy/volume-01",
+      "page_ids": [
+        "p-1J-0",
+        "p-1Z-1",
+        "p-J-1"
+      ],
+      "baseline_nodes": 2674,
+      "baseline_artboards": 28,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "14 Catalyst and policy/volume-02",
+      "page_ids": [
+        "p-20-0"
+      ],
+      "baseline_nodes": 776,
+      "baseline_artboards": 10,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "15 Gov and Bio builders/volume-01",
+      "page_ids": [
+        "p-1M-0",
+        "p-1N-0",
+        "p-S-1"
+      ],
+      "baseline_nodes": 5478,
+      "baseline_artboards": 30,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "15 Gov and Bio builders/volume-02",
+      "page_ids": [
+        "p-K-0"
+      ],
+      "baseline_nodes": 2372,
+      "baseline_artboards": 23,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "15 Gov and Bio builders/volume-03",
+      "page_ids": [
+        "p-1K-0",
+        "p-1L-0"
+      ],
+      "baseline_nodes": 3211,
+      "baseline_artboards": 25,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "16 News breadth and confluence/volume-01",
+      "page_ids": [
+        "p-13-1",
+        "p-3-1"
+      ],
+      "baseline_nodes": 5072,
+      "baseline_artboards": 23,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "16 News breadth and confluence/volume-02",
+      "page_ids": [
+        "p-A-0",
+        "p-H-1"
+      ],
+      "baseline_nodes": 2673,
+      "baseline_artboards": 25,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "17 Bot designs/volume-01",
+      "page_ids": [
+        "p-14-0"
+      ],
+      "baseline_nodes": 2000,
+      "baseline_artboards": 13,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "20 Misc legacy archives/volume-01",
+      "page_ids": [
+        "p-V-0",
+        "p-W-0"
+      ],
+      "baseline_nodes": 4464,
+      "baseline_artboards": 19,
+      "oversize_page_hold": false
+    },
+    {
+      "bucket_id": "HELD/p-1A-0",
+      "page_ids": [
+        "p-1A-0"
+      ],
+      "baseline_nodes": 7087,
+      "baseline_artboards": 66,
+      "oversize_page_hold": true
+    },
+    {
+      "bucket_id": "HELD/p-24-0",
+      "page_ids": [
+        "p-24-0"
+      ],
+      "baseline_nodes": 7065,
+      "baseline_artboards": 23,
+      "oversize_page_hold": true
+    },
+    {
+      "bucket_id": "HELD/p-8-1",
+      "page_ids": [
+        "p-8-1"
+      ],
+      "baseline_nodes": 11305,
+      "baseline_artboards": 10,
+      "oversize_page_hold": true
+    },
+    {
+      "bucket_id": "HELD/p-L-0",
+      "page_ids": [
+        "p-L-0"
+      ],
+      "baseline_nodes": 5664,
+      "baseline_artboards": 39,
+      "oversize_page_hold": true
+    },
+    {
+      "bucket_id": "HELD/p-N-1",
+      "page_ids": [
+        "p-N-1"
+      ],
+      "baseline_nodes": 14225,
+      "baseline_artboards": 101,
+      "oversize_page_hold": true
+    },
+    {
+      "bucket_id": "HELD/p-Z-0",
+      "page_ids": [
+        "p-Z-0"
+      ],
+      "baseline_nodes": 11638,
+      "baseline_artboards": 71,
+      "oversize_page_hold": true
+    }
+  ],
+  "split_steps": [
+    {
+      "path": "root",
+      "source_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-13-1",
+        "p-14-0",
+        "p-15-0",
+        "p-16-0",
+        "p-17-0",
+        "p-18-0",
+        "p-1A-0",
+        "p-1B-0",
+        "p-1E-0",
+        "p-1F-0",
+        "p-1H-0",
+        "p-1I-0",
+        "p-1J-0",
+        "p-1K-0",
+        "p-1L-0",
+        "p-1M-0",
+        "p-1N-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-1R-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-1W-1",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-1Z-1",
+        "p-20-0",
+        "p-22-0",
+        "p-23-0",
+        "p-24-0",
+        "p-3-1",
+        "p-5-0",
+        "p-6-1",
+        "p-7-1",
+        "p-8-1",
+        "p-9-0",
+        "p-A-0",
+        "p-D-0",
+        "p-E-1",
+        "p-H-1",
+        "p-I-1",
+        "p-J-1",
+        "p-K-0",
+        "p-L-0",
+        "p-N-1",
+        "p-O-1",
+        "p-Q-0",
+        "p-S-1",
+        "p-T-0",
+        "p-V-0",
+        "p-W-0",
+        "p-X-0",
+        "p-Y-0",
+        "p-Z-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-15-0",
+        "p-16-0",
+        "p-17-0",
+        "p-18-0",
+        "p-1B-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1M-0",
+        "p-1N-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-1R-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-1Z-1",
+        "p-22-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0",
+        "p-J-1",
+        "p-O-1",
+        "p-Q-0",
+        "p-S-1",
+        "p-Z-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-13-1",
+        "p-14-0",
+        "p-1A-0",
+        "p-1E-0",
+        "p-1H-0",
+        "p-1I-0",
+        "p-1K-0",
+        "p-1L-0",
+        "p-1W-1",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-20-0",
+        "p-24-0",
+        "p-3-1",
+        "p-6-1",
+        "p-7-1",
+        "p-8-1",
+        "p-9-0",
+        "p-A-0",
+        "p-E-1",
+        "p-H-1",
+        "p-I-1",
+        "p-K-0",
+        "p-L-0",
+        "p-N-1",
+        "p-T-0",
+        "p-V-0",
+        "p-W-0",
+        "p-X-0",
+        "p-Y-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-13-1",
+        "p-14-0",
+        "p-1A-0",
+        "p-1E-0",
+        "p-1H-0",
+        "p-1I-0",
+        "p-1K-0",
+        "p-1L-0",
+        "p-1W-1",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-20-0",
+        "p-24-0",
+        "p-3-1",
+        "p-6-1",
+        "p-7-1",
+        "p-8-1",
+        "p-9-0",
+        "p-A-0",
+        "p-E-1",
+        "p-H-1",
+        "p-I-1",
+        "p-K-0",
+        "p-L-0",
+        "p-N-1",
+        "p-T-0",
+        "p-V-0",
+        "p-W-0",
+        "p-X-0",
+        "p-Y-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-15-0",
+        "p-16-0",
+        "p-17-0",
+        "p-18-0",
+        "p-1B-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1M-0",
+        "p-1N-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-1R-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-1Z-1",
+        "p-22-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0",
+        "p-J-1",
+        "p-O-1",
+        "p-Q-0",
+        "p-S-1",
+        "p-Z-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootL",
+      "source_page_ids": [
+        "p-15-0",
+        "p-16-0",
+        "p-17-0",
+        "p-18-0",
+        "p-1B-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1M-0",
+        "p-1N-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-1R-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-1Z-1",
+        "p-22-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0",
+        "p-J-1",
+        "p-O-1",
+        "p-Q-0",
+        "p-S-1",
+        "p-Z-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-15-0",
+        "p-18-0",
+        "p-1B-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-1R-0",
+        "p-22-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0",
+        "p-Q-0",
+        "p-Z-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1M-0",
+        "p-1N-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-1Z-1",
+        "p-J-1",
+        "p-O-1",
+        "p-S-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1M-0",
+        "p-1N-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-1Z-1",
+        "p-J-1",
+        "p-O-1",
+        "p-S-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-15-0",
+        "p-18-0",
+        "p-1B-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-1R-0",
+        "p-22-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0",
+        "p-Q-0",
+        "p-Z-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLL",
+      "source_page_ids": [
+        "p-15-0",
+        "p-18-0",
+        "p-1B-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-1R-0",
+        "p-22-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0",
+        "p-Q-0",
+        "p-Z-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-18-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-15-0",
+        "p-1B-0",
+        "p-1R-0",
+        "p-22-0",
+        "p-Q-0",
+        "p-Z-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-15-0",
+        "p-1B-0",
+        "p-1R-0",
+        "p-22-0",
+        "p-Q-0",
+        "p-Z-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-18-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLLL",
+      "source_page_ids": [
+        "p-18-0",
+        "p-1P-0",
+        "p-1Q-0",
+        "p-23-0",
+        "p-5-0",
+        "p-D-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1P-0",
+        "p-1Q-0",
+        "p-5-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-18-0",
+        "p-23-0",
+        "p-D-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-18-0",
+        "p-23-0",
+        "p-D-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1P-0",
+        "p-1Q-0",
+        "p-5-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLLR",
+      "source_page_ids": [
+        "p-15-0",
+        "p-1B-0",
+        "p-1R-0",
+        "p-22-0",
+        "p-Q-0",
+        "p-Z-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1R-0",
+        "p-22-0",
+        "p-Z-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-15-0",
+        "p-1B-0",
+        "p-Q-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-15-0",
+        "p-1B-0",
+        "p-Q-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1R-0",
+        "p-22-0",
+        "p-Z-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLLRL",
+      "source_page_ids": [
+        "p-1R-0",
+        "p-22-0",
+        "p-Z-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-Z-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1R-0",
+        "p-22-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1R-0",
+        "p-22-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-Z-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLLRLR",
+      "source_page_ids": [
+        "p-1R-0",
+        "p-22-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-22-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1R-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1R-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-22-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLR",
+      "source_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1M-0",
+        "p-1N-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-1Z-1",
+        "p-J-1",
+        "p-O-1",
+        "p-S-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1Z-1",
+        "p-J-1"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1M-0",
+        "p-1N-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-O-1",
+        "p-S-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1M-0",
+        "p-1N-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-O-1",
+        "p-S-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1Z-1",
+        "p-J-1"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLRL",
+      "source_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0",
+        "p-1J-0",
+        "p-1Z-1",
+        "p-J-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1J-0",
+        "p-1Z-1",
+        "p-J-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1J-0",
+        "p-1Z-1",
+        "p-J-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-16-0",
+        "p-17-0",
+        "p-1F-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLRR",
+      "source_page_ids": [
+        "p-1M-0",
+        "p-1N-0",
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-O-1",
+        "p-S-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1M-0",
+        "p-1N-0",
+        "p-S-1"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-O-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-O-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1M-0",
+        "p-1N-0",
+        "p-S-1"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLRRR",
+      "source_page_ids": [
+        "p-1S-0",
+        "p-1T-0",
+        "p-1U-0",
+        "p-O-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1T-0",
+        "p-1U-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1S-0",
+        "p-O-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1S-0",
+        "p-O-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1T-0",
+        "p-1U-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLRRRL",
+      "source_page_ids": [
+        "p-1T-0",
+        "p-1U-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1U-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1T-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1T-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1U-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootLRRRR",
+      "source_page_ids": [
+        "p-1S-0",
+        "p-O-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1S-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-O-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-O-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1S-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootR",
+      "source_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-13-1",
+        "p-14-0",
+        "p-1A-0",
+        "p-1E-0",
+        "p-1H-0",
+        "p-1I-0",
+        "p-1K-0",
+        "p-1L-0",
+        "p-1W-1",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-20-0",
+        "p-24-0",
+        "p-3-1",
+        "p-6-1",
+        "p-7-1",
+        "p-8-1",
+        "p-9-0",
+        "p-A-0",
+        "p-E-1",
+        "p-H-1",
+        "p-I-1",
+        "p-K-0",
+        "p-L-0",
+        "p-N-1",
+        "p-T-0",
+        "p-V-0",
+        "p-W-0",
+        "p-X-0",
+        "p-Y-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1E-0",
+        "p-1H-0",
+        "p-1I-0",
+        "p-1W-1",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-6-1",
+        "p-7-1",
+        "p-9-0",
+        "p-E-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0",
+        "p-Y-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-13-1",
+        "p-14-0",
+        "p-1A-0",
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-24-0",
+        "p-3-1",
+        "p-8-1",
+        "p-A-0",
+        "p-H-1",
+        "p-K-0",
+        "p-L-0",
+        "p-N-1",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-13-1",
+        "p-14-0",
+        "p-1A-0",
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-24-0",
+        "p-3-1",
+        "p-8-1",
+        "p-A-0",
+        "p-H-1",
+        "p-K-0",
+        "p-L-0",
+        "p-N-1",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1E-0",
+        "p-1H-0",
+        "p-1I-0",
+        "p-1W-1",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-6-1",
+        "p-7-1",
+        "p-9-0",
+        "p-E-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0",
+        "p-Y-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRL",
+      "source_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1E-0",
+        "p-1H-0",
+        "p-1I-0",
+        "p-1W-1",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-6-1",
+        "p-7-1",
+        "p-9-0",
+        "p-E-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0",
+        "p-Y-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1E-0",
+        "p-1H-0",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-6-1",
+        "p-9-0",
+        "p-E-1",
+        "p-Y-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1I-0",
+        "p-1W-1",
+        "p-7-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1I-0",
+        "p-1W-1",
+        "p-7-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1E-0",
+        "p-1H-0",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-6-1",
+        "p-9-0",
+        "p-E-1",
+        "p-Y-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRLL",
+      "source_page_ids": [
+        "p-1E-0",
+        "p-1H-0",
+        "p-1X-1",
+        "p-1Y-1",
+        "p-6-1",
+        "p-9-0",
+        "p-E-1",
+        "p-Y-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-6-1",
+        "p-9-0",
+        "p-E-1",
+        "p-Y-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1E-0",
+        "p-1H-0",
+        "p-1X-1",
+        "p-1Y-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1E-0",
+        "p-1H-0",
+        "p-1X-1",
+        "p-1Y-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-6-1",
+        "p-9-0",
+        "p-E-1",
+        "p-Y-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRLLR",
+      "source_page_ids": [
+        "p-1E-0",
+        "p-1H-0",
+        "p-1X-1",
+        "p-1Y-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1E-0",
+        "p-1H-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1X-1",
+        "p-1Y-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1X-1",
+        "p-1Y-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1E-0",
+        "p-1H-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRLLRR",
+      "source_page_ids": [
+        "p-1X-1",
+        "p-1Y-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1Y-1"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1X-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1X-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1Y-1"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRLR",
+      "source_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1I-0",
+        "p-1W-1",
+        "p-7-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1I-0",
+        "p-1W-1"
+      ],
+      "copyA_delete_page_ids": [
+        "p-7-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-7-1",
+        "p-I-1",
+        "p-T-0",
+        "p-X-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1I-0",
+        "p-1W-1"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRLRL",
+      "source_page_ids": [
+        "p-10-0",
+        "p-11-0",
+        "p-1I-0",
+        "p-1W-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-10-0",
+        "p-11-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1I-0",
+        "p-1W-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1I-0",
+        "p-1W-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-10-0",
+        "p-11-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRR",
+      "source_page_ids": [
+        "p-13-1",
+        "p-14-0",
+        "p-1A-0",
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-24-0",
+        "p-3-1",
+        "p-8-1",
+        "p-A-0",
+        "p-H-1",
+        "p-K-0",
+        "p-L-0",
+        "p-N-1",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-13-1",
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-3-1",
+        "p-A-0",
+        "p-H-1",
+        "p-K-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-14-0",
+        "p-1A-0",
+        "p-24-0",
+        "p-8-1",
+        "p-L-0",
+        "p-N-1",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-14-0",
+        "p-1A-0",
+        "p-24-0",
+        "p-8-1",
+        "p-L-0",
+        "p-N-1",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-13-1",
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-3-1",
+        "p-A-0",
+        "p-H-1",
+        "p-K-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRL",
+      "source_page_ids": [
+        "p-13-1",
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-3-1",
+        "p-A-0",
+        "p-H-1",
+        "p-K-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-K-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-13-1",
+        "p-3-1",
+        "p-A-0",
+        "p-H-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-13-1",
+        "p-3-1",
+        "p-A-0",
+        "p-H-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-K-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRLL",
+      "source_page_ids": [
+        "p-1K-0",
+        "p-1L-0",
+        "p-20-0",
+        "p-K-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-20-0",
+        "p-K-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1K-0",
+        "p-1L-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1K-0",
+        "p-1L-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-20-0",
+        "p-K-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRLLL",
+      "source_page_ids": [
+        "p-20-0",
+        "p-K-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-20-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-K-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-K-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-20-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRLR",
+      "source_page_ids": [
+        "p-13-1",
+        "p-3-1",
+        "p-A-0",
+        "p-H-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-13-1",
+        "p-3-1"
+      ],
+      "copyA_delete_page_ids": [
+        "p-A-0",
+        "p-H-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-A-0",
+        "p-H-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-13-1",
+        "p-3-1"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRR",
+      "source_page_ids": [
+        "p-14-0",
+        "p-1A-0",
+        "p-24-0",
+        "p-8-1",
+        "p-L-0",
+        "p-N-1",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-14-0",
+        "p-1A-0",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-24-0",
+        "p-8-1",
+        "p-L-0",
+        "p-N-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-24-0",
+        "p-8-1",
+        "p-L-0",
+        "p-N-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-14-0",
+        "p-1A-0",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRRL",
+      "source_page_ids": [
+        "p-14-0",
+        "p-1A-0",
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-14-0",
+        "p-1A-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-V-0",
+        "p-W-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-14-0",
+        "p-1A-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRRLL",
+      "source_page_ids": [
+        "p-14-0",
+        "p-1A-0"
+      ],
+      "copyA_keep_page_ids": [
+        "p-14-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-1A-0"
+      ],
+      "copyB_keep_page_ids": [
+        "p-1A-0"
+      ],
+      "copyB_delete_page_ids": [
+        "p-14-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRRR",
+      "source_page_ids": [
+        "p-24-0",
+        "p-8-1",
+        "p-L-0",
+        "p-N-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-24-0",
+        "p-8-1"
+      ],
+      "copyA_delete_page_ids": [
+        "p-L-0",
+        "p-N-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-L-0",
+        "p-N-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-24-0",
+        "p-8-1"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRRRL",
+      "source_page_ids": [
+        "p-24-0",
+        "p-8-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-24-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-8-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-8-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-24-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    },
+    {
+      "path": "rootRRRRR",
+      "source_page_ids": [
+        "p-L-0",
+        "p-N-1"
+      ],
+      "copyA_keep_page_ids": [
+        "p-L-0"
+      ],
+      "copyA_delete_page_ids": [
+        "p-N-1"
+      ],
+      "copyB_keep_page_ids": [
+        "p-N-1"
+      ],
+      "copyB_delete_page_ids": [
+        "p-L-0"
+      ],
+      "proposed_parent_file_id": null,
+      "proposed_copyB_file_id": null,
+      "caution": "Each copy/delete operation requires actual approved first-party UI exact-page targeting and source/clone readback; no dispatch authorized"
+    }
+  ]
+}
