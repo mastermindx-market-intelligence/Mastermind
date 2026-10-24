@@ -77,6 +77,7 @@ import hashlib
 import inspect
 import json
 import re
+import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -1049,6 +1050,7 @@ def _receipt_from_event(
     if provenance_schema not in {
         INTENT_SCHEMA,
         INTENT_SCHEMA_V2,
+        INTENT_SCHEMA_DIRECT,
         INTENT_SCHEMA_SERVICE,
         INTENT_SCHEMA_PRINCIPAL,
     }:
@@ -1078,6 +1080,8 @@ def _receipt_from_event(
     job = runtime.jobs.get_job(job_id) if job_id else None
     if job is None:
         raise CeoIntentError(f"intent {intent_id!r} names job {job_id!r}, which does not exist")
+    if provenance_schema == INTENT_SCHEMA_DIRECT:
+        runtime.jobs.direct_native_provenance(job.job_id)
     if provenance_schema == INTENT_SCHEMA_V2:
         cycle = job.orchestration_provenance
         if (
@@ -1183,7 +1187,7 @@ def _receipt_from_event(
                 or not 1 <= job.attempt_limit <= 2):
             raise CeoIntentError("principal durable identity or Job binding differs")
     work_ref = None
-    if provenance_schema == INTENT_SCHEMA_V2 and "workstream" in provenance:
+    if provenance_schema in {INTENT_SCHEMA_V2, INTENT_SCHEMA_DIRECT} and "workstream" in provenance:
         # Revalidate the immutable source pointer before exposing it on replay.
         # Older v2 events without this optional field remain readable as-is.
         work_ref = _text(
@@ -1257,6 +1261,7 @@ def submit_intent(
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
     fresh_admission_observer: Any = None,
+    direct_admission: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1293,9 +1298,37 @@ def submit_intent(
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
     if intent["schema"] == INTENT_SCHEMA_DIRECT:
-        # The pure discriminator is not a legacy create_job capability. The
-        # normal host/Runtime owner must supply the separately qualified seam.
-        raise CeoIntentError("direct native host admission is not composed")
+        from control_plane import direct_native_execution as direct
+        if type(direct_admission) is not direct.DirectNativeAdmission:
+            raise CeoIntentError("direct native host admission is not composed")
+        try:
+            direct_admission.check()
+            _require_workspace(intent,Path(workspace_root) if workspace_root else None)
+            fingerprint=intent_fingerprint(intent)
+            command=command_id_for(intent["intent_id"])
+            existing=runtime.store.find_event_by_command_id(command)
+            if existing is not None:
+                actual=runtime.jobs.direct_native_provenance(existing["job_id"])
+                if actual != direct.admission_material(direct_admission):
+                    raise CeoIntentConflict("direct native admission identity changed")
+                return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
+            try:
+                job=runtime.jobs.create_direct_native_job(intent,fingerprint=fingerprint,command_id=command,
+                    workspace_root=workspace_root,admission=direct_admission)
+            except (StateConflict, sqlite3.IntegrityError):
+                existing=runtime.store.find_event_by_command_id(command)
+                if existing is None: raise
+                actual=runtime.jobs.direct_native_provenance(existing["job_id"])
+                if actual != direct.admission_material(direct_admission):
+                    raise CeoIntentConflict("direct native admission identity changed")
+                return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
+            return build_receipt(job,intent=intent,fingerprint=fingerprint,duplicate=False,created_at_ms=int(runtime.store.find_event_by_command_id(command)["created_at_ms"]))
+        except CeoIntentError:
+            raise
+        except (ValueError,StateConflict) as exc:
+            raise CeoIntentError("direct native host admission refused") from exc
+    if direct_admission is not None:
+        raise CeoIntentError("direct admission cannot promote another schema")
     # Private host source seam, never a frame field or a launch capability.
     # Only the actual new-root branch calls it. Public/replay receipts remain
     # queued, and no observer may turn a duplicate into a fresh admission.

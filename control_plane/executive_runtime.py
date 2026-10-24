@@ -16,6 +16,7 @@ included in events or public ``to_dict`` output.
 from __future__ import annotations
 
 import base64
+import copy
 import dataclasses
 import hashlib
 import fnmatch
@@ -731,6 +732,8 @@ def _paid_review_constraints_for_target(connection, root_row, reviewed_job_id):
     return paid_subject_review_constraints(root_constraints)
 
 
+from control_plane import direct_native_execution as direct_native
+
 def _normalise_constraints(
     value: dict[str, Any] | None,
     *,
@@ -739,6 +742,11 @@ def _normalise_constraints(
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
+    direct_fields = {}
+    if direct_native.POLICY_KEY in raw:
+        if raw[direct_native.POLICY_KEY] != direct_native.POLICY:
+            raise StateConflict("direct native policy is invalid")
+        direct_fields[direct_native.POLICY_KEY] = direct_native.POLICY
     role_fields: dict[str, Any] = {}
     if "responsibility_intent" in raw or "responsibility_intent_digest" in raw:
         from control_plane.executive_responsibility import (
@@ -769,7 +777,7 @@ def _normalise_constraints(
     eligible = sorted(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
-    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields}
+    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields}
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):
@@ -1788,6 +1796,9 @@ def _dialogue_source_from_root_creation(
     ).fetchone()
     if root_row is None:
         raise StateConflict("terminal completion lost its strict v2 root")
+    direct = _direct_native_provenance(connection,root_row)
+    if direct is not None:
+        return normalize_executive_dialogue_source(direct["source"])
     root_role, root_orchestration, _root_digest = _decode_orchestration_job_fields(
         root_row
     )
@@ -2481,6 +2492,60 @@ class CurrentCapacityCommitmentFacts:
         return {
             field.name: getattr(self, field.name) for field in dataclasses.fields(self)
         }
+
+
+def _direct_native_provenance(connection, row, *, required=False):
+    if row is None:
+        raise StateConflict("direct native Job is unavailable")
+    constraints = _strict_canonical_json_loads(str(row["constraints_json"]), name="direct Job constraints")
+    if constraints.get(direct_native.POLICY_KEY) != direct_native.POLICY:
+        if required: raise StateConflict("Job is not direct native")
+        return None
+    events = connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2",(row["job_id"],)).fetchall()
+    if len(events) != 1:
+        raise StateConflict("direct native creation provenance is unavailable")
+    created = _strict_canonical_json_loads(str(events[0][0]),name="direct Job creation")
+    outer = created.get("provenance")
+    value = outer.get("direct_native") if isinstance(outer,dict) else None
+    keys = {"schema_version","principal_scope","receiver_binding_digest","authority_generation_digest","source","source_digest","binding"}
+    if (type(value) is not dict or set(value) != keys or value["schema_version"] != direct_native.PROVENANCE_SCHEMA
+            or row["parent_job_id"] is not None or row["root_job_id"] != row["job_id"]
+            or row["orchestration_role"] is not None or row["attempt_limit"] != 1
+            or set(json.loads(row["requested_authorities_json"])) != {"READ","RESEARCH"}
+            or json.loads(row["allowed_write_paths_json"]) or json.loads(row["validation_commands_json"])):
+        raise StateConflict("direct native immutable Job provenance is invalid")
+    for key in ("principal_scope","receiver_binding_digest","authority_generation_digest","source_digest"):
+        direct_native.require_digest(value[key])
+    source = normalize_executive_dialogue_source(value["source"]).to_dict()
+    binding = direct_native.normalize_binding(value["binding"])
+    if (source != value["source"] or orchestration_digest(source) != value["source_digest"]
+            or value["receiver_binding_digest"] != direct_native.receiver_binding(value["principal_scope"],source)
+            or any(constraints.get(k) != v for k,v in binding.items())
+            or row["branch"] != f"codex/job-{row['job_id'].lower()}"
+            or Path(row["worktree"]).name != row["job_id"].lower()
+            or created.get("direct_workspace") != dict(worktree=row["worktree"],branch=row["branch"],base_sha=binding["base_sha"])):
+        raise StateConflict("direct native source/binding drifted")
+    return dict(value)
+
+
+def _require_direct_workspace(connection, row, *, required=True):
+    provenance = _direct_native_provenance(connection,row)
+    if provenance is None: return None
+    rows = connection.execute("SELECT event_type,payload_json FROM events WHERE command_id=?",(f"direct-workspace:{row['job_id']}:completed",)).fetchall()
+    if not rows and not required: return None
+    if len(rows)!=1 or rows[0]["event_type"] != "DIRECT_NATIVE_WORKSPACE_COMPLETED":
+        raise StateConflict("direct workspace has no same-call allocator completion")
+    value=json.loads(rows[0]["payload_json"])
+    requested=connection.execute("SELECT payload_json FROM events WHERE command_id=?",(f"direct-workspace:{row['job_id']}:requested",)).fetchone()
+    if (requested is None or value["admission_digest"] != orchestration_digest(provenance)
+            or value["reservation_sha256"] != orchestration_digest(json.loads(requested[0]))
+            or value["receipt"]["workspace_path"] != row["worktree"]
+            or value["receipt"]["base_sha"] != provenance["binding"]["base_sha"]
+            or value["receipt"]["branch"] != row["branch"]):
+        raise StateConflict("direct workspace completion source changed")
+    from control_plane.executive_workspace import verify_child_clone_identity
+    verify_child_clone_identity(Path(row["worktree"]),value["identity"],control_uid=value["control_uid"],shared_gid=value["shared_gid"])
+    return value
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -5185,6 +5250,65 @@ def _decode_orchestration_job_fields(
     elif provenance["creator"] != "coo_cycle" or row["parent_job_id"] is None:
         raise PersistenceError("orchestration child lacks COO cycle provenance")
     return role, provenance, str(row["orchestration_provenance_digest"])
+
+
+def _direct_attempt_view(connection, row):
+    """Internal Event-validated view; schema7 role-null columns stay NULL."""
+    if row is None: return row
+    job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(row["job_id"],)).fetchone()
+    admission=_direct_native_provenance(connection,job)
+    if admission is None: return row
+    fields=("effective_grant_json","effective_grant_digest","placement_snapshot_json","placement_snapshot_digest",
+            "execution_principal_snapshot_json","execution_principal_snapshot_digest")
+    if any(row[k] is not None for k in fields):
+        raise StateConflict("direct role-null Attempt violated schema7 NULL floor")
+    claims=connection.execute("SELECT * FROM events WHERE event_type='JOB_CLAIMED' AND attempt_id=? LIMIT 2",(row["attempt_id"],)).fetchall()
+    if len(claims)!=1:
+        raise StateConflict("direct Attempt requires exactly one immutable claim")
+    claim=claims[0];payload=_strict_canonical_json_loads(claim["payload_json"],name="direct claim")
+    value=payload.get("direct_native_claim")
+    keys={"schema_version","admission_digest","effective_grant","effective_grant_digest","placement_snapshot","placement_snapshot_digest"}
+    authority=_authorize_job_row(job)
+    expected_grant=dict(schema_version="mastermind.executive_effective_grant/v1",authorities=list(authority.requested),
+        write_paths=[],validation_argv=[],policy_sha=authority.policy_sha256,job_id=row["job_id"],role=None)
+    if (type(value) is not dict or set(value)!=keys or value["schema_version"]!="mastermind.direct_native_claim/v1"
+            or value["admission_digest"]!=orchestration_digest(admission)
+            or claim["command_id"]!=f"direct-native-dispatch:{row['job_id']}"
+            or claim["aggregate_type"]!="job" or claim["aggregate_id"]!=row["job_id"]
+            or claim["job_id"]!=row["job_id"] or claim["worker_id"]!=row["worker_id"]
+            or claim["quota_class"]!=row["quota_class"]
+            or payload.get("fence_generation")!=row["fence_generation"]
+            or payload.get("attempt_number")!=row["attempt_number"]
+            or value["effective_grant"]!=expected_grant
+            or value["effective_grant_digest"]!=orchestration_digest(expected_grant)
+            or value["placement_snapshot_digest"]!=orchestration_digest(value["placement_snapshot"])):
+        raise StateConflict("direct Attempt immutable grant/claim join changed")
+    placement=validate_placement_snapshot(value["placement_snapshot"])
+    if (placement["worker_id"]!=row["worker_id"] or placement["quota_class"]!=row["quota_class"]
+            or placement["provider"]!="codex" or placement["provider"]!=admission["binding"]["provider"]):
+        raise StateConflict("direct Attempt placement differs from actual native claim")
+    result=dict(row)
+    result.update(effective_grant_json=_json_dumps(expected_grant),effective_grant_digest=value["effective_grant_digest"],
+        placement_snapshot_json=_json_dumps(placement),placement_snapshot_digest=value["placement_snapshot_digest"])
+    principals=connection.execute("SELECT * FROM events WHERE event_type='DIRECT_NATIVE_LAUNCH_PRINCIPAL' AND attempt_id=? LIMIT 2",(row["attempt_id"],)).fetchall()
+    if len(principals)>1 or (not principals and row["status"] in {"RUNNING","CHECKPOINTED","COMPLETED"}):
+        raise StateConflict("direct native launch principal is missing or conflicting")
+    if principals:
+        event=principals[0];principal=_strict_canonical_json_loads(event["payload_json"],name="direct principal")
+        metadata=_strict_canonical_json_loads(row["launch_metadata_json"],name="direct launch metadata")
+        if (set(principal)!={"schema_version","admission_digest","claim_digest","principal","principal_digest","launch_attestation_sha256"}
+                or principal["schema_version"]!="mastermind.direct_native_launch_principal/v1"
+                or event["command_id"]!=f"direct-native-principal:{row['attempt_id']}"
+                or event["aggregate_type"]!="attempt" or event["aggregate_id"]!=row["attempt_id"]
+                or event["job_id"]!=row["job_id"] or event["worker_id"]!=row["worker_id"] or event["quota_class"]!=row["quota_class"]
+                or principal["admission_digest"]!=orchestration_digest(admission)
+                or principal["claim_digest"]!=orchestration_digest(value)
+                or principal["principal_digest"]!=orchestration_digest(principal["principal"])
+                or principal["launch_attestation_sha256"]!=metadata.get("launch_attestation_sha256")):
+            raise StateConflict("direct native launch principal provenance changed")
+        result.update(execution_principal_snapshot_json=_json_dumps(principal["principal"]),
+            execution_principal_snapshot_digest=principal["principal_digest"])
+    return result
 
 
 def _attempt_from_row(row: sqlite3.Row) -> Attempt:
@@ -8094,6 +8218,11 @@ def _validated_sealed_worker_launch_material(
     to this identity.
     """
 
+    if connection is not None:
+        # An already-projected internal mapping is reconstructed from its raw
+        # authoritative row; caller-supplied projected values grant nothing.
+        original=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(attempt_row["attempt_id"],)).fetchone()
+        attempt_row=_direct_attempt_view(connection,original)
     from control_plane.executive_paid_runtime import (
         is_paid_attempt, validated_paid_launch_material,
     )
@@ -8458,6 +8587,8 @@ def _sealed_worker_result_payload(
 ) -> dict[str, Any]:
     """Build seal-equivalent evidence from the immutable sealed-worker receipt."""
 
+    original=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(attempt_row["attempt_id"],)).fetchone()
+    attempt_row=_direct_attempt_view(connection,original)
     from control_plane.executive_paid_runtime import (
         is_paid_attempt, paid_sealed_worker_result_payload,
     )
@@ -8831,6 +8962,31 @@ def _sealed_worker_result_payload(
         )
     envelope = dict(result["structured_output"])
     envelope_digest = orchestration_digest(envelope)
+    if expected_role is None:
+        # Actual local sealed evidence above is mandatory; role-null is not a
+        # legacy summary conversion or a Fabric role-result impersonation.
+        full_job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(attempt_row["job_id"],)).fetchone()
+        admission=_direct_native_provenance(connection,full_job,required=True)
+        keys={"schema_version","status","job_id","attempt_id","admission_digest","payload",
+              "result_evidence","result_envelope","result_envelope_digest","artifact_receipt_digest",
+              "validation_receipt_digest","effective_grant_digest"}
+        if (is_fabric or type(terminal_payload) is not dict or set(terminal_payload)!=keys
+                or terminal_payload["schema_version"] != direct_native.TERMINAL_SCHEMA
+                or terminal_payload["status"] != "COMPLETED"
+                or terminal_payload["job_id"] != attempt_row["job_id"]
+                or terminal_payload["attempt_id"] != attempt_row["attempt_id"]
+                or terminal_payload["admission_digest"] != orchestration_digest(admission)
+                or terminal_payload["payload"] != direct_native.public_payload(envelope)
+                or envelope.get("status") != "COMPLETED" or "role_result" in envelope
+                or result["artifact_manifest"] != []
+                or terminal_payload["result_envelope"] != envelope
+                or terminal_payload["result_envelope_digest"] != envelope_digest
+                or terminal_payload["artifact_receipt_digest"] != orchestration_digest([])
+                or terminal_payload["validation_receipt_digest"] != evidence["validation_receipts_digest"]
+                or terminal_payload["effective_grant_digest"] != attempt_row["effective_grant_digest"]
+                or (job_row["result_json"] is not None and json.loads(job_row["result_json"]) != terminal_payload)):
+            raise StateConflict("direct native terminal lost actual sealed result evidence")
+        return copy.deepcopy(terminal_payload)
     role_result = envelope.get("role_result")
     artifact_manifest = result["artifact_manifest"]
     declared_artifacts = (
@@ -13253,6 +13409,10 @@ class JobRegistry:
                 numbers.append(int(match.group(1)))
         number = max(numbers, default=0) + 1
         job_id = f"JOB-{number:03d}"
+        if isinstance(spec.event_provenance, Mapping) and "direct_native" in spec.event_provenance:
+            root = Path(str(spec.worktree)).parent
+            spec = dataclasses.replace(spec, worktree=str(root / job_id.lower()),
+                branch=f"codex/job-{job_id.lower()}")
         root_job_id = job_id if spec.parent_job_id is None else spec.parent_root_job_id
         if root_job_id is None:
             raise StateConflict("child Job requires its parent's exact root identity")
@@ -13368,6 +13528,8 @@ class JobRegistry:
             )
         if spec.event_provenance is not None:
             event_payload["provenance"] = dict(spec.event_provenance)
+            if "direct_native" in spec.event_provenance:
+                event_payload["direct_workspace"]=dict(worktree=spec.worktree,branch=spec.branch,base_sha=spec.constraints["base_sha"])
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -15634,6 +15796,7 @@ class JobRegistry:
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
         _principal_commit_guard: Callable[[], None] | None = None,
+        _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -15649,6 +15812,21 @@ class JobRegistry:
         that must record who asked and on what grounding.  It changes no job
         column and confers no authority.
         """
+        if _direct_native_admission is not None:
+            if type(_direct_native_admission) is not direct_native.DirectNativeAdmission:
+                raise StateConflict("direct native admission has no owner capability")
+            _direct_native_admission.check()
+            if (orchestration_role is not None or parent_job_id is not None or attempt_limit != 1
+                    or set(requested_authorities or ()) != {"READ", "RESEARCH"}
+                    or allowed_write_paths or validation_commands or review_required or reviews_job_id
+                    or any(v is not None for v in (plan_attempt_id,plan_digest,plan_step_id,repair_round,supersedes_job_id))):
+                raise StateConflict("direct native Job exceeds its closed read-only contract")
+            expected = direct_native.admission_material(_direct_native_admission)
+            if not isinstance(provenance, dict) or provenance.get("direct_native") != expected:
+                raise StateConflict("direct native Job lost its admitted source")
+        elif ((isinstance(constraints,dict) and direct_native.POLICY_KEY in constraints)
+                or (isinstance(provenance,dict) and "direct_native" in provenance)):
+            raise StateConflict("direct native creation requires its private host admission")
         objective = str(objective).strip()
         if not objective:
             raise StateConflict("objective is required")
@@ -15852,6 +16030,8 @@ class JobRegistry:
                 "review orchestration Job grant requires READ plus optional RUN_TESTS and empty writes"
             )
         def recheck_principal():
+            if _direct_native_admission is not None:
+                _direct_native_admission.check()
             if _principal_commit_guard is None:
                 return
             if (not callable(_principal_commit_guard)
@@ -16143,6 +16323,78 @@ class JobRegistry:
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()
         return job
+
+    def create_direct_native_job(self, intent, *, fingerprint, command_id, workspace_root, admission):
+        if type(admission) is not direct_native.DirectNativeAdmission:
+            raise StateConflict("direct admission is not host-issued")
+        admission.check()
+        from control_plane.ceo_intent import validate_intent, INTENT_SCHEMA_DIRECT, _provenance
+        intent=validate_intent(intent)
+        if intent["schema"] != INTENT_SCHEMA_DIRECT or intent["workstream"] != admission.access.work_ref:
+            raise StateConflict("direct intent and host source differ")
+        root=Path(workspace_root)
+        if not root.is_absolute() or root != root.resolve(strict=True):
+            raise StateConflict("direct workspace root must be an existing canonical owner directory")
+        material=direct_native.admission_material(admission)
+        provenance=_provenance(intent,fingerprint)
+        provenance["direct_native"]=material
+        constraints=dict(material["binding"],required_capabilities=["read"],**{direct_native.POLICY_KEY:direct_native.POLICY})
+        return self.create_job(intent["objective"],department=intent["department"],priority=intent["priority"],
+            worktree=str(root / intent["intent_id"]),branch=f"codex/{intent['intent_id']}",
+            constraints=constraints,attempt_limit=1,requested_authorities=["READ","RESEARCH"],
+            command_id=command_id,provenance=provenance,_direct_native_admission=admission)
+
+    def direct_native_provenance(self, job_id):
+        with self.store.read() as connection:
+            row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            return copy.deepcopy(_direct_native_provenance(connection,row,required=True))
+
+    def prepare_direct_native_workspace(self, job_id, *, source_repository, shared_gid, access):
+        from control_plane import executive_workspace as owner
+        access.check()
+        source=Path(source_repository)
+        if not source.is_absolute() or type(shared_gid) is not int or shared_gid<0:
+            raise StateConflict("direct workspace source/custody is invalid")
+        source=source.resolve(strict=True)
+        with self.store.transaction() as connection:
+            row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            material=_direct_native_provenance(connection,row,required=True)
+            if (material["principal_scope"] != access.principal_scope
+                    or material["authority_generation_digest"] != access.authority_generation_digest
+                    or material["source"]["work_ref"] != access.work_ref):
+                raise StateConflict("direct workspace access differs")
+            completed=_require_direct_workspace(connection,row,required=False)
+            if completed is not None:
+                if completed["source_repository"] != str(source) or completed["shared_gid"] != shared_gid:
+                    raise StateConflict("direct workspace replay source changed")
+                return completed
+            if row["status"] != "QUEUED" or row["current_attempt_id"] is not None or row["attempt_count"] != 0:
+                raise StateConflict("direct workspace requires a never-started Job")
+            command=f"direct-workspace:{job_id}:requested"
+            if connection.execute("SELECT 1 FROM events WHERE command_id=?",(command,)).fetchone():
+                raise StateConflict("direct allocation unresolved; no retry or adoption")
+            reservation=dict(admission_digest=orchestration_digest(material),source_repository=str(source),
+                source_identity=owner.child_workspace_directory_identity(source),control_uid=os.geteuid(),shared_gid=shared_gid)
+            access.check()
+            self.store.append_event(connection,aggregate_type="job",aggregate_id=job_id,job_id=job_id,
+                event_type="DIRECT_NATIVE_WORKSPACE_REQUESTED",command_id=command,payload=reservation)
+        created=owner.create_readonly_child_clone(source,Path(row["worktree"]).parent,job_id=job_id,
+            base_sha=material["binding"]["base_sha"],branch=row["branch"],shared_gid=shared_gid)
+        if not owner.is_created_child_clone(created):
+            raise StateConflict("direct workspace receipt is not allocator-owned")
+        completion=dict(reservation,reservation_sha256=orchestration_digest(reservation),
+            receipt=created.receipt.to_dict(),identity=created.identity)
+        with self.store.transaction() as connection:
+            current=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            if (_direct_native_provenance(connection,current,required=True) != material
+                    or current["status"] != "QUEUED" or current["attempt_count"] != 0
+                    or owner.child_workspace_directory_identity(source) != reservation["source_identity"]):
+                raise StateConflict("direct allocation source changed")
+            access.check()
+            owner.verify_child_clone_identity(Path(row["worktree"]),created.identity,control_uid=os.geteuid(),shared_gid=shared_gid)
+            self.store.append_event(connection,aggregate_type="job",aggregate_id=job_id,job_id=job_id,
+                event_type="DIRECT_NATIVE_WORKSPACE_COMPLETED",command_id=f"direct-workspace:{job_id}:completed",payload=completion)
+        return completion
 
     def prepare_coo_child_workspace(self, job_id: str, *, source_repository: str | Path,
                                     shared_gid: int) -> dict[str, Any] | None:
@@ -16924,7 +17176,7 @@ class AttemptRegistry:
             row = connection.execute(
                 "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
             ).fetchone()
-            return _attempt_from_row(row) if row else None
+            return _attempt_from_row(_direct_attempt_view(connection,row)) if row else None
 
     def list_attempts(self, job_id: str | None = None) -> list[Attempt]:
         with self.store.read() as connection:
@@ -16937,7 +17189,7 @@ class AttemptRegistry:
                 rows = connection.execute(
                     "SELECT * FROM attempts ORDER BY created_at_ms,attempt_id"
                 ).fetchall()
-            return [_attempt_from_row(row) for row in rows]
+            return [_attempt_from_row(_direct_attempt_view(connection,row)) for row in rows]
 
     def _claim_job_in_transaction(
         self,
@@ -17026,7 +17278,14 @@ class AttemptRegistry:
             "SELECT metadata_json,held_attempt_id FROM worker_quota_classes WHERE worker_id=?",
             (capacity["worker_id"],),
         ).fetchall()
-        single_worker_capacity = False
+        single_worker_capacity = _direct_native_provenance(connection,job_row) is not None
+        # The direct native view is this existing physical Worker, never a new
+        # simultaneous slot. Make the fence symmetric for incumbent claims.
+        for held in worker_quotas:
+            if held["held_attempt_id"] is not None:
+                held_job=connection.execute("SELECT j.* FROM jobs j JOIN attempts a ON a.job_id=j.job_id WHERE a.attempt_id=?",(held["held_attempt_id"],)).fetchone()
+                if held_job is not None and _direct_native_provenance(connection,held_job) is not None:
+                    single_worker_capacity=True
         for worker_quota in worker_quotas:
             quota_metadata = _strict_canonical_json_loads(
                 str(worker_quota["metadata_json"]), name="shared Worker capacity metadata"
@@ -17078,6 +17337,7 @@ class AttemptRegistry:
                 (capacity["worker_id"], capacity["quota_class"]),
             ).fetchone()[0]
         )
+        is_direct=_direct_native_provenance(connection,job_row) is not None
         connection.execute(
             """
             INSERT INTO attempts(
@@ -17107,16 +17367,16 @@ class AttemptRegistry:
                 timestamp,
                 (
                     _json_dumps(dict(effective_grant))
-                    if effective_grant is not None
+                    if effective_grant is not None and not is_direct
                     else None
                 ),
-                effective_grant_digest,
+                effective_grant_digest if not is_direct else None,
                 (
                     _json_dumps(dict(placement_snapshot))
-                    if placement_snapshot is not None
+                    if placement_snapshot is not None and not is_direct
                     else None
                 ),
-                placement_snapshot_digest,
+                placement_snapshot_digest if not is_direct else None,
             ),
         )
         if is_c2:
@@ -17155,7 +17415,7 @@ class AttemptRegistry:
             "selected_model_alias": _capacity_model_alias(capacity) or None,
             "routing_reason_codes": constraints.get("routing_reason_codes", []),
         }
-        if orchestration_role is not None:
+        if orchestration_role is not None or is_direct:
             claim_payload.update(
                 {
                     "orchestration_role": str(orchestration_role),
@@ -17191,6 +17451,11 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        if is_direct:
+            claim_payload["direct_native_claim"]=dict(schema_version="mastermind.direct_native_claim/v1",
+                admission_digest=orchestration_digest(_direct_native_provenance(connection,job_row,required=True)),
+                effective_grant=dict(effective_grant),effective_grant_digest=effective_grant_digest,
+                placement_snapshot=dict(placement_snapshot),placement_snapshot_digest=placement_snapshot_digest)
         from control_plane.executive_paid_runtime import paid_claim_binding
         paid_binding = paid_claim_binding(capacity, constraints)
         if paid_binding is not None:
@@ -17220,7 +17485,7 @@ class AttemptRegistry:
         if attempt_row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("claimed Attempt disappeared inside its transaction")
         return AttemptLease(
-            attempt=_attempt_from_row(attempt_row),
+            attempt=_attempt_from_row(_direct_attempt_view(connection,attempt_row)),
             lease_token=lease_token,
         )
 
@@ -17236,6 +17501,7 @@ class AttemptRegistry:
         _coo_cycle_dispatch_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
         _initial_prepared: object | None = None,
+        _direct_native_access: direct_native.DirectNativeAccess | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -17251,6 +17517,7 @@ class AttemptRegistry:
         if (
             command_id is not None
             and _coo_cycle_dispatch_capability is not _COO_CYCLE_DISPATCH_CAPABILITY
+            and _direct_native_access is None
         ):
             raise StateConflict(
                 "command-bound claim requires the COO dispatch boundary"
@@ -17268,6 +17535,20 @@ class AttemptRegistry:
                 raise StateConflict("exact worker target requires command-bound child dispatch")
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
+            direct_row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            direct_provenance=_direct_native_provenance(connection,direct_row) if direct_row is not None else None
+            if direct_provenance is not None:
+                if (type(_direct_native_access) is not direct_native.DirectNativeAccess
+                        or command_id != f"direct-native-dispatch:{job_id}"
+                        or _coo_cycle_dispatch_capability is not None or exact_target is not None):
+                    raise StateConflict("direct native Job requires its exact host dispatch")
+                _direct_native_access.check()
+                if (direct_provenance["principal_scope"] != _direct_native_access.principal_scope
+                        or direct_provenance["source"]["work_ref"] != _direct_native_access.work_ref
+                        or direct_provenance["authority_generation_digest"] != _direct_native_access.authority_generation_digest):
+                    raise StateConflict("direct native dispatch authority changed")
+            elif _direct_native_access is not None:
+                raise StateConflict("direct access cannot claim an incumbent Job")
             if command_id is not None:
                 existing_dispatch = connection.execute(
                     "SELECT * FROM events WHERE command_id=?", (str(command_id),)
@@ -17301,7 +17582,7 @@ class AttemptRegistry:
                     ).fetchone()
                     if attempt_row is None or attempt_row["job_id"] != job_id:
                         raise PersistenceError("dispatch replay lost its bound Attempt")
-                    replay_attempt = _attempt_from_row(attempt_row)
+                    replay_attempt = _attempt_from_row(_direct_attempt_view(connection,attempt_row))
                     replay_token = attempt_row["lease_token"]
                     if replay_attempt.status in _LEASE_ACTIVE_ATTEMPT_STATUSES:
                         if replay_token is None:
@@ -17353,6 +17634,8 @@ class AttemptRegistry:
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
             _require_coo_child_workspace_completion(connection, job_row)
+            if direct_provenance is not None:
+                _require_direct_workspace(connection,job_row)
             authority = _authorize_job_row(job_row)
             if exact_target is not None:
                 timestamp = self.store.now_ms()
@@ -17462,7 +17745,7 @@ class AttemptRegistry:
                     raise StateConflict(
                         "orchestration claim requires exact command-bound COO dispatch"
                     )
-            elif _coo_cycle_dispatch_capability is not None or command_id is not None:
+            elif direct_provenance is None and (_coo_cycle_dispatch_capability is not None or command_id is not None):
                 raise StateConflict(
                     "COO dispatch capability cannot claim a legacy role-null Job"
                 )
@@ -17573,6 +17856,18 @@ class AttemptRegistry:
                     raise StateConflict(
                         f"placement snapshot is invalid: {exc}"
                     ) from exc
+            if direct_provenance is not None:
+                if capacity["provider"] != "codex" or capacity["worker_provider"] != "codex":
+                    raise StateConflict("direct native dispatch requires the actual Codex Worker")
+                effective_grant=dict(schema_version="mastermind.executive_effective_grant/v1",
+                    authorities=list(authority.requested),write_paths=[],validation_argv=[],
+                    policy_sha=authority.policy_sha256,job_id=job_id,role=None)
+                effective_grant_digest=orchestration_digest(effective_grant)
+                placement_snapshot=build_placement_snapshot(worker_id=str(capacity["worker_id"]),
+                    quota_class=str(capacity["quota_class"]),provider=str(capacity["provider"]),
+                    account_label=str(capacity["account_label"]),observed_at_ms=timestamp)
+                placement_snapshot_digest=orchestration_digest(placement_snapshot)
+                _direct_native_access.check()
             claimed = self._claim_job_in_transaction(
                 connection,
                 job_row=job_row,
@@ -17593,6 +17888,8 @@ class AttemptRegistry:
                 exact_target=exact_target,
                 _initial_capacity_evidence=(_initial_prepared.evidence if _initial_prepared is not None else None),
             )
+            if direct_provenance is not None:
+                _direct_native_access.check()
             if _initial_prepared is not None and claimed is None:
                 raise StateConflict("finite initial common claim lost CAS")
         return claimed
@@ -18466,7 +18763,7 @@ class AttemptRegistry:
                     "OPERATOR_HARNESS running transition is owned by harness state"
                 )
             job_row = connection.execute(
-                "SELECT orchestration_role FROM jobs WHERE job_id=?",
+                "SELECT * FROM jobs WHERE job_id=?",
                 (row["job_id"],),
             ).fetchone()
             if job_row is None:  # pragma: no cover - foreign key invariant
@@ -18483,7 +18780,7 @@ class AttemptRegistry:
                 "mastermind.executive_paid_model_launch_attestation/v1"
             ):
                 raise StateConflict("paid launch schema differs from immutable Job profile")
-            if job_row["orchestration_role"] is not None:
+            if job_row["orchestration_role"] is not None or _direct_native_provenance(connection,job_row) is not None:
                 if required_launch_attestation_schema not in (
                     {"mastermind.executive_paid_model_launch_attestation/v1"}
                     if paid_attempt else {
@@ -18592,6 +18889,20 @@ class AttemptRegistry:
                         "launch attestation process identity differs from durable columns"
                     )
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
+            direct_provenance=_direct_native_provenance(connection,job_row)
+            if direct_provenance is not None:
+                original_view=_direct_attempt_view(connection,row)
+                claim=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CLAIMED' AND attempt_id=?",(attempt_id,)).fetchone()
+                claim_value=json.loads(claim[0])["direct_native_claim"]
+                metadata=json.loads(row["launch_metadata_json"])
+                self.store.append_event(connection,aggregate_type="attempt",aggregate_id=attempt_id,
+                    job_id=row["job_id"],attempt_id=attempt_id,worker_id=row["worker_id"],quota_class=row["quota_class"],
+                    event_type="DIRECT_NATIVE_LAUNCH_PRINCIPAL",command_id=f"direct-native-principal:{attempt_id}",
+                    payload=dict(schema_version="mastermind.direct_native_launch_principal/v1",
+                        admission_digest=orchestration_digest(direct_provenance),claim_digest=orchestration_digest(claim_value),
+                        principal=orchestration_principal,principal_digest=orchestration_principal_digest,
+                        launch_attestation_sha256=metadata["launch_attestation_sha256"]))
+                orchestration_principal=None
             if orchestration_principal is None:
                 updated = connection.execute(
                     """
@@ -18854,6 +19165,8 @@ class AttemptRegistry:
                         job_row=job_row,
                         payload=payload,
                     )
+                elif _direct_native_provenance(connection,job_row) is not None:
+                    structured = _sealed_worker_result_payload(connection,row,expected_role=None,terminal_payload=payload)
                 else:
                     structured = JobPayload.from_value(payload).to_dict()
                     _assert_parent_aggregation_allowed(
@@ -18903,6 +19216,9 @@ class AttemptRegistry:
                 (timestamp, row["worker_id"], row["quota_class"], attempt_id),
             )
             event_payload: dict[str, Any] = {"status": job_status.value}
+            if status is AttemptStatus.COMPLETED and _direct_native_provenance(connection,job_row) is not None:
+                event_payload.update(direct_native_terminal_digest=orchestration_digest(structured),
+                    admission_digest=structured["admission_digest"])
             if review_evidence is not None:
                 event_payload["review"] = review_evidence
             self.store.append_event(
@@ -26057,6 +26373,18 @@ class BoundedRuntimeReadObservation:
         return self._receipt
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class BoundedDirectResultSnapshot:
+    job_id: str
+    attempt_id: str
+    work_ref: str
+    read_generation: str
+    terminal_digest: str
+    admission: dict[str, Any]
+    completion: dict[str, Any]
+    consumption: dict[str, Any]
+
+
 @dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
@@ -26107,6 +26435,82 @@ class Runtime:
             )
         )
 
+
+    def require_direct_result_access(self, connection, selection, access):
+        if type(access) is not direct_native.DirectNativeAccess:
+            raise StateConflict("direct result access is not host-issued")
+        access.check()
+        row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection["job_id"],)).fetchone()
+        admitted=_direct_native_provenance(connection,row,required=True)
+        if (selection["work_ref"] != access.work_ref or admitted["source"]["work_ref"] != access.work_ref
+                or admitted["principal_scope"] != access.principal_scope
+                or admitted["authority_generation_digest"] != access.authority_generation_digest):
+            raise StateConflict("direct result current principal/source generation differs")
+        access.check()
+        return {"principal_scope":admitted["principal_scope"],"receiver_binding_digest":admitted["receiver_binding_digest"],
+                "source_digest":admitted["source_digest"],"admission_digest":orchestration_digest(admitted)}
+
+    def require_direct_native_launch_access(self, job_id, attempt_id, access):
+        with self.store.read() as connection:
+            self.require_direct_result_access(connection,dict(job_id=job_id,work_ref=access.work_ref),access)
+            row=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(attempt_id,)).fetchone()
+            job=connection.execute("SELECT current_attempt_id FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            if (row is None or row["job_id"] != job_id or row["status"] != "CLAIMED"
+                    or row["lease_token"] is None or job["current_attempt_id"] != attempt_id):
+                raise StateConflict("direct native launch no longer owns its exact claim")
+            access.check()
+
+    def validate_direct_completion(self, connection, selection):
+        job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection["job_id"],)).fetchone()
+        admitted=_direct_native_provenance(connection,job,required=True)
+        attempt=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(selection["attempt_id"],)).fetchone()
+        if (job["status"] != "COMPLETED" or job["current_attempt_id"] != selection["attempt_id"]
+                or selection["work_ref"] != admitted["source"]["work_ref"] or job["attempt_count"] != 1
+                or attempt is None or attempt["job_id"] != job["job_id"] or attempt["status"] != "COMPLETED"
+                or attempt["lease_token"] is not None or job["result_json"] != attempt["result_json"]
+                or len(str(job["result_json"]).encode('utf8')) > 2_097_152):
+            raise StateConflict("direct result is not one exact terminal Attempt")
+        terminal=_sealed_worker_result_payload(connection,attempt,expected_role=None,
+            terminal_payload=_strict_canonical_json_loads(job["result_json"],name="direct terminal"))
+        sha=orchestration_digest(terminal)
+        events=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_COMPLETED' AND job_id=? AND attempt_id=? LIMIT 2",(job["job_id"],attempt["attempt_id"])).fetchall()
+        if len(events)!=1 or json.loads(events[0][0]) != dict(status="COMPLETED",direct_native_terminal_digest=sha,admission_digest=orchestration_digest(admitted)):
+            raise StateConflict("direct terminal lost its immutable completion Event")
+        return dict(payload=copy.deepcopy(terminal["payload"]),terminal_digest=sha,terminal_record=copy.deepcopy(terminal))
+
+    def read_direct_native_result_bounded(self, selection, *, access):
+        from common import direct_native_result_contract as wire
+        from control_plane.direct_native_result import direct_consumption_state,project_direct_native_result
+        selected=wire.validate_request(selection,consume=False)
+        try:
+            with self.observe_bounded_read() as observation:
+                observation._select()
+                connection=observation._connection
+                identity=self.require_direct_result_access(connection,selected,access)
+                row=connection.execute("SELECT current_attempt_id FROM jobs WHERE job_id=?",(selected["job_id"],)).fetchone()
+                if selected["attempt_id"] is None:
+                    selected["attempt_id"]=row["current_attempt_id"]
+                if selected["attempt_id"] is None:
+                    return wire.unavailable(selected,"NOT_TERMINAL")
+                completion=self.validate_direct_completion(connection,selected)
+                state=direct_consumption_state(connection,selected,identity,completion["terminal_digest"])
+                snapshot=BoundedDirectResultSnapshot(selected["job_id"],selected["attempt_id"],selected["work_ref"],
+                    observation._identity,completion["terminal_digest"],identity,completion,state)
+                if self.require_direct_result_access(connection,selected,access) != identity:
+                    raise StateConflict("direct result authority changed")
+            return project_direct_native_result(snapshot,observation.receipt).complete
+        except (StateConflict,ValueError):
+            return wire.unavailable(selected,"SOURCE_UNAVAILABLE")
+
+    def consume_direct_native_result(self, selection, *, access):
+        from common import direct_native_result_contract as wire
+        from control_plane.direct_native_result import consumption_command_id,consume_direct_result_in_transaction
+        selected=wire.validate_request(selection,consume=True)
+        with self.store.transaction() as connection:
+            identity=self.require_direct_result_access(connection,selected,access)
+            consume_direct_result_in_transaction(self,connection,selected,access=access,
+                command_id=consumption_command_id(selected["operation_key"],identity))
+        return self.read_direct_native_result_bounded({key:selected[key] for key in wire.SELECTION_KEYS},access=access)
 
     @contextmanager
     def bounded_acquisition(self) -> Iterator[BoundedRuntimeAcquisition]:

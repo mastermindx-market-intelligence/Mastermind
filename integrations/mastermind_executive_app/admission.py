@@ -221,6 +221,13 @@ async def compose_admission(request: AdmissionRequest) -> AdmissionOutcome:
     frame = _build_v2_frame(
         request_ref=request_ref, grounding=grounding, semantic_request=semantic_request
     )
+    if semantic_request.get("execution_profile") == "native_research_only":
+        from control_plane.direct_native_execution import SUBMIT_SCHEMA
+        from integrations.mastermind_executive_app.principal_namespace import principal_scope_from_identity
+        frame["schema"] = SUBMIT_SCHEMA
+        frame["principal_scope"] = principal_scope_from_identity(
+            issuer_digest=request.principal.issuer_digest,subject_digest=request.principal.subject_digest,
+            client_ref=request.principal.client_ref,resource=request.principal.resource)
     response = await request.client.send_frame(request.ceo_ingress_socket_path, frame)
     return _classify_send_response(response, request_ref=request_ref)
 

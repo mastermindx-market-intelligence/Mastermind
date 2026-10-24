@@ -2210,6 +2210,7 @@ class ExecutiveControlService:
         operator_identity_verifier: Callable[[], Awaitable[None]] | None = None,
         autonomy_guard: Callable[[], None] | None = None,
         ceo_submit_admission_guard: Callable[[], None] | None = None,
+        direct_native_generation_provider: Callable[[], str] | None = None,
         backup_backend: BackupBackendProtocol | None = None,
         activated_socket: socket.socket | None = None,
         service_state: str = "READY",
@@ -2281,6 +2282,9 @@ class ExecutiveControlService:
         self._operator_identity_verifier = operator_identity_verifier
         self._autonomy_guard = autonomy_guard
         self._ceo_submit_admission_guard = ceo_submit_admission_guard
+        if direct_native_generation_provider is not None and not callable(direct_native_generation_provider):
+            raise ValueError("direct native generation provider must be a host callable")
+        self._direct_native_generation_provider = direct_native_generation_provider
         if self.config.coo_autonomy_armed and not callable(self._autonomy_guard):
             raise ValueError("armed COO autonomy requires an autonomy guard")
         self._backup_backend = backup_backend or _ModuleBackupBackend()
@@ -2716,9 +2720,9 @@ class ExecutiveControlService:
         return await paid_capacity_action(self._require_runtime(),self._paid_worker_binding_source,
             mode=mode,availability_guard=self._paid_capacity_available)
 
-    def _paid_subject_review_registration(self, router):
+    def _paid_subject_review_registration(self, router, *, direct_native=False):
         """One READ-only view of the existing Codex Worker, never a new slot."""
-        if not self.config.coo_paid_work_placements:
+        if not self.config.coo_paid_work_placements and not direct_native:
             return None
         from control_plane.executive_runtime import normalize_paid_subject_review_binding
         alias = router.resolve_model_alias("standard.review")
@@ -5693,6 +5697,21 @@ class ExecutiveControlService:
                 except Exception:
                     await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503))
                 return
+            from control_plane import direct_native_execution as direct
+            if isinstance(parsed,Mapping) and parsed.get("schema") in {direct.SUBMIT_SCHEMA,direct.RESULT_SCHEMA}:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer,"peer_denied","direct native frame requires the fixed App peer")
+                    return
+                try:
+                    result=await self._handle_direct_native_app_frame(parsed,app_binding=app_binding)
+                    await self._send_ceo_ingress_response(writer,{"ok":True,"result":result})
+                except ceo_ingress.CeoIngressError as exc:
+                    await self._send_ceo_ingress_error(writer,exc.code,exc.message)
+                except Exception:
+                    # A lost launch/commit response is not a proven no-effect
+                    # refusal. The HTTP owner retains its original request.
+                    await self._send_ceo_ingress_error(writer,"backend_unavailable","direct native original operation requires reconciliation")
+                return
             principal_frame = (
                 isinstance(parsed, Mapping) and isinstance(parsed.get("schema"), str)
                 and parsed["schema"] in ceo_ingress.PRINCIPAL_SCHEMAS
@@ -5963,7 +5982,8 @@ class ExecutiveControlService:
             "harness_version": binding["operator_harness_version"],
         }
         proof_capabilities = ["code", "research", "tests"]
-        paid_review = self._paid_subject_review_registration(router)
+        paid_review = self._paid_subject_review_registration(router,
+            direct_native=callable(self._direct_native_generation_provider))
         existing = runtime.workers.get_worker(self.config.worker_id)
         if existing is not None:
             quota = runtime.workers.get_quota_class(
@@ -6013,7 +6033,7 @@ class ExecutiveControlService:
                         capabilities=operator_capabilities,
                         metadata=operator_metadata,
                     )
-            if self.config.coo_autonomy_armed and paid_review is not None:
+            if (self.config.coo_autonomy_armed or callable(self._direct_native_generation_provider)) and paid_review is not None:
                 runtime.workers.register_quota_class(
                     self.config.worker_id, paid_review[0], **paid_review[1])
             refreshed = runtime.workers.get_worker(self.config.worker_id)
@@ -6559,6 +6579,107 @@ class ExecutiveControlService:
                     job_id, lost_attempt_id, **target, expected_snapshot=snapshot,
                     uid_sweep=sweep, expected_worker_uid=expected_uid,
                     observation_started_at=started, observation_finished_at=finished)
+
+    def _direct_native_access(self, *, principal_scope, work_ref, intent_id, app_binding):
+        from control_plane import direct_native_execution as direct
+        if app_binding is not self._ceo_ingress_app_binding:
+            raise StateConflict("direct native App binding changed")
+        generation_provider=self._direct_native_generation_provider
+        source_provider=self._ceo_ingress_dialogue_source_provider
+        if not callable(generation_provider) or not callable(source_provider):
+            raise StateConflict("direct native normal host source is not composed")
+        def material():
+            if (app_binding is not self._ceo_ingress_app_binding or not app_binding.armed
+                    or self._closing or not self._ceo_ingress_ready
+                    or self._service_state not in {"READY","AWAITING_CANARY"}):
+                raise StateConflict("direct native App authority unavailable")
+            self._require_ceo_submit_admission()
+            generation=direct.require_digest(generation_provider())
+            # Reuse the existing sealed readonly alias and the SAME physical
+            # Worker view. No paid lease/capacity/provider operation is needed.
+            _quota,_registration,recipe=self._paid_subject_review_registration(ModelRouter.load(),direct_native=True)
+            native=direct.normalize_binding({key:(self.config.proof_base_sha if key=="base_sha" else recipe[key])
+                for key in direct._BINDING_KEYS})
+            source=normalize_executive_dialogue_source(source_provider(intent_id,work_ref),work_ref=work_ref).to_dict()
+            self._require_ceo_submit_admission()
+            if direct.require_digest(generation_provider()) != generation:
+                raise StateConflict("direct native host generation changed")
+            return generation,native,source
+        initial=material()
+        generation_digest=direct.digest(dict(host_generation=initial[0],binding=initial[1],source=initial[2]))
+        def current():
+            now=material()
+            return direct.digest(dict(host_generation=now[0],binding=now[1],source=now[2]))
+        return direct._issue_access(principal_scope,work_ref,generation_digest,current),initial[1],initial[2]
+
+    async def _handle_direct_native_app_frame(self, parsed, *, app_binding):
+        from control_plane import direct_native_execution as direct
+        from common import direct_native_result_contract as wire
+        runtime=self._require_runtime()
+        if parsed.get("schema") == direct.SUBMIT_SCHEMA:
+            def admission_provider(intent_id,work_ref):
+                if self._service_state != "READY":
+                    raise StateConflict("direct native admission requires genuine READY")
+                access,binding,source=self._direct_native_access(principal_scope=parsed["principal_scope"],
+                    work_ref=work_ref,intent_id=intent_id,app_binding=app_binding)
+                return direct._issue_admission(access,source,binding)
+            result=await ceo_ingress.handle_direct_native_submit(parsed,runtime=runtime,
+                grounding_provider=app_binding.grounding_provider,workspace_root=self.config.proof_workspace_root,
+                admission_provider=admission_provider)
+            # Exact duplicate/status never restarts a dispatch, including a
+            # claimed/unknown operation after response loss or service restart.
+            if result.get("duplicate") is False:
+                intent_id=result["intent_id"]
+                access,_,_=await asyncio.to_thread(self._direct_native_access,
+                    principal_scope=parsed["principal_scope"],work_ref=result["work_ref"],
+                    intent_id=intent_id,app_binding=app_binding)
+                try:
+                    if self._service_state != "READY":
+                        raise StateConflict("direct native worker is not READY")
+                    await self._dispatch_direct_native(result["job_id"],access=access)
+                except Exception as exc:
+                    self._dispatch_errors[result["job_id"]]=type(exc).__name__ + ": original direct dispatch unavailable or uncertain; no retry"
+                    # Keep the genuine durable admission receipt. It reports
+                    # dispatched=False and is not execution/result success.
+
+            return result
+        expected={"schema","operation","work_ref","job_id","attempt_id","principal_scope"}
+        consume=parsed.get("operation")=="consume"
+        if consume: expected|={"result_digest","operation_key"}
+        if set(parsed)!=expected or parsed.get("operation") not in {"result","consume"}:
+            raise ValueError("direct native frame is not closed")
+        selection=wire.validate_request({key:parsed[key] for key in (wire.SELECTION_KEYS | {"result_digest","operation_key"} if consume else wire.SELECTION_KEYS)},consume=consume)
+        try:
+            with runtime.store.read() as connection:
+                row=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2",(selection["job_id"],)).fetchall()
+                if len(row)!=1: raise StateConflict("direct native origin unavailable")
+                provenance=json.loads(row[0][0])["provenance"]
+                intent_id=provenance["intent_id"]
+            access,_,_=await asyncio.to_thread(self._direct_native_access,principal_scope=parsed["principal_scope"],
+                work_ref=selection["work_ref"],intent_id=intent_id,app_binding=app_binding)
+            if consume:
+                from control_plane.workspace_owned_task import await_owned
+                return await await_owned(asyncio.create_task(asyncio.to_thread(runtime.consume_direct_native_result,selection,access=access)))
+            return await asyncio.to_thread(runtime.read_direct_native_result_bounded,selection,access=access)
+        except Exception:
+            return wire.unavailable({key:selection[key] for key in wire.SELECTION_KEYS},"AUTHORITY_UNAVAILABLE")
+
+    async def _dispatch_direct_native(self, job_id, *, access):
+        runtime=self._require_runtime()
+        async with self._dispatch_lock:
+            async with self._workspace_lock:
+                if any(not task.done() for task in self._dispatch_tasks.values()):
+                    raise StateConflict("serialized native Worker already has an active dispatch")
+                access.check()
+                runtime.jobs.prepare_direct_native_workspace(job_id,source_repository=self.config.proof_source_repository,
+                    shared_gid=self.config.proof_shared_gid,access=access)
+                # Reserve/claim/unknown evidence remains owned by Runtime on
+                # every failure. No startup scan or generic dispatcher retries.
+                active=await self._require_supervisor().start_direct_native_job(job_id,access=access)
+                if not hasattr(active,"lease"):
+                    raise StateConflict("direct native dispatch is already owned; no relaunch")
+                task=asyncio.create_task(self._finish_dispatched(job_id,active),name=f"executive-direct-finish-{job_id}")
+                self._dispatch_tasks[job_id]=task
 
     def _observe_ceo_submit_admission(self) -> dict[str, str]:
         """Observe the SAME current guard, without constructing an intent or Runtime read.

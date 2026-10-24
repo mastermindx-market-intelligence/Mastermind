@@ -1818,6 +1818,7 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     ceo_submit_admission_guard: Callable[[], None] | None = None,
+    direct_native_generation_provider: Callable[[], str] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
     content_profile_loader: Callable[[], Any] | None = None,
     workspace_acquisition_loader: Callable[[], Any] | None = None,
@@ -2831,6 +2832,7 @@ def _service_from_config(
         ),
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=ceo_submit_admission_guard,
+        direct_native_generation_provider=direct_native_generation_provider,
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
@@ -3066,6 +3068,16 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
     require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
+    def direct_native_generation():
+        # The incumbent guard proves exact running configuration and its
+        # root-owned admission receipt. This digest binds that actual epoch;
+        # bearer renewal contributes no permanent jti/expiration authority.
+        require_ceo_admission()
+        attestation=content_attestation_loader()
+        from control_plane.direct_native_execution import digest
+        value=digest(dict(config_sha256=attestation["config_sha256"],release_sha=raw["proof_base_sha"]))
+        require_ceo_admission()
+        return value
     from control_plane.fabric_attended_canary import AttendedControlProbeSource
 
     service = _service_from_config(
@@ -3081,6 +3093,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=require_ceo_admission,
+        direct_native_generation_provider=direct_native_generation,
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
