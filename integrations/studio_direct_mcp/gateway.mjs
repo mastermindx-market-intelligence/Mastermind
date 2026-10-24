@@ -1713,8 +1713,8 @@ export async function startGateway(partialConfig = {}, auth = {}) {
   // Stateless HTTP views detach at exchange completion. The existing shared
   // BackendOwner retains Fabric controllers/results until gateway shutdown.
   const modernToolNames = new Set(['fabric_capabilities', 'fabric_request', 'fabric_status',
-    'fabric_wait', 'fabric_result', 'fabric_accept', 'fabric_controller_output',
-    'studio_ping', 'studio_output_page']);
+    'fabric_wait', 'fabric_result', 'fabric_result_page', 'fabric_accept',
+    'fabric_controller_output', 'studio_ping', 'studio_output_page']);
   const modernHandler = cfg.modernFabricProtocol ? createModernFabricHandler({
     serverInfo: { name: 'mastermind-subagent-fabric', version: GATEWAY_VERSION },
     acquireScope: async ({ authInfo }) => {
