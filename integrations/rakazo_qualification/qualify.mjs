@@ -588,7 +588,7 @@ export async function observePinnedRakazo(root) {
         }),
         always_allow: allowed.decision,
         explicit_create_space: approval.toolRequiresExplicitApproval("create_space"),
-        owner_write_exempt: approval.toolRequiresApproval("write_file", false),
+        owner_write_requires_approval: approval.toolRequiresApproval("write_file", false),
         webhook_write_requires_approval: approval.unattendedTriggerToolRequiresApproval(
           "webhook",
           "write_file",

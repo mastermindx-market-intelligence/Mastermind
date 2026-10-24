@@ -418,7 +418,9 @@ test("approval rules resolve ask or allow and identical arguments keep one effec
   assert.equal(observed.ruled_gate, "ask");
   assert.equal(observed.always_allow, "allow");
   assert.equal(observed.explicit_create_space, true);
-  assert.equal(observed.owner_write_exempt, false);
+  assert.equal(observed.owner_write_requires_approval, false);
+  assert.equal(Object.hasOwn(observed, "owner_write_exempt"), false);
+  assert.equal(JSON.stringify(report).includes('"owner_write_exempt"'), false);
   assert.equal(observed.webhook_write_requires_approval, true);
   assert.equal(observed.effect_key, observed.replay_effect_key);
   assert.match(observed.effect_key, /^run-1:write_file:[a-f0-9]{64}$/);
