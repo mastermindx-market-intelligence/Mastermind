@@ -927,8 +927,9 @@ def _receipt(
         "accepted": True,
         "duplicate": bool(duplicate),
         # ALWAYS False.  This field exists so a caller can never confuse
-        # acceptance with execution: nothing on this path dispatches, and the
-        # control service structurally refuses to dispatch a CEO-created job.
+        # acceptance with execution: this sink never dispatches. The new direct
+        # host path has a separate execution capability; legacy generic dispatch
+        # keeps its fixed-proof guard.
         "dispatched": False,
         "authority": {
             # Read off the DURABLE Job, never echoed back from the request.

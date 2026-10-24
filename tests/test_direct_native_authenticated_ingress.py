@@ -14,7 +14,7 @@ import subprocess
 import pytest
 from pathlib import Path
 from control_plane import executive_runtime as er, ceo_request
-from control_plane.executive_service import ExecutiveControlService,CeoIngressAppBinding
+from control_plane.executive_service import ExecutiveControlService,CeoIngressAppBinding,CEO_WEB_CEO_V2_READ_SCHEMA
 from integrations.executive_mcp.web_ceo import WebCeoV2InstalledExecutiveReaders
 from integrations.mastermind_executive_app.gateway import AppPolicies
 from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient,PreparationResult
@@ -97,7 +97,7 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
             ceo_ingress_socket_path=short_socket_root/'native-http.sock',ceo_ingress_peer_uid=os.geteuid()+1000,
             ceo_ingress_armed=False,ceo_ingress_grounding_provider=grounding,
             ceo_ingress_dialogue_source_provider=lambda _intent,_work:source,
-            ceo_ingress_app_binding=CeoIngressAppBinding(peer_uid=os.geteuid(),armed=True,grounding_provider=grounding,read_provider=readers))
+            ceo_ingress_app_binding=CeoIngressAppBinding(peer_uid=os.geteuid(),armed=True,grounding_provider=grounding,read_provider=readers,read_schema=CEO_WEB_CEO_V2_READ_SCHEMA))
         await service.start()
         try:
             # I1: merely installing the provider/startup creates no quota rows;
@@ -149,12 +149,21 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
                     assert len(service.runtime.jobs.list_jobs())==1 and service.runtime.attempts.list_attempts()==[]
                     assert native.adapter.start_count==0
                     monkeypatch.setattr(ceo_intent,'build_receipt',original_receipt)
+                    original_id=ceo_request.automated_intent_id(response.json()['request_ref'])
+                    local_receipt=ceo_intent.resolve_intent(service.runtime,original_id)
+                    assert local_receipt['schema']=='mastermind.ceo_direct_native_receipt.v1'
+                    direct_status=await asyncio.to_thread(readers._read,'ceo_intent_status',{'intent_id':original_id},'2026-10-24T12:00:00+00:00')
+                    assert direct_status['ok'],direct_status
                     # Original status lookup learns durable mode/Job from its
                     # actual admitted Event; no submit or launch is repeated.
                     recovered=await http.post('/os/executive/status',headers=headers(token),json={'arguments':{'intent_id':ceo_request.automated_intent_id(response.json()['request_ref'])}})
                     assert recovered.status_code==200,recovered.text
+                    assert recovered.json().get('data') is not None,recovered.text
                     assert recovered.json()['data']['schema']=='mastermind.ceo_direct_native_receipt.v1'
                     assert recovered.json()['data']['job_id']==service.runtime.jobs.list_jobs()[0].job_id
+                    assert recovered.json()['data']['status']=='QUEUED'
+                    assert recovered.json()['data']['dispatched'] is False
+                    assert service.runtime.attempts.list_attempts()==[]
                     assert native.adapter.start_count==0
                     return
                 if not armed or execution=='publication-loss':
@@ -237,3 +246,41 @@ def test_normal_installed_factory_closed_arm_startup_creates_no_native_quota(tmp
                 service.config.coo_default_quota_class+'.review') is None
         finally:await service.close()
     asyncio.run(exercise())
+
+
+def test_normal_full_arm_factory_retains_native_primary_and_execution_guards(tmp_path,short_socket_root,monkeypatch):
+    """Actual installed factory constructor; broker/source/Root facts inert.
+
+    This binds the normal factory to the independently joined native owner. It
+    does not claim a physical Worker invocation from this constructor fixture.
+    """
+    from tests.test_ceo_submit_armed_composition import _module,_raw,_write
+    from tests.test_executive_terminal_return import _SEALED_WORKER_SECRET_CANARY
+    from control_plane import executive_worker_broker as broker
+    from control_plane.executive_supervisor import ExecutiveSupervisor
+    module=_module()
+    raw=_raw(tmp_path,control_socket_path=str(short_socket_root/'armed-factory.sock'),shared_run_gid=os.getegid(),
+        ceo_submit_armed=True,coo_autonomy_armed=True,coo_operator_harness_armed=True,coo_foreground_only=True,
+        operator_harness_binary_digest='b'*64,operator_harness_version='inert-qualified')
+    loaded=module.load_control_config(_write(tmp_path,raw))
+    client=object()
+    monkeypatch.setattr(broker,'WorkerBrokerClient',lambda *_,**__:client)
+    monkeypatch.setattr(module,'activate_launchd_socket',lambda _:None)
+    guards=[]
+    def autonomy():guards.append('existing-full-autonomy')
+    def admission():guards.append('existing-ceo-coexistence')
+    def generation():return 'a'*64
+    service=module._service_from_config(loaded,autonomy_guard=autonomy,ceo_submit_admission_guard=admission,
+        direct_native_generation_provider=generation,initial_canary=_SEALED_WORKER_SECRET_CANARY)
+    runtime=er.Runtime.at(tmp_path/'constructor-runtime')
+    native=service._supervisor_factory(runtime)
+    assert type(native) is ExecutiveSupervisor and type(native.adapter) is broker.RemoteCodexWorkerAdapter
+    assert native.runtime is runtime and native.require_complete_launch_attestation is True
+    assert service._direct_native_generation_provider is generation and service._autonomy_guard is autonomy
+    assert service.config.coo_foreground_only is True
+    assert service.config.coo_operator_model_alias!='coo.operator.native-return'
+    from control_plane import direct_native_execution as dn
+    base=dn._issue_access('d'*64,'WS:H2','a'*64,generation)
+    execution=service._direct_native_execution_access(base)
+    execution.check()
+    assert guards and set(guards)=={'existing-full-autonomy','existing-ceo-coexistence'}
