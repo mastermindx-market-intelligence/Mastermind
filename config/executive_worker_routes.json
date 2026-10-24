@@ -204,6 +204,30 @@
         "tests"
       ],
       "worker_eligible": false
+    },
+    "byteplus-modelark.glm-5.3-flash": {
+      "provider_alias": "byteplus-modelark",
+      "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+      "model": "glm-5-3-flash-260828",
+      "effort": "medium",
+      "cost_class": "small",
+      "capabilities": [
+        "code",
+        "tests"
+      ],
+      "worker_eligible": false
+    },
+    "byteplus-modelark.deepseek-v4.1-flash": {
+      "provider_alias": "byteplus-modelark",
+      "execution_profile_id": "sealed.worker.write.no-extensions.v1",
+      "model": "deepseek-v4-1-flash-261017",
+      "effort": "medium",
+      "cost_class": "small",
+      "capabilities": [
+        "code",
+        "tests"
+      ],
+      "worker_eligible": false
     }
   },
   "routes": {

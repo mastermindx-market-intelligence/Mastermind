@@ -17,6 +17,15 @@ from typing import Any
 
 QUOTA_PREVIEW_SCHEMA = "mastermind.quota_economics_preview/v1"
 PROJECTION_SCHEMA = "mastermind.capacity_economics_projection/v1"
+
+# Commercial API model IDs, not Personal Coding Plan names. These are
+# catalog candidates until exact ProviderRealm, ModelRouter and Capacity
+# owners independently qualify the live adapter/credential/model.
+BYTEPLUS_COMMERCIAL_FLASH_MODELS = {
+    "byteplus-modelark.glm-5.3-flash": "glm-5-3-flash-260828",
+    "byteplus-modelark.deepseek-v4.1-flash": "deepseek-v4-1-flash-261017",
+}
+_ZAI_FLASH_MODELS = frozenset({"glm-5.3-flash", "glm-5-3-flash-260828"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
@@ -55,7 +64,12 @@ def _commercial_byteplus_reviewed(
     Capacity must still be independently proven by their incumbent owners.
     No file, provider, broker or network read occurs in this projection.
     """
-    if provider != "byteplus-modelark" or not model_alias.startswith("byteplus-modelark."):
+    if provider != "byteplus-modelark":
+        return False
+    # No arbitrary BytePlus-looking preview may expand the commercial scope.
+    if model_alias not in BYTEPLUS_COMMERCIAL_FLASH_MODELS and (
+        model_alias != "byteplus-modelark.commercial-coding"
+    ):
         return False
 
     from control_plane.codex_provider_realm import (
@@ -82,6 +96,11 @@ def _commercial_byteplus_reviewed(
         or registered_model.provider_alias != provider
         or registered_model.adapter_id != "codex-cli"
         or registered_model.worker_eligible is not True
+        or (
+            model_alias in BYTEPLUS_COMMERCIAL_FLASH_MODELS
+            and registered_model.model
+            != BYTEPLUS_COMMERCIAL_FLASH_MODELS[model_alias]
+        )
     ):
         return False
     # Caller-supplied first-tier text is not routing authority. Require an
@@ -94,6 +113,100 @@ def _commercial_byteplus_reviewed(
         for route in reviewed_router.routes.values()
         for risk in ("routine", "elevated")
     )
+
+
+def _prefer_commercial_flash_over_zai_flash(
+    selected: Mapping[str, Any],
+    options: Sequence[Mapping[str, Any]],
+    *,
+    first_tier_id: str,
+    first_tier_aliases: tuple[str, ...],
+    reviewed_router: Any,
+) -> Mapping[str, Any]:
+    """Project scarcity priority inside the first *already lawful* tier.
+
+    When the preview otherwise favors Z.AI GLM Flash, commercial ModelArk
+    Flash is preferred if the same tier has a reviewed, *eligible* BytePlus
+    account-backed option with positive observed-preview headroom. This
+    spares Z.AI headroom for full GLM 5.3. Never use this rule to displace
+    a full-model job, switch suitability tiers, claim capacity or infer that
+    a credential/worker has been activated.
+    """
+    from control_plane.model_router import ModelRouter
+
+    if type(reviewed_router) is not ModelRouter:
+        return selected
+    if selected.get("provider") != "glm":
+        return selected
+    zai_alias = selected.get("model_alias")
+    if type(zai_alias) is not str or _ID_RE.fullmatch(zai_alias) is None:
+        return selected
+    # A malformed original recommendation must not be "repaired" by
+    # preferentially selecting an alternative from untrusted preview bytes.
+    starting = selected.get("estimated_startable_jobs")
+    concurrency = selected.get("suggested_parallelism")
+    pressure = selected.get("expiry_pressure_jobs_per_hour")
+    if (
+        type(starting) is not int
+        or type(concurrency) is not int
+        or not (0 < concurrency <= starting)
+        or (pressure is not None and (
+            type(pressure) is not str or not 0 < len(pressure) <= 64
+        ))
+    ):
+        return selected
+    zai_model = reviewed_router.model_aliases.get(zai_alias)
+    if (
+        zai_model is None
+        or zai_model.provider_alias != "glm"
+        or zai_model.model not in _ZAI_FLASH_MODELS
+        or zai_alias not in first_tier_aliases
+    ):
+        return selected
+    candidates = []
+    for option in options:
+        if not isinstance(option, Mapping):
+            continue
+        alias = option.get("model_alias")
+        if type(alias) is not str or alias not in BYTEPLUS_COMMERCIAL_FLASH_MODELS:
+            continue
+        if option.get("provider") != "byteplus-modelark":
+            continue
+        if alias not in first_tier_aliases:
+            continue
+        if option.get("eligible_in_preview") is not True:
+            continue
+        estimated = option.get("estimated_startable_jobs")
+        parallelism = option.get("suggested_parallelism")
+        if (type(estimated) is not int or type(parallelism) is not int
+                or not (0 < parallelism <= estimated)):
+            continue
+        option_id = option.get("option_id")
+        if (not isinstance(option_id, str)
+                or _ID_RE.fullmatch(option_id) is None):
+            continue
+        if sum(
+            isinstance(row, Mapping) and row.get("option_id") == option_id
+            for row in options
+        ) != 1:
+            continue
+        if not _commercial_byteplus_reviewed(
+            "byteplus-modelark", alias, first_tier_id,
+            first_tier_aliases, reviewed_router,
+        ):
+            continue
+        # Tie-breaking is deterministic, not a provider-cost or quota claim.
+        # Prefer more usable preview slots; both Flash models are viable
+        # alternatives, with the GLM identity stable on exact ties.
+        candidates.append((
+            -parallelism, -estimated,
+            list(BYTEPLUS_COMMERCIAL_FLASH_MODELS).index(alias),
+            option_id, option,
+        ))
+    if not candidates:
+        return selected
+    candidates.sort(key=lambda item: item[:4])
+    return candidates[0][-1]
 
 
 def _validate_tiers(value: Any) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -225,6 +338,13 @@ def project_quota_preference(
     if row.get("eligible_in_preview") is not True:
         raise CapacityEconomicsProjectionError("suggested option is not eligible in preview")
 
+    # No new quota/selection owner: this advisory projection consumes the
+    # incumbent Provider Control preview and cannot promote a held alias.
+    row = _prefer_commercial_flash_over_zai_flash(
+        row, options, first_tier_id=first_tier_id,
+        first_tier_aliases=first_tier_aliases,
+        reviewed_router=reviewed_router,
+    )
     model_alias = _token(row.get("model_alias"), field="option.model_alias")
     if model_alias not in first_tier_aliases:
         raise CapacityEconomicsProjectionError(

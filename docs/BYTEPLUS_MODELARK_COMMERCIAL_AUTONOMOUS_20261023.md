@@ -86,6 +86,58 @@ headroom remain unobserved. The same public catalog advertises cheaper
 DeepSeek V4.1 Flash Economy options; cost alone must never outrank
 measured suitability or circumvent a missing account/Quota receipt.
 
+## Source-ready Flash model catalog and Capacity policy (2026-10-24)
+
+The "Prioritize BytePlus Routing" Chairman direction is now represented by
+two commercial API only model aliases in the existing
+config/executive_worker_routes.json ModelRouter source:
+
+- byteplus-modelark.glm-5.3-flash -> glm-5-3-flash-260828
+- byteplus-modelark.deepseek-v4.1-flash -> deepseek-v4-1-flash-261017
+
+The versioned model IDs come from the vendor's commercial ap-southeast-1
+release/pricing catalog, not the Personal Coding Plan's dotted model aliases.
+The public catalog is not proof of our account's model activation or of a
+successful Codex Responses/tool-calling run.
+
+The aliases are deliberately worker_eligible=false; commercial provider
+remains enabled=false, autonomous_allowed=false, and no held commercial
+alias enters a live ModelRouter tier. The restricted byteplus.attended alias
+is unchanged. Existing commercial source identity and credential separation
+remain unchanged.
+
+control_plane.capacity_economics_projection.project_quota_preference now
+implements an advisory preference inside the EXISTING source-owner preview:
+when a Z.AI GLM Flash option was suggested and the SAME validated first lawful
+tier contains a reviewed, active, worker-eligible BytePlus commercial Flash
+option with positive preview capacity, prefer the commercial Flash candidate.
+A separate exact ModelRouter and reviewed CodexProviderRealm are required.
+Never promote a BytePlus-looking preview label or a new lower suitability
+tier. Of the two BytePlus Flash options, projected parallelism/headroom ranks
+candidates; exact ties give the GLM Flash alias stable preference. A 401/403,
+429/cooldown, stale preview, missing actual credential or absent Capacity
+measurement cannot be converted into live admission by this preference.
+
+If no BytePlus candidate meets these gates, the existing suggestion remains
+unchanged. Full GLM 5.3 is NEVER replaced by Flash, and GLM/Z.AI's scarce
+full-model concurrency is not allocated to tasks that an already eligible
+commercial Flash worker can handle. The projection still returns
+selection_is_commitment=false and claim_time_revalidation_required=true.
+
+Important remaining integration dependency: Current Z.AI's
+glm.paid.sealed-input uses the paid sealed research execution profile,
+whereas these new commercial candidates use Codex's sealed write profile.
+They are NOT currently a single lawful ModelRouter suitability tier; a
+projection unit simulation proves conditional logic only, not a production
+runnable Z.AI -> BytePlus route. A source-reviewed compatible execution
+profile/adapter and actual ProviderRealm/Capacity facts are necessary before
+activation, while keeping first-tier equivalence and claim ownership intact.
+
+Vendor:
+- https://console.byteplus.com/ark/region%3Aap-southeast-1/docs/model-release-announcement
+- https://console.byteplus.com/ark/region%3Aap-southeast-1/docs/model-pricing
+- https://docs.byteplus.com/en/docs/modelark/deep-thinking
+
 ## Completion gates
 
 Source CI and independent review; native commercial transport canary;
