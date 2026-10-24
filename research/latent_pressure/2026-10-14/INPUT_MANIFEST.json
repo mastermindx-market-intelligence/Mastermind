@@ -1,0 +1,226 @@
+[
+  {
+    "ticker": "SPY",
+    "ref": "macro_snapshot:yahoo/SPY.parquet",
+    "sha256": "3c747f8dabd2e5a7101024d868df245e2663793e78ada5143c0b343e70c54b5a",
+    "bytes": 244520,
+    "rows": 8482,
+    "first": "1993-01-29",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLB",
+    "ref": "macro_snapshot:yahoo/XLB.parquet",
+    "sha256": "1bf29cb613b8ad2ca20bdffaef820ea1954eedea082e87de0fc56f2f80e1d282",
+    "bytes": 187996,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLC",
+    "ref": "macro_snapshot:yahoo/XLC.parquet",
+    "sha256": "64bdadba0a168393ac11b64a458904ac02ca9e6300047cf4855a6300a4f2ff62",
+    "bytes": 60361,
+    "rows": 2089,
+    "first": "2018-06-19",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLE",
+    "ref": "macro_snapshot:yahoo/XLE.parquet",
+    "sha256": "b4ecac24af48b635802bf2839f932f0f51323d8e912acca257d8e3e312b47431",
+    "bytes": 193504,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLF",
+    "ref": "macro_snapshot:yahoo/XLF.parquet",
+    "sha256": "7e4e99439d16dd072c4c6274d5479ee5164385a10694f5ed87273058bb650558",
+    "bytes": 188962,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLI",
+    "ref": "macro_snapshot:yahoo/XLI.parquet",
+    "sha256": "99768cc98b336925cd6c611a68e0482f7913e2fa9f9ef0e269cc5d905de1ed5e",
+    "bytes": 189098,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 1,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLK",
+    "ref": "macro_snapshot:yahoo/XLK.parquet",
+    "sha256": "68f9e0400758f26025c840f38ed6ae60023e72491c7dd3a8717edfc217aacec1",
+    "bytes": 189896,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLP",
+    "ref": "macro_snapshot:yahoo/XLP.parquet",
+    "sha256": "09cb432790e94f7c8d92798a6c21c76da5211657e1d1e448612897ca6b8de4e3",
+    "bytes": 181413,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLRE",
+    "ref": "macro_snapshot:yahoo/XLRE.parquet",
+    "sha256": "8665d4d985ce3cdd5335ac6b9be9a305bafd5165c3cee95432fe14588f1ed81f",
+    "bytes": 72495,
+    "rows": 2767,
+    "first": "2015-10-08",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 5,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLU",
+    "ref": "macro_snapshot:yahoo/XLU.parquet",
+    "sha256": "d3794b283be6a82aaa58c32d6027b86a2c3212ac638fa3b9aa3ce43bbf13cb8a",
+    "bytes": 186302,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLV",
+    "ref": "macro_snapshot:yahoo/XLV.parquet",
+    "sha256": "6427bd2885183c59003a0d9b78ec5966934cb490fe053c429ca750b4a36240a0",
+    "bytes": 184169,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "XLY",
+    "ref": "macro_snapshot:yahoo/XLY.parquet",
+    "sha256": "b4b0e8e6afa5507e0ecc55f9721033594f83e4c17172ea9243fabbba67258017",
+    "bytes": 189586,
+    "rows": 6992,
+    "first": "1998-12-22",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "SMH",
+    "ref": "macro_snapshot:yahoo/SMH.parquet",
+    "sha256": "e9454e5ec3541b5fd19b452a6a06e8d1b3fe9470289a7b5bd2c71ee6db240a66",
+    "bytes": 179208,
+    "rows": 6627,
+    "first": "2000-06-05",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  },
+  {
+    "ticker": "SOXX",
+    "ref": "macro_snapshot:yahoo/SOXX.parquet",
+    "sha256": "a4a1b502cfe3b1ec5c4ed41daf1c98b8733a98553f29c29ab75677252d563289",
+    "bytes": 172890,
+    "rows": 6348,
+    "first": "2001-07-13",
+    "last": "2026-10-09",
+    "columns": [
+      "close_price",
+      "close",
+      "volume"
+    ],
+    "volume_nonpositive": 0,
+    "close_basis": "vendor dividend/split adjusted; later vintage"
+  }
+]

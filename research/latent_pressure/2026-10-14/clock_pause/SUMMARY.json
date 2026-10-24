@@ -1,0 +1,106 @@
+{
+  "experiment": "LP-CLOCK-04",
+  "training_n": 1511,
+  "evaluation_n": 2168,
+  "classes": [
+    "NO_STANDARD_OBSERVATION",
+    "DOWN",
+    "SAME",
+    "UP"
+  ],
+  "metrics": {
+    "constant": {
+      "n": 2168,
+      "class_counts": [
+        867,
+        565,
+        39,
+        697
+      ],
+      "brier4": 0.6805401784926582,
+      "logloss4": 1.1753682699017285,
+      "availability_brier": 0.2474424230812252,
+      "conditional_direction_n": 1301,
+      "conditional_direction_brier": 0.5240329227289886,
+      "conditional_direction_accuracy": 0.5357417371252883,
+      "logloss_decomposition_exact": true
+    },
+    "baseline": {
+      "n": 2168,
+      "class_counts": [
+        867,
+        565,
+        39,
+        697
+      ],
+      "brier4": 0.7011975074987135,
+      "logloss4": 1.2468276187886982,
+      "availability_brier": 0.25844537893348657,
+      "conditional_direction_n": 1301,
+      "conditional_direction_brier": 0.5517724898231753,
+      "conditional_direction_accuracy": 0.5026902382782475,
+      "logloss_decomposition_exact": true
+    },
+    "pause": {
+      "n": 2168,
+      "class_counts": [
+        867,
+        565,
+        39,
+        697
+      ],
+      "brier4": 0.6955062771939137,
+      "logloss4": 1.2403639034909322,
+      "availability_brier": 0.25443844112810515,
+      "conditional_direction_n": 1301,
+      "conditional_direction_brier": 0.5537037745298228,
+      "conditional_direction_accuracy": 0.5003843197540354,
+      "logloss_decomposition_exact": true
+    }
+  },
+  "gains": {
+    "joint": {
+      "mean": 0.005691230304799816,
+      "descriptive_block_interval95": [
+        -0.0006561106551715793,
+        0.011842558919050021
+      ],
+      "blocks": 5,
+      "replicates": 1000,
+      "independent_days": 1,
+      "population_significance_established": false
+    },
+    "availability": {
+      "mean": 0.004006937805381355,
+      "descriptive_block_interval95": [
+        0.0022374844377459637,
+        0.005742818661997981
+      ],
+      "blocks": 5,
+      "replicates": 1000,
+      "independent_days": 1,
+      "population_significance_established": false
+    },
+    "direction": {
+      "mean": -0.0019312847066475017,
+      "descriptive_block_interval95": [
+        -0.012608325509159494,
+        0.008188932883380346
+      ],
+      "blocks": 5,
+      "replicates": 1000,
+      "independent_days": 1,
+      "population_significance_established": false
+    }
+  },
+  "filtered_silence": {
+    "eligible_origins": 2168,
+    "standard_age_ge60_origins": 819,
+    "with_other_L_activity_in_last60s": 737,
+    "fraction_of_standard_quiet": 0.8998778998778999,
+    "not_market_wide_or_directional": true
+  },
+  "gate": false,
+  "forecast_authority": "NONE_REGARDLESS_OF_GATE",
+  "qualification": "Previously seen one-day source; within-day descriptive comparison only, no population or trading claim"
+}

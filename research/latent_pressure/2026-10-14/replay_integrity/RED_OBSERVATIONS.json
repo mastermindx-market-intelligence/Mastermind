@@ -1,0 +1,23 @@
+{
+  "observed_at": "2026-10-15T05:31:49.522227+00:00",
+  "origin": "CONSTRUCTED_NORMALIZED_FIXTURES_NOT_IEX_BOOK_DATA",
+  "base_head": "2dd591f3d93e866c8e4448cdc36ea4d4637102cb",
+  "serial_delete_readd_same_clock": {
+    "history": [
+      "LEVEL_DEPLETED"
+    ],
+    "final_depth": 100,
+    "interpretation": "For an explicitly atomic normalized batch, intermediate depletion is not externally observable. Serial API currently lacks a commit boundary."
+  },
+  "invalid_horizon_types_accepted": [
+    "{'horizon_ns': True}",
+    "{'horizon_ns': 1.5}"
+  ],
+  "nested_large_integer_json": {
+    "start_ns_type": "int",
+    "start_sequence_type": "int",
+    "decimal_start_ns": "1152921504606846977",
+    "interpretation": "Top-levelclockfieldsarestrings,butnestedpendingtimestamps/sequencesareJSONnumberslargerthanJavaScriptsafeinteger."
+  },
+  "scope": "Repair only normalized recovery prototype and a source-independent synthetic replay/consumer. No deniedPDF/workerstatus/legacyrealdataaudit actions. No new financialexperiment orforecastclaim."
+}

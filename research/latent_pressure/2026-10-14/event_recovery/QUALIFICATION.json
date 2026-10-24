@@ -1,0 +1,34 @@
+{
+  "observed_at": "2026-10-15T04:39:01.849365+00:00",
+  "source_capture_date": "2026-10-05",
+  "archive_sha256": "2e41ba84c2a24ccd541d079c2bb05a6da38e988790d8e97a19c1527b1195b0dd",
+  "archive_hash_rechecked": true,
+  "raw_L_independent_python_match": 39763,
+  "source_spec_deepplus_sha256": "1a14b62eacc5aea0f66f7311fa8929d5fdafc1116f144ccbe39be8d727a4153d",
+  "source_spec_transport_sha256": "30d790afa4bf966fcd113381562c59c90424ebc317919436f74ddb3f6d7394ae",
+  "spec_public_pages": [
+    "https://www.iex.io/documents/iex-deep-plus-specification",
+    "https://www.iex.io/documents/iex-transport-specification"
+  ],
+  "retrieved_supported_fields": "IEX-TP pp5-6 and DEEP+ L p24 previously retrieved before blocked selectedPDF read/render action",
+  "full_scan_source_commit": "e5981d709",
+  "frozen_study_commit": "a314e91bf",
+  "fullscan_extractor_original_sha256": "2b68442355f93073741c3dc7fa4930667bad3c68e3ca541a8fe96b378c9e802c",
+  "malformed_repairs": "Negative price, event-after-send, IPv4/UDP containment and unsafe unknown-type JSON were demonstrated by red fixtures then repaired. Explicit little-endian output and heartbeat packet limits were added. One stricter full archive replay was justified by the changed framing predicate and produced three byte-identical outputs; original artifacts remain unchanged and the model was not refitted.",
+  "test_counts": {
+    "decoder": 19,
+    "recovery_engine_synthetic": 18,
+    "event_study_synthetic": 7
+  },
+  "empirical_claim": "Same-day displayed execution history addition failed positive gate; no fullquote or institutionrecovery",
+  "book_adapter_status": "UNVERIFIED_FAIL_CLOSED",
+  "consumer_status": "read-only historical research snapshot works; forecastprobabilitiesnull, allproductionauthoritiesfalse",
+  "source_scope": "IEXvenueonly;HISTreplaynotactualenduseravailableat/real-time proof",
+  "mode": "userselectedUIunknown;StudioM2toolsverified;noautomatedProadmissioninvented",
+  "outstanding_review": null,
+  "test_count_total": 44,
+  "review_status": "Returned and consumed; not accepted as overallapproval; exactadjudicationretained",
+  "stricter_full_replay_commit": "3b08dd90f",
+  "stricter_replay_output_identity": "All three outputs byte-identical tooriginal; see REQUALIFICATION",
+  "current_extractor_sha256": "95f8957137a93b1b8714a91a3910a39ffc3a0101bcf36548fc7ddc3aba0809cd"
+}
