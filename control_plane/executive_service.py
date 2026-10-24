@@ -8867,6 +8867,15 @@ class ExecutiveControlService:
             if job is None:
                 raise StateConflict(f"job {job_id!r} does not exist")
             return _jsonable(job)
+        if command == "session-recovery":
+            # Existing local control-socket peer authorization and READY gate
+            # already apply. This root-scoped view cannot requeue or dispatch.
+            self._exact_args(args, {"root_job_id", "limit"})
+            from .executive_session_recovery import project_root_recovery
+            return await self._run_physical(
+                project_root_recovery, runtime,
+                self._id(args["root_job_id"], "root_job_id"), limit=args["limit"],
+            )
         if command == "attempt":
             self._exact_args(args, {"attempt_id"})
             attempt_id = self._id(args["attempt_id"], "attempt_id")

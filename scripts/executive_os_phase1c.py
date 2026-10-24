@@ -449,6 +449,16 @@ def _absolute_path(value: str) -> Path:
     return path
 
 
+def _session_recovery_limit(value: str) -> int:
+    try:
+        limit = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("limit must be an integer between 1 and 500") from exc
+    if not 1 <= limit <= 500:
+        raise argparse.ArgumentTypeError("limit must be between 1 and 500")
+    return limit
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Operate the private launchd-backed Executive OS control service."
@@ -508,6 +518,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Run one deterministic action for one exact host-bound strict-v2 root.",
     )
     coo_cycle.add_argument("root_job_id")
+    session_recovery = sub.add_parser(
+        "session-recovery", help="Read bounded worker recovery diagnostics for one original root; never requeue.",
+    )
+    session_recovery.add_argument("root_job_id")
+    session_recovery.add_argument("--limit", type=_session_recovery_limit, default=100)
     cancel = sub.add_parser("cancel", help="Request cancellation for one Job.")
     cancel.add_argument("job_id")
     requeue = sub.add_parser("requeue", help="Explicitly requeue one LOST proof Job.")
@@ -3129,6 +3144,8 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
                               "fence_generation": args.fence_generation}
     if args.command == "run-coo-cycle":
         return args.command, {"root_job_id": args.root_job_id}
+    if args.command == "session-recovery":
+        return args.command, {"root_job_id": args.root_job_id, "limit": args.limit}
     if args.command == "attempt":
         return args.command, {"attempt_id": args.attempt_id}
     if args.command == "verify-backup":

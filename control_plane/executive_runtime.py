@@ -26,6 +26,7 @@ import os
 import re
 import secrets
 import sqlite3
+import stat
 import threading
 from types import MappingProxyType
 from abc import ABC, abstractmethod
@@ -1600,6 +1601,7 @@ class CooRetryMutationOutcome:
 class _RetrySafetyMaterial:
     projection: RetrySafetyProjection
     tx9_material: tuple[sqlite3.Row, dict[str, Any], str, dict[str, Any], str] | None
+    quota_material: dict[str, Any] | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -2274,35 +2276,154 @@ def _interactive_in_flight_turn_id(
 ) -> str | None:
     rows = connection.execute(
         """
-        SELECT g.session_epoch_id,e.attempt_id
+        SELECT g.session_epoch_id,e.attempt_id,e.worker_id,
+               e.provider_session_id,a.job_id,a.quota_class
         FROM process_generations g
         JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+        JOIN attempts a ON a.attempt_id=e.attempt_id
         WHERE g.process_generation_id=?
         """,
         (generation_id,),
     ).fetchall()
     if len(rows) != 1:
         raise StateConflict("interactive generation identity is ambiguous")
-    session_epoch_id = rows[0]["session_epoch_id"]
-    attempt_id = rows[0]["attempt_id"]
-    receipts: dict[str, set[str]] = {}
+    bound = rows[0]
+    session_epoch_id = str(bound["session_epoch_id"])
+    attempt_id = str(bound["attempt_id"])
+    worker_id = str(bound["worker_id"])
+    expected_source = (
+        str(bound["job_id"]), attempt_id, worker_id, str(bound["quota_class"])
+    )
+    relevant: dict[str, dict[str, tuple[sqlite3.Row, dict[str, Any]]]] = {}
+    unknown: list[tuple[sqlite3.Row, dict[str, Any]]] = []
     for event in connection.execute(
         """
-        SELECT event_type,payload_json
+        SELECT event_type,payload_json,aggregate_id,command_id,actor,
+               job_id,attempt_id,worker_id,quota_class
         FROM events
         WHERE aggregate_type='operator_operation' AND attempt_id=?
         """,
         (attempt_id,),
     ):
-        payload = _json_loads(event["payload_json"], fallback={})
-        if (
-            payload.get("operation_kind") != OperationKind.BEGIN_TURN.value
-            or payload.get("session_epoch_id") != session_epoch_id
-            or payload.get("process_generation_id") != generation_id
-        ):
+        kind = str(event["event_type"])
+        if kind not in {
+            OperationReceiptKind.INTENT.value, OperationReceiptKind.APPLIED.value,
+            OperationReceiptKind.EFFECT_UNKNOWN.value,
+        }:
             continue
-        turn_id = str(payload.get("turn_id"))
-        receipts.setdefault(turn_id, set()).add(event["event_type"])
+        payload = _json_loads(event["payload_json"], fallback={})
+        if not isinstance(payload, dict):
+            raise StateConflict("interactive turn receipt provenance invalid")
+        if kind == OperationReceiptKind.EFFECT_UNKNOWN.value:
+            unknown.append((event, payload))
+            continue
+        if payload.get("operation_kind") != OperationKind.BEGIN_TURN.value:
+            continue
+        if (payload.get("session_epoch_id") != session_epoch_id
+                or payload.get("process_generation_id") != generation_id):
+            # Another generation of the same Attempt can be valid; an
+            # unbound one cannot be quietly treated as a settled turn.
+            other = connection.execute(
+                "SELECT 1 FROM process_generations g "
+                "JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id "
+                "WHERE g.process_generation_id=? AND e.attempt_id=? "
+                "AND g.session_epoch_id=? LIMIT 1",
+                (payload.get("process_generation_id"), attempt_id,
+                 payload.get("session_epoch_id")),
+            ).fetchone()
+            if other is None:
+                raise StateConflict("interactive turn receipt provenance invalid")
+            continue
+        if (event["actor"] != "supervisor"
+                or (event["job_id"], event["attempt_id"],
+                    event["worker_id"], event["quota_class"]) != expected_source):
+            raise StateConflict("interactive turn receipt source identity invalid")
+        turn_id = payload.get("turn_id")
+        op_id = event["aggregate_id"]
+        if (type(turn_id) is not str or not turn_id
+                or type(op_id) is not str):
+            raise StateConflict("interactive turn receipt identity invalid")
+        try:
+            operation = OperationId(op_id)
+            expected_command = operation_receipt_command_id(
+                operation, OperationReceiptKind(kind),
+            )
+        except (ValueError, TypeError):
+            raise StateConflict("interactive turn receipt identity invalid") from None
+        if event["command_id"] != expected_command:
+            raise StateConflict("interactive turn receipt provenance invalid")
+        packet = relevant.setdefault(operation.command_id, {})
+        if kind in packet:
+            raise StateConflict("interactive duplicate turn receipt identity")
+        packet[kind] = (event, payload)
+
+    for event, payload in unknown:
+        packet = relevant.get(str(event["aggregate_id"]))
+        if packet is None:
+            continue
+        try:
+            operation = OperationId(str(event["aggregate_id"]))
+            expected_command = operation_receipt_command_id(
+                operation, OperationReceiptKind.EFFECT_UNKNOWN,
+            )
+        except (ValueError, TypeError):
+            raise StateConflict("interactive unknown-effect receipt identity invalid") from None
+        if (event["command_id"] != expected_command
+                or event["actor"] != "supervisor"
+                or (event["job_id"], event["attempt_id"],
+                    event["worker_id"], event["quota_class"]) != expected_source
+                or payload.get("schema_version")
+                != "mastermind.operator_harness_effect_unknown/v1"):
+            raise StateConflict("interactive unknown-effect receipt provenance invalid")
+        if OperationReceiptKind.EFFECT_UNKNOWN.value in packet:
+            raise StateConflict("interactive duplicate unknown-effect receipt")
+        packet[OperationReceiptKind.EFFECT_UNKNOWN.value] = (event, payload)
+
+    receipts: dict[str, set[str]] = {}
+    for operation_key, packet in relevant.items():
+        if OperationReceiptKind.INTENT.value not in packet:
+            raise StateConflict("interactive turn receipt has no original INTENT")
+        intent = packet[OperationReceiptKind.INTENT.value][1]
+        expected_intent = {
+            "schema_version": "mastermind.operator_harness_turn_intent/v1",
+            "operation_kind": OperationKind.BEGIN_TURN.value,
+            "attempt_id": attempt_id,
+            "session_epoch_id": session_epoch_id,
+            "process_generation_id": generation_id,
+            "worker_id": worker_id,
+            "provider_session_id": bound["provider_session_id"],
+            "turn_id": intent.get("turn_id"),
+        }
+        if intent != expected_intent:
+            raise StateConflict("interactive turn INTENT provenance invalid")
+        if OperationReceiptKind.APPLIED.value in packet:
+            applied = packet[OperationReceiptKind.APPLIED.value][1]
+            if (
+                set(applied) != {
+                    "schema_version", "operation_kind", "attempt_id",
+                    "session_epoch_id", "process_generation_id", "turn_id",
+                    "provider_native_turn_id", "acknowledged",
+                }
+                or applied.get("schema_version")
+                != "mastermind.operator_harness_turn_applied/v1"
+                or applied.get("operation_kind") != OperationKind.BEGIN_TURN.value
+                or applied.get("attempt_id") != attempt_id
+                or applied.get("session_epoch_id") != session_epoch_id
+                or applied.get("process_generation_id") != generation_id
+                or applied.get("turn_id") != intent["turn_id"]
+                or applied.get("acknowledged") is not True
+            ):
+                raise StateConflict("interactive turn APPLIED provenance invalid")
+        if (
+            OperationReceiptKind.EFFECT_UNKNOWN.value in packet
+            and OperationReceiptKind.APPLIED.value in packet
+        ):
+            raise StateConflict("interactive contradictory turn receipts")
+        turn_id = str(intent["turn_id"])
+        if turn_id in receipts:
+            raise StateConflict("interactive duplicate turn source identity")
+        receipts[turn_id] = set(packet)
+
     for turn_id, states in receipts.items():
         if states == {OperationReceiptKind.INTENT.value}:
             return turn_id
@@ -2311,33 +2432,233 @@ def _interactive_in_flight_turn_id(
             return turn_id
     for turn_id, states in receipts.items():
         if OperationReceiptKind.APPLIED.value in states:
-            turn_operation_applied = connection.execute(
+            interrupt_rows = connection.execute(
                 """
-                SELECT 1
+                SELECT event_type,aggregate_id,command_id,actor,job_id,attempt_id,
+                       worker_id,quota_class,payload_json
                 FROM events
-                WHERE event_type='OPERATOR_OPERATION_APPLIED'
-                  AND aggregate_type='operator_operation'
+                WHERE aggregate_type='operator_operation'
                   AND attempt_id=?
+                  AND event_type IN ('OPERATOR_OPERATION_INTENT',
+                                     'OPERATOR_OPERATION_APPLIED')
                   AND json_extract(payload_json,'$.operation_kind')='interrupt_turn'
                   AND json_extract(payload_json,'$.turn_id')=?
-                LIMIT 1
                 """,
                 (attempt_id, turn_id),
-            ).fetchone()
-            if turn_operation_applied is not None:
+            ).fetchall()
+            if interrupt_rows:
+                if (
+                    len(interrupt_rows) != 2
+                    or {row["event_type"] for row in interrupt_rows}
+                    != {
+                        OperationReceiptKind.INTENT.value,
+                        OperationReceiptKind.APPLIED.value,
+                    }
+                    or len({row["aggregate_id"] for row in interrupt_rows}) != 1
+                ):
+                    raise StateConflict(
+                        "interactive interrupt receipt identity ambiguous"
+                    )
+                by_type = {
+                    str(row["event_type"]): row for row in interrupt_rows
+                }
+                original = by_type[OperationReceiptKind.INTENT.value]
+                interrupt = by_type[OperationReceiptKind.APPLIED.value]
+                try:
+                    operation = OperationId(str(original["aggregate_id"]))
+                    expected_intent_command = operation_receipt_command_id(
+                        operation, OperationReceiptKind.INTENT,
+                    )
+                    expected_applied_command = operation_receipt_command_id(
+                        operation, OperationReceiptKind.APPLIED,
+                    )
+                except (TypeError, ValueError):
+                    raise StateConflict(
+                        "interactive interrupt receipt identity invalid"
+                    ) from None
+                expected_intent = {
+                    "schema_version": "mastermind.operator_harness_turn_operation/v1",
+                    "operation_kind": "interrupt_turn",
+                    "attempt_id": attempt_id,
+                    "session_epoch_id": session_epoch_id,
+                    "process_generation_id": generation_id,
+                    "worker_id": worker_id,
+                    "turn_id": turn_id,
+                }
+                expected_applied = {
+                    "schema_version": "mastermind.operator_harness_turn_operation_applied/v1",
+                    "operation_kind": "interrupt_turn",
+                    "turn_id": turn_id,
+                }
+                for event, kind, expected_command, expected_payload in (
+                    (
+                        original,
+                        OperationReceiptKind.INTENT,
+                        expected_intent_command,
+                        expected_intent,
+                    ),
+                    (
+                        interrupt,
+                        OperationReceiptKind.APPLIED,
+                        expected_applied_command,
+                        expected_applied,
+                    ),
+                ):
+                    if (
+                        event["aggregate_id"] != operation.command_id
+                        or event["command_id"] != expected_command
+                        or event["actor"] != "supervisor"
+                        or (
+                            event["job_id"], event["attempt_id"],
+                            event["worker_id"], event["quota_class"],
+                        )
+                        != expected_source
+                        or _json_loads(event["payload_json"], fallback=None)
+                        != expected_payload
+                    ):
+                        raise StateConflict(
+                            f"interactive interrupt {kind.value} provenance invalid"
+                        )
+                unknown_rows = connection.execute(
+                    """
+                    SELECT command_id,actor,job_id,attempt_id,worker_id,
+                           quota_class,payload_json
+                    FROM events
+                    WHERE aggregate_type='operator_operation'
+                      AND aggregate_id=?
+                      AND event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN'
+                    """,
+                    (operation.command_id,),
+                ).fetchall()
+                if unknown_rows:
+                    if len(unknown_rows) != 1:
+                        raise StateConflict(
+                            "interactive interrupt unknown-effect identity ambiguous"
+                        )
+                    unknown = unknown_rows[0]
+                    expected_unknown_command = operation_receipt_command_id(
+                        operation, OperationReceiptKind.EFFECT_UNKNOWN,
+                    )
+                    unknown_payload = _json_loads(
+                        unknown["payload_json"], fallback=None,
+                    )
+                    if (
+                        unknown["command_id"] != expected_unknown_command
+                        or unknown["actor"] != "supervisor"
+                        or (
+                            unknown["job_id"], unknown["attempt_id"],
+                            unknown["worker_id"], unknown["quota_class"],
+                        )
+                        != expected_source
+                        or not isinstance(unknown_payload, dict)
+                        or set(unknown_payload)
+                        != {"schema_version", "phase", "detail"}
+                        or unknown_payload.get("schema_version")
+                        != "mastermind.operator_harness_effect_unknown/v1"
+                    ):
+                        raise StateConflict(
+                            "interactive interrupt unknown-effect provenance invalid"
+                        )
+                    raise StateConflict(
+                        "interactive interrupt effect remains unknown"
+                    )
                 continue
-            candidate = connection.execute(
+
+            candidate_rows = connection.execute(
                 """
-                SELECT 1
+                SELECT aggregate_type,aggregate_id,command_id,actor,job_id,
+                       attempt_id,worker_id,quota_class,payload_json
                 FROM events
                 WHERE event_type='OHF_CANDIDATE_RESULT_RECORDED'
                   AND attempt_id=?
                   AND json_extract(payload_json,'$.turn.turn_id')=?
                 """,
                 (attempt_id, turn_id),
-            ).fetchone()
-            if candidate is None:
+            ).fetchall()
+            if not candidate_rows:
                 return turn_id
+            if len(candidate_rows) != 1:
+                raise StateConflict(
+                    "interactive candidate receipt identity ambiguous"
+                )
+            candidate_event = candidate_rows[0]
+            candidate_payload = _json_loads(
+                candidate_event["payload_json"], fallback=None,
+            )
+            expected_turn = {
+                "turn_id": turn_id,
+                "session_epoch_id": session_epoch_id,
+                "process_generation_id": generation_id,
+                "attempt_id": attempt_id,
+            }
+            if (
+                candidate_event["aggregate_type"] != "operator_turn"
+                or candidate_event["aggregate_id"] != turn_id
+                or candidate_event["command_id"] != f"ohf-candidate:{turn_id}"
+                or candidate_event["actor"] != "supervisor"
+                or (
+                    candidate_event["job_id"], candidate_event["attempt_id"],
+                    candidate_event["worker_id"], candidate_event["quota_class"],
+                )
+                != expected_source
+                or not isinstance(candidate_payload, dict)
+                or set(candidate_payload)
+                != {"schema_version", "turn", "candidate", "events", "cursor"}
+                or candidate_payload.get("schema_version")
+                != OHF_CANDIDATE_EVIDENCE_SCHEMA_VERSION
+                or candidate_payload.get("turn") != expected_turn
+            ):
+                raise StateConflict(
+                    "interactive candidate receipt provenance invalid"
+                )
+            candidate = candidate_payload.get("candidate")
+            cursor = candidate_payload.get("cursor")
+            events = candidate_payload.get("events")
+            if (
+                not isinstance(candidate, dict)
+                or set(candidate)
+                != {
+                    "attempt_id", "session_epoch_id",
+                    "process_generation_id", "artifact_digest",
+                    "summary", "complete_job_permitted",
+                }
+                or candidate.get("attempt_id") != attempt_id
+                or candidate.get("session_epoch_id") != session_epoch_id
+                or candidate.get("process_generation_id") != generation_id
+                or candidate.get("complete_job_permitted") is not False
+                or not isinstance(cursor, dict)
+                or set(cursor)
+                != {
+                    "attempt_id", "session_epoch_id",
+                    "process_generation_id", "local_sequence",
+                    "turn_id", "provider_replay_cursor",
+                }
+                or cursor.get("attempt_id") != attempt_id
+                or cursor.get("session_epoch_id") != session_epoch_id
+                or cursor.get("process_generation_id") != generation_id
+                or cursor.get("turn_id") != turn_id
+                or not isinstance(events, list)
+            ):
+                raise StateConflict(
+                    "interactive candidate payload identity invalid"
+                )
+            event_keys = {
+                "attempt_id", "session_epoch_id", "process_generation_id",
+                "turn_id", "kind", "provider_event_id",
+                "native_subordinate_id", "payload_redacted",
+            }
+            for normalized in events:
+                if (
+                    not isinstance(normalized, dict)
+                    or set(normalized) != event_keys
+                    or normalized.get("attempt_id") != attempt_id
+                    or normalized.get("session_epoch_id") != session_epoch_id
+                    or normalized.get("process_generation_id") != generation_id
+                    or normalized.get("turn_id") not in {None, turn_id}
+                ):
+                    raise StateConflict(
+                        "interactive candidate event identity invalid"
+                    )
     return None
 
 
@@ -4132,26 +4453,119 @@ class RuntimeStore:
         migration 6 or 7 or create a sidecar as a by-product of discovering staleness.
         """
 
-        connection: sqlite3.Connection | None = None
-        try:
-            connection = sqlite3.connect(
-                f"{self.path.as_uri()}?mode=ro&immutable=1",
-                uri=True,
-                timeout=self.busy_timeout_ms / 1000,
-                isolation_level=None,
+        # SQLite immutable=1 explicitly ignores a live uncheckpointed WAL.
+        # Looking only at the main file could attest the wrong schema or read
+        # partially checkpointed pages while another writable owner is active.
+        # Before opening anything, select the sidecar-aware read-only path if
+        # both verified WAL artifacts are already present. Never create a
+        # missing WAL sidecar as part of a stale-schema preflight.
+        wal = Path(str(self.path) + "-wal")
+        shm = Path(str(self.path) + "-shm")
+
+        def sidecar_identity(path: Path) -> tuple[int, int] | None:
+            try:
+                observed = os.lstat(path)
+            except FileNotFoundError:
+                return None
+            except OSError as exc:
+                raise PersistenceError(
+                    "Executive schema sidecar identity is unavailable"
+                ) from exc
+            if (not stat.S_ISREG(observed.st_mode)
+                    or observed.st_uid != os.getuid()
+                    or observed.st_mode & 0o002):
+                raise PersistenceError(
+                    "Executive schema sidecar is not a protected regular file"
+                )
+            return observed.st_dev, observed.st_ino
+
+        def one_read(*, immutable: bool) -> tuple[list[sqlite3.Row], str]:
+            uri = self.path.as_uri() + (
+                "?mode=ro&immutable=1" if immutable else "?mode=ro"
             )
-            connection.row_factory = sqlite3.Row
-            rows = connection.execute(
-                "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
-            ).fetchall()
-            schema_digest = _normalized_schema_digest(connection)
-        except sqlite3.Error as exc:
+            connection: sqlite3.Connection | None = None
+            try:
+                connection = sqlite3.connect(
+                    uri, uri=True,
+                    timeout=self.busy_timeout_ms / 1000,
+                    isolation_level=None,
+                )
+                connection.row_factory = sqlite3.Row
+                connection.execute("BEGIN")
+                rows = connection.execute(
+                    "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+                ).fetchall()
+                return rows, _normalized_schema_digest(connection)
+            finally:
+                if connection is not None:
+                    connection.close()
+
+        def snapshot() -> tuple[list[sqlite3.Row], str] | None:
+            before = (sidecar_identity(wal), sidecar_identity(shm))
+            # If WAL was witnessed, SQLite's native read-only connection must
+            # arbitrate its own locks/snapshot. It may create/recover a SHM
+            # index but must never be asked to write Executive schema/data.
+            if before[0] is not None and before[1] is not None:
+                try:
+                    return one_read(immutable=False)
+                except sqlite3.Error as exc:
+                    after = (sidecar_identity(wal), sidecar_identity(shm))
+                    if after != before:
+                        return None
+                    raise PersistenceError(
+                        f"executive runtime database at {self.path} is not a verified Executive schema: {exc}"
+                    ) from exc
+
+            # With absent OR incomplete sidecars, we first verify the frozen
+            # main file. Until v5 identity is established, using mode=ro could
+            # create sidecars on an offline stale/foreign schema. Keep it
+            # strictly mutation-free and fail closed on any unverified main.
+            try:
+                main_rows, main_digest = one_read(immutable=True)
+            except sqlite3.Error as exc:
+                after = (sidecar_identity(wal), sidecar_identity(shm))
+                if after != before and after[0] is not None and after[1] is not None:
+                    try:
+                        return one_read(immutable=False)
+                    except sqlite3.Error:
+                        return None
+                raise PersistenceError(
+                    f"executive runtime database at {self.path} is not a verified Executive schema: {exc}"
+                ) from exc
+            if main_digest != _NORMALIZED_V5_SCHEMA_DIGEST:
+                return main_rows, main_digest
+            # A v5 main file is now positively observed. For a stable offline
+            # file use it unchanged: no WAL/SHM files may be manufactured by
+            # schema discovery. If there is WAL activity, switch ONCE to
+            # SQLite locks instead of repeatedly racing immutable snapshots.
+            after = (sidecar_identity(wal), sidecar_identity(shm))
+            if before == (None, None) and after == (None, None):
+                return main_rows, main_digest
+            # An unpaired WAL/SHM is not a trustworthy live SQLite snapshot:
+            # mode=ro may silently treat a malformed orphan WAL as empty and
+            # attest stale main bytes. Retry only the bounded read observation.
+            if (after[0] is None) != (after[1] is None):
+                return None
+            if before[0] is not None and before[1] is None and after == before:
+                return None
+            if before[1] is not None and before[0] is None and after == before:
+                return None
+            try:
+                return one_read(immutable=False)
+            except sqlite3.Error:
+                return None
+
+        # This is a bounded *read-snapshot* re-acquisition under transient WAL
+        # create/checkpoint churn, not a retry of a Job, lease, writer or effect.
+        for _observation in range(4):
+            observed = snapshot()
+            if observed is not None:
+                rows, schema_digest = observed
+                break
+        else:
             raise PersistenceError(
-                f"executive runtime database at {self.path} is not a verified Executive schema: {exc}"
-            ) from exc
-        finally:
-            if connection is not None:
-                connection.close()
+                "Executive schema WAL sidecars changed during all bounded preflight reads"
+            )
         versions = [int(row["version"]) for row in rows]
         if not versions or versions != list(range(1, max(versions) + 1)):
             raise PersistenceError(
@@ -7196,7 +7610,16 @@ def _retry_safety_material(
         except StateConflict:
             pass
     tx9_evidence_digest = tx9_material[2] if tx9_material is not None else None
-    if tx9_evidence_digest is not None:
+    quota_material = None
+    if (job_row is not None and attempt_row is not None
+            and terminal_status == JobStatus.RATE_LIMITED.value):
+        from .executive_quota_rollover import quota_rollover_material
+        quota_material = quota_rollover_material(
+            connection, job=dict(job_row), attempt=dict(attempt_row))
+    if quota_material is not None:
+        retry_safety = RetrySafety.SAFE_NON_MODIFYING_QUOTA_ROLLOVER
+        requeue_kind = "NON_MODIFYING_QUOTA"
+    elif tx9_evidence_digest is not None:
         retry_safety = RetrySafety.SAFE_PRE_EFFECT_INFRASTRUCTURE
         requeue_kind = "TX9_DETACHED"
     elif terminal_status == JobStatus.FAILED.value:
@@ -7208,7 +7631,8 @@ def _retry_safety_material(
     else:
         retry_safety = RetrySafety.UNKNOWN
         requeue_kind = None
-    provenance_digest = tx9_evidence_digest
+    provenance_digest = (quota_material["evidence_digest"]
+                         if quota_material is not None else tx9_evidence_digest)
     if provenance_digest is None and job_row is not None:
         raw = job_row["orchestration_provenance_digest"]
         provenance_digest = str(raw) if raw is not None else None
@@ -7227,6 +7651,7 @@ def _retry_safety_material(
             operation_effect_unknown_present
             or (
                 tx9_evidence_digest is None
+                and quota_material is None
                 and terminal_status
                 in {JobStatus.RATE_LIMITED.value, JobStatus.LOST.value}
             )
@@ -7246,6 +7671,7 @@ def _retry_safety_material(
             evidence=evidence,
         ),
         tx9_material=tx9_material,
+        quota_material=quota_material,
     )
 
 
@@ -7809,6 +8235,29 @@ def _requeue_outcome_from_event(
             expected_job_id=expected_job_id,
             require_current_quota=False,
         )
+    elif kind == "NON_MODIFYING_QUOTA":
+        from .executive_quota_rollover import validate_saved_quota_proof
+        keys = {"previous_status", "requeue_kind", "invalidated_attempt_id",
+                "invalidated_worker_id", "invalidated_quota_class",
+                "quota_rollover_proof", "retry_safety"}
+        proof = payload.get("quota_rollover_proof")
+        _, evidence, _ = _validated_retry_safety_receipt(
+            payload.get("retry_safety"), require_safe=True)
+        if (set(payload) != keys
+                or payload["previous_status"] != JobStatus.RATE_LIMITED.value
+                or payload["invalidated_attempt_id"] != event_row["attempt_id"]
+                or payload["invalidated_worker_id"] != event_row["worker_id"]
+                or payload["invalidated_quota_class"] != event_row["quota_class"]
+                or not validate_saved_quota_proof(connection, proof)
+                or proof["job_id"] != expected_job_id
+                or proof["attempt_id"] != event_row["attempt_id"]
+                or proof["worker_id"] != event_row["worker_id"]
+                or proof["quota_class"] != event_row["quota_class"]
+                or evidence.retry_safety is not RetrySafety.SAFE_NON_MODIFYING_QUOTA_ROLLOVER
+                or evidence.job_id != expected_job_id
+                or evidence.attempt_id != event_row["attempt_id"]
+                or evidence.provenance_digest != proof["evidence_digest"]):
+            raise StateConflict("quota rollover receipt or immutable source proof drifted")
     elif (
         kind != "ORDINARY"
         or set(payload) != {"previous_status", "requeue_kind", "previous_attempt_id"}
@@ -14989,6 +15438,51 @@ class JobRegistry:
                 )
 
             if decision is RetrySafetyDecision.SAFE_REQUEUE:
+                if observed.requeue_kind == "NON_MODIFYING_QUOTA":
+                    proof = material.quota_material
+                    if proof is None:
+                        raise StateConflict("quota release proof disappeared")
+                    _assert_orchestration_requeue_eligible(connection, selected)
+                    timestamp = _finite_fresh_effect(self.store, connection, selected_token)
+                    released = connection.execute(
+                        """UPDATE worker_quota_classes SET held_attempt_id=NULL,
+                             updated_at_ms=?,version=version+1
+                           WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
+                             AND status='RATE_LIMITED' AND fence_counter=?""",
+                        (timestamp, proof["worker_id"], proof["quota_class"],
+                         attempt_token, proof["fence_generation"]))
+                    if released.rowcount != 1:
+                        raise StateConflict("quota hold changed before rollover")
+                    # Release the settled Attempt, NOT the exhausted pool. Existing
+                    # Capacity/Scheduler selects the next eligible worker later.
+                    connection.execute(
+                        """UPDATE jobs SET status='QUEUED',assigned_worker_id=NULL,
+                             assigned_quota_class=NULL,current_attempt_id=NULL,
+                             updated_at_ms=?,version=version+1 WHERE job_id=?""",
+                        (timestamp, selected_token))
+                    event_payload = {
+                        "previous_status": JobStatus.RATE_LIMITED.value,
+                        "requeue_kind": "NON_MODIFYING_QUOTA",
+                        "invalidated_attempt_id": attempt_token,
+                        "invalidated_worker_id": proof["worker_id"],
+                        "invalidated_quota_class": proof["quota_class"],
+                        "quota_rollover_proof": proof,
+                        "retry_safety": retry_receipt,
+                    }
+                    self.store.append_event(
+                        connection, aggregate_type="job", aggregate_id=selected_token,
+                        event_type="JOB_REQUEUED", command_id=requeue_command,
+                        actor="operator", job_id=selected_token, attempt_id=attempt_token,
+                        worker_id=proof["worker_id"], quota_class=proof["quota_class"],
+                        payload=event_payload, timestamp_ms=timestamp)
+                    written = connection.execute(
+                        "SELECT * FROM events WHERE command_id=?", (requeue_command,)).fetchone()
+                    outcome = _requeue_outcome_from_event(
+                        connection, written, expected_job_id=selected_token)
+                    receipt = outcome.to_dict()
+                    receipt["retry_safety"] = retry_receipt
+                    return CooRetryMutationOutcome(
+                        action="REQUEUED", command_id=requeue_command, receipt=receipt)
                 if (
                     observed.requeue_kind != "TX9_DETACHED"
                     or material.tx9_material is None

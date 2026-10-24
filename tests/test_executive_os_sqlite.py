@@ -335,8 +335,17 @@ def test_atomic_claim_allows_exactly_one_winner_across_runtime_instances(tmp_pat
     barrier = Barrier(2)
 
     def contend() -> AttemptLease | str | None:
-        contender = _runtime(tmp_path)
-        barrier.wait()
+        # Preserve BOTH constructor outcomes, including an initialization
+        # failure before the peer enters its gate. An unbounded barrier would
+        # strand CI; a generic BrokenBarrierError would hide the true cause.
+        try:
+            contender = _runtime(tmp_path)
+        except Exception as exc:
+            return f"startup_refused:{type(exc).__name__}:{exc}"
+        try:
+            barrier.wait(timeout=15)
+        except BrokenBarrierError:
+            return "peer_initialization_or_barrier_unavailable"
         try:
             return contender.attempts.claim_job(job.job_id)
         except StateConflict as exc:
@@ -346,7 +355,7 @@ def test_atomic_claim_allows_exactly_one_winner_across_runtime_instances(tmp_pat
         outcomes = list(pool.map(lambda _: contend(), range(2)))
 
     winners = [item for item in outcomes if isinstance(item, AttemptLease)]
-    assert len(winners) == 1
+    assert len(winners) == 1, outcomes
     assert len(runtime.attempts.list_attempts(job.job_id)) == 1
     persisted = runtime.jobs.get_job(job.job_id)
     assert persisted is not None and persisted.attempt_count == 1
