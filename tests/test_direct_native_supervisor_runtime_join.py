@@ -114,7 +114,7 @@ def joined(tmp_path):
     source_data=dict(schema_version=er.EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,work_ref='WS:H2',watch_mode=None,
         commission_ref=dict(repository='mastermindx-market-intelligence/Mastermind',commit=base,
             path='commission.md',content_sha256=hashlib.sha256((source/'commission.md').read_bytes()).hexdigest()))
-    binding=dict(base_sha=base,eligible_quota_classes=['default'],provider='codex',model='gpt-5.6-sol',
+    binding=dict(worker_id='codex-01',base_sha=base,eligible_quota_classes=['default'],provider='codex',model='gpt-5.6-sol',
         effort='high',cost_class='default',routing_policy_version='inert-direct-v1',
         execution_profile_id=profile.profile_id,execution_profile_digest=profile.profile_digest,
         capability_policy_version=registry.policy_version,capability_policy_digest=registry.policy_digest)
