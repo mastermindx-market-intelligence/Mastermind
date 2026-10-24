@@ -106,6 +106,22 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             self.assertEqual(h.cache_cleanup(base, base, "CRITICAL"),
                              [{"state": "HELD_EFFECT_UNVERIFIED"}])
 
+    def test_cache_intent_is_durable_before_command_and_cleared_on_success(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            (base / ".cache/pip").mkdir(parents=True)
+            def checked_package_call(*args, **kwargs):
+                self.assertTrue((base / h.HOLD).exists())
+                self.assertIn("PRE_EFFECT cache=pip", (base / h.HOLD).read_text())
+                return SimpleNamespace(returncode=0, stderr="")
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    h.subprocess, "run", side_effect=checked_package_call):
+                results = h.cache_cleanup(base, base, "CAUTION")
+            self.assertEqual(results[0]["state"], "OK")
+            self.assertFalse((base / h.HOLD).exists())
+
     def test_degraded_receipt_returns_nonzero_without_disarming_timer(self):
         with tempfile.TemporaryDirectory() as d, patch.object(
                 h, "run", return_value={"schema": "mastermind.fleet_linux_hygiene.v1",
