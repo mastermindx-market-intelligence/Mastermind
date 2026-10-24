@@ -161,3 +161,51 @@ async def test_openai_async_sdk_chat_and_sse(tmp_path):
             stream = await client.chat.completions.create(model="exact-slug", messages=[{"role": "user", "content": "say ok"}], stream=True)
             chunks = [chunk async for chunk in stream]
             assert chunks[0].choices[0].delta.content == "ok"
+
+
+@pytest.mark.asyncio
+async def test_inflight_capacity_waits_and_releases(tmp_path):
+    cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=3, window_s=0.4,
+                   max_inflight_per_key=1, max_queue_wait_s=0.15)
+    limit = SlidingWindowAdmissions(cfg)
+    assert await limit.acquire(time.monotonic() + 0.05) == 0
+    pending = asyncio.create_task(limit.acquire(time.monotonic() + 0.12))
+    await asyncio.sleep(0.02)
+    assert limit.pending == 1
+    await limit.release(0)
+    assert await pending == 0
+    await limit.release(0)
+    limit.close()
+
+
+@pytest.mark.asyncio
+async def test_queue_full_fails_503_not_429(tmp_path):
+    cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=1, window_s=0.3,
+                   max_pending=1, max_queue_wait_s=0.13)
+    app = create_app(cfg, transport=httpx.MockTransport(lambda req: streamed_json({"ok": True})))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            headers = {"Authorization": f"Bearer {TOKEN}"}
+            assert (await session.get("/v1/models", headers=headers)).status_code == 200
+            pending = asyncio.create_task(session.get("/v1/models", headers=headers))
+            await asyncio.sleep(0.02)
+            third = await session.get("/v1/models", headers=headers)
+            assert third.status_code == 503
+            assert third.json()["error"]["message"] == "local queue full"
+            assert (await pending).status_code == 504
+
+
+@pytest.mark.asyncio
+async def test_raw_sse_passthrough_no_chunks_transformed(tmp_path):
+    original = 'data: {"id":"abc","object":"chat.completion.chunk","choices":[]}\n\ndata: [DONE]\n\n'
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, headers={"content-type": "text/event-stream"},
+                                  stream=httpx.ByteStream(original.encode()))
+    ))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            response = await session.post("/v1/chat/completions", headers={"Authorization": f"Bearer {TOKEN}"},
+                                          json={"model": "exact-slug", "stream": True, "messages": []})
+            assert response.status_code == 200
+            assert response.text == original
+            assert response.headers["content-type"].startswith("text/event-stream")
