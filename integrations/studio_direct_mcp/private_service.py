@@ -287,6 +287,93 @@ FABRIC_POOL_PIN_MIGRATION = {
     ),
 }
 
+# Exact second native-pool generation. Historical cohort remains immutable.
+# Tuple: predecessor manifest/config raw, successor manifest/config raw,
+# successor canonical, predecessor canonical SHA256. Source evidence, not release permission.
+FABRIC_POOL_SELECTED_CURRENT_SHA256 = "8533800b5abf8334a1cf6cc081322f16799ac5ef89e4deeea577f3a8217d8d1b"
+FABRIC_POOL_PIN_MIGRATION_CURRENT = {
+    "admin-business": (
+        "5dc83dd6aa840b3d321502045db1c4dcaf6fa9d09d5cca8422d5717c84191b1a",
+        "ca8502fb423b719a4e56eda05f6696ac3b8a51da33f93a9cd4fe900a73f0342b",
+        "cd087bef03ff6c0cc1c31806c2d79ea16f161f4d64bd164adc38602e15bf4ccf",
+        "3f7be724a4d03a72c9ba6bd03eb19ceecd9caef72e326f9450af01a45f90b5ea",
+        "8877deabcfe8aa4a911a50438dd7435aebb1391e6be8d645ea9c6b63e4d95a94",
+        "68792c832344c61a7f0ca3462d85c85eba0e586877ee68934153c2bc18e55ebd",
+    ),
+    "chatgpt1": (
+        "6dfe4388e7c1cd97d5c130c23a2f4a4c18f57041a852a33ab9c415b29e4abd15",
+        "95e172659942bc4452838e84fac71050487a7f2497b7d9b1f2268068194477ab",
+        "8eea231687b08ae2431430914dbb6d7ac2a9852347941715318657d97cedfc56",
+        "465acca34be45f63b8c639d7dac219a041e63d28648b8f5399eeb24ef09364cc",
+        "5d08d9f2d8434d260117d74148e9796738612034f850c6a5252728fe49b6c2e4",
+        "d990d0e925cd8767d88c91ba4fd21ec6fc649013a4360cd8bd873c434670d0e6",
+    ),
+    "chatgpt2-business": (
+        "7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421",
+        "d82634b516d65182d3871fe1abf8f0a8470172c7061c450ec980c0183d4caff4",
+        "fae703f4a0e0685e0ac5098873a28b692cae8252741b704049e1a2a23694d1df",
+        "fb24052700ca4ad757c306b4f372fea36dee8ed564c7252afcb202ff4c1debd5",
+        "1e3b3ff37503e1e845db1aea931529421d247c7de22b14b3e12395351edb44d5",
+        "61692e5743974f4fb722b11045da7d51ba9128fe349d8f3b3b2f2f88f1cd3511",
+    ),
+    "chatgpt2-personal": (
+        "a6d86809b5ceb958fbf07b325c8c4f023c1a2214afdf64c3af20be8c8e48d761",
+        "e03ce3cd52852e103752275a8ed2cc1e39bd1f20ee2f211675c37969aa406653",
+        "59e68d043aaea0d3b4985920490d46fb00226ecdc82ba8c1c104be80fe371bcf",
+        "afe128661cc59a1088addee8a06343329aac85fb555bd07ba0b3785a94539524",
+        "ee74f23a1a1948a4e1d93f44c2d6fcd94d7909bb730f967f1ed807a9eaa7b2cf",
+        "7e09acd1297f95136f4ea529969a4a329d36bfbd8e03afc982066efd2df40b8f",
+    ),
+    "chatgpt3": (
+        "e0d49b19cc25f9b7b9022ffcf5d29e397efe3cacb1c509ae665771dd2e29d30a",
+        "2ec90646a57053978c7b91f044618a805ed3c29d9549bf6e5b53b4c45797ec80",
+        "0c281b730aab614f07ef224ad7c63026f6906404e7683259640dc2f6e24f959f",
+        "756541f58eb7acd3b6af9bedb4f7fcbfd899cc41dceb424127ac3af407202f57",
+        "3ded94a4d366e8cc6c1834ce3959df58a09a44b41faad58f7117ba3e5882a6da",
+        "457ba5dd4b26fcbe01427df6c69f840d57b1ad8da7a04879af7b8e383e0090bd",
+    ),
+    "chatgpt3-w570f6f34": (
+        "5462b46a30a5d67fbc3dcee368bfe2675eb409b3bacecbeddc70e9a5a3d9a123",
+        "84b2a98aad0f748b08676dbe5bd55b7a2b595ac00b6e8b066dd74727606bc8d7",
+        "02def531467e7eaed847705633650ad34995616c31e8d7d54b4f86f2663c6dda",
+        "c87ef6966b5f32181721b98a849148fa1148a0fed1132f692c2a735cb912e8de",
+        "6b556f544cb64221aa856dccd051a8ff0f0695edd5044d6c51c035166f9322c6",
+        "35246e482e79f3203b3e1cd28e76c77cfbef8681c1157a9a5add4e232a7820e5",
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "39c6bbe7ddfb69b8ac837be37f7b9fed06f10645967dc1675221dad4b5040879",
+        "919a3e3733a2e2f1be2fafb8d43bd4bd8bfe9ec2beaa1ffeff8c197b0962ed76",
+        "0a82f14f0efa4f02411efe8c7ac50b34ea8a6444d30ea3cc53281eea1958037d",
+        "58d54806f346fc17a37bb95f44729ab3730960f07b50bca72e532503e0524db8",
+        "c493564cf74be705e35960ce3ac5ea446643f148d2a646ac5f53ab8f0315be86",
+        "0a248967072622afa375c6e6ab749d025150b7805fe288c2de83da381c66e0b4",
+    ),
+    "chatgpt4": (
+        "5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9",
+        "e6c1495c7552241a847b3d541f99913e6a74838e0fb5aee9477b861e92d2a48b",
+        "6513834633df33bd4873a31bf23765f7efdac9a1527dd369714580dd20563e87",
+        "1f6decfb322982ff1d0ba9bf3753828ea3c56c5f4f9806dc8b7fd13a1827d222",
+        "4f8de7dbf56f25ae6e05c48ac212419833aeed6f73ffa794b597dfb5c35d8baf",
+        "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+    ),
+    "fabric-design": (
+        "0481da04b267ea610a917e78203ac7829c1799a2a83e226502978c6d8bc7d2f9",
+        "529becd75ecbb401f7086e19bd61416b237014f107ab7e62eb0c275570d1e55a",
+        "72ee692e15832f0eb7a4c1d4f84b4b2f5adb6e475c5f8728dc242eaad1c937ea",
+        "3e773cccbd897bdcfa48629439a186cc9230209a8dde6bf25c131aa98af75d6d",
+        "39f7634173a78c341ad1c06dc6d0ed69494fc9c45d2796b28d16663afd3efa55",
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+    ),
+    "fabric-read": (
+        "c0fda20241050072ccdecc4cfa5e31d4322a3e0a645404666e7116db372954d3",
+        "02b2cddb81d9ca14ec5880f3a9e4444dfff60ebe0c4665f9d0f53226804fed02",
+        "848f8eef185feb3a6382aef51e7e1a72940aae51e8bbd21a082b90e7d0d301fe",
+        "fc0dd4f79e3a712da522bec48c9a5183e2650b8c0ae0d0ab133188c97ebafd38",
+        "19e275513dafea726d66cb99ccce9b8b36aeb76363646986efbbd13d236c6afe",
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+    ),
+}
+
 C2_BUSINESS_V10_ORIGINAL_BLOBS = {
     "fleet-routing.mjs": "7a1d770bf59d9198f1b29f94f56c2e845c4e1b55",
     "fleet-status.mjs": "f04630857f75d712f701360f18e84d42ac8ae8ba",
@@ -492,20 +579,36 @@ def _sealed_v2_fleet_gateway_predecessor(data: dict, account: str) -> bool:
 
 
 
+def _sealed_fabric_pool_current_predecessor(data: dict, account: str) -> bool:
+    """Recognize only the source-pinned live predecessor generation."""
+    pins = FABRIC_POOL_PIN_MIGRATION_CURRENT.get(account)
+    return (pins is not None and isinstance(data, dict)
+            and data.get("version") == MANIFEST_VERSION
+            and data.get("account") == account
+            and data.get("label") == f"com.mastermind.studio-direct-private.{account}"
+            and data.get("configHash") == pins[1]
+            and _canonical_json_sha256(data) == pins[5])
+
+
 def _sealed_fabric_pool_pin_successor(data: dict, account: str) -> bool:
-    """Recognize one exact successor generation; no caller-chosen seals."""
-    entry = FABRIC_POOL_PIN_MIGRATION.get(account)
-    if entry is None or not isinstance(data, dict):
+    """Require a reviewed, exact successor from the original or current epoch."""
+    if not isinstance(data, dict):
         return False
-    if (data.get("version") != MANIFEST_VERSION
-            or data.get("account") != account
-            or data.get("label") != f"com.mastermind.studio-direct-private.{account}"
-            or data.get("configHash") != entry[3]):
-        return False
-    if account in SEALED_V2_FLEET_GATEWAY_PREDECESSORS:
-        if frozenset(data.get("files", {})) != SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]:
-            return False
-    return _canonical_json_sha256(data) == entry[4]
+    for registry in (FABRIC_POOL_PIN_MIGRATION, FABRIC_POOL_PIN_MIGRATION_CURRENT):
+        pins = registry.get(account)
+        if pins is None or data.get("version") != MANIFEST_VERSION:
+            continue
+        if (data.get("account") != account
+                or data.get("label") != f"com.mastermind.studio-direct-private.{account}"
+                or data.get("configHash") != pins[3]):
+            continue
+        if (registry is FABRIC_POOL_PIN_MIGRATION
+                and account in SEALED_V2_FLEET_GATEWAY_PREDECESSORS
+                and frozenset(data.get("files", {})) != SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]):
+            continue
+        if _canonical_json_sha256(data) == pins[4]:
+            return True
+    return False
 
 
 def _sha256_hex(value: str) -> bool:
@@ -1138,6 +1241,7 @@ def _valid_manifest(data, account: str, label: str) -> bool:
             ))
             and not c2_paper_predecessor and not c4_paper_cohort
             and not _sealed_v2_fleet_gateway_predecessor(data, account)
+            and not _sealed_fabric_pool_current_predecessor(data, account)
             and not _sealed_fabric_pool_pin_successor(data, account)):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
@@ -1178,15 +1282,18 @@ def _read_manifest(
         expected_bytes_sha = SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][1]
         if _sha256_file(manifest_path) != expected_bytes_sha:
             raise SystemExit("corrupt manifest")
-    # If a seat carries the explicitly reviewed successor configHash, the
-    # manifest must be *exactly* that reviewed successor, even when its generic
-    # historical fileset would otherwise pass an older permissive validator.
-    pins = FABRIC_POOL_PIN_MIGRATION.get(account)
-    if (pins is not None and data.get("configHash") == pins[3]
-            and not _sealed_fabric_pool_pin_successor(data, account)):
-        raise SystemExit("corrupt manifest")
-    if _sealed_fabric_pool_pin_successor(data, account):
-        if _stable_regular_file_hash(manifest_path, label="manifest") != FABRIC_POOL_PIN_MIGRATION[account][2]:
+    # Current publisher-era predecessor may include independently sealed files.
+    # Its installed raw bytes must match, not just reserialized canonical JSON.
+    if _sealed_fabric_pool_current_predecessor(data, account):
+        if _stable_regular_file_hash(manifest_path, label="manifest") != FABRIC_POOL_PIN_MIGRATION_CURRENT[account][0]:
+            raise SystemExit("corrupt manifest")
+    # Exact successor config hashes are never accepted via a generic fileset.
+    for registry in (FABRIC_POOL_PIN_MIGRATION, FABRIC_POOL_PIN_MIGRATION_CURRENT):
+        pins = registry.get(account)
+        if pins is None or data.get("configHash") != pins[3]:
+            continue
+        if (not _sealed_fabric_pool_pin_successor(data, account)
+                or _stable_regular_file_hash(manifest_path, label="manifest") != pins[2]):
             raise SystemExit("corrupt manifest")
     return data
 
@@ -2560,19 +2667,28 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
     """
     account = args.account
     _validate_account_label(account)
-    pins = FABRIC_POOL_PIN_MIGRATION.get(account)
     reverse = getattr(args, "rollback", False)
     if type(reverse) is not bool:
         raise SystemExit("Fabric pool pin: invalid direction")
-    if pins is None:
+    cohorts = (
+        (FABRIC_POOL_SELECTED_SHA256, FABRIC_POOL_PIN_MIGRATION),
+        (FABRIC_POOL_SELECTED_CURRENT_SHA256, FABRIC_POOL_PIN_MIGRATION_CURRENT),
+    )
+    if not any(account in registry for _, registry in cohorts):
         raise SystemExit("Fabric pool pin: unrecognized account")
+    matching = [(selected, registry[account]) for selected, registry in cohorts
+                if account in registry and args.expected_manifest_sha256
+                in (registry[account][0], registry[account][2])]
+    if len(matching) != 1:
+        raise SystemExit("Fabric pool pin: unrecognized or ambiguous source cohort")
+    selected_launcher_sha, pins = matching[0]
     original_manifest_sha, original_config_sha, selected_manifest_sha, selected_config_sha, _ = pins
     before_manifest_sha = selected_manifest_sha if reverse else original_manifest_sha
     before_config_sha = selected_config_sha if reverse else original_config_sha
     target_manifest_sha = original_manifest_sha if reverse else selected_manifest_sha
     target_config_sha = original_config_sha if reverse else selected_config_sha
-    before_launcher_sha = FABRIC_POOL_SELECTED_SHA256 if reverse else FABRIC_POOL_ORIGINAL_SHA256
-    target_launcher_sha = FABRIC_POOL_ORIGINAL_SHA256 if reverse else FABRIC_POOL_SELECTED_SHA256
+    before_launcher_sha = selected_launcher_sha if reverse else FABRIC_POOL_ORIGINAL_SHA256
+    target_launcher_sha = FABRIC_POOL_ORIGINAL_SHA256 if reverse else selected_launcher_sha
     if args.expected_manifest_sha256 != before_manifest_sha:
         raise SystemExit("Fabric pool pin: unrecognized original account/manifest CAS")
     if not args.preflight_only and args.expected_target_manifest_sha256 != target_manifest_sha:
@@ -2618,7 +2734,7 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
         _assert_no_symlink_ancestors(expected_pool)
         if (_stable_regular_file_hash(
                 expected_pool, label="selected native Fabric launcher",
-            ) != FABRIC_POOL_SELECTED_SHA256):
+            ) != selected_launcher_sha):
             raise SystemExit("Fabric pool pin: selected native launcher bytes drifted")
 
         next_config = dict(current)
@@ -2674,7 +2790,7 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
                 or _stable_regular_file_hash(config_path, label="installed config")
                     != before_config_sha
                 or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
-                    != FABRIC_POOL_SELECTED_SHA256):
+                    != selected_launcher_sha):
             raise SystemExit("Fabric pool pin: concurrent source/preimage change")
 
         try:
@@ -2684,7 +2800,7 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
                     or _stable_regular_file_hash(config_path, label="installed config")
                         != target_config_sha
                     or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
-                        != FABRIC_POOL_SELECTED_SHA256
+                        != selected_launcher_sha
                     or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
                 raise RuntimeError("original changed before manifest commit")
             _atomic_write_bytes(manifest_path, manifest_bytes)
@@ -2693,7 +2809,7 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
                     or _stable_regular_file_hash(config_path, label="installed config")
                         != target_config_sha
                     or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
-                        != FABRIC_POOL_SELECTED_SHA256
+                        != selected_launcher_sha
                     or _verify_staged_install(account, label, roots, require_runtime_seal=True)
                         != next_manifest
                     or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
