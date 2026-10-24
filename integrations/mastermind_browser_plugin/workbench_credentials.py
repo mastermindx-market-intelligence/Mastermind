@@ -15,7 +15,7 @@ import secrets
 import stat
 
 from control_plane.fs_security import has_macos_acl
-from integrations.business_mcp_auth.claims import client_ref_digest
+from integrations.business_mcp_auth.claims import _client_ref
 from integrations.business_mcp_auth.client_credentials import acquire_client_credentials, token_endpoint, validate_client_id
 from integrations.business_mcp_auth.contracts import load_resource_policy, validate_resource_policy
 from integrations.business_mcp_auth.jwks import BoundedJwksCache, HttpxJwksFetcher
@@ -33,6 +33,11 @@ MAX_CONCURRENCY = 4
 class CredentialError(RuntimeError):
     def __init__(self, code="CREDENTIAL_UNAVAILABLE"):
         super().__init__(code)
+
+
+def _broker_client_ref(*, issuer: str, client_id: str) -> str:
+    """Use the incumbent verified-claims client identity projection unchanged."""
+    return _client_ref({"client_id": client_id}, issuer)
 
 
 def _path(value):
@@ -66,7 +71,7 @@ class CredentialEnrollment:
         token_endpoint(policy)
         if (policy.resource != self.route.resource or policy.required_scopes != ("workbench.action",)
                 or policy.allowed_subject_digests != (self.route.broker_subject_digest,)
-                or client_ref_digest(issuer=policy.issuer, client_id=self.client_id) != self.route.broker_client_ref):
+                or _broker_client_ref(issuer=policy.issuer, client_id=self.client_id) != self.route.broker_client_ref):
             raise CredentialError()
 
 

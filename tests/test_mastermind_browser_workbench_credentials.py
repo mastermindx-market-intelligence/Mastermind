@@ -338,11 +338,11 @@ def test_pass_timeout_preserves_configured_failure_backoff(setup, monkeypatch):
 
 def test_client_identity_factor_preserves_qualified_long_issuer():
     import hashlib
-    from integrations.business_mcp_auth.claims import _client_ref, client_ref_digest
+    from integrations.business_mcp_auth.claims import _client_ref
     issuer = "https://identity.example/" + "a" * 1500
     expected = hashlib.sha256((issuer + "\nclient\n" + "client-id").encode()).hexdigest()
     assert _client_ref({"client_id": "client-id"}, issuer) == expected
-    assert client_ref_digest(issuer=issuer, client_id="client-id") == expected
+    assert credentials._broker_client_ref(issuer=issuer, client_id="client-id") == expected
 
 
 @pytest.mark.parametrize("descriptor_kind", ["parent", "lock"])
