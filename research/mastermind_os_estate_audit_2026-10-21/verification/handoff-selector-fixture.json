@@ -1,0 +1,67 @@
+{
+  "schema": "isolated_source_selector_fixture.v1",
+  "repository": "mastermindx-market-intelligence/macro",
+  "source_pin": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f",
+  "source_path": "scripts/agentos.py",
+  "source_sha256": "c772feeb9fa5bbfe5779c92a0e9158ecf145ac2b3cb3bf431f1e0fa0fdd1477f",
+  "source_fragments": [
+    {
+      "lines": [
+        495,
+        502
+      ],
+      "ast_unparsed_source": "def _refs(value: Any, prefix: str) -> list[str]:\n    \"\"\"Extract bare keys from a list of ``PREFIX:KEY`` citations.\n\n    Silent on anything that is not that shape \u2014 callers that need the malformed\n    entries too must use :func:`_citations`, which is the only form allowed in a\n    record.  Kept as a thin wrapper so the graph builders read cleanly.\n    \"\"\"\n    return _citations(value, prefix)[0]"
+    },
+    {
+      "lines": [
+        505,
+        531
+      ],
+      "ast_unparsed_source": "def _citations(value: Any, prefix: str) -> tuple[list[str], list[str]]:\n    \"\"\"Split a citation field into ``(keys, malformed_entries)``.\n\n    ONE citation shape exists \u2014 ``PREFIX:KEY``.  A bare ``KEY`` is malformed, and this\n    is the function that says so.  It exists because the previous split behaviour was\n    the single most expensive kind of defect available here: ``depends_on: [FOO]`` was\n    silently DROPPED (0 errors, 0 warnings) while ``depends_on: [\"WS:FOO\"]`` hard-erred,\n    so the workstream dependency graph that ``check_references`` walks for cycles \u2014 and\n    that ``status`` now exposes as readiness \u2014 was quietly incomplete, with no\n    signal that an edge was missing.  Readiness computed over a graph with dropped edges\n    is wrong in a way nobody can see.\n    \"\"\"\n    keys: list[str] = []\n    malformed: list[str] = []\n    items = value if isinstance(value, list) else [value] if value is not None else []\n    for item in items:\n        if not isinstance(item, str):\n            malformed.append(repr(item))\n            continue\n        text = item.strip()\n        if not text:\n            continue\n        if text.startswith(f'{prefix}:'):\n            keys.append(text.split(':', 1)[1].strip())\n        else:\n            malformed.append(text)\n    return (keys, malformed)"
+    },
+    {
+      "lines": [
+        4293,
+        4293
+      ],
+      "ast_unparsed_source": "HANDOFF_DATE_RE = re.compile('-(\\\\d{4}-\\\\d{2}-\\\\d{2})$')"
+    },
+    {
+      "lines": [
+        5520,
+        5522
+      ],
+      "ast_unparsed_source": "def handoff_rank(stem: str) -> tuple[str, str]:\n    match = HANDOFF_DATE_RE.search(stem)\n    return (match.group(1) if match else '', stem)"
+    }
+  ],
+  "association": {
+    "lines": [
+      5502,
+      5505
+    ],
+    "ast_unparsed_source": "mine = {stem: path for stem, path in handoff_paths.items() if key in _refs(hnd_all[stem].get('workstream'), 'WS')}"
+  },
+  "key": "EXECUTIVE-ECOSYSTEM-COMPLETION",
+  "inputs": [
+    {
+      "filename": "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-S3-PRIME-INSTALLED-BCF4A2F7.md",
+      "original_sha256": "d81704f7cfbfe9c5501a06936d113c3eb0c1527f7fed4abcb096433f4177b8b1",
+      "frontmatter": {
+        "workstream": "WS:EXECUTIVE-ECOSYSTEM-COMPLETION",
+        "mission": "Fable Meta-CEO seat 873aabd3, Chairman brief 2026-10-17 \"Executive Ecosystem Completion\". Window 2026-10-18 14:0xZ \u2192 2026-10-19 00:37Z (Lane R): consume the S3-prime fix (Mastermind PR 1623), decide the installable sha after master moved past the reviewed squash, run the host chain once (assets, install-inputs, maintenance supersede, install, status, disarm) and bring the host to the point where acceptance and arm wait only on the Chairman's single readiness-canary decision, asked once as promised at the option (a) ruling.\n"
+      },
+      "source_url": "https://github.com/mastermindx-market-intelligence/macro/blob/b9b0759af6b8f347a7d729e3b13b8925857c5f8f/agentos/handoffs/WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-S3-PRIME-INSTALLED-BCF4A2F7.md"
+    },
+    {
+      "filename": "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-BCF4A2F7-ACCEPTANCE-FAILED-CONTROL-ROOM-LISTENER.md",
+      "original_sha256": "4e9c2898c2415bae9c21459ed40b09fed482fcf398759e8d5991cc3d7104ad15",
+      "frontmatter": {
+        "workstream": "WS:EXECUTIVE-ECOSYSTEM-COMPLETION",
+        "mission": "Meta-CEO seat 873aabd3, Chairman brief 2026-10-17 \"Executive Ecosystem Completion\". Window 2026-10-19 01:08Z \u2192 04:4xZ (Lane R): run the Chairman's ONE authorized readiness canary for the installed release bcf4a2f7, then acceptance, the arming review refresh, arm and Phase F. The canary passed; acceptance failed at the host no-public-listener proof; the seat pinned the root cause read-only, obtained the independent auditor's FINAL verdict and, on the Chairman's instruction to resume with an Opus orchestrator, commissioned the reviewed fix release to a native Opus sub-orchestrator that drives the Subagent Fabric. From 04:3xZ the seat runs as Opus 5.5.\n"
+      },
+      "source_url": "https://github.com/mastermindx-market-intelligence/macro/blob/b9b0759af6b8f347a7d729e3b13b8925857c5f8f/agentos/handoffs/WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-BCF4A2F7-ACCEPTANCE-FAILED-CONTROL-ROOM-LISTENER.md"
+    }
+  ],
+  "chronologically_latest": "WS-EXECUTIVE-ECOSYSTEM-COMPLETION-2026-10-19-BCF4A2F7-ACCEPTANCE-FAILED-CONTROL-ROOM-LISTENER.md",
+  "scope": "Two real same-day records, association-relevant frontmatter excerpts; isolated source-extracted selector, not full compiler/runtime proof or canonical memory."
+}
