@@ -454,7 +454,10 @@ def _git_env(home: Path) -> dict[str, str]:
     }
 
 
-def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
+def _run(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str],
+    timeout_seconds: int = 60,
+) -> str:
     try:
         completed = subprocess.run(
             list(argv),
@@ -464,7 +467,7 @@ def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=60,
+            timeout=timeout_seconds,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
@@ -2140,8 +2143,12 @@ def prepare_linked_worktree(
         created = True
         _configure_new_sparse_workspace(destination, sparse_directories, env=env)
         # Hydrate the admitted HEAD without detaching its operation-bound branch.
-        # The destination is new and locked; existing workspaces returned above.
-        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env)
+        # A large sparse index on an occupied host can exceed the normal 60s
+        # Git read limit. Extend only this new-worktree hydration to a finite
+        # 240s budget; reads, identity checks and other Git calls keep 60s.
+        # Failed hydration still follows the existing exact-branch cleanup.
+        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env,
+             timeout_seconds=240)
         _, head, actual_branch, common = _require_linked_identity(
             source, destination, env=env, expected_lock_reason=expected_lock
         )
