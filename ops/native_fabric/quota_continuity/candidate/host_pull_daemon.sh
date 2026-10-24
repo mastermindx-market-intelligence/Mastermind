@@ -31,17 +31,22 @@
 # issue a second bootout or bootstrap. A nonzero bootout is never retried
 # and is never followed by bootstrap.
 #
-# install-agent additionally holds <store>/.install-transaction.lock with a
-# nonblocking kernel flock for the whole transaction: the first launchd read,
-# backup, bootout, pid wait, plist replace, bootstrap, and the final receipt.
-# The file is mode 0600 and owned by the installing user. The kernel releases
-# the flock when this process dies. This is not .publication.lock and it is
-# not the collector's /usr/bin/lockf. A second install-agent finds the flock
-# busy and exits before any launchctl, plist, or backup write. Once this
-# process is about to mutate, it writes .install-transaction.marker. A crash
-# after that leaves the marker; the next installer can acquire the flock and
-# then fail-closes without mutating. A crash before the marker has not mutated,
-# and the kernel has already released the flock.
+# install-agent additionally keeps a nonblocking kernel flock on
+# <store>/.install-transaction.lock for the whole transaction: the first
+# launchd read, backup, bootout, pid wait, plist replace, bootstrap, and the
+# final receipt. The file is mode 0600 and owned by the installing user. The
+# flock is owned by one helper this process starts. That helper opens the lock
+# itself with O_CLOEXEC. This shell does not keep the descriptor, so launchctl,
+# ps, publisher, and other descendants do not inherit it. The helper releases
+# the flock when this installer exits, including SIGKILL: it watches this pid
+# and treats a Linux zombie as already dead. An unrelated descendant that
+# outlives the installer does not hold the flock. This is not .publication.lock
+# and it is not the collector's /usr/bin/lockf. A second install-agent finds
+# the flock busy and exits before any launchctl, plist, or backup write. Once
+# this process is about to mutate, it writes .install-transaction.marker. A
+# crash after that leaves the marker; the next installer can acquire the flock
+# and then fail-closes without mutating. A crash before the marker has not
+# mutated, and the helper releases the flock when this process dies.
 
 set -u
 set -o pipefail
@@ -62,6 +67,18 @@ ADMIT_PID=""
 ADMIT_RELEASE=""
 FAULT=""
 MARKER_OWNED=0
+INSTALL_HOLDER_PID=""
+
+release_install_holder() {
+  if [ -z "${INSTALL_HOLDER_PID:-}" ]; then
+    return 0
+  fi
+  # Clean exits drop the helper explicitly. SIGKILL cannot run this; the
+  # helper notices the installer pid is dead or zombie and exits itself.
+  kill -s TERM "$INSTALL_HOLDER_PID" 2>/dev/null || true
+  wait "$INSTALL_HOLDER_PID" 2>/dev/null || true
+  INSTALL_HOLDER_PID=""
+}
 
 release_admission() {
   if [ -n "${ADMIT_RELEASE:-}" ]; then
@@ -87,6 +104,7 @@ die() {
   if [ -n "${RENDERED:-}" ]; then
     rm -f -- "$RENDERED"
   fi
+  release_install_holder
   printf 'HOST_PULL_LIFECYCLE_REFUSED: %s\n' "$*" >&2
   exit "$code"
 }
@@ -96,6 +114,7 @@ finish_install_success() {
     py install-transaction-complete "$STORE" || die 78 "install transaction marker"
     MARKER_OWNED=0
   fi
+  release_install_holder
   exit 0
 }
 
@@ -121,9 +140,11 @@ on_signal() {
         py install-transaction-complete "$STORE" || true
         MARKER_OWNED=0
       fi
+      release_install_holder
       exit "$code"
       ;;
     BACKED_UP)
+      release_install_holder
       exit "$code"
       ;;
     PLIST_REPLACED)
@@ -131,12 +152,14 @@ on_signal() {
       # bytes and report a stopped receipt. Do not bootstrap.
       restore_plist || true
       write_receipt EFFECT_UNKNOWN "signal-$PHASE" "signal during $PHASE" || true
+      release_install_holder
       exit 78
       ;;
     *)
       # Bootout, pid wait, or bootstrap already started. Another launchctl
       # call would be a second mutation against an unknown job state.
       write_receipt EFFECT_UNKNOWN "signal-$PHASE" "signal during $PHASE" || true
+      release_install_holder
       exit 78
       ;;
   esac
@@ -744,44 +767,6 @@ elif cmd == "install-transaction-prepare":
         finally:
             os.close(fd)
 
-elif cmd == "install-transaction-acquire":
-    # fd 9 is the caller's open file description. flock sticks to that
-    # description after this process exits, and the kernel drops it when the
-    # caller dies. Exit 75: another installer holds it. Exit 77: we hold it,
-    # but a previous installer crashed and left the marker.
-    store, generation, pid = sys.argv[2:5]
-    require_safe(store, "store")
-    if HEX.fullmatch(generation) is None:
-        fail("generation identity")
-    if re.fullmatch(r"[1-9][0-9]*", pid) is None:
-        fail("install transaction pid")
-    lockpath = store + "/.install-transaction.lock"
-    marker = store + "/.install-transaction.marker"
-    require_safe(lockpath, "install transaction")
-    require_safe(marker, "install transaction marker")
-    st_path = os.lstat(lockpath)
-    if stat.S_ISLNK(st_path.st_mode) or not stat.S_ISREG(st_path.st_mode):
-        fail("install transaction lock kind")
-    st_fd = os.fstat(9)
-    if st_fd.st_ino != st_path.st_ino or st_fd.st_dev != st_path.st_dev:
-        fail("install transaction lock fd")
-    if (st_fd.st_uid != os.geteuid() or stat.S_IMODE(st_fd.st_mode) != 0o600
-            or not stat.S_ISREG(st_fd.st_mode)):
-        fail("install transaction lock owner")
-    try:
-        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        sys.stderr.write("install transaction already in progress\n")
-        raise SystemExit(75)
-    # A marker means a previous holder died after it had committed to mutate.
-    # Do not replace it and do not continue into launchctl.
-    if os.path.lexists(marker):
-        st_marker = os.lstat(marker)
-        if stat.S_ISLNK(st_marker.st_mode) or not stat.S_ISREG(st_marker.st_mode):
-            fail("install transaction marker kind")
-        sys.stderr.write("install transaction incomplete\n")
-        raise SystemExit(77)
-
 elif cmd == "install-transaction-arm":
     store, generation, pid = sys.argv[2:5]
     require_safe(store, "store")
@@ -946,24 +931,162 @@ note_install_blocked() {
   py write-receipt "$BACKUP_DIR" "$GENERATION" "EFFECT_UNKNOWN" "$phase" "$*"
 }
 
-# Holds fd 9 for the life of this process. Children do not inherit it.
+# The helper, not this shell, owns the transaction flock. It is a direct child
+# and exits when this installer exits, so descendants cannot keep the flock.
 acquire_install_transaction() {
-  local lockpath rc
+  local lockpath status line waited
   lockpath="$STORE/.install-transaction.lock"
   py install-transaction-prepare "$lockpath" || die 78 "install transaction lock refused"
-  exec 9<>"$lockpath" || die 78 "install transaction lock refused"
-  py install-transaction-acquire "$STORE" "$GENERATION" "$$"
-  rc=$?
-  "$PYTHON" -c 'import fcntl; fcntl.fcntl(9, fcntl.F_SETFD, fcntl.FD_CLOEXEC)' || rc=78
-  if [ "$rc" -eq 0 ]; then
+  status=$(mktemp "${TMPDIR:-/tmp}/host-pull-tx.XXXXXX")
+  "$PYTHON" - "$STORE" "$GENERATION" "$status" "$$" >"$status.out" 2>"$status.err" <<'PY' &
+import fcntl, os, re, stat, sys, time
+store, generation, status, installer = sys.argv[1:5]
+HEX = re.compile(r"[0-9a-f]{64}\Z")
+SAFE = re.compile(r"/[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*\Z")
+
+def report(code):
+    fd = os.open(status, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, (str(code) + "\n").encode("ascii"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+def linux_installer_dead(pid):
+    proc = "/proc/%d/stat" % pid
+    try:
+        raw = open(proc, "r", encoding="ascii", errors="replace").read()
+    except OSError:
+        return True
+    try:
+        state = raw.rsplit(")", 1)[1].split()[0]
+    except (IndexError, ValueError):
+        return True
+    # Z means the process has exited and its descriptors are already closed.
+    return state == "Z"
+
+def watch_installer(pid):
+    if sys.platform == "darwin":
+        import select
+        kq = select.kqueue()
+        watch = select.kevent(
+            pid,
+            filter=select.KQ_FILTER_PROC,
+            flags=select.KQ_EV_ADD,
+            fflags=select.KQ_NOTE_EXIT,
+        )
+        # Register once. Re-adding the watch on every poll can drop NOTE_EXIT.
+        kq.control([watch], 0)
+        while True:
+            events = kq.control(None, 1, 0.2)
+            if events:
+                return
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return
+        return
+    while not linux_installer_dead(pid):
+        time.sleep(0.05)
+
+try:
+    if SAFE.fullmatch(store) is None or SAFE.fullmatch(status) is None:
+        raise RuntimeError("unsafe install transaction path")
+    if HEX.fullmatch(generation) is None or re.fullmatch(r"[1-9][0-9]*", installer) is None:
+        raise RuntimeError("install transaction identity")
+    lockpath = store + "/.install-transaction.lock"
+    marker = store + "/.install-transaction.marker"
+    st_path = os.lstat(lockpath)
+    if stat.S_ISLNK(st_path.st_mode) or not stat.S_ISREG(st_path.st_mode):
+        raise RuntimeError("install transaction lock kind")
+    # Opened only in this helper. O_CLOEXEC keeps it out of any exec this
+    # helper might perform. The installer shell never has this descriptor.
+    lock_fd = os.open(lockpath, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+    st_fd = os.fstat(lock_fd)
+    if (st_fd.st_ino != st_path.st_ino or st_fd.st_dev != st_path.st_dev
+            or st_fd.st_uid != os.geteuid() or stat.S_IMODE(st_fd.st_mode) != 0o600):
+        raise RuntimeError("install transaction lock owner")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        report(75)
+        raise SystemExit(75)
+    if os.path.lexists(marker):
+        st_marker = os.lstat(marker)
+        if stat.S_ISLNK(st_marker.st_mode) or not stat.S_ISREG(st_marker.st_mode):
+            raise RuntimeError("install transaction marker kind")
+        report(77)
+        code = 77
+    else:
+        report(0)
+        code = 0
+    watch_installer(int(installer))
+    raise SystemExit(code)
+except SystemExit:
+    raise
+except Exception:
+    try:
+        report(78)
+    except Exception:
+        pass
+    raise
+PY
+  INSTALL_HOLDER_PID=$!
+  line=""
+  waited=0
+  while [ "$waited" -lt 100 ]; do
+    line=$(tr -cd '0-9' <"$status" 2>/dev/null || true)
+    if [ "$line" = "0" ] || [ "$line" = "75" ] || [ "$line" = "77" ] || [ "$line" = "78" ]; then
+      break
+    fi
+    if ! kill -s 0 "$INSTALL_HOLDER_PID" 2>/dev/null; then
+      break
+    fi
+    waited=$((waited + 1))
+    sleep 0.05
+  done
+  if [ "$line" = "0" ]; then
+    if [ -n "${LOCK_DESCENDANT:-}" ]; then
+      [ "$HERMETIC" -eq 1 ] || die 78 "lock descendant is hermetic-only"
+      # This child is the inheritance probe. It must stay alive after the
+      # installer dies and must not hold the transaction descriptor.
+      # Stdio is detached so the probe cannot keep the installer's pipes open.
+      "$PYTHON" - "$lockpath" "$LOCK_DESCENDANT" >/dev/null 2>&1 <<'PY' &
+import os, stat, sys, time
+lockpath, report = sys.argv[1:3]
+target = os.lstat(lockpath)
+inherited = 0
+for fd in range(0, 256):
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        continue
+    if st.st_ino == target.st_ino and st.st_dev == target.st_dev:
+        inherited = 1
+fd9_open = 0
+try:
+    os.fstat(9)
+    fd9_open = 1
+except OSError:
+    fd9_open = 0
+fd = os.open(report, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+try:
+    os.write(fd, ("inherited=%d\nfd9_open=%d\npid=%d\n" % (inherited, fd9_open, os.getpid())).encode("ascii"))
+    os.fsync(fd)
+finally:
+    os.close(fd)
+while True:
+    time.sleep(0.2)
+PY
+    fi
     return 0
   fi
-  if [ "$rc" -eq 75 ]; then
-    exec 9>&-
+  if [ "$line" = "75" ]; then
+    release_install_holder
     note_install_blocked INSTALL_CONTENTION "install transaction already in progress" || true
     die 78 "install transaction already in progress"
   fi
-  if [ "$rc" -eq 77 ]; then
+  if [ "$line" = "77" ]; then
     note_install_blocked INSTALL_ABANDONED "install transaction incomplete" || true
     die 78 "install transaction incomplete"
   fi
@@ -1138,6 +1261,7 @@ HOLD_BOOTSTRAP=""
 HOLD_BOOTOUT=""
 HOLD_PLIST=""
 HOLD_DURING_LOCK=""
+LOCK_DESCENDANT=""
 EXPECT_OWNER_UID=""
 
 while [ "$#" -gt 0 ]; do
@@ -1158,6 +1282,7 @@ while [ "$#" -gt 0 ]; do
     --hold-before-plist) HOLD_PLIST=${2:-}; shift 2 ;;
     --hold-before-bootstrap) HOLD_BOOTSTRAP=${2:-}; shift 2 ;;
     --hold-during-lock) HOLD_DURING_LOCK=${2:-}; shift 2 ;;
+    --lock-descendant) LOCK_DESCENDANT=${2:-}; shift 2 ;;
     --expect-owner-uid) EXPECT_OWNER_UID=${2:-}; shift 2 ;;
     --fault) FAULT=${2:-}; shift 2 ;;
     --wait-limit) WAIT_LIMIT=${2:-}; shift 2 ;;
@@ -1182,8 +1307,8 @@ if [ "$HERMETIC" -eq 1 ]; then
 else
   [ -z "$FIXTURE_ROOT" ] || die 78 "fixture root is hermetic-only"
   [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
-    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$EXPECT_OWNER_UID" ] \
-    && [ -z "$FAULT" ] \
+    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$LOCK_DESCENDANT" ] \
+    && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] \
     || die 78 "test hooks are hermetic-only"
   [ "$WAIT_LIMIT" -eq 50 ] || die 78 "wait limit"
 fi

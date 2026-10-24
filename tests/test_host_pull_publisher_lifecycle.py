@@ -10,6 +10,7 @@ admit it to the 95-member manifest.
 """
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -1209,6 +1210,24 @@ def _plist_backups(ctx):
     return sorted(path.name for path in ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
 
 
+def _wait_transaction_unlocked(ctx, timeout=3):
+    lock = ctx["store"] / ".install-transaction.lock"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        fd = os.open(lock, os.O_RDWR)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            time.sleep(0.05)
+            continue
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return
+        finally:
+            os.close(fd)
+    raise AssertionError("transaction lock still held")
+
+
 def test_second_installer_makes_no_mutation_while_first_holds_transaction(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1267,6 +1286,7 @@ def test_installer_crash_releases_mutex_and_next_fails_closed(workspace):
     proc.communicate(timeout=5)
     marker = ctx["store"] / ".install-transaction.marker"
     assert marker.is_file()
+    _wait_transaction_unlocked(ctx)
     later = run(ctx)
     assert later.returncode == 78, later.stderr
     assert "install transaction incomplete" in later.stderr
@@ -1282,3 +1302,64 @@ def test_installer_crash_releases_mutex_and_next_fails_closed(workspace):
     assert receipt["phase"] == "INSTALL_ABANDONED"
     assert marker.is_file()
     assert_not_executed(ctx)
+
+
+def test_outliving_child_does_not_keep_transaction_lock(workspace):
+    """Inert /bin/bash fixture: a descendant outlives the installer.
+
+    It must not inherit the transaction descriptor. After the installer is
+    killed, that descendant stays alive and the flock is releasable. The
+    successor then fail-closes on the abandoned marker and does not mutate.
+    """
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-plist"
+    hold.write_text("")
+    report = workspace / "descendant-report"
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_plist=hold, lock_descendant=report),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    desc_pid = None
+    try:
+        _release_hold(proc, hold)
+        deadline = time.time() + 8
+        while time.time() < deadline and not report.exists():
+            if proc.poll() is not None:
+                raise AssertionError(proc.stderr.read())
+            time.sleep(0.05)
+        fields = dict(line.split("=", 1) for line in report.read_text().splitlines())
+        assert fields["inherited"] == "0"
+        assert fields["fd9_open"] == "0"
+        desc_pid = int(fields["pid"])
+        os.kill(desc_pid, 0)
+        log_before = launch_log(ctx)
+        backups_before = _plist_backups(ctx)
+        assert "bootout " in log_before
+        assert "bootstrap " not in log_before
+        blocked = run(ctx)
+        assert blocked.returncode == 78, blocked.stderr
+        assert "install transaction already in progress" in blocked.stderr
+        assert launch_log(ctx) == log_before
+        assert ctx["plist"].read_bytes() == original
+        assert _plist_backups(ctx) == backups_before
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.communicate(timeout=5)
+        os.kill(desc_pid, 0)
+        _wait_transaction_unlocked(ctx)
+        os.kill(desc_pid, 0)
+        later = run(ctx)
+        assert later.returncode == 78, later.stderr
+        assert "install transaction incomplete" in later.stderr
+        assert "already in progress" not in later.stderr
+        assert launch_log(ctx) == log_before
+        assert "bootstrap " not in launch_log(ctx)
+        assert ctx["plist"].read_bytes() == original
+        assert _plist_backups(ctx) == backups_before
+        os.kill(desc_pid, 0)
+        assert_not_executed(ctx)
+    finally:
+        if desc_pid is not None:
+            try:
+                os.kill(desc_pid, signal.SIGKILL)
+            except OSError:
+                pass
