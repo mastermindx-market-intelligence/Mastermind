@@ -11,6 +11,7 @@ import hashlib
 import os
 import json
 import subprocess
+import shutil
 import pytest
 from pathlib import Path
 from control_plane import executive_runtime as er, ceo_request
@@ -56,7 +57,9 @@ if(!intent)throw Error('actual App consume producer refused result');
 port.prepare(intent);
 process.stdout.write(JSON.stringify(intent.payload));
 '''
-    completed=subprocess.run([os.environ['MM_TEST_TYPESCRIPT_NODE'],'--input-type=module','-e',script],
+    node = os.environ.get('MM_TEST_TYPESCRIPT_NODE') or shutil.which('node')
+    assert node, 'Node.js is required for the actual TypeScript consumer proof'
+    completed=subprocess.run([node,'--input-type=module','-e',script],
         input=json.dumps(dict(source=str(root),scratch=str(scratch),raw=json.dumps(view),selection=view['selection'],principal_scope=principal_scope)),
         capture_output=True,text=True,timeout=15)
     assert completed.returncode==0,completed.stderr
