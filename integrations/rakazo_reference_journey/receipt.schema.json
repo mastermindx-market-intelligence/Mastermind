@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mastermind/integrations/rakazo_reference_journey/receipt.schema.json",
+  "title": "Rakazo reference journey receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "task",
+    "placement",
+    "source_phase",
+    "donor",
+    "source",
+    "derivation",
+    "identity",
+    "daemon",
+    "toolchain",
+    "environment",
+    "execution",
+    "cleanup",
+    "hashes",
+    "limits",
+    "commands"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {
+      "enum": [
+        "SOURCE_PREPARED",
+        "READINESS_BLOCKED",
+        "NOT_RUN",
+        "RUN_FAILED",
+        "EFFECT_UNKNOWN",
+        "JOURNEY_PASSED"
+      ]
+    },
+    "task": {"const": "HC-P1B.T2"},
+    "placement": {"const": "SOURCE_PREPARATION_AND_READINESS_ONLY"},
+    "source_phase": {
+      "enum": ["NOT_PREPARED", "SOURCE_PREPARED", "REFUSED"]
+    },
+    "donor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "commit", "license"],
+      "properties": {
+        "repository": {"const": "https://github.com/elie222/rakazo.git"},
+        "commit": {"const": "c5e66e010ee3f3166d2ad216f928a75a0b9a2218"},
+        "license": {"const": "Apache-2.0"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "blobs"],
+      "properties": {
+        "state": {"enum": ["NOT_ATTEMPTED", "ADMITTED", "REFUSED"]},
+        "reason": {"type": "string"},
+        "blobs": {"type": "object"}
+      }
+    },
+    "derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason", "upstream_assertions_preserved"],
+      "properties": {
+        "state": {"enum": ["NOT_PREPARED", "PREPARED", "REFUSED"]},
+        "reason": {"type": "string"},
+        "upstream_assertions_preserved": {"type": ["boolean", "null"]},
+        "patch_sha256": {"type": "string"},
+        "override_sha256": {"type": "string"},
+        "derived_topology_sha256": {"type": "string"},
+        "derived_compose_sha256": {"type": "string"}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "app_image", "computer_image", "docker_resources_created"],
+      "properties": {
+        "project": {"type": "string"},
+        "app_image": {"type": "string"},
+        "computer_image": {"type": "string"},
+        "docker_resources_created": {"const": false}
+      }
+    },
+    "daemon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "reason",
+        "synthetic",
+        "binary",
+        "endpoint",
+        "daemon_id",
+        "socket_present",
+        "admitted_daemon_ids",
+        "project_name_qualifies_shared_daemon"
+      ],
+      "properties": {
+        "state": {"const": "UNQUALIFIED"},
+        "reason": {"type": "string"},
+        "synthetic": {"type": "boolean"},
+        "binary": {"type": ["string", "null"]},
+        "endpoint": {"type": ["string", "null"]},
+        "daemon_id": {"type": ["string", "null"]},
+        "socket_present": {"type": "boolean"},
+        "admitted_daemon_ids": {
+          "type": "array",
+          "maxItems": 0,
+          "items": {"type": "string"}
+        },
+        "project_name_qualifies_shared_daemon": {"const": false}
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git", "node", "pnpm", "adopted_for_execution"],
+      "properties": {
+        "git": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "version", "state"],
+          "properties": {
+            "path": {"type": "string"},
+            "version": {"type": ["string", "null"]},
+            "state": {"enum": ["OBSERVED", "ABSENT"]}
+          }
+        },
+        "node": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "version", "state", "satisfies_donor_engine"],
+          "properties": {
+            "path": {"type": ["string", "null"]},
+            "version": {"type": ["string", "null"]},
+            "state": {"enum": ["OBSERVED", "ABSENT"]},
+            "satisfies_donor_engine": {"type": "boolean"}
+          }
+        },
+        "pnpm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "version", "required", "state"],
+          "properties": {
+            "path": {"type": ["string", "null"]},
+            "version": {"type": ["string", "null"]},
+            "required": {"const": "9.15.0"},
+            "state": {"enum": ["ABSENT", "MISMATCH", "EXACT"]}
+          }
+        },
+        "adopted_for_execution": {"const": false}
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sealed_before_child", "inherited_caller_environment", "keys"],
+      "properties": {
+        "sealed_before_child": {"const": true},
+        "inherited_caller_environment": {"const": false},
+        "keys": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "authorized", "spawned", "reason", "planned_command"],
+      "properties": {
+        "state": {"const": "NOT_RUN"},
+        "authorized": {"const": false},
+        "spawned": {"const": false},
+        "reason": {"const": "execution_not_authorized_for_initial_placement"},
+        "planned_command": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_cleanup",
+        "owned_root",
+        "exit_zero_is_clean_receipt",
+        "host_prune",
+        "absence_of_log_is_absence_of_effects"
+      ],
+      "properties": {
+        "resource_cleanup": {
+          "enum": ["NOT_RUN", "REFUSED", "UNKNOWN", "CORROBORATED"]
+        },
+        "owned_root": {
+          "enum": ["REMOVED", "RETAINED", "REFUSED", "UNKNOWN"]
+        },
+        "exit_zero_is_clean_receipt": {"const": false},
+        "host_prune": {"const": false},
+        "absence_of_log_is_absence_of_effects": {"const": false}
+      }
+    },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "patch_sha256",
+        "override_sha256",
+        "config_manifest_sha256",
+        "cache_manifest_sha256",
+        "tmp_manifest_sha256",
+        "source_manifest_sha256",
+        "staging_manifest_sha256"
+      ],
+      "properties": {
+        "patch_sha256": {"type": "string"},
+        "override_sha256": {"type": "string"},
+        "config_manifest_sha256": {"type": "string"},
+        "cache_manifest_sha256": {"type": "string"},
+        "tmp_manifest_sha256": {"type": "string"},
+        "source_manifest_sha256": {"type": "string"},
+        "staging_manifest_sha256": {"type": "string"}
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deadlines_seconds", "log_max_bytes", "execution_armed", "automatic_retry", "notes"],
+      "properties": {
+        "deadlines_seconds": {"type": "object"},
+        "log_max_bytes": {"const": 8192},
+        "execution_armed": {"const": false},
+        "automatic_retry": {"const": false},
+        "notes": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["argv", "returncode", "timed_out", "uncertain", "stdout", "stderr"],
+        "properties": {
+          "argv": {"type": "array", "items": {"type": "string"}},
+          "returncode": {"type": "integer"},
+          "timed_out": {"type": "boolean"},
+          "uncertain": {"type": "boolean"},
+          "stdout": {"type": "string"},
+          "stderr": {"type": "string"}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {"enum": ["JOURNEY_PASSED", "RUN_FAILED", "EFFECT_UNKNOWN"]}
+        },
+        "required": ["status"]
+      },
+      "then": false
+    }
+  ]
+}
