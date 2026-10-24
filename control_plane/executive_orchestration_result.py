@@ -343,6 +343,7 @@ def orchestration_result_schema(
     root_job_id: str | None = None,
     plan_schema_version: str = PLAN_SCHEMA_V1,
     aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+    coordinator_job_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the closed executable envelope schema for ``role``.
 
@@ -365,7 +366,10 @@ def orchestration_result_schema(
         or (role != "plan" and plan_schema_version != PLAN_SCHEMA_V1)
     ):
         raise OrchestrationResultError("plan producer schema version is not admitted")
+    if coordinator_job_id is not None and (role != "plan" or plan_schema_version != PLAN_SCHEMA_V5):
+        raise OrchestrationResultError("coordinator binding requires the V5 planner role")
     for name, value in {
+        "coordinator_job_id": coordinator_job_id,
         "job_id": job_id,
         "run_id": run_id,
         "worker_id": worker_id,
@@ -389,6 +393,8 @@ def orchestration_result_schema(
         role_body["properties"]["steps"]["maxItems"] = 16 if plan_schema_version == PLAN_SCHEMA_V5 else 8
         if plan_schema_version == PLAN_SCHEMA_V5:
             role_body["required"].append("coordinator_job_id")
+            if coordinator_job_id is not None:
+                role_body["properties"]["coordinator_job_id"] = {"const": coordinator_job_id}
         else:
             del role_body["properties"]["coordinator_job_id"]
     if root_job_id is not None:

@@ -19,20 +19,54 @@ MAX_WIRE_BYTES = 1024 * 1024
 MAX_TEXT_CHARS = 16_000
 MAX_EVENTS = 256
 EXECUTIVE_PLAN_CONTRACT = "executive-plan-v1"
+EXECUTIVE_PLAN_CONTRACT_V3 = "executive-plan-v3"
+EXECUTIVE_PLAN_CONTRACT_V4 = "executive-plan-v4"
+EXECUTIVE_PLAN_CONTRACT_V5 = "executive-plan-v5"
 
 
-def native_plan_schema() -> dict[str, Any]:
-    """Reuse the Executive contract; its keywords are equivalent in Draft 7."""
+def _plan_version(contract_name: str) -> str:
+    from control_plane.executive_orchestration_result import (
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+    )
+    admitted = {
+        EXECUTIVE_PLAN_CONTRACT: PLAN_SCHEMA_V1,
+        EXECUTIVE_PLAN_CONTRACT_V3: PLAN_SCHEMA_V3,
+        EXECUTIVE_PLAN_CONTRACT_V4: PLAN_SCHEMA_V4,
+        EXECUTIVE_PLAN_CONTRACT_V5: PLAN_SCHEMA_V5,
+    }
+    if type(contract_name) is not str or contract_name not in admitted:
+        raise HelperProtocolError("native result contract is unsupported")
+    return admitted[contract_name]
+
+
+def native_plan_schema(contract_name: str = EXECUTIVE_PLAN_CONTRACT) -> dict[str, Any]:
+    """Exact opt-in native plan output; the default remains frozen V1."""
     from control_plane.executive_orchestration_result import orchestration_result_schema
-    schema = orchestration_result_schema("plan")
+    schema = orchestration_result_schema(
+        "plan", plan_schema_version=_plan_version(contract_name)
+    )
     schema["$schema"] = "http://json-schema.org/draft-07/schema#"
     return schema
 
 
-def native_plan_contract() -> dict[str, str]:
+def native_plan_contract(contract_name: str = EXECUTIVE_PLAN_CONTRACT) -> dict[str, str]:
     from control_plane.executive_orchestration_result import canonical_bytes
-    return {"name": EXECUTIVE_PLAN_CONTRACT,
-            "schema_digest": hashlib.sha256(canonical_bytes(native_plan_schema())).hexdigest()}
+    return {"name": contract_name,
+            "schema_digest": hashlib.sha256(
+                canonical_bytes(native_plan_schema(contract_name))
+            ).hexdigest()}
+
+
+def native_plan_contract_for_version(plan_schema_version: str) -> dict[str, str]:
+    """Resolve only the closed producer wire; this grants no adapter capability."""
+    if type(plan_schema_version) is str:
+        for contract in (EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3,
+                         EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5):
+            if _plan_version(contract) == plan_schema_version:
+                return native_plan_contract(contract)
+    raise HelperProtocolError("native plan schema version is unsupported")
+
+
 REQUEST_ID_RE = re.compile(r"req-[A-Za-z0-9_-]{1,64}")
 OPERATIONS = frozenset(
     {

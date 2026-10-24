@@ -46,14 +46,14 @@ MANIFEST_PROJECTION={
 OBJECTIVE=('Assess launch-readiness from supplied exact release evidence. Two independent read-only '
     'analyses cover auth/admission/launch and return/recovery/effect preservation. Review only the '
     'auth/admission/launch analysis; the original parent reconciles both and labels the second unreviewed.')
-# These source pins are read from Git 02649, not from the inaccessible staged file.
+# These pins identify the exact published #1315 Launch source; any source drift refuses.
 SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
-        '8596eef6272ed1055ed397670bbb0cb27162759539a18e35fbcd43b3a5bae791',
+        'de1b4f7bf74030b6c71b956440801760452f17049d13fa423a9fac6aeec2562f',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        'cb1883df76ef9aaab7d513dd776efee4ffad4fbe28fefc5c6dd7673e674a5d5d',
+        '5ead9e73c047a50d085208f9e981cdedae54bf23c9304c2a57da7c0cf2bd4321',
     'app/mastermind_os/src/launch-config.ts':
-        'f79bb51390a822c59150c38491ddd63951d1cbec8fe9b283a6875bafe4020ace',
+        '692df4fda3a95a5142c3a36b84d4b7a8ca22a2a606518ee2c92e7628ab770d11',
 }
 
 

@@ -976,14 +976,16 @@ def test_complete_launch_attestation_is_redacted_and_principal_bound(tmp_path: P
     prompt = "private task packet that must only be hashed"
 
     async def exercise():
+        uid, gid = os.geteuid(), os.getegid()
         adapter, spec, workspace, run_dir = _fixture(tmp_path, prompt=prompt)
+        os.chown(run_dir, -1, gid)
         run_dir.chmod(0o770)
         spec = dataclasses.replace(
             spec,
-            expected_worker_uid=os.geteuid(),
-            expected_worker_gid=os.getegid(),
-            worker_user=pwd.getpwuid(os.geteuid()).pw_name,
-            shared_run_gid=os.getegid(),
+            expected_worker_uid=uid,
+            expected_worker_gid=gid,
+            worker_user=pwd.getpwuid(uid).pw_name,
+            shared_run_gid=gid,
             secret_canary_verdict=_passing_canary(),
             require_secret_canary=True,
         )

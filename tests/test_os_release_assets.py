@@ -887,3 +887,59 @@ def test_cli_prepare_reads_one_explicit_canonical_manifest_file_and_defaults_to_
     with pytest.raises(ValueError):
         mod.main()
     assert not (tmp_path / "cli-partial").exists()
+
+
+@pytest.mark.parametrize("choices", [
+    None, [], {}, [{"ref": "frontier.one"}], [{"label": "One"}],
+    [{"ref": "UPPER", "label": "One"}], [{"ref": "frontier.one\n", "label": "One"}],
+    [{"ref": "frontier.one\r\n", "label": "One"}], [{"ref": "a" * 65, "label": "One"}],
+    [{"ref": "frontier.one", "label": "One", "provider": "caller"}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": ""}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": None}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": "bad\nreason"}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": "x" * 257}],
+    [{"ref": "frontier.one", "label": "One"}, {"ref": "frontier.one", "label": "Duplicate"}],
+    [{"ref": f"frontier.{index}", "label": "Model"} for index in range(17)],
+])
+def test_frontier_manifest_refuses_unqualified_choice_shapes(choices):
+    with pytest.raises(ValueError):
+        helper().decode_launch_manifest(canonical(launch_manifest(frontierModels=choices)))
+
+
+def test_frontier_choice_bytes_survive_build_qualification_and_import(launch_bundle, tmp_path):
+    mod, prior, sha, tree, calls = launch_bundle
+    choices = [{"ref": "frontier.one", "label": "One"},
+               {"ref": "2", "label": "Two", "unavailableReason": "Session qualification pending"}]
+    raw = canonical(launch_manifest(frontierModels=choices))
+    out = tmp_path / "selected-bundle"
+    repo = prior.parent / "source"
+    mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id",
+                output=out, build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                executive_resource=mod.OS_EXECUTIVE_RESOURCE, launch_manifest=raw)
+    assert calls[-1]["launch_manifest"] == raw
+    selected = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=repo)
+    receipt = json.loads(selected.receipt)
+    assert receipt["launch_config"] == raw.decode("utf-8")
+    assert receipt["launch_config_sha256"] == hashlib.sha256(raw).hexdigest()
+    original = mod.qualify(prior, expected_sha=sha, tree_sha=tree, source_repo=repo)
+    assert selected.digest != original.digest
+    stage = tmp_path / "selected-stage"
+    stage.mkdir()
+    mod.import_assets(selected, stage)
+    mod.compare_existing(selected, stage)
+    assert json.loads((stage / mod.INSTALLED_RECEIPT).read_bytes())["launch_config"] == raw.decode("utf-8")
+
+
+def test_malformed_frontier_choice_refuses_before_any_build(launch_bundle, tmp_path):
+    mod, prior, sha, _tree, calls = launch_bundle
+    before = len(calls)
+    out = tmp_path / "must-not-be-built"
+    with pytest.raises(ValueError):
+        mod.prepare(source_repo=prior.parent / "source", expected_sha=sha,
+                    web_client_id="test-public-client-id", output=out, build_user="test",
+                    node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                    executive_resource=mod.OS_EXECUTIVE_RESOURCE,
+                    launch_manifest=canonical(launch_manifest(frontierModels=[
+                        {"ref": "frontier.one\n", "label": "One"}])))
+    assert len(calls) == before
+    assert not out.exists()

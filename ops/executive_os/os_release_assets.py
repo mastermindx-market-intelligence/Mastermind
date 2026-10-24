@@ -293,7 +293,7 @@ def _publish_file(path, data):
 
 
 _LAUNCH_ROOT_KEYS = frozenset(("v", "workstream", "priority", "projects", "profiles",
-                               "attemptLimit", "allowedWritePaths", "validation"))
+                               "attemptLimit", "allowedWritePaths", "validation", "frontierModels"))
 _LAUNCH_VALIDATION_KEYS = frozenset(("pytest_targets", "compileall_paths", "git_diff_check"))
 
 
@@ -352,6 +352,23 @@ def _launch_choices(value, *, profile):
     return value
 
 
+def _launch_frontier_choices(value):
+    if type(value) is not list or not 0 < len(value) <= 16:
+        return None
+    refs = []
+    for choice in value:
+        if (type(choice) is not dict
+                or not {"ref", "label"} <= set(choice) <= {"ref", "label", "unavailableReason"}
+                or _launch_string(choice["label"], 120) is None
+                or type(choice["ref"]) is not str
+                or re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", choice["ref"]) is None
+                or ("unavailableReason" in choice
+                    and _launch_string(choice["unavailableReason"], 256) is None)):
+            return None
+        refs.append(choice["ref"])
+    return value if len(set(refs)) == len(refs) else None
+
+
 def _decode_launch_binding(parsed):
     """Mirror app/mastermind_os/src/launch-config.ts decodeLaunchBindingConfig.
 
@@ -370,6 +387,8 @@ def _decode_launch_binding(parsed):
     if _launch_choices(parsed["projects"], profile=False) is None:
         return None
     if _launch_choices(parsed["profiles"], profile=True) is None:
+        return None
+    if "frontierModels" in parsed and _launch_frontier_choices(parsed["frontierModels"]) is None:
         return None
     if "attemptLimit" in parsed:
         limit = parsed["attemptLimit"]

@@ -117,6 +117,134 @@ _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
 _COO_PLAN_ADMISSION_SCHEMA_V3 = "mastermind.coo_plan_admission/v3"
 
 
+_PLANNER_PRODUCER_BINDING_SCHEMA = "mastermind.planner_producer_binding/v1"
+_PLANNER_EXECUTION_FIELDS = (
+    "eligible_quota_classes", "provider", "model", "effort", "cost_class",
+    "routing_policy_version", "execution_profile_id", "execution_profile_digest",
+    "capability_policy_version", "capability_policy_digest",
+    "harness_binary_digest", "harness_version", "base_sha",
+)
+
+
+def _planner_execution_binding_digest(constraints: Mapping[str, Any]) -> str:
+    """Bind the complete admitted constraints, not a caller's proof string."""
+    if not isinstance(constraints, Mapping) or any(
+        not constraints.get(key) for key in _PLANNER_EXECUTION_FIELDS
+    ):
+        raise StateConflict("planner producer requires complete execution constraints")
+    quotas = constraints["eligible_quota_classes"]
+    if (type(quotas) is not list or not quotas
+            or any(type(value) is not str or not value for value in quotas)
+            or len(set(quotas)) != len(quotas)):
+        raise StateConflict("planner producer quota binding is invalid")
+    for key in _PLANNER_EXECUTION_FIELDS[1:]:
+        if type(constraints[key]) is not str or not constraints[key].strip():
+            raise StateConflict("planner producer execution identity is invalid")
+    for key in ("execution_profile_digest", "capability_policy_digest", "harness_binary_digest"):
+        if re.fullmatch(r"[0-9a-f]{64}", constraints[key]) is None:
+            raise StateConflict("planner producer execution digest is invalid")
+    if re.fullmatch(r"[0-9a-f]{40}", constraints["base_sha"]) is None:
+        raise StateConflict("planner producer release identity is invalid")
+    return orchestration_digest(dict(constraints))
+
+
+def _make_planner_producer_binding(
+    *, root_job_id: str, coordinator_job_id: str, planner_job_id: str,
+    plan_schema_version: str, constraints: Mapping[str, Any],
+) -> dict[str, Any]:
+    from control_plane.claude_operator_helper_protocol import native_plan_contract_for_version
+    try:
+        contract = native_plan_contract_for_version(plan_schema_version)
+    except (TypeError, ValueError) as exc:
+        raise StateConflict("planner producer schema version is not admitted") from exc
+    if coordinator_job_id != root_job_id and plan_schema_version != "mastermind.execution_plan/v5":
+        raise StateConflict("nested planner producer requires V5")
+    return {
+        "schema_version": _PLANNER_PRODUCER_BINDING_SCHEMA,
+        "root_job_id": root_job_id,
+        "coordinator_job_id": coordinator_job_id,
+        "planner_job_id": planner_job_id,
+        "plan_schema_version": plan_schema_version,
+        "native_result_contract": contract,
+        "execution_binding_digest": _planner_execution_binding_digest(constraints),
+    }
+
+
+def _validated_planner_producer_binding(
+    connection: sqlite3.Connection, job_row: sqlite3.Row,
+) -> dict[str, Any] | None:
+    """Read the original creation receipt; absence never adopts a new default."""
+    if job_row["orchestration_role"] != "plan":
+        raise StateConflict("planner producer binding requires the plan role")
+    rows = connection.execute(
+        "SELECT * FROM events WHERE event_type='JOB_CREATED' AND job_id=?",
+        (job_row["job_id"],),
+    ).fetchall()
+    if len(rows) != 1:
+        raise StateConflict("planner producer requires one immutable creation receipt")
+    event = rows[0]
+    payload = _strict_canonical_json_loads(
+        str(event["payload_json"]), name="planner producer JOB_CREATED payload"
+    )
+    if (not isinstance(payload, dict) or event["aggregate_type"] != "job"
+            or event["aggregate_id"] != job_row["job_id"]
+            or payload.get("parent_job_id") != job_row["parent_job_id"]
+            or payload.get("root_job_id") != job_row["root_job_id"]
+            or payload.get("orchestration_role") != "plan"
+            or payload.get("orchestration_provenance_digest") != job_row["orchestration_provenance_digest"]):
+        raise StateConflict("planner producer creation identity is invalid")
+    keys = {"planner_producer_binding", "planner_producer_binding_digest"}
+    present = keys.intersection(payload)
+    if not present:
+        return None
+    if present != keys:
+        raise StateConflict("planner producer binding must be all-or-absent")
+    binding = payload["planner_producer_binding"]
+    if type(binding) is not dict:
+        raise StateConflict("planner producer binding is not a closed record")
+    expected = _make_planner_producer_binding(
+        root_job_id=str(job_row["root_job_id"]),
+        coordinator_job_id=str(job_row["parent_job_id"]),
+        planner_job_id=str(job_row["job_id"]),
+        plan_schema_version=binding.get("plan_schema_version"),
+        constraints=_strict_canonical_json_loads(
+            str(job_row["constraints_json"]), name="planner execution constraints"
+        ),
+    )
+    if (binding != expected
+            or payload["planner_producer_binding_digest"] != orchestration_digest(expected)):
+        raise StateConflict("planner producer binding identity or digest differs")
+    return expected
+
+
+def _assert_planner_producer_result(
+    connection: sqlite3.Connection, planner: sqlite3.Row,
+    attempt: sqlite3.Row, plan: Mapping[str, Any],
+) -> None:
+    binding = _validated_planner_producer_binding(connection, planner)
+    if binding is not None:
+        version = binding["plan_schema_version"]
+        if (plan.get("schema_version") != version
+                or plan.get("root_job_id") != binding["root_job_id"]
+                or (version == "mastermind.execution_plan/v5"
+                    and plan.get("coordinator_job_id") != binding["coordinator_job_id"])):
+            raise StateConflict("plan result differs from immutable producer binding")
+    elif (attempt["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value
+            and _strict_canonical_json_loads(str(planner["constraints_json"]),
+                name="legacy planner constraints").get("execution_profile_id") in {
+                    "operator.appserver.readonly.docs-mcp.native-helper.v1",
+                    "operator.browser.local-review.v1", "operator.claude.readonly.v1",
+                }
+            and plan.get("schema_version") not in {
+                "mastermind.execution_plan/v1",
+                "mastermind.execution_plan/v2",
+            }):
+        # Original V1 and work-placement V2 are both historical unbound
+        # contracts. V2 still passes the native placement and sealed-result
+        # checks downstream; only V3+ require an explicit producer binding.
+        raise StateConflict("legacy operator planner result must remain V1")
+
+
 def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
     value_parts = value.split("/")
 
@@ -1759,6 +1887,123 @@ def _provenance_with_dialogue_source(
     return result
 
 
+def _frontier_selection_from_root_creation(
+    connection: sqlite3.Connection, *, root_job_id: str,
+) -> dict[str, Any] | None:
+    """Read the original logical choice without resolving today's model defaults."""
+    from control_plane.frontier_selection import (
+        FrontierSelectionError, selection_from_provenance,
+    )
+    root = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (root_job_id,),
+    ).fetchone()
+    if root is None:
+        raise StateConflict("selected CEO original root disappeared")
+    try:
+        role, provenance, digest = _decode_orchestration_job_fields(root)
+    except PersistenceError as exc:
+        raise StateConflict("selected CEO root provenance is invalid") from exc
+    if (role != "aggregation" or not _accepted_orchestration_root_provenance(provenance)
+            or root["parent_job_id"] is not None or root["root_job_id"] != root_job_id
+            or int(root["depth"]) != 0):
+        raise StateConflict("selected CEO requires the original aggregation root")
+    events = connection.execute(
+        "SELECT * FROM events WHERE event_type='JOB_CREATED' AND job_id=?",
+        (root_job_id,),
+    ).fetchall()
+    if len(events) != 1:
+        raise StateConflict("selected CEO requires one immutable root creation event")
+    event = events[0]
+    try:
+        payload = _strict_canonical_json_loads(
+            str(event["payload_json"]), name="selected CEO root JOB_CREATED payload",
+        )
+    except PersistenceError as exc:
+        raise StateConflict("selected CEO root creation evidence is invalid") from exc
+    if (event["aggregate_type"] != "job" or event["aggregate_id"] != root_job_id
+            or event["command_id"] != provenance.get("command_id")
+            or not isinstance(payload, dict)
+            or not {"parent_job_id", "root_job_id", "depth", "orchestration_role",
+                    "orchestration_provenance_digest"}.issubset(payload)
+            or payload["parent_job_id"] is not None or payload["root_job_id"] != root_job_id
+            or type(payload["depth"]) is not int or payload["depth"] != 0
+            or payload.get("orchestration_role") != "aggregation"
+            or payload.get("orchestration_provenance_digest") != digest):
+        raise StateConflict("selected CEO root creation identity differs")
+    # Older valid roots need not have optional host provenance at all.
+    if "provenance" not in payload:
+        return None
+    host_provenance = payload["provenance"]
+    if not isinstance(host_provenance, dict):
+        raise StateConflict("selected CEO host provenance is invalid")
+    try:
+        return selection_from_provenance(host_provenance)
+    except FrontierSelectionError as exc:
+        raise StateConflict("selected CEO provenance is incomplete or invalid") from exc
+
+
+def _assert_root_frontier_planner_join(
+    connection: sqlite3.Connection, *, root_row: sqlite3.Row,
+    constraints: Mapping[str, Any], plan_schema_version: str | None,
+) -> dict[str, Any] | None:
+    """Fresh root-planner admission joins two independently retained identities."""
+    selected = _frontier_selection_from_root_creation(
+        connection, root_job_id=str(root_row["job_id"]),
+    )
+    if selected is None:
+        return None
+    root_constraints = _strict_canonical_json_loads(
+        str(root_row["constraints_json"]), name="selected CEO root constraints",
+    )
+    if (not isinstance(root_constraints, dict)
+            or root_constraints.get("operator_harness_armed") is not True):
+        raise StateConflict("selected CEO operator lane is not armed for this root")
+    if plan_schema_version is None:
+        raise StateConflict("selected CEO requires a retained native planner producer")
+    _planner_execution_binding_digest(constraints)
+    # The logical frontier profile is not a worker profile. The executable
+    # profile, quota and harness must remain the independently admitted lane.
+    for field in _PLANNER_EXECUTION_FIELDS:
+        root_field = field if field == "base_sha" else f"operator_{field}"
+        if constraints.get(field) != root_constraints.get(root_field):
+            raise StateConflict("selected CEO executable lane differs from its admitted root")
+    for logical, executable in (
+        ("provider_alias", "provider"), ("model", "model"), ("effort", "effort"),
+        ("routing_policy_version", "routing_policy_version"),
+        ("capability_policy_version", "capability_policy_version"),
+        ("capability_policy_digest", "capability_policy_digest"),
+    ):
+        if selected[logical] != constraints[executable]:
+            raise StateConflict("selected CEO differs from the admitted planner identity")
+    return selected
+
+
+def _assert_frontier_planner_execution(
+    connection: sqlite3.Connection, planner: sqlite3.Row,
+) -> dict[str, Any] | None:
+    # A CEO selection governs its root planner, not a nested coordinator's
+    # separately admitted delegation. Sealed/cancel containment does not call this.
+    if (planner["orchestration_role"] != "plan"
+            or planner["parent_job_id"] != planner["root_job_id"]):
+        return None
+    selected = _frontier_selection_from_root_creation(
+        connection, root_job_id=str(planner["root_job_id"]),
+    )
+    if selected is None:
+        return None
+    root = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (planner["root_job_id"],),
+    ).fetchone()
+    producer = _validated_planner_producer_binding(connection, planner)
+    return _assert_root_frontier_planner_join(
+        connection, root_row=root,
+        constraints=_strict_canonical_json_loads(
+            str(planner["constraints_json"]), name="selected CEO planner constraints",
+        ),
+        plan_schema_version=None if producer is None else producer["plan_schema_version"],
+    )
+
+
 def _dialogue_source_from_root_creation(
     connection: sqlite3.Connection,
     *,
@@ -2499,6 +2744,7 @@ class _JobCreationSpec:
     command_id: str | None
     event_provenance: Mapping[str, Any] | None
     timestamp_ms: int
+    planner_plan_schema_version: str | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -9391,6 +9637,7 @@ def _validated_orchestration_child_terminal_payload(
     if result_digest(body) != seal.get("role_result_digest"):
         raise StateConflict("orchestration role body digest mismatches its seal")
     if role == "plan":
+        _assert_planner_producer_result(connection, job_row, attempt_row, body)
         if (
             body.get("coordinator_job_id", body.get("root_job_id")) != job_row["parent_job_id"]
             or body.get("root_job_id") != job_row["root_job_id"]
@@ -9832,6 +10079,7 @@ def _validated_plan_admission(
     except Exception as exc:
         raise StateConflict(f"sealed plan result is invalid: {exc}") from exc
     plan_body = dict(envelope["role_result"])
+    _assert_planner_producer_result(connection, plan_attempt, plan_attempt, plan_body)
     expected_admission_schema = (
         _COO_PLAN_ADMISSION_SCHEMA_V3 if plan_body.get("schema_version") == "mastermind.execution_plan/v5" else _COO_PLAN_ADMISSION_SCHEMA_V2
         if plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
@@ -13230,6 +13478,16 @@ class JobRegistry:
                     "supersedes_job_id": spec.supersedes_job_id,
                 }
             )
+        if spec.planner_plan_schema_version is not None:
+            if spec.orchestration_role != "plan" or spec.parent_job_id is None:
+                raise StateConflict("planner producer cannot bind another role")
+            producer = _make_planner_producer_binding(
+                root_job_id=str(root_job_id), coordinator_job_id=spec.parent_job_id,
+                planner_job_id=job_id, plan_schema_version=spec.planner_plan_schema_version,
+                constraints=spec.constraints,
+            )
+            event_payload["planner_producer_binding"] = producer
+            event_payload["planner_producer_binding_digest"] = orchestration_digest(producer)
         if spec.event_provenance is not None:
             event_payload["provenance"] = dict(spec.event_provenance)
         self.store.append_event(
@@ -13258,6 +13516,7 @@ class JobRegistry:
         workspace_root: str | Path | None,
         execution_binding: dict[str, Any] | None = None,
         dialogue_source: Mapping[str, Any] | None = None,
+        frontier_selection: Mapping[str, Any] | None = None,
     ) -> Job:
         """The sole strict v2 intent -> Phase 1F-C aggregation-root boundary.
 
@@ -13310,6 +13569,13 @@ class JobRegistry:
             "fingerprint": fingerprint,
             "grounding": dict(normalized["grounding"]),
         }
+        from control_plane.frontier_selection import FrontierSelectionError, selection_provenance
+        try:
+            provenance.update(selection_provenance(
+                normalized.get("frontier_model_alias"), frontier_selection,
+            ))
+        except FrontierSelectionError as exc:
+            raise StateConflict("trusted frontier selection is invalid or absent") from exc
         if "workstream" in normalized:
             provenance["workstream"] = normalized["workstream"]
         if dialogue_source is not None:
@@ -13503,6 +13769,7 @@ class JobRegistry:
         root_job_id: str,
         *,
         command_id: str,
+        plan_schema_version: str | None = None,
     ) -> Job:
         """Create or reconcile the sole deterministic planner child.
 
@@ -13575,7 +13842,44 @@ class JobRegistry:
                 "source_digest": str(root.orchestration_provenance_digest),
             },
             _coo_cycle_planner_capability=_COO_CYCLE_PLANNER_CREATION_CAPABILITY,
+            _planner_plan_schema_version=plan_schema_version,
         )
+
+    def get_planner_producer_binding(self, job_id: str) -> dict[str, Any] | None:
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise StateConflict("planner producer Job does not exist")
+            if row["orchestration_role"] != "plan":
+                # This accessor also serves the claim-aware operator transport,
+                # which may execute non-planner Jobs. Never require a planner
+                # binding for such a Job, but refuse any illicit producer claim
+                # in its immutable creation receipt.
+                created = connection.execute(
+                    "SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=?",
+                    (job_id,),
+                ).fetchall()
+                if len(created) != 1:
+                    raise StateConflict("non-planner creation receipt is unavailable")
+                payload = _strict_canonical_json_loads(
+                    str(created[0]["payload_json"]), name="non-planner JOB_CREATED payload"
+                )
+                if (type(payload) is not dict
+                        or payload.get("orchestration_role") != row["orchestration_role"]
+                        or any(key in payload for key in (
+                            "planner_producer_binding", "planner_producer_binding_digest"
+                        ))):
+                    raise StateConflict("non-planner Job cannot carry producer binding")
+                return None
+            return _validated_planner_producer_binding(connection, row)
+
+    def assert_frontier_planner_execution(self, job_id: str) -> dict[str, Any] | None:
+        """Validate an explicit CEO choice only for a fresh root-planner effect."""
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise StateConflict("selected CEO planner disappeared")
+            return _assert_frontier_planner_execution(connection, row)
 
     def _operator_child_constraints(self, root: Job) -> dict[str, Any]:
         root_constraints = dict(root.constraints)
@@ -13911,6 +14215,7 @@ class JobRegistry:
             except Exception as exc:
                 raise StateConflict(f"typed plan is invalid: {exc}") from exc
             plan_body = dict(envelope["role_result"])
+            _assert_planner_producer_result(connection, planner, plan_attempt, plan_body)
             plan_digest = result_digest(plan_body)
             if plan_digest != seal["role_result_digest"]:
                 raise StateConflict("typed plan digest differs from its seal")
@@ -15498,6 +15803,7 @@ class JobRegistry:
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
         _principal_commit_guard: Callable[[], None] | None = None,
+        _planner_plan_schema_version: str | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -15537,6 +15843,11 @@ class JobRegistry:
         orchestration_role = (
             str(orchestration_role).strip().lower() if orchestration_role else None
         )
+        if _planner_plan_schema_version is not None and (
+            orchestration_role != "plan"
+            or _coo_cycle_planner_capability is not _COO_CYCLE_PLANNER_CREATION_CAPABILITY
+        ):
+            raise StateConflict("producer selection requires the private planner owner")
         lineage_values = (
             plan_attempt_id,
             plan_digest,
@@ -15790,6 +16101,11 @@ class JobRegistry:
                         raise StateConflict(
                             "planner command replay semantic target drifted"
                         )
+                    retained_producer = _validated_planner_producer_binding(connection, existing)
+                    if (_planner_plan_schema_version is not None
+                            and (retained_producer is None
+                                 or retained_producer["plan_schema_version"] != _planner_plan_schema_version)):
+                        raise StateConflict("planner replay cannot replace or add a producer binding")
                     return replay_job
             parent_row = None
             if parent_job_id is not None:
@@ -15952,6 +16268,12 @@ class JobRegistry:
                     )
                 if int(attempt_limit) > int(parent_row["attempt_limit"]):
                     raise StateConflict("child attempt_limit may not exceed its parent")
+            if (orchestration_role == "plan" and parent_row is not None
+                    and parent_row["job_id"] == parent_row["root_job_id"]):
+                _assert_root_frontier_planner_join(
+                    connection, root_row=parent_row, constraints=normalized_constraints,
+                    plan_schema_version=_planner_plan_schema_version,
+                )
             job = self._create_job_in_transaction(
                 connection,
                 spec=_JobCreationSpec(
@@ -15998,6 +16320,7 @@ class JobRegistry:
                     command_id=command_id,
                     event_provenance=provenance,
                     timestamp_ms=timestamp,
+                    planner_plan_schema_version=_planner_plan_schema_version,
                 ),
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
@@ -16823,6 +17146,8 @@ class AttemptRegistry:
             if is_c2:
                 raise StateConflict("C2_SELECTED_CAPACITY_NOT_CURRENT")
             return None
+        if orchestration_role == "plan":
+            _assert_frontier_planner_execution(connection, job_row)
         if orchestration_role == "work":
             _assert_dependency_manifest_current(
                 connection,
@@ -21041,6 +21366,8 @@ class OperatorHarnessRegistry:
                 raise StateConflict(
                     "raw orchestration result failed closed validation"
                 ) from None
+            if role == "plan":
+                _assert_planner_producer_result(connection, job, row, envelope["role_result"])
             observation_value = observation.to_dict()
             candidate_digest = orchestration_digest(candidate_payload)
             result_envelope_digest = result_digest(envelope)
@@ -25066,6 +25393,11 @@ def _bounded_strict_root_metadata(
         raise StateConflict(
             "terminal completion root creation provenance is not strict v2"
         )
+    from control_plane.frontier_selection import FrontierSelectionError, selection_from_provenance
+    try:
+        selection_from_provenance(host_provenance)
+    except FrontierSelectionError as exc:
+        raise StateConflict("terminal completion root frontier selection is invalid") from exc
     work_ref = host_provenance.get("workstream")
     if work_ref is not None and (
         not isinstance(work_ref, str) or not str(work_ref).strip()
