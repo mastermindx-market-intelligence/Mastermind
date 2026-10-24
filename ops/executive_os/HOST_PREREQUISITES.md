@@ -1380,22 +1380,15 @@ Gate B receipt, formal acceptance, current provider readiness, both configs,
 exact release and Runtime quiescence. CEO-submit arm follows that transaction.
 Each step below runs against `$MERGE_SHA`.
 
-The installed control document does not contain `coo_foreground_only`.
-`ops/executive_os/control.json.template` omits it, and `install.sh` materializes
-`ceo_submit_armed` as false without materializing this key.
-`finite-control-stage` writes `fabric_bridge_armed` false and does not write
-`coo_foreground_only`. The only production assignment is
-`derive_candidate_configs` in `ops/executive_os/autonomy_control.py` lines
-1228-1229. On a document that lacks the key, `arm --foreground-only` is the
-first writer and stores JSON true. `start-finite` then refuses with
-`configs_not_wholly_disarmed`, because a missing key is `None` and `None is
-not False`. Steps 4-7 are the continuation after an explicit JSON false
-exists. They do not complete on the document this install leaves behind. Do
-not insert the key by editing `control.json`. The install path that already
-materializes an omitted disabled default is the `setdefault` map in
-`install.sh` next to `ceo_submit_armed`. `coo_foreground_only` is already an
-optional control field and is not in that map. Putting JSON false there, and
-in `control.json.template`, is a source change this runbook does not perform.
+A fresh install writes `coo_foreground_only` false. The seat template
+`ops/executive_os/control.json.template` carries that JSON false, and
+`install.sh` materializes the same disabled default next to `ceo_submit_armed`
+when an older control input omits the key. `finite-control-stage` writes
+`fabric_bridge_armed` false and does not write `coo_foreground_only`. After
+steps 0-3 the six arm bits are explicit JSON false, so steps 4-7 can complete.
+`arm --foreground-only` is the later writer that stores JSON true
+(`derive_candidate_configs` in `ops/executive_os/autonomy_control.py` lines
+1228-1229). Do not insert the key by editing `control.json`.
 
 ```bash
 RELEASE="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA"
@@ -1422,14 +1415,17 @@ WORKSPACE_BINDING_CLASS='<workspace_binding_class from provider-readiness-v2.jso
 # 0. Must read status UNARMED and service_state STOPPED.
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 
-# 1. Before staging. checked_configs calls require_service_uids_quiescent
+# 1. Before staging. Success is exit 0 and code control_uid_quiesced.
+# The operation document status is UNARMED on success and on refusal.
+# checked_configs calls require_service_uids_quiescent
 # (attended_control_staging.py line 224) before any config write.
 sudo /bin/bash "$AUTONOMY_CONTROL" arm-quiesce-control-uid \
   --expected-sha "$MERGE_SHA"
 
-# 2. attended_control_staging.py candidate (lines 34-39) and checked_configs
-# (lines 219-227) require wholly disarmed configs, the exact installed
-# release, and already-stopped quiescent services.
+# 2. candidate (attended_control_staging.py lines 34-39) requires wholly
+# disarmed configs. checked_configs (lines 219-227) requires the exact
+# installed release, already-stopped services at line 223, and quiescent
+# service UIDs at line 224.
 sudo "$PYTHON_BINARY" -I -S -B \
   "$RELEASE/ops/executive_os/autonomy_control.py" \
   finite-control-stage \
@@ -1439,9 +1435,7 @@ sudo "$PYTHON_BINARY" -I -S -B \
 # 3. Must still read status UNARMED and service_state STOPPED.
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 
-# 4. Required next, and refused on a freshly installed control document:
-# coo_foreground_only is missing, and a missing key is not JSON false.
-# Stop here until an explicit false exists. Do not continue into arm.
+# 4. While all six arm bits are explicit JSON false. A missing key is refused.
 sudo /bin/bash "$SERVICE_CONTROL" start-finite \
   --expected-sha "$MERGE_SHA" \
   --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256"
@@ -1466,16 +1460,16 @@ Do not reorder. Quiesce the Control UID before `finite-control-stage`.
 `checked_configs` (`ops/executive_os/attended_control_staging.py` lines
 219-227) calls `require_service_uids_quiescent()` at line 224 before any
 write. A process still owned by that UID makes `run_command` return
-`EFFECT_UNKNOWN`. Staging itself (`candidate`, lines 34-39) still requires
-wholly disarmed configs and already-stopped Control and worker services.
-`start-finite` must still see all six arm bits as the JSON boolean false:
-`coo_autonomy_armed`, `coo_operator_harness_armed`, `coo_foreground_only`,
-`ceo_submit_armed`, `fabric_bridge_armed`, and the worker
-`operator_harness_armed`. A missing key is the same refusal
-(`ops/executive_os/finite_service_lifecycle.py` lines 349-353). No installed
-command writes `coo_foreground_only: false` before that check, so step 4
-does not succeed on a fresh control document. `arm --foreground-only` is
-what first writes the key, as true, and then starts Control. With the staged
+`EFFECT_UNKNOWN`. `candidate` (lines 34-39) requires wholly disarmed configs.
+`checked_configs` requires already-stopped Control and worker services at
+line 223. `start-finite` must still see all six arm bits as the JSON boolean
+false: `coo_autonomy_armed`, `coo_operator_harness_armed`,
+`coo_foreground_only`, `ceo_submit_armed`, `fabric_bridge_armed`, and the
+worker `operator_harness_armed`. A missing key is the same refusal
+(`ops/executive_os/finite_service_lifecycle.py` lines 349-353). Install
+leaves `coo_foreground_only` false, and staging leaves that key unchanged
+while writing `fabric_bridge_armed` false, so step 4 can run.
+`arm --foreground-only` then sets that key true and starts Control. With the staged
 `fabric_attended_probe` present, that Control load
 (`scripts/executive_os_phase1c.py` lines 2936-2937) publishes
 `minimax.attended` through `installed_control_placements`
@@ -1488,10 +1482,10 @@ The sample always passes `--foreground-only` and never `--native-return`: `--nat
 The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
 
 Steps 0 and 3 must read exactly `UNARMED` and `service_state` `STOPPED`.
-Step 4 does not reach `READY` while `coo_foreground_only` is absent. After a
-control document that already contains that key as JSON false, and after
-step 4 has reached `READY`, the `arm` operation document status is
-`ARMED_READY` and step 7 must read exactly `CEO_SUBMIT_ARMED`. Arm stops both
+Step 1 succeeds only at exit 0 with `code` `control_uid_quiesced`; its
+`status` is `UNARMED` on refusal as well. Step 4 must reach `READY`. The
+`arm` operation document status is `ARMED_READY` and step 7 must read exactly
+`CEO_SUBMIT_ARMED`. Arm stops both
 Control and worker services before committing either config, starts worker
 then control, and removes its durable transaction marker only after exact
 PID/principal/socket/`READY` proof. The finite bridge has to already be
