@@ -79,6 +79,7 @@ class FableAdvice:
     output_tokens: int
     estimated_usd: float
     reservation_ref: str
+    source_refs: tuple[str, ...]
     stop_reason: str = field(default="end_turn")
 
 
@@ -146,9 +147,10 @@ def _make_body(request: FableRequest) -> bytes:
 
 
 def _worst_case_usd(body: bytes, max_output_tokens: int) -> float:
-    # Text-only bound: reserve one input token for every UTF-8 byte plus an
-    # additional 2048 tokens for message framing/system overhead, even though
-    # typical tokenizer output is much smaller. There are no images or tools.
+    # Conservative preflight estimate: one input token per UTF-8 byte plus
+    # 2048 for framing; provider billing is authoritative and may differ.
+    # Existing Capacity/Console controls must enforce an account-level stop.
+    # There are no images or tools.
     return ((len(body) + 2048) * INPUT_USD_PER_MTOK
             + max_output_tokens * OUTPUT_USD_PER_MTOK) / 1_000_000
 
@@ -192,13 +194,17 @@ def _parse_advice(raw: bytes, request: FableRequest, reservation: CapacityReserv
         usage = reply["usage"]
         inp, out = usage["input_tokens"], usage["output_tokens"]
         if (reply.get("type") != "message" or reply.get("model") != MODEL
-            or not isinstance(reply.get("id"), str) or not reply["id"].startswith("msg_")
+            or not isinstance(reply.get("id"), str) or re.fullmatch(r"msg_[A-Za-z0-9_-]{4,180}", reply["id"]) is None
             or reply.get("stop_reason") != "end_turn"
             or any(type(n) is not int or n < 0 for n in (inp, out))
             or out > request.max_output_tokens):
             raise ValueError("provider response identity or termination is invalid")
         content = reply["content"]
-        text = "\n".join(block["text"] for block in content if block.get("type") == "text")
+        if (not isinstance(content, list) or not content
+                or any(not isinstance(block, dict) or block.get("type") != "text"
+                       or not isinstance(block.get("text"), str) for block in content)):
+            raise ValueError("non-text provider result refused")
+        text = "\n".join(block["text"] for block in content)
         if not text.strip() or len(text) > 200_000:
             raise ValueError("provider response has no bounded advisory text")
         # Cache write is rated conservatively at 1h price, even though request
@@ -211,7 +217,8 @@ def _parse_advice(raw: bytes, request: FableRequest, reservation: CapacityReserv
         if cost > reservation.reserved_usd + 1e-9:
             raise ValueError("provider usage exceeds reserved budget")
         return FableAdvice(request.root_id, request.attempt_id, reply["id"], MODEL,
-                           text, inp, out, cost, reservation.reservation_ref)
+                           text, inp, out, cost, reservation.reservation_ref,
+                           request.source_refs)
     except (KeyError, TypeError, ValueError, IndexError, AttributeError, json.JSONDecodeError):
         raise FableApiIncomplete("provider response incomplete; reconcile original Attempt") from None
 
