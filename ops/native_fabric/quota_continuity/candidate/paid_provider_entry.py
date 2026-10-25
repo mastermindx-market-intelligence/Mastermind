@@ -71,6 +71,19 @@ def validate_config_identity(value,commitment):
     except (KeyError,TypeError,ValueError):refuse()
 
 
+def same_entry_image(commitment):
+    """Necessary image DATA join, never startup/alias admission by itself."""
+    try:
+        a,b=commitment['bootstrap_python'],commitment['launch_python']
+        return (a['real_path']==b['real_path'] and a['sha256']==b['sha256'])
+    except (KeyError,TypeError):return False
+
+
+def _runtime_observation():
+    return dict(python_path=sys.executable,python_version=sys.version.split()[0],
+        startup={k:getattr(sys,k) for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')})
+
+
 def validate_request(value):
     """Closed correlation/bounds only, never a replacement for actual authority."""
     try:
@@ -93,9 +106,10 @@ def validate_request(value):
                 or any(type(h) is not str or not _SHA.fullmatch(h) for h in hashes.values())):
             refuse()
         c = value['initializer_commitment']
-        # Canonical model entry is deliberately narrower than qualification.
-        # This process is the actual Popen observed by the incumbent owner.
-        if (type(c) is not dict or c['bootstrap_python'] != c['launch_python']
+        # Each logical selector retains its own Root namespace/getpath proof.
+        # The actual model Popen uses the observed launch selector; only its
+        # real image may coincide with the fixed bootstrap image.
+        if (type(c) is not dict or not same_entry_image(c)
                 or c['launch_python']['path'] != value['python_path']
                 or c['host_ref'] != value['host_ref']
                 or c['transport_alias'] != value['transport_alias']
@@ -153,7 +167,8 @@ def validate_ready(value, request, *, process_identity, pid):
     try:
         fields = {'schema_version','run_id','pid','start_identity','boot_id','entry_nonce',
             'entry_descriptor_sha256','body_sha256','capsule_sha256',
-            'initializer_commitment_sha256','sources_sha256','pre_execution'}
+            'initializer_commitment_sha256','sources_sha256','pre_execution',
+            'python_path','python_version','startup'}
         if (type(value) is not dict or set(value) != fields or value['schema_version'] != READY_SCHEMA
                 or type(value['pid']) is not int or value['pid'] != pid
                 or value['start_identity'] != process_identity['start_identity']
@@ -161,6 +176,9 @@ def validate_ready(value, request, *, process_identity, pid):
                 or any(value[k] != request[k] for k in ('run_id','entry_nonce','entry_descriptor_sha256',
                     'body_sha256','capsule_sha256','initializer_commitment_sha256','sources_sha256'))):refuse()
         c = request['initializer_commitment'];pre=value['pre_execution']
+        if (value['python_path']!=request['python_path']
+                or type(value['python_version'])is not str or not 0<len(value['python_version'])<=128
+                or value['startup']!={k:c['startup'][k] for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')}):refuse()
         fields={'commitment_sha256','snapshot_sha256','snapshot_sealed','host_env_identity',
                 'bootstrap_sha256','launch_sha256','nested_inputs','helper_origin_identity'}
         if type(pre) is not dict or set(pre) != fields:refuse()
@@ -222,13 +240,17 @@ def _run_model_entry(request, client, context):
         from .linux_process_identity import inspect_linux_process_image
         image=inspect_linux_process_image(os.getpid())
         if image['boot_id']!=request['boot_id']:refuse()
+        runtime=_runtime_observation()
+        if (runtime['python_path']!=request['python_path']
+                or runtime['startup']!={k:request['initializer_commitment']['startup'][k]
+                    for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')}):refuse()
         ready = dict(schema_version=READY_SCHEMA, run_id=run, pid=os.getpid(),
             start_identity=image['start_identity'],boot_id=image['boot_id'],
             entry_nonce=request['entry_nonce'],
             entry_descriptor_sha256=request['entry_descriptor_sha256'],
             body_sha256=request['body_sha256'], capsule_sha256=request['capsule_sha256'],
             initializer_commitment_sha256=request['initializer_commitment_sha256'],
-            sources_sha256=request['sources_sha256'], pre_execution=context.pre_execution)
+            sources_sha256=request['sources_sha256'], pre_execution=context.pre_execution,**runtime)
         raw = canonical(ready)
         if len(raw) > 32768:refuse()
         context.check()

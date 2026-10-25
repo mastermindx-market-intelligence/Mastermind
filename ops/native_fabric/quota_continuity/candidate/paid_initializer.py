@@ -29,7 +29,7 @@ NESTED_OUTER_SHA256 = 'c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0
 NESTED_OUTER_SIZE = 587
 _TOKEN_DATA = _NESTED_DATA = None  # qualified private-package producer only
 _INITIALIZER_SOURCE_HASHES = None  # installed by the same verified peer loader
-_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '6376a30b368e314b6f9b8890c595b0f1b1ecf60421851a3e4b121d69b683675f', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}  # fixed reviewed entry programs
+_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '2ffb64d137f3579c36f3a737a2632c108e05e504524c41175f67e3988ec11080', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}  # fixed reviewed entry programs
 PURPOSE = 'canonical-paid-qualification.v1'
 LIMIT = 16384
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
@@ -333,6 +333,19 @@ def _read_boot_id():
     finally:os.close(fd)
 
 
+def _current_entry_runtime():
+    import sys
+    return dict(python_path=sys.executable,kernel_executable=os.path.realpath('/proc/self/exe'),
+        startup={k:getattr(sys,k) for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')})
+
+
+def _require_current_entry_runtime(request):
+    observed=_current_entry_runtime();c=request['initializer_commitment']
+    if (observed['python_path']!=request['python_path']
+            or observed['kernel_executable']!=c['launch_python']['real_path']
+            or observed['startup']!={k:c['startup'][k] for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')}):refuse()
+
+
 class _CanonicalEntryRun:
     """One fixed same-process purpose, not a reusable qualification object."""
     def __init__(self,request,entry,client):
@@ -352,6 +365,7 @@ class _CanonicalEntryRun:
     def check(self):
         import time
         require_no_site_policy()
+        _require_current_entry_runtime(self.request)
         if (self.pid!=os.getpid() or _read_boot_id()!=self.request['boot_id']
                 or time.monotonic_ns()>=self.deadline
                 or time.time()>=self.request['expires_at']):refuse()

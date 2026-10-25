@@ -33,6 +33,9 @@ def fixture(tmp_path,monkeypatch):
     # startup, host observation or qualification receipt is claimed.
     monkeypatch.setattr(owner,'require_no_site_policy',lambda:None)
     monkeypatch.setattr(owner,'_read_boot_id',lambda:request['boot_id'])
+    monkeypatch.setattr(owner,'_current_entry_runtime',lambda:dict(
+        python_path='/usr/bin/python3',kernel_executable='/usr/bin/python3',
+        startup=dict(prefix='/usr',exec_prefix='/usr',base_prefix='/usr',base_exec_prefix='/usr')))
     bundle={n:sources[n] for n in entry.BUNDLE_NAMES}
     return request,bundle,pre
 
@@ -48,6 +51,10 @@ def test_new_entry_uses_captured_environment_and_restores_after_return(tmp_path,
         module=sys.modules['_fixed_canonical_paid_entry.linux_process_identity']
         monkeypatch.setattr(module,'inspect_linux_process_image',
                             lambda pid:dict(start_identity='fixture',boot_id=request['boot_id']))
+        child=sys.modules['_fixed_canonical_paid_entry.paid_provider_entry']
+        monkeypatch.setattr(child,'_runtime_observation',lambda:dict(
+            python_path='/usr/bin/python3',python_version='3.12.3',
+            startup=dict(prefix='/usr',exec_prefix='/usr',base_prefix='/usr',base_exec_prefix='/usr')))
         return _entry.execute(initialized,pre,lambda:(_entry.check(),checks.append(1)),None)
     monkeypatch.setattr(owner,'_run_owner',qualified_engine)
     class Response:
@@ -90,6 +97,10 @@ def test_environment_drift_after_dispatch_refuses_and_restores_without_replay(tm
         module=sys.modules['_fixed_canonical_paid_entry.linux_process_identity']
         monkeypatch.setattr(module,'inspect_linux_process_image',
                             lambda pid:dict(start_identity='fixture',boot_id=request['boot_id']))
+        child=sys.modules['_fixed_canonical_paid_entry.paid_provider_entry']
+        monkeypatch.setattr(child,'_runtime_observation',lambda:dict(
+            python_path='/usr/bin/python3',python_version='3.12.3',
+            startup=dict(prefix='/usr',exec_prefix='/usr',base_prefix='/usr',base_exec_prefix='/usr')))
         return _entry.execute(initialized,pre,_entry.check,None)
     monkeypatch.setattr(owner,'_run_owner',qualified_engine)
     class Response:

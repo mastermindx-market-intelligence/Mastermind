@@ -188,7 +188,7 @@ def launch_observer(here, packet_path, key, model, receipt, *, entry_request=Non
             pid=proc.pid, process_identity=image,
             observed_user=pwd.getpwuid(image['effective_uid']).pw_name,
             launch_nonce=entry_request['entry_nonce'], started_at=started_at,
-            python_path=sys.executable, python_version=sys.version.split()[0],
+            python_path=ready['python_path'], python_version=ready['python_version'],
             capture_paths=capture_paths,
             host_context=dict(host_env_path=entry_request['initializer_commitment']['host_env']['path'],
                 host_env_sha256=entry_request['initializer_commitment']['host_env']['sha256'],boot_id=image['boot_id'],

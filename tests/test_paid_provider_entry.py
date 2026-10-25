@@ -20,6 +20,14 @@ from tests.test_paid_initializer_nosite import nested_commitment
 from tests.test_paid_glm_canonical import modules
 
 
+@pytest.fixture(autouse=True)
+def model_child_startup(monkeypatch):
+    # Explicit child startup metadata seam, independent of the expected input.
+    monkeypatch.setattr(entry,'_runtime_observation',lambda:dict(
+        python_path='/usr/bin/python3',python_version='3.12.3',
+        startup=dict(prefix='/usr',exec_prefix='/usr',base_prefix='/usr',base_exec_prefix='/usr')))
+
+
 def bound_material(tmp_path=None):
     p,frame,_,lease,authority=material()
     source=p['paid_source_config'];q=source['qualification'];c=nested_commitment()
@@ -279,7 +287,7 @@ def test_actual_observer_gateway_intent_and_client_join(tmp_path,monkeypatch,mod
     monkeypatch.setattr(linux_process_identity,'inspect_linux_process_image',lambda pid:dict(image))
     monkeypatch.setattr(model_owner.pwd,'getpwuid',lambda uid:SimpleNamespace(pw_name='runner'))
     monkeypatch.setattr(model_owner,'sys',SimpleNamespace(
-        executable=p['paid_source_config']['binary']['path'],
+        executable='/usr/bin/python3.12',
         version=p['paid_source_config']['binary']['version']+' inert-platform-metadata'))
     for name,module in (('paid_glm_model_client',client),('paid_provider_entry',entry),
                         ('linux_process_identity',linux_process_identity),('lane_runtime',lane_runtime)):
@@ -310,6 +318,7 @@ def test_actual_observer_gateway_intent_and_client_join(tmp_path,monkeypatch,mod
             path.write_bytes(entry.canonical(data))
         observer(proc,'2026-10-24T00:00:00+00:00')
         launch=model_owner.retained_record(Path(request['capture_root'])/'ATT-1.process.jsonl','ATT-1','launch')
+        assert launch['python_path']=='/usr/bin/python3'!=model_owner.sys.executable
         result=wire.paid_start_from_owned_launch(p,launch,capsule=capsule,lease=lease,
             controller=dict(process_start_identity='controller',boot_id='m2'),authority=authority)
         operation.launch_frame=launch;operation.start_result=result;operation.launch_ready.set()

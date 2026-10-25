@@ -35,7 +35,7 @@ def provider_entry_descriptor(payload, *, sources_sha256, readiness_binding, con
         physical = require_paid_physical(payload)
         q = physical['qualification']
         c = q['initializer_commitment']
-        if (c['bootstrap_python'] != c['launch_python']
+        if (not entry.same_entry_image(c)
                 or c['startup']['profile'] != 'cpython-3.12-linux-root-prefix-nosite.v1'
                 or type(sources_sha256) is not dict or set(sources_sha256) != entry.SOURCE_NAMES
                 or any(type(h) is not str or not _SHA.fullmatch(h) for h in sources_sha256.values())
