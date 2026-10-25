@@ -1,0 +1,38 @@
+{
+  "acceptance": "NOT_PROJECTED",
+  "brief_sha": "317eae34ecfda3fa4ef65fd80d1700e06bd5264f",
+  "content_fallback": "not_captured",
+  "control_room": {
+    "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+    "document_digest": "af62bba128587438e3aae57629da3b304d80b4da328654844896c3ceaa82f057",
+    "instance_after": "2e9640adf14888f19a93fb2f7e9496a6d89af70dc9b281f69ffa24a7056a62b1",
+    "instance_before": "2e9640adf14888f19a93fb2f7e9496a6d89af70dc9b281f69ffa24a7056a62b1",
+    "publication_after": 1,
+    "publication_before": 1,
+    "source_validity_digest": "c8668c551574029a8f7f2f08cba7fd510e378e9c485173f09aa9772c2d168069"
+  },
+  "execution_status": "COMPLETED",
+  "http_body_bytes": 10024,
+  "http_body_sha256": "9ca1a0a5522ce549950d5ea542ad6acd7345e298119dbebe2625676dce67a9f2",
+  "mission_acceptance": "NOT_PROJECTED",
+  "mission_read_state": "CURRENT",
+  "mission_runtime_source_identity": "c62fa75478a1fa12f8976b36c05b6588",
+  "mission_schema": "mastermind.mission_workspace.v3",
+  "note": "http_body_sha256 is the whole HTTP response body from the mounted Executive path. build_executive_mcp_app routes this GET through AuditedWorkspaceApp and the same WorkspaceApp. Nested mission and role_result are fields of that body, not separate raw HTTP responses. The TypeScript content-fallback case is a synthetic mutation of the decoded observation, not a second captured HTTP body.",
+  "proof_ceiling": "SOURCE_ASSOCIATED_READ_QUALIFIED",
+  "review_verdict": "reject",
+  "role_result_availability": "AVAILABLE",
+  "role_result_runtime_source_identity": "c62fa75478a1fa12f8976b36c05b6588",
+  "role_result_schema": "mastermind.workspace_role_result.v1",
+  "route": "/workspace/mission-result/current",
+  "runtime_after": 2,
+  "runtime_before": 2,
+  "selection": {
+    "attempt_id": "ATT-bf0aa72760a2436e92ab1d98fbb55078",
+    "job_id": "JOB-004",
+    "result_envelope_digest": "1cd6c0075b00138086ee2d6198e970f46cf1b015fe592845744fd3944feaff83",
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:ONE"
+  },
+  "transport": "build_executive_mcp_app+AuditedWorkspaceApp+WorkspaceApp"
+}

@@ -35,16 +35,31 @@ def test_actual_outer_dispatch_and_path_fence(settings):
             assert (await client.get('/workspace/mission/current?work_ref=WS:ONE&root_job_id=JOB-001')).status_code == 200
             assert (await client.get('/workspace/window/current')).status_code == 200
             assert workspace.calls[-1][1] == b'work_ref=WS:ONE&root_job_id=JOB-001'
+            mission_result = (
+                '/workspace/mission-result/current?work_ref=WS:ONE&root_job_id=JOB-001'
+                '&job_id=JOB-002&attempt_id=ATT-' + ('ab' * 16)
+                + '&result_envelope_digest=' + ('cd' * 32)
+            )
+            assert (await client.get(mission_result)).status_code == 200
+            assert workspace.calls[-1] == (
+                '/workspace/mission-result/current',
+                mission_result.split('?', 1)[1].encode(),
+            )
             calls = len(workspace.calls) + len(content.calls)
             for url, method in [('/workspace/programs/current?x=1','GET'),('/workspace/work/current?x=1','GET'),
                                 ('/workspace/window/current?x=1','GET'),
                                 ('/workspace/programs/current/','GET'),('/workspace/work/current/','GET'),
+                                ('/workspace/mission-result/current/','GET'),
                                 ('/workspace%2Fprograms/current','GET'),
+                                ('/workspace%2Fmission-result/current','GET'),
                                 ('/workspace/programs/current','POST'),('/workspace/work/current','POST'),
+                                ('/workspace/mission-result/current','POST'),
+                                ('/workspace/mission-result/current','HEAD'),
                                 ('/workspace/window/current','HEAD'),
                                 ('/mcp?x=1','POST')]:
                 assert (await client.request(method,url)).status_code == 404
-            assert (await client.get('/workspace/programs/current',headers=[('Authorization','Bearer a'),('Authorization','Bearer b')])).status_code in (400,401)
+            for path in ('/workspace/programs/current', mission_result):
+                assert (await client.get(path,headers=[('Authorization','Bearer a'),('Authorization','Bearer b')])).status_code in (400,401)
             assert len(workspace.calls)+len(content.calls)==calls
             assert (await client.get('/mcp')).status_code == 404
     asyncio.run(check())
@@ -54,7 +69,7 @@ def test_absent_mounts_keep_legacy_closed(settings):
     app = server.build_executive_mcp_app(settings, audit_sink=existing.Sink())
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=entry.PUBLIC_ORIGIN) as client:
-            for path in ('/workspace/programs/current','/workspace/work/current','/workspace/mission/current','/workspace/window/current','/os/'):
+            for path in ('/workspace/programs/current','/workspace/work/current','/workspace/mission/current','/workspace/mission-result/current','/workspace/window/current','/os/'):
                 assert (await client.get(path)).status_code==404
     asyncio.run(check())
 
@@ -280,7 +295,7 @@ def test_public_mount_transport_fence_precedes_dispatch(settings, static_source)
         workspace_app=workspace, os_app=entry.load_os_app(static_source))
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=entry.PUBLIC_ORIGIN) as client:
-            for path in ('/workspace/programs/current', '/os/', '/os/auth/callback'):
+            for path in ('/workspace/programs/current', '/workspace/mission-result/current', '/os/', '/os/auth/callback'):
                 assert (await client.get(path)).status_code == 200
                 assert (await client.get(path,headers={'Origin':entry.PUBLIC_ORIGIN})).status_code == 200
                 before = len(workspace.calls)
@@ -408,6 +423,7 @@ def test_selected_profile_keeps_optional_mount_absence(settings, profile):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                     base_url=entry.PUBLIC_ORIGIN) as client:
             for path in ("/workspace/programs/current", "/workspace/mission/current",
+                         "/workspace/mission-result/current",
                          "/workspace/window/current", "/os/"):
                 assert (await client.get(path)).status_code == 404
     asyncio.run(check())
@@ -427,7 +443,14 @@ def test_selected_profile_keeps_workspace_dispatch(settings, profile):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                     base_url=entry.PUBLIC_ORIGIN) as client:
             assert (await client.get("/workspace/programs/current")).status_code == 200
-            assert workspace.calls
+            mission_result = (
+                "/workspace/mission-result/current?work_ref=WS:ONE&root_job_id=JOB-001"
+                "&job_id=JOB-002&attempt_id=ATT-" + ("ab" * 16)
+                + "&result_envelope_digest=" + ("cd" * 32)
+            )
+            assert (await client.get(mission_result)).status_code == 200
+            query = mission_result.split("?", 1)[1].encode()
+            assert ("/workspace/mission-result/current", query) in workspace.calls
     asyncio.run(check())
 
 
