@@ -19,6 +19,15 @@ class NativeGenerationTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="native-generation-proof-",
             dir=os.environ.get("NATIVE_ROLLOUT_TEST_ROOT"))
         self.base = Path(self.temp.name).resolve()
+        # The real owner requires an enumerable Studio consumer root. Fixture
+        # isolation prevents tests from consulting or changing production pins.
+        self.studio_root = self.base / "studio-private"
+        self.studio_root.mkdir()
+        self._consumer_root_patch = mock.patch.object(
+            installer.studio_consumer_owner, "STUDIO_CONSUMER_ROOT", self.studio_root,
+        )
+        self._consumer_root_patch.start()
+        self.addCleanup(self._consumer_root_patch.stop)
         self.kit = self.base / "kit"
         self.ext = self.kit / "ext"
         self.ext.mkdir(parents=True)
@@ -54,6 +63,19 @@ class NativeGenerationTests(unittest.TestCase):
                 ' run) shift; exec python3 "$KIT_DIR/ext/helper.py" "$@" ;;\n'
                 ' remote) shift; exec bash "$KIT_DIR/ext/remote_sub.sh" "$@" ;;\n'
                 ' *) exit 2 ;;\nesac\n').encode()
+
+    def studio_consumer(self, pinned_sha, account="fabric-consumer-fixture"):
+        directory = self.studio_root / account
+        directory.mkdir(exist_ok=True)
+        path = directory / "config.json"
+        path.write_text(json.dumps({
+            "fleetStatus": {
+                "enabled": True,
+                "fabricLauncherPath": str(self.pool),
+                "fabricLauncherSha256": pinned_sha,
+            },
+        }))
+        return path
 
     def make_source(self, version, extended=True):
         root = self.base / ("source-" + version)
@@ -286,6 +308,63 @@ with tempfile.TemporaryDirectory() as tmp:
         installer.phase1(bundle)
         self.assertEqual(self.run_cmd([str(self.pool), "remote"]), "V1")
 
+
+    def test_phase1_refuses_stale_studio_consumers_until_pins_are_coordinated(self):
+        self.make_source("V1")
+        release = self.publish("V1")
+        plan_path = self.base / "consumer-pin-plan"
+        plan = installer.prepare(release.parent, release.name, self.pool, plan_path)
+        original_pool = self.pool.read_bytes()
+        original_task = (self.ext / "fabric_task.py").read_bytes()
+        cfg = self.studio_consumer(g.digest(original_pool))
+        with self.assertRaisesRegex(ValueError, "STUDIO_CONSUMER_PIN_MIGRATION_REQUIRED"):
+            installer.phase1(plan_path)
+        self.assertEqual(self.pool.read_bytes(), original_pool)
+        self.assertEqual((self.ext / "fabric_task.py").read_bytes(), original_task)
+        self.assertIsNone(g.current(release.parent))
+
+        # The coordinating Studio owner must separately perform this update.
+        cfg.write_text(json.dumps({
+            "fleetStatus": {
+                "enabled": True,
+                "fabricLauncherPath": str(self.pool),
+                "fabricLauncherSha256": plan["entries"]["pool"]["bridge"],
+            },
+        }))
+        receipt = installer.phase1(plan_path)
+        self.assertEqual(receipt["phase"], 1)
+        self.assertEqual(g.digest(self.pool.read_bytes()), plan["entries"]["pool"]["bridge"])
+
+    def test_phase1_refuses_unavailable_owner_census_before_pool_effect(self):
+        self.make_source("V1")
+        release = self.publish("V1")
+        plan_path = self.base / "no-census-plan"
+        installer.prepare(release.parent, release.name, self.pool, plan_path)
+        original = self.pool.read_bytes()
+        self.studio_root.rmdir()
+        with self.assertRaisesRegex(ValueError, "STUDIO_CONSUMER_CENSUS_REFUSED"):
+            installer.phase1(plan_path)
+        self.assertEqual(self.pool.read_bytes(), original)
+        self.assertIsNone(g.current(release.parent))
+
+    def test_rollback_refuses_to_break_newly_pinned_studio_consumers(self):
+        _release, bundle, plan = self.install_target()
+        cfg = self.studio_consumer(plan["entries"]["pool"]["bridge"])
+        new_launcher = self.pool.read_bytes()
+        with self.assertRaisesRegex(ValueError, "STUDIO_CONSUMER_PIN_MIGRATION_REQUIRED"):
+            installer.rollback(bundle)
+        self.assertEqual(self.pool.read_bytes(), new_launcher)
+
+        cfg.write_text(json.dumps({
+            "fleetStatus": {
+                "enabled": True,
+                "fabricLauncherPath": str(self.pool),
+                "fabricLauncherSha256": plan["entries"]["pool"]["preimage"],
+            },
+        }))
+        result = installer.rollback(bundle)
+        self.assertEqual(result["phase"], "rollback")
+        self.assertEqual(g.digest(self.pool.read_bytes()), plan["entries"]["pool"]["preimage"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -504,9 +504,9 @@
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
-      "bytes": 117292,
+      "bytes": 117518,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee",
+      "sha256": "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
