@@ -7,12 +7,14 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
+
+import yaml
 from unittest.mock import patch
 
 from integrations.meta_ceo_open_harness.launch_seat import (
     ALLOWED_ENV, DONOR_SHA, Seat, SeatLaunchError,
     _checked_private_dir, _source_preflight, build_command,
-    child_environment, prepare, run,
+    child_environment, prepare, role_patch, run,
 )
 
 
@@ -44,6 +46,35 @@ class SeatLaunchTest(unittest.TestCase):
         self.assertEqual(cmd[:3], [str(self.seat.node), str(self.seat.source / 'apps/cli/lib/bin.js'), 'web'])
         self.assertEqual(cmd[-4:], ['--host', '127.0.0.1', '--port', '3080'])
         self.assertIn('--no-open', cmd)
+        self.assertEqual(cmd[3:5], ['--patch', str(role_patch(self.seat))])
+
+    def test_role_presets_are_native_and_have_no_tool_grants(self):
+        for role in ('meta-ceo', 'secretary'):
+            with self.subTest(role=role):
+                seat = Seat(role, self.seat.source, self.seat.root,
+                            3080 if role == 'meta-ceo' else 3081, self.seat.node)
+                patch = role_patch(seat)
+                self.assertTrue(patch.is_file())
+                cfg = yaml.safe_load(patch.read_text())
+                self.assertEqual(cfg[0], {'id': 'agent-preset-registry',
+                                          'config': {'default': role}})
+                self.assertEqual(len(cfg[1]['insert']), 1)
+                preset = cfg[1]['insert'][0]
+                self.assertEqual(preset['id'], 'preset-' + role)
+                self.assertEqual(preset['config']['id'], role)
+                self.assertEqual([p['name'] for p in preset['config']['plugins']],
+                                 ['@deepseek-ai/dsh-persona'])
+                prefix = preset['config']['plugins'][0]['config']['prefix']
+                self.assertIn('receipt', prefix)
+                self.assertNotIn('apiKey:', patch.read_text())
+                self.assertNotIn('tool-bash', patch.read_text())
+
+    def test_role_patch_symlink_is_refused(self):
+        s = self.seat
+        with patch('integrations.meta_ceo_open_harness.launch_seat.role_patch',
+                   return_value=s.source / 'not-real.patch.yml'):
+            with self.git(s.source, s.node), self.assertRaisesRegex(SeatLaunchError, 'patch_missing_or_symlink'):
+                prepare(s, create=False)
 
     def test_two_seats_have_distinct_homes_and_ports(self):
         s = self.seat

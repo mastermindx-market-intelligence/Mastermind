@@ -107,6 +107,9 @@ def prepare(seat: Seat, *, create: bool) -> None:
         raise SeatLaunchError("invalid_port")
     if seat.role not in DEFAULT_PORTS:
         raise SeatLaunchError("invalid_role")
+    patch = role_patch(seat)
+    if patch.is_symlink() or not patch.is_file():
+        raise SeatLaunchError("seat_persona_patch_missing_or_symlink")
     if create:
         for path in (seat.root, seat.root / seat.role, seat.home, seat.workspace):
             _checked_private_dir(path, create=True)
@@ -118,9 +121,15 @@ def prepare(seat: Seat, *, create: bool) -> None:
                 _checked_private_dir(path, create=False)
 
 
+def role_patch(seat: Seat) -> Path:
+    """The role identity is a native DSH Agent preset overlay, not a new agent engine."""
+    return Path(__file__).absolute().with_name(f"{seat.role}.patch.yml")
+
+
 def build_command(seat: Seat) -> list[str]:
     return [str(seat.node), str(seat.source / "apps/cli/lib/bin.js"),
-            "web", "--no-open", "--host", "127.0.0.1", "--port", str(seat.port)]
+            "web", "--patch", str(role_patch(seat)), "--no-open",
+            "--host", "127.0.0.1", "--port", str(seat.port)]
 
 
 def child_environment(seat: Seat, parent: Mapping[str, str]) -> dict[str, str]:

@@ -2,7 +2,7 @@
 
 **Status: local launch-layer source only. NOT a production Meta-CEO, autonomous Secretary, installed model, real-provider canary, or authorized Executive/Fabric client.** This additive launcher does not modify incumbent DSH PR #1717, ACP/MCP PR #1790, or Steward/Grok Secretary source.
 
-This small seat wrapper starts the **existing** MIT-licensed DeepSeek Harness full application, pin `deepseek-ai/deepseek-harness@687f282e8625c6b8d11ff58211a90524be2e4317`, with independently private on-disk DSH homes for two *developer interaction profiles*: `meta-ceo` and `secretary`. The profiles are not two company control planes, CEOs or Jobs. No Grok Bot retained proprietary code is used.
+This small seat wrapper starts the **existing** MIT-licensed DeepSeek Harness full application, pin `deepseek-ai/deepseek-harness@687f282e8625c6b8d11ff58211a90524be2e4317`, with independently private on-disk DSH homes for two *developer interaction profiles* with native DSH persona presets: `meta-ceo` and `secretary`. The profiles are not two company control planes, CEOs or Jobs. No Grok Bot retained proprietary code is used. Each seat selects its own DSH `agent-preset-registry` default and mounts only `dsh-persona`; neither preview agent is granted terminal, filesystem, web, calendar, email, delegation or scheduler tools.
 
 The donor already implements **Settings → Models**, with a `zai` provider, custom OpenAI-compatible APIs, credential references, read-once key storage in `$DSH_HOME/.credentials.yaml`, and normal DSH native streaming chat. This wrapper neither stores API keys nor creates an alternate provider router. You enter your own authorized model key directly in **each seat's** DSH Models settings after launch. Never add secrets to this repository, CLI arguments, shell history, screenshots, GitHub issues, or test fixtures.
 
@@ -24,13 +24,14 @@ python3 integrations/meta_ceo_open_harness/launch_seat.py \
   --seat secretary --source /absolute/path/to/built/deepseek-harness
 ```
 
-The Meta-CEO development chat is at `http://127.0.0.1:3080`, Secretary at `http://127.0.0.1:3081`. Each profile writes only beneath `~/.mastermind/dsh-open-harness/<seat>/`; all existing seat directories must be real, owned by the invoking user, and mode 0700. The launcher refuses a dirty or non-pinned donor checkout, symlinked target seat roots and permissive existing directories. `--port` and `--data-root` override development defaults; `--check` makes no seat state.
+The Meta-CEO development chat is at `http://127.0.0.1:3080`, Secretary at `http://127.0.0.1:3081`. Each profile writes only beneath `~/.mastermind/dsh-open-harness/<seat>/`; all existing seat directories must be real, owned by the invoking user, and mode 0700. Both seats load the matching reviewed `meta-ceo.patch.yml` / `secretary.patch.yml` via native `--patch` when they start; normal DSH UI can display the selected role. The launcher refuses a dirty or non-pinned donor checkout, symlinked target seat roots and permissive existing directories. `--port` and `--data-root` override development defaults; `--check` makes no seat state.
 
 The child inherits only a narrow allowlist of non-secret environment variables plus its dedicated `DSH_HOME`. It **never** inherits existing `OPENAI_API_KEY`, `ZAI_API_KEY`, Company tokens, `DSH_HOME`, or arbitrary proxy settings. Provider and model selection is still DSH's own native per-seat configuration. Environment isolation is not an OS user or process sandbox; the original host's user permissions remain available to DSH and the browser itself has no Mastermind authentication.
 
 ## Test
 
 ```sh
+python3 -m pip install 'PyYAML==6.0.2'  # test-only dependency
 python3 -m unittest discover -s tests/meta_ceo_open_harness -v
 ```
 

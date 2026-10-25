@@ -37,6 +37,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Install pinned offline YAML parser for persona contract tests
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
       - name: Compile launch layer
         run: python -m compileall -q integrations/meta_ceo_open_harness tests/meta_ceo_open_harness
       - name: Run no-network negative tests
