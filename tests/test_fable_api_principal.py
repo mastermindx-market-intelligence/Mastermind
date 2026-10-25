@@ -4,6 +4,7 @@ Never reaches Anthropic; this is not provider-credit or production proof.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from enum import Enum
 from types import SimpleNamespace
@@ -12,7 +13,7 @@ import pytest
 
 from control_plane.fable_api_principal import (
     MODEL, CapacityReservation, FableApiEffectUnknown, FableApiIncomplete,
-    FableApiPrincipal, FableApiRefused, FableRequest,
+    FableApiPrincipal, FableApiRefused, FableRequest, ProviderDispatchReceipt,
 )
 
 
@@ -57,7 +58,7 @@ def _response(**overrides):
     return json.dumps(fields).encode()
 
 
-def _harness(*, enabled=True, cost=3.0, credential="sk-ant-test-do-not-use", send=None,
+def _harness(*, enabled=True, cost=3.0, credential="sk-ant-test-do-not-use", send=None, dispatch=None,
              alias="fable.api.principal", model=MODEL):
     router, decision = _routing(enabled=enabled, cost=cost, alias=alias, model=model)
     events = []
@@ -67,11 +68,15 @@ def _harness(*, enabled=True, cost=3.0, credential="sk-ant-test-do-not-use", sen
     def load_key():
         events.append(("credential",))
         return credential
+    def fake_dispatch(root, attempt, reservation, digest):
+        events.append(("dispatch", root, attempt, reservation, digest))
+        return ProviderDispatchReceipt(root, attempt, reservation, digest, "dispatch-1")
     def fake_send(headers, body):
         events.append(("send", dict(headers), body))
         return 200, _response()
     api = FableApiPrincipal(router=router, decision=decision,
                             bound_root_id="root-1", bound_attempt_id="attempt-1", reserve=reserve,
+                            record_dispatch=dispatch or fake_dispatch,
                             credential_loader=load_key, send=send or fake_send)
     return api, events
 
@@ -79,10 +84,13 @@ def _harness(*, enabled=True, cost=3.0, credential="sk-ant-test-do-not-use", sen
 def test_bounded_invocation_sends_once_only_after_capacity_reservation():
     api, events = _harness()
     outcome = api.invoke(_request())
-    assert [x[0] for x in events] == ["reserve", "credential", "send"]
+    assert [x[0] for x in events] == ["reserve", "credential", "dispatch", "send"]
     assert outcome.model == MODEL and outcome.provider_message_id == "msg_test1"
     assert outcome.reservation_ref == "reservation-1"
     assert outcome.source_refs == ("https://github.com/example/repo/pull/1",)
+    assert outcome.request_sha256 == hashlib.sha256(events[-1][2]).hexdigest()
+    assert outcome.response_sha256 == hashlib.sha256(_response()).hexdigest()
+    assert outcome.dispatch_ref == "dispatch-1"
     assert outcome.estimated_usd == pytest.approx((100 * 10 + 150 * 50)/1_000_000)
     sent = events[-1]
     assert sent[1]["anthropic-version"] == "2023-06-01"
@@ -139,6 +147,7 @@ def test_validated_atomic_reservation_required_before_api_secret():
         return CapacityReservation("wrong-root", "attempt-1", "capacity-envelope-1", 5, "r-1")
     api = FableApiPrincipal(router=router, decision=decision,
                             bound_root_id="root-1", bound_attempt_id="attempt-1",
+                            record_dispatch=lambda *_: None,
                             reserve=bad_reserve, credential_loader=lambda: calls.append("secret"),
                             send=lambda *_: calls.append("send"))
     with pytest.raises(FableApiRefused, match="reservation identity"):
@@ -190,6 +199,7 @@ def test_reject_unapproved_cognition_even_if_provider_enabled():
     decision.cognition_route = "CHAT_INCLUDED_DEFAULT"
     api = FableApiPrincipal(router=router, decision=decision,
                             bound_root_id="root-1", bound_attempt_id="attempt-1",
+                            record_dispatch=lambda *_: None,
                             reserve=lambda *_: None, credential_loader=lambda: "test-secret-12345",
                             send=lambda *_: (200, _response()))
     with pytest.raises(FableApiRefused, match="not a qualified"):
@@ -201,6 +211,7 @@ def test_unapproved_budget_receipt_fails_closed():
     decision.metered_cognition_receipt.budget_authority = ""
     api = FableApiPrincipal(router=router, decision=decision,
                             bound_root_id="root-1", bound_attempt_id="attempt-1",
+                            record_dispatch=lambda *_: None,
                             reserve=lambda *_: None, credential_loader=lambda: "test-secret-12345",
                             send=lambda *_: (200, _response()))
     with pytest.raises(FableApiRefused, match="receipt incomplete"):
@@ -281,3 +292,20 @@ def test_parallel_invokers_cannot_double_spend():
     assert results.count("ok") == 1
     assert results.count("refused") == 11
     assert len([e for e in events if e[0] == "send"]) == 1
+
+
+def test_unconfirmed_dispatch_ledger_receipt_never_calls_provider():
+    api, events = _harness(dispatch=lambda *_: None)
+    with pytest.raises(FableApiEffectUnknown, match="dispatch acknowledgment invalid"):
+        api.invoke(_request())
+    assert not any(x[0] == "send" for x in events)
+
+
+def test_failed_dispatch_ledger_write_requires_original_attempt_reconciliation():
+    def broken_dispatch(*_args):
+        raise RuntimeError("private runtime error must not escape")
+    api, events = _harness(dispatch=broken_dispatch)
+    with pytest.raises(FableApiEffectUnknown, match="dispatch record uncertain") as ei:
+        api.invoke(_request())
+    assert "private runtime" not in str(ei.value)
+    assert not any(x[0] == "send" for x in events)
