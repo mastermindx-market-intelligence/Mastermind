@@ -817,7 +817,7 @@ class TestPublicationEffectUncertainty:
         assert published.state is ing.PublishState.PUBLISHED
         assert published.review_id == "review-recovered"
         assert transport.submits == 1
-        assert transport.readbacks == 1
+        assert transport.readbacks == 2  # preflight and effect reconciliation
 
     def test_the_concrete_adapter_reraises_an_unmatched_effect(self) -> None:
         transport = FakeTransport(lands=False)
@@ -901,18 +901,6 @@ class TestPublication:
         assert first.state is ing.PublishState.PUBLISHED
         assert second.state is ing.PublishState.ALREADY_PUBLISHED
         assert len(publications.calls) == 1
-
-    def test_moved_head_refuses_publication(self) -> None:
-        _, outcome = _admitted_decision()
-        publications = FakePublications()
-        published = _publish(
-            outcome.decision, outcome.job_id,
-            pull_requests=FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA)),
-            publications=publications,
-        )
-        assert published.state is ing.PublishState.REFUSED
-        assert published.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
-        assert publications.calls == []
 
     def test_unverified_result_refuses_publication(self) -> None:
         _, outcome = _admitted_decision()
@@ -999,63 +987,80 @@ class TestPublication:
         assert "worker-reviewer" in body
         assert "worker-builder" in body
 
-# ---------------------------------------------------------------------------
-# Audit #1741: publication facts MUST be freshly sourced on exact frozen head.
-# ---------------------------------------------------------------------------
+
+def test_external_github_source_contracts_are_publicly_exported():
+    """The host can import the authenticated external-origin port by name."""
+    from control_plane import github_review_intent_ingress as ingress
+    assert "ExternalGitHubSourceFacts" in ingress.__all__
+    assert "ExternalGitHubSourcePort" in ingress.__all__
+    assert ingress.ExternalGitHubSourceFacts.__name__ == "ExternalGitHubSourceFacts"
+
 
 @pytest.mark.parametrize(
     "changed,refusal",
     [
         ({"state": "closed"}, gri.ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN.value),
         ({"draft": True}, gri.ReviewIntentRefusal.PULL_REQUEST_DRAFT.value),
-        ({"head_repository": "attacker/fork"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
+        ({"head_repository": "malicious/fork"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
+        ({"number": 9001}, gri.ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value),
         ({"title": "xoxb-secret-shaped-token"}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
         ({"title": "A" * 13000, "body": "B" * 13000}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
-        ({"number": 9001}, gri.ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value),
     ],
 )
-def test_publication_refuses_changed_current_pr_facts_without_head_change(changed, refusal):
+def test_integrated_publication_refuses_changed_pr_facts_without_moving_head(changed, refusal):
     _, admitted = _admitted_decision()
     reads = FakePullRequests(_pull_request(**changed))
     publications = FakePublications()
-    result = ing.publish_verified_review(
-        decision=admitted.decision,
-        job_id=admitted.job_id,
+    outcome = _publish(
+        admitted.decision,
+        admitted.job_id,
         pull_requests=reads,
-        results=FakeResults(_verified(job_id=admitted.job_id)),
         publications=publications,
     )
+    assert outcome.state is ing.PublishState.REFUSED
+    assert outcome.refusal == refusal
     assert reads.reads == 1
-    assert result.state is ing.PublishState.REFUSED
-    assert result.refusal == refusal
     assert publications.calls == []
 
 
-def test_publication_fetches_current_facts_not_admission_snapshot():
-    _, admitted = _admitted_decision()
-    reads = FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA))
-    publications = FakePublications()
-    result = ing.publish_verified_review(
-        decision=admitted.decision,
-        job_id=admitted.job_id,
-        pull_requests=reads,
-        results=FakeResults(_verified(job_id=admitted.job_id)),
-        publications=publications,
-    )
-    assert reads.reads == 1
-    assert result.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
-    assert publications.calls == []
-
-
-def test_combined_objective_over_bound_refused_before_ledger():
+def test_integrated_combined_objective_over_bound_refused_before_ledger():
     fabric = FakeFabric()
-    outcome = _admit(
+    result = _admit(
         fabric=fabric,
         pull_requests=FakePullRequests(_pull_request(
             title="A" * 13000, body="B" * 13000
         )),
     )
-    assert outcome.state is ing.AdmissionState.REFUSED
-    assert outcome.decision.refusal is gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED
+    assert result.state is ing.AdmissionState.REFUSED
+    assert result.decision.refusal is gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED
     assert fabric.admit_calls == 0
     assert fabric.jobs == {}
+
+def test_publication_fetches_current_facts_not_admission_snapshot():
+    """Publication must refuse a moved head from the authenticated fresh read."""
+    _, admitted = _admitted_decision()
+    reads = FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA))
+    publications = FakePublications()
+    outcome = _publish(
+        admitted.decision,
+        admitted.job_id,
+        pull_requests=reads,
+        publications=publications,
+    )
+    assert reads.reads == 1
+    assert outcome.state is ing.PublishState.REFUSED
+    assert outcome.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
+    assert publications.calls == []
+
+
+def test_rendered_review_body_limit_refused_before_publisher():
+    _, admitted = _admitted_decision()
+    publications = FakePublications()
+    result = _publish(
+        admitted.decision, admitted.job_id,
+        results=FakeResults(_verified(job_id=admitted.job_id, summary="A" * 16000)),
+        publications=publications,
+    )
+    assert result.state is ing.PublishState.REFUSED
+    assert result.refusal == "REVIEW_BODY_OVER_BOUND"
+    assert publications.calls == []

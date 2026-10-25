@@ -556,6 +556,13 @@ class ReviewIntentPolicy:
             return ReviewIntentRefusal.ACTOR_NOT_AUTHORIZED
 
         if current is None:
+            # GitHub's enforcement proves at most the channel's baseline
+            # triage/write capability, never a higher configured policy floor
+            # such as MAINTAIN or ADMIN. An unread permission cannot satisfy
+            # those stronger host controls, even with the optional static
+            # allowlist fallback enabled.
+            if PERMISSION_RANK[self.minimum_permission] > PERMISSION_RANK["triage"]:
+                return ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
             if signal.permission_basis is not ActorPermissionBasis.REPORTED_AUTHOR_ASSOCIATION:
                 if not self.require_current_permission_for_all_channels:
                     # GitHub refused this delivery outright unless the actor
@@ -1135,7 +1142,11 @@ def decide_review_intent(
             envelope=envelope,
             pull_request=pull_request,
         )
-    if pull_request.draft:
+    # Drafts may be security-reviewed before merge readiness, but only via
+    # an explicitly authorized label/comment and a fresh permission read.
+    # Keep GitHub review-requested behavior closed on a draft, independent
+    # of whether the external API happens to accept such a request.
+    if pull_request.draft and channel is IntentSource.REVIEW_REQUESTED:
         return _refuse(
             ReviewIntentRefusal.PULL_REQUEST_DRAFT,
             envelope=envelope,
@@ -1173,6 +1184,18 @@ def decide_review_intent(
     else:  # pragma: no cover - unreachable given the channel fence above
         return _refuse(ReviewIntentRefusal.ACTION_NOT_SUPPORTED, envelope=envelope)
 
+    # On a draft, even an action normally enforced by GitHub at triage
+    # cannot substitute for a fresh installation-authenticated permission.
+    # This does not enable PR readiness, GitHub APPROVE or a merge.
+    if (pull_request.draft and current_permission is None
+            and policy.actor_is_listed(login=signal.actor_login)):
+        return _refuse(
+            ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED,
+            envelope=envelope,
+            pull_request=pull_request,
+            actor=signal.actor_login,
+        )
+
     # --- actor authority: allowlist AND a real permission basis -------------
     actor_refusal = policy.actor_permitted(
         signal=signal,
@@ -1191,8 +1214,7 @@ def decide_review_intent(
     try:
         assert_untrusted_text_admissible(pull_request.title, name="pull_request.title")
         assert_untrusted_text_admissible(pull_request.body, name="pull_request.body")
-        # Both fields fit individually, but the combined objective might not.
-        # Refuse within the typed decision rather than crashing after admission.
+        # Individual limits do not guarantee the combined objective bound.
         build_review_objective(pull_request=pull_request, intent_source=intent_source)
     except ReviewIntentError:
         return _refuse(
