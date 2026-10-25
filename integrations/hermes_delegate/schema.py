@@ -70,8 +70,6 @@ def parse_submission(raw: Mapping[str, Any]) -> dict[str, Any]:
     complexity = raw.get("task_complexity")
     if complexity not in COMPLEXITIES:
         raise SubmissionError("TASK_COMPLEXITY_INVALID")
-    if complexity == "C3_FRONTIER_JUDGMENT":
-        raise SubmissionError("FRONTIER_STAYS_WITH_PARENT")
     parent_id = raw.get("parent_id")
     root_id = raw.get("root_id")
     if not isinstance(parent_id, str) or ID_RE.fullmatch(parent_id) is None:

@@ -29,9 +29,15 @@ class FakeAdmission:
         self.reason = reason
         self.calls = []
         self.extra = {}
+        self.error = None
+        self.decision = None
 
     def admit(self, submission):
         self.calls.append(dict(submission))
+        if self.error is not None:
+            raise self.error
+        if self.decision is not None:
+            return self.decision
         return {
             **self.extra,
             "schema": "mastermind.hermes_delegate.admission/v1",
@@ -452,6 +458,228 @@ class DelegateBridge(unittest.TestCase):
                 elif isinstance(node, ast.ImportFrom):
                     imported.add((node.module or "").split(".")[0])
             self.assertFalse(banned & imported, f"{path.name} imports {banned & imported}")
+
+
+def _review(key, reviewer, sha, verdict="accept"):
+        return {
+            "action": "review",
+            "idempotency_key": key,
+            "reviewer_id": reviewer,
+            "verdict": verdict,
+            "result_sha256": sha,
+        }
+
+
+class DelegateEdgePaths(unittest.TestCase):
+    def test_admission_exception_latches_unknown_without_carrier(self):
+        admission = FakeAdmission()
+        admission.error = RuntimeError("admission store unavailable")
+        bridge, admission, fabric, cursor = bridge_for(admission=admission)
+        failed = loads(dispatch(request(), bridge))
+        self.assertEqual(failed["state"], "UNKNOWN")
+        self.assertEqual(failed["detail"], "RuntimeError: admission store unavailable")
+        self.assertIsNone(failed["reason"])
+        again = loads(dispatch(request(carrier="cursor_cloud"), bridge))
+        self.assertEqual(again["state"], "UNKNOWN")
+        self.assertTrue(again["deduped"])
+        self.assertEqual(len(admission.calls), 1)
+        self.assertEqual(fabric.submits, [])
+        self.assertEqual(cursor.submits, [])
+
+    def test_carrier_mismatch_is_refused_without_either_submit(self):
+        admission = FakeAdmission()
+        admission.decision = {
+            "outcome": "ADMITTED",
+            "reason": "admitted for cursor_cloud only",
+            "carrier": "cursor_cloud",
+            "idempotency_key": "child-impl-0001",
+        }
+        bridge, admission, fabric, cursor = bridge_for(admission=admission)
+        refused = loads(dispatch(request(), bridge))
+        self.assertEqual(refused["state"], "REFUSED")
+        self.assertEqual(refused["reason"], "admitted for cursor_cloud only")
+        self.assertEqual(refused["carrier"], "fabric")
+        retry = loads(dispatch(request(carrier="cursor_cloud"), bridge))
+        self.assertEqual(retry["state"], "REFUSED")
+        self.assertEqual(retry["reason"], "admitted for cursor_cloud only")
+        self.assertTrue(retry["deduped"])
+        self.assertEqual(len(admission.calls), 1)
+        self.assertEqual(fabric.submits, [])
+        self.assertEqual(cursor.submits, [])
+
+        empty = FakeAdmission()
+        empty.decision = {
+            "outcome": "ADMITTED",
+            "reason": "",
+            "carrier": "cursor_cloud",
+            "idempotency_key": "child-impl-0002",
+        }
+        other, _empty, other_fabric, other_cursor = bridge_for(admission=empty)
+        viewed = loads(dispatch(request(idempotency_key="child-impl-0002"), other))
+        self.assertEqual(viewed["state"], "REFUSED")
+        self.assertEqual(viewed["reason"], "ADMISSION_CARRIER_MISMATCH")
+        self.assertEqual(other_fabric.submits, [])
+        self.assertEqual(other_cursor.submits, [])
+
+    def test_non_string_refusal_is_not_coerced(self):
+        admission = FakeAdmission()
+        admission.decision = {
+            "outcome": "REFUSED",
+            "reason": None,
+            "carrier": "fabric",
+            "idempotency_key": "child-impl-0001",
+        }
+        bridge, admission, fabric, cursor = bridge_for(admission=admission)
+        refused = loads(dispatch(request(), bridge))
+        self.assertEqual(refused["state"], "UNKNOWN")
+        self.assertEqual(refused["detail"], "ADMISSION_REFUSAL_UNREADABLE")
+        self.assertIsNone(refused["reason"])
+        self.assertEqual(fabric.submits, [])
+        self.assertEqual(cursor.submits, [])
+        self.assertEqual(len(admission.calls), 1)
+
+        carrier = FakeCarrier()
+        carrier.submit_result = {"state": "REFUSED", "reason": ["ECONOMIC_POLICY_REFUSED: pool closed"]}
+        second, _admission, carrier, other_cursor = bridge_for(fabric=carrier)
+        viewed = loads(dispatch(request(idempotency_key="child-impl-0004"), second))
+        self.assertEqual(viewed["state"], "UNKNOWN")
+        self.assertEqual(viewed["detail"], "CARRIER_REFUSAL_UNREADABLE")
+        self.assertIsNone(viewed["reason"])
+        loads(dispatch(request(
+            idempotency_key="child-impl-0004",
+            carrier="cursor_cloud",
+        ), second))
+        self.assertEqual(len(carrier.submits), 1)
+        self.assertEqual(other_cursor.submits, [])
+
+    def test_run_id_mismatch_latches_unknown(self):
+        fabric = FakeCarrier()
+        fabric.submit_result = {"state": "SUBMITTED", "run_id": "other-run-0002"}
+        bridge, _admission, fabric, cursor = bridge_for(fabric=fabric)
+        mismatched = loads(dispatch(request(), bridge))
+        self.assertEqual(mismatched["state"], "UNKNOWN")
+        self.assertEqual(mismatched["detail"], "CARRIER_RUN_ID_MISMATCH")
+        self.assertEqual(mismatched["run_id"], "child-impl-0001")
+        again = loads(dispatch(request(carrier="cursor_cloud"), bridge))
+        self.assertEqual(again["state"], "UNKNOWN")
+        self.assertTrue(again["deduped"])
+        self.assertEqual(len(fabric.submits), 1)
+        self.assertEqual(cursor.submits, [])
+
+    def test_cancel_and_status_after_unknown_do_not_call_carrier(self):
+        fabric = FakeCarrier()
+        fabric.submit_result = {"state": "EFFECT_UNKNOWN", "detail": "reply lost after launch"}
+        bridge, _admission, fabric, cursor = bridge_for(fabric=fabric)
+        loads(dispatch(request(), bridge))
+        cancelled = loads(dispatch({"action": "cancel", "idempotency_key": "child-impl-0001"}, bridge))
+        status = loads(dispatch({"action": "status", "idempotency_key": "child-impl-0001"}, bridge))
+        self.assertEqual(cancelled["state"], "UNKNOWN")
+        self.assertEqual(cancelled["detail"], "reply lost after launch")
+        self.assertFalse(cancelled["deduped"])
+        self.assertEqual(status["state"], "UNKNOWN")
+        self.assertEqual(fabric.cancels, [])
+        self.assertEqual(fabric.statuses, [])
+        self.assertEqual(cursor.cancels, [])
+        self.assertEqual(cursor.submits, [])
+
+    def test_review_by_root_or_child_id_is_rejected(self):
+        bridge, _admission, fabric, _cursor = bridge_for()
+        loads(dispatch(request(), bridge))
+        sha = hashlib.sha256(fabric.body).hexdigest()
+        for reviewer in (ROOT, "child-impl-0001"):
+            with self.subTest(reviewer=reviewer):
+                denied = loads(dispatch(_review("child-impl-0001", reviewer, sha), bridge))
+                self.assertEqual(denied["state"], "SELF_APPROVAL_FORBIDDEN")
+                self.assertEqual(denied["reason"], "SELF_APPROVAL_FORBIDDEN")
+        self.assertEqual(fabric.results, [])
+        self.assertEqual(fabric.statuses, [])
+        accepted = loads(dispatch(_review("child-impl-0001", REVIEWER, sha), bridge))
+        self.assertEqual(accepted["state"], "REVIEWED")
+        self.assertEqual(len(fabric.statuses), 1)
+
+    def test_reject_verdict_blocks_consume(self):
+        bridge, _admission, fabric, _cursor = bridge_for()
+        loads(dispatch(request(), bridge))
+        sha = hashlib.sha256(fabric.body).hexdigest()
+        rejected = loads(dispatch(_review("child-impl-0001", REVIEWER, sha, verdict="reject"), bridge))
+        self.assertEqual(rejected["state"], "REVIEW_REJECTED")
+        consumed = loads(dispatch({
+            "action": "consume",
+            "idempotency_key": "child-impl-0001",
+            "parent_id": PARENT,
+        }, bridge))
+        self.assertEqual(consumed["state"], "REVIEW_REJECTED")
+        self.assertEqual(consumed["reason"], "REVIEW_REJECTED")
+        self.assertFalse(consumed["consumed"])
+        replacement = loads(dispatch(_review("child-impl-0001", "another-reviewer-02", sha), bridge))
+        self.assertEqual(replacement["state"], "REVIEW_REJECTED")
+        self.assertTrue(replacement["deduped"])
+        self.assertEqual(fabric.results, [])
+
+    def test_parent_mismatch_does_not_consume(self):
+        bridge, _admission, fabric, _cursor = bridge_for()
+        loads(dispatch(request(), bridge))
+        sha = hashlib.sha256(fabric.body).hexdigest()
+        loads(dispatch(_review("child-impl-0001", REVIEWER, sha), bridge))
+        mismatched = loads(dispatch({
+            "action": "consume",
+            "idempotency_key": "child-impl-0001",
+            "parent_id": "other-parent-02",
+        }, bridge))
+        self.assertEqual(mismatched["state"], "REFUSED")
+        self.assertEqual(mismatched["reason"], "PARENT_MISMATCH")
+        self.assertEqual(fabric.results, [])
+        status = loads(dispatch({"action": "status", "idempotency_key": "child-impl-0001"}, bridge))
+        self.assertEqual(status["state"], "REVIEWED")
+        consumed = loads(dispatch({
+            "action": "consume",
+            "idempotency_key": "child-impl-0001",
+            "parent_id": PARENT,
+        }, bridge))
+        self.assertEqual(consumed["state"], "CONSUMED")
+        self.assertEqual(len(fabric.results), 1)
+
+    def test_digest_mismatch_blocks_acceptance(self):
+        bridge, _admission, fabric, _cursor = bridge_for()
+        loads(dispatch(request(), bridge))
+        wrong = "ab" * 32
+        denied = loads(dispatch(_review("child-impl-0001", REVIEWER, wrong), bridge))
+        self.assertEqual(denied["state"], "REFUSED")
+        self.assertEqual(denied["reason"], "REVIEW_DIGEST_MISMATCH")
+        self.assertEqual(fabric.results, [])
+        status = loads(dispatch({"action": "status", "idempotency_key": "child-impl-0001"}, bridge))
+        self.assertEqual(status["state"], "TERMINAL")
+
+        other, _admission, other_fabric, _cursor = bridge_for()
+        loads(dispatch(request(idempotency_key="child-impl-0006"), other))
+        sha = hashlib.sha256(other_fabric.body).hexdigest()
+        reviewed = loads(dispatch(_review("child-impl-0006", REVIEWER, sha), other))
+        self.assertEqual(reviewed["state"], "REVIEWED")
+        other_fabric.body = b"tampered result\n"
+        consumed = loads(dispatch({
+            "action": "consume",
+            "idempotency_key": "child-impl-0006",
+            "parent_id": PARENT,
+        }, other))
+        self.assertEqual(consumed["state"], "RESULT_DIGEST_MISMATCH")
+        self.assertEqual(consumed["detail"], "RESULT_DIGEST_MISMATCH")
+        self.assertFalse(consumed["consumed"])
+        again = loads(dispatch({
+            "action": "consume",
+            "idempotency_key": "child-impl-0006",
+            "parent_id": PARENT,
+        }, other))
+        self.assertEqual(again["state"], "RESULT_DIGEST_MISMATCH")
+        self.assertEqual(len(other_fabric.results), 1)
+
+    def test_frontier_complexity_is_refused_before_admission(self):
+        bridge, admission, fabric, cursor = bridge_for()
+        refused = loads(dispatch(request(task_complexity="C3_FRONTIER_JUDGMENT"), bridge))
+        self.assertEqual(refused["state"], "REFUSED")
+        self.assertEqual(refused["reason"], "TASK_COMPLEXITY_INVALID")
+        self.assertEqual(admission.calls, [])
+        self.assertEqual(fabric.submits, [])
+        self.assertEqual(cursor.submits, [])
 
 
 if __name__ == "__main__":
