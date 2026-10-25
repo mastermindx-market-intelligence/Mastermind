@@ -82,6 +82,7 @@ def test_bounded_invocation_sends_once_only_after_capacity_reservation():
     assert [x[0] for x in events] == ["reserve", "credential", "send"]
     assert outcome.model == MODEL and outcome.provider_message_id == "msg_test1"
     assert outcome.reservation_ref == "reservation-1"
+    assert outcome.source_refs == ("https://github.com/example/repo/pull/1",)
     assert outcome.estimated_usd == pytest.approx((100 * 10 + 150 * 50)/1_000_000)
     sent = events[-1]
     assert sent[1]["anthropic-version"] == "2023-06-01"
@@ -173,6 +174,8 @@ def test_lost_send_is_effect_unknown_without_retry():
     (200, _response(stop_reason="max_tokens")),
     (200, _response(usage={"input_tokens":10,"output_tokens":2500})),
     (200, _response(content=[])),
+    (200, _response(id="msg_invalid/with-slash")),
+    (200, _response(content=[{"type":"text","text":"partial"}, {"type":"tool_use","id":"irrelevant"}])),
 ])
 def test_noncomplete_provider_results_are_nonreplayable(status, reply):
     api, events = _harness(send=lambda *_: (status, reply))
