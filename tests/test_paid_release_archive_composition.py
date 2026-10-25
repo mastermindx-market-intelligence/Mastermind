@@ -70,7 +70,9 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
     result = _materialize(root)
     assert result.returncode == 0, result.stderr
     manifest = json.loads(records["native-manifest.json"])
-    assert len(manifest) == 98
+    spec = importlib.util.spec_from_file_location("archived_native_builder",rollout/"build_review_stage.py")
+    builder = importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
+    assert set(manifest) == {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"}
     expected_new = {(RELATIVE_ROLLOUT / "native-code-stage" / name).as_posix()
                     for name in manifest}
     after = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}

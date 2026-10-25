@@ -54,3 +54,26 @@ def test_generated_manifest_covers_actual_new_entry_and_readiness_graph(tmp_path
         key='ext/'+name
         assert manifest[key]==hashlib.sha256((candidate/name).read_bytes()).hexdigest()
         assert inventory['files'][key]['source']=='candidate/'+name
+
+
+def test_exact_new_template_publisher_is_not_old_launcher_ingress(tmp_path):
+    import json,pytest
+    path=DRAFT/'native_generation.py';current=path.read_bytes()
+    added=(b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
+           b'    if relative == "ext/host_pull_launchd.plist.template":\n'
+           b'        return\n')
+    assert hashlib.sha256(current).hexdigest()=='43e814339a16582e2205f12117e1f17c40dce2e42a9c52d815a37c043e772e1b'
+    assert current.count(added)==1
+    old=current.replace(added,b'',1)
+    assert hashlib.sha256(old).hexdigest()=='d044c24940df13d24ff6241f0da9cec3dc24d90dd60604a08c82e0ad8613586c'
+    def load(name,raw):
+        source=tmp_path/(name+'.py');source.write_bytes(raw)
+        spec=importlib.util.spec_from_file_location(name,source)
+        owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner);return owner
+    before=load('old_ingress',old);after=load('new_publisher',current)
+    manifest=json.loads((DRAFT/'native-manifest.json').read_bytes())
+    assert 'ext/host_pull_launchd.plist.template' in manifest
+    with pytest.raises(ValueError,match='flat code files'):before.manifest_files(manifest)
+    assert after.manifest_files(manifest)==manifest
+    for name in ('ext/other.plist.template','ext/nested/host_pull_launchd.plist.template'):
+        with pytest.raises(ValueError):after.file_name(name)
