@@ -133,3 +133,29 @@ def test_bootstrap_acl_has_only_native_enoent_absence(monkeypatch,pointer,error,
     else:
         with pytest.raises(ValueError):m._bootstrap_acl(42)
     assert calls==([('get',42),('free',123)] if pointer else [('get',42)])
+
+
+
+def test_actual_root_owner_import_graph_from_disposable_git_sources(bootstrap,record_property):
+    m,root,_,seal=bootstrap
+    source=SOURCE.parents[4]
+    # Source only, four existing package owners; no installed files or data.
+    count=0
+    for package in ('control_plane','ops/executive_os','scripts','common'):
+        for path in (source/package).rglob('*.py'):
+            relative=path.relative_to(source)
+            target=root/relative;target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(path.read_bytes());target.chmod(0o644);count+=1
+    seal()
+    before=list(sys.path)
+    with m._qualified_root_interfaces() as interfaces:
+        actual,qualification,manifest,native_open,root_read=interfaces
+        assert actual==root
+        assert callable(qualification.verify_qualified_artifacts)
+        assert callable(manifest.verify) and callable(native_open) and callable(root_read)
+        backend=sys.modules['control_plane.paid_fabric_backend']
+        assert callable(backend.CanonicalPaidBackend)
+        assert Path(backend.__file__).is_relative_to(root)
+        interfaces.check()
+    assert sys.path==before
+    record_property('actual_root_python_snapshots',count)
