@@ -28,9 +28,12 @@ human can see it in ~/.local/state/mastermind/storage-cleanup/ALERT.
 """
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -345,35 +348,65 @@ def via_loopback(timeout: int = 2400) -> dict | str | None:
         return f'rc={p.returncode} {(p.stderr.strip() or last)[:300]}'
 
 
+def _claim_sweep_lock(path: Path) -> int | None:
+    """Atomically claim the existing lock inode; None means a live contender.
+
+    Kernel flock, not PID liveness, is the unique sweeper authority. The marker
+    stays on disk after process exit: unlinking it could create a second inode
+    while an earlier owner still holds its kernel lock.
+    """
+    nofollow = getattr(os, 'O_NOFOLLOW', None)
+    if nofollow is None:
+        raise OSError(errno.ENOTSUP, 'no-follow lock unavailable')
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | nofollow, 0o600)
+    claimed = False
+    try:
+        def qualified() -> bool:
+            held = os.fstat(fd)
+            named = os.lstat(path)
+            return (stat.S_ISREG(held.st_mode)
+                    and held.st_uid == os.getuid()
+                    and held.st_nlink == 1
+                    and not (held.st_mode & 0o022)
+                    and (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino))
+
+        if not qualified():
+            raise OSError(errno.EPERM, 'unqualified incumbent lock')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return None
+        if not qualified():
+            raise OSError(errno.EPERM, 'lock path changed')
+        marker = json.dumps({'pid': os.getpid(), 'time': time.time()}).encode('ascii')
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        if os.write(fd, marker) != len(marker):
+            raise OSError(errno.EIO, 'incomplete lock marker')
+        os.fsync(fd)
+        if not qualified():
+            raise OSError(errno.EPERM, 'lock path changed after mark')
+        claimed = True
+        return fd
+    finally:
+        if not claimed:
+            os.close(fd)
+
+
 def main() -> int:
     STATE.mkdir(parents=True, exist_ok=True)
-    # The loopback child runs INSIDE the parent's lock (see via_loopback), so it must
-    # not block on it -- but two children must still never overlap, hence its own file.
+    # Preserve the original nested forced-command loopback: its own lock
+    # serializes children, while the parent retains the top-level lock.
     nolock = os.environ.get('MM_SWEEP_NOLOCK') == '1'
     lock_path = (STATE / 'sweep-loopback.lock') if nolock else LOCK
-    # single-instance guard (a previous sweep may still be converting). The lock
-    # names its owner pid: a lock whose pid is gone is stale (a `launchctl bootout`
-    # mid-sweep left one behind on 2026-09-14 and would have idled the agent for 6 h).
-    if lock_path.exists() and time.time() - lock_path.stat().st_mtime < 6 * 3600:
-        owner = None
-        try:
-            owner = int(json.loads(lock_path.read_text()).get('pid'))
-        except (ValueError, TypeError, AttributeError, OSError):
-            owner = None
-        alive = False
-        if owner:
-            try:
-                os.kill(owner, 0)
-                alive = True
-            except ProcessLookupError:
-                alive = False
-            except PermissionError:
-                alive = True
-        if alive:
-            print(json.dumps({'skipped': 'previous sweep still running', 'pid': owner, 'lock_age_s': int(time.time() - lock_path.stat().st_mtime)}))
-            return 0
-        print(json.dumps({'stale_lock_removed': True, 'pid': owner}), file=sys.stderr)
-    lock_path.write_text(json.dumps({'pid': os.getpid(), 'time': time.time()}))
+    try:
+        lock_fd = _claim_sweep_lock(lock_path)
+    except OSError:
+        print(json.dumps({'degraded': True, 'lock': 'UNVERIFIED'}))
+        return 78
+    if lock_fd is None:
+        print(json.dumps({'degraded': True, 'lock': 'BUSY'}))
+        return 75
     try:
         usage = shutil.disk_usage('/')
         free, total = usage.free, usage.total
@@ -580,10 +613,8 @@ def main() -> int:
                 stamp.write_text(str(time.time()))
         return finish(out)
     finally:
-        try:
-            lock_path.unlink()
-        except OSError:
-            pass
+        # Auto-released on crash/process exit; never unlink the stable inode.
+        os.close(lock_fd)
 
 
 if __name__ == '__main__':

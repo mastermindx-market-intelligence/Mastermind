@@ -4,6 +4,8 @@ import importlib.util
 import io
 import json
 import pathlib
+import queue
+import threading
 import sys
 import tempfile
 import unittest
@@ -220,6 +222,67 @@ class FleetStorageVolumeTests(unittest.TestCase):
                         self.assertEqual(actual, code)
                         self.assertEqual(receipt["incomplete_substeps"], expected)
                         self.assertEqual(receipt["degraded"], bool(expected))
+
+
+    def test_atomic_original_sweep_lock_serializes_two_contenders(self):
+        # Disposable lock only. Never calls the sweeper, SSH, launchd or cleanup.
+        with tempfile.TemporaryDirectory() as temp:
+            lock = pathlib.Path(temp) / 'sweep.lock'
+            start = threading.Barrier(2)
+            release = threading.Event()
+            outcomes = queue.Queue()
+
+            def contender():
+                start.wait(timeout=10)
+                fd = self.sweep._claim_sweep_lock(lock)
+                outcomes.put(fd is not None)
+                if fd is not None:
+                    try:
+                        release.wait(timeout=10)
+                    finally:
+                        self.sweep.os.close(fd)
+
+            threads = [threading.Thread(target=contender) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            try:
+                values = [outcomes.get(timeout=10) for _ in range(2)]
+            finally:
+                release.set()
+                for thread in threads:
+                    thread.join(timeout=10)
+            self.assertEqual(sum(values), 1)
+            self.assertFalse(any(thread.is_alive() for thread in threads))
+            self.assertTrue(lock.exists(), 'stable marker must not be unlinked')
+            fd = self.sweep._claim_sweep_lock(lock)
+            self.assertIsNotNone(fd, 'stale PID text cannot strand kernel lock')
+            self.sweep.os.close(fd)
+            self.assertTrue(lock.exists())
+
+    def test_original_sweep_lock_symlink_and_busy_main_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            target = state / 'preserve'
+            target.write_text('untouched')
+            lock = state / 'sweep.lock'
+            lock.symlink_to(target)
+            with self.assertRaises(OSError):
+                self.sweep._claim_sweep_lock(lock)
+            self.assertEqual(target.read_text(), 'untouched')
+            lock.unlink()
+            fd = self.sweep._claim_sweep_lock(lock)
+            try:
+                with mock.patch.object(self.sweep, 'STATE', state), mock.patch.object(
+                    self.sweep, 'LOCK', lock
+                ), mock.patch.dict(self.sweep.os.environ, {'MM_SWEEP_NOLOCK': '0'}):
+                    with contextlib.redirect_stdout(io.StringIO()) as output:
+                        result = self.sweep.main()
+                    self.assertEqual(result, 75)
+                    self.assertEqual(json.loads(output.getvalue()),
+                                     {'degraded': True, 'lock': 'BUSY'})
+            finally:
+                self.sweep.os.close(fd)
+            self.assertTrue(lock.exists())
 
 
 if __name__ == "__main__":
