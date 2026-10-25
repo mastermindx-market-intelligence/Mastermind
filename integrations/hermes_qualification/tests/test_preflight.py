@@ -46,6 +46,20 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(r["status"], "BLOCKED")
         self.assertIn("terminal", r["observations"]["missing_disabled_toolsets"])
 
+    def test_live_observed_toolset_leak_is_prevented(self):
+        for exposed in ("todo", "connections"):
+            with self.subTest(exposed=exposed):
+                c = copy.deepcopy(self.config)
+                c["agent"]["disabled_toolsets"].remove(exposed)
+                r = self.check(c)
+                self.assertEqual(r["status"], "BLOCKED")
+                self.assertIn(exposed, r["observations"]["missing_disabled_toolsets"])
+
+    def test_unknown_disabled_key_rejected(self):
+        c = copy.deepcopy(self.config)
+        c["agent"]["disabled_toolsets"].append("fake_future_toolset")
+        self.assertIn("UNRECOGNIZED_DISABLED_TOOLSET", self.check(c)["issues"])
+
     def test_no_disabled_section_rejected(self):
         c = copy.deepcopy(self.config)
         del c["agent"]
