@@ -1092,8 +1092,13 @@ def test_executive_dialogue_wake_bridge_rederives_owners_and_deduplicates_submit
     generic_v2_history = WakeLedgerRepository(runtime).list_records(
         generic_v2_obligation.obligation_id
     )
-    assert generic_v2_history[0].record.physical_source is None
+    # Generic armed delivery must retain the same physical source as canary
+    # delivery; dropping it leaves the recipient's reply reference stale.
+    assert generic_v2_history[0].record.physical_source == generic_v2_physical
     assert len(operator.calls) == 3
+    assert asyncio.run(production_bridge(runtime, generic_v2_request)) == DialogueWakeResult(
+        "RECORDED", "WAKE_RECORDED")
+    assert len(operator.calls) == 3  # Same physical request, no second native turn.
 
     moved = dataclasses.replace(
         request,

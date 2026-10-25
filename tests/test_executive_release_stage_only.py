@@ -83,7 +83,10 @@ def stage(tmp_path, bundle, source):
     for name in ("selected", "config", "receipt", "transaction", "services"):
         (protected / name).write_text(f"original {name}")
     runner = tmp_path / "os-python"
-    runner.write_text(f'''#!{sys.executable}
+    # A shebang cannot carry the spaces in an external-SSD venv path. The shell
+    # trampoline quotes the actual interpreter; Python sees it as a docstring.
+    launcher = f'#!/bin/sh\n\'\'\'exec\' {shlex.quote(sys.executable)} "$0" "$@"\n\' \'\'\'\n'
+    runner.write_text(launcher + f'''
 import os, sys, runpy, subprocess, stat
 from pathlib import Path
 sys.path.insert(0, {str(ROOT)!r})
@@ -110,7 +113,7 @@ runpy.run_path(args[0], run_name="__main__")
 ''')
     runner.chmod(0o755)
     statshim = tmp_path / "stat"
-    statshim.write_text(f'''#!{sys.executable}
+    statshim.write_text(launcher + f'''
 import os,sys,stat
 p=sys.argv[-1]
 owner=os.environ.get("BAD_OWNER", "0:0")
@@ -124,7 +127,7 @@ print(owner+":"+oct(stat.S_IMODE(os.lstat(p).st_mode))[2:])
     env = {**os.environ, "SYSTEM_ROOT": str(system), "RELEASE_ROOT": str(system / "releases" / sha),
            "SOURCE_REPO": str(repo), "EXPECTED_SHA": sha, "TREE_SHA": tree,
            "SCRIPT_DIR": str(ROOT / "ops/executive_os"), "PYTHON_BINARY": str(runner),
-           "OS_WEB_ASSETS": str(out), "OS_WEB_ASSETS_DIGEST": digest,
+           "OS_WEB_ASSETS": str(out), "OS_WEB_ASSETS_DIGEST": digest, "CONTROL_AEAD_BUNDLE": "",
            "STAGE_RELEASE_ONLY": "1", "ALLOW_FROZEN_ACCEPTED_ANCESTOR": "0",
            "ARM_PRIVILEGED_BROKER": "0", "CONTROL_CONFIG_SOURCE": "", "PROTECTED_MASTER_SHA": "",
            "CALLS": str(tmp_path / "calls"), "FAIL": ""}

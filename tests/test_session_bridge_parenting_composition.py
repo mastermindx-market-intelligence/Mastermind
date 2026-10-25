@@ -72,12 +72,24 @@ def _material(f, message):
     return obligation, physical
 
 
-@pytest.mark.parametrize("source_fault", [None, "parent_during_read", "foreign_parent_attestation",
-    "writer_after_ready", "writer_during_commit_read", "newer_request_after_ready"])
+@pytest.mark.parametrize("source_fault,attention_gate", [
+    (None, None), ("parent_during_read", None), ("foreign_parent_attestation", None),
+    ("writer_after_ready", None), ("writer_during_commit_read", None),
+    ("newer_request_after_ready", None), (None, "ready"),
+    (None, "route_disarmed"), (None, "target_disabled"), (None, "retry_disarmed"),
+])
 def test_session_send_real_w3c_persists_once_and_original_parent_reads(
-    tmp_path, short_socket_root, monkeypatch, source_fault,
+    tmp_path, short_socket_root, monkeypatch, source_fault, attention_gate,
 ):
+    inline_attention = attention_gate is not None
     f = _strict_dialogue_runtime(tmp_path, monkeypatch, provider_session_id=NATIVE)
+    if inline_attention:
+        # Test-only prior operator configuration. The bridge cannot arm this.
+        import dataclasses
+        f.target = dataclasses.replace(f.target, target_enabled=attention_gate != "target_disabled")
+        f.registry = dataclasses.replace(f.registry, production_armed=attention_gate != "route_disarmed",
+            targets={**f.registry.targets, f.target.session_alias: f.target})
+        monkeypatch.setattr("control_plane.session_targets.load_session_targets", lambda: f.registry)
     # NativeReplyReader binds its default clock at import, so refresh the exact
     # fixture principal instead of changing production clock behavior.
     import time
@@ -142,8 +154,18 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
         await relay.start()
         control = None
         try:
+            operator = Operator()
+            inline_bridge = ExecutiveDialogueWakeBridge(
+                target_provider=None,
+                retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, attention_gate != "retry_disarmed"),
+                operator_adapter=operator, carrier_factory=_build_executive_dialogue_wake_carrier)
+            from integrations.session_bridge.runtime_attention import RuntimeSessionAttention
+            requester = RuntimeSessionAttention(
+                f.runtime, dialogue_socket_path=relay_path,
+                wake_handler_provider=lambda: inline_bridge, admission_guard=lambda: True)
             owner = build_runtime_session_bridge(
-                f.runtime, dialogue_socket_path=relay_path, codex_owner_configured=lambda: True)
+                f.runtime, dialogue_socket_path=relay_path, codex_owner_configured=lambda: True,
+                attention_requester=requester if inline_attention else None)
             async def call(tool, args):
                 return await owner.handle_frame({
                     "schema": PRIVATE_SCHEMA, "tool": tool,
@@ -157,7 +179,22 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
                     "stop_condition": "Return one correlated finding."}
             sent = await call("session_send", args)
             assert sent["ok"] and sent["data"]["carrier"]["reply_committed"], sent
-            assert sent["data"]["attention"] == {"state": "UNAVAILABLE"}
+            if attention_gate in {"route_disarmed", "target_disabled", "retry_disarmed"}:
+                assert operator.calls == 0
+                assert client.post_call_count == 1
+                assert f.registry.production_armed is (attention_gate != "route_disarmed")
+                assert f.target.target_enabled is (attention_gate != "target_disabled")
+                assert inline_bridge._retry_policy.armed is (attention_gate != "retry_disarmed")
+                replay = await call("session_send", args)
+                assert replay["ok"] and replay["data"]["carrier"]["action"] == "DUPLICATE"
+                assert operator.calls == 0 and client.post_call_count == 1
+                return
+            if inline_attention:
+                assert sent["data"]["attention"]["state"] == "RECORDED", sent
+                assert operator.calls == 1  # Native attention before send returns.
+            else:
+                assert sent["data"]["attention"] == {"state": "UNAVAILABLE"}
+                assert operator.calls == 0
             assert client.post_call_count == 1
             event = f.runtime.events.list_events(aggregate_type="session_bridge_continue")[0]
             request_key = event.payload["request_message_key"]
@@ -215,8 +252,7 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
             )
             assert proposal.grant == grant
             assert proposal.read_ref == event.payload["read_ref"]
-            operator = Operator()
-            bridge = ExecutiveDialogueWakeBridge(
+            bridge = inline_bridge if inline_attention else ExecutiveDialogueWakeBridge(
                 target_provider=None, retry_policy=WakeRetryPolicy(1, 1, 60, 1, False, True),
                 operator_adapter=operator, carrier_factory=_build_executive_dialogue_wake_carrier,
                 canary_profile=DialogueWakeCanaryProfile(grant),
@@ -240,8 +276,9 @@ def test_session_send_real_w3c_persists_once_and_original_parent_reads(
                     emitted_at=lambda: "2026-09-03T01:00:02Z")
             turn = observer()
             first = await turn.reconcile_once()
-            assert [(r.outcome.value, r.reason) for r in first] == [
-                ("WAKE_SUBMITTED", "DIALOGUE_TURN_PENDING")]
+            expected_first = (("EFFECT_UNKNOWN_HOLD", "WAKE_EFFECT_UNKNOWN_SAME_CARRIER_HOLD")
+                              if inline_attention else ("WAKE_SUBMITTED", "DIALOGUE_TURN_PENDING"))
+            assert [(r.outcome.value, r.reason) for r in first] == [expected_first]
             assert operator.calls == 1
             assert codex.resolve(target["target_ref"]).reply_binding().reply_to_message_key == request_key
             def attempts():

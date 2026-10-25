@@ -1451,7 +1451,10 @@ class ExecutiveDialogueWakeBridge:
             ):
                 return DialogueWakeResult("MISSING", "CURRENT_WRITER_REFUSED")
             carrier_route = authoritative_route
-            extra_factory: dict[str, Any] = {}
+            # Physical source correlation is not a canary activation grant.
+            # Preserve it for ordinary armed routes as well, so the current
+            # recipient reads/replies to the exact newly committed message.
+            extra_factory: dict[str, Any] = {"physical_source": request.physical_source}
             if profile is not None:
                 current_provider = self._canary_current_facts_for
                 now_provider = self._canary_now_epoch_seconds
@@ -2063,6 +2066,7 @@ class CeoIngressAppBinding:
     steward_provider_factory: Callable[[Runtime], Any] | None = None
     workspace_read_provider_factory: Callable[[Runtime], Any] | None = None
     session_bridge_provider_factory: Callable[[Runtime], Any] | None = None
+    reply_event_provider_factory: Callable[[Runtime], Any] | None = None
     read_schema: str = CEO_APP_READ_SCHEMA
     # Separate principal capability; the incumbent CEO armed bit grants none.
     # Existing launchers omit these fields, so this route is dormant by default.
@@ -2086,6 +2090,8 @@ class CeoIngressAppBinding:
             and not callable(self.session_bridge_provider_factory)
         ):
             raise ValueError("Session Bridge requires a host provider")
+        if self.reply_event_provider_factory is not None and not callable(self.reply_event_provider_factory):
+            raise ValueError("reply events require a host provider")
         if self.principal_facts_factory is not None and not callable(self.principal_facts_factory):
             raise ValueError("principal facts require a host provider")
         if type(self.principal_admission_armed) is not bool:
@@ -5510,6 +5516,45 @@ class ExecutiveControlService:
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=(
                     MAX_PAGE_BYTES if parsed["schema"] == PAGE_SCHEMA else ceo_ingress.MAX_RESPONSE_BYTES))
                 return
+            from common.reply_subscription_private_contract import (
+                PRIVATE_SCHEMA as REPLY_EVENT_PRIVATE_SCHEMA, ReplyEventIngressOwner,
+                MODIFYING as REPLY_EVENT_MODIFYING, result as reply_event_result,
+            )
+            if isinstance(parsed, Mapping) and parsed.get("schema") == REPLY_EVENT_PRIVATE_SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(writer,"peer_denied","reply events require installed App peer")
+                    return
+                factory = app_binding.reply_event_provider_factory
+                if (not app_binding.armed or factory is None or self._closing or not self._ceo_ingress_ready
+                        or self._service_state not in {"READY","AWAITING_CANARY"}):
+                    await self._send_ceo_ingress_error(writer,"ingress_unavailable","reply event owner unavailable")
+                    return
+                try:
+                    runtime = self._require_runtime()
+                    provider = factory(runtime)
+                    if type(provider) is not ReplyEventIngressOwner or provider.runtime is not runtime:
+                        raise ValueError("invalid reply event owner")
+                    operation = provider.validate_frame(parsed)
+                except Exception:
+                    await self._send_ceo_ingress_error(writer,"invalid_input","private event operation unavailable")
+                    return
+                if (self._closing or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                        or self._require_runtime() is not runtime or _peer_uid(connection) != app_binding.peer_uid
+                        or self._service_state not in {"READY","AWAITING_CANARY"}):
+                    await self._send_ceo_ingress_error(writer,"ingress_unavailable","reply event host changed")
+                    return
+                try:
+                    event_result = await provider.handle_frame(parsed)
+                    if (self._closing or self._ceo_ingress_app_binding is not app_binding or not app_binding.armed
+                            or self._service_state not in {"READY","AWAITING_CANARY"}):
+                        raise ValueError("entered reply event host changed")
+                except Exception:
+                    event_result = reply_event_result(operation,code=(
+                        "effect_unknown" if operation in REPLY_EVENT_MODIFYING else "backend_unavailable"))
+                # Once entered, transport loss never permits another callback or
+                # subscription mutation. The canonical Runtime CAS owns recovery.
+                await self._send_ceo_ingress_response(writer,{"ok":True,"result":event_result})
+                return
             from common.session_bridge_private_contract import (
                 PRIVATE_SCHEMA as SESSION_BRIDGE_PRIVATE_SCHEMA,
                 FOREGROUND_PRIVATE_SCHEMA as SESSION_BRIDGE_FOREGROUND_SCHEMA,
@@ -7483,7 +7528,11 @@ class ExecutiveControlService:
             self._native_return_source(root)  # Fresh installed read/execute admission.
             await self._run_owned_coroutine(supervisor.run_native_continuation(
                 dispatch.retained, source=dispatch.source, read_ref=read_ref))
-            await dispatch.source.require_committed_native_reply(read_ref=read_ref)
+            committed_reply = await dispatch.source.require_committed_native_reply(read_ref=read_ref)
+            # Notification is a separate post-COMMIT effect, not a native-Job
+            # terminalization prerequisite. Retain it under existing service
+            # physical-task custody; its Runtime reservation survives restart.
+            self._schedule_native_reply_events(read_ref, committed_reply)
             await self._run_owned_coroutine(supervisor.finish_retained_native_job(dispatch.retained))
             await self._project_terminal_return(dispatch.job_id,
                 expected_attempt_id=lease.attempt.attempt_id)
@@ -7505,6 +7554,94 @@ class ExecutiveControlService:
                 self._native_operator_dispatch = None
             if self._dispatch_tasks.get(dispatch.job_id) is asyncio.current_task():
                 self._dispatch_tasks.pop(dispatch.job_id, None)
+
+    def _schedule_native_reply_events(self, read_ref, committed_reply) -> None:
+        """Retain post-COMMIT notification under existing Executive service custody.
+
+        An external callback cannot delay Job completion or terminal projection.
+        This is one invocation on the already-committed native result, not a
+        new queue, subscriber loop, timer, watcher or retry carrier. Shutdown
+        drains _physical_workers before closing the canonical Runtime owner.
+        """
+        from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+        host, app = self._company_consultation_host, self._ceo_ingress_app_binding
+        consumer = getattr(host, "reply_event_consumer", None)
+        if (self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}
+                or type(consumer) is not ReplyEventCommitConsumer
+                or app is None or not getattr(app, "armed", False)
+                or getattr(app, "reply_event_provider_factory", None) is None
+                or type(read_ref) is not str or not read_ref
+                or type(committed_reply) is not dict):
+            return
+        # The canonical RuntimeSessionReturn.require_committed_native_reply
+        # supplies the *validated Dialogue message*, NOT the writer receipt.
+        # Validate its closed native-reply shape without accepting a caller-
+        # asserted reply_committed bit as independent COMMIT evidence. The
+        # actual durable COMMIT authority is the upstream Runtime reader.
+        try:
+            from common.agent_dialogue_contract_v2 import validate_message_v2
+            canonical = validate_message_v2(committed_reply)
+            if (canonical["message_type"] != "PROGRESS"
+                    or canonical["body"].get("stage") != "message_reply"
+                    or not canonical["message_key"].startswith("asd-native-reply-")):
+                return
+            message_key = canonical["message_key"]
+            fingerprint = canonical["fingerprint"]
+        except Exception:
+            return
+        try:
+            if consumer.runtime is not self._require_runtime():
+                return
+        except Exception:
+            return  # An optional notifier cannot change native Job completion.
+        # Capture the already admitted exact same-Runtime consumer. A normal
+        # service shutdown may begin before the scheduled task gets a
+        # timeslice; _notify_native_reply_events' new-admission gate would
+        # otherwise silently discard the committed reply. This retained task
+        # still runs all canonical subscription/READ checks inside the owner.
+        async def deliver_admitted():
+            try:
+                await consumer.handle_committed(
+                    read_ref=read_ref, message_key=message_key,
+                    fingerprint=fingerprint,
+                )
+            except Exception:
+                pass  # Native COMMIT and Job completion are independent.
+
+        coroutine = deliver_admitted()
+        try:
+            task = asyncio.create_task(
+                coroutine, name="executive-native-reply-notification",
+            )
+        except Exception:
+            coroutine.close()
+            return
+        self._physical_workers.add(task)
+
+        def finished(done):
+            self._physical_workers.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        task.add_done_callback(finished)
+
+    async def _notify_native_reply_events(self, read_ref, committed_reply):
+        """Independent post-COMMIT effect; no writer replay or receipt relabel."""
+        from common.reply_subscription_private_contract import ReplyEventCommitConsumer
+        host, app = self._company_consultation_host, self._ceo_ingress_app_binding
+        consumer = getattr(host,"reply_event_consumer",None)
+        if (self._closing or self._service_state not in {"READY","AWAITING_CANARY"}
+                or type(consumer) is not ReplyEventCommitConsumer
+                or app is None or not getattr(app, "armed", False)
+                or getattr(app, "reply_event_provider_factory", None) is None):
+            return
+        try:
+            if consumer.runtime is not self._require_runtime():
+                return
+            await consumer.handle_committed(read_ref=read_ref,
+                message_key=committed_reply["message_key"],fingerprint=committed_reply["fingerprint"])
+        except Exception:
+            pass  # Existing reservation owns unknown callback effects; native COMMIT stays committed.
 
     async def _signal_native_continuation(self) -> None:
         """Observe exact persisted ACK on an existing Wake ingress edge only."""

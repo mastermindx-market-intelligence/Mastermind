@@ -5178,15 +5178,21 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             os.fspath(CONTROL_SOCKET),
             "status",
         ]
-        completed = subprocess.run(
-            command,
-            cwd=release,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=10,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=release,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            # An absent read-only status witness is not an admission proof.
+            # Keep transient startup latency inside the existing bounded wait;
+            # never retry a mutation or suppress permission/interruption errors.
+            return False
         if completed.returncode != 0 or len(completed.stdout) > _MAX_JSON_BYTES:
             return False
         try:

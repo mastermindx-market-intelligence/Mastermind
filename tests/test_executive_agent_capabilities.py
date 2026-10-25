@@ -858,6 +858,143 @@ def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp
     assert messages == {_DUPLICATE_JSON_KEY_REASON}
 
 
+# The policy source has a 2 MiB raw acquisition budget, independently of the
+# schema's object/cardinality limits and of retained Runtime SQLite budgets.
+_BOUNDED_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def _record_capability_policy_source_reads(monkeypatch, selected):
+    original_open = Path.open
+    requests, handles = [], []
+
+    class Reader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            value = self.handle.read(size)
+            requests.append((size, len(value)))
+            return value
+
+    def tracked_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        if path != selected:
+            return handle
+        handles.append(handle)
+        return Reader(handle)
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+    return requests, handles
+
+
+@pytest.mark.parametrize("relative", [
+    "config/executive_agent_capabilities.json",
+    "config/candidates/claude_principal_rg1.json",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_mastermind_operator.json",
+    "scripts/ohf/fixtures/executive_agent_capabilities_v4_rich_write_operator.json",
+])
+def test_bounded_policy_source_capability_exact_limit_preserves_registry(
+    tmp_path, monkeypatch, relative,
+):
+    import dataclasses
+    root = Path(__file__).resolve().parent.parent
+    expected = ExecutionCapabilityRegistry.load(root / relative, source_root=root)
+    raw = (root / relative).read_bytes()
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    assert len(raw) < limit
+    selected = tmp_path / "bounded-capabilities.json"
+    selected.write_bytes(raw + b" " * (limit - len(raw)))
+    requests, handles = _record_capability_policy_source_reads(monkeypatch, selected)
+    actual = ExecutionCapabilityRegistry.load(selected, source_root=root)
+    for field in dataclasses.fields(expected):
+        if field.name != "source_path":
+            assert getattr(actual, field.name) == getattr(expected, field.name)
+    assert actual.source_path == selected
+    assert requests == [(limit + 1, limit)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+@pytest.mark.parametrize("fault", ["valid", "invalid_utf8", "multibyte"])
+def test_bounded_policy_source_capability_overflow_precedes_decode_and_parse(
+    tmp_path, monkeypatch, fault,
+):
+    from types import SimpleNamespace
+    import control_plane.executive_agent_capabilities as policy_module
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    raw = Path("config/executive_agent_capabilities.json").read_bytes()
+    raw += b" " * (limit + 1 - len(raw))
+    if fault == "invalid_utf8":
+        raw = b"\xff" + raw[1:]
+    elif fault == "multibyte":
+        raw = ('"' + 'é' * (limit // 2) + '"').encode("utf-8")
+        assert len(raw.decode("utf-8")) < limit < len(raw)
+    selected = tmp_path / "over-limit-capabilities.json"
+    selected.write_bytes(raw)
+    requests, handles = _record_capability_policy_source_reads(monkeypatch, selected)
+
+    def forbidden_parse(*_args, **_kwargs):
+        pytest.fail("over-limit capability source reached the JSON parser")
+
+    # Replace only this owner's JSON reference, never the shared json module.
+    monkeypatch.setattr(policy_module, "json", SimpleNamespace(
+        loads=forbidden_parse, JSONDecodeError=json.JSONDecodeError,
+    ))
+    with pytest.raises(CapabilityPolicyError, match="source exceeds byte limit"):
+        ExecutionCapabilityRegistry.load(selected)
+    assert requests == [(limit + 1, limit + 1)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+def test_bounded_policy_source_capability_preserves_universal_newlines(tmp_path):
+    raw = Path("config/executive_agent_capabilities.json").read_bytes()
+    selected = tmp_path / "mixed-newlines.json"
+    lines = raw.split(b"\n")
+    mixed = b"".join(line + (b"\r\n" if i % 2 else b"\r")
+                     for i, line in enumerate(lines))
+    selected.write_bytes(mixed)
+    expected = ExecutionCapabilityRegistry.load()
+    actual = ExecutionCapabilityRegistry.load(selected)
+    assert actual.policy_digest == expected.policy_digest
+    assert actual.profiles == expected.profiles
+
+    # A bare CR is invisible to JSONDecodeError's own newline counter. This
+    # distinguishes the former read_text translation from raw decode alone.
+    malformed = b'{\r\n"schema_version": 1,\r"profiles": }'
+    selected.write_bytes(malformed)
+    with pytest.raises(CapabilityPolicyError) as caught:
+        ExecutionCapabilityRegistry.load(selected)
+    cause = caught.value.__cause__
+    assert isinstance(cause, json.JSONDecodeError)
+    expected_text = '{\n"schema_version": 1,\n"profiles": }'
+    assert cause.doc == expected_text
+    assert cause.lineno == 3 and cause.colno == 13
+
+
+@pytest.mark.parametrize("raw, cause", [
+    (b"\xff", UnicodeDecodeError),
+    (b"\xef\xbb\xbf{}", json.JSONDecodeError),
+    ("{}".encode("utf-16"), UnicodeDecodeError),
+    ("{}".encode("utf-32"), UnicodeDecodeError),
+])
+def test_bounded_policy_source_capability_keeps_encoding_refusals(tmp_path, raw, cause):
+    selected = tmp_path / "bad-encoding.json"
+    selected.write_bytes(raw)
+    with pytest.raises(CapabilityPolicyError) as caught:
+        ExecutionCapabilityRegistry.load(selected)
+    assert isinstance(caught.value.__cause__, cause)
+
+
+def test_bounded_policy_source_capability_missing_path_keeps_resolve_exception(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        ExecutionCapabilityRegistry.load(tmp_path / "missing-capabilities.json")
+
 def test_checked_in_provider_free_acp_profile_uses_exact_workspace_read_grant():
     from control_plane.executive_agent_capabilities import (
         ACP_EXECUTION_SURFACE,
