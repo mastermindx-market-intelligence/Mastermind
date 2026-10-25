@@ -98,10 +98,14 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             with patch.object(h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h.subprocess, "run",
-                    return_value=SimpleNamespace(returncode=17, stderr="partial purge")):
+                    return_value=SimpleNamespace(returncode=17,
+                                           stderr="pip auth failed https://u:SECRET_DO_NOT_LOG@example.invalid/")):
                 results = h.cache_cleanup(base, base, "CAUTION")
             self.assertEqual(results[0]["state"], "EFFECT_UNVERIFIED")
             self.assertEqual(results[0]["exit_code"], 17)
+            self.assertEqual(results[0]["error_class"], "MANAGER_EXIT_NONZERO")
+            self.assertTrue(results[0]["stderr_redacted"])
+            self.assertNotIn("SECRET_DO_NOT_LOG", __import__("json").dumps(results))
             self.assertTrue((base / h.HOLD).exists())
             self.assertEqual(h.cache_cleanup(base, base, "CRITICAL"),
                              [{"state": "HELD_EFFECT_UNVERIFIED"}])

@@ -18,6 +18,9 @@ watcher lifecycle, worker queue, or Git authority. See `README.md` and issue #16
   free-space delta is NOT attributed to package-manager reclamation; until
   distinct manager-specific byte proof exists the attributable counter stays
   zero with an explicit NOT_ESTABLISHED attribution field.
+* Package-manager nonzero exits retain only the exit code and a fixed error class;
+  captured stderr is never copied into JSONL because it can contain credentials
+  or private URLs. An `stderr_redacted` flag records its suppression.
 * NO deletion of a Git worktree, registered Git metadata, external archive,
   root clone, `/tmp`, models, build artifacts, or user files is automated.
   An old directory is a TRIAGE CANDIDATE only. Human ChatGPT worktrees may be

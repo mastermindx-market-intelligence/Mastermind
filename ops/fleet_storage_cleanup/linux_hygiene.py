@@ -300,7 +300,8 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
             results.append({"cache": name, "state": "EFFECT_UNVERIFIED",
                             "exit_code": proc.returncode,
                             "duration_sec": round(time.monotonic() - started, 2),
-                            "stderr_tail": proc.stderr[-160:]})
+                            "error_class": "MANAGER_EXIT_NONZERO",
+                            "stderr_redacted": bool(proc.stderr)})
             break
         after_root, after_cache = volume(Path("/")), volume(cache)
         if (not effect_volume_pair_ok(after_root, after_cache)
