@@ -12,6 +12,7 @@ Fabric worker: the catalogue stays disabled until live qualification.
 """
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import math
@@ -69,6 +70,16 @@ class CapacityReservation:
 
 
 @dataclass(frozen=True)
+class ProviderDispatchReceipt:
+    """Acknowledged dispatch intent from the existing Executive Attempt owner."""
+    root_id: str
+    attempt_id: str
+    reservation_ref: str
+    request_sha256: str
+    dispatch_ref: str
+
+
+@dataclass(frozen=True)
 class FableAdvice:
     root_id: str
     attempt_id: str
@@ -80,6 +91,9 @@ class FableAdvice:
     estimated_usd: float
     reservation_ref: str
     source_refs: tuple[str, ...]
+    request_sha256: str
+    response_sha256: str
+    dispatch_ref: str
     stop_reason: str = field(default="end_turn")
 
 
@@ -186,7 +200,8 @@ def _verify_route(router: object, decision: object):
     return receipt
 
 
-def _parse_advice(raw: bytes, request: FableRequest, reservation: CapacityReservation) -> FableAdvice:
+def _parse_advice(raw: bytes, request: FableRequest, reservation: CapacityReservation,
+                  dispatch: ProviderDispatchReceipt) -> FableAdvice:
     try:
         if type(raw) is not bytes or len(raw) > _MAX_RESULT_BYTES:
             raise ValueError("invalid response bytes")
@@ -218,7 +233,9 @@ def _parse_advice(raw: bytes, request: FableRequest, reservation: CapacityReserv
             raise ValueError("provider usage exceeds reserved budget")
         return FableAdvice(request.root_id, request.attempt_id, reply["id"], MODEL,
                            text, inp, out, cost, reservation.reservation_ref,
-                           request.source_refs)
+                           request.source_refs,
+                           dispatch.request_sha256, hashlib.sha256(raw).hexdigest(),
+                           dispatch.dispatch_ref)
     except (KeyError, TypeError, ValueError, IndexError, AttributeError, json.JSONDecodeError):
         raise FableApiIncomplete("provider response incomplete; reconcile original Attempt") from None
 
@@ -242,8 +259,10 @@ class FableApiPrincipal:
     def __init__(self, *, router: object, decision: object,
                  bound_root_id: str, bound_attempt_id: str,
                  reserve: Callable[[str, str, str, float], CapacityReservation],
+                 record_dispatch: Callable[[str, str, str, str], ProviderDispatchReceipt],
                  credential_loader: Callable[[], str], send: ApiSend = send_anthropic_once):
-        if not callable(reserve) or not callable(credential_loader) or not callable(send):
+        if not all(callable(callback) for callback in (reserve, record_dispatch,
+                                                         credential_loader, send)):
             raise FableApiRefused("trusted owner dependencies missing")
         if not _bounded_id(bound_root_id) or not _bounded_id(bound_attempt_id):
             raise FableApiRefused("trusted Attempt binding is invalid")
@@ -252,6 +271,7 @@ class FableApiPrincipal:
         self.router = router
         self.decision = decision
         self.reserve = reserve
+        self.record_dispatch = record_dispatch
         self.credential_loader = credential_loader
         self.send = send
         self._consumed = False
@@ -292,6 +312,18 @@ class FableApiPrincipal:
         if (not isinstance(key, str) or not 12 <= len(key) <= 1024
             or any(ch in key for ch in "\n\r\x00")):
             raise FableApiRefused("Anthropic API credential unavailable")
+        request_digest = hashlib.sha256(body).hexdigest()
+        try:
+            dispatch = self.record_dispatch(request.root_id, request.attempt_id,
+                                            reservation.reservation_ref, request_digest)
+        except Exception:
+            raise FableApiEffectUnknown("original Attempt dispatch record uncertain; reconcile") from None
+        if (not isinstance(dispatch, ProviderDispatchReceipt)
+            or dispatch.root_id != request.root_id or dispatch.attempt_id != request.attempt_id
+            or dispatch.reservation_ref != reservation.reservation_ref
+            or dispatch.request_sha256 != request_digest
+            or not _bounded_id(dispatch.dispatch_ref)):
+            raise FableApiEffectUnknown("original Attempt dispatch acknowledgment invalid; reconcile")
         headers = {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION,
                    "content-type": "application/json", "accept": "application/json"}
         # The call may have reached Anthropic even if the transport raises.
@@ -304,9 +336,9 @@ class FableApiPrincipal:
             key = ""  # best-effort avoid retained local reference; not secure memory erase
         if status != 200:
             raise FableApiEffectUnknown("provider returned non-success; no automated replay")
-        return _parse_advice(raw, request, reservation)
+        return _parse_advice(raw, request, reservation, dispatch)
 
 
 __all__ = ["MODEL", "MODEL_ALIAS", "PROVIDER_ALIAS", "FableRequest", "CapacityReservation",
-           "FableAdvice", "FableApiRefused", "FableApiEffectUnknown", "FableApiIncomplete",
+           "ProviderDispatchReceipt", "FableAdvice", "FableApiRefused", "FableApiEffectUnknown", "FableApiIncomplete",
            "FableApiPrincipal", "send_anthropic_once"]
