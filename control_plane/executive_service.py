@@ -2908,6 +2908,11 @@ class ExecutiveControlService:
             raise ServiceError("installed COO routing/capability policy drifted")
         return dict(current)
 
+    def _resolve_ceo_frontier_selection(self, alias: str) -> dict[str, Any]:
+        """Host catalog identity only; this does not start a CEO session."""
+        from control_plane.frontier_selection import resolve_selection
+        return resolve_selection(ModelRouter.load(), alias)
+
     def _require_coo_admission_binding(self) -> dict[str, Any]:
         """Fresh admission cannot export a qualification to an unrelated root."""
         qualification = self._require_attended_qualification()
@@ -5431,7 +5436,7 @@ class ExecutiveControlService:
                         else:
                             validate_acceptance_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
@@ -5439,7 +5444,7 @@ class ExecutiveControlService:
                     try:
                         validate_activity_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == FRAME_SCHEMA_V3:
@@ -5447,7 +5452,7 @@ class ExecutiveControlService:
                     try:
                         validate_v3_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == FRAME_SCHEMA_V2:
@@ -5796,6 +5801,7 @@ class ExecutiveControlService:
                         or self._ceo_ingress_dialogue_source_provider is not None
                     ),
                     execution_binding_provider=self._require_coo_admission_binding,
+                    frontier_selection_provider=self._resolve_ceo_frontier_selection,
                     dialogue_source_provider=(
                         self._ceo_ingress_dialogue_source_provider
                     ),
@@ -7882,6 +7888,8 @@ class ExecutiveControlService:
                 # The executor thread may begin after its originating request closes.
                 self._require_foreground_only_source(root_id)
                 return CooCycle(self._require_runtime(), dispatcher=dispatch,
+                    planner_plan_schema_version=getattr(
+                        self.operator_supervisor, "fresh_planner_schema_version", None),
                     before_admission=(require_cycle_admission
                                       if self.config.coo_foreground_only or self._foreground_cycle_owner is not None
                                       else None)).run_once(root_id)

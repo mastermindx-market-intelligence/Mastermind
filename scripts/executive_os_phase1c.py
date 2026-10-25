@@ -1830,6 +1830,7 @@ def _service_from_config(
     dialogue_canary_profile: Any | None = None,
     native_dialogue_canary_profile_loader: Callable[[], Any] | None = None,
     remote_worker_binding_source: Callable[..., Any] | None = None,
+    plan_schema_version: str | None = None,
     fabric_worker_binding_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
@@ -1841,6 +1842,25 @@ def _service_from_config(
     if type(dialogue_canary_profile) is not DialogueWakeCanaryProfile:
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
+    from control_plane.executive_orchestration_result import (
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+    )
+    # Legacy omission stays legacy: only an explicit version opts this Control
+    # host into a native planner producer, and that needs an explicitly supplied
+    # trusted claim-bound adapter. The remote transport has not qualified native
+    # contract custody.
+    if plan_schema_version is not None and (
+        type(plan_schema_version) is not str
+        or plan_schema_version not in {
+            PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+        }
+    ):
+        raise ServiceError("trusted planner plan schema is unsupported")
+    if plan_schema_version is not None and (
+        claimed_operator_adapter_factory is None
+        or remote_operator_binding_source is not None
+    ):
+        raise ServiceError("versioned producer needs a trusted claim-bound adapter")
     _validate_fabric_bridge_config(raw)
     from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
     if (type(attended_work_placements) is not tuple
@@ -2280,6 +2300,7 @@ def _service_from_config(
             prompt_source=(sealed_supervisor.primary
                            if type(sealed_supervisor) is MixedExecutionOwnerSupervisor
                            else sealed_supervisor),
+            plan_schema_version=plan_schema_version,
         )
 
     async def verify_operator_identity() -> None:
@@ -2618,6 +2639,7 @@ def _service_from_config(
                                 ceo_ingress_armed=binding.armed,
                                 strict_v2_admission=True,
                                 execution_binding_provider=current_execution_binding,
+                                frontier_selection_provider=service._resolve_ceo_frontier_selection,
                                 dialogue_source_provider=commission_source_provider,
                                 admission_guard=require_summon_admission,
                                 fresh_admission_observer=(

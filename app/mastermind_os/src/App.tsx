@@ -2764,6 +2764,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           ])}
           projects={commandView.projects}
           profiles={commandView.profiles}
+          frontierModels={commandView.frontierModels}
           unavailableReason={
             canLaunch
               ? undefined

@@ -880,3 +880,56 @@ def test_native_auth_or_quota_error_not_hidden_by_absent_structured_result(fake_
         assert result['success'] is False and result['summary'] is None and result['failure']==expected
         await r.disconnect()
     asyncio.run(scenario())
+
+@pytest.mark.parametrize(
+    ("contract", "schema", "pin_placement"),
+    [
+        ("executive-plan-v3", "mastermind.execution_plan/v3", True),
+        ("executive-plan-v4", "mastermind.execution_plan/v4", False),
+        ("executive-plan-v5", "mastermind.execution_plan/v5", False),
+    ],
+)
+def test_native_versioned_structured_plan_is_provider_schema_bound(
+    fake_sdk, contract, schema, pin_placement
+):
+    async def scenario():
+        from control_plane.claude_operator_helper_protocol import native_plan_contract, native_plan_schema
+        from control_plane.executive_orchestration_result import canonical_bytes
+        r = helper.HelperRuntime("gen", {**_good_config(), "result_contract": contract})
+        handshake = await r.initialize()
+        assert handshake["result_contract"] == native_plan_contract(contract)
+        assert r.client.options.output_format == {
+            "type": "json_schema", "schema": native_plan_schema(contract)
+        }
+        structured = _structured_plan()
+        structured["role_result"]["schema_version"] = schema
+        for step in structured["role_result"]["steps"]:
+            step["prerequisite_step_ids"] = []
+            if schema == "mastermind.execution_plan/v5":
+                structured["role_result"]["coordinator_job_id"] = structured["role_result"]["root_job_id"]
+                step["delegation"] = None
+            if pin_placement:
+                step["placement"] = {
+                    "provider_realm": "codex", "quota_class": "codex-research"
+                }
+        msg = FakeResultMessage("success", r.session_id, False, 1, 0, {}, "discard native prose")
+        msg.structured_output = structured
+        msg.uuid = str(uuid.uuid4())
+        r.client.enqueue_turn_events([msg])
+        await r.begin_turn("V", "read-only planner")
+        await r._drain_task
+        collected = await r.collect()
+        assert collected["success"] is True
+        assert collected["result_source"] == "native-structured-output"
+        assert collected["result_contract"] == native_plan_contract(contract)
+        assert collected["summary"].encode() == canonical_bytes(structured)
+        await r.disconnect()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v6", ""])
+def test_unknown_native_plan_helper_contract_refuses_before_sdk_start(
+    fake_sdk, contract
+):
+    with pytest.raises(HelperProtocolError, match="unsupported"):
+        helper.HelperRuntime("gen", {**_good_config(), "result_contract": contract})

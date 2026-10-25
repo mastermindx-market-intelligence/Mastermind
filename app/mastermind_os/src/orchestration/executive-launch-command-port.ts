@@ -76,6 +76,7 @@ export interface LaunchBindingConfig {
   };
   readonly projects: readonly LaunchChoice[];
   readonly profiles: readonly LaunchChoice[];
+  readonly frontierModels?: readonly LaunchChoice[];
 }
 
 export interface ExecutiveLaunchViewSource {
@@ -199,6 +200,12 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (!listedChoice(this.config.projects, form.projectRef)) return null;
     if (!PROFILES.has(form.profileRef)) return null;
     if (!listedChoice(this.config.profiles, form.profileRef)) return null;
+    if (this.config.frontierModels !== undefined) {
+      if (typeof form.frontierModelAlias !== "string" ||
+          !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(form.frontierModelAlias) ||
+          /[^a-z0-9._-]/.test(form.frontierModelAlias) ||
+          !listedChoice(this.config.frontierModels, form.frontierModelAlias)) return null;
+    } else if (form.frontierModelAlias !== undefined) return null;
     if (!validWorkstream(this.config.workstream)) return null;
     if (!validPriority(this.config.priority)) return null;
 
@@ -220,6 +227,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
         workstream: this.config.workstream,
         department: form.projectRef,
         execution_profile: form.profileRef,
+        ...(form.frontierModelAlias !== undefined ? { frontier_model_alias: form.frontierModelAlias } : {}),
         objective: form.goal,
         priority: this.config.priority,
         ...(writePaths !== undefined ? { allowed_write_paths: writePaths } : {}),
@@ -234,6 +242,7 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
       execution_profile: form.profileRef,
       workstream: this.config.workstream,
     };
+    if (form.frontierModelAlias !== undefined) payload.frontier_model_alias = form.frontierModelAlias;
     if (writePaths !== undefined) payload.allowed_write_paths = [...writePaths];
     if (validation !== undefined) payload.validation = copyValidation(validation);
     if (this.config.attemptLimit !== undefined) {
@@ -454,6 +463,7 @@ export function createExecutiveLaunchBinding(
       return {
         projects: config.projects,
         profiles: config.profiles,
+        ...(config.frontierModels !== undefined ? { frontierModels: config.frontierModels } : {}),
         session: session ? presentSession(session) : null,
       };
     },
@@ -486,10 +496,12 @@ function formFromPayload(payload: Readonly<Record<string, unknown>>): LaunchForm
   if (typeof payload.objective !== "string") return null;
   if (typeof payload.department !== "string") return null;
   if (typeof payload.execution_profile !== "string") return null;
+  if (payload.frontier_model_alias !== undefined && typeof payload.frontier_model_alias !== "string") return null;
   return {
     goal: payload.objective,
     projectRef: payload.department,
     profileRef: payload.execution_profile,
+    ...(typeof payload.frontier_model_alias === "string" ? { frontierModelAlias: payload.frontier_model_alias } : {}),
   };
 }
 

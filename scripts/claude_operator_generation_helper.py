@@ -113,11 +113,22 @@ class HelperRuntime:
         self._native_result_id: str | None = None
         self._applied_launch_provenance: dict[str, Any] = {}
         self._drain_closed = True
-        from control_plane.claude_operator_helper_protocol import EXECUTIVE_PLAN_CONTRACT, native_plan_contract
+        from control_plane.claude_operator_helper_protocol import (
+            EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3,
+            EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5, native_plan_contract,
+        )
         result_contract = self.config.get("result_contract")
-        if result_contract not in (None, EXECUTIVE_PLAN_CONTRACT):
+        if result_contract is not None and (
+            type(result_contract) is not str
+            or result_contract not in {
+                EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3,
+                EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5,
+            }
+        ):
             raise HelperProtocolError("native result contract is unsupported")
-        self._result_contract = native_plan_contract() if result_contract else None
+        self._result_contract = (
+            native_plan_contract(result_contract) if result_contract is not None else None
+        )
 
     def _record_event(self, entry: dict[str, Any]) -> None:
         self._event_sequence += 1
@@ -191,7 +202,10 @@ class HelperRuntime:
             options_kwargs["settings"] = json.dumps(self.config["settings"], allow_nan=False)
         if self._result_contract is not None:
             from control_plane.claude_operator_helper_protocol import native_plan_schema
-            options_kwargs["output_format"] = {"type": "json_schema", "schema": native_plan_schema()}
+            options_kwargs["output_format"] = {
+                "type": "json_schema",
+                "schema": native_plan_schema(self._result_contract["name"]),
+            }
 
         try:
             self._applied_launch_provenance = {
@@ -524,7 +538,9 @@ class HelperRuntime:
                         try:
                             if not isinstance(structured, dict):
                                 raise ValueError("native structured object is absent")
-                            Draft7Validator(native_plan_schema()).validate(structured)
+                            Draft7Validator(
+                                native_plan_schema(self._result_contract["name"])
+                            ).validate(structured)
                             encoded = canonical_bytes(structured)
                             if len(encoded) > MAX_TEXT_CHARS:
                                 raise ValueError("native structured object exceeds bound")

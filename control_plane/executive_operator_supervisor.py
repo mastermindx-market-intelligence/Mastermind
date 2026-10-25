@@ -32,6 +32,7 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.executive_operator_harness_port import ExecutiveOperatorHarnessPort
 from control_plane.executive_orchestration_result import (
+    PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
     canonical_bytes,
     canonical_digest,
     parse_canonical_json,
@@ -46,6 +47,8 @@ from control_plane.executive_runtime import (
     OrchestrationDispatchOutcome,
     Runtime,
     StateConflict,
+    _dialogue_source_from_root_creation,
+    _ohf_json_digest,
 )
 from control_plane.executive_supervisor import (
     ExecutiveSupervisor,
@@ -133,6 +136,7 @@ class ExecutiveOperatorSupervisor:
         instance_id: str = "executive-coo-operator",
         claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
         workspace_identity_source: ClaimedWorkspaceIdentitySource | None = None,
+        plan_schema_version: str | None = None,
         foreground_only: bool = False,
     ) -> None:
         if ((adapter_factory is None) == (claimed_adapter_factory is None)
@@ -145,6 +149,27 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "selected-host workspace identity requires a claim-aware factory"
             )
+        # ``None`` is legacy omission: the retained planner receipt alone decides
+        # the contract. Any explicit value is a native-producer opt-in, including
+        # V1, so it must arrive through a claim-aware adapter factory.
+        if plan_schema_version is not None and (
+            type(plan_schema_version) is not str
+            or plan_schema_version not in {
+                PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+            }
+        ):
+            raise ExecutiveOperatorSupervisorError("operator plan schema is not admitted")
+        if plan_schema_version is not None and claimed_adapter_factory is None:
+            raise ExecutiveOperatorSupervisorError(
+                "versioned producer requires a claim-aware adapter factory"
+            )
+        # This is a fresh-creation preference only. Execution and recovery read
+        # the immutable planner receipt, including historical V1 absence. Native
+        # producer support is never inferred from claimed factory presence.
+        self.plan_schema_version = (
+            PLAN_SCHEMA_V1 if plan_schema_version is None else plan_schema_version
+        )
+        self.fresh_planner_schema_version = plan_schema_version
         if type(foreground_only) is not bool:
             raise ExecutiveOperatorSupervisorError("foreground_only must be boolean")
         self.foreground_only = foreground_only
@@ -155,14 +180,58 @@ class ExecutiveOperatorSupervisor:
         self.prompt_source = prompt_source
         self.instance_id = instance_id
 
+    def _planner_schema(self, job: Job) -> str:
+        try:
+            binding = self.runtime.jobs.get_planner_producer_binding(job.job_id)
+        except StateConflict as exc:
+            raise ExecutiveOperatorSupervisorError(str(exc)) from exc
+        return PLAN_SCHEMA_V1 if binding is None else binding["plan_schema_version"]
+
+    def _require_adapter_contract(self, job: Job, adapter: OperatorHarnessAdapter) -> None:
+        try:
+            binding = self.runtime.jobs.get_planner_producer_binding(job.job_id)
+        except StateConflict as exc:
+            raise ExecutiveOperatorSupervisorError(str(exc)) from exc
+        declared = getattr(adapter, "plan_contract", None)
+        # A historical V1 transport remains historical. Schema support alone
+        # must not promote that transport into a versioned native producer.
+        if binding is None:
+            if declared not in (None, "executive-plan-v1"):
+                raise ExecutiveOperatorSupervisorError("legacy adapter plan contract must remain V1")
+        elif declared != binding["native_result_contract"]["name"]:
+            raise ExecutiveOperatorSupervisorError(
+                "claim-bound adapter plan contract differs from retained producer binding"
+            )
+
     def _adapter_for_attempt(
         self, lease: AttemptLease, requested: RequestedExecutionProfile,
         loader: Callable[[Any], str], *, recovery: bool,
+        expected_recovery_seal: str | None = None,
     ) -> OperatorHarnessAdapter:
         factory = self._claimed_adapter_factory
-        if factory is None:
+        initial_job = self.runtime.jobs.get_job(lease.attempt.job_id)
+        if initial_job is None:
+            raise ExecutiveOperatorSupervisorError("planner Job disappeared before construction")
+        retained_seal = expected_recovery_seal
+        if recovery and lease.attempt.status is not AttemptStatus.CANCEL_REQUESTED:
+            if self._sealed_role_result_json(initial_job, lease) != retained_seal:
+                raise ExecutiveOperatorSupervisorError("retained role-result seal changed before construction")
+        elif retained_seal is not None:
+            raise ExecutiveOperatorSupervisorError("result consumption requires non-cancelled recovery")
+        containment = recovery and (
+            lease.attempt.status is AttemptStatus.CANCEL_REQUESTED or retained_seal is not None
+        )
+        if not containment:
+            self.runtime.jobs.assert_frontier_planner_execution(initial_job.job_id)
+        producer = (None if containment else
+                    self.runtime.jobs.get_planner_producer_binding(initial_job.job_id))
+        if factory is None and producer is not None:
+            raise ExecutiveOperatorSupervisorError("bound planner requires a claim-aware adapter factory")
+        if factory is None and not recovery:
             assert self.adapter_factory is not None
-            return self.adapter_factory(loader)
+            adapter = self.adapter_factory(loader)
+            self._require_adapter_contract(initial_job, adapter)
+            return adapter
 
         # Construction must not start a provider. Runtime retains the lease and
         # final effect admission; the callback receives no lease token or new authority.
@@ -171,6 +240,10 @@ class ExecutiveOperatorSupervisor:
             allowed = ({AttemptStatus.CLAIMED, AttemptStatus.RUNNING,
                         AttemptStatus.CHECKPOINTED, AttemptStatus.CANCEL_REQUESTED}
                        if recovery else {AttemptStatus.CLAIMED})
+            if (containment or producer is not None) and not isinstance(
+                requested, RequestedExecutionProfile
+            ):
+                raise ExecutiveOperatorSupervisorError("bound planner requested profile is invalid")
             identity = ("attempt_id", "job_id", "worker_id", "quota_class",
                         "fence_generation", "lease_owner", "authority_policy_hash")
             if (not isinstance(current, Attempt) or current.status not in allowed
@@ -184,23 +257,65 @@ class ExecutiveOperatorSupervisor:
                     or job.assigned_worker_id != current.worker_id
                     or job.assigned_quota_class != current.quota_class):
                 raise ExecutiveOperatorSupervisorError("claimed operator Job binding moved")
+            if (recovery and current.status is not AttemptStatus.CANCEL_REQUESTED
+                    and self._sealed_role_result_json(
+                        job, AttemptLease(current, lease.lease_token)
+                    ) != retained_seal):
+                raise ExecutiveOperatorSupervisorError("retained role-result seal moved during containment")
+            if not containment:
+                self.runtime.jobs.assert_frontier_planner_execution(job.job_id)
+            current_producer = (None if containment else
+                self.runtime.jobs.get_planner_producer_binding(job.job_id))
+            if current_producer != producer:
+                raise ExecutiveOperatorSupervisorError("planner producer binding moved during construction")
+            if containment or producer is not None:
+                # Containment consumes the recorded execution identity, even if
+                # current quota metadata or producer defaults have changed.
+                if current.requested_execution_profile is not None:
+                    if (_ohf_json_digest(requested)[1] != current.requested_execution_profile_digest
+                            or requested_execution_profile(current.requested_execution_profile) != requested):
+                        raise ExecutiveOperatorSupervisorError("bound planner sealed profile differs")
+                elif recovery or requested != self._requested_profile(job, AttemptLease(current, lease.lease_token)):
+                    raise ExecutiveOperatorSupervisorError("bound planner requested profile differs from its Job")
+            if producer is not None:
+                quota = self.runtime.workers.get_quota_class(current.worker_id, current.quota_class)
+                if (quota is None or quota.active_attempt_id != current.attempt_id
+                        or quota.active_job_id != job.job_id
+                        or quota.fence_generation != current.fence_generation
+                        or current.quota_class not in job.constraints["eligible_quota_classes"]
+                        or quota.provider != job.constraints["provider"]
+                        or quota.model != job.constraints["model"]
+                        or quota.effort != job.constraints["effort"]
+                        or quota.cost_class != job.constraints["cost_class"]
+                        or any(quota.metadata.get(key) != job.constraints[key] for key in (
+                            "routing_policy_version", "execution_profile_id", "execution_profile_digest",
+                            "capability_policy_version", "capability_policy_digest",
+                            "harness_binary_digest", "harness_version"))):
+                    raise ExecutiveOperatorSupervisorError("bound planner quota execution identity moved")
             signature = tuple(getattr(current, key) for key in identity) + (
                 current.status, current.execution_mode,
                 current.requested_execution_profile_digest,
                 current.effective_grant_digest, current.placement_snapshot_digest,
                 current.execution_principal_snapshot_digest, job.status,
+                canonical_digest(current_producer) if current_producer is not None else None,
             )
             return current, signature
 
         current, before = current_binding()
         try:
-            adapter = factory(copy.deepcopy(current), copy.deepcopy(requested),
-                              loader, recovery=recovery)
+            if factory is None:
+                assert self.adapter_factory is not None
+                adapter = self.adapter_factory(loader)
+            else:
+                adapter = factory(copy.deepcopy(current), copy.deepcopy(requested),
+                                  loader, recovery=recovery)
         except Exception:
             raise ExecutiveOperatorSupervisorError("claimed operator construction refused") from None
         _, after = current_binding()
         if before != after:
             raise ExecutiveOperatorSupervisorError("claimed operator binding changed during construction")
+        if not containment:
+            self._require_adapter_contract(initial_job, adapter)
         return adapter
 
     @staticmethod
@@ -512,6 +627,8 @@ class ExecutiveOperatorSupervisor:
         commission: VerifiedCommission | None = None,
     ) -> str:
         grant = ExecutiveSupervisor._effective_grant(job, lease.attempt)
+        version = (PLAN_SCHEMA_V1 if lease.attempt.status is AttemptStatus.CANCEL_REQUESTED
+                   else self._planner_schema(job))
         schema = worker_result_schema(
             job_id=job.job_id,
             run_id=lease.attempt.attempt_id,
@@ -519,6 +636,8 @@ class ExecutiveOperatorSupervisor:
             effective_grant_digest=lease.attempt.effective_grant_digest,
             orchestration_role="plan",
             root_job_id=job.root_job_id,
+            plan_schema_version=version,
+            coordinator_job_id=(job.parent_job_id if version == PLAN_SCHEMA_V5 else None),
         )
         base_prompt = (
             self.prompt_source._prompt(job, lease.attempt, grant)
@@ -554,12 +673,20 @@ class ExecutiveOperatorSupervisor:
         routing observations. Source-free jobs retain their historical identity.
         """
 
-        if commission is None:
+        return ExecutiveOperatorSupervisor._commission_turn_operation_id(
+            attempt_id, None if commission is None else commission.ref_dict()
+        )
+
+    @staticmethod
+    def _commission_turn_operation_id(
+        attempt_id: str, commission_ref: dict[str, str] | None,
+    ) -> OperationId:
+        if commission_ref is None:
             return OperationId(f"ohf-op:turn:{attempt_id}")
         binding = {
             "schema_version": "mastermind.operator_turn_commission_binding/v1",
             "attempt_id": attempt_id,
-            "commission_ref": commission.ref_dict(),
+            "commission_ref": commission_ref,
         }
         binding_digest = hashlib.sha256(
             json.dumps(
@@ -1063,6 +1190,10 @@ class ExecutiveOperatorSupervisor:
                 operation_id=start_operation,
             )
 
+            # Initialization has its own native-contract and served-model
+            # attestation. Recheck retained selection before the first useful turn.
+            self._require_adapter_contract(job, adapter)
+
             def bound_prompt(turn: Any) -> str:
                 value = prompt_by_turn.pop("pending")
                 prompt_by_turn[turn.turn_id] = value
@@ -1365,8 +1496,14 @@ class ExecutiveOperatorSupervisor:
                 lease,
                 require_turn=False,
             )
+            sealed_result_json = (
+                None if lease.attempt.status is AttemptStatus.CANCEL_REQUESTED
+                else self._sealed_role_result_json(job, lease)
+            )
+            containment = (lease.attempt.status is AttemptStatus.CANCEL_REQUESTED
+                           or sealed_result_json is not None)
             verified_commission = None
-            if lease.attempt.status is not AttemptStatus.CANCEL_REQUESTED:
+            if not containment:
                 try:
                     verified_commission = verify_commission_for_job(
                         self.runtime,
@@ -1379,30 +1516,51 @@ class ExecutiveOperatorSupervisor:
                     raise ExecutiveOperatorSupervisorError(
                         f"operator immutable commission verification failed: {exc}"
                     ) from exc
-            # Cancellation/containment of an already-live writer must never depend
-            # on later availability of the immutable commission. No new/resumed
-            # turn is permitted without verification; this source-free prompt is
-            # only a loader placeholder for reconcile/cancel mechanics.
-            prompt = self._prompt(job, lease, verified_commission)
-            expected_turn_operation = (
-                self._turn_operation_id(attempt_id, verified_commission)
-                if verified_commission is not None
-                else None
-            )
+            # Cancellation and sealed-result consumption need only containment.
+            # Do not require fresh source/provider admission or load turn input.
+            if containment:
+                def load_recovery_turn(_turn: Any) -> str:
+                    raise ExecutiveOperatorSupervisorError(
+                        "containment recovery cannot start or resume a turn"
+                    )
+            else:
+                prompt = self._prompt(job, lease, verified_commission)
+                def load_recovery_turn(_turn: Any) -> str:
+                    return prompt
+            if sealed_result_json is not None:
+                # Preserve original input custody without reopening commission
+                # source or requalifying a producer after its output is sealed.
+                with self.runtime.store.read() as connection:
+                    source = _dialogue_source_from_root_creation(
+                        connection, root_job_id=job.root_job_id
+                    )
+                expected_turn_operation = (
+                    self._commission_turn_operation_id(
+                        attempt_id, source.commission_ref.to_dict()
+                    ) if source is not None else None
+                )
+            else:
+                expected_turn_operation = (
+                    self._turn_operation_id(attempt_id, verified_commission)
+                    if verified_commission is not None else None
+                )
             if (
                 expected_turn_operation is not None
-                and existing_turn is not None
                 and (
-                    existing_turn_operation is None
-                    or existing_turn_operation.command_id
-                    != expected_turn_operation.command_id
+                    (sealed_result_json is not None and existing_turn is None)
+                    or (existing_turn is not None and (
+                        existing_turn_operation is None
+                        or existing_turn_operation.command_id
+                        != expected_turn_operation.command_id
+                    ))
                 )
             ):
                 raise ExecutiveOperatorSupervisorError(
                     "operator recovery turn input is not bound to the verified commission"
                 )
             adapter = self._adapter_for_attempt(
-                lease, session.launch.requested, lambda _turn: prompt, recovery=True
+                lease, session.launch.requested, load_recovery_turn, recovery=True,
+                expected_recovery_seal=sealed_result_json,
             )
             orchestrator = self._orchestrator(lease, adapter)
             port = ExecutiveOperatorHarnessPort(self.runtime, lease)
@@ -1473,7 +1631,6 @@ class ExecutiveOperatorSupervisor:
                     status=ReconcileStatus.MISSING_CANCELLED,
                     process_was_live=process_was_live,
                 )
-            sealed_result_json = self._sealed_role_result_json(job, lease)
             if sealed_result_json is not None:
                 if (
                     observation.process_liveness is ProcessLiveness.ALIVE

@@ -37,6 +37,7 @@ export interface OrchestratorSessionPresentation {
 export interface OrchestratorCommandView {
   readonly projects: readonly LaunchChoice[];
   readonly profiles: readonly LaunchChoice[];
+  readonly frontierModels?: readonly LaunchChoice[];
   readonly session: OrchestratorSessionPresentation | null;
 }
 
@@ -219,12 +220,22 @@ export function readCommandView(
       if (!choice) return EMPTY_VIEW;
       profiles.push(choice);
     }
+    let frontierModels: LaunchChoice[] | undefined;
+    if (raw.frontierModels !== undefined) {
+      if (!Array.isArray(raw.frontierModels) || raw.frontierModels.length > 16) return EMPTY_VIEW;
+      frontierModels = [];
+      for (const item of raw.frontierModels) {
+        const choice = asChoice(item);
+        if (!choice) return EMPTY_VIEW;
+        frontierModels.push(choice);
+      }
+    }
     const session =
       raw.session === null || raw.session === undefined
         ? null
         : asSession(raw.session);
     if (raw.session != null && session === null) return EMPTY_VIEW;
-    return { projects, profiles, session };
+    return { projects, profiles, session, ...(frontierModels !== undefined ? { frontierModels } : {}) };
   } catch {
     return EMPTY_VIEW;
   }
