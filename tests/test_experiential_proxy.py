@@ -344,6 +344,95 @@ async def test_disconnect_before_first_stream_byte_releases_slot(tmp_path, fail_
 
 
 @run_async_test
+async def test_disconnect_while_queued_drops_ticket_without_provider_call(tmp_path):
+    """A departed HTTP client cannot spend provider credits after local backpressure."""
+    upstream_calls = []
+
+    def provider(req):
+        upstream_calls.append(req.url.path)
+        return streamed_json({"ok": True})
+
+    cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=1,
+                   window_s=0.5, max_queue_wait_s=0.35)
+    app = create_app(cfg, transport=httpx.MockTransport(provider))
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "scheme": "http", "method": "POST", "path": "/v1/responses",
+        "raw_path": b"/v1/responses", "query_string": b"",
+        "headers": [(b"authorization", f"Bearer {TOKEN}".encode()),
+                    (b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 12345), "server": ("127.0.0.1", 8311),
+    }
+
+    async with app.router.lifespan_context(app):
+        admission = app.state.admissions
+        assert await admission.acquire(time.monotonic() + 0.05) == 0
+        await admission.release(0)
+        incoming = asyncio.Queue()
+        await incoming.put({"type": "http.request", "body": b'{"input":"x"}',
+                            "more_body": False})
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        task = asyncio.create_task(app(scope, incoming.get, send))
+        for _ in range(100):
+            if admission.pending == 1:
+                break
+            await asyncio.sleep(0.002)
+        assert admission.pending == 1
+        await incoming.put({"type": "http.disconnect"})
+        await asyncio.wait_for(task, timeout=0.2)
+        assert admission.pending == 0
+        assert admission._inflight == [0]
+        assert upstream_calls == []
+        assert (await admission.snapshot())["slots"][0]["used_in_window"] == 1
+
+
+@run_async_test
+async def test_cancelled_queued_asgi_task_leaves_no_waiter_or_upstream_send(tmp_path):
+    upstream_calls = []
+    cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=1,
+                   window_s=0.5, max_queue_wait_s=0.35)
+    app = create_app(cfg, transport=httpx.MockTransport(
+        lambda req: upstream_calls.append(req.url.path) or streamed_json({"ok": True})
+    ))
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+        "scheme": "http", "method": "POST", "path": "/v1/responses",
+        "raw_path": b"/v1/responses", "query_string": b"",
+        "headers": [(b"authorization", f"Bearer {TOKEN}".encode()),
+                    (b"content-type", b"application/json")],
+        "client": ("127.0.0.1", 12345), "server": ("127.0.0.1", 8311),
+    }
+
+    async with app.router.lifespan_context(app):
+        admission = app.state.admissions
+        assert await admission.acquire(time.monotonic() + 0.05) == 0
+        await admission.release(0)
+        incoming = asyncio.Queue()
+        await incoming.put({"type": "http.request", "body": b"{}",
+                            "more_body": False})
+
+        async def send(_message):
+            return None
+
+        task = asyncio.create_task(app(scope, incoming.get, send))
+        for _ in range(100):
+            if admission.pending == 1:
+                break
+            await asyncio.sleep(0.002)
+        assert admission.pending == 1
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert admission.pending == 0
+        assert admission._inflight == [0]
+        assert upstream_calls == []
+
+
+@run_async_test
 async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
     app = create_app(settings(tmp_path), transport=httpx.MockTransport(
         lambda req: streamed_json({"ok": True})

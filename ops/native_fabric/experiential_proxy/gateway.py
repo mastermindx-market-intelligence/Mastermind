@@ -88,6 +88,10 @@ class QueueExpired(Exception):
     pass
 
 
+class ClientDisconnected(Exception):
+    """The downstream left before any upstream send was admitted."""
+
+
 class SlidingWindowAdmissions:
     """FIFO waiting; SQLite commits each reservation before forwarding upstream.
 
@@ -182,7 +186,7 @@ class SlidingWindowAdmissions:
                 next_ready = min(next_ready, q[0] + self.settings.window_s)
         return None, next_ready
 
-    async def acquire(self, deadline: float, weight: int = 0) -> int:
+    async def acquire(self, deadline: float, weight: int = 0, *, disconnected: asyncio.Event | None = None) -> int:
         """Wait for permission; never emit a 429 merely for local saturation."""
         if weight < 0:
             raise ValueError("negative request size")
@@ -195,6 +199,8 @@ class SlidingWindowAdmissions:
             self._pending_bytes += weight
             try:
                 while True:
+                    if disconnected is not None and disconnected.is_set():
+                        raise ClientDisconnected
                     if time.monotonic() >= deadline:
                         raise QueueExpired
                     now = self.clock()
@@ -238,6 +244,11 @@ class SlidingWindowAdmissions:
                     self._waiters.remove(ticket)
                     self._pending_bytes -= weight
                     self._condition.notify_all()
+
+    async def notify_change(self) -> None:
+        """Wake a queued request when its downstream disconnects."""
+        async with self._condition:
+            self._condition.notify_all()
 
     async def release(self, slot: int) -> None:
         async with self._condition:
@@ -367,10 +378,37 @@ def create_app(
                 return JSONResponse({"error": {"message": "request body too large"}}, status_code=413)
             body.extend(chunk)
 
+        admissions: SlidingWindowAdmissions = request.app.state.admissions
+        disconnected = asyncio.Event()
+
+        async def watch_disconnect() -> None:
+            # Request.stream() has consumed the complete body; only ASGI
+            # disconnects remain. Cancel the FIFO ticket before vendor admission.
+            try:
+                while True:
+                    if (await request.receive())["type"] == "http.disconnect":
+                        break
+            except Exception:
+                # A broken downstream receive must not spend provider credits.
+                pass
+            disconnected.set()
+            await admissions.notify_change()
+
+        watcher = asyncio.create_task(watch_disconnect())
+        slot = None
         try:
-            slot = await request.app.state.admissions.acquire(
-                time.monotonic() + cfg.max_queue_wait_s, weight=len(body)
-            )
+            try:
+                slot = await admissions.acquire(
+                    time.monotonic() + cfg.max_queue_wait_s,
+                    weight=len(body),
+                    disconnected=disconnected,
+                )
+            finally:
+                watcher.cancel()
+                await asyncio.gather(watcher, return_exceptions=True)
+        except ClientDisconnected:
+            # The caller has gone; response delivery is best effort.
+            return Response(status_code=HTTPStatus.NO_CONTENT)
         except QueueFull:
             # Hard overload protection; NOT a provider or per-key 429.
             return JSONResponse({"error": {"message": "local queue full"}}, status_code=HTTPStatus.SERVICE_UNAVAILABLE, headers={"retry-after": "1"})
@@ -378,6 +416,22 @@ def create_app(
             return JSONResponse({"error": {"message": "local queue wait deadline exceeded"}}, status_code=504)
         except sqlite3.Error:
             return JSONResponse({"error": {"message": "rate admission unavailable"}}, status_code=HTTPStatus.SERVICE_UNAVAILABLE)
+        except BaseException:
+            # Cancellation during watcher cleanup after successful admission
+            # must release the reserved in-flight slot, not leave it stranded.
+            if slot is not None:
+                await admissions.release(slot)
+            raise
+
+        try:
+            abandoned = disconnected.is_set() or await request.is_disconnected()
+        except BaseException:
+            await admissions.release(slot)
+            raise
+        if abandoned:
+            # A completed reservation is intentionally still counted toward RPM.
+            await admissions.release(slot)
+            return Response(status_code=HTTPStatus.NO_CONTENT)
 
         headers = {"authorization": f"Bearer {cfg.api_keys[slot]}", "accept-encoding": "identity"}
         if request.method == "POST":
