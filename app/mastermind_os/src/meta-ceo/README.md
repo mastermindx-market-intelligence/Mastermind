@@ -87,15 +87,21 @@ authenticated Mission v3 document and one selected Workspace Result together.
 `projectOffice` remains the association authority. Acquisition stays in the App
 and the typed host; this hook does not read.
 
-The committed positive body is the unchanged HC-P6.T1 export at dependency
-`40d685dc935506455fe0342c5059afbd76354de1` (`actual-pair.json`, 10024 bytes).
-Its provenance records `content_fallback: not_captured`. A genuine
-`CONTENT_OVER_BUDGET` producer response is not in that export. Consumer tests
-that mutate the nested availability are synthetic and are named as such. They
-are not a captured fallback. Final source qualification still waits for the
-final T1 head and independent review. Native clients have no compound command;
-without `readMissionResult` the legacy Result card remains and Office does not
-claim a pair. A failed compound read does not call the standalone Result route.
+The committed positive body remains the source-pinned HC-P6.T1 export
+(`actual-pair.json`, 10024 bytes, `content_fallback: not_captured`). The
+reviewed producer proof at `abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb` is imported
+as its own commit; that hash is not an ancestor of this branch. Fresh mounted
+positive and `CONTENT_OVER_BUDGET` bodies are produced in attempt-owned
+directories and consumed as whole HTTP bytes. A present, empty, missing, or
+mismatched explicit directory is refused and is not replaced with the committed
+file. Mutations of a committed AVAILABLE body stay labeled synthetic. Native
+clients have no compound command; without `readMissionResult` the legacy Result
+card remains and Office does not claim a pair. A failed compound read does not
+call the standalone Result route. The App captures the mounted typed method and
+checks that same function again before the queued call and before publication.
+A superseded callback stays silent. A cancellation that still owns the ticket,
+including `READ_CANCELLED` after raw-method replacement or acquisition expiry,
+settles unavailable and leaves both Office halves empty.
 
 `mission-adapter.ts` supplies that pure Mission presentation seam and the
 compound pair seam. Call
@@ -120,7 +126,10 @@ Programs and Conversation keep their existing qualification gates. A compound
 accept advances the Mission and Result revisions together and leaves session,
 binding, effect and authority unset unless the incumbent owner supplied them.
 Local acquisition time is labelled `LOCAL_ACQUISITION`. An older compound
-completion cannot publish into or clear a newer pair.
+completion cannot publish into or clear a newer pair. Replacing the mounted
+typed `readMissionResult` is a different fence from replacing the raw client
+method: the in-flight App callback must see the captured function still
+installed on the host.
 
 ## Verification and integration
 

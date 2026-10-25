@@ -3044,33 +3044,55 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       setResultState({ kind: "PENDING", selection: valid });
       const controller = new AbortController();
       resultController.current = controller;
-      const stale = () => compoundTicket.current !== ticket || controller.signal.aborted
+      // A newer ticket, host, generation, selection, or auth epoch owns the
+      // screen. Those callbacks stay silent so they cannot clear that pair.
+      const superseded = () => compoundTicket.current !== ticket
         || window.MastermindMissionHost !== host
         || host?.invalidationGeneration?.() !== hostGeneration
         || liveSelection.current !== selectionAtStart
         || liveAuthRevision.current !== authAtStart;
+      // The mounted typed method can be replaced without changing the raw
+      // client or the host object. Raw identity checks do not cover that.
+      const typedHeld = () => window.MastermindMissionHost?.readMissionResult === compoundRead;
+      const withholdOwned = (reason: string) => {
+        if (superseded()) return;
+        office.supersedePair();
+        compoundRetention.current = null;
+        setResultState({ kind: "UNAVAILABLE", selection: valid, reason });
+      };
       Promise.resolve()
-        .then(() => compoundRead({ ...valid, signal: controller.signal }))
+        .then(() => {
+          if (superseded()) return undefined;
+          if (controller.signal.aborted || !typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
+          return compoundRead({ ...valid, signal: controller.signal });
+        })
         .then((decoded) => {
-          if (stale()) return;
+          if (decoded === undefined || superseded()) return;
+          if (!typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
           if (decoded.availability !== "AVAILABLE" || !decoded.mission || !decoded.roleResult) {
-            setResultState({
-              kind: "UNAVAILABLE",
-              selection: valid,
-              reason: decoded.reasonCodes[0] ?? "SOURCE_UNAVAILABLE",
-            });
+            withholdOwned(decoded.reasonCodes[0] ?? "SOURCE_UNAVAILABLE");
+            return;
+          }
+          if (!typedHeld()) {
+            withholdOwned("READ_CANCELLED");
             return;
           }
           const accepted = office.acceptMissionResult(
             held, decoded.mission, decoded.roleResult, new Date().toISOString(),
           );
-          if (stale()) return;
+          if (superseded()) return;
+          if (!typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
           if (accepted.kind !== "observed") {
-            setResultState({
-              kind: "UNAVAILABLE",
-              selection: valid,
-              reason: accepted.reason,
-            });
+            withholdOwned(accepted.reason);
             return;
           }
           compoundRetention.current = {
@@ -3084,15 +3106,14 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           setResultState({ kind: "READY", selection: valid, document: decoded.roleResult });
         })
         .catch((err: Error) => {
-          if (stale()) return;
-          if (err?.message === "READ_CANCELLED") return;
-          setResultState({
-            kind: "UNAVAILABLE",
-            selection: valid,
-            reason: err?.message === "MISSION_RESULT_RESPONSE_INVALID"
+          if (superseded()) return;
+          withholdOwned(
+            err?.message === "MISSION_RESULT_RESPONSE_INVALID"
               ? "MISSION_RESULT_RESPONSE_INVALID"
-              : "RESULT_SOURCE_UNAVAILABLE",
-          });
+              : err?.message === "READ_CANCELLED"
+                ? "READ_CANCELLED"
+                : "RESULT_SOURCE_UNAVAILABLE",
+          );
         });
       return;
     }
