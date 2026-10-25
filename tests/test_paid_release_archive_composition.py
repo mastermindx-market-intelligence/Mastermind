@@ -70,8 +70,13 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
     result = _materialize(root)
     assert result.returncode == 0, result.stderr
     manifest = json.loads(records["native-manifest.json"])
-    spec = importlib.util.spec_from_file_location("archived_native_builder",rollout/"build_review_stage.py")
-    builder = importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
+    # Read the archived owner's explicit graph without adding an import cache
+    # to the namespace whose exact installer additions we are checking.
+    import types
+    source = rollout / "build_review_stage.py"
+    builder = types.ModuleType("archived_native_builder")
+    builder.__file__ = str(source)
+    exec(compile(source.read_bytes(), str(source), "exec"), builder.__dict__)
     assert set(manifest) == {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"}
     expected_new = {(RELATIVE_ROLLOUT / "native-code-stage" / name).as_posix()
                     for name in manifest}
