@@ -161,6 +161,33 @@ class FleetStorageVolumeTests(unittest.TestCase):
                         self.assertFalse(report["external_volume_pressure_hosts"])
                         self.assertFalse(report["unverified_prior_external_breaches"])
 
+    def test_incomplete_substep_never_masquerades_as_green_sweep(self):
+        # Does not execute sweep.main or any cleanup helper; finish is a pure
+        # receipt and exit-status boundary under a disposable state directory.
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            with mock.patch.object(self.sweep, "STATE", state), mock.patch.object(
+                self.sweep, "_external_volume_snapshots", return_value=[]
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ):
+                for steps, expected_incomplete, expected_exit in [
+                    ({"stale_packs_rc": 2, "scratch_reap_rc": 0},
+                     ["stale_packs"], 1),
+                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0}, [], 0),
+                ]:
+                    with contextlib.redirect_stdout(io.StringIO()) as stdout:
+                        exit_code = self.sweep.finish({"mode": "calm", **steps})
+                    receipt = json.loads(stdout.getvalue())
+                    self.assertEqual(exit_code, expected_exit)
+                    self.assertEqual(receipt["incomplete_substeps"], expected_incomplete)
+                    self.assertEqual(receipt["degraded"], bool(expected_incomplete))
+                    self.assertEqual(receipt["stale_packs_rc"], steps["stale_packs_rc"])
+            recorded = [json.loads(line) for line in
+                        (state / "sweep-log.jsonl").read_text().splitlines()]
+            self.assertEqual([row["degraded"] for row in recorded], [True, False])
+
 
 if __name__ == "__main__":
     unittest.main()

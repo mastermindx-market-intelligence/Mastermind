@@ -270,6 +270,14 @@ def _external_volume_snapshots() -> list[dict]:
 
 
 def finish(out: dict) -> int:
+    # A completed top-level pass is not a clean sweep when a bounded helper
+    # refused or only partially scanned. Preserve its original return code
+    # and make the same launchd heartbeat report an explicit degraded result.
+    # StartInterval continues recurring even when this invocation exits 1.
+    incomplete = sorted(key[:-3] for key, rc in out.items()
+                        if key.endswith('_rc') and type(rc) is int and rc != 0)
+    out['incomplete_substeps'] = incomplete
+    out['degraded'] = bool(incomplete)
     out['free_gib_after'] = round(shutil.disk_usage('/').free / GIB, 1)
     out['external_volumes'] = _external_volume_snapshots()
     with (STATE / 'sweep-log.jsonl').open('a') as f:
@@ -280,7 +288,7 @@ def finish(out: dict) -> int:
     elif alert.exists():
         alert.unlink()
     print(json.dumps(out))
-    return 0
+    return 1 if incomplete else 0
 
 
 LOOPBACK_KEY = Path.home() / '.ssh/id_mm_loopback'
