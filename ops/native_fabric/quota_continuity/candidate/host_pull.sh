@@ -142,7 +142,7 @@ run_probe() {
   else
     if [ "$key_guard" = "fixed-qualified-readiness" ]; then
       [ "$#" -eq 5 ] && [ -n "$5" ] || return 78
-      perl -e 'alarm 35; exec @ARGV' ssh "${key_options[@]}" "$alias" "$probe" 2>/dev/null <<< "$5"
+      perl -e 'alarm 35; exec @ARGV' ssh "${key_options[@]}" "$alias" "$probe" <<< "$5"
     elif [ "$key_guard" = "fixed-paid-qualification" ]; then
       # The closed compiler bounds the FINAL UTF-8 command plus its NUL before
       # this branch. Keep the committed bootstrap direct: the telemetry spool's

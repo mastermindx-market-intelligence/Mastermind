@@ -554,6 +554,20 @@ class ObservationUnavailable(RuntimeError):
         super().__init__('qualified_observation_unavailable')
 
 
+def _transport_outcome(code, output, error):
+    # Only an exact local OpenSSH pre-connect failure establishes that this
+    # observation did not reach remote startup. Never retain/echo stderr.
+    # Authentication/trust failures, silence and ambiguous loss remain held.
+    if code == 0 and output and not error:
+        return 'RETURNED'
+    if code == 255 and not output and len(error) <= 4096 and re.fullmatch(
+            rb'ssh: connect to host [A-Za-z0-9.:%_-]{1,253} port [0-9]{1,5}: '
+            rb'(?:Connection timed out|Operation timed out|No route to host|'
+            rb'Network is unreachable|Connection refused)\n', error):
+        return 'PRECONNECT_UNAVAILABLE'
+    return 'REFUSED'
+
+
 def _transport(context, request, *, correction_sha=None):
     """One existing host-pull transport child, bounded stdout and lifetime."""
     import selectors
@@ -590,11 +604,11 @@ def _transport(context, request, *, correction_sha=None):
                  'transport-spawn',str(child_peer.fileno())]
     try:
         child=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,env=env,cwd='/',start_new_session=True,close_fds=True,**options)
+        stderr=subprocess.PIPE,env=env,cwd='/',start_new_session=True,close_fds=True,**options)
     except BaseException:
         if peer is not None:peer.close()
         if child_peer is not None:child_peer.close()
-        raise ObservationUnavailable() from None
+        raise ReadinessRefused() from None
     if child_peer is not None:child_peer.close()
     if peer is not None:
         try:
@@ -603,25 +617,26 @@ def _transport(context, request, *, correction_sha=None):
                 refusal_sha256=correction_sha))
             peer.sendall(frame);peer.shutdown(1)
         except BaseException:
-            for stream in (child.stdin,child.stdout):
+            for stream in (child.stdin,child.stdout,child.stderr):
                 if stream is not None and not stream.closed:stream.close()
             try:os.killpg(child.pid,signal.SIGTERM)
             except ProcessLookupError:pass
             try:child.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 os.killpg(child.pid,signal.SIGKILL);child.wait()
-            raise
+            raise ReadinessRefused() from None
         finally:peer.close()
-    started=time.monotonic();captured=bytearray();offset=0
+    started=time.monotonic();captured=bytearray();errors=bytearray();offset=0
     try:
         with selectors.DefaultSelector() as selected:
             os.set_blocking(child.stdin.fileno(),False)
             selected.register(child.stdin,selectors.EVENT_WRITE,'in')
             selected.register(child.stdout,selectors.EVENT_READ,'out')
+            selected.register(child.stderr,selectors.EVENT_READ,'err')
             while selected.get_map():
                 left=40-(time.monotonic()-started)
                 if left<=0:
-                    raise ObservationUnavailable()
+                    _refuse()
                 for key,_ in selected.select(min(left,0.25)):
                     if key.data=='in':
                         try:offset+=os.write(key.fileobj.fileno(),outgoing[offset:offset+4096])
@@ -634,17 +649,19 @@ def _transport(context, request, *, correction_sha=None):
                         data=os.read(key.fileobj.fileno(),8192)
                         if not data:selected.unregister(key.fileobj)
                         else:
-                            captured.extend(data)
-                            if len(captured)>MAX_BYTES:_refuse()
+                            sink=errors if key.data=='err' else captured
+                            sink.extend(data)
+                            if len(sink)>(4096 if key.data=='err' else MAX_BYTES):_refuse()
         code=child.wait(timeout=max(0.01,40-(time.monotonic()-started)))
-        if code==78:_refuse()
-        if code!=0 or not captured:raise ObservationUnavailable()
+        outcome=_transport_outcome(code,bytes(captured),bytes(errors))
+        if outcome=='PRECONNECT_UNAVAILABLE':raise ObservationUnavailable()
+        if outcome!='RETURNED':_refuse()
         context.check()
         return bytes(captured)
-    except subprocess.TimeoutExpired:
-        raise ObservationUnavailable() from None
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        raise ReadinessRefused() from None
     finally:
-        for stream in (child.stdin,child.stdout):
+        for stream in (child.stdin,child.stdout,child.stderr):
             if stream is not None and not stream.closed:stream.close()
         if child.poll() is None:
             # Only this newly owned finite transport session; never a Fabric

@@ -76,18 +76,26 @@ room/lease checks and the actual canonical AccountTable/Control guard remain.
 
 ## Failure, loss and correction
 
-A malformed configuration or unavailable read is not positive evidence. A lost
-read-only transport clears account readiness; a later cycle under the existing
-recurring grant is a new observation with a new nonce. This is defensible only
-because this exact fixed startup performs exports, a directory-existence test
-and private DATA parsing: no helper evaluation, provider request, process launch
-of a worker, credential rotation or external write occurs. This rule cannot
-recover any old uncertain mutating/provider operation or spent diagnostic.
+A malformed configuration or unavailable read is not positive evidence. The
+fixed bounded transport captures at most 4 KiB of stderr privately and never
+prints or retains its text. Authentication/trust refusal, unexpected output,
+ambiguous nonzero exit, local timeout or lost child completion becomes a held
+refusal; neither silence nor exit 255 establishes read-only loss. Only exit 255
+with empty stdout and one exact C-locale OpenSSH pre-connect timeout/no-route/
+network-unreachable/connection-refused diagnostic is classified unavailable.
+A later recurring cycle after that proven pre-connect loss is a new observation,
+not recovery of a started operation. SSH endpoint/startup trust remains an
+administrative premise; this source does not assert that arbitrary SSH startup
+is effect-free. The fixed reviewed observer itself performs exports, a
+directory-existence test and private DATA parsing, with no helper evaluation,
+provider request, worker launch, credential rotation or external write. This
+rule cannot recover an old uncertain mutating/provider operation or spent
+diagnostic.
 
 An actual permission/custody/protocol/context refusal is retained as the
 original `status=refused` observation, with its original scope, context and
 time. Physical refresh, restart, elapsed time or transport labels cannot erase
-it, freshen it or enter the internal transport around it. There is no retry
+it, freshen it or enter the internal transport around it. Physical read/preserve/replace and readiness publication hold the same existing directory flock for their whole publication intervals, including refusal preservation. There is no retry
 counter, new queue or new authority store; this is negative observation DATA in
 the existing host snapshot and the normal collector return.
 

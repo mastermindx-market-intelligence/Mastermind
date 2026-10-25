@@ -402,6 +402,28 @@ def read_hosts():
         print("|".join(fields))
 
 def write_state(*, physical_only=False):
+    # Both physical preservation and readiness publication serialize on this
+    # existing directory inode. Hold it before reading the old observation,
+    # through replacement/fsync; no separate retry or authority ledger.
+    if not physical_only:
+        return _write_state_unlocked(physical_only=False)
+    import fcntl, os, stat, sys
+    fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        directory = os.fstat(fd)
+        if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid()
+                or directory.st_mode & 0o022):
+            raise SystemExit("host_pull: observation directory custody unavailable")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        current = os.stat(sys.argv[1], follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (directory.st_dev, directory.st_ino):
+            raise SystemExit("host_pull: observation directory changed")
+        return _write_state_unlocked(physical_only=True, publication_directory=directory)
+    finally:
+        os.close(fd)
+
+
+def _write_state_unlocked(*, physical_only=False, publication_directory=None):
     import json, os, sys, time, tempfile, stat, math, re
     state_dir, host, out = sys.argv[1], sys.argv[2], sys.argv[4]
     raw_rc = sys.argv[3]
@@ -742,7 +764,7 @@ def write_state(*, physical_only=False):
                 doc['glm_local_account_readiness']=refusal
         except (OSError,ValueError,TypeError):pass
     path = os.path.join(state_dir, host + ".json")
-    directory = os.stat(state_dir, follow_symlinks=False)
+    directory = publication_directory or os.stat(state_dir, follow_symlinks=False)
     if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid()
             or directory.st_mode & 0o022):
         raise SystemExit("host_pull: observation directory custody unavailable")
