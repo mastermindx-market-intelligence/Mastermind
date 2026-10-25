@@ -17,11 +17,15 @@ import sys
 from typing import Any
 
 SCHEMA = "mastermind.hermes_candidate_preflight.v1"
+# Exact CLI toolsets observed from the pinned NousResearch/hermes-agent
+# source/CLI at 1c0cd667746d3395fe9e1b6c74f8f85952486f18.
+# These are NOT all future/desktop toolsets. The version is part of admission.
 REQUIRED_DISABLED = frozenset({
-    "terminal", "file", "browser", "computer_use", "code_execution",
-    "delegation", "cronjob", "memory", "session_search", "skills",
-    "messaging", "discord", "discord_admin", "kanban", "image_gen",
-    "web", "vision", "tts", "debugging",
+    "web", "browser", "terminal", "file", "code_execution", "vision",
+    "video", "image_gen", "video_gen", "x_search", "tts", "stt",
+    "skills", "todo", "kanban", "memory", "context_engine", "session_search",
+    "connections", "delegation", "cronjob", "yuanbao", "computer_use",
+    "a2a",  # plugin toolset; currently disabled by default, still explicitly fenced
 })
 ALLOWED_ENABLED = frozenset({"clarify"})
 ALLOWED_TOP_LEVEL = frozenset({"agent", "model", "auxiliary", "toolsets"})
@@ -88,6 +92,8 @@ def inspect(config: Any, *, sha256: str) -> dict[str, Any]:
         disabled_set = set(disabled)
         if len(disabled_set) != len(disabled):
             issues.append("DUPLICATE_DISABLED_TOOLSET")
+    if disabled_set - REQUIRED_DISABLED:
+        issues.append("UNRECOGNIZED_DISABLED_TOOLSET")
     missing = sorted(REQUIRED_DISABLED - disabled_set)
     if missing:
         issues.append("DANGEROUS_TOOLSET_NOT_GLOBALLY_DISABLED")
