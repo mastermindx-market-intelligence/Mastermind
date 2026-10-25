@@ -279,6 +279,14 @@ def finish(out: dict) -> int:
     # StartInterval continues recurring even when this invocation exits 1.
     incomplete = sorted(key[:-3] for key, rc in out.items()
                         if key.endswith('_rc') and type(rc) is int and rc != 0)
+    # The archive pass invokes two remote substeps under a nested receipt.
+    # A failed or refused peer must not disappear beneath a green top-level
+    # heartbeat merely because its *_rc is not a direct member of out.
+    archive = out.get('fleet_archive')
+    if isinstance(archive, dict):
+        incomplete.extend('fleet_archive.' + key[:-3]
+                          for key, rc in archive.items()
+                          if key.endswith('_rc') and type(rc) is int and rc != 0)
     # The launchd parent can lack filesystem grants and delegate to its
     # existing forced-command loopback child. A string/partial/old child
     # response, or no child at all, is NOT a completed sweep: do not print a
@@ -341,6 +349,10 @@ def via_loopback(timeout: int = 2400) -> dict | str | None:
                            capture_output=True, text=True, timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as exc:
         return f'loopback failed: {exc!r}'[:300]
+    # The forced-command transport's process exit is independently binding.
+    # A success-shaped final JSON line cannot absolve a nonzero ssh/child exit.
+    if p.returncode != 0:
+        return f'loopback transport rc={p.returncode}'
     last = (p.stdout.strip().splitlines() or [''])[-1]
     try:
         return json.loads(last)

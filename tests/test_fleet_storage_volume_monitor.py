@@ -224,6 +224,58 @@ class FleetStorageVolumeTests(unittest.TestCase):
                         self.assertEqual(receipt["degraded"], bool(expected))
 
 
+    def test_nested_archive_substep_failure_degrades_top_level_receipt(self):
+        # An optional archive pass may run both peer helpers. A refused peer
+        # is incomplete even when every other direct helper returned rc=0.
+        # Never invokes a remote archive or any cleanup helper.
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.object(self.sweep, "STATE", pathlib.Path(temp)), (
+                mock.patch.object(self.sweep, "_external_volume_snapshots", return_value=[])
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ):
+                for archive, expected, code in [
+                    ({"mb_rc": 2, "m1_rc": 0}, ["fleet_archive.mb"], 1),
+                    ({"mb_rc": 0, "m1_rc": 124}, ["fleet_archive.m1"], 1),
+                    ({"mb_rc": 0, "m1_rc": 0}, [], 0),
+                ]:
+                    with self.subTest(archive=archive), contextlib.redirect_stdout(io.StringIO()) as output:
+                        actual = self.sweep.finish({"mode": "calm", "hung_rc": 0,
+                                                    "fleet_archive": archive})
+                    receipt = json.loads(output.getvalue())
+                    self.assertEqual(actual, code)
+                    self.assertEqual(receipt["incomplete_substeps"], expected)
+                    self.assertEqual(receipt["degraded"], bool(expected))
+
+    def test_nonzero_loopback_exit_cannot_return_success_shaped_json(self):
+        # No ssh call: hermetic transport-exit fixture under disposable key path.
+        clean = {"grants": "ok", "degraded": False, "mode": "calm",
+                 "free_gib_after": 180.0, "incomplete_substeps": []}
+        with tempfile.TemporaryDirectory() as temp:
+            key = pathlib.Path(temp) / "loopback-fixture"
+            key.write_text("fixture")
+            proc = mock.Mock(returncode=42, stdout=json.dumps(clean) + "\\n",
+                             stderr="not for top-level success")
+            with mock.patch.object(self.sweep, "LOOPBACK_KEY", key), mock.patch.object(
+                self.sweep.subprocess, "run", return_value=proc
+            ), mock.patch.dict(self.sweep.os.environ, {"MM_SWEEP_LOOPBACK": "0"}):
+                self.assertEqual(self.sweep.via_loopback(),
+                                 "loopback transport rc=42")
+            # This invalid child must also degrade the original launchd receipt.
+            with mock.patch.object(self.sweep, "STATE", pathlib.Path(temp)), (
+                mock.patch.object(self.sweep, "_external_volume_snapshots", return_value=[])
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=180 * 1024 ** 3)
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                code = self.sweep.finish({"mode": "calm", "grants": "denied",
+                                          "loopback": "loopback transport rc=42"})
+            self.assertEqual(code, 1)
+            self.assertIn("grant_requiring_passes",
+                          json.loads(output.getvalue())["incomplete_substeps"])
+
+
     def test_atomic_original_sweep_lock_serializes_two_contenders(self):
         # Disposable lock only. Never calls the sweeper, SSH, launchd or cleanup.
         with tempfile.TemporaryDirectory() as temp:
