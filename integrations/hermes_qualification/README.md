@@ -35,18 +35,19 @@ On directly connected **ubuntu1**, in private scratch directories only, acquired
 
 **Critical finding:** first candidate YAML with 19 disabled toolset names still had `todo` and `connections` **enabled** in the real CLI registry, despite global `toolsets: [clarify]`. The sample and static checker now require **all 24 observed non-clarify CLI/plugin toolsets disabled**; the corrected actual Hermes `tools list` reports **only `clarify` enabled** for the CLI platform. This is a narrowly scoped observation, not proof the Desktop client, remote gateways, plugin loading or receiving services cannot act.
 
-`runtime_registry.py` consumes a previously captured `hermes tools list --platform cli` UTF-8 output (never launches Hermes); it checks exact expected built-in/plugin toolset names, detects any additional enabled tools or unknown new toolsets, and creates an exclusive private JSON receipt with `PASS_CLI_REGISTRY_OBSERVATION_ONLY` or `BLOCKED`. The parser's pinned upstream source SHA is an **assertion**, not cryptographic attestation of a submitted text file or executable. A future binary/extension update invalidates the toolset census and requires a fresh source review before claiming eligibility.
+`runtime_registry.py` consumes a previously captured `hermes tools list --platform cli` UTF-8 output **and its complete separate stderr stream** (never launches Hermes); it checks exact expected built-in/plugin toolset names, detects any additional enabled tools or unknown new toolsets, and creates an exclusive private JSON receipt with `PASS_CLI_REGISTRY_OBSERVATION_ONLY` or `BLOCKED`. The parser's pinned upstream source SHA is an **assertion**, not cryptographic attestation of a submitted text file or executable. A second canary found a duplicate top-level `toolsets` key in an intermediate example: Hermes rejected that file and silently continued using previous good settings while stock PyYAML accepted the duplicate. The corrected example now has one `toolsets` key, preflight rejects duplicates, anchors and aliases, and a registry capture with stderr warnings cannot qualify. A future binary/extension update invalidates the toolset census and requires a fresh source review before claiming eligibility.
 
 ```sh
 # In an approved, isolated, no-credential Hermes runtime only:
-hermes tools list --platform cli > /secure/new/captured-toolsets.txt
+hermes tools list --platform cli > /secure/new/captured-toolsets.txt 2> /secure/new/captured-stderr.txt
 python3 integrations/hermes_qualification/runtime_registry.py \
   --tool-list /secure/new/captured-toolsets.txt \
+  --stderr /secure/new/captured-stderr.txt \
   --receipt /secure/new/unique-registry-receipt.json
 python3 -m unittest discover -v -s integrations/hermes_qualification/tests
 ```
 
-The captured text must be from an observed verified executable and restricted profile; it must not contain tokens or private content. The output parser validates **CLI only** and cannot inspect actual model calls, authorization, host/network isolation, TCC or a Desktop-injected `desktop_ui` tool.
+The captured text must be from an observed verified executable and restricted profile, and **all stderr warnings must be absent**; it must not contain tokens or private content. The output parser validates **CLI only** and cannot inspect actual model calls, authorization, host/network isolation, TCC or a Desktop-injected `desktop_ui` tool.
 
 ## Follow-on acceptance, held
 
