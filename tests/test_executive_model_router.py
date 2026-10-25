@@ -40,7 +40,7 @@ _V1_EQUIVALENT_FIRST_TIERS = {
     ("review", "elevated"): ("standard.review",),
 }
 
-_V1_ROUTING_POLICY_VERSION = "2026-08-24.stage4"
+_CURRENT_ROUTING_POLICY_VERSION = "2026-10-14.attended-qualification"
 
 _JOB_CONSTRAINT_KEYS = {
     "task_kind",
@@ -93,7 +93,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-10-11.native-return-host-source"
+    assert implementation.capability_policy_version == "2026-10-14.attended-qualification"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
@@ -127,7 +127,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
             decision.job_constraints()
 
 
-def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible():
+def test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity():
     router = ModelRouter.load()
 
     assert router.providers["codex"].enabled
@@ -138,10 +138,37 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
         False,
         False,
     )
-    for provider in ("qwen", "glm", "xai"):
+    for provider in ("qwen", "xai"):
         assert not router.providers[provider].enabled
         assert not router.providers[provider].autonomous_allowed
         assert router.providers[provider].adapter_id == "openai-compatible"
+
+    # Canonical paid glm catalogue identity (PR1794). enabled/autonomous_allowed
+    # and the worker_eligible paid alias below are closed-catalogue policy facts
+    # only: this pin does NOT assert live eligibility, runtime activation, or
+    # any R1/live receipt. canonical-paid-fabric is source-implemented
+    # (CanonicalPaidFabricWorkerAdapter) and stays BUILT_NOT_PROVEN.
+    assert router.providers["glm"] == ProviderAlias(
+        "glm",
+        "canonical-paid-fabric",
+        True,
+        True,
+    )
+    glm_paid_aliases = [
+        alias
+        for alias in router.model_aliases.values()
+        if alias.execution_profile_id == "fabric.paid.glm.sealed-input.v1"
+    ]
+    assert len(glm_paid_aliases) == 1
+    glm_paid = glm_paid_aliases[0]
+    assert glm_paid.model_alias == "glm.paid.sealed-input"
+    assert glm_paid.provider_alias == "glm"
+    assert glm_paid.adapter_id == "canonical-paid-fabric"
+    assert glm_paid.model == "glm-5.3-flash"
+    assert glm_paid.effort == "medium"
+    assert glm_paid.cost_class == "small"
+    assert list(glm_paid.capabilities) == ["research"]
+    assert glm_paid.worker_eligible
 
     luna = router.resolve_model_alias("fast.engineering")
     assert luna.model == "gpt-5.6-luna"
@@ -152,8 +179,12 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
     assert terra.execution_profile_id == "sealed.worker.readonly.no-extensions.v1"
 
     assert adapter_descriptor("codex-cli").implemented
+    assert adapter_descriptor("canonical-paid-fabric").implemented
     assert not adapter_descriptor("claude-code").implemented
     assert not adapter_descriptor("openai-compatible").implemented
+    assert not adapter_descriptor("acp").implemented
+    assert all(provider.adapter_id != "acp" for provider in router.providers.values())
+    assert all(alias.adapter_id != "acp" for alias in router.model_aliases.values())
 
 
 def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_path):
@@ -246,7 +277,10 @@ def test_heterogeneous_pair_does_not_arm_general_routing_or_bypass_capacity(tmp_
     with pytest.raises(RoutingPolicyError, match="not worker eligible"):
         fixture.resolve_model_alias("hf1q.claude.fixture")
 
-    for provider in ("qwen", "glm", "xai"):
+    # glm is now the enabled canonical-paid-fabric provider (identity pinned in
+    # test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity);
+    # only qwen/xai remain disabled openai-compatible seams.
+    for provider in ("qwen", "xai"):
         assert not checked_in.providers[provider].enabled
         assert not checked_in.providers[provider].autonomous_allowed
 
@@ -365,7 +399,7 @@ def test_runtime_claim_honors_alias_order_before_worker_id_and_records_receipt(t
         "fast.engineering",
         "standard.engineering",
     ]
-    assert event.payload["routing_policy_version"] == _V1_ROUTING_POLICY_VERSION
+    assert event.payload["routing_policy_version"] == _CURRENT_ROUTING_POLICY_VERSION
     assert event.payload["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
     assert event.payload["execution_profile_digest"] == decision.execution_profile_digest
     assert event.payload["capability_policy_version"] == decision.capability_policy_version
@@ -624,7 +658,7 @@ def test_current_v2_schema_preserves_the_complete_v1_codex_route_and_policy_cont
     router = ModelRouter.load()
 
     assert ROUTER_SCHEMA_VERSION == "mastermind.executive_worker_routes/v2"
-    assert router.policy_version == _V1_ROUTING_POLICY_VERSION
+    assert router.policy_version == _CURRENT_ROUTING_POLICY_VERSION
     for (task_kind, risk), aliases in _V1_EQUIVALENT_FIRST_TIERS.items():
         decision = router.route(WorkRequest(task_kind, risk=risk))
         assert decision.suitability_tiers == (
@@ -634,7 +668,7 @@ def test_current_v2_schema_preserves_the_complete_v1_codex_route_and_policy_cont
         assert decision.to_dict()["preferred_model_aliases"] == list(aliases)
         assert decision.job_constraints()["preferred_model_aliases"] == list(aliases)
         assert decision.job_constraints()["routing_policy_version"] == (
-            _V1_ROUTING_POLICY_VERSION
+            _CURRENT_ROUTING_POLICY_VERSION
         )
 
 
@@ -783,3 +817,28 @@ def test_v2_review_exclusions_survive_structured_tiers_and_claim_projection():
     assert review.excluded_worker_ids == ("builder-01",)
     assert review.to_dict()["excluded_worker_ids"] == ["builder-01"]
     assert review.job_constraints()["excluded_worker_ids"] == ["builder-01"]
+
+
+
+def test_byteplus_plan_remains_unroutable_without_private_realm():
+    router = ModelRouter.load()
+    assert router.providers["byteplus"] == ProviderAlias(
+        "byteplus", "attended-fabric", False, False
+    )
+    alias = router.model_aliases["byteplus.attended"]
+    assert alias.model == "glm-5.3-flash"
+    assert not alias.worker_eligible
+    assert not adapter_descriptor("attended-fabric").implemented
+    for tiers in router.routes.values():
+        for risk in ("routine", "elevated"):
+            assert all(
+                "byteplus.attended" not in tier.model_aliases
+                for tier in tiers[risk]
+            )
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("byteplus.attended")
+    with pytest.raises(RoutingPolicyError, match="attended model alias refused"):
+        router.resolve_attended_model_alias(
+            "byteplus.attended",
+            "byteplus-coding-plan-personal.claude-code-anthropic",
+        )

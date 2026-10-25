@@ -1,0 +1,14 @@
+--- a/run_observation.py
++++ b/run_observation.py
+@@ -38,0 +39,7 @@
++# Exact additional immutable generation used by the original issuer-preflight run.
++# Existing generations and strict directory/file custody remain unchanged.
++ACTIVE_SUPPORT_DIGEST = '4014714eb8865585f11b2a0120975479c10f0567cad968c5a57e5101f8c8f114'
++ACTIVE_SUPPORT_FILES = SOURCE_FILES | {
++    'fabric_operator_client.py', 'fabric_operator_stop.py',
++    'fabric_policy_snapshot.py', 'pools.yaml', 'fabric_operator_diagnostics.py', 'yes',
++}
+@@ -336 +343,2 @@
+-    if not isinstance(files, dict) or frozenset(files) not in GENERATIONS:
++    generations = (ACTIVE_SUPPORT_FILES,) if digest == ACTIVE_SUPPORT_DIGEST else GENERATIONS
++    if not isinstance(files, dict) or frozenset(files) not in generations:

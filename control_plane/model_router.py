@@ -811,10 +811,38 @@ class ModelRouter:
             raise RoutingPolicyError(f"model alias {alias!r} is not worker eligible")
         return profile
 
+    def resolve_frontier_model_alias(self, model_alias: str) -> ModelAlias:
+        """Resolve a reviewed logical lead without conferring execution authority.
+
+        Provider enablement and capacity remain admission concerns. A successful
+        resolution may describe included-chat cognition, never a worker claim.
+        """
+        if not isinstance(model_alias, str):
+            raise RoutingPolicyError("frontier_model_alias must be a string")
+        alias = _bounded_id(model_alias, field="frontier_model_alias")
+        try:
+            profile = self.model_aliases[alias]
+        except KeyError as exc:
+            raise RoutingPolicyError(f"unknown frontier model alias {alias!r}") from exc
+        if profile.worker_eligible:
+            raise RoutingPolicyError(f"frontier model alias {alias!r} must be non-worker")
+        if not _LEAD_TASKS.issubset(profile.capabilities):
+            raise RoutingPolicyError(
+                f"frontier model alias {alias!r} lacks required lead capabilities"
+            )
+        return profile
+
+    def resolve_attended_model_alias(self, model_alias: str, binding_id: str) -> ModelAlias:
+        """Resolve finite attended catalogue eligibility, never claim authority."""
+        from control_plane.fabric_attended_routing import resolve_attended_alias
+
+        return resolve_attended_alias(self, model_alias, binding_id)[0]
+
     def route(
         self,
         request: WorkRequest,
         *,
+        frontier_model_alias: str | None = None,
         cognition_route: CognitionRoute | str | None = None,
         chat_reasoning_mode: ChatReasoningMode | str | None = None,
         metered_cognition_receipt: MeteredCognitionReceipt | None = None,
@@ -896,7 +924,18 @@ class ModelRouter:
                         )
                     reasons.append("non_pro_default")
 
-            lead_profile = self.model_aliases["frontier.orchestrator"]
+            if frontier_model_alias is None:
+                lead_profile = self.model_aliases["frontier.orchestrator"]
+            else:
+                lead_profile = self.resolve_frontier_model_alias(frontier_model_alias)
+                if not set(request.required_capabilities).issubset(
+                    lead_profile.capabilities
+                ):
+                    raise RoutingPolicyError(
+                        f"frontier model alias {lead_profile.model_alias!r} "
+                        "cannot satisfy requested capabilities"
+                    )
+                reasons.append("frontier_model_selected")
             return RoutingDecision(
                 mode=RouteMode.FRONTIER_LEAD,
                 policy_version=self.policy_version,
@@ -910,7 +949,7 @@ class ModelRouter:
                 capability_policy_digest=lead_profile.capability_policy_digest,
                 suitability_tiers=(
                     SuitabilityTier(
-                        "frontier.lead", ("frontier.orchestrator",)
+                        "frontier.lead", (lead_profile.model_alias,)
                     ),
                 ),
                 required_capabilities=request.required_capabilities,
@@ -922,6 +961,10 @@ class ModelRouter:
                 pro_mode_receipt=pro_mode_receipt,
             )
 
+        if frontier_model_alias is not None:
+            raise RoutingPolicyError(
+                "worker work does not accept a frontier model selection"
+            )
         if pro_mode_receipt is not None:
             raise RoutingPolicyError(
                 f"{_PRO_MODE_REFUSAL}: a Pro receipt cannot be attached to worker work"
@@ -996,6 +1039,7 @@ def route_work(
     ambiguity: str = "low",
     required_capabilities: Sequence[str] = (),
     excluded_worker_ids: Sequence[str] = (),
+    frontier_model_alias: str | None = None,
     cognition_route: CognitionRoute | str | None = None,
     chat_reasoning_mode: ChatReasoningMode | str | None = None,
     metered_cognition_receipt: MeteredCognitionReceipt | None = None,
@@ -1017,6 +1061,7 @@ def route_work(
             required_capabilities=tuple(required_capabilities),
             excluded_worker_ids=tuple(excluded_worker_ids),
         ),
+        frontier_model_alias=frontier_model_alias,
         cognition_route=cognition_route,
         chat_reasoning_mode=chat_reasoning_mode,
         metered_cognition_receipt=metered_cognition_receipt,

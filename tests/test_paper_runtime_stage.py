@@ -81,15 +81,68 @@ class RuntimeStageTests(unittest.TestCase):
         with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
             stage.stage("v7", root=self.root, _source_dir=self.source)
 
-    def test_current_v10_reviewed_hash_matches_bridge_source(self):
+    def test_current_v14_reviewed_hash_matches_bridge_source(self):
         bridge = ROOT / "integrations" / "paper_desktop" / "bridge.py"
         current = load_local(
             "paper_runtime_stage_current_source_pin",
             ROOT / "integrations" / "paper_desktop" / "runtime_stage.py",
         )
         self.assertEqual(
-            current.REVIEWED_GENERATIONS["v10"]["bridge.py"],
+            current.REVIEWED_GENERATIONS["v14"]["bridge.py"],
             current._sha256(bridge.read_bytes()),
+        )
+
+    def test_historical_v11_pin_remains_immutable(self):
+        current = load_local(
+            "paper_runtime_stage_v11_predecessor",
+            ROOT / "integrations/paper_desktop/runtime_stage.py",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v11"]["bridge.py"],
+            "6d28be62b21bff12dc04ae1bdc50f12a4ff55fdb8261bdd6923bac2804fecf7c",
+        )
+
+    def test_staging_v12_preserves_every_existing_v11_file_and_both_generations_verify(self):
+        old_bridge = (self.source / "bridge.py").read_bytes()
+        new_bridge = old_bridge + b"# reviewed successor fixture\n"
+        reviewed = {
+            "v11": {"bridge.py": stage._sha256(old_bridge)},
+            "v12": {"bridge.py": stage._sha256(new_bridge)},
+        }
+
+        def snapshot_tree(target):
+            result = {}
+            for path in (target, *target.rglob("*")):
+                info = path.lstat()
+                content = (os.readlink(path) if path.is_symlink()
+                           else path.read_bytes() if path.is_file() else None)
+                result[str(path.relative_to(target))] = (
+                    info.st_ino, info.st_mode, info.st_mtime_ns, content,
+                )
+            return result
+
+        with mock.patch.object(stage, "REVIEWED_GENERATIONS", reviewed):
+            stage.stage("v11", root=self.root, _source_dir=self.source)
+            before = snapshot_tree(self.root / "v11")
+            (self.source / "bridge.py").write_bytes(new_bridge)
+            result = stage.stage("v12", root=self.root, _source_dir=self.source)
+            self.assertEqual(result["state"], "RUNTIME_STAGED")
+            self.assertEqual((self.root / "v12/source/bridge.py").read_bytes(), new_bridge)
+            for generation in ("v11", "v12"):
+                self.assertEqual(
+                    stage.verify(generation, root=self.root, _source_dir=self.source)["state"],
+                    "RUNTIME_VERIFIED",
+                )
+            self.assertEqual(snapshot_tree(self.root / "v11"), before)
+
+    def test_historical_v10_pin_remains_immutable(self):
+        current = load_local(
+            "paper_runtime_stage_previous_generation",
+            ROOT / "integrations/paper_desktop/runtime_stage.py",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v10"]["bridge.py"],
+            "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
         )
 
     def test_historical_v9_pin_remains_immutable(self):

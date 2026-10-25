@@ -140,6 +140,64 @@ def _resolve_catalog_pair(
     return binding, profile, profiles
 
 
+def prepare_assigned_subscription_files(spec: WorkerLaunchSpec, *, worker_id: str, selected_model: str):
+    """Reuse original filesystem/schema preparation after an authenticated assignment.
+
+    No credential, admission, process or run state is created here. The caller
+    retains its actual claim and original process owner. Isolation validation
+    uses the existing stateless canonical validator and static identity helper.
+    """
+    ClaudeSubscriptionWorkerAdapter._validate_ids(spec)
+    if spec.worker_id != worker_id:
+        raise LaunchValidationError("worker_id does not match admission")
+    authorities = _authority_set(spec)
+    if "RESEARCH" in authorities:
+        raise LaunchValidationError("Claude subscription worker does not grant network research in v1")
+    if not isinstance(spec.prompt, str) or not spec.prompt.strip() or len(spec.prompt.encode()) > _MAX_PROMPT_BYTES:
+        raise LaunchValidationError("prompt is missing or exceeds one MiB")
+    if spec.model != selected_model:
+        raise LaunchValidationError("launch model does not match fixed provider realm model")
+    workspace_lexical = Path(spec.workspace_path)
+    if not workspace_lexical.is_absolute():
+        raise LaunchValidationError("workspace path must be absolute")
+    info = workspace_lexical.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise LaunchValidationError("workspace must be a real directory")
+    workspace = workspace_lexical.resolve(strict=True)
+    baseline = _git_snapshot(workspace, require_clean=True)
+    if spec.expected_base_sha and baseline.head != spec.expected_base_sha.lower():
+        raise LaunchValidationError("workspace HEAD does not match expected base SHA")
+    run_dir = _ensure_run_directory(
+        Path(spec.run_dir),
+        shared_gid=(int(spec.shared_run_gid) if spec.shared_run_gid is not None else None),
+    )
+    if _is_relative_to(run_dir, workspace) or _is_relative_to(workspace, run_dir):
+        raise LaunchValidationError("run_dir and workspace must be disjoint")
+    # Reuse the accepted isolation-manifest validator rather than create a
+    # second identity/separation implementation for this provider.
+    CodexWorkerAdapter._validate_isolation_manifest(CodexWorkerAdapter, spec, workspace, run_dir, verify_filesystem=True)
+    home = _ensure_private_directory(run_dir / "home")
+    tmp = _ensure_private_directory(run_dir / "tmp")
+    _ensure_private_directory(run_dir / "logs")
+    _ensure_private_directory(run_dir / "output")
+    schema_path = Path(spec.result_schema_path).resolve(strict=True)
+    if not _is_relative_to(schema_path, run_dir):
+        raise LaunchValidationError("result schema must be contained by run_dir")
+    try:
+        schema = json.loads(_read_limited(schema_path, _MAX_SCHEMA_BYTES).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise LaunchValidationError("result schema is invalid JSON") from exc
+    if not isinstance(schema, (dict, bool)):
+        raise LaunchValidationError("result schema root must be object or boolean")
+    allowed = tuple(_normalise_relative_path(value) for value in spec.allowed_artifact_paths)
+    if "WRITE_BRANCH" in authorities and not allowed:
+        raise LaunchValidationError("WRITE_BRANCH requires allowed artifact paths")
+    if any(_is_protected_workspace_path(value) for value in allowed):
+        raise LaunchValidationError("allowed artifact path targets protected workspace metadata")
+    return workspace, run_dir, home, tmp, baseline, schema
+
+
+
 @dataclasses.dataclass
 class _RunState:
     spec: WorkerLaunchSpec
@@ -425,56 +483,10 @@ class ClaudeSubscriptionWorkerAdapter:
                 raise LaunchValidationError(f"invalid {field}")
 
     def _validate_spec(self, spec: WorkerLaunchSpec) -> tuple[Path, Path, Path, Path, Any, Any]:
-        self._validate_ids(spec)
-        if spec.worker_id != self.admission.worker_id:
-            raise LaunchValidationError("worker_id does not match admission")
         if spec.run_id in self._runs:
             raise LaunchValidationError("run_id is already known")
-        authorities = _authority_set(spec)
-        if "RESEARCH" in authorities:
-            raise LaunchValidationError("Claude subscription worker does not grant network research in v1")
-        if not isinstance(spec.prompt, str) or not spec.prompt.strip() or len(spec.prompt.encode()) > _MAX_PROMPT_BYTES:
-            raise LaunchValidationError("prompt is missing or exceeds one MiB")
-        if spec.model != self.selected_model:
-            raise LaunchValidationError("launch model does not match fixed provider realm model")
-        workspace_lexical = Path(spec.workspace_path)
-        if not workspace_lexical.is_absolute():
-            raise LaunchValidationError("workspace path must be absolute")
-        info = workspace_lexical.lstat()
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-            raise LaunchValidationError("workspace must be a real directory")
-        workspace = workspace_lexical.resolve(strict=True)
-        baseline = _git_snapshot(workspace, require_clean=True)
-        if spec.expected_base_sha and baseline.head != spec.expected_base_sha.lower():
-            raise LaunchValidationError("workspace HEAD does not match expected base SHA")
-        run_dir = _ensure_run_directory(
-            Path(spec.run_dir),
-            shared_gid=(int(spec.shared_run_gid) if spec.shared_run_gid is not None else None),
-        )
-        if _is_relative_to(run_dir, workspace) or _is_relative_to(workspace, run_dir):
-            raise LaunchValidationError("run_dir and workspace must be disjoint")
-        # Reuse the accepted isolation-manifest validator rather than create a
-        # second identity/separation implementation for this provider.
-        CodexWorkerAdapter._validate_isolation_manifest(self, spec, workspace, run_dir, verify_filesystem=True)
-        home = _ensure_private_directory(run_dir / "home")
-        tmp = _ensure_private_directory(run_dir / "tmp")
-        _ensure_private_directory(run_dir / "logs")
-        _ensure_private_directory(run_dir / "output")
-        schema_path = Path(spec.result_schema_path).resolve(strict=True)
-        if not _is_relative_to(schema_path, run_dir):
-            raise LaunchValidationError("result schema must be contained by run_dir")
-        try:
-            schema = json.loads(_read_limited(schema_path, _MAX_SCHEMA_BYTES).decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise LaunchValidationError("result schema is invalid JSON") from exc
-        if not isinstance(schema, (dict, bool)):
-            raise LaunchValidationError("result schema root must be object or boolean")
-        allowed = tuple(_normalise_relative_path(value) for value in spec.allowed_artifact_paths)
-        if "WRITE_BRANCH" in authorities and not allowed:
-            raise LaunchValidationError("WRITE_BRANCH requires allowed artifact paths")
-        if any(_is_protected_workspace_path(value) for value in allowed):
-            raise LaunchValidationError("allowed artifact path targets protected workspace metadata")
-        return workspace, run_dir, home, tmp, baseline, schema
+        return prepare_assigned_subscription_files(spec, worker_id=self.admission.worker_id,
+                                                   selected_model=self.selected_model)
 
     # These aliases let the accepted Codex isolation-manifest implementation run
     # against the same provider-neutral WorkerLaunchSpec without copying it.

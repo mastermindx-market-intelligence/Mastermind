@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import plistlib
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,8 @@ NEW = '7' * 40
 def test_rebind_parser_is_non_enrolling():
     p = a2.build_parser()
     assert p.parse_args(['rebind-release', '--expected-bot-user-id', BOT]).command == 'rebind-release'
-    for flag in ['--enable-w3c', '--token', '--config', '--plist']:
+    assert p.parse_args(['rebind-release', '--expected-bot-user-id', BOT, '--enable-w3c']).enable_w3c is True
+    for flag in ['--token', '--config', '--plist']:
         with pytest.raises(a2.A2EnrollmentError):
             p.parse_args(['rebind-release', '--expected-bot-user-id', BOT, flag])
 
@@ -33,6 +35,9 @@ def host(monkeypatch, tmp_path):
     plists = tmp_path / 'Library' / 'LaunchDaemons'
     for directory in (config, locks, plists):
         directory.mkdir(parents=True, exist_ok=True)
+        # macOS temporary roots may assign the wheel group to newly created
+        # directories; the native CAS requires the exact test principal group.
+        os.chown(directory, -1, os.getgid())
         directory.chmod(0o700 if directory == locks else 0o755)
     # Own the complete fixture namespace under either 002 or 022 umask.
     for directory in (root.parent.parent, root.parent, root):
@@ -72,6 +77,67 @@ def rebind():
 
 def pair():
     return (a2.PLIST_PATH.read_bytes(), a2.CONFIG_PATH.read_bytes())
+
+
+def seed_legacy_socket_pair():
+    # Exact canonical output of the previous release: change *only* its
+    # historical socket in both bound files; preserve token inode and bytes.
+    config = json.loads(a2.CONFIG_PATH.read_bytes())
+    assert config["relay_socket_path"] == str(a2.SOCKET_PATH)
+    config["relay_socket_path"] = str(a2.LEGACY_SOCKET_PATH)
+    a2.CONFIG_PATH.chmod(0o600)
+    a2.CONFIG_PATH.write_bytes(a2._canonical_json_bytes(config))
+    a2.CONFIG_PATH.chmod(0o400)
+
+    plist = plistlib.loads(a2.PLIST_PATH.read_bytes())
+    args = plist["ProgramArguments"]
+    index = args.index("--socket-path") + 1
+    assert args[index] == str(a2.SOCKET_PATH)
+    args[index] = str(a2.LEGACY_SOCKET_PATH)
+    a2.PLIST_PATH.write_bytes(plistlib.dumps(plist, fmt=plistlib.FMT_XML, sort_keys=False))
+    a2.PLIST_PATH.chmod(0o644)
+
+
+@pytest.mark.parametrize("current_release", [False, True])
+def test_legacy_socket_pair_rebinds_once_to_persistent_path_without_token_read(host, monkeypatch, current_release):
+    if current_release:
+        host(sha=NEW)
+    seed_legacy_socket_pair()
+    token_identity = a2.TOKEN_PATH.stat()
+    read = os.read
+    def forbid_token_read(fd, size):
+        assert os.fstat(fd).st_ino != token_identity.st_ino
+        return read(fd, size)
+    monkeypatch.setattr(os, "read", forbid_token_read)
+
+    result = rebind()
+    assert result["action"] == "rebound"
+    assert json.loads(a2.CONFIG_PATH.read_bytes())["relay_socket_path"] == str(a2.SOCKET_PATH)
+    doc = plistlib.loads(a2.PLIST_PATH.read_bytes())
+    args = doc["ProgramArguments"]
+    assert args[args.index("--socket-path") + 1] == str(a2.SOCKET_PATH)
+    assert rebind()["action"] == "already-current"
+    assert a2.TOKEN_PATH.stat() == token_identity
+
+
+@pytest.mark.parametrize("alter", ["config", "plist"])
+def test_legacy_mixed_socket_pair_refused_without_any_mutation(host, alter):
+    seed_legacy_socket_pair()
+    if alter == "config":
+        new_document = json.loads(a2.CONFIG_PATH.read_bytes())
+        new_document["relay_socket_path"] = str(a2.SOCKET_PATH)
+        a2.CONFIG_PATH.chmod(0o600)
+        a2.CONFIG_PATH.write_bytes(a2._canonical_json_bytes(new_document))
+        a2.CONFIG_PATH.chmod(0o400)
+    else:
+        doc = plistlib.loads(a2.PLIST_PATH.read_bytes())
+        args = doc["ProgramArguments"]
+        args[args.index("--socket-path") + 1] = str(a2.SOCKET_PATH)
+        a2.PLIST_PATH.write_bytes(plistlib.dumps(doc, fmt=plistlib.FMT_XML, sort_keys=False))
+    before = pair()
+    with pytest.raises(a2.A2EnrollmentError, match="STATE_REFUSED"):
+        rebind()
+    assert pair() == before
 
 
 @pytest.mark.parametrize('scopes', [a2.DEDICATED_A2_SCOPES, a2.SHARED_A2_SCOPES])
@@ -429,3 +495,261 @@ def test_staged_source_drift_never_publishes_or_rolls_back(host, monkeypatch, st
         assert staged_path.read_bytes() == foreign
     else:
         assert leftovers == []  # Only our own held inode may be unlinked.
+
+
+@pytest.mark.parametrize('sha', [OLD, NEW])
+@pytest.mark.parametrize('scopes', [a2.DEDICATED_A2_SCOPES, a2.SHARED_A2_SCOPES])
+def test_explicit_w3c_enable_updates_existing_pair_even_at_same_release(host, monkeypatch, sha, scopes):
+    host(scopes=scopes, w3c=False, sha=sha)
+    token_info = a2.TOKEN_PATH.stat()
+    original = json.loads(a2.CONFIG_PATH.read_bytes())
+    original_read = os.read
+    def no_token_read(fd, count):
+        assert os.fstat(fd).st_ino != token_info.st_ino
+        return original_read(fd, count)
+    monkeypatch.setattr(os, 'read', no_token_read)
+    result = asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))
+    assert result['action'] == 'rebound'
+    expected = {**original, 'release_sha': NEW, 'w3c_enabled': True}
+    assert json.loads(a2.CONFIG_PATH.read_bytes()) == expected
+    assert a2.PLIST_PATH.read_bytes() == a2.render_plist(bot_user_id=BOT, release_sha=NEW, w3c_enabled=True)
+    assert a2.TOKEN_PATH.stat() == token_info
+    before = pair()
+    inodes = (a2.CONFIG_PATH.stat().st_ino, a2.PLIST_PATH.stat().st_ino)
+    assert asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))['action'] == 'already-current'
+    assert pair() == before
+    assert inodes == (a2.CONFIG_PATH.stat().st_ino, a2.PLIST_PATH.stat().st_ino)
+    # Default rebind still preserves the newly selected true state.
+    assert rebind()['action'] == 'already-current'
+    assert pair() == before
+
+
+def test_explicit_w3c_enable_refuses_loaded_relay_without_pair_or_credential_change(host, monkeypatch):
+    before = pair()
+    token_info = a2.TOKEN_PATH.stat()
+    def loaded():
+        raise a2.A2EnrollmentError('A2_ENROLLMENT_HOST_REFUSED')
+    monkeypatch.setattr(a2, '_assert_disarmed', loaded)
+    with pytest.raises(a2.A2EnrollmentError, match='A2_ENROLLMENT_HOST_REFUSED'):
+        asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))
+    assert pair() == before
+    assert a2.TOKEN_PATH.stat() == token_info
+
+
+def test_explicit_w3c_enable_fault_restores_owned_false_generation(host, monkeypatch):
+    before = pair()
+    token_info = a2.TOKEN_PATH.stat()
+    original = a2._A2Rebind.replace
+    writes = []
+    def fail_after_first(self, path, payload):
+        original(self, path, payload)
+        writes.append(path)
+        if len(writes) == 1:
+            raise RuntimeError('owned first replacement settled')
+    monkeypatch.setattr(a2._A2Rebind, 'replace', fail_after_first)
+    with pytest.raises(a2.A2EnrollmentError, match='A2_REBIND_WRITE_REFUSED'):
+        asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))
+    assert pair() == before
+    assert a2.TOKEN_PATH.stat() == token_info
+
+
+def test_explicit_w3c_enable_is_typed_and_does_not_disable_true(host):
+    with pytest.raises(a2.A2EnrollmentError, match='A2_ENROLLMENT_ARGUMENTS_REFUSED'):
+        asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c='true'))
+    host(w3c=True, sha=NEW)
+    before = pair()
+    assert asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=False))['action'] == 'already-current'
+    assert pair() == before
+
+
+def test_existing_relay_enable_cli_uses_same_owned_transaction(host):
+    import io
+    output = io.StringIO()
+    result = a2._run_invocation(
+        ['rebind-release', '--expected-bot-user-id', BOT, '--enable-w3c'],
+        stdin=io.BytesIO(), stdout=output, environ={}, require_native_tty=True)
+    assert result == 0, output.getvalue()
+    assert json.loads(output.getvalue())['action'] == 'rebound'
+    assert json.loads(a2.CONFIG_PATH.read_bytes())['w3c_enabled'] is True
+
+
+def _reverse_witness(legacy_pair, *, previous=OLD, current=NEW):
+    import hashlib
+    return dict(
+        bot_user_id=BOT,
+        expected_current_release_sha=current,
+        expected_previous_release_sha=previous,
+        expected_previous_tree_sha='a' * 40,
+        expected_previous_config_sha256=hashlib.sha256(legacy_pair[1]).hexdigest(),
+        expected_previous_plist_sha256=hashlib.sha256(legacy_pair[0]).hexdigest(),
+    )
+
+
+def _seed_real_previous_release(monkeypatch):
+    """Build a real signed-shape manifest, including filesystem inventory.
+
+    Test UID/GID substitute for the installed root principal; the actual
+    create/verify, manifest schema and sealed-byte comparison run unmocked.
+    """
+    from ops.executive_os import release_manifest
+    root = a2.SYSTEM_RELEASE_ROOT / OLD
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o755)
+    sealed_file = root / 'historical-code.py'
+    sealed_file.write_bytes(b'# inert historical code fixture\n')
+    sealed_file.chmod(0o644)
+    original_owner_validator = release_manifest._validate_owned_info
+
+    def assert_fixture_owner(info, *, label):
+        assert info.st_uid == os.getuid(), label
+        # macOS temp namespaces can inherit gid=wheel even for uid=501.
+        # Only translate ownership for the fixture; the real seal and
+        # every manifest byte/inventory comparison remain exercised.
+        assert info.st_gid in (os.getgid(), 0), label
+        assert not info.st_mode & 0o022, label
+
+    monkeypatch.setattr(release_manifest, '_validate_owned_info',
+                        assert_fixture_owner)
+    try:
+        release_manifest.create(root, OLD, 'a' * 40)
+        persisted = release_manifest.verify(root, OLD, 'a' * 40)
+    except BaseException:
+        monkeypatch.setattr(release_manifest, '_validate_owned_info',
+                            original_owner_validator)
+        raise
+    assert persisted['schema_version'] == release_manifest.SCHEMA_VERSION
+    assert persisted['commit_sha'] == OLD
+    assert persisted['tree_sha'] == 'a' * 40
+    assert len(persisted['entries']) >= 1
+    return root
+
+
+def _prepare_reverse(host, monkeypatch):
+    host()
+    seed_legacy_socket_pair()
+    old_pair = pair()
+    assert rebind()['action'] == 'rebound'
+    new_pair = pair()
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', lambda: None)
+    _seed_real_previous_release(monkeypatch)
+    return old_pair, new_pair
+
+
+def test_reverse_parser_requires_explicit_old_generation_and_disallows_w3c():
+    parser = a2.build_parser()
+    args = ['reverse-rebind-release', '--expected-bot-user-id', BOT,
+            '--expected-current-release-sha', NEW,
+            '--expected-previous-release-sha', OLD,
+            '--expected-previous-tree-sha', 'a' * 40,
+            '--expected-previous-config-sha256', 'b' * 64,
+            '--expected-previous-plist-sha256', 'c' * 64]
+    assert parser.parse_args(args).command == 'reverse-rebind-release'
+    with pytest.raises(a2.A2EnrollmentError):
+        parser.parse_args(args + ['--enable-w3c'])
+    with pytest.raises(a2.A2EnrollmentError):
+        parser.parse_args(args[:-2])
+
+
+def test_reverse_exact_historical_pair_and_token_inode_preserved(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    before_token = a2.TOKEN_PATH.stat()
+    kwargs = _reverse_witness(old_pair)
+    result = asyncio.run(a2._reverse_rebind(**kwargs))
+    assert result['action'] == 'reversed'
+    assert result['release_sha'] == OLD
+    assert pair() == old_pair
+    assert pair() != new_pair
+    assert a2.TOKEN_PATH.stat() == before_token
+    assert asyncio.run(a2._reverse_rebind(**kwargs))['action'] == 'already-reversed'
+    assert a2.TOKEN_PATH.stat() == before_token
+
+
+@pytest.mark.parametrize('which', ['config', 'plist', 'current_sha', 'previous_tree', 'previous_sha'])
+def test_reverse_rejects_incorrect_witness_without_mutation(host, monkeypatch, which):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    kwargs = _reverse_witness(old_pair)
+    changes = {
+        'config': ('expected_previous_config_sha256', '0' * 64),
+        'plist': ('expected_previous_plist_sha256', '0' * 64),
+        'current_sha': ('expected_current_release_sha', '4' * 40),
+        'previous_tree': ('expected_previous_tree_sha', 'f' * 40),
+        'previous_sha': ('expected_previous_release_sha', 'e' * 40),
+    }
+    key, value = changes[which]
+    kwargs[key] = value
+    with pytest.raises(a2.A2EnrollmentError):
+        asyncio.run(a2._reverse_rebind(**kwargs))
+    assert pair() == new_pair
+
+
+def test_reverse_rejects_armed_w3c_without_downgrading(host, monkeypatch):
+    host()
+    assert asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))['action'] == 'rebound'
+    current_pair = pair()
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', lambda: None)
+    _seed_real_previous_release(monkeypatch)
+    kwargs = _reverse_witness(current_pair)
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**kwargs))
+    assert err.value.code == 'A2_REBIND_STATE_REFUSED'
+    assert pair() == current_pair
+
+
+def test_reverse_refuses_if_control_return_is_armed(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed',
+                        lambda: (_ for _ in ()).throw(a2.A2EnrollmentError('A2_REBIND_STATE_REFUSED')))
+    with pytest.raises(a2.A2EnrollmentError):
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert pair() == new_pair
+
+
+def test_reverse_refuses_failed_previous_release_seal(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    # Tamper AFTER create() with actual release bytes, not a fake verifier.
+    (a2.SYSTEM_RELEASE_ROOT / OLD / 'historical-code.py').write_bytes(
+        b'# tampered, does not match previous signed manifest\n')
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert err.value.code == 'A2_REBIND_STATE_REFUSED'
+    assert pair() == new_pair
+
+
+def test_reverse_acknowledged_second_rename_failure_restores_new_pair(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    original_replace = os.replace
+    calls = 0
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError('second CAS publication denied')
+        return original_replace(*args, **kwargs)
+    monkeypatch.setattr(os, 'replace', fail_second)
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert err.value.code == 'A2_REBIND_WRITE_REFUSED'
+    assert pair() == new_pair
+    assert a2.TOKEN_PATH.read_bytes() == b'INERT-TEST-ONLY-NOT-A-CREDENTIAL'
+
+
+def test_reverse_changed_control_after_first_publication_freezes_effect(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    before_token = a2.TOKEN_PATH.stat()
+    observations = 0
+
+    def check_return():
+        nonlocal observations
+        observations += 1
+        if observations == 3:
+            raise a2.A2EnrollmentError('A2_REBIND_STATE_REFUSED')
+
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', check_return)
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert err.value.code == 'A2_REBIND_EFFECT_UNCERTAIN'
+    # Acknowledged first publication is operation-owned but mixed; no
+    # automatic rollback is allowed after original controller arming drift.
+    assert a2.PLIST_PATH.read_bytes() == old_pair[0]
+    assert a2.CONFIG_PATH.read_bytes() == new_pair[1]
+    assert a2.TOKEN_PATH.stat() == before_token

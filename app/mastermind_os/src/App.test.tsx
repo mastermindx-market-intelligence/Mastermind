@@ -84,6 +84,64 @@ afterEach(() => {
 });
 
 describe("React read lifecycle fences", () => {
+  it("reports Programs collection state independently of unresolved Mission roots", async () => {
+    history.replaceState(null, "", "/os/");
+    const pending = deferred<unknown>(), readMission = vi.fn();
+    window.MastermindMissionHost = { readPrograms: () => pending.promise, readMission };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
+    expect(header.getByText("SOURCE READ PENDING")).toBeTruthy();
+    const raw = controlRoomFixture();
+    raw.autonomy.responsibilities = [];
+    await act(async () => pending.resolve(raw));
+    expect(header.getByText("AVAILABLE")).toBeTruthy();
+    expect(header.getByText(`${raw.work.length} Programs from the bounded source observation.`)).toBeTruthy();
+    expect(header.queryByText("No producer document is currently admitted.")).toBeNull();
+    expect((screen.getByRole("button", { name: /Alpha program/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /Beta program/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(readMission).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("");
+  });
+  it("reports an empty Programs collection without claiming an available Mission", async () => {
+    history.replaceState(null, "", "/os/");
+    const raw = controlRoomFixture();
+    raw.work = [];
+    raw.autonomy.responsibilities = [];
+    window.MastermindMissionHost = { readPrograms: async () => raw };
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: "Open Programs" }));
+    const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
+    expect(await header.findByText("AVAILABLE")).toBeTruthy();
+    expect(header.getByText("0 Programs from the bounded source observation.")).toBeTruthy();
+    expect(screen.getByText("No Programs were projected. This is not evidence of zero work.")).toBeTruthy();
+  });
+  it("reports Programs read failure in its own header without exposing the error", async () => {
+    history.replaceState(null, "", "/os/");
+    window.MastermindMissionHost = { readPrograms: async () => { throw new Error("private producer detail"); } };
+    render(<App />);
+    await userEvent.click(screen.getByRole("button", { name: "Open Programs" }));
+    const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
+    expect(await header.findByText("Program source unavailable; current company movement is not inferred.")).toBeTruthy();
+    expect(header.getByText("UNAVAILABLE")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("private producer detail");
+  });
+  it("keeps Programs and exact Mission navigation available with a withheld next action", async () => {
+    const raw = controlRoomFixture(), unsafe = "token=synthetic-fixture";
+    raw.work[1].agent_os.next_action = unsafe;
+    const readMission = vi.fn(async ({ workRef, rootJobId }) => missionFixture(workRef, rootJobId));
+    window.MastermindMissionHost = { readPrograms: async () => raw, readMission };
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    expect(await screen.findByText(/Next action withheld/)).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain(unsafe);
+    await user.click(screen.getByRole("button", { name: /Beta program/ }));
+    expect(await screen.findByText("Exact project context · JOB-B")).toBeTruthy();
+    expect(readMission).toHaveBeenLastCalledWith(expect.objectContaining({ workRef: "WS:BETA", rootJobId: "JOB-B" }));
+    expect(window.location.search).toBe("?work_ref=WS%3ABETA&root_job_id=JOB-B");
+  });
   it("hides displayed A synchronously while B is pending and after B rejects", async () => {
     const b = deferred<unknown>(), collectionB = deferred<unknown>(),
       read = vi.fn(({ workRef }: { workRef: string }) =>

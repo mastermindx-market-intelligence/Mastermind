@@ -177,3 +177,20 @@ async def run_native_return_stdio(*, socket_path: str, server_uid: int, timeout_
     gateway = UnixNativeReturnGateway(socket_path=socket_path, server_uid=server_uid, timeout_seconds=timeout_seconds)
     from integrations.mastermind_company_mcp.server import run_native_return_stdio as run
     await run(gateway)
+
+
+class UnixProductAcceptanceGateway(UnixCompanyConsultationGateway):
+    """Distinct selector using the existing one-request authenticated transport."""
+    from integrations.mastermind_company_mcp import product_acceptance as _acceptance
+    _tools = frozenset({_acceptance.TOOL_NAME})
+    _effecting = _tools
+    _validate_arguments = staticmethod(lambda tool, args: UnixProductAcceptanceGateway._acceptance.validate_arguments(args))
+    _encode_request = staticmethod(_acceptance.encode_request)
+    _response = staticmethod(lambda frame, tool: UnixProductAcceptanceGateway._acceptance.validated_response(frame))
+    _error = staticmethod(lambda tool, code: UnixProductAcceptanceGateway._acceptance.envelope(error=code))
+
+
+async def run_product_acceptance_stdio(*, socket_path: str, server_uid: int, timeout_seconds: float = 30.0) -> None:
+    gateway = UnixProductAcceptanceGateway(socket_path=socket_path, server_uid=server_uid, timeout_seconds=timeout_seconds)
+    from integrations.mastermind_company_mcp.server import run_product_acceptance_stdio as run
+    await run(gateway)

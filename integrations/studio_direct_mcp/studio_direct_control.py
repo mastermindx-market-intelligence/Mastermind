@@ -26,6 +26,28 @@ def invoke(helper, action, account):
     return _invoke_from(Path(__file__).parent, helper, action, account)
 
 
+def _fleet_ready(gateway, tunnel):
+    """Match the fail-closed readiness predicate of the existing fleet projection.
+
+    A tunnel transport can be ready while its control-plane poll is not. The
+    owner must not mark that seat ready when the fleet reader will reject the
+    contradictory receipt. This affects reporting only, not launch admission.
+    """
+    return (
+        gateway.get('loaded') is True
+        and gateway.get('running') is True
+        and tunnel.get('loaded') is True
+        and tunnel.get('running') is True
+        and tunnel.get('healthy') is True
+        and tunnel.get('ready') is True
+        and tunnel.get('configurationDrift') is False
+        and tunnel.get('tunnelReady') is True
+        and tunnel.get('controlPlanePollReady') is True
+        and tunnel.get('gatewayReady') is True
+        and tunnel.get('managedAliasRunning') is False
+    )
+
+
 def installed_status(account):
     """Read one installed seat through the installed control-helper generation."""
     gateway = _invoke_from(INSTALLED_CONTROL_ROOT, 'private_service.py', 'status', account)
@@ -34,7 +56,7 @@ def installed_status(account):
         'account': account,
         'action': 'status',
         'steps': [],
-        'ready': bool(gateway.get('running') and tunnel.get('ready')),
+        'ready': _fleet_ready(gateway, tunnel),
         'gateway': gateway,
         'tunnel': tunnel,
     }

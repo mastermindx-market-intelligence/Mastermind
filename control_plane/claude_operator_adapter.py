@@ -22,6 +22,7 @@ from typing import Any, Callable, Mapping
 from control_plane.claude_operator_helper_protocol import (
     INTERFACE_VERSION, security_settings, EXECUTIVE_PLAN_CONTRACT, native_plan_contract,
 )
+from control_plane.claude_mcp_client_projection import ClaudeMcpClientProjection
 from control_plane.executive_agent_capabilities import claude_security_config_digest
 from control_plane.claude_worker import (
     ClaudeWorkerContractError, _validate_exact_model, _validate_known_model_runtime,
@@ -125,6 +126,262 @@ class ClaudeReadbackPolicyObserver:
                                       "native readback and applied launch provenance are unavailable")
         return ClaudePolicyObservation("read-only", "never", "disabled",
             claude_security_config_digest(observed_policy, launch_provenance=provenance))
+
+
+@dataclass(frozen=True)
+class ClaudeProjectedMcpPolicyObservation:
+    """What native readback proves for one inert projected MCP configuration."""
+
+    sandbox_state: str
+    approval_state: str
+    network_state: str
+    effective_config_digest: str
+    client_projection_digest: str
+    source_profile_id: str
+    source_profile_digest: str
+    observed_mcp_servers: tuple[str, ...]
+    observed_mcp_tools: tuple[str, ...]
+    native_tool_schema_attested: bool = False
+    resource_generation_attested: bool = False
+
+
+class ClaudeProjectedMcpReadbackObserver:
+    """Attest an already-reviewed Agent SDK MCP projection without admitting it.
+
+    Native Claude currently exposes MCP server names/status and the effective
+    tool-name inventory, but not the full MCP tools/list schemas.  This observer
+    therefore binds the exact projected configuration bytes to same-session
+    native readback while explicitly refusing to claim native tool-schema or
+    Attempt-bound resource attestation.
+    """
+
+    _BASE_KEYS = frozenset(
+        {
+            "tools",
+            "permission_mode",
+            "setting_sources",
+            "strict_mcp_config",
+            "mcp_servers",
+            "sandbox",
+            "skills",
+        }
+    )
+    _PROJECTED_KEYS = frozenset(
+        {"mcp_servers", "allowed_tools", "strict_mcp_config", "disallowed_tools"}
+    )
+    _CORE_TOOLS = frozenset({"Read", "Glob", "Grep", "StructuredOutput"})
+
+    def __init__(
+        self,
+        base_config: Mapping[str, Any],
+        projection: ClaudeMcpClientProjection,
+    ) -> None:
+        if not isinstance(projection, ClaudeMcpClientProjection):
+            raise ValueError("reviewed Claude MCP client projection is required")
+        if projection.surface != "agent-sdk" or projection.production_armed is not False:
+            raise ValueError("only an inert Agent SDK MCP projection is supported")
+        if (
+            not isinstance(base_config, Mapping)
+            or set(base_config) != self._BASE_KEYS
+            or base_config.get("tools") != ["Read", "Glob", "Grep"]
+            or base_config.get("permission_mode") != "dontAsk"
+            or base_config.get("setting_sources") != []
+            or base_config.get("strict_mcp_config") is not True
+            or base_config.get("mcp_servers") != {}
+            or base_config.get("skills") != []
+        ):
+            raise ValueError("native MCP base policy is not the qualified read-only template")
+        sandbox = base_config.get("sandbox")
+        expected_sandbox = {
+            "enabled": True,
+            "failIfUnavailable": True,
+            "autoAllowBashIfSandboxed": False,
+            "allowUnsandboxedCommands": False,
+            "excludedCommands": [],
+            "network": {
+                "allowedDomains": [],
+                "deniedDomains": ["*"],
+                "allowAllUnixSockets": False,
+                "allowLocalBinding": False,
+            },
+        }
+        if sandbox != expected_sandbox:
+            raise ValueError("native MCP base sandbox is not qualified")
+
+        projected = projection.configuration()
+        if (
+            not isinstance(projected, dict)
+            or not set(projected) <= self._PROJECTED_KEYS
+            or set(projected) < {"mcp_servers", "allowed_tools", "strict_mcp_config"}
+            or projected.get("strict_mcp_config") is not True
+            or not isinstance(projected.get("mcp_servers"), dict)
+            or not projected["mcp_servers"]
+            or not isinstance(projected.get("allowed_tools"), list)
+            or tuple(sorted(projected["allowed_tools"]))
+            != tuple(sorted(projection.auto_approved_tools))
+        ):
+            raise ValueError("Claude MCP client projection is not an exact Agent SDK shape")
+        if "disallowed_tools" in projected and (
+            not isinstance(projected["disallowed_tools"], list)
+            or tuple(sorted(projected["disallowed_tools"]))
+            != tuple(sorted(projection.denied_tools))
+        ):
+            raise ValueError("Claude MCP deny projection differs from its source")
+        if not projection.enabled_tools:
+            raise ValueError("projected MCP observer requires at least one granted tool")
+        expected_servers = tuple(sorted(projected["mcp_servers"]))
+        if len(expected_servers) != len(set(expected_servers)):
+            raise ValueError("projected MCP server identities are duplicated")
+
+        self._base = json.loads(json.dumps(dict(base_config), allow_nan=False))
+        self._projection = projection
+        self._projected = json.loads(json.dumps(projected, allow_nan=False))
+        self._expected_servers = expected_servers
+        self._projection_digest = _digest(
+            {
+                "surface": projection.surface,
+                "source_profile_id": projection.source_profile_id,
+                "source_profile_digest": projection.source_profile_digest,
+                "source_grant_digests": list(projection.source_grant_digests),
+                "source_tool_schema_digests": list(
+                    projection.source_tool_schema_digests
+                ),
+                "configuration": self._projected,
+            }
+        )
+
+    @property
+    def client_projection_digest(self) -> str:
+        return self._projection_digest
+
+    def launch_config(self) -> dict[str, Any]:
+        """Return the candidate launch config; still not launch authorization."""
+
+        value = json.loads(json.dumps(self._base, allow_nan=False))
+        value["mcp_servers"] = json.loads(
+            json.dumps(self._projected["mcp_servers"], allow_nan=False)
+        )
+        value["allowed_tools"] = list(self._projected["allowed_tools"])
+        if "disallowed_tools" in self._projected:
+            value["disallowed_tools"] = list(self._projected["disallowed_tools"])
+        return value
+
+    def observe(
+        self, handshake: Mapping[str, Any]
+    ) -> ClaudeProjectedMcpPolicyObservation:
+        init = handshake.get("initialization", {})
+        if (
+            handshake.get("registration_zero_turn") is not True
+            or handshake.get("native_subscription_verified") is not True
+            or handshake.get("sdk_version") != "0.2.160"
+            or handshake.get("cli_version") != "2.1.275"
+            or handshake.get("result_contract") != native_plan_contract()
+            or not isinstance(init, Mapping)
+            or init.get("skills") != []
+            or init.get("plugins") != []
+            or init.get("permissionMode") != "dontAsk"
+        ):
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "native projected capability readback is incomplete",
+            )
+
+        raw_tools = init.get("tools")
+        if not isinstance(raw_tools, list) or any(
+            not isinstance(tool, str) for tool in raw_tools
+        ):
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "native projected tool inventory is malformed",
+            )
+        tool_set = set(raw_tools)
+        expected_mcp_tools = set(self._projection.enabled_tools)
+        observed_mcp_tools = {tool for tool in tool_set if tool.startswith("mcp__")}
+        if (
+            len(tool_set) != len(raw_tools)
+            or tool_set - expected_mcp_tools != self._CORE_TOOLS
+            or observed_mcp_tools != expected_mcp_tools
+        ):
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "native projected tool inventory differs",
+            )
+
+        init_servers = init.get("mcp_servers")
+        if (
+            not isinstance(init_servers, list)
+            or any(not isinstance(name, str) for name in init_servers)
+            or tuple(sorted(init_servers)) != self._expected_servers
+            or len(set(init_servers)) != len(init_servers)
+        ):
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "native projected MCP server inventory differs",
+            )
+        mcp_status = handshake.get("mcp_status")
+        rows = mcp_status.get("servers") if isinstance(mcp_status, Mapping) else None
+        if not isinstance(rows, list) or len(rows) != len(self._expected_servers):
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "native projected MCP status is incomplete",
+            )
+        status_map: dict[str, str] = {}
+        for row in rows:
+            if (
+                not isinstance(row, Mapping)
+                or set(row) != {"name", "status"}
+                or not isinstance(row.get("name"), str)
+                or row["name"] in status_map
+                or row.get("status") != "connected"
+            ):
+                raise ClaudeOperatorError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    "native projected MCP status differs",
+                )
+            status_map[row["name"]] = row["status"]
+        if tuple(sorted(status_map)) != self._expected_servers:
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "native projected MCP status identities differ",
+            )
+
+        provenance = handshake.get("applied_launch_provenance")
+        expected_provenance = {
+            key: self.launch_config()[key]
+            for key in ("setting_sources", "strict_mcp_config", "skills")
+        }
+        if (
+            provenance != expected_provenance
+            or handshake.get("settings_readback_provenance")
+            != "native-get_settings/0.2.160/2.1.275"
+        ):
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                "native projected launch provenance is unavailable",
+            )
+        observed_policy = security_settings(handshake.get("effective_policy"))
+        if observed_policy != {"sandbox": self._base["sandbox"]}:
+            raise ClaudeOperatorError(
+                AdapterFailureClass.CONFIG_DRIFT,
+                "effective native policy differs from projected base policy",
+            )
+        config_digest = claude_security_config_digest(
+            observed_policy,
+            launch_provenance=provenance,
+        )
+        return ClaudeProjectedMcpPolicyObservation(
+            sandbox_state="read-only",
+            approval_state="never",
+            network_state="disabled",
+            effective_config_digest=config_digest,
+            client_projection_digest=self._projection_digest,
+            source_profile_id=self._projection.source_profile_id,
+            source_profile_digest=self._projection.source_profile_digest,
+            observed_mcp_servers=self._expected_servers,
+            observed_mcp_tools=tuple(sorted(observed_mcp_tools)),
+            native_tool_schema_attested=False,
+            resource_generation_attested=False,
+        )
 
 
 @dataclass

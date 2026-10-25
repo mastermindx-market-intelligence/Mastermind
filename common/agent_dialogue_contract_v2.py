@@ -22,12 +22,34 @@ from common.agent_dialogue_contract import (
     validate_commission_ref,
     validate_evidence_ref,
 )
+from common.product_acceptance_contract import (
+    ProductAcceptanceContractError,
+    validate_product_acceptance_association,
+)
 
 MESSAGE_SCHEMA_V2 = "mastermind.agent_dialogue.v2"
 MESSAGE_DISCRIMINATOR_V2 = "MMX/AGENT_DIALOGUE_V2"
 PARENT_SCHEMA_V2 = "mastermind.agent_dialogue_parent.v2"
 PARENT_DISCRIMINATOR_V2 = "MMX/AGENT_DIALOGUE_PARENT_V2"
 TURN_WATCH_MODE_V1 = "turn_watch_v1"
+
+
+def validate_decision_request_body_v2(value: Any) -> dict[str, Any]:
+    """Keep generic V2 requests unchanged and validate an optional typed join.
+
+    A well-formed association is wire data, not retained issuance evidence.
+    Only the existing owner may construct and qualify its canonical join.
+    """
+    if not isinstance(value, dict) or "acceptance_request" not in value:
+        return validate_body("DECISION_REQUEST", value)
+    normalized = validate_body(
+        "DECISION_REQUEST", {key: item for key, item in value.items() if key != "acceptance_request"}
+    )
+    try:
+        normalized["acceptance_request"] = validate_product_acceptance_association(value["acceptance_request"])
+    except ProductAcceptanceContractError as exc:
+        raise DialogueContractError("MESSAGE_INVALID") from exc
+    return normalized
 
 _OPERATION_KEY_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{7,127}\Z")
 _WORK_REF_RE = re.compile(r"\AWS:[A-Z0-9][A-Z0-9-]{1,63}\Z")
@@ -76,7 +98,20 @@ MESSAGE_KEYS_V2 = frozenset(
     }
 )
 _EXECUTIVE_ACTOR_KEYS = frozenset({"kind", "seat", "reasoning_surface"})
+_PRINCIPAL_ACTOR_KEYS = frozenset(
+    {
+        "kind",
+        "seat",
+        "reasoning_surface",
+        "principal_binding_digest",
+        "mission_authority_ref",
+        "authority_generation_digest",
+        "capability_profile_digest",
+        "root_job_id",
+    }
+)
 _WORKER_ACTOR_KEYS = frozenset({"kind", "job_id", "attempt_id", "worker_id"})
+COO_PRINCIPAL_MESSAGE_TYPES = frozenset({"RULING", "CONTINUE", "STOP"})
 _REPOSITORY_APPLICABILITY_KEYS = frozenset(
     {"kind", "repository", "head_sha", "pr"}
 )
@@ -329,6 +364,36 @@ def validate_actor_ref(value: Any) -> dict[str, Any]:
             ),
         }
 
+    if kind == "executive_principal":
+        if set(value) != _PRINCIPAL_ACTOR_KEYS or value.get("seat") != "coo":
+            raise DialogueContractError("MESSAGE_INVALID")
+        digests = (
+            value["principal_binding_digest"],
+            value["authority_generation_digest"],
+            value["capability_profile_digest"],
+        )
+        if any(
+            not isinstance(item, str) or _SHA64_RE.fullmatch(item) is None
+            for item in digests
+        ):
+            raise DialogueContractError("MESSAGE_INVALID")
+        return {
+            "kind": "executive_principal",
+            "seat": "coo",
+            "reasoning_surface": _require_identity_string(
+                value["reasoning_surface"], max_chars=100
+            ),
+            "principal_binding_digest": value["principal_binding_digest"],
+            "mission_authority_ref": _require_identity_string(
+                value["mission_authority_ref"], max_chars=255
+            ),
+            "authority_generation_digest": value["authority_generation_digest"],
+            "capability_profile_digest": value["capability_profile_digest"],
+            "root_job_id": _require_identity_string(
+                value["root_job_id"], max_chars=64
+            ),
+        }
+
     if kind == "worker_attempt":
         if set(value) != _WORKER_ACTOR_KEYS:
             raise DialogueContractError("MESSAGE_INVALID")
@@ -378,6 +443,8 @@ def validate_applies_to_v2(value: Any) -> dict[str, Any]:
 def _allowed_message_types(actor_ref: Mapping[str, Any]) -> frozenset[str]:
     if actor_ref["kind"] == "worker_attempt":
         return FABLE_MESSAGE_TYPES
+    if actor_ref["kind"] == "executive_principal":
+        return COO_PRINCIPAL_MESSAGE_TYPES
     seat = actor_ref["seat"]
     if seat == "coo":
         return FABLE_MESSAGE_TYPES
@@ -392,6 +459,13 @@ def _validate_worker_attempt_join(
     actor_ref: Mapping[str, Any],
     applies_to: Mapping[str, Any],
 ) -> None:
+    if actor_ref["kind"] == "executive_principal":
+        if (
+            applies_to["kind"] != "executive_attempt"
+            or actor_ref["root_job_id"] == applies_to["job_id"]
+        ):
+            raise DialogueContractError("MESSAGE_INVALID")
+        return
     if actor_ref["kind"] != "worker_attempt":
         return
     if applies_to["kind"] != "executive_attempt":
@@ -455,6 +529,18 @@ def validate_message_v2(value: Any) -> dict[str, Any]:
     if not isinstance(fingerprint, str) or _SHA64_RE.fullmatch(fingerprint) is None:
         raise DialogueContractError("MESSAGE_INVALID")
 
+    body = (
+        validate_decision_request_body_v2(value["body"])
+        if message_type == "DECISION_REQUEST"
+        else validate_body(message_type, value["body"])
+    )
+    if (
+        actor_ref["kind"] == "executive_principal"
+        and message_type == "RULING"
+        and body["authority_class"] != "WITHIN_COMMISSION"
+    ):
+        raise DialogueContractError("MESSAGE_INVALID")
+
     normalized = {
         "schema": MESSAGE_SCHEMA_V2,
         "message_key": message_key,
@@ -469,7 +555,7 @@ def validate_message_v2(value: Any) -> dict[str, Any]:
             value["summary"],
             max_chars=MAX_SUMMARY_CHARS,
         ),
-        "body": validate_body(message_type, value["body"]),
+        "body": body,
         "evidence_refs": _validate_evidence_refs(value["evidence_refs"]),
         "requires_response": requires_response,
         "created_at": _require_utc(

@@ -1010,9 +1010,51 @@ def project_needs_ceo(
             f"— not read; CEO attention not projected"
         ]
 
+    # The brief carries its own supply warnings one level down, in
+    # `inputs.degraded`.  The boot-packet renderer discloses them from there,
+    # but this module reads only the packet's top-level `degraded` — which does
+    # not include them — so every warning the collector recorded about its
+    # inputs has vanished from every executive surface.  Collect them here,
+    # immediately after the schema gate (a foreign brief's `inputs` stays
+    # unread), and keep them even when `needs_ceo` itself is unreadable: a
+    # malformed ruling list must not erase what the inputs said.
+    input_degraded: list[str] = []
+    raw_inputs = brief.get("inputs")
+    if raw_inputs is not None:
+        if not isinstance(raw_inputs, Mapping):
+            input_degraded.append(
+                f"boot packet brief inputs is a {type(raw_inputs).__name__}, "
+                f"not an object; its degraded warnings were not read"
+            )
+        else:
+            raw_degraded = raw_inputs.get("degraded")
+            if raw_degraded is not None:
+                if not isinstance(raw_degraded, (list, tuple)):
+                    # A string here would iterate character by character, and
+                    # dropping it would discard the brief's own account of what
+                    # its inputs could not read.
+                    input_degraded.append(
+                        f"boot packet brief inputs degraded is a "
+                        f"{type(raw_degraded).__name__}, not a list; "
+                        f"its warnings were not disclosed"
+                    )
+                else:
+                    for index, warning in enumerate(raw_degraded):
+                        if isinstance(warning, str):
+                            # Verbatim, in source order, duplicates kept — the
+                            # same bubble the packet's own top-level warnings
+                            # get in `compose_inbox`.
+                            input_degraded.append(f"boot_packet: {warning}")
+                        else:
+                            input_degraded.append(
+                                f"boot packet brief inputs degraded[{index}] "
+                                f"is a {type(warning).__name__}, not a string; "
+                                f"no warning disclosed from it"
+                            )
+
     rows = brief.get("needs_ceo") or []
     if not isinstance(rows, (list, tuple)):
-        return items, [
+        return items, input_degraded + [
             f"boot packet needs_ceo is a {type(rows).__name__}, not a list; "
             f"CEO attention not projected"
         ]
@@ -1059,7 +1101,7 @@ def project_needs_ceo(
                 ordinal=index,
             )
         )
-    return items, degraded
+    return items, input_degraded + degraded
 
 
 def load_boot_packet_file(path: str | Path) -> tuple[dict[str, Any] | None, str | None]:

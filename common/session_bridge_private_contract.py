@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from typing import Any
 
 PRIVATE_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge.v1"
+# Framing distinction only. It grants no principal, admission or START right;
+# the same installed validator and live host checks still own those decisions.
+FOREGROUND_PRIVATE_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge_foreground.v1"
 PRIVATE_RESULT_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge_result.v1"
 SESSION_TOOLS = ("session_targets", "session_send", "session_summon", "session_reply_read")
 MODIFYING_TOOLS = ("session_send", "session_summon")

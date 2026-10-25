@@ -24,6 +24,11 @@ from typing import Sequence
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _INSTALLER_REPO = Path(__file__).resolve().parents[2]
+_COMPLETE_STATUS_ARGS = ("status", "--porcelain=v1", "--untracked-files=normal")
+# A complete clean-tree observation on an external volume can exceed the short
+# metadata-read budget. Keep this one exact operation bounded, without retries
+# or caller overrides; all identity, cleanliness and trust predicates still run.
+_COMPLETE_STATUS_TIMEOUT_SECONDS = 60
 
 
 class InstallSourcePolicyError(RuntimeError):
@@ -67,7 +72,7 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=15,
+            timeout=_COMPLETE_STATUS_TIMEOUT_SECONDS if args == _COMPLETE_STATUS_ARGS else 15,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:

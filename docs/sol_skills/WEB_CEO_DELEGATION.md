@@ -13,7 +13,9 @@ Enrolled companion procedure. This skill is enrolled in the same pinned INDEX as
 
 `CONCENTRATED_JUDGMENT`: prefer Astra when a mission's dominant need is difficult architecture, ambiguity resolution, synthesis, adversarial judgment or a concentrated decision that unlocks implementation. When that same turn independently qualifies for Pro mode under governing law, Astra Pro is the provisional preference for this profile.
 
-`SUSTAINED_ORCHESTRATION`: prefer Sol when a mission's dominant need is extended decision-bearing orchestration: coherent decomposition, worker-return adjudication, bounded repair, integration and advancement of successive authorized dependencies. When that same turn independently qualifies for Pro mode under governing law, Sol Pro is the provisional preference for this profile. This is useful principal work, not mechanical labor.
+`SUSTAINED_ORCHESTRATION`: prefer Sol for the remaining principal-level program decisions, difficult exceptions and cross-domain acceptance when those duties genuinely need a program executive. Do not automatically assign Sol/Opus the routine delivery-management loop merely because they use fewer tokens than Astra/Fable; they may consume the same shared principal subscription pool.
+
+`OPERATOR_OWNED_DELIVERY`: normally commission a qualified, admitted economical Fabric operator, commonly GLM/Grok when the actual task fit permits, to own bounded decomposition, worker delegation, ordinary return adjudication, independent review, repair and domain integration. That operator delegates easy bounded labor to qualified workers. The principal consumes one integrated outcome and reserved exceptions, not each raw worker return. This is a working approach, not a new Runtime role, frontier classification, reasoning-mode class or provider grant. Load `skills/mastermind-fabric-orchestration/SKILL.md` and only the actually assigned role from the same pinned protected source; reuse a valid current-turn load.
 
 These are provisional role preferences, not duration guarantees, service limits, mandatory elapsed times, reasoning-mode admission, or runtime/model aliases. Either model may perform either profile when current evidence and capability favor it. Do not force an Astra-to-Sol handoff, add two principals to every task, or interrupt a productive incumbent just because of a model label. One existing action-authoritative responsibility and current RuntimeBinding remain in charge.
 
@@ -31,9 +33,39 @@ no resource permission, runtime admission or extra budget.
 
 A work unit is delegable when an independent eligible worker can acquire the necessary inputs, operate within a bounded scope and return checkable evidence without deciding a reserved principal/Chairman question. An investigation may have an unknown answer; specify the question, falsifier and evidence rather than pretending the solution is already known.
 
-Compare direct principal effort with framing + necessary review + expected clarification/repair, also considering worker latency and useful independent work the principal can advance meanwhile. Delegate when total useful progress improves without lowering quality. Do not delegate merely to meet an agent-count quota or save nominal tokens at the expense of acceptance.
+Compare the whole completion cycle: framing + delegation + implementation + review + expected clarification/repair + integration + principal consumption, including actual shared-pool scarcity, worker latency and useful independent work the principal can advance meanwhile. Direct CEO -> worker remains allowed, but its commissioning owner retains adjudication unless that duty is explicitly assigned to an admitted operator. CEO -> operator -> workers, Meta-CEO -> CEO -> operator -> workers, and Meta-CEO -> operator -> workers are also allowed planning shapes; actual bound Job depth and conserved-root admission must be checked rather than inferred from organizational titles. Delegate when total useful progress improves without lowering quality. Do not delegate merely to meet an agent-count quota or save nominal tokens at the expense of acceptance.
 
 Retain substantial otherwise-delegable work only with a brief concrete reason: `LOWER_TOTAL_OVERHEAD`, `PRINCIPAL_JUDGMENT`, `UNIQUE_APPROVED_ACCESS`, `CRITICAL_PATH_SHORTCUT`, or `NO_ELIGIBLE_PRE_EFFECT_WORKER`. These are explanatory notes aligned to the active-turn owner, not new lifecycle states or runtime enums. Reassess when the remaining task becomes routine, tool work repeats or a repair cycle fails without adding evidence.
+
+### Optional layers, conserved root
+
+The CEO -> native coordinator -> Fabric operator -> Fabric worker pattern is optional.
+Choose the shallowest capable route separately for each bounded assignment:
+
+| Assigning function | Eligible next function |
+|---|---|
+| CEO | Direct Fabric worker, self-executing Fabric operator, useful native coordinator, or direct principal work |
+| Native coordinator | Direct Fabric worker, useful operator/coordinator, or its own judgment/integration |
+| Fabric operator | Execute the assignment itself, or commission a separable worker within its actual grant |
+| Fabric worker | Execute its leaf assignment; escalate decomposition to the assigning parent |
+
+Skipping a model-driven manager does not skip deterministic admission, capacity,
+review independence, plan provenance, cleanup or retained-result owners. Keep existing
+Runtime role enums and policy limits; model titles and native-session depth are different
+from Runtime Job roles and depth. A bounded shell task does not need a fictional planner
+Attempt. A Runtime task still needs its owner's valid plan/revision provenance.
+
+Bind a native coordinator to the original root using its actual ancestry and the parent's
+bounded commission, with the coordinator's own native identity as immediate Fabric parent.
+Do not reset root accounting, copy a native session ID into parent_job_id, or treat
+caller-supplied root/role strings as authentication. Use the existing atomic admission and
+budget owners. Any unqualified mixed accounting or caller binding remains an explicit
+route limitation, not permission to add another registry or allowance.
+
+Return exact retained bytes to the actual assigning parent. Root-only Codex Stop return
+is not a child-session hook; preserve its checks. A qualified foreground coordinator may
+inspect, consume and adjudicate its own child's retained result, then send a compact
+summary to its principal. Active return and foreground consumption do not prove idle Wake.
 
 ## 3. Commission a complete bounded outcome
 

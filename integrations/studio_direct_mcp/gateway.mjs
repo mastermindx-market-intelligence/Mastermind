@@ -75,6 +75,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import express from 'express';
+import { isLegacyRequest } from '@modelcontextprotocol/server';
+import { toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
+import { createModernFabricHandler } from './modern-fabric-http.mjs';
 import { createCommissionService } from './commission-service.mjs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -117,7 +120,7 @@ import {
 } from './fleet-status.mjs';
 
 /** Gateway version. Kept independent of the backend's version. */
-export const GATEWAY_VERSION = '0.1.8';
+export const GATEWAY_VERSION = '0.1.11';
 
 const BOOT_MS = Date.now();
 const BOOT_NS = process.hrtime.bigint();
@@ -385,6 +388,21 @@ export function resolveConfig(partial = {}) {
   }
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
+  if (cfg.fabricOnly !== undefined && typeof cfg.fabricOnly !== "boolean") {
+    throw new TypeError("config.fabricOnly must be boolean when supplied");
+  }
+  if (cfg.fabricOnly === true && (cfg.gitPublish || cfg.repositoryWorkspaces ||
+      cfg.commissionPublication || cfg.paperDesign || cfg.fleetStatus)) {
+    throw new TypeError("Fabric-only gateway refuses unrelated host capabilities");
+  }
+
+  if (cfg.modernFabricProtocol !== undefined && typeof cfg.modernFabricProtocol !== 'boolean') {
+    throw new TypeError('config.modernFabricProtocol must be boolean when supplied');
+  }
+  if (cfg.modernFabricProtocol === true && (cfg.fabricOnly !== true ||
+      cfg.backendMode !== 'shared-account' || cfg.host !== '127.0.0.1' || cfg.publicUrl)) {
+    throw new TypeError('modern Fabric protocol requires the private Fabric-only shared backend');
+  }
 
   return cfg;
 }
@@ -628,7 +646,9 @@ function handleStudioPing(session) {
     monotonicMs: monotonicMs(),
     monotonicDurationMs: 0,
     gatewayVersion: GATEWAY_VERSION,
-    sessionId: session ? session.id : null,
+    sessionId: session?.modernRequest ? null : (session ? session.id : null),
+    ...(session?.modernRequest && { protocolVersion: '2026-07-28', requestScoped: true,
+      backendGeneration: session.owner.generation }),
   };
   structured.monotonicDurationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
   return {
@@ -1021,42 +1041,8 @@ class GatewaySession {
       },
     );
 
-    server.setRequestHandler(ListToolsRequestSchema, async (request, extra) =>
-      session.withBackendSlot(async () => {
-        const backend = await session.ensureBackend();
-        const result = await backend.client.listTools(request.params ?? {}, {
-          timeout: session.cfg.requestTimeoutMs,
-          signal: extra?.signal,
-        });
-        const tools = sanitizeToolList(result.tools);
-        const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
-        if (session.fleetStatus) {
-          localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
-        }
-        if (session.gitPublisher) {
-          localTools.push(...(session.workspaceAccess ? STUDIO_REPOSITORY_GIT_TOOLS : STUDIO_GIT_PUBLISH_TOOLS).map((tool) => ({ ...tool })));
-        }
-        if (session.workspaceAccess) {
-          localTools.push(...STUDIO_WORKSPACE_TOOLS.map((tool) => ({ ...tool })));
-        }
-        if (session.paperDesigner) {
-          localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
-        }
-        const backendNames = new Set(tools.map((tool) => tool.name));
-        for (const localTool of localTools) {
-          if (backendNames.has(localTool.name)) {
-            throw new McpError(ErrorCode.InternalError, `Backend tool name collides with gateway-owned tool: ${localTool.name}`);
-          }
-          tools.push(localTool);
-        }
-        for (const tool of tools) session.rememberToolAnnotations(tool);
-        const out = { tools };
-        if (typeof result.nextCursor === 'string' && result.nextCursor.length > 0) {
-          out.nextCursor = result.nextCursor;
-        }
-        session.bumpTool(LIST_TOOLS_KEY);
-        return out;
-      }, { kind: 'tools/list', catalogPriority: true }));
+    server.setRequestHandler(ListToolsRequestSchema, (request, extra) =>
+      session.listTools(request, extra));
 
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
       session.callTool(request, extra));
@@ -1085,6 +1071,44 @@ class GatewaySession {
 
     this.server = server;
     return server;
+  }
+
+  async listTools(request, extra) {
+    return this.withBackendSlot(async () => {
+      const backend = await this.ensureBackend();
+      const result = await backend.client.listTools(request.params ?? {}, {
+        timeout: this.cfg.requestTimeoutMs,
+        signal: extra?.signal,
+      });
+      const tools = sanitizeToolList(result.tools);
+      const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+      if (this.fleetStatus) {
+        localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
+      }
+      if (this.gitPublisher) {
+        localTools.push(...(this.workspaceAccess ? STUDIO_REPOSITORY_GIT_TOOLS : STUDIO_GIT_PUBLISH_TOOLS).map((tool) => ({ ...tool })));
+      }
+      if (this.workspaceAccess) {
+        localTools.push(...STUDIO_WORKSPACE_TOOLS.map((tool) => ({ ...tool })));
+      }
+      if (this.paperDesigner) {
+        localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
+      }
+      const backendNames = new Set(tools.map((tool) => tool.name));
+      for (const localTool of localTools) {
+        if (backendNames.has(localTool.name)) {
+          throw new McpError(ErrorCode.InternalError, `Backend tool name collides with gateway-owned tool: ${localTool.name}`);
+        }
+        tools.push(localTool);
+      }
+      for (const tool of tools) this.rememberToolAnnotations(tool);
+      const out = { tools };
+      if (typeof result.nextCursor === 'string' && result.nextCursor.length > 0) {
+        out.nextCursor = result.nextCursor;
+      }
+      this.bumpTool(LIST_TOOLS_KEY);
+      return out;
+    }, { kind: 'tools/list', catalogPriority: true });
   }
 
   bumpTool(name) {
@@ -1287,8 +1311,10 @@ class GatewaySession {
         ErrorCode.InternalError,
         'EFFECT_UNKNOWN: ' +
           `${reason}. The tool call may or may not have taken effect. ` +
-          'This session is tainted and will refuse further work; re-initialize to open a new ' +
-          'session. The gateway will not replay this call.',
+          (this.modernRequest
+            ? 'Inspect the same retained Fabric run; do not resubmit or change its identity. '
+            : 'This session is tainted and will refuse further work; re-initialize to open a new session. ') +
+          'The gateway will not replay this call.',
         { 'private-studio-mcp/effect': 'UNKNOWN' },
       );
     }
@@ -1555,6 +1581,11 @@ class GatewaySession {
  */
 export async function startGateway(partialConfig = {}, auth = {}) {
   const cfg = resolveConfig(partialConfig);
+  if (cfg.modernFabricProtocol && !cfg.testMode &&
+      (auth.accountLabel !== cfg.accountLabel || typeof auth.accountLabel !== 'string' ||
+       !auth.accountLabel || auth.principal !== 'tunnel:' + auth.accountLabel)) {
+    throw new TypeError('modern Fabric protocol requires its installed private tunnel principal');
+  }
   let commissionService = null;
   if (cfg.commissionPublication) {
     if (typeof auth.accountLabel !== 'string' || !auth.accountLabel ||
@@ -1679,6 +1710,65 @@ export async function startGateway(partialConfig = {}, auth = {}) {
     return owner;
   }
 
+  // Stateless HTTP views detach at exchange completion. The existing shared
+  // BackendOwner retains Fabric controllers/results until gateway shutdown.
+  const modernToolNames = new Set(['fabric_capabilities', 'fabric_request', 'fabric_status',
+    'fabric_wait', 'fabric_result', 'fabric_accept', 'fabric_controller_output',
+    'studio_ping', 'studio_output_page']);
+  const modernHandler = cfg.modernFabricProtocol ? createModernFabricHandler({
+    serverInfo: { name: 'mastermind-subagent-fabric', version: GATEWAY_VERSION },
+    acquireScope: async ({ authInfo }) => {
+      const principal = principalKeyOf(authInfo);
+      const session = await withAdmitLock(async () => {
+        if (shuttingDown || sessions.size >= cfg.maxSessions) {
+          stats.sessions.rejectedCapacity += 1;
+          throw new McpError(ErrorCode.InternalError, 'Gateway request capacity exhausted');
+        }
+        const owner = await ownerForPrincipal(principal, shortTag(principal));
+        if (!owner) throw new McpError(ErrorCode.InternalError, 'Gateway backend capacity exhausted');
+        const view = new GatewaySession({ id: randomUUID(), principalKey: principal,
+          principalTag: shortTag(principal), cfg, lists, stats, owner,
+          onDestroyed(destroyed) { sessions.delete(destroyed.id); } });
+        view.modernRequest = true;
+        view.httpRequestsInFlight = 1;
+        sessions.set(view.id, view);
+        stats.sessions.started += 1;
+        return view;
+      });
+      return {
+        async listTools(request, extra) {
+          const result = await session.listTools(request, extra);
+          if (result.tools.some(tool => !modernToolNames.has(tool.name))) {
+            throw new McpError(ErrorCode.InternalError, 'Fabric backend exposed an unrelated tool');
+          }
+          return result;
+        },
+        callTool(request, extra) {
+          if (!modernToolNames.has(request?.params?.name)) {
+            throw new McpError(ErrorCode.InvalidParams, 'Tool is outside the Fabric-only boundary');
+          }
+          session.noteAdmittedWork(request);
+          return session.callTool(request, extra);
+        },
+        close() { return session.destroy('modern_exchange_complete'); },
+      };
+    },
+  }) : null;
+  const modernNodeHandler = modernHandler ? toNodeHandler(modernHandler, {
+    maxRequestBodySize: MAX_BODY_BYTES,
+    onerror(error) { log('error', 'modern_http_failed', { error: error?.name || 'Error' }); },
+  }) : null;
+
+  async function routeModern(req, res) {
+    if (!modernHandler) return false;
+    // The SDK predicate owns era selection, including malformed modern claims.
+    // Passing the parsed body avoids reading an already-consumed Node stream.
+    const request = await toWebRequest(req, req.body, { maxRequestBodySize: MAX_BODY_BYTES });
+    if (await isLegacyRequest(request, req.body, { maxRequestBodySize: MAX_BODY_BYTES })) return false;
+    await modernNodeHandler(req, res, req.body);
+    return true;
+  }
+
   /* ---- the express app ---- */
 
   const app = express();
@@ -1737,6 +1827,7 @@ export async function startGateway(partialConfig = {}, auth = {}) {
       ready: accepting && canAdmitNewSession(),
       accepting,
       version: GATEWAY_VERSION,
+      ...(modernHandler && { modernFabricProtocol: '2026-07-28' }),
       uptimeMs: stats.uptimeMs,
       sessions: {
         active: sessions.size,
@@ -1789,13 +1880,16 @@ export async function startGateway(partialConfig = {}, auth = {}) {
     next();
   }, express.json({ limit: MAX_BODY_BYTES }), (req, res, next) => {
     log('info', 'http_body_parsed', req.__httpTrace);
-    handlePost(req, res).catch(next).finally(() => releaseInFlight(req));
+    (async () => { if (!await routeModern(req, res)) await handlePost(req, res); })()
+      .catch(next).finally(() => releaseInFlight(req));
   });
   mcp.get('/mcp', (req, res, next) => {
-    handleGet(req, res).catch(next).finally(() => releaseInFlight(req));
+    (async () => { if (!await routeModern(req, res)) await handleGet(req, res); })()
+      .catch(next).finally(() => releaseInFlight(req));
   });
   mcp.delete('/mcp', (req, res, next) => {
-    handleDelete(req, res).catch(next).finally(() => releaseInFlight(req));
+    (async () => { if (!await routeModern(req, res)) await handleDelete(req, res); })()
+      .catch(next).finally(() => releaseInFlight(req));
   });
 
   app.use(mcp);
@@ -2103,6 +2197,7 @@ export async function startGateway(partialConfig = {}, auth = {}) {
     public: Boolean(cfg.publicUrl),
     generation: GATEWAY_GENERATION,
     backendMode: cfg.backendMode,
+    modernFabricProtocol: Boolean(modernHandler),
   });
 
   let closePromise;
@@ -2114,6 +2209,7 @@ export async function startGateway(partialConfig = {}, auth = {}) {
       listeningAddress = null;
       await admitTail;
       if (commissionService) await commissionService.close();
+      if (modernHandler) await modernHandler.close();
 
       // Close all remaining owned backends. Broken predecessors were already
       // closed before replacement.

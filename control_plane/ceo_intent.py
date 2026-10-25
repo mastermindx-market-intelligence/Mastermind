@@ -74,8 +74,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import re
+import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -89,6 +91,7 @@ from control_plane.executive_runtime import (
 #: Schema of the envelope this module accepts.  A bump means a migration.
 INTENT_SCHEMA = "mastermind.ceo_intent.v1"
 INTENT_SCHEMA_V2 = "mastermind.ceo_intent.v2"
+INTENT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_intent.v1"
 
 #: Schema of the strict NON-CEO service-principal intent.  Same sink, same
 #: adapter, same Job path — a second *principal class*, never a second control
@@ -101,6 +104,7 @@ INTENT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent.v1"
 #: Schema of the receipt this module returns.
 RECEIPT_SCHEMA = "mastermind.ceo_intent_receipt.v1"
 RECEIPT_SCHEMA_V2 = "mastermind.ceo_intent_receipt.v2"
+RECEIPT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_receipt.v1"
 RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
 RECEIPT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent_receipt.v1"
 _DIALOGUE_SOURCE_UNSET = object()
@@ -328,6 +332,10 @@ class CeoIntentError(ValueError):
 
 class CeoIntentConflict(CeoIntentError):
     """An immutable accepted intent disagrees with the submitted identity."""
+
+
+class _FreshAdmissionObserverFailed(RuntimeError):
+    """The root is committed; its original operation needs reconciliation."""
 
 
 # ---------------------------------------------------------------------------
@@ -691,12 +699,19 @@ def _require_principal_context(intent, context, request_ref, guard) -> None:
 
 
 def _run_principal_guard(intent, guard) -> None:
-    # The future App-only ingress must supply a canonical host recheck, not a
-    # model-authored Boolean. A callback alone is NOT OAuth/peer authentication.
-    # Replays resolve first. Guard failures or non-None results have no Job effect.
+    """Recheck trusted synchronous owner facts without exposing private errors."""
+    # A host callback is not OAuth/peer authentication or model-authored authority.
     try:
-        if guard(copy.deepcopy(intent)) is not None:
-            raise ValueError()
+        if (not callable(guard) or inspect.iscoroutinefunction(guard)
+                or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
+            raise ValueError
+        result = guard(copy.deepcopy(intent))
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise ValueError
+        if result is not None:
+            raise ValueError
     except Exception:
         raise CeoIntentError("trusted principal admission refused") from None
 
@@ -719,6 +734,8 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         _exact_keys(raw, "intent", _REQUIRED_KEYS, _OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_V2:
         _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
+    elif schema == INTENT_SCHEMA_DIRECT:
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS | {"workstream"}, frozenset())
     elif schema == INTENT_SCHEMA_SERVICE:
         _exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_PRINCIPAL:
@@ -742,6 +759,17 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         "grounding": _grounding(raw["grounding"]),
         "execution_contract": _execution_contract(raw["execution_contract"]),
     }
+    if schema == INTENT_SCHEMA_DIRECT:
+        contract = intent["execution_contract"]
+        if (raw["intent_kind"] != "direct_native_readonly"
+                or raw["business_impact"] != "routine"
+                or set(contract["requested_authorities"]) != {"READ", "RESEARCH"}
+                or contract.get("attempt_limit") != 1
+                or contract.get("allowed_write_paths")
+                or contract.get("validation_commands")
+                or contract.get("constraints")):
+            raise CeoIntentError("direct native intent requires its exact read-only contract")
+        intent.update(intent_kind="direct_native_readonly", business_impact="routine")
     if schema == INTENT_SCHEMA_V2:
         intent_kind = _text(
             raw["intent_kind"], "intent.intent_kind", max_chars=64
@@ -899,8 +927,9 @@ def _receipt(
         "accepted": True,
         "duplicate": bool(duplicate),
         # ALWAYS False.  This field exists so a caller can never confuse
-        # acceptance with execution: nothing on this path dispatches, and the
-        # control service structurally refuses to dispatch a CEO-created job.
+        # acceptance with execution: this sink never dispatches. The new direct
+        # host path has a separate execution capability; legacy generic dispatch
+        # keeps its fixed-proof guard.
         "dispatched": False,
         "authority": {
             # Read off the DURABLE Job, never echoed back from the request.
@@ -916,7 +945,7 @@ def _receipt(
             raise CeoIntentError("principal receipt identity is unavailable")
         value["principal"] = dict(principal)
         value["request_ref"] = _require_principal_request_ref(request_ref, intent_id)
-    if receipt_schema == RECEIPT_SCHEMA_V2 and work_ref is not None:
+    if receipt_schema in {RECEIPT_SCHEMA_V2, RECEIPT_SCHEMA_DIRECT} and work_ref is not None:
         value["work_ref"] = _text(
             work_ref, "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
         )
@@ -944,7 +973,7 @@ def build_receipt(
         receipt_schema=_receipt_schema_for(intent.get("schema")),
         principal=_principal_identity(intent) if intent.get("schema") == INTENT_SCHEMA_PRINCIPAL else None,
         request_ref=principal_request_ref,
-        work_ref=intent.get("workstream") if intent.get("schema") == INTENT_SCHEMA_V2 else None,
+        work_ref=intent.get("workstream") if intent.get("schema") in {INTENT_SCHEMA_V2, INTENT_SCHEMA_DIRECT} else None,
     )
 
 
@@ -960,6 +989,8 @@ def _receipt_schema_for(intent_schema: Any) -> str:
         return RECEIPT_SCHEMA_PRINCIPAL
     if intent_schema == INTENT_SCHEMA_V2:
         return RECEIPT_SCHEMA_V2
+    if intent_schema == INTENT_SCHEMA_DIRECT:
+        return RECEIPT_SCHEMA_DIRECT
     if intent_schema == INTENT_SCHEMA_SERVICE:
         return RECEIPT_SCHEMA_SERVICE
     return RECEIPT_SCHEMA
@@ -1020,6 +1051,7 @@ def _receipt_from_event(
     if provenance_schema not in {
         INTENT_SCHEMA,
         INTENT_SCHEMA_V2,
+        INTENT_SCHEMA_DIRECT,
         INTENT_SCHEMA_SERVICE,
         INTENT_SCHEMA_PRINCIPAL,
     }:
@@ -1049,6 +1081,8 @@ def _receipt_from_event(
     job = runtime.jobs.get_job(job_id) if job_id else None
     if job is None:
         raise CeoIntentError(f"intent {intent_id!r} names job {job_id!r}, which does not exist")
+    if provenance_schema == INTENT_SCHEMA_DIRECT:
+        runtime.jobs.direct_native_provenance(job.job_id)
     if provenance_schema == INTENT_SCHEMA_V2:
         cycle = job.orchestration_provenance
         if (
@@ -1154,7 +1188,7 @@ def _receipt_from_event(
                 or not 1 <= job.attempt_limit <= 2):
             raise CeoIntentError("principal durable identity or Job binding differs")
     work_ref = None
-    if provenance_schema == INTENT_SCHEMA_V2 and "workstream" in provenance:
+    if provenance_schema in {INTENT_SCHEMA_V2, INTENT_SCHEMA_DIRECT} and "workstream" in provenance:
         # Revalidate the immutable source pointer before exposing it on replay.
         # Older v2 events without this optional field remain readable as-is.
         work_ref = _text(
@@ -1227,6 +1261,8 @@ def submit_intent(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
+    fresh_admission_observer: Any = None,
+    direct_admission: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1262,6 +1298,47 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if intent["schema"] == INTENT_SCHEMA_DIRECT:
+        from control_plane import direct_native_execution as direct
+        if type(direct_admission) is not direct.DirectNativeAdmission:
+            raise CeoIntentError("direct native host admission is not composed")
+        try:
+            direct_admission.check()
+            _require_workspace(intent,Path(workspace_root) if workspace_root else None)
+            fingerprint=intent_fingerprint(intent)
+            command=command_id_for(intent["intent_id"])
+            existing=runtime.store.find_event_by_command_id(command)
+            if existing is not None:
+                actual=runtime.jobs.direct_native_provenance(existing["job_id"])
+                if actual != direct.admission_material(direct_admission):
+                    raise CeoIntentConflict("direct native admission identity changed")
+                return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
+            try:
+                job=runtime.jobs.create_direct_native_job(intent,fingerprint=fingerprint,command_id=command,
+                    workspace_root=workspace_root,admission=direct_admission)
+            except (StateConflict, sqlite3.IntegrityError):
+                existing=runtime.store.find_event_by_command_id(command)
+                if existing is None: raise
+                actual=runtime.jobs.direct_native_provenance(existing["job_id"])
+                if actual != direct.admission_material(direct_admission):
+                    raise CeoIntentConflict("direct native admission identity changed")
+                return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
+            return build_receipt(job,intent=intent,fingerprint=fingerprint,duplicate=False,created_at_ms=int(runtime.store.find_event_by_command_id(command)["created_at_ms"]))
+        except CeoIntentError:
+            raise
+        except (ValueError,StateConflict) as exc:
+            raise CeoIntentError("direct native host admission refused") from exc
+    if direct_admission is not None:
+        raise CeoIntentError("direct admission cannot promote another schema")
+    # Private host source seam, never a frame field or a launch capability.
+    # Only the actual new-root branch calls it. Public/replay receipts remain
+    # queued, and no observer may turn a duplicate into a fresh admission.
+    if fresh_admission_observer is not None and (
+        intent["schema"] != INTENT_SCHEMA_V2
+        or not callable(fresh_admission_observer)
+        or inspect.iscoroutinefunction(fresh_admission_observer)
+    ):
+        raise CeoIntentError("fresh admission observer requires synchronous v2 host source")
     if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
         _require_principal_context(intent, principal_context, principal_request_ref, principal_admission_guard)
         from control_plane.ceo_request import derive_worktree
@@ -1315,7 +1392,9 @@ def submit_intent(
                     _require_service_ceiling(contract)
                 else:
                     _require_principal_contract(intent)
+                def principal_commit_fence():
                     _run_principal_guard(intent, principal_admission_guard)
+
                 job = runtime.jobs.create_job(
                     intent["objective"],
                     department=intent["department"],
@@ -1332,6 +1411,8 @@ def submit_intent(
                     validation_commands=contract.get("validation_commands"),
                     command_id=command_id,
                     provenance=_provenance(intent, fingerprint, principal_request_ref=principal_request_ref),
+                    **({"_principal_commit_guard": principal_commit_fence}
+                       if intent["schema"] == INTENT_SCHEMA_PRINCIPAL else {}),
                     owner_seat="coo",
                     escalation_target="coo",
                 )
@@ -1371,6 +1452,21 @@ def submit_intent(
         raise CeoIntentError(str(exc)) from exc
 
     created = runtime.store.find_event_by_command_id(command_id)
+    if fresh_admission_observer is not None:
+        try:
+            if created is None or created.get("job_id") != job.job_id:
+                raise ValueError("canonical root creation source is unavailable")
+            observed = fresh_admission_observer(job.job_id, command_id)
+            if observed is not None:
+                if inspect.iscoroutine(observed):
+                    observed.close()
+                raise ValueError("fresh admission observer returned a value")
+        except Exception as exc:
+            # Do not classify a post-commit observation failure as a zero-Job
+            # refusal, swallow it as a concurrent duplicate, or run a worker.
+            raise _FreshAdmissionObserverFailed(
+                "fresh admission observation failed; reconcile the original operation"
+            ) from exc
     return build_receipt(
         job,
         intent=intent,

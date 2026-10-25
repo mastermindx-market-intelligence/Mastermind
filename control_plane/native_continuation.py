@@ -6,11 +6,32 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from common.agent_dialogue_contract_v2 import normalize_context_v2
 from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.executive_current_target import read_current_target
 from control_plane.wake_ledger import NativeContinuationAckEvidence, LedgerPhase
+
+
+@runtime_checkable
+class NativeContinuationSource(Protocol):
+    """Trusted installed composition port; Runtime retains every authority fence.
+
+    The integration owner constructs the concrete source. Core callers receive
+    no SDK, transport constructor, or caller-authored binding through this port.
+    """
+    runtime: Any
+
+    async def read_continuation_source(self, *, read_ref: str) -> dict: ...
+
+    def resolve(self, *, native_session_id: str, operation_key: str,
+                in_reply_to: str) -> Any: ...
+
+    def require_native_ack(self, binding: Any, *, workspace_id: str,
+                           channel_id: str) -> Any: ...
+
+    async def require_committed_native_reply(self, *, read_ref: str) -> Any: ...
+
 
 _SCHEMA = "mastermind.session_bridge.continue_request.v1"
 

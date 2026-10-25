@@ -47,6 +47,7 @@ export type LaunchOutcome = { status: "accepted" } | { status: "refused" };
 export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 
 export interface LaunchOrchestratorProps {
+  locale?: "en" | "zh-CN";
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
@@ -98,6 +99,7 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 // ---------------------------------------------------------------------------
 
 export function LaunchOrchestrator({
+  locale = "en",
   projects,
   profiles,
   submitting,
@@ -219,7 +221,7 @@ export function LaunchOrchestrator({
     <section className="card">
       <div className="section-title">
         <div>
-          <h2>Launch Orchestrator</h2>
+          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : "Launch Orchestrator"}</h2>
         </div>
       </div>
 
@@ -295,7 +297,7 @@ export function LaunchOrchestrator({
               onChange={(e) => setDraftProfile(e.target.value)}
               disabled={launchPending}
               aria-invalid={!!profileError}
-              aria-describedby={profileError ? `${profileId}-error` : undefined}
+              aria-describedby={[profileError ? `${profileId}-error` : "",selectedProfile === "native_research_only" ? `${profileId}-meaning` : ""].filter(Boolean).join(" ") || undefined}
             >
               {profileStale && (
                 <option value={selectedProfile} disabled>
@@ -313,6 +315,9 @@ export function LaunchOrchestrator({
                 {profileError}
               </p>
             )}
+            {selectedProfile === "native_research_only" ? <p id={`${profileId}-meaning`} className="muted">
+              {locale === "zh-CN" ? "直接运行一个只读任务，不创建规划或子任务。" : "Run one read-only task directly, without planning or child tasks."}
+            </p> : null}
           </div>
 
           {/* Error message */}

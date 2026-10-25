@@ -1,0 +1,105 @@
+--- a/pick.py
++++ b/pick.py
+@@ -146,7 +146,2 @@
+-        # Weekly — same logic
+-        now = datetime.now(timezone.utc)
+-        days_until_sun = (6 - now.weekday()) % 7
+-        if days_until_sun == 0 and now.hour * 60 + now.minute > 0:
+-            days_until_sun = 7
+-        secs = days_until_sun * 86400 - now.hour * 3600 - now.minute * 60 - now.second
+-        return max(0, secs / 3600)
++        pair = _grok_burn_down_window()
++        return 168.0 if pair is None else pair[0]
+@@ -190,0 +186,3 @@
++    if pool == "grok":
++        pair = _grok_burn_down_window()
++        return None if pair is None else pair[1]
+@@ -191,0 +190,37 @@
++
++
++def _grok_burn_down_window(doc=None, now=None):
++    """One dated operator-supplied provider screenshot, never a guessed week."""
++    import math
++    source = load_pools() if doc is None else doc
++    cfg = (((source.get("pools") or {}).get("grok") or {}).get("windows") or {}).get("weekly") or {}
++    if cfg.get("source") != "chairman_provider_screenshot":
++        return None
++    remaining = cfg.get("remaining_pct")
++    if type(remaining) not in (int, float) or not math.isfinite(remaining) or not 0 <= remaining <= 100:
++        return None
++    try:
++        observed = datetime.fromisoformat(cfg["observed_at"].replace("Z", "+00:00"))
++        reset = datetime.fromisoformat(cfg["reset_at"].replace("Z", "+00:00"))
++        now = now or datetime.now(timezone.utc)
++        if observed.utcoffset() is None or reset.utcoffset() is None:
++            return None
++        age = (now - observed).total_seconds()
++        hours = (reset - now).total_seconds() / 3600
++        if not 0 <= age <= 21600 or not 0 < hours <= 6:
++            return None
++        return hours, float(remaining)
++    except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
++        return None
++
++
++def _grok_priority_active(doc=None, task_class=None):
++    source = load_pools() if doc is None else doc
++    cfg = _routing(source).get("grok_expiring_priority") or {}
++    pair = _grok_burn_down_window(source)
++    if cfg.get("enabled") is not True or pair is None or pair[1] < 15 or _grok_exhausted():
++        return False
++    allowed = {"execute", "fix_build", "mechanical", "review", "audit", "census", "verify",
++               "build", "fix", "heal", "extract", "tests-only-repair", "integration", "design",
++               "high_level", "repair", "domain_orchestration"}
++    return task_class is None or task_class in allowed
+@@ -295,3 +330,3 @@
+-# MiniMax and GLM require observed remaining quota. Grok retains its existing
+-# policy; this change does not qualify or alter that separate route.
+-_BURN_DOWN_NEEDS_AUTHORITATIVE_R31 = frozenset({"glm", "minimax"})
++# Every promotion requires a dated paired quota window; Grok uses the explicit
++# operator-supplied screenshot until its observed reset and never guesses a week.
++_BURN_DOWN_NEEDS_AUTHORITATIVE_R31 = frozenset({"glm", "minimax", "grok"})
+@@ -311 +346 @@
+-    return 100.0  # legacy Grok policy, unchanged
++    return None  # unknown is not evidence of available quota
+@@ -327,2 +362,2 @@
+-    MiniMax and GLM require a fresh paired provider observation; an unknown
+-    cannot establish unspent quota. Grok retains its existing policy."""
++    MiniMax and GLM require fresh paired provider observations. Grok accepts the
++    dated operator-supplied provider screenshot. Unknown quota is never urgent."""
+@@ -339 +374 @@
+-    if p in {"glm", "minimax"}:
++    if p in {"glm", "minimax", "grok"}:
+@@ -345,0 +381 @@
++                else _grok_burn_down_window(doc) if p == "grok"
+@@ -1272,0 +1309,2 @@
++    if p == "grok" and _grok_priority_active(doc, tc):
++        return True, "grok_expiring_priority_class"
+@@ -1576,0 +1615,2 @@
++    if _grok_priority_active(doc, tc):
++        steps.insert(0, "grok_expiring_priority=first while dated window is live; Ubuntu0..3 only; ordinary gates apply")
+@@ -1707,0 +1748,4 @@
++        # Chairman placement instruction: Grok workers run only on the four
++        # Ubuntu hosts. This restricts selection; all ordinary host gates remain.
++        pool_excluded = excluded | (set(registry) - {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}
++                                    if pool == "grok" else set())
+@@ -1713 +1757 @@
+-                excluded=excluded, plan_path=None, state_reader=reader,
++                excluded=pool_excluded, plan_path=None, state_reader=reader,
+@@ -1734 +1778 @@
+-            if chosen in registry and chosen not in excluded and (host == "auto" or chosen == host):
++            if chosen in registry and chosen not in pool_excluded and (host == "auto" or chosen == host):
+@@ -1960,0 +2005,2 @@
++    if _grok_priority_active(doc, tc):
++        order = ["grok"] + [token for token in order if token != "grok"]
+@@ -1989,0 +2036,2 @@
++        if p == "grok" and _grok_priority_active(doc, tc):
++            why += "+grok_expiring_priority"
+@@ -2020,0 +2069,2 @@
++        if _grok_priority_active(doc, tc):
++            order = ["grok"] + [token for token in order if token != "grok"]
+@@ -2249,0 +2300,4 @@
++    if normalized_mode == "grok" and normalized_model == "grok-4.6" and _grok_priority_active(policy_doc, normalized_task):
++        result.update(reason="grok_expiring_quota_authorization",
++                      tier=model_tier.CLASS_TIER.get(normalized_task, "leaf-labor"))
++        return result

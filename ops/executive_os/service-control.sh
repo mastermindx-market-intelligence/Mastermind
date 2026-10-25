@@ -23,8 +23,11 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
+  /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
+  /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent" >&2
+  /bin/echo "reconcile-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --transaction-id autonomy-<12 lowercase hex>" >&2
   exit 64
 }
 
@@ -464,6 +467,90 @@ qualify_gateway_refresh_preflight() {
 }
 
 
+# Closed OS gateway publication argv walk. Every flag is accepted at most
+# once, every value is a bounded digest or the original transaction id, and
+# any unknown word or missing required flag refuses. No path, account, label,
+# port, grant text or verified boolean is ever accepted here.
+GATEWAY_EXPECTED_SHA=""
+os_gateway_args() {
+  local verb="$1" flag value seen="" sha="" bundle=""
+  shift
+  while [ "$#" -gt 0 ]; do
+    flag="$1"
+    shift
+    case "$seen" in
+      *"|$flag|"*) return 1 ;;
+    esac
+    case "$flag" in
+      --expected-sha|--expected-bundle-digest) ;;
+      --expected-grant-absent)
+        [ "$verb" = "publish-os-gateway" ] || return 1
+        seen="$seen|$flag|"
+        continue
+        ;;
+      --expected-mcp-config-sha256|--expected-mcp-plist-sha256|--expected-grant-sha256)
+        [ "$verb" = "publish-os-gateway" ] || return 1
+        ;;
+      --transaction-id) [ "$verb" = "reconcile-os-gateway" ] || return 1 ;;
+      *) return 1 ;;
+    esac
+    [ "$#" -ge 1 ] || return 1
+    value="$1"
+    shift
+    seen="$seen|$flag|"
+    case "$flag" in
+      --expected-sha)
+        [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+        sha="$value"
+        ;;
+      --transaction-id) [[ "$value" =~ ^autonomy-[0-9a-f]{12}$ ]] || return 1 ;;
+      *) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1 ;;
+    esac
+    case "$flag" in --expected-bundle-digest) bundle="$value" ;; esac
+  done
+  [ -n "$sha" ] && [ -n "$bundle" ] || return 1
+  if [ "$verb" = "publish-os-gateway" ]; then
+    case "$seen" in
+      *"|--expected-mcp-config-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+    case "$seen" in
+      *"|--expected-mcp-plist-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+    # Exactly one grant expectation: the prior digest or explicit absence.
+    case "$seen" in
+      *"|--expected-grant-absent|"*)
+        case "$seen" in *"|--expected-grant-sha256|"*) return 1 ;; esac
+        ;;
+      *"|--expected-grant-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+  else
+    case "$seen" in
+      *"|--transaction-id|"*) ;;
+      *) return 1 ;;
+    esac
+  fi
+  GATEWAY_EXPECTED_SHA="$sha"
+  return 0
+}
+
+dispatch_os_gateway() {
+  local verb="$1" gateway_dir
+  if ! os_gateway_args "$@"; then
+    usage
+  fi
+  # The publishing owner must be this exact installed release's controller:
+  # a copied or relocated service-control never publishes.
+  gateway_dir="$MCP_RELEASE_ROOT/$GATEWAY_EXPECTED_SHA/ops/executive_os"
+  [[ "$SCRIPT_SOURCE" == "$gateway_dir/service-control.sh" ]] || exit 65
+  [[ "$SCRIPT_DIR" == "$gateway_dir" ]] || exit 65
+  [[ "$SCRIPT_PATH" == "$gateway_dir/service-control.sh" ]] || exit 65
+  exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$gateway_dir/autonomy_control.py" "$@"
+}
+
+
 require_gateway_enabled() {
   local output
   if ! output="$(/bin/launchctl print-disabled system 2>/dev/null)"; then
@@ -585,13 +672,50 @@ readside_postflight() {
 
 [ "$#" -ge 1 ] || usage
 case "$1" in
+  prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid)
+    [ "$#" -ge 3 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
+  start-restored-a2-readside)
+    [ "$#" -eq 15 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
+  start-finite|stop-finite|status-finite)
+    [ "$#" -eq 5 ] && [ "$2" = "--expected-sha" ] && [ "$4" = "--expected-manifest-sha256" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] && [[ "$5" =~ ^[0-9a-f]{64}$ ]] || usage
+    ;;
   restart-gateway)
     [ "$#" -eq 3 ] && [ "$2" = "--expected-sha" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
     ;;
+  publish-os-gateway|reconcile-os-gateway)
+    [ "$#" -ge 2 ] || usage
+    ;;
   *) [ "$#" -eq 1 ] || usage ;;
 esac
 case "$1" in
+  prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid)
+    require_root
+    paid_dir="$MCP_RELEASE_ROOT/$3/ops/executive_os"
+    [[ "$SCRIPT_SOURCE" == "$paid_dir/service-control.sh" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$paid_dir" ]] && [[ "$SCRIPT_PATH" == "$paid_dir/service-control.sh" ]] || exit 65
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$paid_dir/canonical_paid_actions.py" "$@"
+    ;;
+  stop-incident-broker)
+    require_root
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$SCRIPT_DIR/../../scripts/executive_os_incident_maintenance.py"
+    ;;
+  start-finite|stop-finite|status-finite)
+    require_root
+    finite_dir="$MCP_RELEASE_ROOT/$3/ops/executive_os"
+    [[ "$SCRIPT_SOURCE" == "$finite_dir/service-control.sh" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$finite_dir" ]] && [[ "$SCRIPT_PATH" == "$finite_dir/service-control.sh" ]] || exit 65
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$finite_dir/finite_service_lifecycle.py" "$@"
+    ;;
+  publish-os-gateway|reconcile-os-gateway)
+    require_root
+    dispatch_os_gateway "$@"
+    ;;
   start)
     require_root
     validate_plist "$WORKER_PLIST"
@@ -668,6 +792,71 @@ case "$1" in
     stop_one "$CONTROL_LABEL"
     stop_one "$RELAY_LABEL"
     readside_postflight
+    ;;
+  start-restored-a2-readside)
+    # Same fixed-label service owner; A2 CAS and Control restore settled first.
+    [ "$#" -eq 15 ] \
+      && [ "$2" = "--expected-sha" ] \
+      && [ "$4" = "--expected-control-sha256" ] \
+      && [ "$6" = "--expected-previous-release-sha" ] \
+      && [ "$8" = "--expected-previous-tree-sha" ] \
+      && [ "${10}" = "--expected-previous-config-sha256" ] \
+      && [ "${12}" = "--expected-previous-plist-sha256" ] \
+      && [ "${14}" = "--expected-bot-user-id" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$5" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "$7" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$9" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "${11}" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "${13}" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "${15}" =~ ^U[0-9A-Z]{9,}$ ]] || usage
+    require_root
+    local_release_root="$MCP_RELEASE_ROOT/$3"
+    local_release_dir="$local_release_root/ops/executive_os"
+    local_recovery_script="$local_release_dir/service-control.sh"
+    # Root Python import must bind to the exact installed service controller.
+    [[ "$SCRIPT_SOURCE" == "$local_recovery_script" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$local_release_dir" ]] || exit 65
+    [[ "$SCRIPT_PATH" == "$local_recovery_script" ]] || exit 65
+    [[ -f "$local_recovery_script" && ! -L "$local_recovery_script" ]] || exit 65
+    validate_plist "$AGENT_RELAY_PLIST"
+    validate_plist "$RELAY_PLIST"
+    validate_plist "$CONTROL_PLIST"
+    readside_preflight
+    require_absent "$AGENT_RELAY_LABEL"
+    require_absent "$RELAY_LABEL"
+    require_absent "$CONTROL_LABEL"
+    [ "$(agent_relay_disabled_state)" = "disabled" ] || {
+      /bin/echo "A2 must be unloaded and disabled before restoration" >&2
+      exit 65
+    }
+    "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B - "$local_release_root" "$@" <<'PY_RESTORED_A2'
+import sys
+sys.path.insert(0, sys.argv[1])
+from ops.executive_os.autonomy_control import main
+raise SystemExit(main(["a2-restored-readside-preflight", *sys.argv[3:]]))
+PY_RESTORED_A2
+    if ! start_agent_relay; then
+      /bin/echo "a2_restore_effect_unknown stage=agent-relay-start" >&2
+      exit 75
+    fi
+    if ! require_running "$AGENT_RELAY_LABEL"; then
+      /bin/echo "a2_restore_effect_unknown stage=agent-relay-running" >&2
+      exit 75
+    fi
+    if ! ensure_running "$RELAY_LABEL" "$RELAY_PLIST"; then
+      /bin/echo "a2_restore_effect_unknown stage=c1-start" >&2
+      exit 75
+    fi
+    if ! ensure_running "$CONTROL_LABEL" "$CONTROL_PLIST"; then
+      /bin/echo "a2_restore_effect_unknown stage=control-start" >&2
+      exit 75
+    fi
+    if ! readside_postflight; then
+      /bin/echo "a2_restore_effect_unknown stage=readside-postflight" >&2
+      exit 75
+    fi
+    /bin/echo "a2_restored_readside=running release=$3 previous_a2_release=$7 live_slack_return=unverified"
     ;;
   start-agent-relay)
     require_root

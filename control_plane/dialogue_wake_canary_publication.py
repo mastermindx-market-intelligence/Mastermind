@@ -18,6 +18,7 @@ from control_plane.dialogue_wake_canary_activation import (
 
 PUBLICATION_SCHEMA = "mastermind.dialogue_wake_canary_publication/v1"
 PUBLICATION_OPERATION = "DIALOGUE_WAKE_CANARY_PUBLISH"
+NATIVE_PUBLICATION_SCHEMA = "mastermind.native_dialogue_wake_publication.v1"
 _RECEIPT_PATTERNS = {
     "transaction_id": r"autonomy-[0-9a-f]{12}",
     "installed_release_sha": r"[0-9a-f]{40}",
@@ -117,3 +118,30 @@ def verify_publication_receipt(
     )
     if receipt != expected or receipt.installed_release_sha != installed_release_sha:
         raise ValueError("publication evidence disagrees with installed configuration")
+
+
+@dataclasses.dataclass(frozen=True)
+class NativeDialogueCanaryPublication:
+    """Closed native facet of the incumbent root publication file."""
+    receipt: DialogueWakeCanaryPublicationReceipt
+    grant: DialogueWakeCanaryActivationGrant
+
+    def __post_init__(self):
+        if type(self.receipt) is not DialogueWakeCanaryPublicationReceipt or type(self.grant) is not DialogueWakeCanaryActivationGrant:
+            raise ValueError("closed native publication required")
+        verify_publication_receipt(self.receipt, grant=self.grant,
+            installed_release_sha=self.receipt.installed_release_sha,
+            control_config_sha256=self.receipt.control_config_sha256,
+            worker_config_sha256=self.receipt.worker_config_sha256)
+        if self.grant.target_attempt_id != self.grant.source_attempt_id:
+            raise ValueError("native publication must target its exact source Attempt")
+
+    def to_dict(self):
+        return {"schema": NATIVE_PUBLICATION_SCHEMA, "receipt": self.receipt.to_dict(), "grant": self.grant.to_dict()}
+
+    @classmethod
+    def from_dict(cls, value):
+        if type(value) is not dict or set(value) != {"schema", "receipt", "grant"} or value["schema"] != NATIVE_PUBLICATION_SCHEMA:
+            raise ValueError("native publication fields changed")
+        return cls(DialogueWakeCanaryPublicationReceipt.from_dict(value["receipt"]),
+            DialogueWakeCanaryActivationGrant.from_dict(value["grant"]))

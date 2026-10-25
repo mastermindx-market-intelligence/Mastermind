@@ -2081,3 +2081,24 @@ def compose_mission_workspace_v3(
     for row in output["result_refs"]["refs"]:
         assert set(row) == FABRIC_V3_REF_KEYS
     return output
+
+
+def compose_mission_workspace_v4(*, control_room, fabric_view, selection,
+                                 source_validity, cache_currentness,
+                                 source_generation=None, owner_observation=None):
+    """A separate acceptance companion; all v1-v3 documents remain unchanged."""
+    from common import product_acceptance_read_contract as contract
+    selected = contract.selection(selection)
+    if (type(fabric_view) is not dict
+            or set(fabric_view) != {'schema', 'fabric_view', 'product_acceptance'}
+            or fabric_view['schema'] != contract.FABRIC_SCHEMA):
+        raise ValueError('invalid_fabric_companion')
+    accepted = contract.validate_view(fabric_view['product_acceptance'], selected=selected)
+    mission = compose_mission_workspace_v3(control_room=control_room,
+        fabric_view=fabric_view['fabric_view'], work_ref=selected['work_ref'],
+        root_job_id=selected['root_job_id'], source_validity=source_validity,
+        cache_currentness=cache_currentness, source_generation=source_generation,
+        owner_observation=owner_observation)
+    if mission['read_state']['state'] != 'CURRENT':
+        accepted = contract.unavailable(selected, 'SOURCE_UNAVAILABLE')
+    return {'schema': contract.MISSION_SCHEMA, 'mission': mission, 'product_acceptance': accepted}

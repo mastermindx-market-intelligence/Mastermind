@@ -10,6 +10,12 @@ MCP server/plugin/skill therefore cannot become ambient authority merely because
 it exists in a provider home: it must belong to the exact reviewed profile that
 both the Job and claimed capacity name.  The operator-harness attestation layer
 remains responsible for proving the provider process actually matches the grant.
+
+The paid model-only sealed-input profile (``fabric.paid.glm.sealed-input.v1``)
+is a closed configuration-only extension: one exact surface/realm tuple, the
+sealed-worker fences, and no inference transport, permission or authority of
+any kind.  A live paid-model admission remains separately authorized by the
+actual adapter and its paid lease, never by this registry.
 """
 from __future__ import annotations
 
@@ -70,15 +76,39 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+# Paid model-only sealed-input extension: exactly one reviewed surface/realm/
+# profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
+# sealed-worker fence below, so it can never carry MCP servers, plugins,
+# resources, skills, V4 skill capabilities, native helpers or a writable
+# sandbox.  The paid realm and the model-only surface are refused on every
+# other profile, and only the canonical paid Fabric adapter maps the surface;
+# no arbitrary alias, second registry or generation rename exists.  This is
+# configuration naming only: it grants no permission, token, provider
+# admission or authority, and live model transport stays separately authorized
+# by the actual adapter and its paid lease.
+PAID_FABRIC_ADAPTER_ID = "canonical-paid-fabric"
+PAID_GLM_SEALED_PROFILE_ID = "fabric.paid.glm.sealed-input.v1"
+PAID_GLM_EXECUTION_SURFACE = "glm-model-only"
+PAID_GLM_AUTH_REALM = "paid-lease-bound-account"
+ACP_EXECUTION_SURFACE = "acp-agent"
+ACP_PROVIDER_FREE_AUTH_REALM = "dedicated-worker-no-auth"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE,
 })
-_AUTH_REALMS = frozenset({"dedicated-worker-account"})
+_AUTH_REALMS = frozenset({
+    "dedicated-worker-account", PAID_GLM_AUTH_REALM, ACP_PROVIDER_FREE_AUTH_REALM,
+})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
     "claude-code": frozenset({"claude-code"}),
+    "attended-fabric": frozenset({"claude-code"}),
+    PAID_FABRIC_ADAPTER_ID: frozenset({PAID_GLM_EXECUTION_SURFACE}),
+    "acp": frozenset({ACP_EXECUTION_SURFACE}),
 }
-_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "claude-code", PAID_GLM_EXECUTION_SURFACE,
+})
 
 
 def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
@@ -159,6 +189,17 @@ _MCP_COMMON_KEYS = frozenset(
 )
 _MCP_HTTP_KEYS = _MCP_COMMON_KEYS | {"url"}
 _MCP_STDIO_KEYS = _MCP_COMMON_KEYS | {"args", "command"}
+ACP_WORKSPACE_READ_MCP_CAPABILITY_ID = "mastermind-acp-workspace-read-v1"
+ACP_WORKSPACE_READ_MCP_CONFIG_NAME = "mastermindAcpWorkspaceRead"
+ACP_WORKSPACE_READ_MCP_COMMAND = (
+    "/Library/Application Support/MastermindExecutive/bin/mmx-acp-workspace-read-mcp"
+)
+ACP_WORKSPACE_READ_MCP_ARGS: tuple[str, ...] = ()
+ACP_WORKSPACE_READ_MCP_SERVER_IDENTITY = "mastermind-acp-workspace-read"
+ACP_WORKSPACE_READ_MCP_SERVER_VERSION = "1.0.0"
+ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST = (
+    "76bc2f621a26a36cae7a1e90edab3af113cdc6924a662fa83004f6b56babd18d"
+)
 WORKER_BROWSER_MCP_COMMAND = "/usr/bin/python3"
 WORKER_BROWSER_MCP_BOOTSTRAP = r'''import hashlib,json,os,stat
 K=("MASTERMIND_BROWSER_ARTIFACT_DIR","MASTERMIND_BROWSER_FIXTURE_A_URL","MASTERMIND_BROWSER_FIXTURE_B_URL","MASTERMIND_BROWSER_FIXTURE_NONCE","MASTERMIND_BROWSER_ORIGIN","MASTERMIND_BROWSER_PROXY_URL","MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH","MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256","MASTERMIND_BROWSER_RUNTIME_ROOT","MASTERMIND_BROWSER_WORKSPACE_PATH","PLAYWRIGHT_BROWSERS_PATH")
@@ -220,6 +261,28 @@ COMPANY_MCP_COMMAND = "/usr/bin/python3"
 COMPANY_MCP_BOOTSTRAP = 'import hashlib,json,os,pathlib,re,stat,subprocess\nR=pathlib.Path("/Library/Application Support/MastermindExecutive")\nC=R/"config/company-consultation-edge.json"\nE={"PATH":"/usr/bin:/bin","LANG":"en_US.UTF-8"}\ndef sealed(p,d=False):\n for n in (p,*p.parents):\n  i=n.lstat(); D=d or n!=p\n  if i.st_uid!=0 or ((n==p or n==R or R in n.parents) and i.st_gid!=0) or i.st_mode&0o022 or stat.S_ISLNK(i.st_mode) or not (stat.S_ISDIR(i.st_mode) if D else stat.S_ISREG(i.st_mode)) or (not D and i.st_nlink!=1): raise ValueError()\n  if b"+" in subprocess.check_output(["/usr/bin/stat","-f","%Sp",str(n)],env=E): raise ValueError()\ntry:\n sealed(C)\n if stat.S_IMODE(C.stat().st_mode)!=0o444: raise ValueError()\n v=json.loads(C.read_bytes()); S=v["release_sha"]\n if set(v)!={"schema","release_sha","control_uid","worker_uid","entry_sha256","receipt_sha256"} or v["schema"]!="mastermind.company_mcp_edge/v1" or type(S)!=str or re.fullmatch("[0-9a-f]{40}",S) is None or type(v["worker_uid"])!=int or v["worker_uid"]<=0 or os.geteuid()!=v["worker_uid"]: raise ValueError()\n P=R/"releases"/S/"ops/executive_os/company_mcp_edge.py"; sealed(P)\n if hashlib.sha256(P.read_bytes()).hexdigest()!=v["entry_sha256"]: raise ValueError()\n B=pathlib.Path("/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"); sealed(B)\n os.execve(B,[str(B),"-I","-S","-B",str(P),"stdio"],E)\nexcept (KeyError,OSError,TypeError,ValueError):\n raise SystemExit("Company edge bootstrap refused")\n'
 COMPANY_MCP_ARGS = ("-I", "-S", "-B", "-c", COMPANY_MCP_BOOTSTRAP)
 COMPANY_EXECUTION_PROFILE = "operator.appserver.interactive.company-mcp.v1"
+
+from common.claude_principal_capability_contract import (
+    RICH_CLAUDE_PRINCIPAL_PROFILE_ID,
+    EXECUTIVE_COO_MCP_CAPABILITY_ID,
+    EXECUTIVE_COO_MCP_CONFIG_NAME,
+    EXECUTIVE_COO_MCP_URL,
+    EXECUTIVE_COO_MCP_SERVER_IDENTITY,
+    EXECUTIVE_COO_MCP_SERVER_VERSION,
+    EXECUTIVE_COO_MCP_TOOL_SCHEMA_DIGEST,
+    EXECUTIVE_COO_MCP_ENABLED_TOOLS,
+    PRINCIPAL_COMPANY_MCP_CAPABILITY_ID,
+    PRINCIPAL_COMPANY_MCP_CONFIG_NAME,
+    PRINCIPAL_COMPANY_MCP_COMMAND,
+    PRINCIPAL_COMPANY_MCP_SERVER_IDENTITY,
+    PRINCIPAL_COMPANY_MCP_SERVER_VERSION,
+    PRINCIPAL_COMPANY_MCP_TOOL_SCHEMA_DIGEST,
+    PRINCIPAL_COMPANY_MCP_ENABLED_TOOLS,
+    PRINCIPAL_COMPANY_MCP_BOOTSTRAP,
+    PRINCIPAL_COMPANY_MCP_ARGS,
+    RICH_CLAUDE_PRINCIPAL_MCP_IDS,
+)
+
 # Separate, disabled-by-default return facet over the same sealed SDK edge.
 # The consultation command and grant remain byte-for-byte unchanged.
 NATIVE_RETURN_MCP_ARGS = (*COMPANY_MCP_ARGS[:-1], COMPANY_MCP_BOOTSTRAP.replace(
@@ -229,6 +292,13 @@ NATIVE_RETURN_CONFIG_NAME = "mastermind-native-return"
 NATIVE_RETURN_SERVER_IDENTITY = "mastermind-native-return-mcp"
 NATIVE_RETURN_SERVER_VERSION = "1.0.0"
 NATIVE_RETURN_TOOL_SCHEMA_DIGEST = "b2ed6841f5693bd3f2fcd91b036ba1bae529ea9a8472e524b61648c1ced8fb40"
+PRODUCT_ACCEPTANCE_MCP_ARGS = (*COMPANY_MCP_ARGS[:-1], COMPANY_MCP_BOOTSTRAP.replace(
+    'str(P),"stdio"', 'str(P),"acceptance-stdio"'))
+PRODUCT_ACCEPTANCE_EXECUTION_PROFILE = "operator.appserver.interactive.product-acceptance.v1"
+PRODUCT_ACCEPTANCE_CONFIG_NAME = "mastermind-product-acceptance"
+PRODUCT_ACCEPTANCE_SERVER_IDENTITY = "mastermind-product-acceptance-mcp"
+PRODUCT_ACCEPTANCE_SERVER_VERSION = "1.0.0"
+PRODUCT_ACCEPTANCE_TOOL_SCHEMA_DIGEST = "a8a86ebfc59820efafe0810e08f3897583ab104817596c2d4e94f8f80c93e84d"
 _RESOURCE_KEYS = frozenset(
     {
         "artifact_root",
@@ -431,6 +501,24 @@ def _https_url(value: Any, *, field: str) -> str:
             f"{field} must be an HTTPS origin/path without credentials, query, or fragment"
         )
     return token
+
+
+def _reviewed_mcp_http_url(
+    capability_id: str,
+    value: Any,
+    *,
+    field: str,
+) -> str:
+    """Keep generic HTTP grants HTTPS-only except one exact reviewed COO loopback."""
+
+    token = str(value or "").strip()
+    if capability_id == EXECUTIVE_COO_MCP_CAPABILITY_ID:
+        if token != EXECUTIVE_COO_MCP_URL:
+            raise CapabilityPolicyError(
+                "Executive COO MCP grant must use its exact reviewed loopback URL"
+            )
+        return token
+    return _https_url(token, field=field)
 
 
 _BASE_APP_SERVER_OVERRIDES = (
@@ -746,7 +834,7 @@ def app_server_security_config_projection(
             "enabled": agents.get("enabled") if isinstance(agents, Mapping) else None
         }
 
-    return {
+    projected: dict[str, object] = {
         "agents": agent_projection,
         "features": {
             key: features.get(key) if isinstance(features, Mapping) else None
@@ -756,6 +844,44 @@ def app_server_security_config_projection(
         "plugins": plugin_projection,
         "skills": skills_block,
     }
+    # Only the opt-in workspace-write profile projects this namespace; old V3
+    # read-only config/digests retain their exact established JSON shape.
+    # Presence matters: omitting this table is not proof that the sandbox has
+    # no network or supplemental writable roots.
+    raw_write = root.get("sandbox_workspace_write")
+    active_write_sandbox = str(
+        root.get("sandbox_mode") or root.get("sandboxMode") or ""
+    ).strip() == "workspace-write"
+    # Real Codex 0.159.3 includes `sandbox_workspace_write: null` in config/read
+    # even while a read-only sandbox is active.  That null is not an active
+    # writable policy and must not break the established V3 read-only digest.
+    # A writable sandbox with null/missing settings remains unattestable.
+    if "sandbox_workspace_write" in root and (
+        raw_write is not None or active_write_sandbox
+    ):
+        if isinstance(raw_write, Mapping):
+            reviewed_fields = frozenset({
+                "exclude_slash_tmp", "exclude_tmpdir_env_var",
+                "network_access", "writable_roots",
+            })
+            # Writable-sandbox fields are security-sensitive. A future Codex
+            # release may add a new permission or network field: dropping it
+            # would incorrectly attest a broader effective policy as approved.
+            # Unknown keys fail the expected config digest, rather than being
+            # silently ignored while the write-capable profile starts.
+            if set(raw_write) - reviewed_fields:
+                projected["sandbox_workspace_write"] = {"invalid": True}
+            else:
+                roots = raw_write.get("writable_roots")
+                projected["sandbox_workspace_write"] = {
+                    "exclude_slash_tmp": raw_write.get("exclude_slash_tmp"),
+                    "exclude_tmpdir_env_var": raw_write.get("exclude_tmpdir_env_var"),
+                    "network_access": raw_write.get("network_access"),
+                    "writable_roots": list(roots) if isinstance(roots, list) else None,
+                }
+        else:
+            projected["sandbox_workspace_write"] = {"invalid": True}
+    return projected
 
 
 def app_server_security_config_digest(config: Mapping[str, Any] | None) -> str:
@@ -885,7 +1011,7 @@ class ExecutionCapabilityProfile:
                 ),
                 "non_code_mode_only": False,
             }
-        return {
+        projection = {
             "agents": agents,
             "features": {
                 "apps": False,
@@ -916,9 +1042,60 @@ class ExecutionCapabilityProfile:
                 else {"config": None}
             ),
         }
+        if self.execution_surface == "codex-app-server" and self.write_capable:
+            projection["sandbox_workspace_write"] = {
+                "network_access": False,
+                "writable_roots": [],
+                "exclude_slash_tmp": True,
+                "exclude_tmpdir_env_var": True,
+            }
+        return projection
+
+    def acp_config_projection(self) -> dict[str, object]:
+        """Secret-free policy projection for the provider-neutral ACP surface."""
+
+        if self.execution_surface != ACP_EXECUTION_SURFACE:
+            raise CapabilityPolicyError(
+                f"profile {self.profile_id!r} is not an ACP profile"
+            )
+        return {
+            "execution_surface": self.execution_surface,
+            "auth_realm": self.auth_realm,
+            "sandbox_policy": self.sandbox_policy,
+            "approval_policy": self.approval_policy,
+            "network_policy": self.network_policy,
+            "write_capable": self.write_capable,
+            "native_helper_policy": self.native_helper_policy.value,
+            "skills": list(self.skills),
+            "skill_grants": [
+                {
+                    "capability_id": grant.capability_id,
+                    "grant_digest": grant.grant_digest,
+                }
+                for grant in self.skill_grants
+            ],
+            "mcp_servers": [
+                {
+                    "capability_id": grant.capability_id,
+                    "grant_digest": grant.grant_digest,
+                }
+                for grant in self.mcp_server_grants
+            ],
+            "resources": [
+                {
+                    "resource_id": grant.resource_id,
+                    "grant_digest": grant.grant_digest,
+                }
+                for grant in self.resource_grants
+            ],
+            "plugins": list(self.plugins),
+            "forbidden": list(self.forbidden),
+        }
 
     @property
     def expected_config_digest(self) -> str:
+        if self.execution_surface == ACP_EXECUTION_SURFACE:
+            return _digest(self.acp_config_projection())
         if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
             requested = self.claude_sdk_config_projection()
             return claude_security_config_digest({
@@ -930,17 +1107,111 @@ class ExecutionCapabilityProfile:
     def claude_sdk_config_projection(self) -> dict[str, object]:
         """Requested policy only; never evidence that the CLI enforced it.
 
-        This first disabled profile has no command, write, MCP, plugin or child
-        capability. A current production policy observer is still required
-        before enabling it or deriving observed OHF enforcement fields.
+        The original restricted profile remains extension-free.  The rich COO
+        principal is a separate disabled candidate generation whose exact MCP
+        configuration can be reviewed while its sandbox still denies network
+        and Unix-socket access.  Projection therefore grants no live transport
+        or provider admission by itself.
         """
-        if (self.execution_surface != CLAUDE_OPERATOR_EXECUTION_SURFACE
-                or self.write_capable or self.sandbox_policy != "read-only"
+
+        sandbox = {
+            "enabled": True,
+            "failIfUnavailable": True,
+            "autoAllowBashIfSandboxed": False,
+            "allowUnsandboxedCommands": False,
+            "excludedCommands": [],
+            "network": {
+                "allowedDomains": [],
+                "deniedDomains": ["*"],
+                "allowAllUnixSockets": False,
+                "allowLocalBinding": False,
+            },
+        }
+        if self.profile_id == RICH_CLAUDE_PRINCIPAL_PROFILE_ID:
+            if (
+                self.enabled
+                or self.execution_surface != CLAUDE_OPERATOR_EXECUTION_SURFACE
+                or self.write_capable
+                or self.sandbox_policy != "read-only"
                 or self.network_policy != "disabled"
                 or self.native_helper_policy is not NativeHelperPolicy.DISABLED
-                or self.skills or self.skill_grants or self.mcp_server_grants
-                or self.plugins or self.resource_grants):
-            raise CapabilityPolicyError("Claude policy exceeds its unadmitted first profile")
+                or self.native_helper is not None
+                or self.skills
+                or self.skill_grants
+                or self.mcp_servers != RICH_CLAUDE_PRINCIPAL_MCP_IDS
+                or self.plugins
+                or self.resource_grants
+            ):
+                raise CapabilityPolicyError(
+                    "rich Claude principal candidate differs from its inert reviewed ceiling"
+                )
+            servers: dict[str, object] = {}
+            allowed_tools: list[str] = []
+            for grant in self.mcp_server_grants:
+                if grant.capability_id == EXECUTIVE_COO_MCP_CAPABILITY_ID:
+                    if (
+                        grant.transport != "streamable-http"
+                        or grant.url != EXECUTIVE_COO_MCP_URL
+                        or grant.command is not None
+                        or grant.args
+                    ):
+                        raise CapabilityPolicyError(
+                            "rich Claude Executive COO transport differs"
+                        )
+                    entry: dict[str, object] = {
+                        "type": "http",
+                        "url": grant.url,
+                    }
+                elif grant.capability_id == PRINCIPAL_COMPANY_MCP_CAPABILITY_ID:
+                    if (
+                        grant.transport != "stdio"
+                        or grant.command != PRINCIPAL_COMPANY_MCP_COMMAND
+                        or grant.args != PRINCIPAL_COMPANY_MCP_ARGS
+                        or grant.url is not None
+                    ):
+                        raise CapabilityPolicyError(
+                            "rich Claude principal Company transport differs"
+                        )
+                    entry = {
+                        "type": "stdio",
+                        "command": grant.command,
+                        "args": list(grant.args),
+                    }
+                else:
+                    raise CapabilityPolicyError(
+                        "rich Claude principal contains an unreviewed MCP grant"
+                    )
+                servers[grant.config_name] = entry
+                allowed_tools.extend(
+                    f"mcp__{grant.config_name}__{tool}"
+                    for tool in grant.enabled_tools
+                )
+            return {
+                "tools": ["Read", "Glob", "Grep"],
+                "skills": [],
+                "permission_mode": "dontAsk",
+                "setting_sources": [],
+                "strict_mcp_config": True,
+                "mcp_servers": dict(sorted(servers.items())),
+                "allowed_tools": sorted(allowed_tools),
+                "sandbox": sandbox,
+            }
+
+        if (
+            self.execution_surface != CLAUDE_OPERATOR_EXECUTION_SURFACE
+            or self.write_capable
+            or self.sandbox_policy != "read-only"
+            or self.network_policy != "disabled"
+            or self.native_helper_policy is not NativeHelperPolicy.DISABLED
+            or self.skills
+            or self.skill_grants
+            or self.mcp_server_grants
+            or self.plugins
+            or self.resource_grants
+        ):
+            raise CapabilityPolicyError(
+                "Claude policy exceeds its unadmitted first profile"
+            )
         return {
             "tools": ["Read", "Glob", "Grep"],
             "skills": [],
@@ -948,14 +1219,7 @@ class ExecutionCapabilityProfile:
             "setting_sources": [],
             "strict_mcp_config": True,
             "mcp_servers": {},
-            "sandbox": {
-                "enabled": True, "failIfUnavailable": True,
-                "autoAllowBashIfSandboxed": False,
-                "allowUnsandboxedCommands": False,
-                "excludedCommands": [],
-                "network": {"allowedDomains": [], "deniedDomains": ["*"],
-                            "allowAllUnixSockets": False, "allowLocalBinding": False},
-            },
+            "sandbox": sandbox,
         }
 
     def app_server_config_overrides(self) -> tuple[str, ...]:
@@ -1011,6 +1275,20 @@ class ExecutionCapabilityProfile:
             values.extend(grant.config_overrides())
         if self.skill_grants:
             values.append("skills.bundled.enabled=false")
+        if self.write_capable:
+            # Real Codex App Server config/read otherwise reports an unknown
+            # approval policy.  The V4 write profile requires exact observed
+            # `never` before a provider thread is admissible. Preserve the
+            # legacy V3 override bytes and their existing config digests.
+            # Explicitly exclude ambient writable tmp roots and networking.
+            values.extend((
+                'approval_policy="never"',
+                'sandbox_mode="workspace-write"',
+                "sandbox_workspace_write.network_access=false",
+                "sandbox_workspace_write.writable_roots=[]",
+                "sandbox_workspace_write.exclude_slash_tmp=true",
+                "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+            ))
         return tuple(values)
 
     def capability_manifest(self, *, harness_binary_digest: str) -> CapabilityManifest:
@@ -1208,23 +1486,41 @@ class ExecutionCapabilityRegistry:
             command: str | None = None
             args: tuple[str, ...] = ()
             if transport == "streamable-http":
-                url = _https_url(
-                    value.get("url"), field=f"mcp_servers.{capability_id}.url"
+                url = _reviewed_mcp_http_url(
+                    capability_id,
+                    value.get("url"),
+                    field=f"mcp_servers.{capability_id}.url",
                 )
             else:
                 command_value = str(value.get("command") or "").strip()
-                reviewed = {
-                    "playwright-worker-browser-b1": (WORKER_BROWSER_MCP_COMMAND, WORKER_BROWSER_MCP_ARGS),
-                    "company-consultation-mcp-v1": (COMPANY_MCP_COMMAND, COMPANY_MCP_ARGS),
+                reviewed_stdio = {
+                    "playwright-worker-browser-b1": (
+                        WORKER_BROWSER_MCP_COMMAND,
+                        WORKER_BROWSER_MCP_ARGS,
+                    ),
+                    "company-consultation-mcp-v1": (
+                        COMPANY_MCP_COMMAND,
+                        COMPANY_MCP_ARGS,
+                    ),
+                    PRINCIPAL_COMPANY_MCP_CAPABILITY_ID: (
+                        PRINCIPAL_COMPANY_MCP_COMMAND,
+                        PRINCIPAL_COMPANY_MCP_ARGS,
+                    ),
                     "native-return-mcp-v1": (COMPANY_MCP_COMMAND, NATIVE_RETURN_MCP_ARGS),
-                }.get(capability_id)
-                if reviewed is None or command_value != reviewed[0]:
+                    "product-acceptance-mcp-v1": (COMPANY_MCP_COMMAND, PRODUCT_ACCEPTANCE_MCP_ARGS),
+                    ACP_WORKSPACE_READ_MCP_CAPABILITY_ID: (
+                        ACP_WORKSPACE_READ_MCP_COMMAND,
+                        ACP_WORKSPACE_READ_MCP_ARGS,
+                    ),
+                }
+                expected_stdio = reviewed_stdio.get(capability_id)
+                if expected_stdio is None or command_value != expected_stdio[0]:
                     raise CapabilityPolicyError(
                         f"MCP grant {capability_id!r} stdio command is not reviewed"
                     )
                 raw_args = value.get("args")
                 if (
-                    raw_args != list(reviewed[1])
+                    raw_args != list(expected_stdio[1])
                     or len(
                         json.dumps(
                             raw_args,
@@ -1285,6 +1581,34 @@ class ExecutionCapabilityRegistry:
                 or tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
             ):
                 raise CapabilityPolicyError("Company MCP grant differs from its reviewed binding")
+            if capability_id == EXECUTIVE_COO_MCP_CAPABILITY_ID and (
+                config_name != EXECUTIVE_COO_MCP_CONFIG_NAME
+                or transport != "streamable-http"
+                or url != EXECUTIVE_COO_MCP_URL
+                or auth_status != "oAuth"
+                or server_identity != EXECUTIVE_COO_MCP_SERVER_IDENTITY
+                or server_version != EXECUTIVE_COO_MCP_SERVER_VERSION
+                or enabled_tools != tuple(sorted(EXECUTIVE_COO_MCP_ENABLED_TOOLS))
+                or approval_mode != "approve"
+                or tool_schema_digest != EXECUTIVE_COO_MCP_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError(
+                    "Executive COO MCP grant differs from its reviewed binding"
+                )
+            if capability_id == PRINCIPAL_COMPANY_MCP_CAPABILITY_ID and (
+                config_name != PRINCIPAL_COMPANY_MCP_CONFIG_NAME
+                or transport != "stdio"
+                or auth_status != "unsupported"
+                or server_identity != PRINCIPAL_COMPANY_MCP_SERVER_IDENTITY
+                or server_version != PRINCIPAL_COMPANY_MCP_SERVER_VERSION
+                or enabled_tools
+                != tuple(sorted(PRINCIPAL_COMPANY_MCP_ENABLED_TOOLS))
+                or approval_mode != "approve"
+                or tool_schema_digest != PRINCIPAL_COMPANY_MCP_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError(
+                    "Principal Company MCP grant differs from its reviewed binding"
+                )
             if capability_id == "native-return-mcp-v1" and (
                 config_name != NATIVE_RETURN_CONFIG_NAME or transport != "stdio"
                 or auth_status != "unsupported"
@@ -1295,6 +1619,16 @@ class ExecutionCapabilityRegistry:
                 or tool_schema_digest != NATIVE_RETURN_TOOL_SCHEMA_DIGEST
             ):
                 raise CapabilityPolicyError("Native return MCP grant differs from its reviewed binding")
+            if capability_id == "product-acceptance-mcp-v1" and (
+                config_name != PRODUCT_ACCEPTANCE_CONFIG_NAME or transport != "stdio"
+                or auth_status != "unsupported"
+                or server_identity != PRODUCT_ACCEPTANCE_SERVER_IDENTITY
+                or server_version != PRODUCT_ACCEPTANCE_SERVER_VERSION
+                or enabled_tools != ("request_decision",)
+                or approval_mode != "approve"
+                or tool_schema_digest != PRODUCT_ACCEPTANCE_TOOL_SCHEMA_DIGEST
+            ):
+                raise CapabilityPolicyError("Product acceptance MCP grant differs from its reviewed binding")
             normalized_grant = {
                 "capability_id": capability_id,
                 "config_name": config_name,
@@ -1648,6 +1982,61 @@ class ExecutionCapabilityRegistry:
                     f"profile {profile_id!r} cannot grant MCP/plugins or resources "
                     f"to sealed worker execution surface {execution_surface!r}"
                 )
+            principal_only_mcp = set(mcp_server_ids) & set(
+                RICH_CLAUDE_PRINCIPAL_MCP_IDS
+            )
+            is_rich_claude_profile = (
+                profile_id == RICH_CLAUDE_PRINCIPAL_PROFILE_ID
+            )
+            if principal_only_mcp and not is_rich_claude_profile:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot borrow rich-principal MCP grants"
+                )
+            if is_rich_claude_profile and (
+                enabled
+                or execution_surface != CLAUDE_OPERATOR_EXECUTION_SURFACE
+                or auth_realm != "dedicated-worker-account"
+                or sandbox_policy != "read-only"
+                or approval_policy != "never"
+                or network_policy != "disabled"
+                or write_capable
+                or native_helper_policy is not NativeHelperPolicy.DISABLED
+                or native_helper is not None
+                or skills
+                or mcp_server_ids != RICH_CLAUDE_PRINCIPAL_MCP_IDS
+                or resource_ids
+                or plugins
+                or forbidden
+            ):
+                raise CapabilityPolicyError(
+                    "rich Claude principal profile requires disabled inert owner admission"
+                )
+            is_acp_profile = execution_surface == ACP_EXECUTION_SURFACE
+            if is_acp_profile:
+                if (
+                    auth_realm != ACP_PROVIDER_FREE_AUTH_REALM
+                    or sandbox_policy != "read-only"
+                    or approval_policy != "never"
+                    or network_policy != "disabled"
+                    or write_capable
+                    or native_helper_policy is not NativeHelperPolicy.DISABLED
+                    or native_helper is not None
+                    or skills
+                    or plugins
+                    or resource_ids
+                    or mcp_server_ids != (ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,)
+                    or len(resolved_mcp) != 1
+                    or resolved_mcp[0].transport != "stdio"
+                    or resolved_mcp[0].auth_status != "unsupported"
+                ):
+                    raise CapabilityPolicyError(
+                        "ACP first profile exceeds the reviewed provider-free read-only ceiling"
+                    )
+            elif auth_realm == ACP_PROVIDER_FREE_AUTH_REALM:
+                raise CapabilityPolicyError(
+                    "provider-free auth realm is reserved for the ACP execution surface"
+                )
+
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
             if is_browser_profile:
                 if (
@@ -1690,11 +2079,12 @@ class ExecutionCapabilityRegistry:
                         f"profile {profile_id!r} cannot grant skill_capabilities "
                         f"to sealed worker execution surface {execution_surface!r}"
                     )
-                if write_capable:
-                    raise CapabilityPolicyError(
-                        f"profile {profile_id!r} write-capable profiles cannot "
-                        "grant skill_capabilities"
-                    )
+                # Source-verified V4 Skill methods may accompany a writable
+                # Codex App Server workspace.  This is not a tool, credential,
+                # network or sandbox grant: the existing sandbox/write checks,
+                # capability manifest and exact package digests still apply.
+                # Sealed worker surfaces and browser profiles remain rejected
+                # by their separate launch/admission fences.
                 if is_browser_profile:
                     raise CapabilityPolicyError(
                         f"profile {profile_id!r} browser profile cannot grant "
@@ -1728,6 +2118,10 @@ class ExecutionCapabilityRegistry:
                 skills = tuple(sorted(seen_grant_runtime_names))
             else:
                 skill_grants = ()
+            if is_rich_claude_profile and (skills or skill_grants):
+                raise CapabilityPolicyError(
+                    "rich Claude principal cannot gain Skill capability in this generation"
+                )
             if profile_id == _PENDING_BROWSER_PROFILE_ID:
                 if (enabled or execution_surface != "codex-app-server"
                         or auth_realm != "dedicated-worker-account"
@@ -1741,6 +2135,45 @@ class ExecutionCapabilityRegistry:
                     raise CapabilityPolicyError(
                         "pending fabric browser profile requires disabled, inert owner admission"
                     )
+            # Paid model-only sealed-input fence: the paid auth realm and the
+            # model-only surface exist for exactly one closed profile tuple and
+            # are refused everywhere else.  No alias profile, no legacy-profile
+            # adoption, no mixed surface/realm combination and no field widening
+            # is accepted, and the sealed-worker fences above already deny MCP,
+            # plugins, resources, skills, skill capabilities and helpers.
+            is_paid_glm_profile = profile_id == PAID_GLM_SEALED_PROFILE_ID
+            if auth_realm == PAID_GLM_AUTH_REALM and not is_paid_glm_profile:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot use the paid lease-bound auth realm"
+                )
+            if (
+                execution_surface == PAID_GLM_EXECUTION_SURFACE
+                and not is_paid_glm_profile
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot use the paid model-only execution surface"
+                )
+            if is_paid_glm_profile and (
+                not enabled
+                or execution_surface != PAID_GLM_EXECUTION_SURFACE
+                or auth_realm != PAID_GLM_AUTH_REALM
+                or sandbox_policy != "read-only"
+                or approval_policy != "never"
+                or network_policy != "disabled"
+                or write_capable
+                or native_helper_policy is not NativeHelperPolicy.DISABLED
+                or native_helper is not None
+                or skills
+                or skill_capability_ids
+                or skill_grants
+                or mcp_server_ids
+                or resource_ids
+                or plugins
+                or forbidden
+            ):
+                raise CapabilityPolicyError(
+                    "paid GLM sealed-input profile differs from its exact reviewed ceiling"
+                )
             if write_capable and sandbox_policy != "workspace-write":
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} write capability requires workspace-write"
@@ -1895,6 +2328,8 @@ __all__ = [
     "CAPABILITY_POLICY_SCHEMA",
     "CAPABILITY_POLICY_SCHEMA_V3",
     "CAPABILITY_POLICY_SCHEMA_V4",
+    "ACP_EXECUTION_SURFACE",
+    "ACP_PROVIDER_FREE_AUTH_REALM",
     "DEFAULT_CAPABILITY_POLICY_PATH",
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
     "CapabilityPolicyError",
@@ -1905,6 +2340,10 @@ __all__ = [
     "NativeHelperGrant",
     "ResourceGrant",
     "PendingBrowserResource",
+    "PAID_FABRIC_ADAPTER_ID",
+    "PAID_GLM_AUTH_REALM",
+    "PAID_GLM_EXECUTION_SURFACE",
+    "PAID_GLM_SEALED_PROFILE_ID",
     "app_server_security_config_digest",
     "app_server_security_config_projection",
     "build_company_consultation_grant_profile",

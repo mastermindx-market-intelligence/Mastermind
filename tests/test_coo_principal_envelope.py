@@ -4,14 +4,20 @@ import dataclasses
 
 import pytest
 
+from control_plane import ceo_intent
 from control_plane.coo_principal_envelope import (
     ACTOR,
     INTENT_SCHEMA,
+    ORCHESTRATION_INTENT_SCHEMA,
     SEAT,
     CooPrincipalEnvelopeError,
     PrincipalAdmissionContext,
     derive_principal_envelope,
+    derive_principal_orchestration_envelope,
+    principal_orchestration_bundle_digest,
+    validate_principal_orchestration_bundle,
 )
+from control_plane.coo_principal_request import ORCHESTRATION_ACTION_KIND
 
 
 WORK_REF = "WS:EXECUTIVE-CAPACITY-FABRIC"
@@ -77,6 +83,211 @@ def derive(request=None, *, ctx=None, ground=None):
         workspace_root="/tmp/mastermind-jobs",
         grounding=ground or grounding(),
     )
+
+
+def orchestration_request(**changes):
+    value = {
+        "operation_key": "claude-exec-integration",
+        "objective": "Coordinate one governed Executive orchestration episode.",
+        "department": "executive-infrastructure",
+        "priority": 7,
+        "workstream": WORK_REF,
+        "business_impact": "routine",
+    }
+    value.update(changes)
+    return value
+
+
+def derive_orchestration(request=None, *, ctx=None, ground=None):
+    return derive_principal_orchestration_envelope(
+        request or orchestration_request(),
+        context=ctx or context(),
+        grounding=ground or grounding(),
+    )
+
+
+def test_orchestration_bundle_round_trips_and_has_full_source_digest():
+    result = derive_orchestration()
+    validated = validate_principal_orchestration_bundle(result)
+    assert validated == result
+    digest = principal_orchestration_bundle_digest(result)
+    assert len(digest) == 64
+    assert digest == principal_orchestration_bundle_digest(validated)
+
+
+@pytest.mark.parametrize(
+    ("surface", "field", "value"),
+    [
+        ("bundle", "request_ref", "req-coo-" + "f" * 32),
+        ("bundle", "intent_id", "coo-" + "f" * 32),
+        ("bundle", "action_kind", "bounded_intent"),
+        ("bundle", "request_fingerprint", "f" * 64),
+        ("bundle", "bundle_digest", "f" * 64),
+        ("request", "objective", "changed after derivation"),
+        ("request", "operation_key", "different-operation-key"),
+        ("envelope", "principal_binding_digest", "f" * 64),
+        ("envelope", "authority_generation_digest", "f" * 64),
+        ("envelope", "business_impact", "material"),
+        ("envelope", "grounding", {"mastermind_sha": "f" * 40, "macro_sha": "2" * 40}),
+    ],
+)
+def test_orchestration_bundle_detects_identity_or_payload_drift(surface, field, value):
+    result = derive_orchestration()
+    changed = {
+        key: (dict(item) if isinstance(item, dict) else item)
+        for key, item in result.items()
+    }
+    if surface == "bundle":
+        changed[field] = value
+    elif surface == "request":
+        changed["normalized_request"] = dict(changed["normalized_request"])
+        changed["normalized_request"][field] = value
+    else:
+        changed["envelope"] = dict(changed["envelope"])
+        changed["envelope"][field] = value
+    with pytest.raises(CooPrincipalEnvelopeError):
+        validate_principal_orchestration_bundle(changed)
+
+
+def test_orchestration_envelope_is_role_correct_and_current_sink_inert():
+    result = derive_orchestration()
+    envelope = result["envelope"]
+    assert envelope["schema"] == ORCHESTRATION_INTENT_SCHEMA
+    assert envelope["action_kind"] == ORCHESTRATION_ACTION_KIND
+    assert envelope["actor"] == ACTOR == "coo-principal"
+    assert envelope["seat"] == SEAT == "coo"
+    assert envelope["workstream"] == WORK_REF
+    assert envelope["business_impact"] == "routine"
+    assert envelope["principal_binding_digest"] == D0
+    assert envelope["mission_authority_ref"] == "authority:coo-principal-v1"
+    assert envelope["authority_generation_digest"] == D1
+    assert "execution_contract" not in envelope
+    assert "execution_profile" not in envelope
+    assert "root_job_id" not in envelope
+    assert "provider" not in envelope
+    assert "account" not in envelope
+    assert "host" not in envelope
+
+    # H4-A cannot create a root through today's sink. The later reviewed
+    # issuer/sink unit must add an explicit accepted discriminator.
+    with pytest.raises(ceo_intent.CeoIntentError):
+        ceo_intent.validate_intent(envelope)
+
+
+def test_cross_kind_same_logical_operation_reuses_request_and_intent_identity():
+    bounded = derive()
+    orchestration = derive_orchestration()
+    assert orchestration["request_ref"] == bounded["request_ref"]
+    assert orchestration["intent_id"] == bounded["intent_id"]
+    assert orchestration["envelope"]["schema"] != bounded["envelope"]["schema"]
+    assert orchestration["action_kind"] == ORCHESTRATION_ACTION_KIND
+    assert len(orchestration["request_fingerprint"]) == 64
+    assert orchestration["request_fingerprint"] == orchestration["envelope"][
+        "request_fingerprint"
+    ]
+
+
+def test_orchestration_semantic_change_keeps_identity_but_moves_action_fingerprint():
+    first = derive_orchestration()
+    changed = derive_orchestration(
+        orchestration_request(
+            objective="Changed orchestration semantics under the same operation.",
+            priority=10,
+            business_impact="material",
+        )
+    )
+    assert changed["request_ref"] == first["request_ref"]
+    assert changed["intent_id"] == first["intent_id"]
+    assert changed["request_fingerprint"] != first["request_fingerprint"]
+    assert changed["envelope"] != first["envelope"]
+
+
+def test_orchestration_principal_generation_moves_envelope_not_business_fingerprint():
+    first = derive_orchestration()
+    moved = derive_orchestration(
+        ctx=context(
+            principal_binding_digest="a" * 64,
+            mission_authority_ref="authority:coo-principal-v2",
+            authority_generation_digest="b" * 64,
+        )
+    )
+    assert moved["request_ref"] == first["request_ref"]
+    assert moved["intent_id"] == first["intent_id"]
+    assert moved["request_fingerprint"] == first["request_fingerprint"]
+    assert moved["envelope"] != first["envelope"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "execution_profile",
+        "attempt_limit",
+        "allowed_write_paths",
+        "validation",
+        "root_job_id",
+        "children",
+        "plan",
+        "budget",
+        "branch",
+        "worktree",
+        "provider",
+        "model",
+        "account",
+        "host",
+        "realm",
+        "release_class",
+        "requested_authorities",
+        "dispatch",
+        "service",
+        "session_id",
+    ],
+)
+def test_orchestration_public_request_cannot_supply_execution_or_placement(field):
+    request = orchestration_request()
+    request[field] = "caller-value"
+    with pytest.raises(CooPrincipalEnvelopeError, match="unexpected field"):
+        derive_orchestration(request)
+
+
+def test_orchestration_grounding_is_closed_and_exact():
+    result = derive_orchestration()
+    assert result["envelope"]["grounding"] == {
+        "macro_sha": "2" * 40,
+        "mastermind_sha": "1" * 40,
+        "boot_packet_schema": "mastermind.ceo_boot_packet.v1",
+    }
+    with pytest.raises(CooPrincipalEnvelopeError, match="unexpected field"):
+        derive_orchestration(
+            ground={**grounding(), "provider_session_id": "forbidden"}
+        )
+
+
+def test_orchestration_bundle_has_no_runtime_effect_or_acceptance_claim():
+    result = derive_orchestration()
+    assert set(result) == {
+        "request_ref",
+        "intent_id",
+        "action_kind",
+        "request_fingerprint",
+        "normalized_request",
+        "envelope",
+        "bundle_digest",
+    }
+    forbidden = {
+        "job_id",
+        "status",
+        "accepted",
+        "duplicate",
+        "dispatched",
+        "created_at_ms",
+        "worker_id",
+        "attempt_id",
+        "quota_class",
+        "lease_token",
+        "provider_session_id",
+    }
+    assert forbidden.isdisjoint(result)
+    assert forbidden.isdisjoint(result["envelope"])
 
 
 def test_envelope_is_distinct_from_ceo_identity_and_server_derives_coo_provenance():

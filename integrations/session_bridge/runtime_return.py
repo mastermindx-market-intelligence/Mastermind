@@ -512,10 +512,63 @@ class RuntimeSessionReturn:
         except Exception:
             raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable") from None
 
+    def _read_request(self, read_ref):
+        """A committed result retains its original read provenance after cleanup.
+
+        This grants no target discovery, writer lease, attention or execution.
+        Uncommitted requests still need the current writer. A native admission
+        proves COMMIT admission only; the exact canonical reply must also be
+        read and matched before any result can be returned.
+        """
+        event, value = self._stored_request(read_ref)
+        events = self.runtime.events.list_events(
+            aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
+        admission = self._native_commit_admission(event, events)
+        if admission is None:
+            event, value, _ = self._request(read_ref)
+        return event, value, admission
+
+    async def require_committed_native_reply(self, *, read_ref):
+        """Internal owner read of the exact reply; grants no parent identity."""
+        try:
+            event, value, _ = self._request(read_ref)
+            response = await self.service_call(self.socket_path, {
+                "version": CONTROL_VERSION_V2, "operation": "read_thread",
+                "args": {"context": value["context"], "thread_ts": value["thread_ts"]}})
+            if not isinstance(response, dict) or response.get("ok") is not True:
+                raise ValueError("canonical carrier unavailable")
+            messages, request = self._continuation_messages(value, response["result"])
+            events = self.runtime.events.list_events(
+                aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
+            admission = self._native_commit_admission(event, events)
+            if admission is None or not self._commit_started(event, request):
+                raise ValueError("native COMMIT unavailable")
+            replies = [item for item in messages
+                if item["message_key"] == admission.payload["message_key"]]
+            if (len(replies) != 1 or _digest(replies[0]) != admission.payload["message_sha256"]
+                    or replies[0]["fingerprint"] != admission.payload["fingerprint"]
+                    or replies[0]["reply_to_message_key"] != value["request_message_key"]
+                    or replies[0]["message_type"] != "PROGRESS"
+                    or replies[0]["body"].get("stage") != "message_reply"
+                    or any(replies[0][key] != value["context"][key] for key in (
+                        "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))):
+                raise ValueError("exact canonical native reply unavailable")
+            after, after_value, _ = self._request(read_ref)
+            after_events = self.runtime.events.list_events(
+                aggregate_type=after.aggregate_type, aggregate_id=after.aggregate_id)
+            after_admission = self._native_commit_admission(after, after_events)
+            if (after.to_dict() != event.to_dict() or after_value != value
+                    or after_admission is None or after_admission.to_dict() != admission.to_dict()
+                    or not self._commit_started(after, request)):
+                raise ValueError("canonical commit changed during read")
+            return replies[0]
+        except Exception:
+            raise BridgeError("reply_unavailable", "exact canonical native reply unavailable") from None
+
     async def resolve_read(self, *, principal, read_ref):
         try:
             identity = _principal(principal)
-            event, value, _ = self._request(read_ref)
+            event, value, admission = self._read_request(read_ref)
             if value["principal"] != identity:
                 raise ValueError("foreign principal")
             response = await self.service_call(self.socket_path, {
@@ -524,6 +577,8 @@ class RuntimeSessionReturn:
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("carrier unavailable")
             messages, request = self._continuation_messages(value, response["result"])
+            if admission is not None and not self._commit_started(event, request):
+                raise ValueError("original continuation COMMIT is unavailable")
             expected_reply_key = "asd-native-reply-" + hashlib.sha256(
                 ("mastermind.session_bridge.native_reply.v1\n" + value["operation_key"]).encode()
             ).hexdigest()[:40]
@@ -533,15 +588,24 @@ class RuntimeSessionReturn:
             if len(replies) != 1:
                 raise ValueError("reply unavailable or ambiguous")
             reply = replies[0]
+            if admission is not None and (
+                    reply["fingerprint"] != admission.payload["fingerprint"]
+                    or _digest(reply) != admission.payload["message_sha256"]):
+                raise ValueError("canonical reply differs from its native COMMIT admission")
             if (reply["message_type"] != "PROGRESS" or reply["body"].get("stage") != "message_reply"
                     or any(reply[k] != value["context"][k] for k in (
                         "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))
                     or any(request[k] != value["context"][k] for k in (
                         "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError("reply context changed")
-            after, after_value, _ = self._request(read_ref)
-            if after.to_dict() != event.to_dict() or after_value["principal"] != _principal(principal):
+            after, after_value, after_admission = self._read_request(read_ref)
+            if (after.to_dict() != event.to_dict()
+                    or (None if admission is None else admission.to_dict())
+                    != (None if after_admission is None else after_admission.to_dict())
+                    or after_value["principal"] != _principal(principal)):
                 raise ValueError("authorization changed")
+            if after_admission is not None and not self._commit_started(after, request):
+                raise ValueError("original continuation COMMIT changed during read")
             return NativeReplyReadBinding(
                 authorized_principal=principal, read_ref=read_ref,
                 request_ref=event.command_id, request_message_key=value["request_message_key"],

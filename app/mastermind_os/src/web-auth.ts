@@ -1,4 +1,7 @@
+import { guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import {
+  RESEARCH_SCOPE,
+  validateResearchResource,
   EXECUTIVE_SCOPE,
   validateExecutiveResource,
   ACQUISITION_AUDIENCE,
@@ -18,9 +21,13 @@ import {
   readWebAuthConfig,
   type WebAuthConfig,
 } from "./public-config";
-import { normalizeSelection, normalizeWorkspaceSelection } from "./mission";
+import { normalizeSelection, normalizeWorkspaceSelection, type MissionSelection } from "./mission";
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
+import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection, parseDirectNativeJson } from "./direct-native-result";
+import { validActivitySelection } from "./planning/retained-activity";
+import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
+import { evidenceUrl, EVIDENCE_BODY_BYTES } from "./research/evidence-contract";
 export type { AuthState } from "./host";
 export interface WebPopup {
   close(): void;
@@ -28,6 +35,8 @@ export interface WebPopup {
   set location(value: string);
 }
 export interface WebAuthDeps {
+  /** Internal host composition only. The production default is uncomposed. */
+  productAcceptanceOwner?: ProductAcceptanceOwner;
   config?: Partial<WebAuthConfig>;
   crypto?: Crypto;
   fetchFn?: typeof fetch;
@@ -42,7 +51,7 @@ export interface WebAuthDeps {
   clearTimeout?: typeof clearTimeout;
   now?: () => number;
 }
-type Resource = "acquisition" | "content" | "executive";
+type Resource = "acquisition" | "content" | "executive" | "research";
 type Token = { value: string; expires: number };
 const TYPE = "mastermind-auth-callback";
 const opaque = (s: unknown, max = 4096): s is string =>
@@ -115,6 +124,8 @@ export function handleWebAuthCallback(): boolean {
 export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   const config = { ...readWebAuthConfig(), ...deps.config };
   const executiveResource = validateExecutiveResource(config.executiveResource);
+  const proposedResearch = validateResearchResource(config.researchResource);
+  const researchResource = proposedResearch !== executiveResource ? proposedResearch : null;
   const configured =
     typeof config.webClientId === "string" &&
     /^[A-Za-z0-9_-]{1,128}$/.test(config.webClientId) &&
@@ -145,8 +156,17 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     acquisition: null,
     content: null,
     executive: null,
+    research: null,
   };
   const listeners = new Set<(s: AuthState) => void>();
+  const researchListeners = new Set<() => void>();
+  const researchRequests = new Set<AbortController>();
+  function invalidateResearch() {
+    for (const request of researchRequests) request.abort();
+    for (const listener of researchListeners) {
+      try { listener(); } catch { /* isolate subscribers */ }
+    }
+  }
   const valid = (resource: Resource) =>
     Boolean(tokens[resource] && tokens[resource]!.expires > now());
   let executiveGeneration = 0;
@@ -159,7 +179,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       try { listener(); } catch { /* isolate subscribers */ }
     }
   }
-  const resourceScope = (resource: Resource) => resource === "executive" ? EXECUTIVE_SCOPE :
+  const resourceScope = (resource: Resource) => resource === "research" ? RESEARCH_SCOPE :
+    resource === "executive" ? EXECUTIVE_SCOPE :
     resource === "acquisition" ? ACQUISITION_SCOPE : CONTENT_SCOPE;
   function getState(): AuthState {
     return {
@@ -178,6 +199,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     };
   }
   function emit() {
+    for (const listener of researchListeners) {
+      try { listener(); } catch { /* isolate subscribers */ }
+    }
     for (const listener of listeners) {
       try {
         listener(getState());
@@ -188,6 +212,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   }
   function cancel() {
     generation++;
+    tokens.research = null;
+    invalidateResearch();
     tokens.executive = null;
     advanceExecutive();
     const old = flow;
@@ -255,7 +281,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         !Number.isSafeInteger(t.expires_in) ||
         Number(t.expires_in) < 1 ||
         Number(t.expires_in) > 604800 ||
-        (resource === "executive"
+        (resource === "research"
+          ? t.scope !== RESEARCH_SCOPE
+          : resource === "executive"
           ? typeof t.scope !== "string" || t.scope.trim().split(/\s+/).sort().join(" ") !==
             EXECUTIVE_SCOPE.split(" ").sort().join(" ")
           : t.scope !== undefined && t.scope !== scope)
@@ -296,6 +324,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const url = new URL(`${ISSUER}authorize`);
     const scope = resourceScope(resource);
     const audience =
+      resource === "research" ? researchResource! :
       resource === "executive" ? executiveResource! :
       resource === "acquisition" ? ACQUISITION_AUDIENCE : CONTENT_AUDIENCE;
     for (const [key, value] of Object.entries({
@@ -397,6 +426,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           if (ticket === generation && tokens[resource] === token) {
             tokens[resource] = null;
             if (resource === "executive") advanceExecutive();
+            if (resource === "research") invalidateResearch();
             emit();
           }
         },
@@ -462,6 +492,30 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
     return getState();
   }
+  async function signInResearch() {
+    if (!configured || !researchResource) throw new Error("RESEARCH_UNAVAILABLE");
+    cancel();
+    tokens.acquisition = null;
+    tokens.content = null;
+    lastError = null;
+    let popup: WebPopup | null = null;
+    try { popup = open("about:blank", "_blank", POPUP_FEATURES); } catch { /* blocked */ }
+    if (!popup) throw new Error("POPUP_BLOCKED");
+    const current = { generation, popup, cancel: () => {} };
+    flow = current; emit();
+    try {
+      await transaction("research", current);
+      check(current.generation);
+    } catch (error) {
+      throw new Error(reason(error));
+    } finally {
+      if (flow === current) {
+        flow = null;
+        try { popup.close(); } catch { /* closed */ }
+        emit();
+      }
+    }
+  }
   async function signOut() {
     cancel();
     tokens.acquisition = null;
@@ -500,6 +554,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) onAbort();
     const timer = later(() => controller.abort(), READ_TIMEOUT_MS);
+    if (resource === "research") researchRequests.add(controller);
     try {
       const response = await fetchFn(url, {
         method: "GET",
@@ -545,14 +600,20 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     } finally {
       clear(timer);
       signal.removeEventListener("abort", onAbort);
+      researchRequests.delete(controller);
     }
   }
-  async function executivePost(route: "context" | "submit" | "status", arguments_: unknown, signal: AbortSignal) {
+  async function executivePost(
+    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "direct-native/result" | "direct-native/consume",
+    arguments_: unknown,
+    signal: AbortSignal,
+  ) {
     const token = tokens.executive, ticket = executiveGeneration;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
-    const body = JSON.stringify(route === "context" ? {} : { arguments: arguments_ });
-    if (new TextEncoder().encode(body).length > 65_536) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
+    const direct = route.startsWith("direct-native/");
+    const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || direct) ? arguments_ : { arguments: arguments_ });
+    if (new TextEncoder().encode(body).length > (direct ? 4096 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
@@ -575,8 +636,10 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           body, signal: controller.signal,
         });
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
-        if (!response.ok) throw new Error("EXECUTIVE_REQUEST_FAILED");
-        const decoded = await boundedJson(response, 262_144);
+        if (!response.ok && !direct) throw new Error("EXECUTIVE_REQUEST_FAILED");
+        const decoded = await boundedJson(response, direct ? DIRECT_RESULT_BYTES : 262_144, direct ? parseDirectNativeJson : JSON.parse);
+        if (!response.ok && (![401,403,409,503].includes(response.status) || decodeDirectNativeResult(decoded)?.availability!=="UNAVAILABLE"))
+          throw new Error("EXECUTIVE_REQUEST_FAILED");
         if (!current()) throw new Error("EXECUTIVE_REQUEST_CANCELLED");
         return decoded;
       })();
@@ -590,6 +653,17 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   return {
+    research: {
+      authGeneration: () => generation,
+      available: () => configured && researchResource !== null && valid("research"),
+      subscribe(listener) { researchListeners.add(listener); return () => { researchListeners.delete(listener); }; },
+      signIn: signInResearch,
+      readEvidenceItem: (itemId, signal) => {
+        if (!configured || !researchResource) return Promise.reject(new Error("RESEARCH_UNAVAILABLE"));
+        const url = evidenceUrl(itemId); // validates before any fetch
+        return read("research", url, signal, { cap: EVIDENCE_BODY_BYTES, typedUnavailableSchema: null });
+      },
+    },
     executive: {
       authGeneration: () => executiveGeneration,
       available: () => configured && executiveResource !== null && valid("executive"),
@@ -597,7 +671,47 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       context: (signal) => executivePost("context", null, signal),
       submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
+      directNative: {
+        read: (selection, signal) => {
+          const normalized=normalizeDirectSelection(selection);
+          if(!normalized)return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+          return executivePost("direct-native/result",normalized,signal);
+        },
+        consume: (request, signal) => {
+          const {result_digest,operation_key,...selected}=request;
+          const normalized=normalizeDirectSelection(selected);
+          if(!normalized||normalized.attempt_id===null||typeof result_digest!=="string"||!/^[a-f0-9]{64}$/.test(result_digest)||
+            typeof operation_key!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(operation_key))return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+          return executivePost("direct-native/consume",{...normalized,result_digest,operation_key},signal);
+        },
+      },
     },
+    /**
+     * Fixed selected-session continuation transport over the same private
+     * Executive bearer. Three fixed POST routes only; the selection is
+     * normalized before any call and the exact argument shapes are passed
+     * through verbatim. Without Executive configuration or a valid Executive
+     * token this reports unavailable and executivePost sends no request.
+     */
+    executiveSession: {
+      authGeneration: () => executiveGeneration,
+      available: () => configured && executiveResource !== null && valid("executive"),
+      subscribe(listener) { executiveListeners.add(listener); return () => { executiveListeners.delete(listener); }; },
+      context: (selection, signal) => {
+        const normalized = normalizeSelection(selection);
+        if (!normalized) return Promise.reject(new Error("SELECTION_INVALID"));
+        return executivePost(
+          "session/context",
+          { selection: { work_ref: normalized.workRef, root_job_id: normalized.rootJobId } },
+          signal,
+        );
+      },
+      send: (arguments_, signal) => executivePost("session/send", arguments_, signal),
+      reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
+    } satisfies ExecutiveSessionTransport,
+    // Same existing OAuth generation used by every bounded acquisition read.
+    // The MissionHost requires this proof before it mounts the plan port.
+    invalidationGeneration: () => generation,
     getState,
     subscribe(listener) {
       listeners.add(listener);
@@ -619,6 +733,19 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
         },
       ),
+    readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
+      if (!/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(work_ref) || !/^JOB-[0-9]{1,9}$/.test(root_job_id))
+        return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
+    },
+    readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selected = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validActivitySelection(selected))
+        return Promise.reject(new Error("ACTIVITY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/operator/activity/current?${new URLSearchParams(selected)}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_retained_activity.v1" });
+    },
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));
@@ -628,6 +755,34 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         signal,
       );
     },
+    async readOriginalMissionV4(request: MissionSelection & { signal: AbortSignal }) {
+      const { signal, ...input } = request;
+      const selected = normalizeWorkspaceSelection(input);
+      if (!selected) throw new Error("SELECTION_INVALID");
+      return read("acquisition", `${ORIGIN}/workspace/mission/v4/current?${new URLSearchParams({
+        work_ref: selected.workRef, root_job_id: selected.rootJobId, read_mode: "original_owner",
+      })}`, signal);
+    },
+    ...(deps.productAcceptanceOwner ? {
+      productAcceptanceOwner: deps.productAcceptanceOwner,
+      async readMissionV4(request: MissionV4Selection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = missionV4Selection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = generation, owner = deps.productAcceptanceOwner;
+        const authorized = () => !signal.aborted && generation === started && owner === deps.productAcceptanceOwner
+          && getState().status === "signed_in" && getState().acquisition;
+        const guard = guardAcceptanceRead(owner, selected, authorized);
+        try {
+          guard.check();
+          const raw = await read("acquisition", `${ORIGIN}/workspace/mission/v4/current?${new URLSearchParams({
+            work_ref: selected.workRef, root_job_id: selected.rootJobId, request_message_key: selected.requestMessageKey,
+          })}`, signal);
+          guard.check();
+          return raw;
+        } finally { guard.dispose(); }
+      },
+    } : {}),
     readMissionV3: ({ workRef, rootJobId, signal }) => {
       if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
         return Promise.reject(new Error("SELECTION_INVALID"));
@@ -687,7 +842,7 @@ function base64(b: Uint8Array) {
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 }
-async function boundedJson(response: Response, max: number): Promise<unknown> {
+async function boundedJson(response: Response, max: number, parse: (raw: string) => unknown = JSON.parse): Promise<unknown> {
   if (
     response.headers
       .get("content-type")
@@ -728,7 +883,7 @@ async function boundedJson(response: Response, max: number): Promise<unknown> {
     offset += chunk.length;
   }
   try {
-    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(all));
+    return parse(new TextDecoder("utf-8", { fatal: true }).decode(all));
   } catch {
     throw new Error("RESPONSE_INVALID_JSON");
   }

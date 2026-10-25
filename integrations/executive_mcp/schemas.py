@@ -270,7 +270,13 @@ def loopback_bind_host(value: Any, field: str = "bind_host") -> str:
 #: kept alive for external readers (docs, the JSON-schema enum below, and any
 #: existing import of ``schemas.EXECUTION_PROFILES``) but is no longer an
 #: independent policy copy.
-EXECUTION_PROFILES: dict[str, tuple[str, ...]] = _ceo_request.EXECUTION_PROFILES
+# The frozen legacy catalog projects names only; capability values still come
+# from the one canonical law. Authenticated App-only profiles do not change this
+# advertised tool surface or acquire legacy submit admission.
+EXECUTION_PROFILES: dict[str, tuple[str, ...]] = {
+    name: _ceo_request.EXECUTION_PROFILES[name]
+    for name in ("research_only", "bounded_code_change")
+}
 
 #: Every capability any profile may ever emit.  A profile naming anything
 #: outside this set is a defect and is refused at derivation time.  Re-export
@@ -849,7 +855,8 @@ def _validate_submit(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
     MAS-75 PR-A (P1 repair): this is a pure COMPATIBILITY WRAPPER over the one
     shared, transport-agnostic normalization law in ``control_plane.ceo_request``
-    — it holds no independent field/path/validation rule of its own.  The single
+    — it holds no independent field/path/validation rule of its own. The native
+    App-only profile is excluded from this frozen legacy transport. The shape
     check kept here (``arguments`` must be a ``Mapping``) exists only because
     ``validate_tool_arguments`` already guarantees this for every real call path
     but this function is also exercised directly (tests, and any future direct
@@ -862,6 +869,8 @@ def _validate_submit(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
     if not isinstance(arguments, Mapping):
         raise GatewayError("invalid_input", "arguments must be an object")
+    if arguments.get("execution_profile") == "native_research_only":
+        raise GatewayError("invalid_input", "native research requires authenticated App admission")
     try:
         return _ceo_request.normalize_high_level_request(arguments)
     except _ceo_request.CeoRequestError as exc:
@@ -997,14 +1006,18 @@ def bound_document(
          "field": "job.result.summary", "preview": "..."}
 
     so the result is always valid JSON and a bounded field can never be read as
-    a complete one.  If the document is still over the limit after every string
-    leaf has been bounded, this raises ``output_too_large`` rather than emitting
-    something misleading.
+    a complete one. Receipt growth shares the byte budget. Only replacements
+    that reduce the combined size are applied. If the document cannot fit,
+    this raises ``output_too_large`` rather than emitting something misleading.
     """
 
     receipts: list[dict[str, Any]] = []
     current = _jsonable(data)
-    if len(canonical_json(current)) <= limit:
+    def size() -> int:
+        return len(canonical_json(current)) + len(canonical_json(receipts)) - 2
+
+    current_size = size()
+    if current_size <= limit:
         return current, receipts
 
     sizes: list[tuple[int, tuple[str | int, ...]]] = []
@@ -1012,7 +1025,7 @@ def bound_document(
     sizes.sort(key=lambda item: (-item[0], _display_path(item[1])))
 
     for original_bytes, parts in sizes:
-        if len(canonical_json(current)) <= limit:
+        if current_size <= limit:
             break
         node: Any = current
         reachable = True
@@ -1035,17 +1048,20 @@ def bound_document(
             "field": display,
             "preview": preview,
         }
+        receipt = {key: value for key, value in replacement.items() if key != "preview"}
+        # Include JSON escaping, the new receipt and its list separator. Small
+        # leaves usually grow when wrapped and must remain byte-for-byte intact.
+        saving = len(canonical_json(node)) - len(canonical_json(replacement))
+        cost = len(canonical_json(receipt)) + (1 if receipts else 0)
+        if saving <= cost:
+            continue
         current = _replace_at(current, parts, replacement)
-        receipts.append(
-            {
-                "bounded": True,
-                "original_bytes": original_bytes,
-                "returned_bytes": len(preview.encode("utf-8")),
-                "field": display,
-            }
-        )
+        receipts.append(receipt)
+        # Leaf replacement and receipt append have exact canonical byte deltas.
+        # Do not re-encode a wide unboundable document for every small leaf.
+        current_size -= saving - cost
 
-    if len(canonical_json(current)) > limit:
+    if size() > limit:
         raise GatewayError(
             "output_too_large",
             f"response exceeds the {limit}-byte ceiling even after bounding "

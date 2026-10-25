@@ -1,0 +1,25 @@
+{
+  "classification": "SEALED_SOURCE_PACKAGE_NOT_INSTALLED",
+  "original_runtime": "Existing external Fabric LaneLease/OwnedExecution owner; same algorithms, no parallel lifecycle",
+  "inputs": {
+    "lane_runtime.py": {
+      "base_sha256": "d36860ea8036ed5ec733a47c709a477c851fee95dddbae23c8e2214dc308b77e",
+      "patch_sha256": "664002d7309779e69cd5f1b3e6a260215f1247526c813824e7e8f5897c8457be",
+      "materialized_candidate_sha256": "54d7ba3e6164cf05ef90ff1e169b0fef716655e759d4076b6d218e1e4d9bf096",
+      "packaged_sha256": "cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91",
+      "changes": "Original reviewed candidate plus qualified Darwin direct-image observation and pre/post-retention snapshot checks; original owner/lease/finisher unchanged."
+    },
+    "remote_sub_exec.py": {
+      "base_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
+      "patch_sha256": "e63dd33a6dee126315267804381c711d0c58760b085866bc0dfe2c38b1a9864d",
+      "materialized_candidate_sha256": "eee7012f78277a07fa07e1636d9df457c21e9ee1b8be81ba57462adcf14d9c36",
+      "packaged_sha256": "5412b5e8fc1c3af2c4c64fced0a97d96e6c47c99608e19f8071244cd0d04d45e",
+      "changes": "Only fixed package imports and lazy legacy CLI dependency"
+    }
+  },
+  "limits": [
+    "No live external ext overwrite or historical patch application to current installed files",
+    "Legacy CLI is not a fixed-entry route",
+    "Selected binary/principal/realm/credential/canary/Runtime production qualification remains separate"
+  ]
+}

@@ -289,7 +289,7 @@ def test_host_identity_and_reverse_socket_direction_match_protected_source() -> 
     assert transport["allowed_peer_uid"] == 457
     assert transport["owner_uid"] == 450
     assert transport["listener_socket"] != (
-        "/var/run/mastermind-agent-relay/agent-relay.sock"
+        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
     )
 
 

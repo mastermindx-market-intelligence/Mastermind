@@ -406,12 +406,17 @@ def test_acceptance_revalidates_full_selected_prestate_before_marker(tmp_path, m
         'schema_version': m.SCHEMA_SUPERSEDE, 'descriptor_sha256': m.digest(d)}
 
 
-@pytest.mark.parametrize('prejob', [False, True])
-def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch, prejob):
+@pytest.mark.parametrize(('prejob', 'nested_fault'), [
+    (False, None), (True, None), (False, 'valid'), (False, 'canary'), (False, 'depth')])
+def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp_path, monkeypatch, prejob, nested_fault):
+    nested = nested_fault is not None
     import dataclasses
     from control_plane.executive_runtime import Runtime
     from ops.executive_os import autonomy_control as ac
     from tests.test_executive_acceptance_maintenance_v2 import _terminal_fixture
+    # This helper freezes the complete historical v5 contract for this test.
+    # Use one monkeypatch scope so teardown cannot restore a nested v5 vector
+    # over the current schema and leak it into later tests.
     runtime, root, before, config, prior, material, proof, _, _ = _terminal_fixture(tmp_path, monkeypatch)
     accepted, selected_sha, successor = 'b'*40, 'e'*40, 'f'*40
     root = dataclasses.replace(root, constraints={**root.constraints, 'operator_harness_armed': False})
@@ -463,6 +468,23 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     for filename, value in [('descriptor.json', selected), ('preparing.json', {'schema_version': m.SCHEMA_V2}),
                             ('baseline.json', before), ('inventory.json', artifacts), ('prior-secret-canary.json', canary)]:
         m.write_sealed(bundle/filename, value, public=filename == 'descriptor.json')
+    if nested:
+        import shutil
+        older_sha = 'd'*40
+        older_bundle = m.bundle_path(older_sha)
+        shutil.copytree(bundle, older_bundle)
+        older = dict(selected, successor_sha=older_sha)
+        _rewrite(older_bundle/'descriptor.json', older)
+        selected.update(schema_version=m.SCHEMA_SUPERSEDE,
+                        superseded_unstarted_sha=older_sha,
+                        superseded_descriptor_sha256=m.digest(older))
+        _rewrite(bundle/'descriptor.json', selected)
+        _rewrite(bundle/'preparing.json', {'schema_version': m.SCHEMA_SUPERSEDE})
+        if nested_fault == 'canary':
+            _rewrite(older_bundle/'prior-secret-canary.json', {'passed': False})
+        elif nested_fault == 'depth':
+            monkeypatch.setattr(m, '_MAX_SUPERSEDE_DEPTH', 2)
+        older_originals = {p.name: p.read_bytes() for p in older_bundle.iterdir()}
     if prejob:
         from tests.test_executive_acceptance_supersede_prejob import receipt_prefix
         receipt_prefix(runtime_root, selected, monkeypatch)
@@ -472,6 +494,15 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
         supersede_unstarted_sha=None if prejob else selected_sha,
         supersede_prejob_sha=selected_sha if prejob else None,
         superseded_descriptor_sha256=m.digest(selected))
+    if nested_fault in {'canary', 'depth'}:
+        with pytest.raises(m.MaintenanceError, match='sealed baseline drifted' if nested_fault == 'canary' else 'too deep'):
+            m.prepare(args)
+        assert {p.name: p.read_bytes() for p in bundle.iterdir()} == originals
+        assert {p.name: p.read_bytes() for p in older_bundle.iterdir()} == older_originals
+        assert m.snapshot(runtime.store.path) == before
+        assert not m.bundle_path(successor).exists()
+        assert not list(m.bundle_path(successor).parent.glob('.preparing-*'))
+        return
     result = m.prepare(args)
     d = m.descriptor_for(successor)
     assert result == m.bundle_path(successor)
@@ -480,6 +511,8 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     assert d['interrupted_prejob_sha' if prejob else 'superseded_unstarted_sha'] == selected_sha
     assert d['template_proof_job_id'] == proof.job_id and d['frozen_base_sha'] == 'a'*40
     assert {p.name: p.read_bytes() for p in bundle.iterdir()} == originals
+    if nested:
+        assert {p.name: p.read_bytes() for p in older_bundle.iterdir()} == older_originals
     assert m.snapshot(runtime.store.path) == before
     assert not (result/'run-started.json').exists()
     assert not (bundle/'carry-forward.json').exists()
@@ -495,6 +528,9 @@ def test_only_exact_legacy_sealed_empty_wal_pair_is_admitted(tmp_path, monkeypat
     shm.write_bytes(b'X'*32768)
     wal.chmod(0o400)
     shm.chmod(0o400)
+    # Match the fixture's simulated trusted group, not macOS temp's wheel group.
+    os.chown(wal, -1, os.getgid())
+    os.chown(shm, -1, os.getgid())
     if fault == 'wal-nonempty':
         wal.chmod(0o600)
         wal.write_bytes(b'committed transaction')

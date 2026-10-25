@@ -149,13 +149,14 @@ def _latest_lifecycle() -> dict[str, Any]:
 
 
 def _latest_benchmark() -> dict[str, Any]:
-    """Read the most recent benchmark ledger artifact.  Returns {} on any failure."""
+    """Read the most recent benchmark ledger artifact.  Returns {} on any failure.
+
+    Delegates to brain.benchmark_ledger.latest() — the ledger module owns the on-disk selection
+    contract (dated-LEDGER filenames only, never the co-located _series*.json sidecars)."""
     try:
-        bench_dir = _ROOT / "data" / "benchmark"
-        files = sorted(bench_dir.glob("*.json")) if bench_dir.exists() else []
-        if not files:
-            return {}
-        return json.loads(files[-1].read_text())
+        from brain import benchmark_ledger
+        out = benchmark_ledger.latest()
+        return out if isinstance(out, dict) else {}
     except Exception:  # noqa: BLE001
         return {}
 

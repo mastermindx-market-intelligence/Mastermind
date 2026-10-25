@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://mcp.mastermind-x.com/os/"}
+import { planObservationFixture } from "./planning/plan-observation.fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createWebAuth,
@@ -620,5 +621,115 @@ describe("optional Executive authentication in the existing web owner", () => {
     expect(e.client.executive!.authGeneration()).toBeGreaterThan(generation);
     expect(listener).toHaveBeenCalled();
     expect(e.client.getState().status).toBe("signed_in");
+  });
+});
+
+describe("authenticated admitted-plan Web host transport", () => {
+  const selection = { work_ref: "WS:PLAN-VISIBILITY", root_job_id: "JOB-123" };
+  const request = () => ({ ...selection, signal: new AbortController().signal });
+  const observation = (state: "SAME" | "UNKNOWN") => state === "SAME"
+    ? planObservationFixture(selection)
+    : { ...planObservationFixture(selection), state, control_room: null, runtime: null };
+  const unavailablePlan = () => ({
+    schema: "mastermind.workspace_admitted_execution_plan.v1",
+    selection: { ...selection }, availability: "UNAVAILABLE",
+    reason_codes: ["ADMISSION_NOT_ESTABLISHED"],
+    source_observation: observation("UNKNOWN"), plan: null,
+  });
+  const availablePlan = () => ({
+    schema: "mastermind.workspace_admitted_execution_plan.v1",
+    selection: { ...selection }, availability: "AVAILABLE",
+    reason_codes: [], source_observation: observation("SAME"),
+    plan: { schema: "mastermind.admitted_execution_plan_view.v1",
+      root_job_id: selection.root_job_id, plan_attempt_id: "ATT-123",
+      plan_schema_version: "mastermind.execution_plan/v3",
+      admission_schema_version: "mastermind.coo_plan_admission/v2",
+      policy_sha: "a".repeat(64), plan_digest: "b".repeat(64),
+      reservation_digest: "c".repeat(64), admission_state: "ADMITTED",
+      steps: [{ ordinal: 0, step_id: "step-0",
+        objective: "Validate the authenticated original plan",
+        business_impact: "material", review_required: true, prerequisite_step_ids: [] }],
+    },
+  });
+  it("mounts only the existing generation-fenced owner port, with no unsigned acquisition", async () => {
+    const e = setup();
+    const host = bindMissionHost(e.client);
+    expect(typeof e.client.invalidationGeneration).toBe("function");
+    expect(typeof host.readAdmittedPlan).toBe("function");
+    await expect(host.readAdmittedPlan!(request())).rejects.toThrow("PLAN_READ_UNAUTHORIZED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    await e.login();
+    e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response(availablePlan()));
+    const result = await host.readAdmittedPlan!(request());
+    expect(result.availability).toBe("AVAILABLE");
+    if (result.availability !== "AVAILABLE") throw Error("expected admitted plan");
+    expect(result.plan.steps[0].objective).toBe("Validate the authenticated original plan");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/plan/current");
+    expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(selection);
+    expect(options).toMatchObject({
+      method: "GET", redirect: "error", credentials: "omit", cache: "no-store",
+      headers: { Authorization: "Bearer private-token" },
+    });
+  });
+  it("preserves 503 as a typed unavailable plan without treating admission as execution", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailablePlan()), {
+      status: 503, headers: { "content-type": "application/json" },
+    }));
+    const observed = await bindMissionHost(e.client).readAdmittedPlan!(request());
+    expect(observed).toMatchObject({ availability: "UNAVAILABLE", observation: "UNKNOWN",
+      plan: null, reason_codes: ["ADMISSION_NOT_ESTABLISHED"] });
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("fences a late plan reply after sign-out using the original OAuth generation", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const host = bindMissionHost(e.client);
+    const late = deferred<Response>();
+    e.fetcher.mockReturnValueOnce(late.promise);
+    const before = host.invalidationGeneration!();
+    const result = host.readAdmittedPlan!(request());
+    const denied = expect(result).rejects.toThrow();
+    await host.auth!.signOut();
+    late.resolve(response(availablePlan()));
+    await denied;
+    expect(host.invalidationGeneration!()).toBeGreaterThan(before);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("fixed H2 direct-native authenticated routes",()=>{
+  const resource="https://fixture-resource.mastermind-x.com/executive";
+  const selection={work_ref:"WS:H2-FIXTURE",job_id:"JOB-123",attempt_id:null};
+  const unavailable={schema:"mastermind.direct_native_result_response.v1",selection,availability:"UNAVAILABLE",reason_codes:["NOT_TERMINAL"],result:null,consumption:null};
+  it("uses the existing executive bearer and exact direct bodies without automatic consumption",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+    e.fetcher.mockImplementation(async()=>response(unavailable));
+    const signal=new AbortController().signal;
+    await e.client.executive!.directNative!.read(selection,signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const consumed={...selection,attempt_id:"ATT-456",result_digest:"d".repeat(64),operation_key:"mmos-consume-fixture"};
+    await e.client.executive!.directNative!.consume(consumed,signal);
+    expect(e.fetcher.mock.calls.map(([url])=>url)).toEqual([ORIGIN+'/os/executive/direct-native/result',ORIGIN+'/os/executive/direct-native/consume']);
+    expect(e.fetcher.mock.calls.map(([,init])=>JSON.parse(String(init?.body)))).toEqual([selection,consumed]);
+    for(const [,init] of e.fetcher.mock.calls)expect(init).toMatchObject({method:"POST",redirect:"error",credentials:"omit",cache:"no-store",headers:{Authorization:"Bearer private-token"}});
+  });
+  it("preserves typed unavailable on503 and rejects duplicate fields before display",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable),{status:503,headers:{'content-type':'application/json'}}));
+    expect(await e.client.executive!.directNative!.read(selection,new AbortController().signal)).toMatchObject(unavailable);
+    e.fetcher.mockResolvedValueOnce(new Response('{"schema":"a","schema":"b"}',{headers:{'content-type':'application/json'}}));
+    await expect(e.client.executive!.directNative!.read(selection,new AbortController().signal)).rejects.toThrow('RESPONSE_INVALID_JSON');
+    expect(e.fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("rejects malformed digest/selection before fetch and fences a late reply after signout",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+    await expect(e.client.executive!.directNative!.consume({...selection,attempt_id:'ATT-456',result_digest:'x'+'d'.repeat(64),operation_key:'original'},new AbortController().signal)).rejects.toThrow('DIRECT_SELECTION_INVALID');
+    expect(e.fetcher).not.toHaveBeenCalled();
+    const pendingResponse=deferred<Response>();e.fetcher.mockReturnValueOnce(pendingResponse.promise);
+    const pending=e.client.executive!.directNative!.read(selection,new AbortController().signal);
+    const rejected=expect(pending).rejects.toThrow();await e.client.signOut();pendingResponse.resolve(response(unavailable));await rejected;
   });
 });

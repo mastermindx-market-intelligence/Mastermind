@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -136,7 +137,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-11.native-return-host-source"
+    assert registry.policy_version == "2026-10-14.attended-qualification"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -299,11 +300,16 @@ def test_company_dialogue_fixture_compiles_through_existing_capability_authority
     assert widened.expected_config_digest != expected_digest
 
 
-def test_production_policy_has_no_company_dialogue_placeholder_endpoint_or_profile():
+def test_production_policy_has_no_legacy_company_dialogue_placeholder():
     raw = _raw_policy()
     rendered = json.dumps(raw, sort_keys=True)
-    assert "mastermind-company-dialogue" not in rendered
-    assert "mastermindCompanyDialogue" not in rendered
+    # The old test-only HTTPS placeholder remains forbidden. H1-RG1 now has a
+    # distinct reviewed principal Company Dialogue grant, covered separately.
+    assert "mastermind-company-dialogue-v1" not in raw["mcp_servers"]
+    assert (
+        "operator.appserver.readonly.company-dialogue.fixture.v1"
+        not in raw["profiles"]
+    )
     assert "company-dialogue.test.invalid" not in rendered
 
 
@@ -683,42 +689,64 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
 
 
 def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
-    """Freeze the V3 policy after the disabled Company edge addition.
-
-    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
-    Company stdio grant rotates the global policy identity; the incumbent
-    Browser B1 and docs profile digests remain unchanged. Company stays
-    disabled until its installed native admission owner is qualified.
-    """
-
+    """Preserve protected native-return and explicit RG1 predecessor identities."""
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
     assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
     assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
 
-    registry = ExecutionCapabilityRegistry.load()
-    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
-    assert registry.capability_packages == {}
-    # Preserve the previous ratified generation's identity independently of
-    # the new inert declaration, which necessarily rotates the policy digest.
-    raw = _raw_policy()
-    del raw["profiles"]["operator.browser.isolated.v1"]
-    del raw["resources"]["worker-browser-isolated"]
-    del raw["profiles"]["operator.appserver.interactive.native-return.v1"]
-    del raw["mcp_servers"]["native-return-mcp-v1"]
-    raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
-    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
-    assert registry.policy_digest != previous.policy_digest
-    registry = previous
-    assert registry.policy_digest == (
+    default = ExecutionCapabilityRegistry.load()
+    assert default.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert default.capability_packages == {}
+    root = Path(__file__).resolve().parents[1]
+    candidate_raw = json.loads(
+        (root / "config" / "candidates" / "claude_principal_rg1.json").read_text()
+    )
+    candidate = ExecutionCapabilityRegistry.load(
+        root / "config" / "candidates" / "claude_principal_rg1.json",
+        source_root=root,
+    )
+    del candidate_raw["profiles"]["principal.claude.coo.rich.v1"]
+    del candidate_raw["mcp_servers"]["executive-coo-mcp-v1"]
+    del candidate_raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
+    candidate_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, candidate_raw))
+    assert candidate.policy_digest != previous.policy_digest
+    assert previous.policy_digest == (
+        "506c1e2aa4bb730bf0325383bfdbbcf73adba7f248378af4dfc7d89ff23c6dd5"
+    )
+
+    # The accepted native-return generation remains in the default policy;
+    # removing only its own additions recovers the same frozen predecessor.
+    protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
+    del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
+    del protected_raw["profiles"]["fabric.attended.claude.bounded.v1"]
+    del protected_raw["profiles"]["fabric.paid.glm.sealed-input.v1"]
+    del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
+    del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    # The new ACP read-only generation is independent of the frozen
+    # predecessor too; remove it only for this historical digest assertion.
+    # Default policy still tests both the protected attended and ACP profiles.
+    del protected_raw["profiles"]["worker.acp.providerfree.readonly.v1"]
+    del protected_raw["mcp_servers"]["mastermind-acp-workspace-read-v1"]
+    protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
+    assert default.policy_digest != protected_previous.policy_digest
+    assert protected_previous.policy_digest == previous.policy_digest
+
+    older_raw = json.loads(json.dumps(candidate_raw))
+    del older_raw["profiles"]["operator.browser.isolated.v1"]
+    del older_raw["resources"]["worker-browser-isolated"]
+    older = ExecutionCapabilityRegistry.load(_write(tmp_path, older_raw))
+    assert older.policy_digest == (
         "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
     )
-    assert registry.resolve(
+    assert older.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     ).profile_digest == (
         "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
     )
-
-    for profile in registry.profiles.values():
+    for profile in older.profiles.values():
         assert profile.skill_grants == ()
         assert profile.app_server_config_projection()["skills"] == {"config": None}
 
@@ -828,3 +856,54 @@ def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp
         messages.add(str(excinfo.value))
 
     assert messages == {_DUPLICATE_JSON_KEY_REASON}
+
+
+def test_checked_in_provider_free_acp_profile_uses_exact_workspace_read_grant():
+    from control_plane.executive_agent_capabilities import (
+        ACP_EXECUTION_SURFACE,
+        ACP_PROVIDER_FREE_AUTH_REALM,
+        ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        ACP_WORKSPACE_READ_MCP_COMMAND,
+        ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST,
+    )
+
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("worker.acp.providerfree.readonly.v1")
+    assert profile.enabled is True
+    assert profile.execution_surface == ACP_EXECUTION_SURFACE == "acp-agent"
+    assert profile.auth_realm == ACP_PROVIDER_FREE_AUTH_REALM == "dedicated-worker-no-auth"
+    assert profile.write_capable is False
+    assert profile.network_policy == "disabled"
+    assert profile.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert profile.skills == profile.plugins == profile.resource_grants == ()
+    assert len(profile.mcp_server_grants) == 1
+    grant = profile.mcp_server_grants[0]
+    assert grant.capability_id == ACP_WORKSPACE_READ_MCP_CAPABILITY_ID
+    assert grant.transport == "stdio"
+    assert grant.command == ACP_WORKSPACE_READ_MCP_COMMAND
+    assert grant.args == ()
+    assert grant.auth_status == "unsupported"
+    assert grant.enabled_tools == ("read_file", "search_text")
+    assert grant.tool_schema_digest == ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST
+    projection = profile.acp_config_projection()
+    assert projection["execution_surface"] == "acp-agent"
+    assert projection["auth_realm"] == "dedicated-worker-no-auth"
+    assert projection["mcp_servers"] == [{
+        "capability_id": ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        "grant_digest": grant.grant_digest,
+    }]
+    assert profile.expected_config_digest == hashlib.sha256(
+        json.dumps(
+            projection,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
+    assert registry.production_armed is False
+
+
+def test_acp_projection_refuses_non_acp_surface():
+    profile = ExecutionCapabilityRegistry.load().profiles["operator.appserver.readonly.v1"]
+    with pytest.raises(CapabilityPolicyError, match="not an ACP profile"):
+        profile.acp_config_projection()

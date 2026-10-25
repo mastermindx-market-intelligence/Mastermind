@@ -335,6 +335,7 @@ def seal_control_owned_paths(
     paths: dict[str, str | Path],
     *,
     control_uid: int | None = None,
+    expected_identities: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Remove worker traversal at control-owned assignment boundaries.
 
@@ -343,6 +344,10 @@ def seal_control_owned_paths(
     control-owned assignment root makes every descendant unreachable to the
     worker principal.  Every requested boundary is attempted even if another
     fails; successful revocations are never rolled back.
+
+    A remote owner may bind this effect to its retained pre-seal snapshot.
+    That snapshot is an exact filesystem precondition, not caller authority
+    or proof that worker admission/process cleanup is held.
     """
 
     if not paths or any(
@@ -354,6 +359,21 @@ def seal_control_owned_paths(
     canonical_values = [Path(value).resolve(strict=False) for value in paths.values()]
     if len(canonical_values) != len(set(canonical_values)):
         raise AssignmentSealError("assignment seal paths must be distinct")
+
+    expected: dict[str, dict[str, object]] | None = None
+    if expected_identities is not None:
+        fields = {"path", "device", "inode", "mode", "uid", "gid", "mtime_ns"}
+        if not isinstance(expected_identities, Mapping) or set(expected_identities) != set(paths):
+            raise AssignmentSealError("assignment seal snapshot labels differ")
+        expected = {}
+        for label, value in expected_identities.items():
+            if (not isinstance(value, Mapping) or set(value) != fields
+                    or type(value["path"]) is not str
+                    or value["path"] != str(Path(paths[label]).resolve(strict=False))
+                    or any(type(value[key]) is not int or value[key] < 0
+                           for key in fields - {"path"})):
+                raise AssignmentSealError("assignment seal snapshot is malformed")
+            expected[label] = dict(value)
 
     sealed: dict[str, dict[str, object]] = {}
     errors: list[str] = []
@@ -374,6 +394,11 @@ def seal_control_owned_paths(
                     f"{label} boundary is not a control-owned protected directory"
                 )
             before_identity = _seal_identity(path.resolve(strict=True), before)
+            if expected is not None and before_identity != expected[label]:
+                raise AssignmentSealError(f"{label} boundary differs from original snapshot")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (before.st_dev, before.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while opening")
             os.fchmod(descriptor, 0o700)
             os.fsync(descriptor)
             after = os.fstat(descriptor)
@@ -384,6 +409,9 @@ def seal_control_owned_paths(
                 for field in stable_fields
             ) or after_identity["mode"] != 0o700:
                 raise AssignmentSealError(f"{label} boundary did not seal to mode 0700")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (after.st_dev, after.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while sealing")
             sealed[label] = {
                 "before": before_identity,
                 "after": after_identity,
@@ -2209,7 +2237,15 @@ def inspect_linked_worktree(
             dirty=True,
             recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
             removed=False,
-            reason="tracked or untracked workspace changes are present",
+            reason=(
+                "tracked or untracked workspace changes are present; "
+                f"tracked_changes={'present' if cleanliness.status else 'absent'}; "
+                f"all_untracked={'present' if cleanliness.all_untracked else 'absent'} "
+                "(including ignored files). Ordinary git status may hide ignored files. "
+                "Inspect git ls-files --others -z; retain needed source and evidence, "
+                "and remove only verified disposable outputs before requesting release. "
+                "No files were removed."
+            ),
         )
 
     if head.lower() == base.lower():
@@ -2333,3 +2369,97 @@ def release_linked_worktree(
         removed=True,
         reason="clean recoverable linked worktree removed; branch/ref history retained",
     )
+
+
+# This capability is local to the allocator's actual return. Persisted DTOs and
+# coincident paths cannot manufacture same-call allocation completion.
+_CREATED_CHILD_CLONE = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _CreatedChildClone:
+    receipt: WorkspaceReceipt
+    identity: dict[str, object]
+    _origin: object
+
+
+def child_workspace_directory_identity(path: Path) -> dict[str, int]:
+    """Stable directory custody; never pin mutable timestamps as live identity."""
+    path = Path(path)
+    try:
+        canonical = path.resolve(strict=True)
+        info = path.lstat()
+    except OSError as exc:
+        raise WorkspaceError("child workspace directory is unavailable") from exc
+    if not path.is_absolute() or canonical != path:
+        raise WorkspaceError("child workspace directory is not canonical")
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise WorkspaceError("child workspace is not a real directory")
+    return dict(device=info.st_dev, inode=info.st_ino, uid=info.st_uid,
+                gid=info.st_gid, mode=stat.S_IMODE(info.st_mode))
+
+
+def _child_git_file_identity(path: Path) -> dict[str, object]:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise WorkspaceError("child Git metadata is unavailable") from exc
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise WorkspaceError("child Git metadata is not a single regular file")
+        h = hashlib.sha256()
+        while block := os.read(fd, 1024 * 1024):
+            h.update(block)
+        after = os.fstat(fd)
+        stable = lambda i: (i.st_dev,i.st_ino,i.st_uid,i.st_gid,i.st_mode,i.st_nlink,
+                            i.st_size,i.st_mtime_ns,i.st_ctime_ns)
+        if stable(before) != stable(after) or stable(before) != stable(path.lstat()):
+            raise WorkspaceError("child Git metadata changed during identity read")
+        return dict(device=before.st_dev, inode=before.st_ino, uid=before.st_uid,
+                    gid=before.st_gid, mode=stat.S_IMODE(before.st_mode),
+                    size=before.st_size, sha256=h.hexdigest())
+    finally:
+        os.close(fd)
+
+
+def _child_clone_identity(workspace: Path) -> dict[str, object]:
+    env = git_observation_env({
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "HOME": str(workspace.parent / ".supervisor-home"),
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+    })
+    return {"workspace": child_workspace_directory_identity(workspace),
+            "git": child_workspace_directory_identity(workspace / '.git'),
+            "git_files": {name: _child_git_file_identity(workspace / '.git' / name)
+                          for name in ('config', 'index', 'HEAD')},
+            "head": _run(['git', '-C', str(workspace), 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=None, env=env),
+            "status": _run(['git', '-C', str(workspace), 'status', '--porcelain=v1', '--untracked-files=all'], cwd=None, env=env)}
+
+
+def verify_child_clone_identity(workspace: Path, expected: dict, *, control_uid: int, shared_gid: int) -> None:
+    if (type(expected) is not dict or set(expected) != {"workspace", "git", "git_files", "head", "status"}
+            or expected["status"] != ""
+            or expected != _child_clone_identity(workspace)):
+        raise WorkspaceError("child workspace allocator identity changed")
+    validate_shared_git_handoff(workspace, control_uid=control_uid, shared_gid=shared_gid)
+
+
+def is_created_child_clone(value: object) -> bool:
+    return type(value) is _CreatedChildClone and value._origin is _CREATED_CHILD_CLONE
+
+
+def create_readonly_child_clone(source_repository: Path, workspace_root: Path, *,
+                                job_id: str, base_sha: str, branch: str,
+                                shared_gid: int) -> _CreatedChildClone:
+    """Actual existing allocator, no remote acquisition or write-path grant."""
+    receipt = prepare_credentialless_clone(source_repository, workspace_root,
+        job_id=job_id, base_sha=base_sha, branch=branch, shared_gid=shared_gid,
+        shared_write_paths=(), commission_dependency=None)
+    workspace = Path(receipt.workspace_path)
+    expected = _child_clone_identity(workspace)
+    if expected["head"] != base_sha:
+        raise WorkspaceError("child clone did not resolve the assigned source commit")
+    verify_child_clone_identity(workspace, expected, control_uid=os.geteuid(), shared_gid=shared_gid)
+    return _CreatedChildClone(receipt, expected, _CREATED_CHILD_CLONE)

@@ -1,0 +1,58 @@
+--- artifact_delivery.py
++++ artifact_delivery.py
+@@ -625 +625,3 @@
+-_CURRENT_PRODUCER_SHA256 = 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf'
++_PREVIOUS_PRODUCER_PATH = _ORIGINAL_PRODUCER_PATH.with_name('artifact_production.e126d643.before.py')
++_PREVIOUS_PRODUCER_SHA256 = 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf'
++_CURRENT_PRODUCER_SHA256 = '0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409'
+@@ -629 +631 @@
+-def _original_validator_source():
++def _original_validator_source(producer_sha=_ORIGINAL_PRODUCER_SHA256):
+@@ -631,2 +633,8 @@
+-    raw = local_file(_ORIGINAL_PRODUCER_PATH, 128 * 1024)
+-    if digest(raw) != _ORIGINAL_PRODUCER_SHA256:
++    if producer_sha == _ORIGINAL_PRODUCER_SHA256:
++        path = _ORIGINAL_PRODUCER_PATH
++    elif producer_sha == _PREVIOUS_PRODUCER_SHA256:
++        path = _PREVIOUS_PRODUCER_PATH
++    else:
++        raise ValueError('original_producer_validator_changed')
++    raw = local_file(path, 128 * 1024)
++    if digest(raw) != producer_sha:
+@@ -646 +654 @@
+-    __slots__ = ('_support_digest',)
++    __slots__ = ('_support_digest', '_producer_sha')
+@@ -652 +660 @@
+-        source = _original_validator_source()
++        source = _original_validator_source(self._producer_sha)
+@@ -654 +662 @@
+-        exec(compile(source, str(_ORIGINAL_PRODUCER_PATH), 'exec'), namespace)
++        exec(compile(source, 'fixed_producer_' + self._producer_sha, 'exec'), namespace)
+@@ -678,4 +686,5 @@
+-    """Select only the two reviewed versions from an exact original support map.
+-
+-    Historical c0 receives an explicit immutable validator context; current e126
+-    continues through the existing default validator. Unknown versions refuse.
++    """Select only three exact reviewed producer generations.
++
++    The matching installed e126 or 0be uses the existing default validator. After
++    0be adoption, e126 and c0 use their own fixed source and support-bound context.
++    Unknown or drifted current versions cannot be reclassified as e126 history.
+@@ -690,2 +699,6 @@
+-    if producer_sha == _CURRENT_PRODUCER_SHA256:
+-        if digest(local_file(HERE / 'artifact_production.py', 128 * 1024)) != producer_sha:
++    if producer_sha in (_PREVIOUS_PRODUCER_SHA256, _CURRENT_PRODUCER_SHA256):
++        installed_sha = digest(local_file(HERE / 'artifact_production.py', 128 * 1024))
++        if installed_sha == producer_sha:
++            return None
++        if not (producer_sha == _PREVIOUS_PRODUCER_SHA256
++                and installed_sha == _CURRENT_PRODUCER_SHA256):
+@@ -693,2 +706 @@
+-        return None
+-    if producer_sha != _ORIGINAL_PRODUCER_SHA256:
++    elif producer_sha != _ORIGINAL_PRODUCER_SHA256:
+@@ -696 +708 @@
+-    _original_validator_source()
++    _original_validator_source(producer_sha)
+@@ -697,0 +710 @@
++    object.__setattr__(context, '_producer_sha', producer_sha)

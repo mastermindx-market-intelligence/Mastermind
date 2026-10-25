@@ -193,12 +193,14 @@ def test_current_target_consumes_canonical_harness_generation(monkeypatch) -> No
         status=JobStatus.RUNNING,
         current_attempt_id=ATTEMPT,
         assigned_worker_id=WORKER,
+        assigned_quota_class="native-current",
     )
     attempt = SimpleNamespace(
         attempt_id=ATTEMPT,
         job_id=JOB,
         status=AttemptStatus.RUNNING,
         worker_id=WORKER,
+        quota_class="native-current",
         fence_generation=4,
     )
     worker = SimpleNamespace(
@@ -226,7 +228,9 @@ def test_current_target_consumes_canonical_harness_generation(monkeypatch) -> No
             get_attempt=lambda attempt_id: attempt if attempt_id == ATTEMPT else None
         ),
         workers=SimpleNamespace(
-            get_worker=lambda worker_id: worker if worker_id == WORKER else None
+            get_worker=lambda worker_id: worker if worker_id == WORKER else None,
+            get_quota_class=lambda *_: SimpleNamespace(worker_id=WORKER, quota_class="native-current",
+                status=WorkerStatus.BUSY, active_attempt_id=ATTEMPT, active_job_id=JOB, fence_generation=4)
         ),
         current_harness_binding_source=lambda attempt_id: (
             calls.append(attempt_id) or harness

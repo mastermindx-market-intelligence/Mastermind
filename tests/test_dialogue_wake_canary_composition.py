@@ -49,6 +49,25 @@ def test_only_trusted_grant_can_compose_bridge_with_generic_flags_false(
     assert raw["dialogue_wake_retry_policy"].armed is generic
 
 
+def test_same_process_native_grant_uses_existing_observation_listener(tmp_path, monkeypatch):
+    module = _module()
+    raw = observation_config(_app_raw(tmp_path), module)
+    captured = _capture_service(module, monkeypatch)
+    listeners = []
+    monkeypatch.setattr(module, "activate_launchd_socket", lambda name: listeners.append(name) or object())
+    current = [DialogueWakeCanaryProfile(None)]
+    module._service_from_config(raw, native_dialogue_canary_profile_loader=lambda: current[0])
+    assert listeners.count("DialogueObservation") == 1
+    bridge = captured["dialogue_wake_handler"]
+    assert bridge.canary_profile.grant is None
+    current[0] = DialogueWakeCanaryProfile(parsed())
+    assert bridge.canary_profile == current[0]
+    current[0] = DialogueWakeCanaryProfile(None)
+    assert bridge.canary_profile.grant is None
+    assert raw["dialogue_bridge_armed"] is False
+    assert raw["dialogue_wake_retry_policy"].armed is False
+
+
 @pytest.mark.parametrize("w3c_installed", [False, True])
 def test_continue_carrier_does_not_require_or_arm_attention(
     tmp_path, monkeypatch, w3c_installed,

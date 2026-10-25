@@ -38,7 +38,7 @@ function ProjectCard({ card, history, featured, onNavigateMission }: {
       <p className="projects-ref">{card.workRef}</p>
       <p className="projects-root">{rootLabel(card)}</p>
     </div>
-    <p className="projects-next"><span>Next step</span>{card.nextAction || "No next action projected"}</p>
+    <p className="projects-next"><span>Next step</span>{card.nextActionWithheld ? "Next action withheld" : card.nextAction || "No next action projected"}</p>
     <p className="projects-owner"><span>Owner</span>Not supplied</p>
     <div className="projects-status"><span>{history ? "Retained state" : "Owner state"}</span><p>{card.state || "Unknown"}</p></div>
     <div className="projects-open">

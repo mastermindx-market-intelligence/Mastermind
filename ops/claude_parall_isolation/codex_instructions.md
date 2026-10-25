@@ -1,0 +1,5 @@
+<!-- claude-parall-launch-isolation-20261019 -->
+## Claude Desktop / Parall account isolation
+
+The M2 has multiple active Parall-managed Claude Desktop accounts. Never use `open -a Claude`, `/Applications/Claude.app`, `Claude Official.app`, the raw `/Applications/Claude Runtimes/*/Claude.app` backends, the default `claude://` URL handler, or `claude --desktop` as a convenient independent-review launcher. Shared Anthropic bundle identities and generic native handlers can collide with numbered accounts. Use the already-admitted Subagent Fabric for bounded independent review; preserve exact provider/host/lease/budget rules. Intentional interactive Claude GUI navigation requires an explicit existing Parall wrapper/account (for example `/Applications/Claude 6.app`) and must not repurpose active account sessions. Do not terminate a numbered Claude instance to recover from a default-app launch. If GUI launch attribution is uncertain, report it rather than assigning blame to Codex or Web without a process/launch receipt.
+<!-- /claude-parall-launch-isolation-20261019 -->

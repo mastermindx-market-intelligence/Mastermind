@@ -1,0 +1,170 @@
+--- a/hosts.json
++++ b/hosts.json
+@@ -18,7 +18,8 @@
+       "ssh_alias": "ssh config alias used for every remote call (BatchMode). Never a secret; no credentials live here. null for the local seat host (probed in-process, never ssh'd).",
+       "tools": "v2: name -> null placeholders; host_pull.sh's probe fills the resolved tool list into ext/state/hosts/<host>.json (gh,codex,claude,node,python3,cursor-agent).",
+       "windows": "v2: availability windows in UTC, list of {days: Mon-Fri|Sat-Sun|All, open_utc: HH:MM, close_utc: HH:MM}. Empty list = always open. pool_status.py prints OPEN/CLOSED; a window may wrap midnight (close_utc <= open_utc).",
+-      "worktree_root": "v2: directory remote worktrees live under (SSD-pinned, see ~/.config/mastermind/worktree-storage.json). null = not assigned yet (P4)."
++      "worktree_root": "v2: directory remote worktrees live under (SSD-pinned, see ~/.config/mastermind/worktree-storage.json). null = not assigned yet (P4).",
++      "checkout_reserve_gb": "Optional conservative per-new-worker materialization allowance (GiB) added to min_free_gb for Linux host picker and under the incumbent LaneLease physical admission lock. Zero/absent preserves existing legacy behavior; does not create disk reservation authority."
+     },
+     "files_per_host": {
+       "daemon_log": "host_queue_<host>.log",
+@@ -735,7 +736,8 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": "/home/ubuntu0/.mastermind/worktrees"
++    "worktree_root": "/home/ubuntu0/.mastermind/worktrees",
++    "checkout_reserve_gb": 15
+   },
+   "ubuntu1": {
+     "_cursor_native_qual_20261008": {
+@@ -860,7 +862,8 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": null
++    "worktree_root": null,
++    "checkout_reserve_gb": 15
+   },
+   "ubuntu2": {
+     "_cursor_native_qual_20261008": {
+@@ -942,7 +945,8 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": null
++    "worktree_root": null,
++    "checkout_reserve_gb": 15
+   },
+   "ubuntu3": {
+     "_enrollment_note_20261005": "Telemetry-only candidate for universal Studio/fabric fleet visibility; dispatch held pending route qualification.",
+@@ -1076,7 +1080,8 @@
+       "python3": null
+     },
+     "windows": [],
+-    "worktree_root": null
++    "worktree_root": null,
++    "checkout_reserve_gb": 15
+   },
+   "_thermal_headroom_change_20261013": {
+     "operator_intent": "Chairman 2026-10-13 thermal headroom mitigation, admission-only",
+--- a/host_pick.py
++++ b/host_pick.py
+@@ -290,13 +290,25 @@
+         )
+ 
+         disk_free = _finite_nonnegative((state or {}).get("disk_free_gb"))
+-        minimum_free = _as_float(entry.get("min_free_gb"))
++        minimum_free = _finite_nonnegative(entry.get("min_free_gb"))
++        # Optional staged-worktree allowance belongs to the existing host
++        # disk gate. Do not admit one more 10+ GiB checkout at the base floor.
++        reserve = _finite_nonnegative(entry.get("checkout_reserve_gb", 0))
++        if reserve is not None and reserve > 128:
++            reserve = None
++        required_disk = (
++            minimum_free + reserve
++            if minimum_free is not None and reserve is not None else None
++        )
+         gates.append(
+             _gate(
+                 name,
+-                disk_free is not None and minimum_free is not None and disk_free >= minimum_free,
++                disk_free is not None and required_disk is not None and disk_free >= required_disk,
+                 "disk",
+-                "missing" if disk_free is None or minimum_free is None else f"{disk_free:g}>={minimum_free:g}",
++                ("missing" if reserve == 0 else "missing-or-invalid")
++                if disk_free is None or required_disk is None
++                else (f"{disk_free:g}>={required_disk:g}" if reserve == 0
++                      else f"{disk_free:g}>={required_disk:g} (base={minimum_free:g},stage={reserve:g})"),
+             )
+         )
+ 
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -397,10 +397,17 @@
+         or not isinstance(thermal_limit, (int, float))
+         or (thermal_enabled and not 50 <= thermal_limit <= 100)):
+     raise SystemExit(3)
+-print(alias, cores, max_active, load_gate, min_free_mem, thermal_limit)
++min_free_disk = entry.get("min_free_gb", 0)
++checkout_reserve = entry.get("checkout_reserve_gb", 0)
++if (type(min_free_disk) not in (int, float) or not 0 <= min_free_disk <= 1024
++        or type(checkout_reserve) not in (int, float) or not 0 <= checkout_reserve <= 128):
++    raise SystemExit(3)
++# Absent reserve does not change legacy Mac/seat last-mile behavior.
++last_mile_disk = float(min_free_disk) + float(checkout_reserve) if checkout_reserve else 0.0
++print(alias, cores, max_active, load_gate, min_free_mem, thermal_limit, f"{last_mile_disk:.3f}")
+ ' "$HERE/hosts.json" "$HOST_ARG" "$MODE" 2>/dev/null) || REGISTRY=""
+   [ -n "$REGISTRY" ] || { log "HOST_POLICY_REFUSED host=$HOST_ARG"; RC=3; return "$RC"; }
+-  read -r SSH_ALIAS CORES MAX_ACTIVE LOAD_GATE MIN_FREE_MEM_GB MAX_CPU_TCTL_C <<< "$REGISTRY"
++  read -r SSH_ALIAS CORES MAX_ACTIVE LOAD_GATE MIN_FREE_MEM_GB MAX_CPU_TCTL_C MIN_FREE_DISK_GB <<< "$REGISTRY"
+   LANE_HOST_LOAD_RATIO=$(awk -v g="$LOAD_GATE" -v c="$CORES" 'BEGIN{if(c+0<=0) exit 1; printf "%.4f", (g+0)/(c+0)}') || { log "HOST_POLICY_RATIO_REFUSED"; RC=3; return "$RC"; }
+ }
+ load_host_registry || exit "$RC"
+@@ -943,7 +950,7 @@
+   REMOTE_INNER='export GLM_REMOTE_CAPABILITY_FILE="$HOME/lanes/tmp/$KEY.glm-cap.json"; '"$REMOTE_INNER"
+ fi
+ log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
+-LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
++LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+ ADMISSION_FILE="$HERE/lanes/${ID}.admission"
+ if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi
+ ADMISSION_WAIT_STARTED_SECONDS=""
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -1632,6 +1632,13 @@
+         if (not math.isfinite(cpu_tctl_limit)
+                 or (cpu_tctl_limit != 0 and not 50 <= cpu_tctl_limit <= 100)):
+             raise LaneRuntimeConfigError("lane_cpu_tctl_limit_out_of_bounds")
++        raw_disk_floor = (os.environ if env is None else env).get("LANE_MIN_FREE_DISK_GB", "0")
++        try:
++            minimum_free_disk = float(raw_disk_floor)
++        except (ValueError, TypeError) as exc:
++            raise LaneRuntimeConfigError("lane_min_free_disk_invalid") from exc
++        if not math.isfinite(minimum_free_disk) or not 0 <= minimum_free_disk <= 2048:
++            raise LaneRuntimeConfigError("lane_min_free_disk_out_of_bounds")
+         chosen_max = config.max_active if max_active is None else int(max_active)
+         chosen_ratio = config.max_load_ratio if load_ratio_limit is None else float(load_ratio_limit)
+         observed_load = float(os.getloadavg()[0] if load1 is None else load1)
+@@ -1683,6 +1690,39 @@
+                 if tctl is None or tctl >= cpu_tctl_limit:
+                     why = ("host_temperature_unknown" if tctl is None
+                            else "host_temperature_at_or_above_limit")
++                    snapshot = HostAdmissionSnapshot(**{
++                        **snapshot.public_dict(),
++                        "allowed": False,
++                        "reasons": tuple(dict.fromkeys((*snapshot.reasons, why))),
++                    })
++            if minimum_free_disk > 0:
++                # The incumbent admission lock guards the last-mile check. For
++                # Linux lanes active_dir is ~/lanes/ext/active, so ~/lanes/wt
++                # must be on the same actual volume. Unknown/mismatch HOLD.
++                # resolve(): remote lanes run from an immutable support release
++                # whose ext/active is a SYMLINK to ~/lanes/ext/active; the
++                # unresolved parent.parent is the release root (no wt there), so
++                # every remote lane HELD host_disk_unknown (C19 seat 7ab343c8,
++                # 2026-10-13T14:4xZ; backup .bak-pre-wt-resolve-20261013-c19).
++                checkout_dir = active_dir.resolve().parent.parent / "wt"
++                free_disk_gib = None
++                reason_unknown = "host_disk_unknown"
++                try:
++                    observed = checkout_dir.lstat()
++                    if stat.S_ISDIR(observed.st_mode):
++                        active_dev = active_dir.stat().st_dev
++                        if observed.st_dev == active_dev:
++                            usage = os.statvfs(checkout_dir)
++                            free_disk_gib = (usage.f_bavail * usage.f_frsize) / (1024 ** 3)
++                        else:
++                            reason_unknown = "host_disk_volume_mismatch"
++                except (OSError, ValueError, OverflowError):
++                    pass
++                if free_disk_gib is None or free_disk_gib < minimum_free_disk:
++                    why = (
++                        reason_unknown if free_disk_gib is None
++                        else "host_disk_below_staging_reserve"
++                    )
+                     snapshot = HostAdmissionSnapshot(**{
+                         **snapshot.public_dict(),
+                         "allowed": False,

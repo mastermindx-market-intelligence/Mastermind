@@ -1,0 +1,64 @@
+{
+  "adapter_preserved": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207",
+  "at": "2026-10-14T05:26:48.970469+00:00",
+  "evidence": {
+    "CURSOR_QUOTA_ACCEPTANCE_READBACK.json": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/pool-exhaustion-failover-20261014/CURSOR_QUOTA_ACCEPTANCE_READBACK.json",
+      "sha256": "99f1fe0b21ecd63815fcd4ea69886b698bf8e3c2844b9e05310ff1343428a429"
+    },
+    "CURSOR_QUOTA_PARENT_ADJUDICATION.json": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/pool-exhaustion-failover-20261014/CURSOR_QUOTA_PARENT_ADJUDICATION.json",
+      "sha256": "ec3e509da57ba98145e92c90c8c14fbfb5f453797c6ffb89baff77cbf8e371fb"
+    },
+    "FINAL_INSTALL_ADJUDICATION_01a138a2.json": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/pool-exhaustion-failover-20261014/FINAL_INSTALL_ADJUDICATION_01a138a2.json",
+      "sha256": "f1242b5daa707eaa5f5b9b0f7f1ee0dabcf0ae14b31057694a5878e17d4a331e"
+    },
+    "INSTALL_RECEIPT.json": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/pool-exhaustion-failover-20261014/INSTALL_RECEIPT.json",
+      "sha256": "126d8b7308d658b87ad2ed383204fefac6bd577e50973208ac9dde61b8a0c2d3"
+    },
+    "PUBLISHER_COMPAT.xml": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/pool-exhaustion-failover-20261014/PUBLISHER_COMPAT.xml",
+      "sha256": "76dc702640d0fd083a1e6d49b84ac90abc9f5ba43f9b2d21e023ebf17a07bad9"
+    },
+    "QUOTA_CORRECTED_FINAL.xml": {
+      "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/pool-exhaustion-failover-20261014/QUOTA_CORRECTED_FINAL.xml",
+      "sha256": "b8e075c6462f3b6596f545388caa61a834e48a2359dfa587cd438b4c8551f800"
+    }
+  },
+  "installed": {
+    "native_remote.py": {
+      "installed": "a111878452f2d7ba6ad97af53055d77ed9de13d783653029e5f20311902ff051",
+      "mode": "0o644",
+      "pre": "df6c8b9b4d128deaff7e16810c6f21a97de60d3973f467a3630e8c11b72a23c4"
+    },
+    "pick.py": {
+      "installed": "3120d99aa3bc4c9224b61ab3d593c284dcc11f4a2df0e657f401125b2651f188",
+      "mode": "0o600",
+      "pre": "db8ee0cd7d431dffac2b746a7be3854834fde74b5702a8e88dc3fc22750b4cf7"
+    },
+    "support_bundle.py": {
+      "installed": "2790f29690bac70f111b118ddb3defd8da49ecc2653a8a2cd3caa2be69121f51",
+      "mode": "0o644",
+      "pre": "4f8544b91eb367f2179062e61d1e5b6b5fece4b15881a5635d34d8265e6a91ef"
+    }
+  },
+  "limits": [
+    "Only prestart automatic fallback is installed; existing interrupted work is not relaunched or moved.",
+    "Cursor Grok alias shares Grok review family; Cursor Composer is distinct.",
+    "Pool order preserves ordinary earlier cheap candidates, actual eligibility and original budget.",
+    "No RuntimeBinding or idle Wake proof."
+  ],
+  "not_installed": [
+    "quota_failover.py advisory planner"
+  ],
+  "original_root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "patch_sha256": {
+    "native_remote.py.patch": "78e63dd0664e7b02a052bc038171b16e2e0e3b76de0189800bcfb28186da846d",
+    "pick.py.patch": "b3e0dc84e82801bbb3bbace3343df7993a9008170fa385fe14df0171986f5f81",
+    "support_bundle.py.patch": "aee30ad30a51210be69a7e3b14cee7b31df80cec21aac1fa10d0a783a5525494"
+  },
+  "schema": "mastermind.pool_quota_fallback_source.v1",
+  "state": "INSTALLED_AND_ORIGINAL_PARENT_LIVE_ACCEPTED"
+}
