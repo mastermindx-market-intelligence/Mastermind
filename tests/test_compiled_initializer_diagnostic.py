@@ -67,6 +67,8 @@ def test_real_compiler_input_is_measured_before_diagnostic_variant(monkeypatch,r
     assert len(diagnostic.encode())+1<131072
     record_property('original_command_bytes_with_nul',len(command.encode())+1)
     record_property('diagnostic_code_bytes_with_nul',len(diagnostic.encode())+1)
+    variant=list(argv);variant[5]=diagnostic
+    record_property('diagnostic_quoted_equivalent_bytes_with_nul',len(shlex.join(variant).encode())+1)
 
 
 @pytest.mark.parametrize('change',[
@@ -76,9 +78,11 @@ def test_real_compiler_input_is_measured_before_diagnostic_variant(monkeypatch,r
     lambda v:v.update(sites=[{'function':'pin','line':True}]),
     lambda v:v.update(sites=[{'function':'pin','line':1,'path':'CANARY'}]),
     lambda v:v.update(sites=[{'function':'pin','line':1}]*7),
+    lambda v:v.update(node_role='/PRIVATE_CANARY'),lambda v:v.update(acl_key='PRIVATE_CANARY'),
+    lambda v:v.update(schema='mastermind.inert_compiled_initializer_failure/v1'),
 ])
 def test_private_or_unbounded_metadata_is_wholly_withheld(change):
-    value=dict(schema=d.SCHEMA,stage='BOOTSTRAP',kind='REFUSAL',sites=[],errno=None)
+    value=dict(schema=d.SCHEMA,stage='BOOTSTRAP',kind='REFUSAL',sites=[],errno=None,node_role='UNKNOWN',acl_key='UNKNOWN')
     change(value)
     assert d.decode_failure(json.dumps(value).encode()) is None
 
@@ -90,7 +94,7 @@ def test_duplicate_nul_and_overbound_frames_are_withheld():
 
 
 def test_reporter_failure_cannot_replace_test_outcome_and_interrupt_propagates():
-    raw=json.dumps(dict(schema=d.SCHEMA,stage='BOOTSTRAP',kind='REFUSAL',sites=[],errno=None)).encode()
+    raw=json.dumps(dict(schema=d.SCHEMA,stage='BOOTSTRAP',kind='REFUSAL',sites=[],errno=None,node_role='UNKNOWN',acl_key='UNKNOWN')).encode()
     class Capture:
         def __enter__(self):return self
         def __exit__(self,*args):return False
@@ -126,3 +130,37 @@ def test_real_pytest_failure_does_not_render_completed_process_values(tmp_path):
     assert child.returncode==1
     assert b'compiled diagnostic variant refused' in child.stdout
     assert b'SYNTHETIC_' not in child.stdout and b'1 failed' in child.stdout
+
+
+@pytest.mark.parametrize('role,node',[
+    ('HOME_ANCESTOR','/PRIVATE_CANARY'),('HOME','/PRIVATE_CANARY/account'),
+    ('LANE_ROOT','/PRIVATE_CANARY/account/lanes'),('EXT','/PRIVATE_CANARY/account/lanes/ext'),
+    ('HOST_ENV','/PRIVATE_CANARY/account/lanes/ext/HOST_ENV.sh'),
+    ('NESTED_HELPER','/PRIVATE_CANARY/account/lanes/ext/.host_glm_token.sh'),
+    ('CAPTURE_ROOT','/PRIVATE_CANARY/account/lanes/ext/lanes'),
+])
+@pytest.mark.parametrize('key,label',[('system.posix_acl_access','ACCESS'),('system.posix_acl_default','DEFAULT')])
+def test_owned_guard_frames_report_only_fixture_role_and_acl_key(role,node,key,label):
+    hook='/PRIVATE_CANARY/account/lanes/ext/HOST_ENV.sh'
+    helper='/PRIVATE_CANARY/account/lanes/ext/.host_glm_token.sh'
+    capture='/PRIVATE_CANARY/account/lanes/ext/lanes'
+    selected=helper if role=='NESTED_HELPER' else capture if role=='CAPTURE_ROOT' else hook
+    parts=selected.split('/')[1:];index=len(node.split('/'))-2
+    code=('def run_bootstrap():\n'
+        ' commitment='+repr(dict(account=dict(home='/PRIVATE_CANARY/account'),lane_root='/PRIVATE_CANARY/account/lanes',host_env=dict(path=hook),nested_helper=dict(path=helper)))+'\n'
+        ' request='+repr(dict(capture_root=capture))+'\n'
+        ' def pin(name):\n  fd=7\n  parts='+repr(parts)+'\n  index='+str(index)+'\n'
+        '  def no_acl(fd):\n   key='+repr(key)+'\n   raise ValueError("PRIVATE_ACL_CANARY")\n'
+        '  no_acl(fd)\n'
+        ' pin('+repr(selected)+')\n')
+    body='namespace={"__file__":"<qualified-paid_initializer.py>"}\nexec('+repr(code)+',namespace)\ntry:\n namespace["run_bootstrap"]()'
+    child=run(body);value=d.decode_failure(child.stderr)
+    assert child.returncode==78 and value['node_role']==role and value['acl_key']==label
+    assert b'CANARY' not in child.stderr
+
+
+def test_unjoined_frames_never_acquire_private_fixture_role():
+    # Coincident names without the actual qualified module identity stay UNKNOWN.
+    child=run('def run_bootstrap():\n def pin():\n  def no_acl():raise ValueError("PRIVATE_CANARY")\n  no_acl()\n pin()\ntry:\n run_bootstrap()')
+    value=d.decode_failure(child.stderr)
+    assert child.returncode==78 and value['node_role']==value['acl_key']=='UNKNOWN'
