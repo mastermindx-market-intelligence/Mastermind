@@ -16,6 +16,9 @@ def load(name):
     return module
 
 class GrokUpgrade(unittest.TestCase):
+    # The immutable Grok overlay retains its historical bounded refusal.
+    # Native F1 candidate composition overrides only this diagnostic contract.
+    EXPECTED_UNKNOWN_MODEL_DENIAL = 'NONE reason=unknown requested_model'
     def test_default_model_is_47(self):
         picker = load('pick')
         self.assertEqual(picker._default_model('grok'), 'grok-4.7')
@@ -111,7 +114,7 @@ class GrokUpgrade(unittest.TestCase):
             refused=picker._format_pick('review',pool='cursor',requested_model='grok-4.7')
             self.assertTrue(refused.startswith('NONE reason=exact Grok Build model'))
             invalid=picker._format_pick('review',pool='grok',requested_model='grok-4.8')
-            self.assertEqual(invalid, 'NONE reason=requested model not admitted for selected pool/task')
+            self.assertEqual(invalid, self.EXPECTED_UNKNOWN_MODEL_DENIAL)
             # A refused, unadmitted model cannot reach the launch policy.
             self.assertEqual(gate_models, ['grok-4.6', 'grok-4.7'])
 
@@ -120,9 +123,8 @@ class GrokUpgrade(unittest.TestCase):
         secret_input='private-password-secret-should-never-echo'
         with patch.object(picker,'load_pools',return_value={'pools':{'grok':{}}}):
             result=picker._format_pick('review',pool='grok',requested_model=secret_input)
-        # Current reviewed native F1 strict pin contract emits a bounded typed
-        # denial rather than the older unknown-model diagnostic.
-        self.assertEqual(result, 'NONE reason=requested model not admitted for selected pool/task')
+        # Both overlay and composed candidate must refuse without echoing secrets.
+        self.assertEqual(result, self.EXPECTED_UNKNOWN_MODEL_DENIAL)
         self.assertNotIn(secret_input,result)
 
     def test_advisory_bailian_result_never_exposes_account_alias(self):
