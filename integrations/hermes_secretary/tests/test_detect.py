@@ -44,9 +44,14 @@ class CommissionDetection(unittest.TestCase):
             [
                 ("C0BRDFZPLHK", "1761410014.000100", "PLACE_ON_TITLED_WORKER"),
                 ("C0BSBM78V1N", "1761410001.000100", "HAND_TO_COORDINATOR"),
+                ("C0BSBM78V1N", "1761410003.000100", "HAND_TO_COORDINATOR"),
                 ("C0BSBM78V1N", "1761410005.000100", "PLACE_ON_TITLED_WORKER"),
+                ("C0BSBM78V1N", "1761410006.000100", "PLACE_ON_TITLED_WORKER"),
+                ("C0BSBM78V1N", "1761410006.000200", "PEER_RECEIPT"),
                 ("C0BSBM78V1N", "1761410008.000100", "BLOCKED_WAKE"),
                 ("C0BSBM78V1N", "1761410009.000200", "HAND_TO_COORDINATOR"),
+                ("C0BTD5804QK", "1761410013.000100", "HAND_TO_COORDINATOR"),
+                ("C0BTD5804QK", "1761410013.000200", "PEER_RECEIPT"),
                 ("C0C5FCK1F45", "1761410012.000100", "REFUSE_SECRET"),
                 ("C0CCNK7JFAL", "1761410010.000100", "ACTION_NEEDED_RETURN"),
             ],
@@ -57,10 +62,10 @@ class CommissionDetection(unittest.TestCase):
         self.assertIn("bounded source note", commission["ask"])
         self.assertIn("do not merge", commission["limits"])
         self.assertFalse(commission["would_post"])
-        thread = decisions[4]
+        thread = decisions[7]
         self.assertEqual(thread["operation_id"], "thread-op-009")
         self.assertEqual(thread["thread_ts"], "1761410009.000100")
-        owed = decisions[6]
+        owed = decisions[11]
         self.assertEqual(owed["tasks"], ["rf-t01"])
         self.assertEqual(owed["decision"], "ACTION_NEEDED_RETURN")
 
@@ -91,10 +96,34 @@ class CommissionDetection(unittest.TestCase):
             seen=set(),
         )
         blob = " ".join(json_blob(item) for item in decisions)
-        self.assertNotIn("self-echo-003", blob)
+        self.assertIn("self-echo-003", blob)
         self.assertNotIn("other-seat-004", blob)
         self.assertNotIn("U0OTHERSEAT1", blob)
-        self.assertNotIn("U0BTCHX8HMF", blob)
+        echo = next(item for item in decisions if item.get("operation_id") == "self-echo-003")
+        self.assertEqual(echo["author"], "Grok Secretary")
+        self.assertNotEqual(echo["author"], "self")
+        own = roster_with(self_user_id="UHERMESSELF1", other_seats=("U0OTHERSEAT1",))
+        own_message = {
+            "channel": "C0BSBM78V1N",
+            "ts": "1761410060.000100",
+            "user": "UHERMESSELF1",
+            "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: own-loop-060",
+        }
+        self.assertIsNone(classify(
+            own_message, messages=[own_message], ledger=[], roster=own, include_returns=False,
+        ))
+        sibling = roster_with(self_user_id="UHERMESSELF1", sibling_ids=("USIBLING001",))
+        sibling_message = {
+            "channel": "C0BSBM78V1N",
+            "ts": "1761410061.000100",
+            "user": "USIBLING001",
+            "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: sibling-061",
+        }
+        found = classify(
+            sibling_message, messages=[sibling_message], ledger=[], roster=sibling, include_returns=False,
+        )
+        self.assertEqual(found["decision"], "HAND_TO_COORDINATOR")
+        self.assertFalse(sibling.is_self("USIBLING001"))
 
     def test_acked_placement_and_acked_commission_stay_quiet(self):
         decisions = scan(
@@ -106,8 +135,27 @@ class CommissionDetection(unittest.TestCase):
             seen=set(),
         )
         ids = {item["ts"] for item in decisions}
-        self.assertNotIn("1761410006.000100", ids)
-        self.assertNotIn("1761410013.000100", ids)
+        self.assertIn("1761410006.000100", ids)
+        self.assertIn("1761410013.000100", ids)
+        receipts = [item for item in decisions if item["decision"] == "PEER_RECEIPT"]
+        self.assertEqual({item["ts"] for item in receipts}, {"1761410006.000200", "1761410013.000200"})
+        self.assertTrue(all(item["author"] == "Grok Secretary" for item in receipts))
+        own = roster_with(self_user_id="UHERMESSELF1", other_seats=("U0OTHERSEAT1",))
+        suppressed = scan(
+            self.messages + [{
+                "channel": "C0BSBM78V1N",
+                "ts": "1761410005.000900",
+                "thread_ts": "1761410005.000100",
+                "user": "UHERMESSELF1",
+                "text": "ACK own receipt",
+            }],
+            channels=("C0BSBM78V1N",),
+            include_returns=False,
+            ledger=[],
+            roster=own,
+            seen=set(),
+        )
+        self.assertNotIn("1761410005.000100", {item["ts"] for item in suppressed})
 
     def test_closed_ledger_row_does_not_match(self):
         decisions = scan(

@@ -12,7 +12,7 @@ from fixture_loader import load_fixture
 from parity import compare, load_decisions, secretary_posts_from_readonly
 from roster import default_roster, roster_with
 
-SECRETARY_USER_ID = default_roster().secretary_user_id
+GROK_USER_ID = default_roster().grok_secretary_user_id
 from shadow import run_shadow
 from slack_readonly import ReadOnlySlackClient, ReadOnlySlackError
 
@@ -28,10 +28,10 @@ class ShadowRunner(unittest.TestCase):
         roster = roster_with(other_seats=("U0OTHERSEAT1",))
         first = run_shadow(client, mode="ping_scan", ledger=ledger, output_path=output, roster=roster)
         second = run_shadow(client, mode="ping_scan", ledger=ledger, output_path=output, roster=roster)
-        self.assertEqual(len(first), 7)
+        self.assertEqual(len(first), 12)
         self.assertEqual(second, [])
         lines = output.read_text(encoding="utf-8").splitlines()
-        self.assertEqual(len(lines), 7)
+        self.assertEqual(len(lines), 12)
         blob = output.read_text(encoding="utf-8")
         self.assertNotIn("xoxb-not-a-real-token", blob)
         self.assertNotIn("chat_postMessage", blob)
@@ -77,9 +77,14 @@ class ShadowRunner(unittest.TestCase):
             [
                 ("1761410014.000100", "PLACE_ON_TITLED_WORKER"),
                 ("1761410001.000100", "HAND_TO_COORDINATOR"),
+                ("1761410003.000100", "HAND_TO_COORDINATOR"),
                 ("1761410005.000100", "PLACE_ON_TITLED_WORKER"),
+                ("1761410006.000100", "PLACE_ON_TITLED_WORKER"),
+                ("1761410006.000200", "PEER_RECEIPT"),
                 ("1761410008.000100", "BLOCKED_WAKE"),
                 ("1761410009.000200", "HAND_TO_COORDINATOR"),
+                ("1761410013.000100", "HAND_TO_COORDINATOR"),
+                ("1761410013.000200", "PEER_RECEIPT"),
             ],
         )
         output.unlink()
@@ -146,33 +151,33 @@ class Parity(unittest.TestCase):
                 "channel": "C0BSBM78V1N",
                 "ts": "1761410001.000300",
                 "thread_ts": "1761410001.000100",
-                "user": SECRETARY_USER_ID,
+                "user": GROK_USER_ID,
                 "text": "ACK hermes-wp5-shadow-001",
             },
             {
                 "channel": "C0CCNK7JFAL",
                 "ts": "1761410010.000300",
                 "thread_ts": "1761410010.000100",
-                "user": SECRETARY_USER_ID,
+                "user": GROK_USER_ID,
                 "text": "ACTION NEEDED RETURN rf-t01",
             },
             {
                 "channel": "C0BSBM78V1N",
                 "ts": "1761410005.000300",
                 "thread_ts": "1761410005.000100",
-                "user": SECRETARY_USER_ID,
+                "user": GROK_USER_ID,
                 "text": "noted without a marker",
             },
             {
                 "channel": "C0CBC6AEAQZ",
                 "ts": "1761410020.000100",
-                "user": SECRETARY_USER_ID,
+                "user": GROK_USER_ID,
                 "text": "ACK stray",
             },
             {
                 "channel": "C0BSBM78V1N",
                 "ts": "1761410099.000100",
-                "user": SECRETARY_USER_ID,
+                "user": GROK_USER_ID,
                 "text": "ACK outside the window",
             },
         ]
@@ -196,9 +201,9 @@ class Parity(unittest.TestCase):
         posts = secretary_posts_from_readonly(
             client,
             channels=("C0BSBM78V1N",),
-            secretary_user_id=SECRETARY_USER_ID,
+            secretary_user_id=GROK_USER_ID,
         )
-        self.assertTrue(any(item["user"] == SECRETARY_USER_ID for item in posts))
+        self.assertTrue(any(item["user"] == GROK_USER_ID for item in posts))
         self.assertTrue(all(call[0] in {"conversations_history", "conversations_replies"} for call in client.calls))
 
 

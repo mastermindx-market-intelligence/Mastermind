@@ -108,6 +108,8 @@ class HarnessEndToEnd(unittest.TestCase):
         write_secrets(secrets)
         output = root / "would-decisions.jsonl"
         admission = CountingAdmission()
+        saved_bot = os.environ.pop("HERMES_SLACK_BOT_USER_ID", None)
+        self.addCleanup(lambda: saved_bot is not None and os.environ.__setitem__("HERMES_SLACK_BOT_USER_ID", saved_bot))
         with NetworkGuard() as guard:
             stack = boot_stack(root=root / "boot", secrets_file=secrets, hermes_bin=STUB)
             try:
@@ -130,7 +132,7 @@ class HarnessEndToEnd(unittest.TestCase):
         self.assertNotIn("xoxb-not-a-real-token", text)
         self.assertNotIn("chat_postMessage", text)
         rows = [json.loads(line) for line in text.splitlines() if line.strip()]
-        self.assertEqual(len(rows), 7)
+        self.assertEqual(len(rows), 12)
         self.assertTrue(all(row["would_post"] is False for row in rows))
         placements = [row for row in rows if row["decision"] == "PLACE_ON_TITLED_WORKER"]
         self.assertGreaterEqual(len(placements), 1)
@@ -147,6 +149,15 @@ class HarnessEndToEnd(unittest.TestCase):
             EXPECTED.parent.mkdir(parents=True, exist_ok=True)
             EXPECTED.write_text(text, encoding="utf-8")
         self.assertEqual(text, EXPECTED.read_text(encoding="utf-8"))
+        again = routine_tick(
+            mode="ping_scan",
+            fixture=FIXTURE,
+            output=output,
+            bridge=Bridge(admission),
+        )
+        self.assertEqual(again["count"], 0)
+        self.assertEqual(again["admitted"], 0)
+        self.assertEqual(output.read_text(encoding="utf-8"), text)
 
     def test_doctor_lists_every_missing_pointer_on_a_clean_host(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -159,6 +170,28 @@ class HarnessEndToEnd(unittest.TestCase):
         self.assertNotIn("local-test-gateway-token", rendered)
         for item in _CLEAN_MISSING:
             self.assertIn(f"- {item}", rendered)
+
+    def test_doctor_drops_one_agents_slack_pair_when_that_file_has_it(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            write_secrets(
+                home / ".config" / "hermes-runtime" / "mmsecretary.secrets.env",
+                extra=(
+                    "HERMES_SLACK_BOT_USER_ID=UHERMESSELF1\n"
+                    "HERMES_SLACK_BOT_TOKEN=not-a-placeholder-token\n"
+                ),
+            )
+            report = doctor(environ={}, home=home, systemd_user=False, upstream_attested=False)
+        rendered = format_doctor(report)
+        self.assertNotIn("credential_file:mmsecretary.secrets.env", report["missing"])
+        self.assertNotIn("id:hermes-secretary:HERMES_SLACK_BOT_USER_ID", report["missing"])
+        self.assertNotIn("credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN", report["missing"])
+        self.assertIn("credential_file:mmmeta.secrets.env", report["missing"])
+        self.assertIn("id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID", report["missing"])
+        self.assertIn("credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN", report["missing"])
+        self.assertNotIn("not-a-placeholder-token", rendered)
+        self.assertNotIn("UHERMESSELF1", rendered)
+        self.assertNotIn(TOKEN, rendered)
 
     def test_install_status_uninstall_and_cli(self) -> None:
         os.chmod(STUB, 0o755)
@@ -208,6 +241,8 @@ class HarnessEndToEnd(unittest.TestCase):
         self.assertEqual(status.returncode, 0, status.stderr)
         self.assertEqual(json.loads(status.stdout)["status"], "INSTALLED")
         shadow_out = root / "shadow.jsonl"
+        saved_bot = os.environ.pop("HERMES_SLACK_BOT_USER_ID", None)
+        self.addCleanup(lambda: saved_bot is not None and os.environ.__setitem__("HERMES_SLACK_BOT_USER_ID", saved_bot))
         shadow = self._ctl(
             "shadow-run",
             "--fixture", str(FIXTURE),
@@ -215,7 +250,7 @@ class HarnessEndToEnd(unittest.TestCase):
         )
         self.assertEqual(shadow.returncode, 0, shadow.stderr)
         body = json.loads(shadow.stdout)
-        self.assertEqual(body["count"], 7)
+        self.assertEqual(body["count"], 12)
         self.assertEqual(body["admitted"], 0)
         self.assertFalse(body["would_post"])
         posts = root / "posts.json"
@@ -305,6 +340,8 @@ _CLEAN_MISSING = [
     "credential:MASTERMIND_STEWARD_ACCESS_TOKEN",
     "credential:MINIMAX_TOKEN_PLAN_KEY",
     "credential:ZAI_API_KEY",
+    "credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN",
+    "credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN",
     "credential_file:mmmeta.secrets.env",
     "credential_file:mmsecretary.secrets.env",
     "endpoint:HERMES_CURSOR_POOL_BASE_URL",
@@ -315,8 +352,9 @@ _CLEAN_MISSING = [
     "grant:mac_tcc",
     "grant:pinned_upstream_checkout",
     "grant:ubuntu1_systemd_user_manager",
-    "id:CHRIS_SLACK_USER_ID",
     "id:DOT_BOT_USER_IDS",
+    "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
+    "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
 ]
 
 

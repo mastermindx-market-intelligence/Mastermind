@@ -235,6 +235,40 @@ class StandingRuleGuards(unittest.TestCase):
         self.assertIsNone(rules.refusal_text("never-recorded"))
         self.assertIsNone(rules.fabric_state("missing-run"))
 
+    def test_grok_is_addressable_and_the_agent_own_id_is_not(self):
+        import os
+        from unittest import mock
+
+        rules = StandingRules(shadow_mode=False)
+        rooms = rules.voice_rooms
+        rules.consider(
+            "slack_post",
+            channel=rooms[0],
+            thread_ts="1761410001.000100",
+            kind="PICKUP",
+            address_user="U0BTCHX8HMF",
+        )
+        shadow = StandingRules(shadow_mode=True)
+        with self.assertRaises(GuardRefusal) as caught:
+            shadow.consider(
+                "slack_post",
+                channel=rooms[0],
+                thread_ts="1761410001.000100",
+                kind="PICKUP",
+                address_user="U0BTCHX8HMF",
+            )
+        self.assertEqual(caught.exception.code, "SHADOW_NO_POST")
+        with mock.patch.dict(os.environ, {"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"}):
+            with self.assertRaises(GuardRefusal) as caught:
+                rules.consider(
+                    "slack_post",
+                    channel=rooms[0],
+                    thread_ts="1761410001.000100",
+                    kind="RESULT",
+                    address_user="UHERMESSELF1",
+                )
+            self.assertEqual(caught.exception.code, "SELF_LOOP")
+
 
 if __name__ == "__main__":
     unittest.main()

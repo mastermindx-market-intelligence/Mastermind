@@ -50,8 +50,9 @@ def render_user_unit(
         if label == "python" and not value:
             raise RuntimeRefusal("UNSAFE_PATH")
     state = str(profile.state_dir)
-    text = f"""# Mastermind Hermes runtime user unit.
+    text = f"""# Mastermind Hermes runtime user unit. One unit per agent.
 # Loopback only. No secrets in this file.
+# HERMES_SLACK_BOT_USER_ID and HERMES_SLACK_BOT_TOKEN live in that unit's 0600 secrets file.
 # Upstream pin {PINNED_UPSTREAM_SHA} is enforced by the profile loader.
 [Unit]
 Description=Mastermind Hermes runtime ({profile.role}, pinned loopback)

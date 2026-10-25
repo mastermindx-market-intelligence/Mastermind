@@ -8,6 +8,7 @@ client; this module never constructs a network transport.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -57,14 +58,16 @@ def routine_tick(
     thread_ts: str | None = None,
 ) -> dict[str, Any]:
     _roster_mod, shadow, _slack = _secretary()
-    client, ledger, default_roster = load_fixture(fixture)
+    client, ledger, _configured = load_fixture(fixture)
     owner = bridge if bridge is not None else Bridge()
+    active = roster if roster is not None else _secretary()[0].default_roster(environ=os.environ)
+    prior = output.read_text(encoding="utf-8") if output.exists() else ""
     decisions = shadow.run_shadow(
         client,
         mode=mode,
         ledger=ledger,
         output_path=output,
-        roster=roster or default_roster,
+        roster=active,
         channel=channel,
         thread_ts=thread_ts,
     )
@@ -78,7 +81,7 @@ def routine_tick(
             delegation = None
         decision["delegation"] = delegation
         decision["would_post"] = False
-    _rewrite(output, decisions)
+    _rewrite(output, decisions, prior=prior)
     methods = sorted({call[0] for call in getattr(client, "calls", [])})
     return {
         "decisions": decisions,
@@ -89,7 +92,9 @@ def routine_tick(
     }
 
 
-def _rewrite(path: Path, decisions: list[dict]) -> None:
+def _rewrite(path: Path, decisions: list[dict], *, prior: str = "") -> None:
+    """Replace this tick's raw append with enriched rows. Keep earlier rows."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     for decision in decisions:
@@ -98,4 +103,7 @@ def _rewrite(path: Path, decisions: list[dict]) -> None:
         if decision.get("delegation", {}).get("live_submit") if isinstance(decision.get("delegation"), dict) else False:
             raise RuntimeError("SHADOW_NO_LIVE_SUBMIT")
         lines.append(json.dumps(decision, sort_keys=True, ensure_ascii=True))
-    path.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+    body = prior
+    if body and not body.endswith("\n"):
+        body += "\n"
+    path.write_text(body + "".join(line + "\n" for line in lines), encoding="utf-8")

@@ -224,6 +224,17 @@ def _slack_as_chris(rules: StandingRules, ctx: dict) -> None:
 def _slack_post(rules: StandingRules, ctx: dict) -> None:
     if rules.shadow_mode:
         raise GuardRefusal("SHADOW_NO_POST")
+    target = ctx.get("address_user")
+    if isinstance(target, str) and target:
+        import os
+
+        from roster import default_roster
+
+        roster = default_roster(environ=os.environ)
+        if roster.is_self(target):
+            raise GuardRefusal("SELF_LOOP")
+        if not roster.may_address(target):
+            raise GuardRefusal("DRAFT_ONLY")
     if _preauthorized_thread(rules, ctx):
         return None
     raise GuardRefusal("DRAFT_ONLY")

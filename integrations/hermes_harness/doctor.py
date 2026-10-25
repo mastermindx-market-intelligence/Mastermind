@@ -71,8 +71,7 @@ def doctor(
     manager = _systemd_user_manager() if systemd_user is None else systemd_user
     if not manager:
         missing.append("grant:ubuntu1_systemd_user_manager")
-    if _chris_missing():
-        missing.append("id:CHRIS_SLACK_USER_ID")
+    missing.extend(_agent_identity_gaps(root))
     missing.append("id:DOT_BOT_USER_IDS")
     missing = sorted(set(missing))
     return {
@@ -129,14 +128,53 @@ def _gateway_file_ok(path: Path) -> bool:
     return True
 
 
-def _chris_missing() -> bool:
+def _agent_identity_gaps(home: Path) -> list[str]:
+    """Per-agent Slack bot id and token. Names only; file bodies stay out."""
+
     path = Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return True
-    value = data.get("CHRIS_SLACK_USER_ID") if isinstance(data, dict) else None
-    return not isinstance(value, str) or not value.strip()
+        return [
+            "credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN",
+            "credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN",
+            "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
+            "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
+        ]
+    rows = data.get("hermes_agents") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    gaps: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("name")
+        secrets_name = row.get("secrets_file")
+        if not isinstance(name, str) or not isinstance(secrets_name, str):
+            continue
+        user_id, token = _slack_pair(home / ".config" / "hermes-runtime" / secrets_name)
+        if not user_id:
+            gaps.append(f"id:{name}:HERMES_SLACK_BOT_USER_ID")
+        if not token:
+            gaps.append(f"credential:{name}:HERMES_SLACK_BOT_TOKEN")
+    return gaps
+
+
+def _slack_pair(path: Path) -> tuple[bool, bool]:
+    try:
+        secrets = load_secrets(path)
+    except (RuntimeRefusal, OSError):
+        return False, False
+    user_id = secrets.values.get("HERMES_SLACK_BOT_USER_ID", "")
+    token = secrets.values.get("HERMES_SLACK_BOT_TOKEN", "")
+    user_ok = bool(user_id) and user_id.startswith("U") and user_id.isalnum() and len(user_id) >= 7
+    token_ok = (
+        bool(token)
+        and len(token) >= 16
+        and not any(ch.isspace() for ch in token)
+        and token.lower() not in {"changeme", "password", "secret", "token", "hermes", "replace-me"}
+    )
+    return user_ok, token_ok
 
 
 def _upstream_attested(home: Path) -> bool:

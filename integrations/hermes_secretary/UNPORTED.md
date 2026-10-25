@@ -10,7 +10,7 @@ The 2026-10-25 teaching snapshot was ported as procedures, guards, and shadow de
 
 4. **Live `fabric_task.py` submission.** The once-only guard is implemented. The owner script, the m2studio shell, and `http://127.0.0.1:45119/readyz` are not called. Sibling `integrations/hermes_delegate/` is absent on this head, so there is no second submitter to wire.
 
-5. **Chris's Slack user id and the Dot bot user ids.** `roster.json` has a required `CHRIS_SLACK_USER_ID` slot. It is null, and an unset or blank value adds nobody. Dot bot user ids are still unknown. Do not guess either.
+5. **Dot bot user ids, and each Hermes agent's own Slack bot.** Chairman Chris is `U0BRET6191C` (`chris@mastermind-x.com`). Grok Secretary `U0BTCHX8HMF` (`groksecretary@mastermind-x.com`) is a permanent peer, not this agent's self. `HERMES_SLACK_BOT_USER_ID` and `HERMES_SLACK_BOT_TOKEN` are still unset, one pair per agent unit. Dot bot user ids are still unknown. Do not guess them.
 
 6. **Resolved in `roster.json`.** The standing-authorized post rooms are `#dotsandgroksecretary` `C0CBC6AEAQZ` and `#metaceo` `C0C5FCK1F45`. A thread reply there of kind receipt, PICKUP, or RESULT is pre-authorized. Everything else is draft-only. Shadow mode still posts nothing.
 

@@ -14,23 +14,38 @@ from roster import (
     default_roster,
     load_roster_config,
     roster_from_mapping,
+    roster_with,
     watched_channel_ids,
 )
 
 
 class RosterConfig(unittest.TestCase):
-    def test_shipped_config_fails_closed_on_the_unset_chris_slot(self):
+    def test_shipped_chairman_and_grok_peer_are_not_self(self):
         data = load_roster_config()
-        self.assertIn("CHRIS_SLACK_USER_ID", data)
-        self.assertIsNone(data["CHRIS_SLACK_USER_ID"])
+        self.assertEqual(data["CHRIS_SLACK_USER_ID"], "U0BRET6191C")
+        self.assertEqual(data["chris"]["email"], "chris@mastermind-x.com")
+        self.assertEqual(data["peers"][0]["email"], "groksecretary@mastermind-x.com")
         roster = default_roster()
-        self.assertNotIn("Chris", roster.authors.values())
+        self.assertEqual(roster.author_name("U0BRET6191C"), "Chris")
+        self.assertEqual(roster.role("U0BRET6191C"), "allowed")
         self.assertEqual(roster.role("UNOTCHRIS01"), "other_seat")
-        self.assertIsNone(roster.author_name("UNOTCHRIS01"))
-        self.assertEqual(roster.secretary_user_id, "U0BTCHX8HMF")
-        self.assertEqual(roster.role("U0BTCHX8HMF"), "self")
+        self.assertIsNone(roster.self_user_id)
+        self.assertEqual(roster.grok_secretary_user_id, "U0BTCHX8HMF")
+        self.assertEqual(roster.role("U0BTCHX8HMF"), "peer")
+        self.assertFalse(roster.is_self("U0BTCHX8HMF"))
+        self.assertTrue(roster.may_address("U0BTCHX8HMF"))
+        self.assertEqual(roster.author_name("U0BTCHX8HMF"), "Grok Secretary")
         self.assertEqual(roster.author_name("U0C5L14LT7G"), "ChatGPT2")
-        self.assertEqual(roster.author_name("U0BSB73JWNL"), "ChatGPT2")
+        own = default_roster(environ={"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"})
+        self.assertTrue(own.is_self("UHERMESSELF1"))
+        self.assertEqual(own.role("U0BTCHX8HMF"), "peer")
+        self.assertFalse(own.may_address("UHERMESSELF1"))
+        sibling = roster_with(self_user_id="UHERMESSELF1", sibling_ids=("USIBLING001",))
+        self.assertEqual(sibling.role("USIBLING001"), "sibling")
+        self.assertFalse(sibling.is_self("USIBLING001"))
+        self.assertTrue(sibling.may_address("USIBLING001"))
+        with self.assertRaises(RosterConfigError):
+            default_roster(environ={"HERMES_SLACK_BOT_USER_ID": "U0BTCHX8HMF"})
 
     def test_ids_live_in_the_config_file_not_constants(self):
         text = (ROOT / "constants.py").read_text(encoding="utf-8")
@@ -45,7 +60,12 @@ class RosterConfig(unittest.TestCase):
             roster_from_mapping(missing)
         blank = dict(data)
         blank["CHRIS_SLACK_USER_ID"] = "  "
-        self.assertNotIn("Chris", roster_from_mapping(blank).authors.values())
+        with self.assertRaises(RosterConfigError):
+            roster_from_mapping(blank)
+        unset = dict(data)
+        unset["CHRIS_SLACK_USER_ID"] = None
+        with self.assertRaises(RosterConfigError):
+            roster_from_mapping(unset)
         for bad in ("chris", "not-a-user", 12):
             broken = dict(data)
             broken["CHRIS_SLACK_USER_ID"] = bad

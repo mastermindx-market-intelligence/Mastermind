@@ -72,4 +72,6 @@ def boot_harness() -> None:
     register_extension_tools("steward", steward_tools)
     register_extension_tools("delegate", delegate_tools)
     register_extension_tools("secretary", secretary_skills)
-    register_child_secret_env(sorted({spec.credential_env for spec in PROVIDERS.values()}))
+    register_child_secret_env(sorted(
+        {spec.credential_env for spec in PROVIDERS.values()} | {"HERMES_SLACK_BOT_USER_ID"}
+    ))

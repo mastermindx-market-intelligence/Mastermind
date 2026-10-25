@@ -55,10 +55,38 @@ is last in every chain. Personal Coding Plan `/api/coding` URLs are refused.
 A set `*_FILE` pointer is the only source for that provider. A missing or
 mode-wrong file does not fall back to the matching env var.
 
-Ids that doctor still reports until they are filled in `integrations/hermes_secretary/roster.json`
-or a host grant exists:
+Each always-on Hermes agent has its own systemd user unit and its own 0600
+secrets file. The Slack bot identity is per unit, not shared with Grok Secretary.
 
-- `CHRIS_SLACK_USER_ID` is null. Do not guess it.
+| Agent | User unit | Secrets file |
+| --- | --- | --- |
+| `hermes-secretary` | `hermes-runtime-mmsecretary.service` | `~/.config/hermes-runtime/mmsecretary.secrets.env` |
+| `hermes-metaceo` | `hermes-runtime-mmmeta.service` | `~/.config/hermes-runtime/mmmeta.secrets.env` |
+
+Add these lines to each secrets file, with that agent's own values. Do not
+copy one agent's bot onto the other unit, and do not use Grok Secretary's id
+`U0BTCHX8HMF` as either self:
+
+```
+HERMES_SLACK_BOT_USER_ID=U<this-agents-bot-user-id>
+HERMES_SLACK_BOT_TOKEN=<this-agents-bot-token>
+```
+
+`self` is only that unit's `HERMES_SLACK_BOT_USER_ID`. Sibling Hermes ids live
+in `roster.json` under `sibling_hermes_agent_ids` and are not a self loop.
+The supervisor forwards the user id into that unit's process. The bot token
+stays in the secrets file and is not written into the unit.
+
+Chairman Chris is `U0BRET6191C` (`chris@mastermind-x.com`). Grok Secretary
+`U0BTCHX8HMF` (`groksecretary@mastermind-x.com`) is a permanent peer. Hermes
+reads Grok's posts, can take assignments and receipts from Grok, and may
+address Grok in a pre-authorized thread. Shadow mode remains the default and
+still posts nothing.
+
+Ids and credentials doctor still reports until they are provided:
+
+- `id:hermes-secretary:HERMES_SLACK_BOT_USER_ID` and `credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN`
+- `id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID` and `credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN`
 - Dot bot user ids are unknown.
 - m2studio computer-use machine `61f4e9d7-b202-4cda-85ed-36904689931e` has no Mac TCC grant.
 - Executive admission is not bound. `mmx_delegate` returns `EXECUTIVE_ADMISSION_NOT_BOUND`.
@@ -121,13 +149,14 @@ Hermes built-in toolsets `delegation` and `skills` stay disabled. The
 composed allowlist adds the six Steward reads, `mmx_delegate`, and, on
 `mmsecretary` only, the three secretary skill names.
 
-Enable the user units only after doctor no longer lists the gateway files.
+Enable each user unit on its own. One unit does not start the other.
 This still does not post to Slack:
 
 ```sh
 systemctl --user daemon-reload
 systemctl --user enable --now hermes-runtime-mmsecretary.service
 systemctl --user enable --now hermes-runtime-mmmeta.service
+systemctl --user status hermes-runtime-mmsecretary.service hermes-runtime-mmmeta.service
 python3 integrations/hermes_harness/hermesctl status \
   --state "$HOME/.local/state/hermes-runtime-mmsecretary"
 python3 - <<'PY'

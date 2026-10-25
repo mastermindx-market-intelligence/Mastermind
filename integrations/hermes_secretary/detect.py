@@ -1,7 +1,8 @@
 """Commission, placement, BLOCKED, and owed-return detection.
 
-Dedup key is ``channel:ts``. The secretary's own posts and other seats'
-traffic produce no decision. A quiet scan returns an empty list.
+Dedup key is ``channel:ts``. Only this agent's own bot user id is a self
+loop. Grok Secretary is a peer: its posts are read, and its assignments and
+receipts become decisions. Other seats stay quiet.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ _OP = re.compile(
 )
 _LIMITS = re.compile(r"(?i)\blimits?\s*[:=]\s*([^\n]+)")
 _ACK = re.compile(r"(?i)\bACK\b")
+_RECEIPT = re.compile(r"(?i)\b(?:ACK|RECEIPT|PICKUP|RESULT)\b")
 _SECRET = re.compile(
     r"(xox[baprs]-[A-Za-z0-9-]+|sk-[A-Za-z0-9]|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?i:api[_-]?key|password|token)\s*[:=]\s*\S+)"
 )
@@ -40,8 +42,8 @@ def contains_secret(text: str) -> bool:
     return _SECRET.search(text) is not None
 
 
-def addressed_to_secretary(text: str, secretary_user_id: str) -> bool:
-    if f"<@{secretary_user_id}>" in text:
+def addressed_to_secretary(text: str, addressed_user_id: str) -> bool:
+    if addressed_user_id and f"<@{addressed_user_id}>" in text:
         return True
     if re.search(r"(?i)\bto:\s*grok secretary\b", text):
         return True
@@ -130,14 +132,16 @@ def _thread_root(message: dict) -> str:
     return str(message.get("thread_ts") or message["ts"])
 
 
-def _is_ack(message: dict, secretary_user_id: str) -> bool:
-    return message.get("user") == secretary_user_id and _ACK.search(message.get("text", "")) is not None
+def _is_ack(message: dict, self_user_id: str | None) -> bool:
+    if self_user_id is None:
+        return False
+    return message.get("user") == self_user_id and _ACK.search(message.get("text", "")) is not None
 
 
-def _acked(message: dict, messages: list[dict], secretary_user_id: str) -> bool:
+def _acked(message: dict, messages: list[dict], self_user_id: str | None) -> bool:
     root = _thread_root(message)
     for other in messages:
-        if other.get("channel") != message["channel"] or not _is_ack(other, secretary_user_id):
+        if other.get("channel") != message["channel"] or not _is_ack(other, self_user_id):
             continue
         if _thread_root(other) != root:
             continue
@@ -178,7 +182,7 @@ def classify(
 
     _require_message(message)
     role = roster.role(message["user"])
-    if role != "allowed":
+    if role in {"self", "other_seat"}:
         return None
     text = message["text"]
     channel = message["channel"]
@@ -188,8 +192,12 @@ def classify(
         return annotate(decision, message)
 
     signals: list[str] = []
-    if addressed_to_secretary(text, roster.secretary_user_id):
+    if addressed_to_secretary(text, roster.grok_secretary_user_id) or (
+        roster.self_user_id is not None and f"<@{roster.self_user_id}>" in text
+    ):
         signals.append("commission")
+    if role == "peer" and _RECEIPT.search(text):
+        signals.append("receipt")
     if needs_placement(text):
         signals.append("placement")
     if channel == agent_dispatch_id() and blocked_actionable(text):
@@ -199,11 +207,13 @@ def classify(
         signals.append("return")
     if not signals:
         return None
-    if _acked(message, messages, roster.secretary_user_id) and "return" not in signals:
+    if _acked(message, messages, roster.self_user_id) and "return" not in signals:
         return None
 
     if "return" in signals:
         kind = "ACTION_NEEDED_RETURN"
+    elif "receipt" in signals and role == "peer":
+        kind = "PEER_RECEIPT"
     elif "commission" in signals:
         kind = "HAND_TO_COORDINATOR"
     elif "placement" in signals:
