@@ -67,10 +67,10 @@ def _fixture_compiled_failure(error):
         sites=[s for s in sites[-6:] if type(s['line'])is int and 1<=s['line']<=100000]
         _fd_sys.stderr.write(_fd_json.dumps(dict(schema='mastermind.inert_compiled_initializer_failure/v1',stage=stage,kind=kind,sites=sites,errno=number),sort_keys=True,separators=(',',':'))+'\n')
     except Exception:pass
-_fd_original_hook=_fd_sys.excepthook
 def _fixture_compiled_hook(kind,error,trace):
     if isinstance(error,Exception):_fixture_compiled_failure(error)
-    else:_fd_original_hook(kind,error,trace)
+    # Rendering is suppressed for interrupts too; CPython still propagates its
+    # original interrupt/exit behavior after this hook returns.
 _fd_sys.excepthook=_fixture_compiled_hook
 ''')
     body=source[len(preamble):].replace(catch,

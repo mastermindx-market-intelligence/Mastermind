@@ -23,11 +23,12 @@ def test_final_exception_not_prior_handled_optional_probe_is_reported():
     assert b'CANARY' not in child.stderr and b'/private' not in child.stderr
 
 
-@pytest.mark.parametrize('error,expected',[('KeyboardInterrupt()',-2),('SystemExit(19)',19)])
+@pytest.mark.parametrize('error,expected',[('KeyboardInterrupt("PRIVATE_INTERRUPT_CANARY")',-2),('SystemExit(19)',19)])
 def test_interrupts_and_system_exit_are_not_converted_to_refusal(error,expected):
     child=run('try:\n raise '+error)
     assert child.returncode==expected
     assert d.decode_failure(child.stderr) is None
+    assert b'CANARY' not in child.stderr
 
 
 def test_success_stdout_and_no_failure_frame_are_preserved():
