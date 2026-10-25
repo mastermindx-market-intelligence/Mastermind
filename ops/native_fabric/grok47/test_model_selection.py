@@ -111,14 +111,18 @@ class GrokUpgrade(unittest.TestCase):
             refused=picker._format_pick('review',pool='cursor',requested_model='grok-4.7')
             self.assertTrue(refused.startswith('NONE reason=exact Grok Build model'))
             invalid=picker._format_pick('review',pool='grok',requested_model='grok-4.8')
-            self.assertTrue(invalid.startswith('NONE reason=unknown requested_model'))
+            self.assertEqual(invalid, 'NONE reason=requested model not admitted for selected pool/task')
+            # A refused, unadmitted model cannot reach the launch policy.
+            self.assertEqual(gate_models, ['grok-4.6', 'grok-4.7'])
 
     def test_unknown_requested_model_not_echoed_in_cli_response(self):
         picker=load('pick')
         secret_input='private-password-secret-should-never-echo'
         with patch.object(picker,'load_pools',return_value={'pools':{'grok':{}}}):
             result=picker._format_pick('review',pool='grok',requested_model=secret_input)
-        self.assertEqual(result,'NONE reason=unknown requested_model')
+        # Current reviewed native F1 strict pin contract emits a bounded typed
+        # denial rather than the older unknown-model diagnostic.
+        self.assertEqual(result, 'NONE reason=requested model not admitted for selected pool/task')
         self.assertNotIn(secret_input,result)
 
     def test_advisory_bailian_result_never_exposes_account_alias(self):
