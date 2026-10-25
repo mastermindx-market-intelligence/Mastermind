@@ -43,6 +43,10 @@ def verify(source: Path) -> None:
         raise ValueError("source_tests_digest_changed")
     if sha(BUSINESS_TEST.read_bytes()) != metadata["business_tests_sha256"]:
         raise ValueError("business_tests_digest_changed")
+    if (set(metadata.get("preimages_sha256", {})) != set(FILES)
+            or set(metadata.get("postimages_sha256", {}))
+               != {"codex_pool_policy.py", "tests/test_codex_native_profile.py"}):
+        raise ValueError("source_manifest_coverage_incomplete")
     observed = {}
     for name in FILES:
         path = source / name
@@ -51,7 +55,7 @@ def verify(source: Path) -> None:
             raise ValueError("source_file_not_regular_" + name)
         data = path.read_bytes()
         observed[name] = sha(data)
-        if name in metadata["preimages_sha256"] and observed[name] != metadata["preimages_sha256"][name]:
+        if observed[name] != metadata["preimages_sha256"][name]:
             raise ValueError("source_preimage_drift_" + name)
 
     with tempfile.TemporaryDirectory(prefix="mmx-codex-six-alias-") as folder:

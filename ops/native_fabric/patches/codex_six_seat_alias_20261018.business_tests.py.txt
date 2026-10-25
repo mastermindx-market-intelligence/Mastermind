@@ -327,3 +327,31 @@ def test_model_bound_personal_two_distinct_verified_workspaces_remain_eligible()
     first=row("C1", 90, workspace="1"*64, entitlement="personal_pro")
     second=row("C2", 80, workspace="2"*64, entitlement="personal_pro")
     assert pick([first, second]).alias == "C1"
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+@pytest.mark.parametrize("alias", ["C1", "B1", "B2"])
+@pytest.mark.parametrize("offered,requested", [
+    (frozenset({"gpt-6-luna"}), "gpt-6-luna"),
+    (frozenset({ASTRA, "gpt-6-luna"}), ASTRA),
+    (frozenset({SOL, "gpt-6.7-forged"}), SOL),
+])
+def test_public_selector_rejects_unapproved_model_catalog_even_if_claimed_qualified(
+    strategy, alias, offered, requested,
+):
+    # Direct callers can construct otherwise valid observations without the
+    # trusted native projector; never let them widen the approved model set.
+    candidate=row(alias, 99, workspace="a"*64, user="1"*64,
+                  entitlement=("personal_pro" if alias.startswith("C")
+                               else "business_premium_included"),
+                  models=offered)
+    assert pick([candidate], strategy=strategy, model=requested,
+                sticky=alias) is None
+
+
+def test_approved_native_models_still_select_with_exact_subject_binding():
+    assert pick([row("B1", 100, models=frozenset({SOL}))], model=SOL).alias == "B1"
+    assert pick([row("C1", 80, entitlement="personal_pro",
+                     models=frozenset({ASTRA}))], model=ASTRA).alias == "C1"

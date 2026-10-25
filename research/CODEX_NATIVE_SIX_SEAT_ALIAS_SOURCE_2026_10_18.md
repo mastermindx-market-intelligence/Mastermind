@@ -104,8 +104,9 @@ and member hashes, a fresh future quota horizon, active subscription headroom,
 an explicitly requested model present in its qualified model set, and an
 available broker slot. An unknown Standard tier, missing member ID, missing
 model list, or business_workspace_shared_credits class cannot qualify.
-Two aliases with an IDENTICAL (workspace, user, entitlement class) tuple are
-both excluded, without starving an unrelated eligible account. DIFFERENT
+Two aliases with an IDENTICAL subscription key (Personal: workspace;
+Business: workspace plus member) are both excluded, without starving an
+unrelated eligible account. Entitlement-class strings never split a quota. DIFFERENT
 members of the SAME Business workspace are deliberately eligible separately
 when their exact seat allowance was independently qualified. One user in
 Personal vs Business scopes stays a different quota context.
@@ -188,7 +189,12 @@ model/list read inside its existing App Server process, the original #1365
 pure project_native_account_observation is hardened to require the exact
 sanitized model_visibility shape: OBSERVED, model/list source,
 admission_granted=false, and no unknown, duplicate or malformed identifiers.
-Only the two approved Astra/Sol identifiers may survive projection. A caller
+Only the two approved Astra/Sol identifiers may survive projection. The public
+selector also rejects direct caller-supplied observations containing any model
+outside this approved pair. A legacy no-model request remains supported only
+within the incumbent four-seat path: enrolling six aliases requires an explicit
+requested model, existing owner-verified subject binding, and live native
+per-seat entitlement proof before any atomic worker reservation. A caller
 may specify a strict subset to narrow execution but cannot add a model that
 the native App Server did not return. A missing/failed native model read
 makes this projective sample ineligible; the native owner separately retains
