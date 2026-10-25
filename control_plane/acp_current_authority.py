@@ -14,6 +14,7 @@ from typing import Any
 from common.acp_continuing_authority_contract import (
     DISPATCH_AUTHORIZED,
     EVIDENCE_SCOPE,
+    MAX_OBSERVATION_BYTES,
     OBSERVATION_KEYS,
     SCHEMA,
     UNVERIFIED_JOINS,
@@ -221,42 +222,50 @@ class OriginalAcpRunController:
 
     def _retain(self, constraints: dict[str, Any]) -> dict[str, Any]:
         attempt = self._lease.attempt
+        declared_version = str(constraints.get("capability_policy_version") or "").strip().lower()
+        declared_policy = str(constraints.get("capability_policy_digest") or "").strip().lower()
+        declared_profile = str(constraints.get("execution_profile_digest") or "").strip().lower()
         bound: dict[str, Any] = {
             "constraints": _constraint_tuple(constraints),
             "profile_id": str(constraints.get("execution_profile_id") or "").strip().lower(),
             "model": str(self._spec.model or "").strip().lower(),
             "policy_hash": attempt.authority_policy_hash,
             "grant_digest": attempt.effective_grant_digest,
-            "source_version": None,
-            "source_digest": None,
-            "profile_digest": None,
+            "source_version": declared_version or None,
+            "source_digest": declared_policy or None,
+            "profile_digest": declared_profile or None,
             "auth_realm": None,
             "projection_digest": None,
             "mcp_grants": None,
             "profile_bound": False,
         }
         profile_id = bound["profile_id"]
-        if not profile_id:
+        if not profile_id or not declared_version or not declared_policy or not declared_profile:
             return bound
         try:
             registry = ExecutionCapabilityRegistry.load()
             profile = registry.resolve(profile_id)
         except CapabilityPolicyError:
             return bound
-        bound["source_version"] = registry.policy_version
-        bound["source_digest"] = registry.policy_digest
-        bound["profile_digest"] = profile.profile_digest
+        pins_match = (
+            str(registry.policy_version).strip().lower() == declared_version
+            and str(registry.policy_digest).strip().lower() == declared_policy
+            and str(profile.profile_digest).strip().lower() == declared_profile
+        )
+        if not pins_match:
+            return bound
+        if (
+            profile.execution_surface != ACP_EXECUTION_SURFACE
+            or profile.auth_realm != ACP_PROVIDER_FREE_AUTH_REALM
+        ):
+            return bound
+        try:
+            bound["projection_digest"] = profile.expected_config_digest
+        except CapabilityPolicyError:
+            return bound
         bound["auth_realm"] = profile.auth_realm
         bound["mcp_grants"] = _mcp_grants(profile)
-        if (
-            profile.execution_surface == ACP_EXECUTION_SURFACE
-            and profile.auth_realm == ACP_PROVIDER_FREE_AUTH_REALM
-        ):
-            try:
-                bound["projection_digest"] = profile.expected_config_digest
-                bound["profile_bound"] = True
-            except CapabilityPolicyError:
-                bound["profile_bound"] = False
+        bound["profile_bound"] = True
         return bound
 
     def _require_correlation(self, parsed: dict[str, Any]) -> None:
@@ -436,10 +445,13 @@ class OriginalAcpRunController:
         retained_constraints = self._bound["constraints"]
         drifted = fresh_constraints != retained_constraints
         profile_id = self._bound["profile_id"]
-        if not profile_id or not self._bound["profile_bound"]:
+        declared_version = self._bound["source_version"]
+        declared_policy = self._bound["source_digest"]
+        declared_profile = self._bound["profile_digest"]
+        if not profile_id:
             state = "NOT_CURRENT"
             facts["source"] = _state(state, category="incumbent_registry")
-            facts["profile"] = _state(state, category="incumbent_registry", profile_id=profile_id or None)
+            facts["profile"] = _state(state, category="incumbent_registry", profile_id=None)
             facts["realm"] = _state(state, category="incumbent_registry")
             facts["mcp_grant"] = _state(state, category="incumbent_registry", grants=None)
             return
@@ -455,8 +467,10 @@ class OriginalAcpRunController:
             return
         source = (
             "CURRENT"
-            if registry.policy_version == self._bound["source_version"]
-            and registry.policy_digest == self._bound["source_digest"]
+            if declared_version
+            and declared_policy
+            and str(registry.policy_version).strip().lower() == declared_version
+            and str(registry.policy_digest).strip().lower() == declared_policy
             else "NOT_CURRENT"
         )
         grants = _mcp_grants(profile)
@@ -471,10 +485,13 @@ class OriginalAcpRunController:
             surface_ok = False
         profile_state = (
             "CURRENT"
-            if not drifted
+            if source == "CURRENT"
+            and self._bound["profile_bound"]
+            and not drifted
             and surface_ok
-            and profile.profile_id == profile_id
-            and profile.profile_digest == self._bound["profile_digest"]
+            and str(profile.profile_id).strip().lower() == profile_id
+            and declared_profile
+            and str(profile.profile_digest).strip().lower() == declared_profile
             and projection == self._bound["projection_digest"]
             else "NOT_CURRENT"
         )
@@ -582,6 +599,7 @@ class OriginalAcpRunController:
             }
         return {
             "category": "expected_not_live",
+            "source_policy_version": self._bound["source_version"],
             "source_policy_digest": self._bound["source_digest"],
             "profile_id": self._bound["profile_id"] or None,
             "profile_digest": self._bound["profile_digest"],
@@ -599,6 +617,10 @@ class OriginalAcpRunController:
         correlation = parsed["child_correlation"]
         return {
             "category": "child_supplied",
+            "invocation_id": parsed["invocation_id"],
+            "raw_tool": parsed["raw_tool"],
+            "argument_digest": parsed["argument_digest"],
+            "request_digest": parsed["request_digest"],
             "connection_id": correlation["connection_id"],
             "catalog_digest": correlation["catalog_digest"],
             "definition_digest": correlation["definition_digest"],
@@ -606,6 +628,8 @@ class OriginalAcpRunController:
             "attests_liveness": False,
             "attests_session": False,
             "attests_connection": False,
+            "attests_arguments": False,
+            "attests_tool": False,
             "attests_observation": False,
         }
 
@@ -654,6 +678,12 @@ class OriginalAcpRunController:
             return _output_refused()
         if token and (token in encoded or token in repr(self) or token in str(observation)):
             return _output_refused()
+        try:
+            size = len(encoded.encode("utf-8"))
+        except UnicodeError:
+            return _output_refused()
+        if size > MAX_OBSERVATION_BYTES:
+            return _output_unavailable("OUTPUT_CEILING")
         return observation
 
 
@@ -669,7 +699,7 @@ def _disposition(facts: dict[str, dict[str, Any]], required: tuple[str, ...]) ->
     return "CURRENT", "OK"
 
 
-def _output_refused() -> dict[str, Any]:
+def _output_unavailable(reason: str) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "disposition": "UNAVAILABLE",
@@ -678,10 +708,14 @@ def _output_refused() -> dict[str, Any]:
         "phase": None,
         "invocation_id": None,
         "observed_at_ms": None,
-        "reason_code": "OUTPUT_REFUSED",
+        "reason_code": reason,
         "subject": None,
         "controller_observed": None,
         "expected_bindings": None,
         "child_correlation": None,
         "unverified_joins": list(UNVERIFIED_JOINS),
     }
+
+
+def _output_refused() -> dict[str, Any]:
+    return _output_unavailable("OUTPUT_REFUSED")

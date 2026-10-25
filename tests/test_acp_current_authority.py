@@ -13,9 +13,14 @@ from types import SimpleNamespace
 import pytest
 
 from common.acp_continuing_authority_contract import (
+    MAX_OBSERVATION_BYTES,
     MAX_REQUEST_BYTES,
     SCHEMA,
     AcpContinuingAuthorityContractError,
+    canonical_request_bytes,
+    canonical_request_digest,
+    parse_observation_request,
+    request_correlation_material,
 )
 from control_plane.acp_current_authority import OriginalAcpRunController
 from control_plane.executive_agent_capabilities import (
@@ -48,7 +53,7 @@ def _process(attempt_id: str, *, pid: int = 4242, base_sha: str = "c" * 40) -> W
     )
 
 
-def _world(tmp_path, *, profile_id: str = PROFILE_ID, model: str = "fixture-model"):
+def _world(tmp_path, *, profile_id: str = PROFILE_ID, model: str = "fixture-model", pins: dict | None = None):
     registry = ExecutionCapabilityRegistry.load()
     profile = registry.resolve(profile_id)
     clock = [1_800_000_000_000]
@@ -61,6 +66,8 @@ def _world(tmp_path, *, profile_id: str = PROFILE_ID, model: str = "fixture-mode
         "capability_policy_digest": registry.policy_digest,
         "adapter_id": "acp-agent",
     }
+    if pins:
+        metadata.update(pins)
     runtime.workers.register_worker(
         "acp-01", provider="codex", account_label="inert-acp-currentness-fixture",
         worker_type="acp-agent", capabilities=["research"],
@@ -123,7 +130,16 @@ def _request(controller: OriginalAcpRunController, **overrides) -> bytes:
             body[key].update(value)
         else:
             body[key] = value
-    return json.dumps(body, separators=(",", ":")).encode("utf-8")
+    body["request_digest"] = canonical_request_digest(request_correlation_material(body))
+    return json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _assert_token_free(exc: BaseException) -> None:
+    assert isinstance(exc, AcpContinuingAuthorityContractError)
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
+    visible = " ".join((str(exc), repr(exc), repr(tuple(exc.args)), repr(getattr(exc, "object", None))))
+    assert SENTINEL not in visible
 
 
 def _ownership(runtime: Runtime, attempt_id: str):
@@ -592,3 +608,210 @@ def test_registry_refusal_is_not_a_positive_cache(tmp_path, monkeypatch):
     assert second["reason_code"] == "SOURCE_UNAVAILABLE"
     assert second is not first
     assert second["controller_observed"]["profile"]["state"] == "UNAVAILABLE"
+
+
+def test_closed_parser_rejects_phase_surrogate_and_escaped_token(tmp_path):
+    world = _world(tmp_path)
+    controller = OriginalAcpRunController(world.runtime, world.lease, world.spec)
+    calls = {"n": 0}
+    original = world.runtime.attempts._leased_row
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    world.runtime.attempts._leased_row = wrapped
+    sentinel = OriginalAcpRunController(
+        world.runtime, AttemptLease(attempt=world.lease.attempt, lease_token=SENTINEL), world.spec
+    )
+
+    def refuse(raw: bytes, code: str) -> None:
+        with pytest.raises(AcpContinuingAuthorityContractError) as caught:
+            parse_observation_request(raw, forbidden_exact=SENTINEL)
+        _assert_token_free(caught.value)
+        assert caught.value.code == code
+        with pytest.raises(AcpContinuingAuthorityContractError) as observed:
+            sentinel.observe(raw)
+        _assert_token_free(observed.value)
+        assert observed.value.code == code
+
+    refuse(_request(controller).replace(b'"phase":"startup"', b'"phase":{}'), "TYPE_INVALID")
+    refuse(
+        _request(controller).replace(b'"phase":"startup"', b'"phase":{"x":"startup"}'),
+        "TYPE_INVALID",
+    )
+    refuse(
+        _request(controller).replace(b'"raw_tool":"workspace.read"', b'"raw_tool":"\\uD800"'),
+        "FRAME_INVALID",
+    )
+    escaped = "".join(f"\\u{ord(char):04x}" for char in SENTINEL).encode()
+    refuse(
+        _request(controller).replace(b'"raw_tool":"workspace.read"', b'"raw_tool":"' + escaped + b'"'),
+        "TOKEN_REJECTED",
+    )
+    refuse(
+        _request(controller).replace(
+            b'"raw_tool":"workspace.read"',
+            b'"raw_tool":"' + escaped + b'\\uD800"',
+        ),
+        "TOKEN_REJECTED",
+    )
+    with pytest.raises(AcpContinuingAuthorityContractError) as invalid:
+        parse_observation_request(b'{"phase":"\xff"}')
+    assert invalid.value.code == "FRAME_INVALID"
+    assert invalid.value.__cause__ is None and invalid.value.__context__ is None
+    oversized = bytearray(b"{" + b" " * MAX_REQUEST_BYTES)
+    with pytest.raises(AcpContinuingAuthorityContractError) as too_large:
+        parse_observation_request(oversized)
+    assert too_large.value.code == "FRAME_TOO_LARGE"
+    parsed = parse_observation_request(bytearray(_request(controller)))
+    assert parsed["phase"] == "startup"
+    deep = b"[" * 2000 + b"]" * 2000
+    assert len(deep) <= MAX_REQUEST_BYTES
+    with pytest.raises(AcpContinuingAuthorityContractError) as deep_frame:
+        controller.observe(deep)
+    assert deep_frame.value.code in {"TYPE_INVALID", "COLLECTION_REFUSED", "NESTING_REFUSED", "FRAME_INVALID"}
+    nested = b'{"a":' * 80 + b"1" + b"}" * 80
+    assert len(nested) <= MAX_REQUEST_BYTES
+    with pytest.raises(AcpContinuingAuthorityContractError) as nested_frame:
+        parse_observation_request(nested)
+    assert nested_frame.value.code in {"NESTING_REFUSED", "FRAME_INVALID"}
+    assert calls["n"] == 0
+
+
+def test_request_digest_binds_tool_argument_and_invocation(tmp_path):
+    world = _world(tmp_path)
+    controller = OriginalAcpRunController(world.runtime, world.lease, world.spec)
+    raw = _request(controller)
+    first = controller.observe(raw)
+    material = request_correlation_material(json.loads(raw))
+    canonical = canonical_request_bytes(material)
+    assert not canonical.endswith(b"\n")
+    assert list(json.loads(canonical)) == sorted(json.loads(canonical))
+    assert first["child_correlation"]["request_digest"] == canonical_request_digest(material)
+    assert first["child_correlation"]["raw_tool"] == "workspace.read"
+    assert first["child_correlation"]["argument_digest"] == "a" * 64
+    assert first["child_correlation"]["invocation_id"] == "inv-original-1"
+    assert first["child_correlation"]["category"] == "child_supplied"
+    assert first["child_correlation"]["attests_arguments"] is False
+    assert first["child_correlation"]["attests_tool"] is False
+    assert first["dispatch_authorized"] is False
+    unicode_pin = dict(material)
+    unicode_pin["raw_tool"] = "café"
+    unicode_bytes = canonical_request_bytes(unicode_pin)
+    assert "café".encode() in unicode_bytes
+    assert b"\\u00e9" not in unicode_bytes
+    escaped = raw.replace(b'"raw_tool":"workspace.read"', b'"raw_tool":"work\\u0073pace.read"')
+    spaced = json.dumps(json.loads(raw), indent=2).encode()
+    body = json.loads(raw)
+    reversed_keys = json.dumps({key: body[key] for key in reversed(tuple(body))}, ensure_ascii=False).encode()
+    for equivalent in (escaped, spaced, reversed_keys):
+        again = controller.observe(equivalent)
+        assert again["child_correlation"]["request_digest"] == first["child_correlation"]["request_digest"]
+        assert again["dispatch_authorized"] is False
+    calls = {"n": 0}
+    original = world.runtime.attempts._leased_row
+
+    def wrapped(*args, **kwargs):
+        calls["n"] += 1
+        return original(*args, **kwargs)
+
+    world.runtime.attempts._leased_row = wrapped
+    stale = raw.replace(b'"raw_tool":"workspace.read"', b'"raw_tool":"workspace.other"')
+    with pytest.raises(AcpContinuingAuthorityContractError) as mismatch:
+        controller.observe(stale)
+    assert mismatch.value.code == "DIGEST_MISMATCH"
+    assert calls["n"] == 0
+    other = controller.observe(_request(controller, argument_digest="e" * 64))
+    assert other["observed_at_ms"] == first["observed_at_ms"]
+    assert other["invocation_id"] == first["invocation_id"]
+    assert other["child_correlation"]["argument_digest"] == "e" * 64
+    assert other["child_correlation"]["request_digest"] != first["child_correlation"]["request_digest"]
+    assert other["child_correlation"]["attests_arguments"] is False
+    assert other["dispatch_authorized"] is False
+    assert len(json.dumps(first, ensure_ascii=False).encode()) <= MAX_OBSERVATION_BYTES
+
+
+def test_declared_registry_pins_are_not_adopted(tmp_path):
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve(PROFILE_ID)
+    cases = (
+        ("version", {"capability_policy_version": "stale-generation-a"}),
+        ("policy", {"capability_policy_digest": "a" * 64}),
+        ("profile", {"execution_profile_digest": "f" * 64}),
+    )
+    for name, pins in cases:
+        world = _world(tmp_path / name, pins=pins)
+        controller = OriginalAcpRunController(world.runtime, world.lease, world.spec)
+        observation = controller.observe(_request(controller))
+        text = _text(observation)
+        assert observation["disposition"] == "NOT_CURRENT"
+        assert observation["dispatch_authorized"] is False
+        assert observation["controller_observed"]["profile"]["state"] == "NOT_CURRENT"
+        assert observation["controller_observed"]["profile"].get("profile_digest") is None
+        if name == "version":
+            assert observation["reason_code"] == "SOURCE_NOT_CURRENT"
+            assert observation["expected_bindings"]["source_policy_version"] == "stale-generation-a"
+            assert controller._bound["source_version"] == "stale-generation-a"
+            assert registry.policy_version not in text
+            assert observation["controller_observed"]["source"].get("policy_version") is None
+        elif name == "policy":
+            assert observation["reason_code"] == "SOURCE_NOT_CURRENT"
+            assert observation["expected_bindings"]["source_policy_digest"] == "a" * 64
+            assert controller._bound["source_digest"] == "a" * 64
+            assert registry.policy_digest not in text
+            assert observation["controller_observed"]["source"].get("policy_digest") is None
+        else:
+            assert observation["reason_code"] == "PROFILE_NOT_CURRENT"
+            assert observation["controller_observed"]["source"]["state"] == "CURRENT"
+            assert observation["expected_bindings"]["profile_digest"] == "f" * 64
+            assert controller._bound["profile_digest"] == "f" * 64
+            assert profile.profile_digest not in text
+
+
+def test_runtime_read_failure_after_current_is_unavailable(tmp_path, monkeypatch):
+    world = _world(tmp_path)
+    controller = OriginalAcpRunController(world.runtime, world.lease, world.spec)
+    first = controller.observe(_request(controller))
+    assert first["disposition"] == "CURRENT"
+    before = _ownership(world.runtime, world.lease.attempt.attempt_id)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("synthetic runtime read failure")
+
+    monkeypatch.setattr(world.runtime.attempts, "_leased_row", boom)
+    second = controller.observe(_request(controller))
+    after = _ownership(world.runtime, world.lease.attempt.attempt_id)
+    assert second is not first
+    assert second["disposition"] == "UNAVAILABLE"
+    assert second["reason_code"] == "OWNER_UNAVAILABLE"
+    assert second["dispatch_authorized"] is False
+    assert second["controller_observed"]["lease"]["state"] == "UNAVAILABLE"
+    assert "synthetic runtime read failure" not in _text(second)
+    assert before[0] == after[0]
+    assert before[1] == after[1]
+    assert before[2] == after[2]
+    assert before[3] == after[3]
+
+
+def test_output_ceiling_drops_the_positive_observation(tmp_path, monkeypatch):
+    world = _world(tmp_path)
+    controller = OriginalAcpRunController(world.runtime, world.lease, world.spec)
+    first = controller.observe(_request(controller))
+    assert first["disposition"] == "CURRENT"
+    original = OriginalAcpRunController._child
+
+    def huge(self, parsed):
+        body = original(self, parsed)
+        body["padding"] = "x" * (MAX_OBSERVATION_BYTES + 1)
+        return body
+
+    monkeypatch.setattr(OriginalAcpRunController, "_child", huge)
+    second = controller.observe(_request(controller))
+    assert second["disposition"] == "UNAVAILABLE"
+    assert second["reason_code"] == "OUTPUT_CEILING"
+    assert second["dispatch_authorized"] is False
+    assert second["controller_observed"] is None
+    assert second["child_correlation"] is None
+    assert second["subject"] is None
+    assert "CURRENT" not in _text(second["controller_observed"])

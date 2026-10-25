@@ -13,11 +13,17 @@ Four new files:
 - `tests/test_acp_current_authority.py` — test-owned Runtime proof
 - this note
 
-The controller retains the actual `AttemptLease`, `WorkerLaunchSpec`, and, when the same original start has one, the original `WorkerProcessRef`. The lease token stays on that `AttemptLease`. It is not placed in `repr`, contract errors, or the observation. A request that contains the token is refused before parsing completes.
+The controller retains the actual `AttemptLease`, `WorkerLaunchSpec`, and, when the same original start has one, the original `WorkerProcessRef`. The lease token stays on that `AttemptLease`. It is not placed in `repr`, contract errors, or the observation. A literal token is refused from the raw bytes and the decoded text. After JSON decoding, every key and string value is scanned again, so a `\uXXXX` encoding of the token is refused before any Runtime read. Contract refusals keep only a closed code. Their args, repr, object, cause, and context do not retain the supplied input. A lone surrogate is a closed `FRAME_INVALID`, including when it shares a string with an escaped token.
+
+The request byte length is checked before a `bytearray` is copied. `phase` is required to be a string before it is tested for membership. Duplicate keys, non-finite numbers, unknown fields, wrong types, excess length, nested objects below one level, collections, and decoder failures are closed refusals. A deep frame inside the 4096-byte ceiling returns one of those refusals.
+
+`request_digest` is SHA-256, lowercase hex, of the canonical UTF-8 JSON for every validated field except `request_digest`. Canonical form uses sorted keys, compact comma and colon separators, `ensure_ascii` false, `allow_nan` false, and no terminal newline. The material is `schema`, `phase`, `invocation_id`, `raw_tool`, `argument_digest`, `original_identity`, and the complete `child_correlation`. The incoming digest is verified before Runtime. The observation echoes that verified digest with the tool, argument digest, and invocation id under `child_correlation`, category `child_supplied`. Those fields do not attest actual arguments, a native tool, a connection, or a dispatch authorization. There is no replay cache, registry, or TTL. Two encodings of the same closed request share one digest. A stale digest after any bound-field change is `DIGEST_MISMATCH`.
+
+A positive observation must fit in 8192 UTF-8 bytes. A larger closed observation is replaced by a static `UNAVAILABLE` body with reason `OUTPUT_CEILING`, null subject and facts, and `dispatch_authorized` false. The positive body is not truncated.
 
 Every `observe` call does all of the following:
 
-1. Parse the closed request under a 4096-byte ceiling, rejecting duplicate keys, non-finite numbers, unknown fields, wrong types, excess length, nested objects below one level, and collections.
+1. Parse and verify the closed request, including the canonical digest and the token scan above.
 2. Compare the request's original identity, including the child-reported fence, to the retained attachment. A mismatch is correlation failure. The request does not choose the Runtime row, the SQL, the profile, the source, or the target.
 3. Open one controller-owned `Runtime.store.transaction()` and read a fresh `store.now_ms()`.
 4. Call `AttemptRegistry._leased_row` with the retained attempt, fence, and token, then `current_authority_snapshot` in that same transaction. Startup and discovery pass `CLAIMED`. Dispatch passes `RUNNING` and `CHECKPOINTED`.
@@ -25,8 +31,10 @@ Every `observe` call does all of the following:
    - `ExecutiveAuthorityPolicy.load` and `authorize`, then `validate_effective_grant`
    - `ExecutionCapabilityRegistry.load` and `resolve`, then the profile's ACP projection digest
    - `_capacity_matches_route` for the retained worker and quota
-6. Compare those fresh values to the generation retained at attachment. A changed policy, profile, realm, MCP grant, model, or route is `NOT_CURRENT`. The new value is not adopted.
-7. Return one observation and discard it. The next call reads again.
+6. Compare the loaded registry `policy_version`, `policy_digest`, and resolved `profile_digest` with the original Job's declared `capability_policy_version`, `capability_policy_digest`, and `execution_profile_digest`. Those declared pins are the retained expectations. Job and quota can agree on generation A while the loaded registry is generation B; that is `NOT_CURRENT`, and B is not copied into the expected bindings. The same declared expectations are checked again on every observation. A later drift of those pins is also `NOT_CURRENT`.
+7. Return one observation and discard it. The next call reads again. A failure at the Runtime transaction or leased-row read is a new `UNAVAILABLE` result. It does not reuse the previous positive and it does not include the exception text.
+
+`Runtime.store.transaction` takes a SQLite `BEGIN IMMEDIATE` writer lock. This observation calls the authority and capability owners, which read policy files, before that transaction commits. The lock therefore covers that existing policy IO. This repair does not add a Runtime owner and does not move that IO. A later per-tool transport has to treat that locked duration as a limit of the current store before it composes another query into the same transaction.
 
 MCP `grant_digest` values come from `McpServerGrant` on the resolved profile. Orchestration `effective_grant_digest` comes from the Attempt grant owner. They are separate fields. A role-null Attempt has a null orchestration digest and can still report MCP grant digests.
 
@@ -38,7 +46,7 @@ The observation states are only `CURRENT`, `NOT_CURRENT`, and `UNAVAILABLE`.
 | --- | --- |
 | `controller_observed` | Facts read from Runtime or from an incumbent policy, registry, grant, or route owner on this call |
 | `expected_bindings` | Identities retained at attachment. They are expectations, not liveness, artifact, session, or connection proof |
-| `child_correlation` | Connection, catalog, and definition values supplied by the child, plus the reported fence. Echo does not attest an observation |
+| `child_correlation` | Child-supplied connection, catalog, definition, invocation, raw tool, argument digest, verified request digest, and reported fence. Echo does not attest arguments, a tool execution, a connection, or an observation |
 | `unverified_joins` | Native process liveness, artifact ownership, session ownership, child connection, and launch-attestation liveness |
 
 Constructor arguments and request fields do not attest process liveness, artifacts, a session, or a connection. A persisted pid match means the stored identity equals the retained expectation. It does not mean the process is alive.
@@ -78,4 +86,4 @@ A future positive decision, if one is ever authorized, linearizes authorization 
 
 ## Preservation
 
-v1 broker and v1 admission behavior are unchanged. This slice does not edit `#1856`'s files or `#1790`'s held subject, and it is not a review or a retry of either. No production, provider, install, credential, or account-policy action is taken.
+v1 broker and v1 admission behavior are unchanged. This slice does not edit `#1856`'s files or `#1790`'s held subject, and it is not a review or a retry of either. No production, provider, install, credential, or account-policy action is taken. The FIX1 repair stays inside the same four files. It does not activate a transport and it does not satisfy full P3.

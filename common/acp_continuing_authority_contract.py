@@ -6,16 +6,19 @@ token, authorize a tool, open a socket, or arm dispatch. The schema is
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import math
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, NoReturn
 
 SCHEMA = "mastermind.acp_control_currentness/v1"
 EVIDENCE_SCOPE = "controller_evidence_only"
 MAX_REQUEST_BYTES = 4096
 MAX_STRING_BYTES = 256
 MAX_OBJECT_DEPTH = 1
+MAX_OBSERVATION_BYTES = 8192
 STATES = frozenset({"CURRENT", "NOT_CURRENT", "UNAVAILABLE"})
 PHASES = frozenset({"startup", "discovery", "dispatch"})
 DISPATCH_AUTHORIZED = False
@@ -70,6 +73,7 @@ ERROR_CODES = frozenset({
     "ATTACHMENT_IDENTITY_MISMATCH",
     "COLLECTION_REFUSED",
     "CORRELATION_MISMATCH",
+    "DIGEST_MISMATCH",
     "DUPLICATE_KEY",
     "FRAME_INVALID",
     "FRAME_TOO_LARGE",
@@ -101,6 +105,19 @@ class AcpContinuingAuthorityContractError(ValueError):
         return f"AcpContinuingAuthorityContractError({self.code!r})"
 
 
+def _closed(code: str) -> NoReturn:
+    """Raise a contract refusal that retains no input, cause, or context."""
+
+    error = AcpContinuingAuthorityContractError(code)
+    try:
+        raise error from None
+    except AcpContinuingAuthorityContractError as raised:
+        raised.__context__ = None
+        raised.__cause__ = None
+        raised.__suppress_context__ = True
+        raise
+
+
 def _reject_nonfinite(_value: str) -> Any:
     raise AcpContinuingAuthorityContractError("NONFINITE")
 
@@ -116,28 +133,39 @@ def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _walk(value: Any, depth: int) -> None:
+def _check_text(value: str, forbidden: str | None) -> None:
+    if forbidden and forbidden in value:
+        _closed("TOKEN_REJECTED")
+    try:
+        size = len(value.encode("utf-8"))
+    except UnicodeError:
+        _closed("FRAME_INVALID")
+    if size > MAX_STRING_BYTES:
+        _closed("LENGTH_EXCEEDED")
+
+
+def _walk(value: Any, depth: int, forbidden: str | None) -> None:
     if isinstance(value, dict):
         if depth > MAX_OBJECT_DEPTH:
-            raise AcpContinuingAuthorityContractError("NESTING_REFUSED")
-        for item in value.values():
-            _walk(item, depth + 1)
+            _closed("NESTING_REFUSED")
+        for key, item in value.items():
+            if not isinstance(key, str):
+                _closed("TYPE_INVALID")
+            _check_text(key, forbidden)
+            _walk(item, depth + 1, forbidden)
         return
     if isinstance(value, (list, tuple)):
-        raise AcpContinuingAuthorityContractError("COLLECTION_REFUSED")
-    if isinstance(value, bool) or value is None:
-        return
-    if isinstance(value, int):
+        _closed("COLLECTION_REFUSED")
+    if isinstance(value, bool) or value is None or isinstance(value, int):
         return
     if isinstance(value, str):
-        if len(value.encode("utf-8")) > MAX_STRING_BYTES:
-            raise AcpContinuingAuthorityContractError("LENGTH_EXCEEDED")
+        _check_text(value, forbidden)
         return
     if isinstance(value, float):
         if not math.isfinite(value):
-            raise AcpContinuingAuthorityContractError("NONFINITE")
-        raise AcpContinuingAuthorityContractError("TYPE_INVALID")
-    raise AcpContinuingAuthorityContractError("TYPE_INVALID")
+            _closed("NONFINITE")
+        _closed("TYPE_INVALID")
+    _closed("TYPE_INVALID")
 
 
 def _exact_keys(value: Mapping[str, Any], expected: frozenset[str]) -> None:
@@ -168,26 +196,88 @@ def _fence(value: Any) -> int:
     return value
 
 
+def request_correlation_material(parsed: Mapping[str, Any]) -> dict[str, Any]:
+    """Closed digest material. ``request_digest`` is excluded."""
+
+    identity = parsed["original_identity"]
+    correlation = parsed["child_correlation"]
+    return {
+        "argument_digest": parsed["argument_digest"],
+        "child_correlation": {
+            "catalog_digest": correlation["catalog_digest"],
+            "connection_id": correlation["connection_id"],
+            "definition_digest": correlation["definition_digest"],
+        },
+        "invocation_id": parsed["invocation_id"],
+        "original_identity": {
+            "attempt_id": identity["attempt_id"],
+            "fence_generation": identity["fence_generation"],
+            "job_id": identity["job_id"],
+            "quota_class": identity["quota_class"],
+            "worker_id": identity["worker_id"],
+        },
+        "phase": parsed["phase"],
+        "raw_tool": parsed["raw_tool"],
+        "schema": parsed["schema"],
+    }
+
+
+def canonical_request_bytes(material: Mapping[str, Any]) -> bytes:
+    """UTF-8 canonical JSON: sorted keys, compact, ensure_ascii false, no newline."""
+
+    try:
+        encoded = json.dumps(
+            material,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError, UnicodeError):
+        _closed("FRAME_INVALID")
+    if encoded.endswith("\n"):
+        _closed("FRAME_INVALID")
+    try:
+        return encoded.encode("utf-8")
+    except UnicodeError:
+        _closed("FRAME_INVALID")
+
+
+def canonical_request_digest(material: Mapping[str, Any]) -> str:
+    return hashlib.sha256(canonical_request_bytes(material)).hexdigest()
+
+
 def parse_observation_request(
-    raw: bytes,
+    raw: bytes | bytearray,
     *,
     forbidden_exact: str | None = None,
 ) -> dict[str, Any]:
     """Parse one closed request. ``forbidden_exact`` is rejected, never echoed."""
 
-    if not isinstance(raw, (bytes, bytearray)):
-        raise AcpContinuingAuthorityContractError("TYPE_INVALID")
-    payload = bytes(raw)
-    if len(payload) > MAX_REQUEST_BYTES:
-        raise AcpContinuingAuthorityContractError("FRAME_TOO_LARGE")
-    if forbidden_exact and forbidden_exact.encode("utf-8") in payload:
-        raise AcpContinuingAuthorityContractError("TOKEN_REJECTED")
+    if type(raw) is bytearray:
+        if len(raw) > MAX_REQUEST_BYTES:
+            _closed("FRAME_TOO_LARGE")
+        payload = bytes(raw)
+    elif type(raw) is bytes:
+        if len(raw) > MAX_REQUEST_BYTES:
+            _closed("FRAME_TOO_LARGE")
+        payload = raw
+    else:
+        _closed("TYPE_INVALID")
+    forbidden = forbidden_exact if type(forbidden_exact) is str and forbidden_exact else None
+    if forbidden is not None:
+        try:
+            forbidden_bytes = forbidden.encode("utf-8")
+        except UnicodeError:
+            forbidden_bytes = b""
+        if forbidden_bytes and forbidden_bytes in payload:
+            _closed("TOKEN_REJECTED")
     try:
         text = payload.decode("utf-8")
-    except UnicodeError as exc:
-        raise AcpContinuingAuthorityContractError("FRAME_INVALID") from None
-    if forbidden_exact and forbidden_exact in text:
-        raise AcpContinuingAuthorityContractError("TOKEN_REJECTED")
+    except UnicodeError:
+        _closed("FRAME_INVALID")
+    if forbidden and forbidden in text:
+        _closed("TOKEN_REJECTED")
     try:
         document = json.loads(
             text,
@@ -195,16 +285,21 @@ def parse_observation_request(
             parse_constant=_reject_nonfinite,
             parse_float=_reject_nonfinite,
         )
-    except AcpContinuingAuthorityContractError:
+    except AcpContinuingAuthorityContractError as error:
+        error.__context__ = None
+        error.__cause__ = None
+        error.__suppress_context__ = True
         raise
-    except (UnicodeError, json.JSONDecodeError, ValueError):
-        raise AcpContinuingAuthorityContractError("FRAME_INVALID") from None
+    except (UnicodeError, json.JSONDecodeError, ValueError, RecursionError):
+        _closed("FRAME_INVALID")
     if not isinstance(document, dict):
-        raise AcpContinuingAuthorityContractError("TYPE_INVALID")
-    _walk(document, 0)
+        _closed("TYPE_INVALID")
+    _walk(document, 0, forbidden)
     _exact_keys(document, REQUEST_KEYS)
-    if document["schema"] != SCHEMA or document["phase"] not in PHASES:
-        raise AcpContinuingAuthorityContractError("TYPE_INVALID")
+    phase = document["phase"]
+    schema = document["schema"]
+    if type(schema) is not str or schema != SCHEMA or type(phase) is not str or phase not in PHASES:
+        _closed("TYPE_INVALID")
     identity = document["original_identity"]
     correlation = document["child_correlation"]
     if not isinstance(identity, dict) or not isinstance(correlation, dict):
@@ -231,4 +326,9 @@ def parse_observation_request(
             "definition_digest": _digest(correlation["definition_digest"]),
         },
     }
+    if not hmac.compare_digest(
+        canonical_request_digest(request_correlation_material(parsed)),
+        parsed["request_digest"],
+    ):
+        _closed("DIGEST_MISMATCH")
     return parsed
