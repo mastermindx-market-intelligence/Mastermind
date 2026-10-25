@@ -29,6 +29,7 @@ def _request():
         question="Which architecture should be built?",
         evidence_brief="Two documented designs conflict.",
         source_refs=("https://github.com/example/repo/pull/10",),
+        frontier_witness="materially conflicting architecture contracts across products",
         max_output_tokens=2048,
     )
 
@@ -59,6 +60,7 @@ def test_paid_route_selection_carries_receipt_but_not_api_execution_authority():
     emitted = []
     principal = FableApiPrincipal(
         router=router, decision=decision,
+        bound_root_id="source-root", bound_attempt_id="source-attempt",
         reserve=lambda *_: emitted.append("reserve"),
         credential_loader=lambda: emitted.append("credential"),
         send=lambda *_: emitted.append("provider"),
