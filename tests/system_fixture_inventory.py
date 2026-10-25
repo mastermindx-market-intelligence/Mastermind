@@ -61,9 +61,9 @@ def collect():
                 for entry in entries:
                     if time.monotonic()-started>5:incomplete('TIME_LIMIT');return
                     if value['nodes_seen']>=MAX_NODES:incomplete('NODE_LIMIT');return
+                    value['nodes_seen']+=1
                     name=parent_name+'/'+entry.name if parent_name else entry.name
                     if not relative_name(name):incomplete('UNREPRESENTABLE_NAME');continue
-                    value['nodes_seen']+=1
                     try:info=entry.stat(follow_symlinks=False)
                     except OSError:
                         record(name,'UNKNOWN',['METADATA_REFUSED']);incomplete('METADATA_UNAVAILABLE');continue

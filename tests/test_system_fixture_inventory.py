@@ -158,3 +158,14 @@ def test_time_limit_is_explicitly_incomplete(tmp_path,monkeypatch):
         with monkeypatch.context()as patch:
             patch.setattr(m,'time',SimpleNamespace(monotonic=lambda:next(clock)));value=m.collect()
     assert not value['complete']and 'TIME_LIMIT'in value['reasons']
+
+
+
+def test_unrepresentable_entries_still_consume_the_node_budget(tmp_path,monkeypatch):
+    with synthetic_root(tmp_path,monkeypatch)as(library,opened):
+        for number in range(8):(library/('bad\n'+str(number)+PRIVATE)).write_bytes(b'never read')
+        with monkeypatch.context()as patch:
+            patch.setattr(m,'MAX_NODES',3);value=m.collect()
+    assert value['nodes_seen']==3 and not value['complete']
+    assert set(value['reasons'])=={'UNREPRESENTABLE_NAME','NODE_LIMIT'}
+    assert value['records']==[]and PRIVATE not in m.encode(value)
