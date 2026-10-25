@@ -194,7 +194,7 @@ def test_runtime_requires_dedicated_socket_path_and_exact_executive_peer(
     runtime = _runtime()
     token_file = _token_file(tmp_path)
     assert runtime.AGENT_RELAY_SOCKET_PATH == Path(
-        "/var/run/mastermind-agent-relay/agent-relay.sock"
+        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
     )
 
     for socket_path, peer_uids in (

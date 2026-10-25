@@ -157,7 +157,9 @@ def test_closed_request_preserves_original_identity_and_distinct_forward_digest(
 
 
 def test_production_broker_hook_routes_active_policy_to_exact_private_factory(prepared, monkeypatch):
-    constructor = Mock(return_value=S())
+    # This seam stubs construction only; a weak-referenceable mock preserves
+    # the production owner-lifetime registry contract without authenticating it.
+    constructor = Mock(return_value=Mock())
     monkeypatch.setattr(broker, 'PrivilegedActionBroker', constructor)
     listener = Mock()
     listener.accept.side_effect = TimeoutError
@@ -187,7 +189,9 @@ def _break_optional_forward_import(monkeypatch, error):
 def test_production_startup_missing_optional_module_keeps_ordinary_broker(monkeypatch):
     name = 'ops.executive_os.provider_incident_forward'
     _break_optional_forward_import(monkeypatch, ModuleNotFoundError(name, name=name))
-    constructor = Mock(return_value=S())
+    # This seam stubs construction only; a weak-referenceable mock preserves
+    # the production owner-lifetime registry contract without authenticating it.
+    constructor = Mock(return_value=Mock())
     monkeypatch.setattr(broker, 'PrivilegedActionBroker', constructor)
     listener = Mock()
     listener.accept.side_effect = TimeoutError

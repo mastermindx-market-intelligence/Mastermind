@@ -971,8 +971,6 @@ def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None
     pins = {
         "tests/test_executive_runtime_bounded_acquisition.py": 1,
         "tests/test_mastermind_window_reader_static_fences.py": 1,
-        "tests/test_capacity_host_artifacts.py": 1,
-        "tests/test_trend_persistence_walkforward.py": 0,
         "tests/test_market_view.py": 1,
         "tests/test_product_acceptance_original_selector.py": 1,
         "tests/test_executive_os_phase1fc.py": 2,

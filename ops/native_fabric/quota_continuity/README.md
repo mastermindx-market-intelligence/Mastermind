@@ -19,9 +19,10 @@ proof/installation operations remain held and are not used as this patch's tests
 
 ## Candidate behavior
 
-* The current attempt emits bounded typed provider diagnostics from CLI-owned
-  fields. Assistant prose, stderr text, tool results and private reasoning are
-  not quota classification inputs.
+* Typed provider diagnostics come from CLI-owned fields. Assistant prose,
+  stderr, tool results and private reasoning never establish provider HTTP
+  status or measured usage. Qwen's existing local classifier is separately
+  labeled policy inference, as described below.
 * The existing broker stores account/shared-allowance cooldowns in its own SQLite
   database. Both picker exclusion and locked reservation consult those rows.
   Expiry allows one lease across the shared allowance to probe; its qualified
@@ -49,6 +50,47 @@ proof/installation operations remain held and are not used as this patch's tests
   reviews and accepts the actual successful successor.
 * A crash or missing final controller receipt is unconfirmed execution. Reading
   it never starts another worker. There is no new background scheduler or queue.
+
+## Qwen admission feedback
+
+The prospective Qwen path keeps two different kinds of evidence explicit. A
+structured Codex error enum is a CLI classification. The existing Qwen wrapper's
+scanner can also infer a limit and apply Bailian's local adaptive cooldown. That
+inference does not establish a provider HTTP status, measured usage, a provider
+reset, or permission to retry. Its terminal capacity state remains `unknown`;
+its separately labeled local-policy receipt carries only the actual locked
+policy observation, computed expiry and effective soft cap.
+
+A prospective receipt joins the original owned process result and exact lease,
+root, account, host and model through the existing controller outcome path.
+Duplicate feedback preserves the original expiry; conflicting feedback refuses.
+Bailian's adaptive 429 feedback uses an account-specific soft row in the existing
+quota table. It preserves the current minimum-three policy and does not replace
+an existing hard allowance hold or apply one account's local cap to another.
+Other providers retain their existing hard cooldown and half-open behavior.
+
+Usage-based exclusion requires a fresh, applicable observation for that exact
+account. Stale, future, malformed or expired observations remain `UNKNOWN` and
+cannot establish exhaustion. A caller's explicit not-before bound is a separate
+constraint on that request; it is neither a permanent account ban nor evidence
+that an earlier operation became eligible. `request --not-before` accepts a
+strict UTC `Z` instant, with up to six fractional digits. The exact witness is
+retained in the original request and launch digest. Before that instant, the
+request refuses before routing or capacity preflight, the direct controller
+refuses before host/state/lease work, the broker refuses before acquisition
+mutation, and Qwen refuses before its slot, configuration and credential owners.
+The controller carries the same bound to the remote wrapper. Equality allows
+ordinary admission checks to proceed; it grants no capacity. This option never
+sleeps, queues, schedules a successor, or authorizes replay. Omission preserves
+the prior request/launch shapes and clears an unrelated inherited label.
+Historical failed reviews and unknown usage are not backfilled by this change.
+
+The broker fixtures replace optional live status enrichment and enter a
+process-local boundary before qualification. It denies provider transport,
+real credential-file access and unguarded child processes, including swallowed
+attempts. The real restart child inherits the same boundary. Negative cases
+use a synthetic endpoint and credential file, with transport and reads blocked
+before effects; broker, lease, receipt and SQLite behavior remain real.
 
 ## Pre-task capacity check
 
@@ -115,6 +157,43 @@ The original helper remains byte-for-byte evidence in
 a deployable fallback. The stage builder requires the secure candidate and
 verifies the original preimage hash before overlaying it. Existing flat and
 historical source retains its prior contract while its old controllers finish.
+
+### Original-owner Qwen slot-root preflight (native release)
+
+Before selecting a newly verified immutable Qwen generation for new-work
+broker admission, the existing native release owner must qualify the actual
+host-owned ext/slots/bailian directory that the generation binds to. This
+is a release step, not broker automation, permission escalation, or approval
+to run an Alibaba provider request.
+
+1. Confirm protected merge, exact 85-file source closure, original-owner
+   publication/custody and the generation's declared ext/slots state binding.
+   Do not run a build-tree helper with a guessed SLOTS_ROOT or create a new
+   runtime directory to manufacture readiness.
+2. Read the actual final directory's owner, physical identity and mode on each
+   admitted Qwen host. If a legacy root is group/world-writable, invoke the
+   new generation's bailian_keys.py preflight-slots once as that existing
+   state owner before allowing new broker grants. The explicitly invoked
+   write-path preflight binds the final directory with no-follow, verifies
+   owner and inode, removes only unsafe group/world WRITE bits, and preserves
+   all cooldown files, quota evidence, leases and account identities.
+3. Require BAILIAN_SLOTS_ROOT_VERIFIED and independently verify the owned,
+   non-symlink final directory no longer has group/world write permission.
+   BAILIAN_SLOTS_ROOT_* and nonzero exit are release holds; investigate
+   original filesystem custody instead of relaxing broker rank-1 denial,
+   bypassing the tool, or selecting a different account.
+4. New-work account eligibility remains read-only/fail-closed; a missing root
+   on an unqualified host is not authority to enroll that host. Retain the
+   exact old generation for already-running controllers. No Qwen provider
+   canary or unattended use is authorized until the account owner verifies
+   the specific Alibaba Token Plan edition, remaining Credits/reset and
+   applicable usage terms.
+
+This command touches no provider credentials. Run it through the original
+native release owner's verified generation and state mapping, not by copying
+unreviewed source into installed ext or changing the immutable selection
+pointer. Publication, preflight, source review, protected queue, selection
+and observed worker results are separate evidence.
 
 ## Retention and reclamation
 
@@ -265,3 +344,213 @@ One origin monotonic deadline governs routing, provider-lease acquisition, contr
 Deadline routing excludes only the local `m2` slot transport, whose slot wait and child lifetime do not yet consume this commission deadline. Remote Darwin hosts remain eligible through all ordinary economic, readiness, and placement gates. Direct deadline-bearing `m2` calls refuse before slot acquisition or task creation. Local calls without commission metadata retain their incumbent behavior.
 
 Automatic continuation applies to eligible ordinary C3 commissions and explicitly opted-in native CLI requests. It does not add a background scheduler, wake an ended native parent conversation, replay uncertain task effects, or bypass context, output, turn, resource, or time limits. Exhausting all authorized routes or the commission budget still returns retained evidence for the existing owner. A healthy canary validates normal dispatch and settlement; it does not establish that a real provider returned HTTP 429 or that quota failover occurred.
+
+## Registry-bound physical roots for new ordinary runs
+
+The optional `physical_lane_root` field belongs to the existing host entry in
+the original `ext/hosts.json` registry. This source capability does not enroll a
+host. When the field is present, that original registry owns path selection;
+publisher output may confirm the frozen path but cannot replace it. Task text,
+environment overrides and a resolved home-directory alias cannot select this
+configured root. No live registry value is changed by this source repair.
+Installing the protected release and admitting a real host root remain separate
+owner actions.
+
+The first supported shape is one **new explicit-ID ordinary plain GLM or Qwen
+remote run**, with an original root and assigning parent, `cwd=~`, no artifact
+contract, no operator child/budget or continuation, and no Macro workspace or
+CPU-scope extension. Configured unsupported shapes refuse before a provider
+lease or remote transfer; local reservation and packet retention may already
+exist. The local m2 shortcut also refuses a configured field before worker
+invocation. When the field is absent, eligible ordinary plain runs retain the
+separate publisher-owned transport repair: the strictly parsed publication
+return freezes the physical owner for readback, launch, polling, collection and
+cleanup. That path carries no registry-origin layout attestation and does not
+inherit the configured-root protocol's exclusive leaves or recovery guarantees.
+Configured-root failure or publisher disagreement never selects this fallback.
+Other run shapes retain their incumbent transport contract.
+
+On both eligible ordinary branches, host initialization may prepend its own
+home-relative or host CLI paths. After sourcing the physical owner's HOST_ENV,
+the controller prepends only that frozen owner's venv/bin again before GLM
+account readiness and launch. Other host PATH entries keep their relative order.
+Legacy/nonplain initialization is unchanged. This guarantees the intended path
+precedence, not authenticated virtual-environment bytes or arbitrary host setup.
+
+The field must name an absolute physical path using ASCII letters, digits,
+`_`, `-`, `.`, and `/`, with no empty, dot, or dot-dot components. The owner must
+already provide the root plus `tmp`, `ext`, `ext/active`, `ext/lanes`, `orch`,
+`orch/fabric`, and `support-releases`. The unchanged `DirectoryChain` checks
+every ancestor for permitted ownership, directory type, safe mode and no-follow
+custody. A pre-upload observation pins device, inode, UID and mode for this
+fixed layout. Later checks compare with that observation; replacement at the
+same pathname does not refresh the pin. These checks use the existing commission
+supervisor and deadline.
+
+Only this shape adds `artifact_delivery.py` to the exact remote support closure
+(38 files); default and historical 37-file or earlier generations retain their
+existing membership. The publisher still checks closed file sets. Transport,
+executor and collector check the immutable code manifest and the publisher's
+fixed state-link map against the same physical root. Bound executor reads
+require owned regular files, one link, no group/other write, stable identities,
+and exact sealed modes for code and release metadata. The generic legacy file
+reader and `DirectoryChain` body are unchanged.
+
+Bound packet transfer uses the existing SSH channel with a bounded stdin
+receiver and exclusive no-follow creation. Existing packet, output or receipt
+leaves refuse; they are never adopted, overwritten or removed. The bound launch
+reserves stdout and RC with exclusive opens and keeps their descriptors through
+the original executor entry. A strictly qualified empty reserved RC is pending
+only under the physical result contract v2; malformed nonempty content remains
+refused. It makes exactly one
+launch attempt, including when physical admission refuses. This avoids inventing a second attempt outside
+the retained evidence contract.
+
+The current producer combines acquisition evidence and optional physical-layout
+evidence in strict v3 receipts and plain launch bindings. Versions have one
+closed meaning each:
+
+| Record family | Preserved history | Current producer |
+| --- | --- | --- |
+| Transport observation | v1 unbound; v2 with validated non-null layout | Same v1/v2 shapes |
+| Transport verification | v1 original; protected v2 with layout and no acquisition field | v3 requires acquisition tag and explicit layout value |
+| Plain launch binding | v1 original; protected v2 retains original top-level fields and nested layout | v3 requires top-level and matching nested acquisition tag plus explicit nested layout |
+| Plain result contract | v1 unbound; v2 with validated layout | Selected from validated layout, not launch-binding version |
+| Artifact launch binding | v1 original; v2 acquisition-aware | Unchanged; no physical-root artifact extension |
+
+For v3, `lane_root` is either a validated layout or explicit `null`; omission is
+invalid. The configured branch emits a layout, while the unconfigured publisher
+branch emits `null`. A v3/null binding retains result-contract v1 and cannot
+interpret an empty RC as a physical reservation. New plain producers require
+their exact v3 transport receipt; they cannot promote historical receipts by
+inferring missing evidence. Mixed historical shapes and unknown fields refuse.
+
+`pool` remains the canonical accounting family (`glm` or `bailian`). The separate
+`acquisition_pool` records the successful controller acquisition and must match
+the unique original lease event. It permits `glm-frontier` only with exact
+`glm-5.3`; ordinary GLM and Qwen keep their finite existing tuples. Historical
+v1 and protected v2 retain their original logical-pool interpretation and cannot
+acquire frontier qualification from a model name or current routing metadata.
+
+Physical collection checks current original registry agreement and reads the
+retained physical path. Old v1 records and historical scopes cannot acquire a
+root retrospectively. Authentication, producer packet-consumption attestation,
+served-model/physical-host authentication, and business acceptance remain
+unproven by these records.
+
+`rollout/test_remote_lane_root.py` exercises the actual publisher, portable
+transport reader, retained binding, generated collector, exclusive packet and
+launch entries, and executor boundaries with inert fixtures. It covers alias
+retargeting, same-path directory substitution, link/mode/hash changes, existing
+leaf preservation, incompatible schemas, unsupported carriers, single-attempt
+admission and supervised deadline expiry. No test starts a provider worker or
+alters a live host/configuration owner. Passing these tests is source
+qualification, not live installation, worker START, result acceptance, or
+permission to replay any held operation.
+
+
+## Composed native-closure qualification
+
+After changing any file in the explicit native closure, rebuild the manifest and
+source inventory, compare the complete closure against the selected generation,
+and update the current `NATIVE_MANIFEST_SHA` binding in
+`tests/test_fabric_native_security_composition_20261018.py` to the reviewed
+manifest. Do not repin its historical executor, donor, quota, deadline or physical
+root transformations merely to clear a test. The current manifest pin is distinct
+from those preserved security preimages and transformations.
+
+Run the composed regression before publishing a PR, not only the isolated
+`ops/native_fabric` tests:
+
+```sh
+python3 -m pytest -q tests/test_fabric_native_security_composition_20261018.py
+```
+
+That test builds the exact closure, selects it through the existing publisher,
+and exercises the remote-support/executor/outcome-binding seam using an inert
+fixture. It does not contact a provider, acquire a host lease, or authorize a
+production selection. The OPT-007 outcome correction changes only
+`ext/provider_outcome.py` within the 85-file closure; its composed-manifest check
+must move with that reviewed change.
+
+## Explicit per-request turn ceilings
+
+The native `fabric_task.py request --max-turns N` constrains one new commission
+without changing global defaults. N must be an integer in 1..400. Validation
+precedes request retention and routing, including the foreground continuation
+entry. The transient request constraint is cleared at request ingress, retained
+with the commission, and carried by the existing environment relay. The incumbent
+`sub.sh` profile resolves its normal limit first, then applies the smaller request
+ceiling. An invalid incumbent limit is never sanitized by a valid request.
+
+Only the existing GLM and MiniMax Claude modes are qualified for this option.
+Model suitability, economic, host and lease guards still run; unsupported routes
+cannot silently execute without the ceiling. Quota successors preserve the
+ceiling and original deadline. Mid-task exhaustion never gains replay authority.
+This is a CLI-turn fuse, not a tool-call or token counter and not guaranteed cost.
+
+Repository test `tests/test_fabric_request_turn_budget.py` runs native and Web
+contracts in fresh processes, including actual shell/CLI fixture transport and
+negative tests. No provider calls or installed state are used. Release needs the
+full regenerated native manifest and its composition-test fingerprint, protected
+checks, then existing publisher/CAS selection. The Web facade is a separate
+same-account release and refuses an older native adapter for this opt-in.
+
+This change does not replace the OPT-007 outcome-classification repair in #1720.
+Compose any newer protected native closure before installation; never select this
+branch's earlier dependency snapshot over a later installed generation.
+
+### Request-ceiling qualification, 2026-10-22
+
+Operation `fabric-request-turn-budget-20261022-c3` keeps #1720's incumbent source
+and CI untouched. Direct scoped implementation was retained for lower total
+framing/review overhead; no new provider worker or native helper was commissioned.
+The new regressions first failed on the preimage. Local checks then passed 12
+native ceiling/continuation/profile cases, 43 Web facade cases (including actual
+isolated shell/CLI transport), and the two corresponding repository wrapper cases.
+Separate incumbent suites passed: adapter 4, foreground continuation 7, owned
+wrappers 3, capacity preflight 6, physical transport owner 20, support publication 3.
+Counts overlap in exercised behavior and are not independent product capabilities.
+
+The existing 19-case commission-deadline suite returned two failures on M2, with
+retained evidence of an expired original deadline during routing-env processing.
+No timeout was relaxed and causation is not established. A subsequent isolated
+Ubuntu qualification transport was refused by the platform before dispatch; it
+was not replayed through another connector. The repository CI wrapper includes the existing deadline suite so a protected
+release cannot silently omit it; the follow-up fixture changes below preserve
+all original short-expiry assertions.
+Local regression artifacts remain at
+`/Volumes/Mastermind/evidence/fabric-request-turn-budget-20261022-c3/native-regression`.
+Full current-head hosted CI, native selection and live Web/native consumption
+remain unproven. This candidate is source-only until those release gates clear.
+
+### Follow-up: private fixtures and actual worker-wrapper ceiling
+
+The two positive transport-identity cases now allow finite 30-second startup
+headroom (40-second outer test timeout); they do not test host speed. Every short
+negative expiry case and the frozen original 31.5-second end-to-end assertion
+remain unchanged. The normal CI wrapper supplies the existing test-root seam
+with a canonical private directory beneath the test user's home. Shared `/tmp`
+was correctly rejected by the no-follow/ancestor-mode checks; no permissions or
+production guard was changed to admit it.
+
+All five targeted positive/tamper/expiry cases passed in that private directory.
+The complete CI-facing wrapper then returned two passed and one failed: within
+its 19-case deadline suite, the frozen original case measured 31.660543 seconds
+against 31.5. This remains a failed check, not a waived threshold or a proven
+cause. No further unchanged timing retry was made. Hosted exact-head qualification
+remains required and this source candidate remains DRAFT/HOLD.
+
+An additional real executor -> provider wrapper -> inert CLI regression now
+verifies both GLM and MiniMax receive max-turns25, and that an existing limit8
+remains8. It checks actual process/output binding and cleanup through existing
+owners, with only loopback provider and fake credential fixtures. The native
+ceiling suite now passes13 tests; the Web facade suite passes43. A disposable
+source-only composition of #1720's corrected private metadata projection with
+this ceiling implementation passed the nine metadata and twelve then-existing
+ceiling cases. These are compatibility tests, not deployment or live acceptance.
+
+The existing deadline assertion is not removed, weakened or marked expected to
+fail. Runtime source and the 85-file native manifest are unchanged by these
+fixture improvements. Evidence remains in this operation's native-regression
+directory; production selection and both owning release processes remain pending.

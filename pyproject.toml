@@ -39,14 +39,14 @@ dev = [
     # Match the qualified Research signal owner and its production hash lock.
     "uvicorn[standard]==0.52.4",
     # Exact current security-reviewed JWT implementation for hermetic A1 tests.
-    "PyJWT[crypto]==2.13.0",
+    "PyJWT[crypto]==2.14.0",
 ]
 
 # Isolated installation profile for remote Business MCP app/resource-server
 # processes. This does not arm, publish, authenticate, or install an app.
 business-mcp = [
     "mcp==1.28.1",
-    "PyJWT[crypto]==2.13.0",
+    "PyJWT[crypto]==2.14.0",
     # Executive installed reads execute the canonical boot-packet collector in
     # this dependency-complete edge runtime; the sealed control Python stays -S.
     "PyYAML==6.0.3",

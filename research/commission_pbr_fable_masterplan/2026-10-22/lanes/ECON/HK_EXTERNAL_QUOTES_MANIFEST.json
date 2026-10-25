@@ -1,0 +1,40 @@
+{
+  "captured_utc": "20261022T082655Z",
+  "source": "https://query1.finance.yahoo.com/v8/finance/chart/<SYM>?period1=1781481600&period2=1782518400&interval=1d&events=div,split",
+  "purpose": "independent HK daily open/close for the six-symbol HK quantity bridge (pbr-econ W1, #1693)",
+  "fetched_by": "pbr-econ (Mac, curl, public endpoint, no credentials)",
+  "files": {
+    "0700.HK.json": {
+      "sha256": "5a9ff7e16d9f1e77e093d67c617d22487ee92fb0854bc23109a840a890709352",
+      "bytes": 2045
+    },
+    "0981.HK.json": {
+      "sha256": "6d9d996fbe620443bbc974f4d32385301b24dc740fd0e03c321604f45b5016b3",
+      "bytes": 1976
+    },
+    "1024.HK.json": {
+      "sha256": "a13130ad08c769e4758df55cdccefb33ce882bdf76a6106c916666e8c836719c",
+      "bytes": 2143
+    },
+    "1398.HK.json": {
+      "sha256": "785e91f9f672fb7c70b8bcd31207690eebc575f9a7b696115769b0b87ed1ce15",
+      "bytes": 2168
+    },
+    "1929.HK.json": {
+      "sha256": "40cd72547eeb9a206b1e9a6ee57ae884bf518e2ff86f5910f6465f6bf3ba4d88",
+      "bytes": 2220
+    },
+    "2628.HK.json": {
+      "sha256": "60b85eb04398ed344d9b89deff25e98b3f4864c5fbd3126766e731d06debf243",
+      "bytes": 2191
+    },
+    "3988.HK.json": {
+      "sha256": "a09f66ceb76e9321141f4b87d6f47ba6ef0ba3f5770a8d5363cab24fd89d24ce",
+      "bytes": 2164
+    },
+    "3993.HK.json": {
+      "sha256": "0ac60b405f70c781d0572b911488f0a385ca53c2c93494324eb92d2bb8062b46",
+      "bytes": 2188
+    }
+  }
+}

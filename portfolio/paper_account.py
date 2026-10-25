@@ -15,16 +15,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import fcntl
 import threading
 from copy import deepcopy
 from contextlib import contextmanager
-from datetime import UTC, date, datetime, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from numbers import Real
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, NoReturn
 from uuid import uuid4
 
 import bot  # noqa: F401  -> vendor/macro onto sys.path
@@ -203,33 +204,236 @@ def _fresh_account() -> dict[str, Any]:
     }
 
 
+def _is_account_number(value: Any) -> bool:
+    """Schema-level number for account.json: an int or float, NOT a bool, and finite."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError):
+        return False
+
+
+def validate_account_state(raw: Any) -> list[str]:
+    """Pure schema check of one parsed account.json document — no I/O, never raises.
+
+    Returns a SORTED list of problem codes; an empty list means VALID.  Extra keys are allowed
+    everywhere (per-position mark metadata, ``spy_shares``, ``benchmark_symbol``,
+    ``cash_yield_through``, ``last_paper_transaction_id``, ...).  Negative cash or negative
+    shares are economic questions, deliberately NOT schema ones: they are VALID here.
+    """
+    try:
+        if not isinstance(raw, dict):
+            return ["not_an_object"]
+        problems: list[str] = []
+        if not _is_account_number(raw.get("cash")):
+            problems.append("cash_invalid")
+        if not _is_account_number(raw.get("starting_nav")) or raw.get("starting_nav") <= 0:
+            problems.append("starting_nav_invalid")
+        positions = raw.get("positions")
+        if not isinstance(positions, dict):
+            problems.append("positions_invalid")
+        else:
+            for key, pos in positions.items():
+                label = key if isinstance(key, str) else repr(key)
+                if not isinstance(key, str) or not key:
+                    problems.append(f"position_key_invalid:{key!r}")
+                if not isinstance(pos, dict):
+                    problems.append(f"position_not_object:{label}")
+                    continue
+                if not _is_account_number(pos.get("shares")):
+                    problems.append(f"position_shares_invalid:{label}")
+                if not _is_account_number(pos.get("avg_cost")):
+                    problems.append(f"position_avg_cost_invalid:{label}")
+        return sorted(problems)
+    except Exception:  # noqa: BLE001 — the validator itself must never become the fault it guards
+        return ["not_an_object"]
+
+
+def _classify_account_bytes(raw_bytes: bytes) -> tuple[list[str], Any, Exception | None]:
+    """Decode, parse and schema-check raw account.json bytes.  Pure — never raises.
+
+    Returns ``(problems, parsed, parse_error)``; ``problems == []`` means VALID.  Undecodable or
+    unparseable bytes (an empty file included) classify as ``["unparseable"]``.
+    """
+    try:
+        parsed = json.loads(raw_bytes.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — one INVALID class for undecodable/unparseable bytes
+        return ["unparseable"], None, exc
+    return validate_account_state(parsed), parsed, None
+
+
+def account_file_status(
+    portfolio_id: str | None = None,
+    *,
+    path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Read-only landing-gate classification of one account.json.
+
+    NEVER writes, quarantines or alerts.  ``path`` overrides the registry-resolved account path.
+    Returns ``{status, path, sha256, size, problems}`` with status MISSING | VALID | INVALID;
+    problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]`` or the
+    :func:`validate_account_state` codes.
+    """
+    account_path = Path(path) if path is not None else _paths(portfolio_id)["account"]
+    if not account_path.exists():
+        return {"status": "MISSING", "path": str(account_path), "sha256": None,
+                "size": None, "problems": []}
+    try:
+        raw_bytes = account_path.read_bytes()
+    except Exception as exc:  # noqa: BLE001 — classification must never raise
+        return {"status": "INVALID", "path": str(account_path), "sha256": None,
+                "size": None, "problems": [f"unreadable:{type(exc).__name__}"]}
+    problems, _parsed, _parse_error = _classify_account_bytes(raw_bytes)
+    return {
+        "status": "VALID" if not problems else "INVALID",
+        "path": str(account_path),
+        "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "size": len(raw_bytes),
+        "problems": problems,
+    }
+
+
+def _quarantine_invalid_account(
+    portfolio_id: str | None,
+    path: Path,
+    raw_bytes: bytes | None,
+    problems: list[str],
+) -> dict[str, Any]:
+    """Best-effort quarantine of an invalid EXISTING account.json; never stops the caller's raise.
+
+    Writes a byte-for-byte COPY of the original beside it (idempotent per distinct content).  The
+    original itself is never moved, renamed, truncated, rewritten or deleted: a moved account.json
+    would read as missing on the next load and silently seed a fresh book — exactly the defect
+    this closes.  One ledger row plus one governance event per NEWLY written copy (or a failed
+    copy); every detection, repeats included, is logged.  Any failure in here is recorded on the
+    returned record and swallowed.
+    """
+    data_dir = path.parent
+    source_sha256 = (
+        hashlib.sha256(raw_bytes).hexdigest() if raw_bytes is not None else None
+    )
+    record: dict[str, Any] = {
+        "event": "account_state_invalid",
+        "portfolio_id": portfolio_id or "flagship",
+        "path_name": path.name,
+        "source_sha256": source_sha256,
+        "size": len(raw_bytes) if raw_bytes is not None else None,
+        "problems": list(problems),
+        "quarantine_file": None,
+        "status": "quarantine_failed",
+        "detected_at": datetime.now(UTC).isoformat(),
+        "recoverable": True,   # the original stays in place; a human repairs or replaces it
+    }
+    if raw_bytes is not None:
+        candidate = data_dir / f"account.quarantine.{source_sha256[:16]}.json"
+        record["quarantine_file"] = candidate.name
+        if candidate.exists():
+            record["status"] = "already_quarantined"
+        else:
+            try:
+                _atomic_write_bytes(candidate, raw_bytes)
+                record["status"] = "quarantined"
+            except Exception as exc:  # noqa: BLE001 — the caller's raise still happens
+                record["quarantine_error"] = repr(exc)[:300]
+    if record["status"] in {"quarantined", "quarantine_failed"}:
+        try:
+            _append_jsonl(data_dir / "account_quarantine.jsonl", record)
+        except Exception as exc:  # noqa: BLE001 — the shared event below is a second audit sink
+            record["audit_ledger_error"] = repr(exc)[:300]
+        try:
+            from control_plane import run_events
+            run_events.append({
+                "kind": "account_state_invalid",
+                "job": "paper_account",
+                "book": portfolio_id or "flagship",
+                "step": "load_account",
+                "status": "error",
+                "severity": "HARD_STOP",
+                "actor": "deterministic_engine",
+                "extra": {
+                    "problems": record["problems"],
+                    "quarantine_file": record["quarantine_file"],
+                    "quarantine_status": record["status"],
+                    "source_sha256": record["source_sha256"],
+                    "recoverable": record["recoverable"],
+                },
+            })
+        except Exception as exc:  # noqa: BLE001 — event logging never re-enables an invalid book
+            record["event_log_error"] = repr(exc)[:300]
+    logging.getLogger(__name__).error(
+        "account_state_invalid portfolio=%s problems=%s",
+        record["portfolio_id"], record["problems"],
+    )
+    return record
+
+
+def _account_invalid_error(
+    portfolio_id: str | None,
+    problems: list[str],
+    record: dict[str, Any] | None,
+    *,
+    strict: bool = False,
+    read_exc: Exception | None = None,
+) -> "AccountStateInvalid":
+    """Build the fail-closed error; ``strict`` keeps the legacy replay message strings byte-for-byte."""
+    if strict:
+        message = (
+            f"account cannot be read during transaction recovery: {read_exc!r}"
+            if read_exc is not None
+            else "account schema is invalid during transaction recovery"
+        )
+    else:
+        message = f"account state invalid for {portfolio_id or 'flagship'}: {problems}"
+    return AccountStateInvalid(message, record=record)
+
+
+def _raise_invalid_account(
+    portfolio_id: str | None,
+    account_path: Path,
+    raw_bytes: bytes | None,
+    problems: list[str],
+    *,
+    strict: bool = False,
+    cause: Exception | None = None,
+) -> NoReturn:
+    """Quarantine an invalid EXISTING account file, then raise AccountStateInvalid (never returns)."""
+    record = _quarantine_invalid_account(portfolio_id, account_path, raw_bytes, problems)
+    error = _account_invalid_error(portfolio_id, problems, record, strict=strict, read_exc=cause)
+    if cause is not None:
+        raise error from cause
+    raise error
+
+
 def _load_account_file(portfolio_id: str | None = None, *, strict: bool = False) -> dict[str, Any]:
     """Read account.json without invoking transaction recovery.
 
     ``strict`` is used by replay: a corrupt on-disk account must never be mistaken for a fresh book
     and overwritten by a prepared transaction.
+
+    Fail-closed (D-ACCT-1): a MISSING file is still a new book, but an EXISTING file that cannot be
+    read, parsed, or schema-validated is quarantined (byte-for-byte copy beside the original) and
+    raises :class:`AccountStateInvalid`.  It is NEVER replaced by a fresh book — the next save of a
+    fresh book over the real file would silently reset a live paper book.
     """
     _account_path = _paths(portfolio_id)["account"]
+    if not _account_path.exists():
+        return _fresh_account()
     try:
-        if _account_path.exists():
-            raw = json.loads(_account_path.read_text())
-            # basic schema validation
-            if (
-                isinstance(raw.get("cash"), (int, float))
-                and isinstance(raw.get("positions"), dict)
-                and raw.get("starting_nav")
-            ):
-                return raw
-            if strict:
-                raise PaperTransactionConflict("account schema is invalid during transaction recovery")
-    except PaperTransactionConflict:
-        raise
+        raw_bytes = _account_path.read_bytes()
+    except FileNotFoundError:
+        return _fresh_account()
     except Exception as exc:
-        if strict:
-            raise PaperTransactionConflict(
-                f"account cannot be read during transaction recovery: {exc!r}"
-            ) from exc
-    return _fresh_account()
+        _raise_invalid_account(
+            portfolio_id, _account_path, None,
+            [f"unreadable:{type(exc).__name__}"], strict=strict, cause=exc,
+        )
+    problems, parsed, parse_error = _classify_account_bytes(raw_bytes)
+    if not problems:
+        return parsed
+    _raise_invalid_account(
+        portfolio_id, _account_path, raw_bytes, problems, strict=strict, cause=parse_error,
+    )
 
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
@@ -277,10 +481,45 @@ def _durable_unlink(path: Path) -> None:
 
 def _save_account(state: dict[str, Any], portfolio_id: str | None = None) -> None:
     _ensure_dir(portfolio_id)
+    # Refuse to PERSIST an invalid in-memory book before anything is written.  The on-disk file
+    # is deliberately NOT quarantined for this case: it is still valid and stays untouched.
+    state_problems = validate_account_state(state)
+    if state_problems:
+        raise AccountStateInvalid(
+            f"refusing to save invalid account state for {portfolio_id or 'flagship'}: "
+            f"{state_problems}"
+        )
+    account_path = _paths(portfolio_id)["account"]
+    if account_path.exists():
+        # Nothing may overwrite an INVALID book (D-ACCT-1): saving a fresh/valid state over it
+        # would silently reset a live paper book.  Quarantine the invalid bytes, then fail
+        # closed — a human repairs the file directly.
+        _assert_existing_account_valid(portfolio_id, account_path, strict=False)
     _atomic_write_bytes(
-        _paths(portfolio_id)["account"],
+        account_path,
         json.dumps(state, indent=2, default=str).encode("utf-8"),
     )
+
+
+def _assert_existing_account_valid(
+    portfolio_id: str | None,
+    account_path: Path,
+    *,
+    strict: bool = False,
+) -> None:
+    """Read + classify the existing account.json; quarantine and raise if it is INVALID."""
+    try:
+        raw_bytes = account_path.read_bytes()
+    except Exception as exc:  # noqa: BLE001 — unreadable bytes are one INVALID class
+        _raise_invalid_account(
+            portfolio_id, account_path, None,
+            [f"unreadable:{type(exc).__name__}"], strict=strict, cause=exc,
+        )
+    problems, _parsed, parse_error = _classify_account_bytes(raw_bytes)
+    if problems:
+        _raise_invalid_account(
+            portfolio_id, account_path, raw_bytes, problems, strict=strict, cause=parse_error,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -385,6 +624,20 @@ _PERSISTED_FILL_SHARE_QUANTUM = 0.000001
 
 class PaperTransactionConflict(RuntimeError):
     """Prepared paper state cannot be replayed without overwriting unrelated runtime state."""
+
+
+class AccountStateInvalid(PaperTransactionConflict):
+    """An EXISTING account.json is unreadable, unparseable, or schema-invalid.
+
+    Raised INSTEAD of silently seeding a fresh book, whose next save would reset a live paper
+    book (D-ACCT-1).  ``.record`` carries the quarantine/alert record dict when an on-disk file
+    was quarantined; it is None when an invalid in-memory STATE was refused before any file was
+    touched.  Subclassing PaperTransactionConflict keeps every existing hard-stop handler hard.
+    """
+
+    def __init__(self, message: str, *, record: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.record = record
 
 
 def _transaction_path(portfolio_id: str | None = None) -> Path:
@@ -501,8 +754,9 @@ def _pending_clear_transition(
     *,
     prices: dict[str, float] | None = None,
     price_sources: dict[str, str] | None = None,
+    _evidence: dict | None = None,
 ) -> dict[str, Any]:
-    """Capture the exact queued target that a successful settlement is allowed to remove."""
+    """Capture the exact queued target and optional selected-price context for recovery."""
     path = _pending_target_path(portfolio_id)
     pending_payload = _read_pending_target_payload(portfolio_id)
     settlement_prices = {
@@ -531,6 +785,25 @@ def _pending_clear_transition(
             ticker: str(price_sources.get(ticker) or "settlement_snapshot")
             for ticker in settlement_prices
         }
+    if _evidence is not None:
+        try:
+            from portfolio import price_evidence, registry
+            transition["settlement_price_evidence"] = price_evidence.settlement_snapshot(
+                settlement_prices, transition.get("settlement_price_sources"),
+                registry.currency(portfolio_id), _evidence,
+            )
+        except Exception:
+            # Evidence capture does not veto a numerically valid settlement. The
+            # failure itself stays in the same immutable transaction preimage.
+            transition["settlement_price_evidence"] = {
+                "schema": "mastermind.settlement_price_evidence.v1",
+                "currency": None,
+                "quotes": {},
+                "omitted_quote_count": len(settlement_prices),
+                "capture_error": "snapshot_failed",
+                "market_observed_at": None,
+                "execution_qualification": "not_checked",
+            }
     return transition
 
 
@@ -996,15 +1269,44 @@ def acknowledge_settlement_receipt(
     transaction_id: str,
     portfolio_id: str | None = None,
 ) -> bool:
-    """Acknowledge only the exact committed receipt after mark/publish finalization."""
+    """Retain the exact committed receipt before removing it from the active outbox.
+
+    The archive preserves the original transaction preimage, queue and price facts;
+    acknowledgement does not reserialize it or add a supposed fill timestamp.
+    An archive may coexist with an active receipt after an interrupted ACK.  The
+    active copy still owns recovery until its removal succeeds.
+    """
     value = str(transaction_id or "")
     if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
         raise ValueError("invalid settlement receipt transaction id")
-    path = _settlement_receipt_path(value, portfolio_id)
-    if not path.exists():
-        return False
-    _durable_unlink(path)
-    return True
+    with _paper_transaction_lock(portfolio_id):
+        path = _settlement_receipt_path(value, portfolio_id)
+        if not path.exists():
+            return False
+        payload = path.read_bytes()
+        archive = path.parent / "acknowledged" / path.name
+        # The existing book lock serializes cooperating receipt writers.  Never
+        # replace a retained preimage, including one left by an interrupted ACK.
+        if not archive.exists():
+            _atomic_write_bytes(archive, payload)
+        if archive.read_bytes() != payload:
+            raise PaperTransactionConflict("settlement receipt archive differs from active receipt")
+
+        # The shared atomic writer tolerates unsupported directory fsync.  Here
+        # retention must be durable before deleting the only active preimage, so
+        # archive sync errors deliberately leave the active receipt for retry.
+        # Sync both directories: the archive directory itself may be newly made.
+        # Repeat these syncs for an identical copy left by an interrupted write.
+        with archive.open("rb") as retained:
+            os.fsync(retained.fileno())
+        for directory in (archive.parent, path.parent):
+            dir_fd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        _durable_unlink(path)
+        return True
 
 
 def _pending_orders_transition(
@@ -1411,94 +1713,201 @@ def _fetch_price_series(ticker: str, *, cache_only: bool = False) -> "pd.Series 
     return None
 
 
-def _live_price(ticker: str) -> float | None:
-    """Best live mark for a ticker, in USD.
+def _live_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
+    """Best available native quote converted to USD, with optional read provenance.
 
-    Dispatches by venue suffix:
-      * ``*.SS`` / ``*.SZ`` → the LIVE Tushare A-share close (CNY) when available, else the vendored
-                              ``chinastockdata/`` snapshot → USD
-      * ``*.HK`` / ``^HSI`` → the LIVE Yahoo close (HKD) when available, else the vendored
-                              ``hkstockdata/`` snapshot → USD
-      * else                → ``stockdata/``     (USD, incl. US-listed China ADRs)
-    The China/HK legs convert their LOCAL quote to USD via ``portfolio.fx`` so the paper account's
-    single-currency NAV stays honest (it holds all three venues at once). Live marks come from
-    Tushare for A-shares (``daily``) and Yahoo for Hong Kong; both degrade to the snapshot on any
-    miss (Tushare's ``hk_daily`` is too rate-limited to mark a multi-name HK book)."""
+    Yahoo Close is tried first for US, mainland China and HK. China also tries
+    Tushare after a missing Yahoo result. The vendored per-name snapshot is the
+    final fallback. A fresh retrieval can still contain an older source bar;
+    neither the word "live" nor this observation qualifies a price for execution.
+    """
+    from portfolio import price_evidence
+
     t = (ticker or "").upper().strip()
     if t.endswith(".SS") or t.endswith(".SZ"):
-        sub, convert = "chinastockdata", True
+        sub, convert, native_currency = "chinastockdata", True, "CNY"
     elif t.endswith(".HK") or t == "^HSI":
-        sub, convert = "hkstockdata", True
+        sub, convert, native_currency = "hkstockdata", True, "HKD"
     else:
-        sub, convert = "stockdata", False
+        sub, convert, native_currency = "stockdata", False, "USD"
 
     local: float | None = None
-    # A-shares: prefer Yahoo's native-CNY Shanghai/Shenzhen quote, which remains reachable from
-    # non-China VPS hosts; retain Tushare as the second live source. Hong Kong: Yahoo HKD close
-    # (Tushare's ``hk_daily`` is throttled to ~1 call/hr — see data_layer.yahoo_feed).
-    # Both lag-correct the vendored snapshot.
+    selected_source = None
+    upstream = None
+    source_label = None
+    source_text_sha256 = None
+    fx_context = None
+    attempts = []
+
+    def read(reader, name):
+        nonlocal selected_source, upstream
+        try:
+            if _evidence is None:
+                value, context = reader(t), None
+            else:
+                value, context = price_evidence.read_with_evidence(reader, t)
+        except Exception:
+            if _evidence is not None:
+                try:
+                    attempts.append({"source": name, "outcome": "error"})
+                except Exception:
+                    pass
+            raise
+        if value is not None:
+            selected_source, upstream = name, context
+        if _evidence is not None:
+            try:
+                attempts.append({
+                    "source": name,
+                    "outcome": "missing" if value is None else (
+                        "returned" if price_evidence.positive_number(value) is not None else "invalid_value"
+                    ),
+                })
+            except Exception:
+                pass
+        return value
+
     if t.endswith((".SS", ".SZ")):
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
         if local is None:
             try:
                 from data_layer import tushare_feed
-                local = tushare_feed.price_local(t)
+                local = read(tushare_feed.price_local, "tushare_close")
             except Exception:
                 local = None
     elif t.endswith(".HK") or t == "^HSI":
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
     else:
-        # US (bare tickers + ETFs): the LIVE Yahoo quote (USD) via yfinance — reflects TODAY's tape.
-        # The vendored stockdata snapshot is CI/EOD-lagging, so on a fast day (e.g. SMH -7%) it marks a
-        # stale price and the book NAV is wrong; the live leg fixes that. Degrades to the snapshot below.
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
-    # Fallback (and the only path when the live leg misses): the vendored per-name snapshot.
     if local is None:
+        snapshot_error = False
         try:
             p = _ROOT / "vendor" / "macro" / "site" / sub / f"{t}.json"
             if p.exists():
-                v = (json.loads(p.read_text()).get("tech") or {}).get("price")
+                raw_text = p.read_text()
+                payload = json.loads(raw_text)
+                v = (payload.get("tech") or {}).get("price")
                 if v is not None:
                     local = float(v)
+                    selected_source, upstream = "macro_snapshot", None
+                    if _evidence is not None:
+                        try:
+                            source_label = payload.get("asof")
+                            source_text_sha256 = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+                        except Exception:
+                            pass
         except Exception:
+            snapshot_error = True
             local = None
+        if _evidence is not None:
+            try:
+                attempts.append({
+                    "source": "macro_snapshot",
+                    "outcome": "error" if snapshot_error else (
+                        "missing" if local is None else (
+                            "returned" if price_evidence.positive_number(local) is not None else "invalid_value"
+                        )
+                    ),
+                })
+            except Exception:
+                pass
+
+    def observed(value):
+        if _evidence is not None:
+            try:
+                price_evidence.emit(_evidence, price_evidence.make_read(
+                    t, value, "USD", selected_source, stage="paper_live",
+                    upstream=upstream, input_price=local, input_currency=native_currency,
+                    source_bar_label=source_label, source_bar_label_kind="snapshot_asof",
+                    source_text_sha256=source_text_sha256, attempts=attempts,
+                    fx_context=fx_context, fx_operation="divide",
+                ))
+            except Exception:
+                pass
+        return value
+
     if local is None:
-        return None
+        return observed(None)
     if convert:
         from portfolio import fx
-        return fx.to_usd(local, t)
-    return local
+        if _evidence is None:
+            return observed(fx.to_usd(local, t))
+        value, fx_context = price_evidence.read_with_evidence(fx.to_usd, local, t)
+        return observed(value)
+    return observed(local)
 
 
-def _current_price(ticker: str) -> float | None:
-    """Best available current/last-close price for a ticker: the stockdata live mark first,
-    else the last point of the engine price series (covers the leadership-sleeve ETFs)."""
-    px = _live_price(ticker)
+def _current_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
+    """Select the existing live/snapshot path, then the last engine-series point.
+
+    Optional context preserves the selected source and native/USD conversion facts.
+    Source index labels remain bar labels, and FX source timing is not certified.
+    """
+    from portfolio import price_evidence
+
+    t = (ticker or "").upper().strip()
+    if _evidence is None:
+        px, live_context = _live_price(ticker), None
+    else:
+        px, live_context = price_evidence.read_with_evidence(_live_price, ticker)
     if px and px > 0:
+        if _evidence is not None:
+            try:
+                price_evidence.emit(_evidence, price_evidence.make_read(
+                    t, px, "USD", "live_price", stage="paper_current", upstream=live_context,
+                ))
+            except Exception:
+                pass
         return px
     s = _fetch_price_series(ticker)
     try:
         if s is not None and len(s) > 0:
             v = float(s.iloc[-1])
-            # The series stores (yahoo / breadth cache) quote in LOCAL currency; convert a China/HK
-            # name to USD so the fallback can't leak a raw CNY/HKD mark into NAV (bare US tickers pass
-            # through unchanged). Mirrors the conversion _live_price already does for the live mark.
             from portfolio import fx
-            return fx.to_usd(v, ticker)
+            if _evidence is None:
+                value, fx_context = fx.to_usd(v, ticker), None
+            else:
+                value, fx_context = price_evidence.read_with_evidence(fx.to_usd, v, ticker)
+            if _evidence is not None:
+                try:
+                    price_evidence.emit(_evidence, price_evidence.make_read(
+                        t, value, "USD", "engine_series", stage="paper_current",
+                        input_price=v, input_currency=fx.currency_of(ticker),
+                        fx_context=fx_context, fx_operation="divide",
+                        source_bar_label=s.index[-1], source_bar_label_kind="series_index",
+                        attempts=[{
+                            "source": "live_price",
+                            "outcome": "missing" if px is None else "invalid_value",
+                        }],
+                    ))
+                except Exception:
+                    pass
+            return value
     except Exception:
         pass
+    if _evidence is not None:
+        try:
+            price_evidence.emit(_evidence, price_evidence.make_read(
+                t, None, "USD", None, stage="paper_current",
+                attempts=[
+                    {"source": "live_price", "outcome": "missing" if px is None else "invalid_value"},
+                    {"source": "engine_series", "outcome": "unavailable"},
+                ],
+            ))
+        except Exception:
+            pass
     return None
 
 
@@ -1511,40 +1920,271 @@ def _benchmark_for(portfolio_id: str | None) -> str:
         return "SPY"
 
 
-def reset_cost_basis_to_market(prices: dict[str, float] | None = None,
-                               portfolio_id: str | None = None) -> dict[str, float]:
-    """Reset every holding's avg_cost to its CURRENT market price → wipes unrealized P&L.
-
-    Used when the book is marked flat with no trading (e.g. the market has been closed all day):
-    nothing actually traded, so carrying a stale unrealized gain/loss is wrong. Only the cost
-    basis — and therefore unrealized P&L — is reset to zero as of now.
-
-    NAV-safe: a holding is reset ONLY to a real current mark. `prices` (the same marks nav()/
-    positions_pnl() use) is preferred; the stockdata live price is the per-name fallback. A name
-    with NO available mark is SKIPPED (never reset to a stale series value) so the avg_cost — which
-    nav() falls back to when a live quote is missing — can't silently shift the portfolio total.
-    Returns {ticker: new_cost_basis}. Paper-only."""
-    state = _load_account(portfolio_id)
-    prices = prices or {}
-    updated: dict[str, float] = {}
-    for ticker, pos in state.get("positions", {}).items():
-        px = prices.get(ticker)
-        if px is None:
-            px = _live_price(ticker)          # the stockdata mark (consistent with the marks elsewhere)
-        if px and px > 0 and pos.get("shares"):
-            pos["avg_cost"] = round(float(px), 4)
-            updated[ticker] = pos["avg_cost"]
-    _save_account(state, portfolio_id)
-    return updated
-
-
 # ---------------------------------------------------------------------------
 # core account operations
 # ---------------------------------------------------------------------------
 
-def nav(prices: dict[str, float], portfolio_id: str | None = None) -> float:
-    """Current NAV = cash + market value of all positions."""
+class NavWithheld(ValueError):
+    """Raised by ``nav(strict=True)`` when a held line has no lawful price.
+
+    Carries the full :func:`valuation` result in ``.valuation`` so the caller can
+    see exactly which lines were unpriced instead of guessing.
+    """
+
+    def __init__(self, valuation: dict[str, Any]):
+        unpriced = [str(row.get("ticker")) for row in (valuation or {}).get("unpriced") or []]
+        super().__init__(f"nav withheld: unpriced held position(s): {', '.join(unpriced)}")
+        self.valuation = valuation
+
+
+def _valuation_day(value: Any) -> date | None:
+    """Parse an ISO day (first 10 chars) or return None — never raise."""
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def valuation(prices: dict[str, float], asof: str, portfolio_id: str | None = None, *,
+              price_evidence: dict | None = None, state: dict[str, Any] | None = None) -> dict:
+    """Value the account classifying every held line's price evidence.
+
+    Pure — performs no writes; reads the account only when ``state`` is None.
+    Each held line (``shares != 0``) is classified in order:
+
+    - FRESH — a valid input price whose evidence is current (``stale_days`` in
+      (None, 0), a source that is not a carry, an ``observed_asof`` — when
+      present — equal to the valuation date, and ``close_qualified`` — when
+      present — not ``False``).
+    - CARRIED (input) — a valid input price whose evidence says carry, is stale,
+      or was observed before ``asof``. The line values at the input price but
+      keeps the observed date and an honest age.
+    - CARRIED (persisted) — no usable input price, but the position carries a
+      finite persisted ``current_price`` whose ``current_price_asof`` is within
+      ``stale_max`` days of ``asof`` and not in the future (a mark newer than
+      ``asof`` must never value an older date).
+    - UNATTESTED — a valid input price with no evidence entry for it, whose
+      otherwise-current evidence says ``close_qualified is False`` (an intraday
+      print, a seed, an injected float, an adjusted historical close), or whose
+      ``stale_days`` is present but not a finite number (the age is unreadable):
+      the value is used but the line cannot qualify.
+    - UNPRICED — anything else. Never booked at cost basis and never zero: the
+      line's value is None, the whole account is WITHHELD, and ``mark()`` does not
+      persist the rejected input as the position's last observed mark.
+
+    Status: QUALIFIED when every held line is FRESH (or the book holds nothing),
+    WITHHELD when any line is UNPRICED, else PROVISIONAL. ``nav``/``invested``
+    are None while WITHHELD; ``nav_qualified`` equals ``nav`` only when QUALIFIED.
+    """
+    try:
+        from portfolio.marks import _stale_max_days
+        stale_max = int(_stale_max_days())
+    except Exception:  # noqa: BLE001 — degrade-safe default, same as marks
+        stale_max = 30
+
+    asof_str = str(asof)[:10]
+    asof_day = _valuation_day(asof) or date.today()
+    account = state if state is not None else _load_account(portfolio_id)
+    evidence = price_evidence if isinstance(price_evidence, dict) else {}
+
+    lines: dict[str, dict] = {}
+    carried: list[str] = []
+    unattested: list[str] = []
+    unpriced: list[str] = []
+
+    for raw_ticker, pos in (account.get("positions") or {}).items():
+        ticker = str(raw_ticker)
+        pos = pos or {}
+        try:
+            shares = float(pos.get("shares") or 0.0)
+        except (TypeError, ValueError):
+            shares = 0.0
+        if shares == 0:
+            continue
+
+        raw_px = (prices or {}).get(ticker)
+        try:
+            px = float(raw_px) if raw_px is not None else None
+        except (TypeError, ValueError):
+            px = None
+        px_valid = px is not None and math.isfinite(px) and px > 0
+
+        cls: str | None = None
+        price: float | None = None
+        price_asof: str | None = None
+        source: str | None = None
+        age_days: int | None = None
+
+        if px_valid:
+            ev = evidence.get(ticker)
+            if not isinstance(ev, dict):
+                cls, price = "UNATTESTED", px
+            else:
+                ev_source = str(ev.get("source") or "")
+                raw_stale = ev.get("stale_days")
+                # A present stale_days that is not a finite number cannot attest freshness:
+                # it may value the line (UNATTESTED) but never qualify it. A fractional age
+                # rounds away from zero, so any non-zero age stays non-zero.
+                stale_days: int | None = None
+                stale_garbled = False
+                if raw_stale is not None:
+                    try:
+                        if isinstance(raw_stale, bool):
+                            raise TypeError("bool is not an age")
+                        stale_f = float(raw_stale)
+                        if not math.isfinite(stale_f):
+                            raise ValueError("non-finite age")
+                        stale_days = math.ceil(stale_f) if stale_f >= 0 else math.floor(stale_f)
+                    except (TypeError, ValueError, OverflowError):
+                        stale_garbled = True
+                observed = str(ev.get("observed_asof") or "")[:10]
+                observed_day = _valuation_day(observed) if observed else None
+                says_carry = "carry" in ev_source.lower()
+                observed_current = not observed or observed == asof_str
+                if (stale_days in (None, 0) and not stale_garbled and not says_carry
+                        and observed_current):
+                    # close_qualified is optional (today's mark_symbols() shape omits it);
+                    # only an explicit False demotes the line — it can value, never qualify.
+                    if ev.get("close_qualified") is False:
+                        cls, price, source = "UNATTESTED", px, (ev_source or None)
+                    else:
+                        cls, price, source = "FRESH", px, (ev_source or None)
+                elif (says_carry or (stale_days or 0) > 0
+                        or (observed_day is not None and observed_day < asof_day)):
+                    cls, price, source = "CARRIED", px, (ev_source or None)
+                    if observed:
+                        price_asof = observed
+                    else:
+                        price_asof = (asof_day - timedelta(days=max(stale_days or 0, 0))).isoformat()
+                    observed_day = _valuation_day(price_asof)
+                    age_days = (asof_day - observed_day).days if observed_day else None
+                elif stale_garbled and observed_current:
+                    cls, price, source = "UNATTESTED", px, (ev_source or None)
+                else:
+                    cls = "UNPRICED"  # e.g. an observation dated after asof — direction matters
+        else:
+            try:
+                persisted_px = float(pos.get("current_price"))
+            except (TypeError, ValueError):
+                persisted_px = None
+            persisted_day = _valuation_day(pos.get("current_price_asof"))
+            if (persisted_px is not None and math.isfinite(persisted_px) and persisted_px > 0
+                    and persisted_day is not None
+                    and 0 <= (asof_day - persisted_day).days <= stale_max):
+                cls = "CARRIED"
+                price = persisted_px
+                price_asof = persisted_day.isoformat()
+                age_days = (asof_day - persisted_day).days
+                source = pos.get("current_price_source")
+            else:
+                cls = "UNPRICED"
+
+        if cls == "UNPRICED":
+            price = None
+        value = shares * price if price is not None else None
+        lines[ticker] = {
+            "class": cls,
+            "price": round(price, 6) if price is not None else None,
+            "price_asof": price_asof,
+            "age_days": age_days,
+            "source": source,
+            "value": value,
+            "shares": shares,
+        }
+        if cls == "CARRIED":
+            carried.append(ticker)
+        elif cls == "UNATTESTED":
+            unattested.append(ticker)
+        elif cls == "UNPRICED":
+            unpriced.append(ticker)
+
+    cash = float(account.get("cash") or 0.0)
+    if unpriced:
+        nav_status = "WITHHELD"
+    elif carried or unattested:
+        nav_status = "PROVISIONAL"
+    else:
+        nav_status = "QUALIFIED"
+
+    nav_total: float | None = None
+    invested: float | None = None
+    if nav_status != "WITHHELD":
+        nav_total = cash + sum(l["value"] for l in lines.values())
+        invested = nav_total - cash
+    carried_value = float(sum(lines[t]["value"] for t in carried))
+    carried_fraction = (carried_value / invested) if invested else 0.0
+
+    carried_rows = []
+    for t in sorted(carried):
+        line = lines[t]
+        carried_rows.append({
+            "ticker": t,
+            "price": line["price"],
+            "price_asof": line["price_asof"],
+            "age_days": line["age_days"],
+            "source": line["source"],
+            "value": line["value"],
+            "weight_of_invested": round((line["value"] / invested) if invested else 0.0, 6),
+        })
+
+    unpriced_rows = []
+    for t in sorted(unpriced):
+        pos = (account.get("positions") or {}).get(t) or {}
+        try:
+            last_px = float(pos.get("current_price"))
+        except (TypeError, ValueError):
+            last_px = None
+        if last_px is None or not math.isfinite(last_px) or last_px <= 0:
+            last_px = None
+        unpriced_rows.append({
+            "ticker": t,
+            "shares": lines[t]["shares"],
+            "last_observed_price": last_px,
+            "last_observed_asof": pos.get("current_price_asof"),
+        })
+
+    return {
+        "asof": asof_str,
+        "nav_status": nav_status,
+        "nav": nav_total,
+        "nav_qualified": nav_total if nav_status == "QUALIFIED" else None,
+        "cash": cash,
+        "invested": invested,
+        "lines": lines,
+        "carried": carried_rows,
+        "carried_value": carried_value,
+        "carried_fraction": carried_fraction,
+        "unattested": sorted(unattested),
+        "unpriced": unpriced_rows,
+    }
+
+
+def nav(prices: dict[str, float], portfolio_id: str | None = None, *,
+        strict: bool = False, asof: str | None = None,
+        price_evidence: dict | None = None) -> float:
+    """Current NAV = cash + market value of all positions.
+
+    ``strict=False`` keeps the historical behaviour for legacy callers, including
+    the cost-basis substitution for a missing quote — each substitution that
+    actually enters the value is logged as a warning. ``strict=True`` routes
+    through :func:`valuation`: an unpriced held line raises :class:`NavWithheld`
+    instead of being silently booked at cost.
+    """
+    if strict:
+        v = valuation(prices, asof or date.today().isoformat(), portfolio_id,
+                      price_evidence=price_evidence)
+        if v["nav_status"] == "WITHHELD":
+            raise NavWithheld(v)
+        return float(v["nav"])
     state = _load_account(portfolio_id)
+    missing = sorted(
+        ticker for ticker, pos in state["positions"].items()
+        if ticker not in (prices or {}) and float((pos or {}).get("shares") or 0.0) != 0.0
+    )
+    if missing:
+        logging.getLogger(__name__).warning(
+            "nav_avg_cost_fallback_used portfolio=%s tickers=%s", portfolio_id, missing
+        )
     mktval = sum(
         pos["shares"] * prices.get(ticker, pos["avg_cost"])
         for ticker, pos in state["positions"].items()
@@ -3019,6 +3659,7 @@ def clear_pending_target(portfolio_id: str | None = None) -> None:
 def settle_target(prices: dict[str, float], asof: str,
                   portfolio_id: str | None = None, *,
                   _price_sources: dict[str, str] | None = None,
+                  _evidence: dict | None = None,
                   _locked: bool = False) -> dict | None:
     """If a target was queued while the market was closed, rebalance to it now (at the open marks)
     and clear it. Returns the settled target dict, or None if nothing was queued. Paper-only.
@@ -3028,6 +3669,10 @@ def settle_target(prices: dict[str, float], asof: str,
     If any positive target or intended full exit lacks a trusted price,
     ``UnpriceableExitPrices`` is raised before an account write and the pending target is retained
     for a later retry.
+
+    Optional _evidence is observation input, not numeric authority. Its bounded
+    snapshot joins the existing transaction identity and can change future IDs;
+    absent legacy input keeps the existing preimage shape. Recovery reuses it.
     """
     try:
         canonical_asof = date.fromisoformat(asof).isoformat()
@@ -3042,6 +3687,7 @@ def settle_target(prices: dict[str, float], asof: str,
                 asof,
                 portfolio_id=portfolio_id,
                 _price_sources=_price_sources,
+                _evidence=_evidence,
                 _locked=True,
             )
     preflight = preflight_pending_target(portfolio_id)
@@ -3107,7 +3753,7 @@ def settle_target(prices: dict[str, float], asof: str,
             positive_target_tickers=missing_prices["positive_target_tickers"],
         )
     followup = _pending_clear_transition(
-        portfolio_id, prices=prices, price_sources=_price_sources
+        portfolio_id, prices=prices, price_sources=_price_sources, _evidence=_evidence
     )
     rebalance(
         target,
@@ -3132,13 +3778,19 @@ def settle_target(prices: dict[str, float], asof: str,
 def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
          benchmark: str | None = None, *,
          mark_source: str = "paper_account_mark",
+         price_evidence: dict | None = None,
          _settlement_receipt_id: str | None = None,
-         _locked: bool = False) -> None:
+         _locked: bool = False) -> dict:
     """Snapshot NAV to nav_history.jsonl. Also initialises the benchmark shares on first call.
 
     The benchmark symbol is registry-resolved per book. Its normalized shares remain in the
     back-compat ``spy_shares`` slot, while ``benchmark_symbol`` records which index those shares
-    belong to so a benchmark change can never reuse the old instrument's scale."""
+    belong to so a benchmark change can never reuse the old instrument's scale.
+
+    Valuation goes through :func:`valuation`. A held line with no lawful price makes the
+    whole snapshot WITHHELD: no nav row is written (an existing row for the date stays
+    untouched) and the diagnosis lands in ``nav_withheld.jsonl``. Missing prices never
+    raise and never enter the value. Returns the :func:`valuation` result."""
     if not _locked:
         with _paper_transaction_lock(portfolio_id):
             return mark(
@@ -3147,6 +3799,7 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
                 portfolio_id=portfolio_id,
                 benchmark=benchmark,
                 mark_source=mark_source,
+                price_evidence=price_evidence,
                 _settlement_receipt_id=_settlement_receipt_id,
                 _locked=True,
             )
@@ -3184,11 +3837,18 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         state["benchmark_symbol"] = bench
         _save_account(state, portfolio_id)
 
+    # Value the book through the qualification path (pure — no writes) using the same
+    # loaded state, so the NAV row and the persisted per-position marks agree on one
+    # classification of every held line.
+    v = valuation(prices, asof, portfolio_id, price_evidence=price_evidence, state=state)
+
     # Persist each held position's latest *observed* mark so closed-market readers can value the
     # account at its last completed mark.  A missing quote MUST NOT overwrite that evidence with
     # avg_cost: doing so turns an absent feed into a fabricated zero P&L and destroys the only EOD
     # price the dashboard can carry overnight.  The mark's date/source travel with the value, and a
-    # backfill for an older date cannot roll a newer stored mark backward.  This metadata is display
+    # backfill for an older date cannot roll a newer stored mark backward.  A price classified
+    # CARRIED from input evidence keeps the date it was actually OBSERVED — re-stamping it with
+    # the mark date would launder a stale quote into a fresh one.  This metadata is display
     # provenance only; execution continues to require the explicit ``prices`` argument elsewhere.
     _marked_any = False
     _mark_asof = str(asof)[:10]
@@ -3201,24 +3861,68 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
             px = None
         if px is None or not math.isfinite(px) or px <= 0:
             continue
+        line = v["lines"].get(ticker)
+        if line is not None and line["class"] == "UNPRICED":
+            # The qualification rejected this input (e.g. observed after asof): it is not an
+            # observed mark for this date, so it must not become the persisted last mark.
+            continue
+        if line is not None and line["class"] == "CARRIED" and line.get("price_asof"):
+            stamp_asof = str(line["price_asof"])[:10]
+            stamp_source = line.get("source") or _mark_source
+        else:
+            stamp_asof = _mark_asof
+            stamp_source = _mark_source
         previous_asof = str(pos.get("current_price_asof") or "")[:10]
         try:
-            if previous_asof and date.fromisoformat(previous_asof) > date.fromisoformat(_mark_asof):
+            if previous_asof and date.fromisoformat(previous_asof) > date.fromisoformat(stamp_asof):
                 continue
         except (TypeError, ValueError):
             pass
         pos["current_price"] = round(px, 4)
-        pos["current_price_asof"] = _mark_asof
-        pos["current_price_source"] = _mark_source
+        pos["current_price_asof"] = stamp_asof
+        pos["current_price_source"] = stamp_source
         pos["current_price_time_kind"] = "portfolio_mark_date"
         _marked_any = True
     if _marked_any:
         _save_account(state, portfolio_id)
 
-    current_nav = state["cash"] + sum(
-        pos["shares"] * prices.get(ticker, pos["avg_cost"])
-        for ticker, pos in state["positions"].items()
-    )
+    if v["nav_status"] == "WITHHELD":
+        # An unpriced held line has no lawful value: never a cost-basis stand-in, never zero.
+        # Withhold the NAV point entirely — an existing row for this date stays byte-identical —
+        # and record the diagnosis next to the ledger. Never raise: settle.py reads a raise as a
+        # failure to finalize settlement, and a kept receipt blocks every later mark.
+        withheld_path = nav_path.with_name("nav_withheld.jsonl")
+        withheld_row = {
+            "date": asof,
+            "mark_source": _mark_source,
+            "unpriced": v["unpriced"],
+            "carried": v["carried"],
+            "reason": "unpriced_held_position",
+        }
+        wrows: list[dict] = []
+        if withheld_path.exists():
+            for line in withheld_path.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("date") == asof and r.get("mark_source") == _mark_source:
+                    continue
+                wrows.append(r)
+        wrows.append(withheld_row)
+        # idempotent per (date, mark_source); keep the ledger in chronological order.
+        wrows.sort(key=lambda row: (str(row.get("date") or ""), str(row.get("mark_source") or "")))
+        _ensure_dir(portfolio_id)
+        _atomic_write_bytes(
+            withheld_path,
+            ("\n".join(json.dumps(r, default=str) for r in wrows) + "\n").encode("utf-8"),
+        )
+        return v
+
+    current_nav = v["nav"]
     invested = current_nav - state["cash"]
 
     spy_nav: float | None = None
@@ -3232,6 +3936,13 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         "invested": round(invested, 2),
         "spy_nav": round(spy_nav, 2) if spy_nav is not None else None,
         "benchmark": bench,
+        "nav_status": v["nav_status"],
+        "nav_qualified": round(v["nav_qualified"], 2) if v["nav_qualified"] is not None else None,
+        "carried": v["carried"],
+        "carried_value": round(v["carried_value"], 2),
+        "carried_fraction": round(v["carried_fraction"], 6),
+        "unattested": v["unattested"],
+        "mark_source": _mark_source,
     }
     # idempotent per date: keep exactly one NAV row per calendar date (replace, don't
     # append) so repeated book builds on the same day don't pile up duplicate points.
@@ -3257,6 +3968,7 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         nav_path,
         ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8"),
     )
+    return v
 
 
 # ---------------------------------------------------------------------------

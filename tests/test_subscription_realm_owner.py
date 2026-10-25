@@ -17,13 +17,17 @@ from ops.executive_os import provider_worker_slots as slots
 
 @pytest.fixture
 def enrolled(tmp_path, monkeypatch):
-    uid, gid = os.getuid(), os.getgid()
     root = tmp_path / "workers"
     home = root / "minimax-01" / "provider-home"
     home.mkdir(parents=True, mode=0o700)
     credential = home / realm.PROVIDER_CREDENTIAL_FILENAME
     credential.write_bytes(b"opaque-test-value")
     credential.chmod(0o600)
+    # Newly created files inherit the parent directory group on macOS; it need
+    # not equal the test process primary GID. Keep the real fixture ownership
+    # checks while virtualizing the dedicated worker principal below.
+    metadata = credential.lstat()
+    uid, gid = metadata.st_uid, metadata.st_gid
     binary, receipt = tmp_path / "codex", tmp_path / "receipt.json"
     binary.write_bytes(b"binary")
     binary.chmod(0o555)
