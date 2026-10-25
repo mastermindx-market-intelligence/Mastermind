@@ -60,6 +60,10 @@ GROK47_MERGED_SOURCE_DIGESTS = {
     'sub.sh': '7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2',
 }
 
+# PR #1797 composes the existing Qwen/Grok-forward picker with a two-hunk
+# judgment review-routing repair. The protected Grok overlay digest above is
+# unchanged; the source-owned candidate postimage is pinned independently below.
+# Former Qwen/Grok-forward candidate pick SHA256: a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee.
 # Three exact forward compositions preserve protected Qwen fresh-usage and
 # caller UTC narrowing. Qualify their accepted Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.

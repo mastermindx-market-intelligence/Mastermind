@@ -223,11 +223,28 @@ class PairedLauncherUpgrade(unittest.TestCase):
     def tearDownClass(cls):
         _cleanup(cls.shared)
 
+    @staticmethod
+    def _reset_fixture_audit():
+        global _active
+        _active = False
+
     def setUp(self):
         global _active
         _active = True
+        # Unittest invokes addCleanup even when setUp raises. Keep the global
+        # audit sentinel and throwaway fixture from poisoning later test packs.
+        self.addCleanup(self._reset_fixture_audit)
         self.temp = tempfile.TemporaryDirectory(prefix='paired-upgrade-')
+        self.addCleanup(_cleanup, self.temp)
         self.root = Path(self.temp.name).resolve()
+        # Reuse the real Studio pin-census owner with an enumerable, throwaway
+        # zero-consumer fixture. Never consult actual private Studio accounts.
+        studio_root = self.root / 'studio-consumers'
+        studio_root.mkdir(mode=0o700)
+        patch = mock.patch.object(installer.studio_consumer_owner,
+                                  'STUDIO_CONSUMER_ROOT', studio_root)
+        patch.start()
+        self.addCleanup(patch.stop)
         self.ext = self.root / 'kit/ext'
         self.ext.mkdir(parents=True)
         (self.root / 'bin').mkdir()
@@ -293,7 +310,8 @@ class PairedLauncherUpgrade(unittest.TestCase):
     def tearDown(self):
         global _active
         _active = False
-        _cleanup(self.temp)
+        # Registered cleanups restore the census binding and dispose the
+        # throwaway owner even if an assertion or setUp fails.
         self.assertEqual(_unexpected, [], 'a forbidden fallback was attempted')
 
     def assert_complete(self):
