@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import PurePosixPath
 import re
-
 SCHEMA = 'mastermind.paid_initializer_commitment/v1'
 CONTRACT = 'paid-host-env-held-fd.v1'
 NESTED_CONTRACT = 'paid-host-env-held-fd-token-data.v1'
@@ -26,24 +25,18 @@ _paid_no_site_check()
 """
 NESTED_OUTER_SHA256 = 'c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0379b2f6'
 NESTED_OUTER_SIZE = 587
-_TOKEN_DATA = _NESTED_DATA = None  # qualified private-package producer only
-_INITIALIZER_SOURCE_HASHES = None  # installed by the same verified peer loader
-_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '3e9b821dd345162cef12bce6a2d5b40be16d8711fb7a2c3750de17c7261c03cf', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}  # fixed reviewed entry programs
+_TOKEN_DATA = _NESTED_DATA = None
+_INITIALIZER_SOURCE_HASHES = None
+_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '3e9b821dd345162cef12bce6a2d5b40be16d8711fb7a2c3750de17c7261c03cf', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}
 PURPOSE = 'canonical-paid-qualification.v1'
 LIMIT = 16384
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
 _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z')
 FIELDS = frozenset('schema_version host_ref transport_alias lane_root account bootstrap_python launch_python host_env initialized_context initialization_contract purpose startup'.split())
-
-
 class InitializerCommitmentRefused(ValueError):
  pass
-
-
 def refuse():
  raise InitializerCommitmentRefused('paid_initializer_commitment_refused')
-
-
 def require_no_site_policy():
  """Check existing early policy; never install/backfill it in a caller."""
  import sys
@@ -51,14 +44,12 @@ def require_no_site_policy():
    or not sys.dont_write_bytecode
    or any(name not in sys.modules or sys.modules[name] is not None
        for name in ('site','sitecustomize','usercustomize'))):refuse()
-
-
 class _IgnoredNoSiteNode:
  """Hold the exact link, never its target; require empty visible metadata."""
  NAME='sitecustomize.py'
  def __init__(self,directory):
   import stat
-  if type(self) not in (_IgnoredNoSiteNode,_QualifiedSysconfigLink):refuse()
+  if type(self) not in (_IgnoredNoSiteNode,_QualifiedSysconfigLink,_RuntimeSonameLink,_QualifiedRuntimeLibrary):refuse()
   self.directory=directory;self.fd=None
   try:
    info=os.fstat(directory)
@@ -91,36 +82,34 @@ class _IgnoredNoSiteNode:
   try:self.check()
   finally:
    if self.fd is not None:os.close(self.fd);self.fd=None
-
-
-
 class _QualifiedSysconfigLink(_IgnoredNoSiteNode):
  NAME='_sysconfigdata__linux_x86_64-linux-gnu.py'
- TARGET='_sysconfigdata__x86_64-linux-gnu.py'
+ TARGET=LINK_VALUE='_sysconfigdata__x86_64-linux-gnu.py'
+ LIMIT=1048576
  def __init__(self,directory):
   self.target_fd=self.fd=None
   try:
    super().__init__(directory)
-   if os.readlink(self.NAME,dir_fd=directory)!=self.TARGET:refuse()
-   self.target_fd=os.open(self.TARGET,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+   if os.readlink(self.NAME,dir_fd=directory)!=self.LINK_VALUE:refuse()
+   self.target_directory=self.runtime_directory if type(self)is _QualifiedRuntimeLibrary else directory
+   self.target_fd=os.open(self.TARGET,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=self.target_directory)
    info=os.fstat(self.target_fd);self.target_before=self._identity(info)
    self._target_kind(info)
-   raw=os.pread(self.target_fd,1048577,0)
+   raw=os.pread(self.target_fd,self.LIMIT+1,0)
    if len(raw)!=info.st_size:refuse()
    self.target_hash=hashlib.sha256(raw).digest();self.check()
   except BaseException:
    if self.fd is not None:os.close(self.fd);self.fd=None
    if self.target_fd is not None:os.close(self.target_fd);self.target_fd=None
    raise
- @staticmethod
- def _target_kind(info):
+ def _target_kind(self,info):
   import stat
   if (not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022
-    or info.st_nlink!=1 or not 0<info.st_size<=1048576):refuse()
+    or info.st_nlink!=1 or not 0<info.st_size<=self.LIMIT):refuse()
  def check(self):
   import errno
   super().check()
-  if os.readlink(self.NAME,dir_fd=self.directory)!=self.TARGET:refuse()
+  if os.readlink(self.NAME,dir_fd=self.directory)!=self.LINK_VALUE:refuse()
   info=os.fstat(self.target_fd);self._target_kind(info)
   if self._identity(info)!=self.target_before:refuse()
   for key in ('system.posix_acl_access','system.posix_acl_default'):
@@ -128,24 +117,44 @@ class _QualifiedSysconfigLink(_IgnoredNoSiteNode):
    except OSError as error:
     if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):refuse()
    else:refuse()
-  if (hashlib.sha256(os.pread(self.target_fd,1048577,0)).digest()!=self.target_hash
+  if (hashlib.sha256(os.pread(self.target_fd,self.LIMIT+1,0)).digest()!=self.target_hash
     or self._identity(os.fstat(self.target_fd))!=self.target_before
-    or self._identity(os.stat(self.TARGET,dir_fd=self.directory,follow_symlinks=False))!=self.target_before
-    or os.readlink(self.NAME,dir_fd=self.directory)!=self.TARGET):refuse()
+    or self._identity(os.stat(self.TARGET,dir_fd=self.target_directory,follow_symlinks=False))!=self.target_before
+    or os.readlink(self.NAME,dir_fd=self.directory)!=self.LINK_VALUE):refuse()
   super().check()
  def __exit__(self,*args):
   try:super().__exit__(*args)
   finally:
    if self.target_fd is not None:os.close(self.target_fd);self.target_fd=None
-
-
+class _RuntimeSonameLink(_IgnoredNoSiteNode):
+ NAME='libpython3.12.so.1'
+class _QualifiedRuntimeLibrary(_QualifiedSysconfigLink):
+ NAME='libpython3.12.so'
+ TARGET='libpython3.12.so.1.0'
+ LINK_VALUE='../../x86_64-linux-gnu/libpython3.12.so.1'
+ LIMIT=16777216
+ def __init__(self,directory,runtime_directory):
+  self.soname=None;self.runtime_directory=runtime_directory
+  try:
+   self.soname=_RuntimeSonameLink(runtime_directory)
+   if os.readlink(self.soname.NAME,dir_fd=runtime_directory)!=self.TARGET:refuse()
+   super().__init__(directory)
+  except BaseException:
+   if self.soname is not None:self.soname.__exit__(None,None,None)
+   raise
+ def check(self):
+  self.soname.check()
+  if os.readlink(self.soname.NAME,dir_fd=self.runtime_directory)!=self.TARGET:refuse()
+  super().check();self.soname.check()
+  if os.readlink(self.soname.NAME,dir_fd=self.runtime_directory)!=self.TARGET:refuse()
+ def __exit__(self,*args):
+  try:super().__exit__(*args)
+  finally:self.soname.__exit__(*args)
 def _require_startup_entry(info,count):
  """The unchanged Root/type/mode/count predicate, shared by both profiles."""
  import stat
  if (count>20000 or info.st_uid!=0 or info.st_mode&0o022
    or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))):refuse()
-
-
 def _no_site_startup_entries(library):
  """No-follow classification under the existing Root namespace premise."""
  import stat
@@ -159,34 +168,22 @@ def _no_site_startup_entries(library):
     yield entry.path,info
     if stat.S_ISDIR(info.st_mode):directories.append(entry.path)
   pending.extend(reversed(directories))
-
-
 def canonical(value):
  return json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
-
-
 def closed(value, keys):
  if type(value) is not dict or set(value)!=set(keys) or any(type(k) is not str for k in value):refuse()
  return value
-
-
 def text(value, pattern):
  if type(value) is not str or not pattern.fullmatch(value):refuse()
  return value
-
-
 def path(value):
  if (type(value) is not str or not 1<len(value)<=4096 or not value.startswith('/')
    or any(ord(c)<32 or ord(c)==127 for c in value) or str(PurePosixPath(value))!=value
    or any(p in ('','.', '..') for p in value.split('/')[1:])):refuse()
  return value
-
-
 def integer(value,low,high):
  if type(value) is not int or not low<=value<=high:refuse()
  return value
-
-
 def validate_commitment(value, *, host_ref, transport_alias, python_path, capture_root):
  try:
   if type(value) is not dict:refuse()
@@ -235,8 +232,6 @@ def validate_commitment(value, *, host_ref, transport_alias, python_path, captur
   if len(encoded)>LIMIT:refuse()
   return json.loads(encoded)
  except (KeyError,TypeError,ValueError,RecursionError,OverflowError):refuse()
-
-
 def decode_commitment(raw,expected_sha256,**selectors):
  try:
   text(expected_sha256,_SHA)
@@ -250,8 +245,6 @@ def decode_commitment(raw,expected_sha256,**selectors):
   value=json.loads(raw,object_pairs_hook=pairs,parse_constant=lambda _:refuse())
   return validate_commitment(value,**selectors)
  except (TypeError,ValueError,UnicodeError,RecursionError,OverflowError):refuse()
-
-
 def sealed_snapshot(raw):
  """Linux exact-byte ephemeral FD. Never execute the mutable origin FD."""
  import fcntl
@@ -273,8 +266,6 @@ def sealed_snapshot(raw):
   return fd
  except BaseException:
   os.close(fd);raise
-
-
 def _initialized_environment(raw,commitment):
  """Environment is transferred as DATA, never shell-generated proof/code."""
  if type(raw) is not bytes or not 0<len(raw)<=65536 or not raw.endswith(b'\0'):refuse()
@@ -306,8 +297,6 @@ def _initialized_environment(raw,commitment):
     contract=NESTED_CONTRACT)
   return result
  except (UnicodeError,ValueError,TypeError):refuse()
-
-
 def _bounded_child(argv,*,timeout,**kwargs):
  """Bound pipe acquisition before materialization; output never goes to logs."""
  import selectors
@@ -332,8 +321,6 @@ def _bounded_child(argv,*,timeout,**kwargs):
   selector.close();child.stdout.close()
   if child.poll() is None:
    child.kill();child.wait()
-
-
 def _capture_environment(snapshot,commitment,environment=None,*,timeout=15):
  import shlex
  script=('export PATH='+shlex.quote(commitment['lane_root']+'/venv/bin')
@@ -342,8 +329,6 @@ def _capture_environment(snapshot,commitment,environment=None,*,timeout=15):
   +'/usr/bin/env -0')
  return _bounded_child(['/bin/bash','--noprofile','--norc','-c',script],
   pass_fds=(snapshot,),env=environment,timeout=timeout)
-
-
 def _pre_execution_witness(request,commitment,prepared,hs,helper_identity):
  def identity(s):
   return [s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,
@@ -356,8 +341,6 @@ def _pre_execution_witness(request,commitment,prepared,hs,helper_identity):
  if prepared is not None:
   result.update(nested_inputs=prepared.witness,helper_origin_identity=helper_identity)
  return result
-
-
 def _read_boot_id():
  import stat
  fd=os.open('/proc/sys/kernel/random/boot_id',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -370,28 +353,17 @@ def _read_boot_id():
   if not _ID.fullmatch(value):refuse()
   return value
  finally:os.close(fd)
-
-
 def _current_entry_runtime():
  import sys
  return dict(python_path=sys.executable,kernel_executable=os.path.realpath('/proc/self/exe'),
   startup={k:getattr(sys,k) for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')})
-
-
 def _require_current_entry_runtime(request):
  observed=_current_entry_runtime();c=request['initializer_commitment']
  if (observed['python_path']!=request['python_path']
    or observed['kernel_executable']!=c['launch_python']['real_path']
    or observed['startup']!={k:c['startup'][k] for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')}):refuse()
-
-
 def run_canonical_entry(request, *, source_bundle):
- """Additive finite purpose; original Control/gateway still authorizes IO.
-
-    Only the independently pinned three programs can execute. The verified
-    bootstrap also joins these initializer peers to the actual source vector.
-    No supplied callback/environment/qualification receipt is an execution grant.
-    """
+ """Fixed C-only bundle entry; the held engine and original Control authorize IO."""
  import sys,types
  require_no_site_policy()
  names=('paid_provider_entry.py','paid_glm_model_client.py','linux_process_identity.py')
@@ -417,13 +389,9 @@ def run_canonical_entry(request, *, source_bundle):
  finally:
   for name in names:sys.modules.pop(package_name+'.'+name[:-3],None)
   sys.modules.pop(package_name,None)
-
-
 def run_bootstrap(request, probe_source):
  """Original qualification purpose: ten-second probe, 64 KiB DATA return."""
  return _run_owner(request,probe_source)
-
-
 def _run_owner(request, probe_source, *, _entry=None):
  """One Linux qualification child; caller already owns request/source trust.
 
@@ -544,6 +512,12 @@ def _run_owner(request, probe_source, *, _entry=None):
       ignored_nodes.append(node);continue
      if name==library+'/'+_QualifiedSysconfigLink.NAME and stat.S_ISLNK(info.st_mode):
       node=contexts.enter_context(_QualifiedSysconfigLink(library_fd))
+      if node.before!=identity(info):refuse()
+      ignored_nodes.append(node);continue
+     if library=='/usr/lib/python3.12' and name==library+'/config-3.12-x86_64-linux-gnu/libpython3.12.so' and stat.S_ISLNK(info.st_mode):
+      config_fd,_=pin(library+'/config-3.12-x86_64-linux-gnu',directory=True,owners={0})
+      runtime_fd,_=pin('/usr/lib/x86_64-linux-gnu',directory=True,owners={0})
+      node=contexts.enter_context(_QualifiedRuntimeLibrary(config_fd,runtime_fd))
       if node.before!=identity(info):refuse()
       ignored_nodes.append(node);continue
      _require_startup_entry(info,count)

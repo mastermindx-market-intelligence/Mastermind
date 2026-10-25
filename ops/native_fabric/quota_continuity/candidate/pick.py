@@ -1209,7 +1209,7 @@ def judgment_order(doc: Optional[Dict[str, Any]] = None) -> List[str]:
 
 
 JUDGMENT_CLASSES_R28 = frozenset({
-    "operator", "reviewer", "adjudicate", "decompose", "audit", "repair",
+    "operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",
     "domain_orchestration",
 })
 LABOR_CLASSES_R30 = frozenset({
@@ -2053,24 +2053,37 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
         # catalog. Capability/host, economic, quality and independence gates
         # below are still required; catalog presence is not worker admission.
     if explicit_model and not native_alias and not grok_pin:
-        models = {str(value).casefold() for value in _glm_models(doc).values()}
-        full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
-        if explicit_model not in models:
-            return "NONE reason=unknown requested_model"
-        effective_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
-        if forced and effective_pool != "glm":
-            return f"NONE reason=requested_model contradicts pool={pool!r}"
-        if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
-            return "NONE reason=requested model/complexity escalation not admitted"
-        guard = launch_policy(
-            "glm", tc, explicit_model, escalation_reason=escalation_reason,
-            doc=doc, task_complexity=complexity,
-        )
-        if not guard.get("allowed"):
-            return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
-        if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
-            return "NONE reason=explicit model held by GLM peak labor policy"
-        forced = "glm"
+        # Exact worker pinning is never an arbitrary model promotion. Permit
+        # the current task-qualified default for its explicitly chosen pool;
+        # keep the pre-existing full GLM C2 escalation narrow and witnessed.
+        selected_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
+        glm_models = {str(value).casefold() for value in _glm_models(doc).values()}
+        if explicit_model in glm_models:
+            if selected_pool and selected_pool != "glm":
+                return f"NONE reason=requested_model contradicts pool={pool!r}"
+            normal_model, _ = _selection_model("glm", tc, doc)
+            if not (selected_pool == "glm" and explicit_model == str(normal_model).casefold()):
+                full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
+                if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
+                    return "NONE reason=requested model/complexity escalation not admitted"
+                guard = launch_policy(
+                    "glm", tc, explicit_model, escalation_reason=escalation_reason,
+                    doc=doc, task_complexity=complexity,
+                )
+                if not guard.get("allowed"):
+                    return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
+                if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
+                    return "NONE reason=explicit model held by GLM peak labor policy"
+            forced = "glm"
+        elif selected_pool:
+            if selected_pool not in (doc.get("pools") or {}):
+                return "NONE reason=unknown forced pool"
+            admitted_default, _ = _selection_model(selected_pool, tc, doc)
+            if not admitted_default or admitted_default.casefold() != explicit_model:
+                return "NONE reason=requested model not admitted for selected pool/task"
+            forced = selected_pool
+        else:
+            return "NONE reason=exact model requires provider pool"
     if forced:
         forced = ROUTING_TOKEN_POOLS.get(forced, forced)
         if forced not in (doc.get("pools") or {}):
@@ -2108,7 +2121,9 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             host_modes=host_modes, task_complexity=complexity, escalation_reason=escalation_reason
         )
 
-    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:
+    # Independent review/audit remain judgment even when legacy execute_classes includes them.
+    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.
+    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):
         return _pick_execute(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                              task_complexity=complexity, escalation_reason=escalation_reason,
                              route_key=route_key)
