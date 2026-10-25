@@ -318,18 +318,23 @@ def test_hook_held_namespace_rename_refuses(backend,tmp_path,monkeypatch):
 
 def test_inspection_transport_no_key_mutation_normal_transport_unchanged(tmp_path):
     text=(SOURCE/'host_pull.sh').read_text()
+    # Include fixed wrapper assignment with caller; capture argv and stdin
+    # using inert local functions. Never make an actual SSH request.
+    assignment=text[text.index('HOST_PULL_REMOTE_STDIN_EXEC='):text.index('run_probe() {')]
     function=text[text.index('run_probe() {'):text.index('if [ -n "$PHYSICAL_HOST" ]; then')]
-    # Bash functions stand in for transport executables; no SSH/perl is run.
-    stub='perl(){ printf "ARG:%s\\n" "$@"; }; sh(){ return 98; };\n'
+    stub='perl(){ printf "ARG:%s\n" "$@"; printf "STDIN:"; /bin/cat; }; sh(){ return 98; };\n'
     for flag in ('','fixed-hook-inspection','fixed-physical-diagnostic'):
-        script=stub+function+'\nrun_probe 0 mmx-ubuntu0 INERT '+flag
+        script=stub+assignment+function+'\nrun_probe 0 mmx-ubuntu0 INERT '+flag
         result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',script],
                               env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
         assert result.returncode==0
         assert 'ARG:BatchMode=yes' in result.stdout and 'ARG:ConnectTimeout=8' in result.stdout
         assert ('ARG:StrictHostKeyChecking=yes' in result.stdout)==bool(flag)
         assert ('ARG:UpdateHostKeys=no' in result.stdout)==bool(flag)
-        assert result.stdout.endswith('ARG:mmx-ubuntu0\nARG:INERT\n')
+        assert 'ARG:INERT\n' not in result.stdout
+        assert result.stdout.endswith('STDIN:INERT\n')
+        wrapper=result.stdout.split('ARG:mmx-ubuntu0\nARG:',1)[1].split('\nSTDIN:',1)[0]
+        assert 0<len(wrapper)<4096 and 'mktemp' in wrapper and 'exit 143' in wrapper
 
 
 def physical_frame(output=None, digest='a'*64):
