@@ -13,7 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 from ops.native_fabric.quota_continuity.candidate import paid_initializer as m
-from tests.test_paid_initializer import commitment, selectors
+from tests.test_paid_initializer import commitment, selectors, _preserving_stat_view
+
+
+
+def _stat_view(info,*,uid=0,mode=None):
+    return _preserving_stat_view(info,uid=uid,mode=mode)
 
 
 def nested_commitment():
@@ -83,41 +88,96 @@ def test_no_follow_scanner_never_classifies_target_or_descends_symlinks(tmp_path
     assert all(stat.S_ISLNK(info.st_mode) for name,info in values if name.endswith('sitecustomize.py'))
 
 
+@pytest.mark.parametrize('outcome',[[],['system.posix_acl_access'],['user.inert'],(),None,
+    errno.EOPNOTSUPP,errno.EBADF,errno.EACCES,errno.EIO])
+def test_ignored_node_visible_metadata_is_closed_data_not_errno_absence(tmp_path,monkeypatch,outcome):
+    # Pure method discriminator: sentinel FDs are not native custody proof.
+    parent=tmp_path/'library';parent.mkdir();link=parent/'sitecustomize.py'
+    link.symlink_to(tmp_path/'unopened-target')
+    parent_info=_stat_view(parent.stat());link_info=_stat_view(link.lstat(),mode=stat.S_IFLNK|0o777)
+    node=object.__new__(m._IgnoredNoSiteNode);node.directory=object();node.fd=object()
+    node.directory_before=node._identity(parent_info);node.before=node._identity(link_info)
+    raw_fstat=os.fstat;raw_stat=os.stat;raw_list=getattr(os,'listxattr',None)
+    def fstat(fd):
+        if fd is node.directory:return parent_info
+        if fd is node.fd:return link_info
+        return raw_fstat(fd)
+    def named(name,*args,**kwargs):
+        if name=='sitecustomize.py' and kwargs.get('dir_fd') is node.directory:
+            assert kwargs=={'dir_fd':node.directory,'follow_symlinks':False}
+            return link_info
+        return raw_stat(name,*args,**kwargs)
+    def listed(name,**kwargs):
+        if name=='/proc/self/fd/'+str(node.directory)+'/sitecustomize.py':
+            assert kwargs=={'follow_symlinks':False}
+            if type(outcome)is int:raise OSError(outcome,'inert metadata refusal')
+            return outcome
+        assert raw_list is not None
+        return raw_list(name,**kwargs)
+    with monkeypatch.context() as model:
+        model.setattr(os,'fstat',fstat);model.setattr(os,'stat',named);model.setattr(os,'listxattr',listed,raising=False)
+        if type(outcome)is list and not outcome:node.check()
+        else:
+            with pytest.raises(m.InitializerCommitmentRefused):node.check()
+
+
 @pytest.mark.skipif(sys.platform!='linux',reason='actual Linux O_PATH/no-follow named link ACL')
 def test_actual_nofollow_link_metadata_recheck_and_unsupported_acl_refusal(tmp_path,monkeypatch):
     library=tmp_path/'library';library.mkdir(mode=0o700)
     target=tmp_path/'NEVER_OPEN_TARGET';target.write_bytes(b'inert-not-code')
     link=library/'sitecustomize.py';link.symlink_to(target)
-    rawfstat=os.fstat;rawstat=os.stat;rawopen=os.open;rawxattr=os.getxattr
-    # Only Root ownership premise is modeled; real Linux O_PATH, node identity,
-    # native no-follow ACL result and all timestamps remain actual.
-    def root(info):
-        return SimpleNamespace(**{key:getattr(info,key) for key in ('st_dev','st_ino','st_mode','st_gid','st_nlink','st_size','st_mtime_ns','st_ctime_ns')},st_uid=0)
-    monkeypatch.setattr(os,'fstat',lambda fd:root(rawfstat(fd)))
-    monkeypatch.setattr(os,'stat',lambda *a,**kw:root(rawstat(*a,**kw)))
-    opened=[]
-    def guarded_open(name,flags,*a,**kw):
-        assert str(name)!=str(target)
-        if name=='sitecustomize.py':assert flags&os.O_PATH and flags&os.O_NOFOLLOW
-        opened.append(name);return rawopen(name,flags,*a,**kw)
-    monkeypatch.setattr(os,'open',guarded_open)
+    rawfstat=os.fstat;rawstat=os.stat;rawopen=os.open;rawlist=os.listxattr
+    # Model only exact owned objects, restore before pytest renders a failure,
+    # and preserve the complete stat_result interface and actual timestamps.
     directory=rawopen(library,os.O_RDONLY|os.O_DIRECTORY)
-    def native_xattr(name,key,**kw):
-        assert str(name)=='/proc/self/fd/'+str(directory)+'/sitecustomize.py'
-        assert kw=={'follow_symlinks':False}
-        return rawxattr(name,key,**kw)
-    monkeypatch.setattr(os,'getxattr',native_xattr)
-    node=m._IgnoredNoSiteNode(directory)  # Unsupported native proof is a real failure.
-    with pytest.raises(m.InitializerCommitmentRefused):
-        with node:
-            node.check();link.unlink();link.symlink_to(target)
-            with pytest.raises(m.InitializerCommitmentRefused):node.check()
     try:
-        def unsupported(name,key,**kw):
-            assert str(name).endswith('/sitecustomize.py') and kw=={'follow_symlinks':False}
-            raise OSError(errno.EBADF,'synthetic unsupported metadata')
-        monkeypatch.setattr(os,'getxattr',unsupported)
-        with pytest.raises(m.InitializerCommitmentRefused):m._IgnoredNoSiteNode(directory)
+        with monkeypatch.context() as model:
+            watched={directory:(rawfstat(directory).st_dev,rawfstat(directory).st_ino)}
+            def root_fstat(fd):
+                info=rawfstat(fd)
+                return _stat_view(info) if watched.get(fd)==(info.st_dev,info.st_ino) else info
+            def root_stat(name,*args,**kwargs):
+                info=rawstat(name,*args,**kwargs)
+                return _stat_view(info) if name=='sitecustomize.py' and kwargs.get('dir_fd')==directory and kwargs.get('follow_symlinks') is False else info
+            model.setattr(os,'fstat',root_fstat);model.setattr(os,'stat',root_stat)
+            def guarded_open(name,flags,*args,**kwargs):
+                assert str(name)!=str(target)
+                owned=name=='sitecustomize.py' and kwargs.get('dir_fd')==directory
+                if owned:assert flags&os.O_PATH and flags&os.O_NOFOLLOW
+                fd=rawopen(name,flags,*args,**kwargs)
+                if owned:
+                    info=rawfstat(fd);watched[fd]=(info.st_dev,info.st_ino)
+                return fd
+            model.setattr(os,'open',guarded_open)
+            alias='/proc/self/fd/'+str(directory)+'/sitecustomize.py'
+            def native_list(name,**kwargs):
+                if str(name)==alias:assert kwargs=={'follow_symlinks':False}
+                return rawlist(name,**kwargs)
+            model.setattr(os,'listxattr',native_list)
+            # Actual Linux llistxattr/O_PATH results; only owned UID is modeled.
+            with m._IgnoredNoSiteNode(directory) as node:node.check()
+            assert rawlist(alias,follow_symlinks=False)==[]
+            for value in (['system.posix_acl_access'],['user.inert'],(),None):
+                def named_or_invalid(name,**kwargs):
+                    if str(name)==alias:
+                        assert kwargs=={'follow_symlinks':False}
+                        return value
+                    return rawlist(name,**kwargs)
+                model.setattr(os,'listxattr',named_or_invalid)
+                with pytest.raises(m.InitializerCommitmentRefused):m._IgnoredNoSiteNode(directory)
+            for code in (errno.EOPNOTSUPP,errno.EBADF,errno.EACCES,errno.EIO):
+                def unsupported(name,**kwargs):
+                    if str(name)==alias:
+                        assert kwargs=={'follow_symlinks':False}
+                        raise OSError(code,'synthetic metadata refusal')
+                    return rawlist(name,**kwargs)
+                model.setattr(os,'listxattr',unsupported)
+                with pytest.raises(m.InitializerCommitmentRefused):m._IgnoredNoSiteNode(directory)
+            model.setattr(os,'listxattr',native_list)
+            with pytest.raises(m.InitializerCommitmentRefused):
+                with m._IgnoredNoSiteNode(directory) as node:
+                    link.unlink();link.symlink_to(target)
+                    with pytest.raises(m.InitializerCommitmentRefused):node.check()
     finally:os.close(directory)
     assert target.read_bytes()==b'inert-not-code'
 
@@ -151,7 +211,28 @@ def test_shared_actual_startup_predicate_rejects_foreign_writable_links_types_co
 
 
 @pytest.mark.parametrize('uid,mode',[(1,stat.S_IFDIR|0o700),(0,stat.S_IFDIR|0o777),(0,stat.S_IFREG|0o600)])
-def test_ignored_node_rejects_unqualified_parent_before_open(monkeypatch,uid,mode):
-    monkeypatch.setattr(os,'fstat',lambda fd:SimpleNamespace(st_uid=uid,st_mode=mode))
-    monkeypatch.setattr(os,'open',lambda *a,**kw:pytest.fail('unqualified namespace opened'))
-    with pytest.raises(m.InitializerCommitmentRefused):m._IgnoredNoSiteNode(17)
+def test_ignored_node_rejects_unqualified_parent_before_open(monkeypatch,tmp_path,uid,mode):
+    raw_fstat=os.fstat;raw_open=os.open;directory=raw_open(tmp_path,os.O_RDONLY|os.O_DIRECTORY)
+    def fstat(fd):
+        info=raw_fstat(fd)
+        return _stat_view(info,uid=uid,mode=mode) if fd==directory else info
+    def opened(name,*args,**kwargs):
+        if name=='sitecustomize.py' and kwargs.get('dir_fd')==directory:pytest.fail('unqualified namespace opened')
+        return raw_open(name,*args,**kwargs)
+    monkeypatch.setattr(os,'fstat',fstat);monkeypatch.setattr(os,'open',opened)
+    try:
+        with pytest.raises(m.InitializerCommitmentRefused):m._IgnoredNoSiteNode(directory)
+    finally:os.close(directory)
+
+
+def test_stat_uid_model_preserves_complete_interface_and_linecache(tmp_path,monkeypatch):
+    import linecache
+    file=tmp_path/'source.py';file.write_text('public inert source\n');raw=file.stat();view=_stat_view(raw)
+    assert type(view)is os.stat_result and len(view)==len(raw)
+    assert view.st_uid==0 and view[4]==0
+    assert all(getattr(view,key)==getattr(raw,key)for key in dir(raw)if key.startswith('st_')and key!='st_uid')
+    actual_stat=os.stat
+    monkeypatch.setattr(os,'stat',lambda name,*args,**kwargs:_stat_view(actual_stat(name,*args,**kwargs)) if str(name)==str(file) else actual_stat(name,*args,**kwargs))
+    assert linecache.getline(str(file),1)=='public inert source\n'
+    other=tmp_path/'unmodeled';other.write_bytes(b'public')
+    assert other.stat()==actual_stat(other)

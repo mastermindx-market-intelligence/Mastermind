@@ -233,10 +233,16 @@ Only an immediate `lib/python3.12/sitecustomize.py` symlink can be excluded from
 executable startup closure. It still counts toward the unchanged 20,000-entry
 bound. New-profile traversal uses no-follow `scandir` classification. The existing
 Root-owned, nonwritable, ACL-qualified library directory and ancestors stay held;
-`O_PATH|O_NOFOLLOW` pins the link node, and native no-follow ACL queries address
-`/proc/self/fd/<held-library-directory>/sitecustomize.py`, never the link descriptor
-itself or its target. Full named/FD identities are rechecked around these queries
-and handoffs. Missing native metadata, unsupported ACL behavior, changed node,
+`O_PATH|O_NOFOLLOW` pins the link node. A successful native no-follow
+`listxattr` must return an actual empty list at
+`/proc/self/fd/<held-library-directory>/sitecustomize.py`, never at the link
+FD itself or its target. Full named/FD and parent identities bracket the query.
+Every error, unsupported operation, non-list result or visible attribute name
+refuses. This is a type-semantics/custody and empty-visible-metadata invariant:
+Linux VFS excludes symlink inodes from POSIX ACL interpretation. An empty list
+alone does not prove universal attribute absence because inaccessible names can
+be omitted; it grants no LSM, target-code or sandbox assurance. Ordinary files
+and directories retain their existing getxattr ACL guards. Changed node,
 foreign owner, other symlink/type, writable namespace or excess count refuses.
 All image, zip, `._pth`, pyvenv, getpath, immutable snapshot and source guards remain.
 

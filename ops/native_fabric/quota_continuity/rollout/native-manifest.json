@@ -70,7 +70,7 @@
   "ext/paid_glm_model_client.py": "ea2d98c4360f981872b3b0b081447a70a969f42792675bf54f9e12557e24a773",
   "ext/paid_host_qualification.py": "e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0",
   "ext/paid_incumbent_state.py": "2fd23881b84ca8ee32a93b5e15267de117f40b37dd53fe095cb1d3dee658454d",
-  "ext/paid_initializer.py": "2d34fa0ef1353c991783574e6a7af4f3011ecbea1f07caed3e967c5f1e6b2f7c",
+  "ext/paid_initializer.py": "0ed3d942dcda3675e124e5b1a0c2a918df066f5d8332d1439f6f178eaf9d9661",
   "ext/paid_initializer_nested_data.py": "47c476deedd42231206d528b656664c8b590414ea905ee2fe91571a90454d073",
   "ext/paid_initializer_token_data.py": "7a3e5d2642df12c48769490c6cb86301bad1843088bf2dae48181c7a307e2dfe",
   "ext/paid_model_owner.py": "a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c",
