@@ -55,3 +55,13 @@ These are not part of `288c59a2`. They load each agent's Slack id.
 | --- | --- | --- | --- |
 | `integrations/hermes_runtime/systemd_unit.py` | `EnvironmentFile=` is that unit's 0600 secrets path, so the unit process receives `HERMES_SLACK_BOT_USER_ID`. The unit text still has no secret bytes. | glue | `InstallLifecycleTests._assert_unit_has_no_secret` |
 | `integrations/hermes_runtime/secrets.py` | The Hermes child receives `HERMES_SLACK_BOT_USER_ID` from the secrets file and does not receive the bot token or the gateway token. | glue | `RegistryTests.test_registered_child_secret_names_are_forwarded_and_the_gateway_token_is_not` |
+
+## Secretary shadow job and PyYAML
+
+Review `5644055838` failed the secretary shadow job because leaving shadow imported `integrations.hermes_harness.shadow_gate`, and importing that package loaded `extensions`, which loads `integrations.hermes_models` and its module-level `import yaml`. The secretary workflow does not install PyYAML.
+
+Choice: keep `shadow_gate`'s import path free of PyYAML. `integrations/hermes_harness/__init__.py` does not import `extensions` until `boot_harness` is called. `shadow_gate` itself imports only `integrations.hermes_runtime.errors`, whose yaml use is already inside the profile loader. PyYAML was not added to `.github/workflows/hermes-secretary.yml`.
+
+| File | Reason | Kind | Test |
+| --- | --- | --- | --- |
+| `integrations/hermes_harness/__init__.py` | Defer `boot_harness` so the secretary leave-shadow import does not require PyYAML. | glue | Secretary suite run with PyYAML absent |

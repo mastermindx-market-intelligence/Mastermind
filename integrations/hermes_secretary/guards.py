@@ -61,6 +61,7 @@ class StandingRules:
 
 
 def _require_bot_id_to_leave_shadow() -> None:
+    # Import shadow_gate only. The harness package must not load PyYAML here.
     from integrations.hermes_harness.shadow_gate import assert_may_leave_shadow
     from integrations.hermes_runtime.errors import RuntimeRefusal
 
