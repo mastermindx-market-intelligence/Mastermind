@@ -1,0 +1,40 @@
+name: Hermes harness
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/hermes_harness/**'
+      - 'integrations/hermes_runtime/**'
+      - 'integrations/hermes_models/**'
+      - 'integrations/hermes_steward/**'
+      - 'integrations/hermes_delegate/**'
+      - 'integrations/hermes_secretary/**'
+      - 'docs/hermes/**'
+      - '.github/workflows/hermes-harness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harness-offline:
+    name: Hermes harness offline stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install only the audited YAML parser
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+      - name: Compile the harness and the five packages
+        run: python -m compileall -q integrations/hermes_harness integrations/hermes_runtime integrations/hermes_models integrations/hermes_steward integrations/hermes_delegate integrations/hermes_secretary
+      - name: Run the offline end-to-end harness
+        run: python -m unittest discover -v -s integrations/hermes_harness/tests -p 'test_*.py'

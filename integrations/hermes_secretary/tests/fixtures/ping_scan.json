@@ -1,0 +1,150 @@
+{
+  "ledger": [
+    {"task": "rf-t01", "state": "open", "title": "Yahoo rights vintage return"},
+    {"task": "rf-t02", "state": "returned_pending", "title": "Already handed back"}
+  ],
+  "history": {
+    "C0BSBM78V1N": [
+      {
+        "ts": "1761410001.000100",
+        "user": "U0BRETDUAS2",
+        "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: hermes-wp5-shadow-001\nPlease place the bounded source note on the existing titled worker.\nlimits: read-only, do not merge, do not touch #1717"
+      },
+      {
+        "ts": "1761410001.000100",
+        "user": "U0BRETDUAS2",
+        "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: hermes-wp5-shadow-001\nPlease place the bounded source note on the existing titled worker.\nlimits: read-only, do not merge, do not touch #1717"
+      },
+      {
+        "ts": "1761410003.000100",
+        "user": "U0BTCHX8HMF",
+        "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: self-echo-003"
+      },
+      {
+        "ts": "1761410004.000100",
+        "user": "U0OTHERSEAT1",
+        "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: other-seat-004"
+      },
+      {
+        "ts": "1761410005.000100",
+        "user": "U0BSB73JWNL",
+        "text": "PENDING_PICKUP needs_placement titled worker queue"
+      },
+      {
+        "ts": "1761410006.000100",
+        "user": "U0BR1GQH7SB",
+        "text": "PENDING_PICKUP needs_placement please place this"
+      },
+      {
+        "ts": "1761410007.000100",
+        "user": "U0C59APBUN4",
+        "text": "status-only watcher update. The room is quiet."
+      },
+      {
+        "ts": "1761410008.000100",
+        "user": "U0C59APBUN4",
+        "text": "BLOCKED on the carrier. Need a wake before the next placement."
+      },
+      {
+        "ts": "1761410009.000100",
+        "user": "U0BRETDUAS2",
+        "text": "Checking the room. Nothing in this parent."
+      }
+    ],
+    "C0BTD5804QK": [
+      {
+        "ts": "1761410013.000100",
+        "user": "U0BRETDUAS2",
+        "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: acked-013\nlimits: read only"
+      }
+    ],
+    "C0BRDFZPLHK": [
+      {
+        "ts": "1761410014.000100",
+        "user": "U0BR1GQH7SB",
+        "text": "WAITING_CAPACITY for a titled worker on the control-room note"
+      }
+    ],
+    "C0C5FCK1F45": [
+      {
+        "ts": "1761410012.000100",
+        "user": "U0BRETDUAS2",
+        "text": "TO: Grok Secretary\noperation_id: secret-012\ntoken: xoxb-not-a-real-token"
+      }
+    ],
+    "C0CBC6AEAQZ": [
+      {
+        "ts": "1761410015.000100",
+        "user": "U0OTHERSEAT1",
+        "text": "DIRECT_TARGETED from another seat. Ignore this."
+      }
+    ],
+    "C0CCNK7JFAL": [
+      {
+        "ts": "1761410010.000100",
+        "user": "U0BR1GQH7SB",
+        "text": "rf-t01 is ready. Please record the return."
+      },
+      {
+        "ts": "1761410011.000100",
+        "user": "U0BR1GQH7SB",
+        "text": "rf-t02 was already sent yesterday."
+      }
+    ]
+  },
+  "replies": {
+    "C0BSBM78V1N|1761410006.000100": [
+      {
+        "ts": "1761410006.000100",
+        "user": "U0BR1GQH7SB",
+        "text": "PENDING_PICKUP needs_placement please place this"
+      },
+      {
+        "ts": "1761410006.000200",
+        "user": "U0BTCHX8HMF",
+        "thread_ts": "1761410006.000100",
+        "text": "ACK placed on the existing titled worker"
+      }
+    ],
+    "C0BSBM78V1N|1761410009.000100": [
+      {
+        "ts": "1761410009.000100",
+        "user": "U0BRETDUAS2",
+        "text": "Checking the room. Nothing in this parent."
+      },
+      {
+        "ts": "1761410009.000200",
+        "user": "U0BRETDUAS2",
+        "thread_ts": "1761410009.000100",
+        "text": "<@U0BTCHX8HMF> Meta-CEO assignment\noperation_id: thread-op-009\nlimits: comments only"
+      }
+    ],
+    "C0BTD5804QK|1761410013.000100": [
+      {
+        "ts": "1761410013.000100",
+        "user": "U0BRETDUAS2",
+        "text": "<@U0BTCHX8HMF> TO: Grok Secretary\noperation_id: acked-013\nlimits: read only"
+      },
+      {
+        "ts": "1761410013.000200",
+        "user": "U0BTCHX8HMF",
+        "thread_ts": "1761410013.000100",
+        "text": "ACK acked-013"
+      }
+    ],
+    "C0BSBM78V1N|1761410008.000100": [
+      {
+        "ts": "1761410008.000100",
+        "user": "U0C59APBUN4",
+        "text": "BLOCKED on the carrier. Need a wake before the next placement."
+      }
+    ],
+    "C0BSBM78V1N|1761410007.000100": [
+      {
+        "ts": "1761410007.000100",
+        "user": "U0C59APBUN4",
+        "text": "status-only watcher update. The room is quiet."
+      }
+    ]
+  }
+}
