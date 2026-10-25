@@ -359,3 +359,27 @@ def test_paired_entries_resolve_through_real_new_owner_without_process_launch(ow
         assert argv[2:] == ['--help']
         assert environment['FABRIC_NATIVE_CODE_GENERATION'] == receipt['selection']['generation']
         assert g.digest(g.regular_bytes(plan['entries'][entry]['target'])) == plan['entries'][entry]['bridge']
+
+
+@pytest.mark.parametrize('edge', ['publication', 'pool', 'task'])
+def test_published_successor_owner_drift_refuses_before_next_authority_edge(owner, edge):
+    prepare(owner)
+    before = g.current(owner.store)
+    pool, task = owner.pool.read_bytes(), (owner.ext / 'fabric_task.py').read_bytes()
+    launcher = owner.store / 'launchers' / (installer.SUCCESSOR_TO + '.py')
+    atomic = g.atomic_bytes
+    def drift(path, *args):
+        atomic(path, *args)
+        changed_at = {'publication': launcher, 'pool': owner.pool,
+                      'task': owner.ext / 'fabric_task.py'}[edge]
+        if Path(path) == changed_at:
+            atomic(launcher, b'foreign owner bytes\n', 0o555)
+    with mock.patch.object(g, 'atomic_bytes', side_effect=drift):
+        with pytest.raises(ValueError, match='successor launcher differs'):
+            installer.apply_successor(owner.successor)
+    if edge == 'publication':
+        assert owner.pool.read_bytes() == pool
+    if edge != 'task':
+        assert (owner.ext / 'fabric_task.py').read_bytes() == task
+    assert g.current(owner.store) == before
+    assert (owner.store / 'bootstrap/.launcher-successor-v1.json').exists()

@@ -500,6 +500,14 @@ def read_successor(bundle):
     return plan, payloads
 
 
+
+def _require_successor_launcher(plan, payloads):
+    launcher = Path(plan["store"]) / "launchers" / (SUCCESSOR_TO + ".py")
+    generation.require(launcher, stat.S_ISREG, 0o555)
+    if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
+        raise ValueError("published successor launcher differs")
+
+
 def apply_successor(bundle):
     """Advance only this retained source transition; no process or service control."""
     plan, payloads = read_successor(bundle)
@@ -534,9 +542,7 @@ def apply_successor(bundle):
             if not exists or current != selected or (completed and _successor_json(receipt_path) != receipt):
                 raise ValueError("completed successor no longer matches current state")
             _upgrade_entries(plan, complete=True)
-            generation.require(launcher, stat.S_ISREG, 0o555)
-            if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
-                raise ValueError("selected successor launcher differs")
+            _require_successor_launcher(plan, payloads)
             if not completed:
                 _record_once(receipt_path, receipt)
             return receipt
@@ -554,6 +560,7 @@ def apply_successor(bundle):
                 raise ValueError("published successor launcher differs")
         else:
             generation.atomic_bytes(launcher, payloads["native_generation.py"], 0o555)
+        _require_successor_launcher(plan, payloads)
         for name in ("pool", "task"):
             read_successor(bundle)
             _upgrade_entries(plan, partial=True)
@@ -561,6 +568,7 @@ def apply_successor(bundle):
                 raise ValueError("successor selection changed before ingress replacement")
             if name == "pool":
                 _require_studio_consumer_pin(plan, "bridge")
+            _require_successor_launcher(plan, payloads)
             entry = plan["entries"][name]
             if generation.digest(generation.regular_bytes(entry["target"])) != entry["bridge"]:
                 generation.atomic_bytes(Path(entry["target"]), payloads[name + ".bridge"], entry["mode"])
@@ -568,6 +576,7 @@ def apply_successor(bundle):
         _upgrade_entries(plan, complete=True)
         if generation.current(store) != previous:
             raise ValueError("successor selection changed before commit")
+        _require_successor_launcher(plan, payloads)
         if generation._select_locked(store, plan["target_generation"], previous["generation"]) != selected:
             raise ValueError("successor selection readback differs")
         _record_once(receipt_path, receipt)
