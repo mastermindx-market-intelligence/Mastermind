@@ -38,6 +38,8 @@ def volume(path: Path) -> dict:
         free = v.f_bavail * v.f_frsize
         return {
             "path": str(path), "resolved": str(resolved), "state": "OK",
+            "total_bytes": total, "available_bytes": free,
+            "inodes_total": v.f_files, "inodes_available": v.f_favail,
             "total_gib": round(total / GIB, 2),
             "free_gib": round(free / GIB, 2),
             "free_fraction": round(free / total, 4) if total else None,
@@ -200,6 +202,27 @@ def cache_redirected(name: str) -> bool:
     return any(key in os.environ for key in overrides)
 
 
+def effect_volume_pair_ok(root_volume: dict, cache_volume: dict) -> bool:
+    """Require byte/inode-exact observations on one stable filesystem.
+
+    A successful package-manager exit cannot identify which process caused a
+    free-space delta; observations are never an attributable reclaimed-byte
+    counter. Reject missing precision and separate mounts before any effect.
+    """
+    for snapshot in (root_volume, cache_volume):
+        if snapshot.get("state") != "OK":
+            return False
+        for field in ("device", "total_bytes", "available_bytes",
+                      "inodes_total", "inodes_available"):
+            if type(snapshot.get(field)) is not int or snapshot[field] < 0:
+                return False
+        if (snapshot["total_bytes"] <= 0 or
+                snapshot["available_bytes"] > snapshot["total_bytes"] or
+                snapshot["inodes_available"] > snapshot["inodes_total"]):
+            return False
+    return root_volume["device"] == cache_volume["device"]
+
+
 def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
     """Only package-manager cache APIs; no arbitrary rm, /tmp or Git pruning."""
     if mode == "CALM":
@@ -235,6 +258,12 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
         if package_busy():
             results.append({"cache": name, "state": "SKIPPED_PACKAGE_ACTIVITY"})
             break
+        # Capture exact values on the same filesystem before each distinct
+        # manager effect; a historic/rounded root snapshot is not sufficient.
+        before_root, before_cache = volume(Path("/")), volume(cache)
+        if not effect_volume_pair_ok(before_root, before_cache):
+            results.append({"cache": name, "state": "SKIPPED_UNVERIFIED_EFFECT_VOLUME"})
+            break
         marker = state / HOLD
         try:
             # Fail closed BEFORE entering the destructive package-manager API.
@@ -242,6 +271,9 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
             # refuses unattended retries until the exact effect is reconciled.
             with marker.open("x") as intent:
                 intent.write(f"{time.time()}: PRE_EFFECT cache={name}\n")
+                intent.write(json.dumps({"schema": "mastermind.cache_effect_preimage.v1",
+                                         "cache": name, "root": before_root,
+                                         "target": before_cache}, sort_keys=True) + "\n")
                 intent.flush()
                 os.fsync(intent.fileno())
             directory_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
@@ -270,6 +302,30 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
                             "duration_sec": round(time.monotonic() - started, 2),
                             "stderr_tail": proc.stderr[-160:]})
             break
+        after_root, after_cache = volume(Path("/")), volume(cache)
+        if (not effect_volume_pair_ok(after_root, after_cache)
+                or before_root["device"] != after_root["device"]
+                or before_cache["device"] != after_cache["device"]
+                or not trusted_cache_target(root, cache)):
+            # Process success without exact stable postimage is effect-unknown.
+            # Preserve the durable hold; never infer completion from exit=0.
+            results.append({"cache": name, "state": "EFFECT_UNVERIFIED",
+                            "reason": "post_effect_volume_or_target_unverified",
+                            "exit_code": 0})
+            break
+        measurement = {
+            "device": before_root["device"],
+            "before_available_bytes": before_root["available_bytes"],
+            "after_available_bytes": after_root["available_bytes"],
+            "before_free_inodes": before_root["inodes_available"],
+            "after_free_inodes": after_root["inodes_available"],
+            "observed_available_delta_bytes":
+                after_root["available_bytes"] - before_root["available_bytes"],
+            "observed_free_inodes_delta":
+                after_root["inodes_available"] - before_root["inodes_available"],
+            "attributable_reclaimed_bytes": 0,
+            "reclaim_attribution": "NOT_ESTABLISHED_BY_MANAGER",
+        }
         try:
             marker.unlink()
         except OSError as exc:
@@ -278,7 +334,7 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
                             "error": type(exc).__name__})
             break
         results.append({"cache": name, "state": "OK",
-                        "exit_code": 0,
+                        "exit_code": 0, **measurement,
                         "duration_sec": round(time.monotonic() - started, 2),
                         "stderr_tail": ""})
     return results
@@ -297,7 +353,11 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
                     and lanes.get("state") == "OK"
                     and worktrees.get("state") == "OBSERVED_ONLY"
                     and configured.get("state") == "CONFIGURED"
-                    and before.get("inodes_free_fraction") is not None)
+                    and before.get("inodes_free_fraction") is not None
+                    and type(before.get("available_bytes")) is int
+                    and type(before.get("inodes_available")) is int
+                    and type(lanes.get("available_bytes")) is int
+                    and type(lanes.get("inodes_available")) is int)
     result = {"schema": "mastermind.fleet_linux_hygiene.v1",
               "epoch": time.time(), "host": socket.gethostname(),
               "mode": mode, "root": before, "lanes": lanes, "memory": mem,
@@ -313,12 +373,23 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
     result["root_after"] = volume(Path("/"))
     result["finished_epoch"] = time.time()
     after = result["root_after"]
+    # Root drift can be observed exactly but never attributed to this cleaner
+    # without distinct, trusted manager-specific byte evidence.
+    result["observed_root_available_delta_bytes"] = (
+        after["available_bytes"] - before["available_bytes"]
+        if before.get("state") == after.get("state") == "OK"
+        and before.get("device") == after.get("device")
+        and type(before.get("available_bytes")) is int
+        and type(after.get("available_bytes")) is int else None)
+    result["attributable_reclaimed_bytes"] = 0
+    result["reclaim_attribution"] = "NO_VERIFIED_MANAGER_SPECIFIC_BYTE_EVIDENCE"
     result["degraded"] = (not mandatory_ok or after.get("state") != "OK"
                           or after.get("inodes_free_fraction") is None
                           or (before.get("state") == "OK" and after.get("device") != before.get("device"))
                           or any(x.get("state") in ("FAILED", "EFFECT_UNVERIFIED",
                                                    "HELD_EFFECT_UNVERIFIED",
                                                    "MARKER_UNAVAILABLE",
+                                                   "SKIPPED_UNVERIFIED_EFFECT_VOLUME",
                                                    "SKIPPED_MANDATORY_OBSERVATION_UNVERIFIED")
                                  for x in result["cleanup"]))
     return result

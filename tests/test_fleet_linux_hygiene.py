@@ -242,6 +242,72 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             self.assertFalse(h.append_receipt(state, {"schema": "test"}))
             self.assertEqual(outside.read_text(), "keep")
 
+    def test_volume_exact_integer_bytes_and_inodes_not_rounded(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            sample = SimpleNamespace(f_blocks=2000000, f_frsize=4096,
+                                     f_bavail=1234567, f_files=100000,
+                                     f_favail=54321)
+            with patch.object(h.os, "statvfs", return_value=sample):
+                result = h.volume(Path(d))
+            self.assertEqual(result["available_bytes"], 1234567 * 4096)
+            self.assertEqual(result["total_bytes"], 2000000 * 4096)
+            self.assertEqual(result["inodes_available"], 54321)
+            self.assertEqual(result["inodes_total"], 100000)
+            self.assertIsInstance(result["available_bytes"], int)
+
+    def test_manager_effect_records_byte_exact_drift_without_fake_reclamation(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".cache/pip").mkdir(parents=True)
+            def snapshot(available, inodes, device=5):
+                return {"state": "OK", "device": device,
+                        "total_bytes": 1000000, "available_bytes": available,
+                        "inodes_total": 1000, "inodes_available": inodes}
+            pre_root, pre_cache = snapshot(300000, 500), snapshot(300000, 500)
+            post_root, post_cache = snapshot(312345, 505), snapshot(312345, 505)
+            def run_manager(*args, **kwargs):
+                marker = (root / h.HOLD).read_text()
+                self.assertIn("PRE_EFFECT cache=pip", marker)
+                self.assertIn('"available_bytes": 300000', marker)
+                return SimpleNamespace(returncode=0, stderr="")
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    h, "volume", side_effect=[pre_root, pre_cache, post_root, post_cache]), patch.object(
+                    h.subprocess, "run", side_effect=run_manager):
+                rows = h.cache_cleanup(root, root, "CAUTION")
+            self.assertEqual(rows[0]["state"], "OK")
+            self.assertEqual(rows[0]["observed_available_delta_bytes"], 12345)
+            self.assertEqual(rows[0]["observed_free_inodes_delta"], 5)
+            self.assertEqual(rows[0]["attributable_reclaimed_bytes"], 0)
+            self.assertEqual(rows[0]["reclaim_attribution"],
+                             "NOT_ESTABLISHED_BY_MANAGER")
+            self.assertFalse((root / h.HOLD).exists())
+
+    def test_effect_volume_device_drift_preserves_hold_without_replay(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".cache/pip").mkdir(parents=True)
+            def snapshot(device):
+                return {"state": "OK", "device": device,
+                        "total_bytes": 1000000, "available_bytes": 300000,
+                        "inodes_total": 1000, "inodes_available": 500}
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    h, "volume", side_effect=[snapshot(5), snapshot(5),
+                                             snapshot(6), snapshot(5)]), patch.object(
+                    h.subprocess, "run",
+                    return_value=SimpleNamespace(returncode=0, stderr="")) as manager:
+                rows = h.cache_cleanup(root, root, "CAUTION")
+            self.assertEqual(rows[0]["state"], "EFFECT_UNVERIFIED")
+            self.assertEqual(rows[0]["reason"], "post_effect_volume_or_target_unverified")
+            self.assertEqual(manager.call_count, 1)
+            self.assertTrue((root / h.HOLD).exists())
+            self.assertEqual(h.cache_cleanup(root, root, "CRITICAL"),
+                             [{"state": "HELD_EFFECT_UNVERIFIED"}])
+
     def test_timer_keeps_running_and_has_no_end_date(self):
         timer = (SOURCE.parent / "mastermind-linux-hygiene.timer").read_text()
         self.assertIn("Persistent=true", timer)

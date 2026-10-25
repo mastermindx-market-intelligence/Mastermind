@@ -11,8 +11,13 @@ watcher lifecycle, worker queue, or Git authority. See `README.md` and issue #16
 * When under pressure, `--apply-safe-caches` may use **package-manager cache
   commands** (pip and uv; npm additionally in critical mode) only when their
   usual local cache directory exists, no matching install process is observed,
-  and no previous cleanup effect is held unverified. These actions cannot be
-  claimed as exact reclaimed bytes from free-space deltas alone.
+  and no previous cleanup effect is held unverified. Each manager invocation
+  requires exact same-device root/cache before-and-after bytes and available
+  inodes, and the durable PRE_EFFECT marker carries its exact preimage. Loss of
+  device identity or postimage retains the EFFECT_UNVERIFIED hold. An observed
+  free-space delta is NOT attributed to package-manager reclamation; until
+  distinct manager-specific byte proof exists the attributable counter stays
+  zero with an explicit NOT_ESTABLISHED attribution field.
 * NO deletion of a Git worktree, registered Git metadata, external archive,
   root clone, `/tmp`, models, build artifacts, or user files is automated.
   An old directory is a TRIAGE CANDIDATE only. Human ChatGPT worktrees may be
