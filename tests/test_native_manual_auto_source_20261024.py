@@ -30,6 +30,27 @@ AFTER = {
 }
 
 
+COMPOSED_JUDGMENT_PICK = "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df"
+
+
+def _restore_historical_picker(current: bytes) -> bytes:
+    """Reconstruct only the exact reviewed #1797 hunks in the disposable F1 stage."""
+    replacements = (
+        (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
+         b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
+        (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
+         b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
+         b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
+         b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
+    )
+    assert hashlib.sha256(current).hexdigest() == COMPOSED_JUDGMENT_PICK
+    for newer, older in replacements:
+        assert current.count(newer) == 1
+        current = current.replace(newer, older, 1)
+    assert hashlib.sha256(current).hexdigest() == SOURCE["ext/pick.py"][1]
+    return current
+
+
 def sha(path: Path) -> str:
     assert path.is_file() and not path.is_symlink()
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -47,8 +68,12 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     stage = built / "native-code-stage"
     for relative, (name, original_sha) in SOURCE.items():
         source = NATIVE / "candidate" / name
-        assert sha(source) == original_sha
-        shutil.copy2(source, stage / relative)
+        if relative == "ext/pick.py":
+            historical = _restore_historical_picker(source.read_bytes())
+            (stage / relative).write_bytes(historical)
+        else:
+            assert sha(source) == original_sha
+            shutil.copy2(source, stage / relative)
     for action in ("--check", None):
         args = ["git", "apply"] + ([action] if action else []) + [str(PATCH)]
         proc = subprocess.run(args, cwd=stage, capture_output=True, text=True, timeout=18)
@@ -66,3 +91,6 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     assert re.search(r"Ran 14 tests", proc.stderr) and "\nOK\n" in proc.stderr
     # Native source code may be staged/reviewed, but never installed by this test.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
+
+
+# Reviewed judgment routing is preserved in the current native release source.

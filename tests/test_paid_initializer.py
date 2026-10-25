@@ -576,9 +576,11 @@ def test_native_initializer_extends_only_exact_preimage_members():
     assert len(before)==95 and len(current)==98
     assert set(before)<=set(current)
     assert set(current)-set(before)=={'ext/paid_initializer.py','ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py'}
-    assert {p for p in before if before[p]!=current[p]}=={'ext/host_pull.sh','ext/paid_host_qualification.py'}
-    assert sum(before[p]==current[p] for p in before)==93
-    for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py'):
+    # The only additional pre-existing member delta is protected #1797's
+    # exact review-routing picker; it is not an initializer transformation.
+    assert {p for p in before if before[p]!=current[p]}=={'ext/host_pull.sh','ext/paid_host_qualification.py','ext/pick.py'}
+    assert sum(before[p]==current[p] for p in before)==92
+    for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py','pick.py'):
         assert current['ext/'+name]==hashlib.sha256((native/'candidate'/name).read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
