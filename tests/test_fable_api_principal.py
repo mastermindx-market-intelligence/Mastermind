@@ -257,3 +257,24 @@ def test_sender_never_retries_when_network_fails(monkeypatch):
     with pytest.raises(TimeoutError):
         module.send_anthropic_once({"x-api-key":"unit-secret"}, b'{}')
     assert calls == ["connect", "request", "close"]
+
+
+def test_parallel_invokers_cannot_double_spend():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    api, events = _harness()
+    ready = Barrier(12)
+    def invoke(_index):
+        ready.wait()
+        try:
+            answer = api.invoke(_request())
+            return "ok" if answer.model == MODEL else "bad"
+        except FableApiRefused:
+            return "refused"
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        results = list(executor.map(invoke, range(12)))
+    assert results.count("ok") == 1
+    assert results.count("refused") == 11
+    assert len([e for e in events if e[0] == "send"]) == 1
