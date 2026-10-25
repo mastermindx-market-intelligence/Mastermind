@@ -19,12 +19,13 @@ import sys
 import tempfile
 import threading
 import time
+from http.cookiejar import CookieJar
 from urllib.error import HTTPError, URLError
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 DEFAULT_DSH_SHA = "687f282e8625c6b8d11ff58211a90524be2e4317"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
-URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})(?:/|\b)")
+URL = re.compile(r"http://127\.0\.0\.1:([1-9][0-9]{0,4})/\?token=([A-Za-z0-9_-]{20,220})(?![A-Za-z0-9_-])")
 SCHEMA = "mastermind.dsh_web_native_smoke.v1"
 MAX_RESPONSE_BYTES = 256 * 1024
 
@@ -89,8 +90,9 @@ def clean_env(scratch: Path, node: Path) -> dict[str, str]:
 
 def wait_for_web(process: subprocess.Popen[str], lines: queue.Queue[str],
                  deadline: float) -> dict:
-    opener = build_opener(ProxyHandler({}))  # Never use ambient HTTP proxy.
+    opener = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()))  # No ambient proxy; ephemeral cookies.
     announced_port = None
+    launch_url = None
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise Refused("STARTUP_EXITED", "Web CLI exited before serving the application")
@@ -98,16 +100,20 @@ def wait_for_web(process: subprocess.Popen[str], lines: queue.Queue[str],
             line = lines.get(timeout=min(0.15, max(0.01, deadline-time.monotonic())))
             matches = URL.findall(line)
             if matches:
-                announced_port = int(matches[-1])
+                raw_port, launch_token = matches[-1]
+                announced_port = int(raw_port)
                 if announced_port > 65535:
                     raise Refused("UNTRUSTED_ORIGIN", "app advertised an invalid port")
+                # DSH requires one short-lived launch-token -> signed-cookie exchange.
+                # Keep the token only in process memory; return/receipt contains origin only.
+                launch_url = f"http://127.0.0.1:{announced_port}/?token={launch_token}"
         except queue.Empty:
             pass
         if announced_port is None:
             continue
         origin = f"http://127.0.0.1:{announced_port}/"
         try:
-            with opener.open(Request(origin, method="GET"), timeout=0.45) as response:
+            with opener.open(Request(launch_url, method="GET"), timeout=0.45) as response:
                 code = response.status
                 media_type = response.headers.get_content_type()
                 data = response.read(MAX_RESPONSE_BYTES + 1)

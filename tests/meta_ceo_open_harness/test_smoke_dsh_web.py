@@ -37,9 +37,18 @@ if (args[args.indexOf('--port')+1] !== '0') process.exit(13);
 const bad = ['OPENAI_API_KEY','ANTHROPIC_API_KEY','ZAI_API_KEY','NODE_OPTIONS','HTTP_PROXY','HTTPS_PROXY','AWS_SECRET_ACCESS_KEY'];
 if (bad.some(key => process.env[key]) || !process.env.DSH_HOME || !process.env.HOME) process.exit(14);
 const mode = fs.readFileSync(path.join(__dirname,'mode.txt'),'utf8').trim();
+const token = 'fixture_token_very_long_1234567890abcdef';
 if (mode === 'exit') process.exit(15);
 if (mode === 'hang') { setInterval(()=>{}, 9999); return; }
 const server = http.createServer((req,res) => {
+ const uri = new URL(req.url, 'http://127.0.0.1');
+ if (mode !== 'badtoken' && uri.pathname === '/' && uri.searchParams.get('token') === token) {
+   res.writeHead(302, {'Set-Cookie':'dsh_session=fixture; HttpOnly; SameSite=Lax', 'Location':'./'});
+   res.end(); return;
+ }
+ if (!(req.headers.cookie || '').includes('dsh_session=fixture')) {
+   res.writeHead(401, {'Content-Type':'text/plain'}); res.end('Authentication required'); return;
+ }
  if (mode === 'bad') {
    res.writeHead(200, {'Content-Type':'text/html'});
    res.end('<html><body>Missing app mount</body></html>');
@@ -49,7 +58,8 @@ const server = http.createServer((req,res) => {
  }
 });
 server.listen(0, '127.0.0.1', () => {
- const url = 'http://'+(mode==='wrongorigin'?'0.0.0.0':'127.0.0.1')+':'+server.address().port+'/';
+ const suffix = mode === 'bareorigin' ? '/' : '/?token='+token;
+ const url = 'http://'+(mode==='wrongorigin'?'0.0.0.0':'127.0.0.1')+':'+server.address().port+suffix;
  console.log(url);
 });
 process.on('SIGTERM',()=>server.close(()=>process.exit(0)));
@@ -100,6 +110,7 @@ class NativeAppSmokeTests(unittest.TestCase):
         self.assertTrue(result["owned_process_stopped"])
         self.assertTrue(result["url"].startswith("http://127.0.0.1:"))
         self.assertEqual(result["http_status"], 200)
+        self.assertNotIn("token=", json.dumps(result), "launch bearer must never reach receipt")
         self.assertFalse(result["native_chat_tested"])
         self.assertEqual(result["provider_requests_observed"], "NOT_INSTRUMENTED")
         opener = build_opener(ProxyHandler({}))
@@ -150,6 +161,18 @@ class NativeAppSmokeTests(unittest.TestCase):
         self._set_mode("wrongorigin")
         result = self._run(timeout=.35)
         self.assertEqual(result["status"], "STARTUP_NO_LOOPBACK_URL", result)
+        self.assertTrue(result["owned_process_stopped"])
+
+    def test_bare_url_cannot_bypass_token_exchange(self) -> None:
+        self._set_mode("bareorigin")
+        result = self._run(timeout=.35)
+        self.assertEqual(result["status"], "STARTUP_NO_LOOPBACK_URL", result)
+        self.assertTrue(result["owned_process_stopped"])
+
+    def test_broken_token_exchange_never_claims_success(self) -> None:
+        self._set_mode("badtoken")
+        result = self._run(timeout=.65)
+        self.assertEqual(result["status"], "HTTP_NOT_READY", result)
         self.assertTrue(result["owned_process_stopped"])
 
     def test_invalid_expected_pin_is_rejected(self) -> None:
