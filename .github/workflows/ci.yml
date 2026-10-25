@@ -23,6 +23,11 @@ jobs:
   pytest_shards:
     name: pytest shard ${{ matrix.index }}
     runs-on: ubuntu-latest
+    # Only the shard job can perform read-only prior-run provenance checks.
+    # Required fan-in and other workflow jobs retain the narrower global grant.
+    permissions:
+      contents: read
+      actions: read
     # Retain protected master's bounded five-minute headroom for test setup.
     # All three shards must still succeed within the finite 45-minute limit.
     timeout-minutes: 45
@@ -112,6 +117,10 @@ jobs:
             xargs -0 -n1 bash -n
 
       - name: Run repository test shard
+        env:
+          # Fork/PR/merge_group receive no GH_TOKEN from this step. Only the
+          # protected master push can attempt same-SHA prior-queue proof reads.
+          GH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
 
   # Branch protection requires exactly the stable context "test". Matrix

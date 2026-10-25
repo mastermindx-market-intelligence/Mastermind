@@ -187,6 +187,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.plan_only:
         return 0
+    # Protected master pushes sometimes re-test the exact SHA already proven by
+    # the native merge queue. Only that event may reuse a completed, identical
+    # first-attempt merge_group run, including its *actual* four successful jobs
+    # and required shard-zero Paper/Fabric/compile/shell steps. Unknown, 403,
+    # malformed, missing token, different SHA or direct pushes ALWAYS run pytest.
+    # This is a stateless GET into the incumbent GitHub CI provenance owner,
+    # never a second status plane or a new authorization to merge.
+    import os
+    if (
+        os.environ.get("GITHUB_EVENT_NAME") == "push"
+        and os.environ.get("GITHUB_REF") == "refs/heads/master"
+    ):
+        try:
+            from scripts.ci_merge_group_reuse import possible_same_sha_reuse_for_ci_runner
+            reused, _reason = possible_same_sha_reuse_for_ci_runner()
+        except Exception:
+            reused = False
+        if reused:
+            print("CI_REUSE_PROVEN: exact native merge_group completed; "
+                  "no duplicate pytest execution on this push", flush=True)
+            return 0
     # No hand-written selectors, mutating retry, positive allowlist or shell.
     completed = subprocess.run(
         ci_pytest.pytest_argv(selected, progress=True),
