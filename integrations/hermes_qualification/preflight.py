@@ -156,10 +156,34 @@ def inspect_file(path: Path) -> dict[str, Any]:
     # Do not follow arbitrary large files or input streams; this is a local config audit.
     if len(data) > 128 * 1024:
         raise ValueError("CONFIG_TOO_LARGE")
+    # Hermes refuses duplicate keys and uses its previous known-good config.
+    # Stock PyYAML.safe_load instead silently adopts the last duplicate value.
+    # For a governance preflight this discrepancy is an explicit hard failure.
     try:
-        parsed = yaml.safe_load(data)
-    except yaml.YAMLError as exc:
-        raise ValueError("INVALID_SAFE_YAML") from exc
+        for token in yaml.scan(data):
+            if isinstance(token, (yaml.tokens.AnchorToken, yaml.tokens.AliasToken, yaml.tokens.TagToken)):
+                raise ValueError("YAML_ALIAS_ANCHOR_OR_TAG_NOT_ADMITTED")
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise ValueError("INVALID_YAML_TOKEN_STREAM") from exc
+
+    class UniqueKeySafeLoader(yaml.SafeLoader):
+        def construct_mapping(self, node, deep=False):
+            if not isinstance(node, yaml.MappingNode):
+                raise yaml.constructor.ConstructorError(None, None, "expected mapping", node.start_mark)
+            result = {}
+            for key_node, value_node in node.value:
+                key = self.construct_object(key_node, deep=deep)
+                if not isinstance(key, str):
+                    raise yaml.constructor.ConstructorError(None, None, "non-string mapping key", key_node.start_mark)
+                if key in result:
+                    raise yaml.constructor.ConstructorError(None, None, "duplicate mapping key", key_node.start_mark)
+                result[key] = self.construct_object(value_node, deep=deep)
+            return result
+
+    try:
+        parsed = yaml.load(data, Loader=UniqueKeySafeLoader)
+    except (yaml.YAMLError, RecursionError) as exc:
+        raise ValueError("INVALID_UNIQUE_SAFE_YAML") from exc
     return inspect(parsed, sha256=hashlib.sha256(data).hexdigest())
 
 
