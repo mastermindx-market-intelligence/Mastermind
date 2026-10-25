@@ -39,6 +39,7 @@ _H1_OWNED = {'tests/test_paid_initializer.py': {'cases': ('test_actual_linux_ini
                                                   '_system_fixture_failure_notice',
                                                   '_system_fixture_launch',
                                                   '_system_fixture_metadata_safe',
+                                                  '_system_fixture_public_node',
                                                   'bounded',
                                                   'changed_capture',
                                                   'check_read',

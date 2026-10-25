@@ -65,6 +65,9 @@ def test_every_precondition_exit_retains_closed_stage_without_qualifying(fault,m
     value=captured[0];assert m._system_fixture_metadata_safe(value)
     assert value['function']in('_system_fixture_launch','guarded')and value['line']>0
     assert PRIVATE not in json.dumps(value)
+    if fault in ('startup_entry','startup_count'):assert value['node']==dict(relative_name='entry',kind='REGULAR')
+    elif fault=='ignored_link':assert value['node']==dict(relative_name='sitecustomize.py',kind='SYMLINK')
+    else:assert value['node']is None
     if fault=='selector_resolution':assert value['errno']==2
     if fault=='image_custody':assert value['fields']==['uid']
     if fault in('ancestor_custody','startup_entry'):assert value['fields']==['write_mode']
@@ -93,7 +96,7 @@ def test_actual_optional_and_explicit_failure_are_preserved_even_if_annotation_f
 
 @pytest.mark.parametrize('field,value',[('stage',PRIVATE),('function',PRIVATE),('line',True),('errno',PRIVATE),('fields',[PRIVATE]),('extra',PRIVATE)])
 def test_annotation_emission_revalidates_every_field(monkeypatch,field,value):
-    data=dict(schema='mastermind.inert_system_fixture.v1',stage='selector_resolution',function=None,line=None,errno=None,fields=[]);data[field]=value
+    data=dict(schema='mastermind.inert_system_fixture.v1',stage='selector_resolution',function=None,line=None,errno=None,fields=[],node=None);data[field]=value
     lines=[];monkeypatch.setattr(m,'_system_fixture_failure_metadata',lambda *args:data)
     m._system_fixture_failure_notice(fixture_with_reporter(lines.append),ValueError(PRIVATE),'selector_resolution')
     assert lines==[]
@@ -107,3 +110,39 @@ def test_unexpected_exception_and_interrupt_old_fallback_semantics_preserved(mon
     def interrupted(*args,**kwargs):raise KeyboardInterrupt()
     monkeypatch.setattr(m.Path,'resolve',interrupted)
     with pytest.raises(KeyboardInterrupt):m._system_fixture_launch(no_site=True,diagnostic_request=object())
+
+
+@pytest.mark.parametrize('raw',[
+    '/private/canary','/usr/lib/python3.12-evil/canary','/usr/lib/python3.12/../private',
+    '/usr/lib/python3.12/./sitecustomize.py','/usr/lib/python3.12/a//b',
+    '/usr/lib/python3.12/a\\b','/usr/lib/python3.12/line\nprivate',
+    '/usr/lib/python3.12/'+('a'*241),'/usr/lib/python3.12/'+('/'.join(['a']*9)),
+    '/usr/lib/python3.12/界.py',
+])
+def test_public_node_refuses_private_noncanonical_or_unbounded_names(raw):
+    info=os.stat_result((stat.S_IFLNK|0o777,1,1,1,0,0,10,0,0,0))
+    assert m._system_fixture_public_node(raw,info)is None
+
+
+def test_exact_public_node_reports_kind_without_following_or_target_data(monkeypatch):
+    def forbidden(*args,**kwargs):pytest.fail('diagnostic followed or opened a node')
+    info=os.stat_result((stat.S_IFLNK|0o777,1,1,1,0,0,10,0,0,0))
+    with monkeypatch.context()as patch:
+        patch.setattr(os,'readlink',forbidden);patch.setattr(os,'open',forbidden)
+        first=m._system_fixture_public_node('/usr/lib/python3.12/sitecustomize.py',info)
+        second=m._system_fixture_public_node('/usr/lib/python3.12/__pycache__/public.cpython-312.pyc',info)
+    assert first==dict(relative_name='sitecustomize.py',kind='SYMLINK')
+    assert second['kind']=='SYMLINK'
+
+
+@pytest.mark.parametrize('node',[
+    {'relative_name':'../'+PRIVATE,'kind':'SYMLINK'},
+    {'relative_name':'sitecustomize.py','kind':PRIVATE},
+    {'relative_name':'sitecustomize.py','kind':'SYMLINK','target':PRIVATE},
+    {'relative_name':PRIVATE+'\nsecret','kind':'SYMLINK'},
+])
+def test_emitter_withholds_malformed_public_node(monkeypatch,node):
+    data=dict(schema='mastermind.inert_system_fixture.v1',stage='startup_entry',function=None,line=None,errno=None,fields=[],node=node)
+    monkeypatch.setattr(m,'_system_fixture_failure_metadata',lambda *args:data)
+    lines=[];m._system_fixture_failure_notice(fixture_with_reporter(lines.append),ValueError(PRIVATE),'startup_entry')
+    assert lines==[]

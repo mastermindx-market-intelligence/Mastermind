@@ -53,15 +53,35 @@ _SYSTEM_FIXTURE_STAGES=frozenset(('selector_resolution','selector_version','imag
     'getpath_execution','getpath_version','getpath_prefixes'))
 
 
+def _system_fixture_public_node(path,info):
+    # Only a lexical public name; never resolve/readlink/open its target.
+    import re,stat
+    from pathlib import PurePath
+    raw=path if type(path)is str else str(path)if isinstance(path,PurePath)else None
+    prefix='/usr/lib/python3.12/'
+    if type(raw)is not str or not raw.startswith(prefix):return None
+    relative=raw[len(prefix):];parts=relative.split('/')
+    if (not 0<len(relative)<=240 or len(parts)>8 or any(part in ('.','..')or
+            re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.+-]{0,95}',part)is None for part in parts)):return None
+    if type(info)is not os.stat_result:return None
+    kind=next((name for predicate,name in ((stat.S_ISREG,'REGULAR'),(stat.S_ISDIR,'DIRECTORY'),
+        (stat.S_ISLNK,'SYMLINK'),(stat.S_ISFIFO,'FIFO'),(stat.S_ISSOCK,'SOCKET'),
+        (stat.S_ISCHR,'CHARACTER'),(stat.S_ISBLK,'BLOCK'))if predicate(info.st_mode)),'UNKNOWN')
+    return dict(relative_name=relative,kind=kind)
+
+
 def _system_fixture_failure_metadata(error,stage):
     if type(stage)is not str or stage not in _SYSTEM_FIXTURE_STAGES:return None
-    value=dict(schema='mastermind.inert_system_fixture.v1',stage=stage,function=None,line=None,errno=None,fields=[])
+    value=dict(schema='mastermind.inert_system_fixture.v1',stage=stage,function=None,line=None,errno=None,fields=[],node=None)
     trace=error.__traceback__
     while trace is not None:
         code=trace.tb_frame.f_code
         if code.co_filename==__file__ and code.co_name in ('_system_fixture_launch','guarded'):
             if type(trace.tb_lineno)is int and 0<trace.tb_lineno<=1000000:
                 value.update(function=code.co_name,line=trace.tb_lineno)
+                if stage in ('startup_entry','startup_count','ignored_link'):
+                    candidate=_system_fixture_public_node(trace.tb_frame.f_locals.get('path')if code.co_name=='guarded'else trace.tb_frame.f_locals.get('name'),trace.tb_frame.f_locals.get('info'))
+                    if candidate is not None:value['node']=candidate
                 if code.co_name=='guarded':
                     import stat
                     info=trace.tb_frame.f_locals.get('info')
@@ -78,12 +98,17 @@ def _system_fixture_failure_metadata(error,stage):
 
 
 def _system_fixture_metadata_safe(value):
-    return (type(value)is dict and set(value)=={'schema','stage','function','line','errno','fields'}
+    return (type(value)is dict and set(value)=={'schema','stage','function','line','errno','fields','node'}
         and value['schema']=='mastermind.inert_system_fixture.v1'
         and type(value['stage'])is str and value['stage'] in _SYSTEM_FIXTURE_STAGES
         and (value['function'] is None or type(value['function'])is str and value['function'] in ('_system_fixture_launch','guarded'))
         and (value['line'] is None or type(value['line'])is int and 0<value['line']<=1000000)
         and (value['errno'] is None or type(value['errno'])is int and 0<=value['errno']<=4096)
+        and (value['node'] is None or value['stage'] in ('startup_entry','startup_count','ignored_link')
+            and type(value['node'])is dict and set(value['node'])=={'relative_name','kind'}
+            and type(value['node']['relative_name'])is str and type(value['node']['kind'])is str
+            and value['node']['kind'] in ('REGULAR','DIRECTORY','SYMLINK','FIFO','SOCKET','CHARACTER','BLOCK','UNKNOWN')
+            and _system_fixture_public_node('/usr/lib/python3.12/'+value['node']['relative_name'],os.stat_result((0,)*10))is not None)
         and type(value['fields'])is list and len(value['fields'])<=4
         and all(type(field)is str and field in ('uid','kind','write_mode','acl')for field in value['fields']))
 
@@ -139,7 +164,7 @@ def _system_fixture_launch(*,no_site=False,diagnostic_request=None):
         for prefix in ('/usr',):
             stage='startup_library';library=Path(prefix)/'lib/python3.12';guarded(library)
             if no_site:
-                stage='startup_entry'
+                stage='startup_entry';name=info=None
                 for name,info in m._no_site_startup_entries(str(library)):
                     stage='startup_entry';count+=1
                     if count>20000:
@@ -151,7 +176,7 @@ def _system_fixture_launch(*,no_site=False,diagnostic_request=None):
                             with m._IgnoredNoSiteNode(directory):pass
                         finally:os.close(directory)
                     else:guarded(Path(name))
-                    stage='startup_entry'
+                    stage='startup_entry';name=info=None
             else:
                 for parent,dirs,files in os.walk(library,followlinks=False):
                     dirs[:]=[v for v in dirs if v not in ('site-packages','dist-packages')]
