@@ -1,6 +1,6 @@
 # Hermes candidate qualification — non-operational first slice
 
-**Status:** source-only, provider-free static guard. `BUILT_NOT_PROVEN` for the checker, `SPEC_ONLY` for live Hermes-to-Mastermind integration. Neither Hermes nor a model is installed, started, called, or authorized by this directory.
+**Status:** source-only policy and CLI-observation guards, plus a separate, disposable **actual Hermes CLI qualification** on ubuntu1. `BUILT_NOT_PROVEN` for both guards; **partial P1 proof** for an isolated CLI import/version/tool list. The real agent turn, authenticated tools, gateway, desktop, models, provider billing, Fabric integration and release remain `NOT_BUILT` or unqualified. No model or production service is authorized by this directory.
 
 This is a path-disjoint subordinate qualification surface for the existing [Meta-CEO R2 implementation contract](../../docs/superpowers/specs/2026-10-12-meta-ceo-office-r2-implementation.md), [open-harness assessment PR #1841](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1841), and DSH incumbents [#1717](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1717), [#1790](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1790), [#1845](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1845). It does not select Hermes over DSH, deploy to any host, or authorize a new company control plane. The `integrations/hermes_mastermind/` namespace is **outside** this slice and may have an unresolved Fabric request; do not modify it until that exact original operation is reconciled.
 
@@ -27,6 +27,26 @@ python3 -m unittest discover -v \
 ```
 
 The `--receipt` path must be **absent** before execution. If one exists, inspect/reconcile it—never overwrite or blind retry. `PASS_OFFLINE_POLICY_ONLY` means static YAML policy fit, **not** app execution, a qualified model route, active tool registry parity, protected isolation, TCC/screen permissions, approved ingress, a valid RuntimeBinding or organizational acceptance.
+
+
+## Actual upstream canary and toolset escape discovery (2026-10-25)
+
+On directly connected **ubuntu1**, in private scratch directories only, acquired clean immutable `NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18` (369 MiB source), installed source-pinned Python 3.14.7 with `uv sync --frozen --no-dev` into a separate private venv, and ran the real `hermes --version`, `hermes --help`, `hermes tools list --platform cli` and `hermes serve --help`. The binary reports `Hermes Agent vgit.1c0cd66 (2026.9.24)`, Python 3.14.7. The CLI help path had no model call and the serve help path had **73 MiB peak RSS**; this is **not** resident gateway/GUI memory proof. The controlled HOME was empty of API keys and channels.
+
+**Critical finding:** first candidate YAML with 19 disabled toolset names still had `todo` and `connections` **enabled** in the real CLI registry, despite global `toolsets: [clarify]`. The sample and static checker now require **all 24 observed non-clarify CLI/plugin toolsets disabled**; the corrected actual Hermes `tools list` reports **only `clarify` enabled** for the CLI platform. This is a narrowly scoped observation, not proof the Desktop client, remote gateways, plugin loading or receiving services cannot act.
+
+`runtime_registry.py` consumes a previously captured `hermes tools list --platform cli` UTF-8 output (never launches Hermes); it checks exact expected built-in/plugin toolset names, detects any additional enabled tools or unknown new toolsets, and creates an exclusive private JSON receipt with `PASS_CLI_REGISTRY_OBSERVATION_ONLY` or `BLOCKED`. The parser's pinned upstream source SHA is an **assertion**, not cryptographic attestation of a submitted text file or executable. A future binary/extension update invalidates the toolset census and requires a fresh source review before claiming eligibility.
+
+```sh
+# In an approved, isolated, no-credential Hermes runtime only:
+hermes tools list --platform cli > /secure/new/captured-toolsets.txt
+python3 integrations/hermes_qualification/runtime_registry.py \
+  --tool-list /secure/new/captured-toolsets.txt \
+  --receipt /secure/new/unique-registry-receipt.json
+python3 -m unittest discover -v -s integrations/hermes_qualification/tests
+```
+
+The captured text must be from an observed verified executable and restricted profile; it must not contain tokens or private content. The output parser validates **CLI only** and cannot inspect actual model calls, authorization, host/network isolation, TCC or a Desktop-injected `desktop_ui` tool.
 
 ## Follow-on acceptance, held
 
