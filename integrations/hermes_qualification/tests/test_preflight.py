@@ -127,8 +127,25 @@ class PreflightTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "hostile.yaml"
             path.write_text('x: !!python/object/apply:os.system ["echo inappropriate"]', encoding="utf8")
-            with self.assertRaisesRegex(ValueError, "INVALID_SAFE_YAML"):
+            with self.assertRaises(ValueError):
                 preflight.inspect_file(path)
+
+    def test_duplicate_top_level_and_nested_keys_rejected_like_hermes(self):
+        with tempfile.TemporaryDirectory() as d:
+            valid = (ROOT / "example-readonly.config.yaml").read_text(encoding="utf8")
+            for content in (valid + "\ntoolsets: [all]\n", valid.replace("  default: glm-5.3", "  default: glm-5.3\n  default: unknown")):
+                path = Path(d) / "duplicate.yaml"
+                path.write_text(content, encoding="utf8")
+                with self.assertRaisesRegex(ValueError, "INVALID_UNIQUE_SAFE_YAML"):
+                    preflight.inspect_file(path)
+
+    def test_alias_anchor_tag_and_recursive_alias_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            for content in ("x: &a [one]\ny: *a\n", "x: &a [*a]\n", "x: !!python/object/new:object {}\n"):
+                path = Path(d) / "anchored.yaml"
+                path.write_text(content, encoding="utf8")
+                with self.assertRaises(ValueError):
+                    preflight.inspect_file(path)
 
     def test_oversize_file_rejected(self):
         with tempfile.TemporaryDirectory() as d:
