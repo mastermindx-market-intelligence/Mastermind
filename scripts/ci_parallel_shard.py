@@ -71,6 +71,7 @@ def validate_parallel_workflow(text: str) -> None:
     ):
         raise ci_pytest.PolicyError("each matrix member must run its canonical shard")
     for name in (
+        "Verify Browser Link package",
         "Verify Paper direct pinned MCP SDK",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source", "Validate shell scripts",
@@ -81,6 +82,20 @@ def validate_parallel_workflow(text: str) -> None:
         ]
         if len(matches) != 1 or matches[0].get("if") != "matrix.index == 0":
             raise ci_pytest.PolicyError("non-pytest CI gates must run in shard zero")
+    browser_step = next(
+        step for step in shard_steps
+        if isinstance(step, dict) and step.get("name") == "Verify Browser Link package"
+    )
+    browser_commands = [
+        "npm ci --prefix integrations/mastermind_browser_link --ignore-scripts --no-audit --no-fund",
+        "npm run build --prefix integrations/mastermind_browser_link",
+        "node --test tests/browser_link/*.test.mjs",
+    ]
+    browser_run = browser_step.get("run")
+    if (set(browser_step) != {"name", "if", "run"}
+            or not isinstance(browser_run, str)
+            or [line.strip() for line in browser_run.splitlines() if line.strip()] != browser_commands):
+        raise ci_pytest.PolicyError("Browser Link gate must preserve its package build and tests")
     # Preserve the incumbent protected Fabric compatibility gate's *actual*
     # executable surface. Merely pinning its name and shard index permits a
     # false-green gate if its Node or private-service tests are silently cut.

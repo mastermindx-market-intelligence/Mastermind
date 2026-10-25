@@ -31,9 +31,12 @@ from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.workbench_action_mcp.contracts import ActionCaller
 
+from integrations.mastermind_browser_link.tool_contract import backend_tool_policy
+
 from .browser_port import BrowserPortRefused
 from .contracts import BrowserContractError
 from .resource_port import BrowserResourceRefused
+from .resource_observation import OBSERVE_RESOURCES_TOOL, OBSERVE_RESOURCES_INPUT_SCHEMA
 
 
 PREPARE_RESOURCE_TOOL = "prepare_browser_resource"
@@ -125,14 +128,15 @@ def _validated_catalog(
         ):
             raise ValueError("browser tool catalog is invalid")
         by_name[name] = copy.deepcopy(dict(row))
-    if not ALLOWED_BROWSER_TOOLS <= set(by_name):
+    allowed_tools, _read_tools = backend_tool_policy(expected_digest)
+    if not allowed_tools <= set(by_name):
         raise ValueError("browser tool catalog lacks a granted tool")
     selected = {
-        "tools": {name: by_name[name] for name in sorted(ALLOWED_BROWSER_TOOLS)}
+        "tools": {name: by_name[name] for name in sorted(allowed_tools)}
     }
     if observed_mcp_tool_schema_digest(selected) != expected_digest:
         raise ValueError("browser tool catalog schema drift")
-    return {name: by_name[name] for name in ALLOWED_BROWSER_TOOLS}
+    return {name: by_name[name] for name in allowed_tools}
 
 
 def _with_browser_ref(native_schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -206,7 +210,7 @@ _RESOURCE_PREPARE_SCHEMA = {
             "maxLength": 256,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
         },
-        "mode": {"type": "string", "enum": ["isolated", "persistent"]},
+        "mode": {"type": "string", "enum": ["isolated", "persistent", "extension"]},
         "profile_ref": {
             "anyOf": [
                 {"type": "null"},
@@ -256,6 +260,7 @@ def build_browser_tool_surface(
     tool_catalog: Mapping[str, Any],
     *,
     expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    include_resource_observation: bool = False,
 ) -> BrowserToolSurface:
     catalog = _validated_catalog(
         tool_catalog,
@@ -271,10 +276,13 @@ def build_browser_tool_surface(
         RUN_ACTION_TOOL: action_ref_schema,
         RECONCILE_ACTION_TOOL: action_ref_schema,
     }
+    if include_resource_observation:
+        schemas[OBSERVE_RESOURCES_TOOL] = _snapshot(OBSERVE_RESOURCES_INPUT_SCHEMA, 32768)
     prepare_tool_to_native: dict[str, str] = {}
-    for name in sorted(ALLOWED_BROWSER_TOOLS):
+    allowed_tools, read_only_tools = backend_tool_policy(expected_tool_schema_digest)
+    for name in sorted(allowed_tools):
         wrapped = _snapshot(_with_browser_ref(catalog[name]["inputSchema"]), 32768)
-        if name in READ_ONLY_BROWSER_TOOLS:
+        if name in read_only_tools:
             schemas[name] = wrapped
         else:
             prepare_name = "prepare_" + name
@@ -318,7 +326,15 @@ def build_browser_tool_surface(
             ),
         ),
     ]
-    for name in sorted(READ_ONLY_BROWSER_TOOLS):
+    if include_resource_observation:
+        rows.append(Tool(
+            name=OBSERVE_RESOURCES_TOOL,
+            description="Observe current owner-admitted browser resources, or one exact signed resource. No browser is started.",
+            inputSchema=schemas[OBSERVE_RESOURCES_TOOL],
+            annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False,
+                                        idempotentHint=True, openWorldHint=False),
+        ))
+    for name in sorted(read_only_tools):
         native = catalog[name]
         annotations = native.get("annotations", {})
         rows.append(
@@ -405,6 +421,7 @@ def create_authenticated_browser_server(
     call_receipt_sink: CallReceiptSink | None = None,
     allowed_origins: tuple[str, ...] = (),
     expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    observe_resources: Callable[..., Any] | None = None,
 ) -> FastMCP:
     selected_policy = validate_resource_policy(policy)
     if selected_policy.required_scopes != ("workbench.action",):
@@ -418,6 +435,7 @@ def create_authenticated_browser_server(
         or not callable(prepare_action)
         or not callable(run_action)
         or not callable(reconcile_action)
+        or (observe_resources is not None and not callable(observe_resources))
         or (call_receipt_sink is not None and not callable(call_receipt_sink))
         or type(allowed_hosts) is not tuple
         or not allowed_hosts
@@ -427,6 +445,7 @@ def create_authenticated_browser_server(
     surface = build_browser_tool_surface(
         tool_catalog,
         expected_tool_schema_digest=expected_tool_schema_digest,
+        include_resource_observation=observe_resources is not None,
     )
     catalog = surface.catalog
     schemas = surface.schemas
@@ -530,7 +549,9 @@ def create_authenticated_browser_server(
                 observed = await start_resource(caller, request["start_ref"])
             elif name == RECONCILE_RESOURCE_TOOL:
                 observed = await reconcile_resource(caller, request["start_ref"])
-            elif name in READ_ONLY_BROWSER_TOOLS:
+            elif name == OBSERVE_RESOURCES_TOOL:
+                observed = await observe_resources(caller, request)
+            elif name in backend_tool_policy(expected_tool_schema_digest)[1]:
                 native_args = dict(request)
                 browser_ref = native_args.pop("browser_ref")
                 direct_native = await read_tool(caller, browser_ref, name, native_args)

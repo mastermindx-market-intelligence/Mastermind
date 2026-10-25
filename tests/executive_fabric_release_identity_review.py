@@ -478,3 +478,27 @@ REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
     'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
     'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
 }
+
+# Browser Workbench candidate source-site review ledger. These pins are exact
+# immutable postimages for independent security review, NOT reviewer sign-off,
+# host activation, an installed permission change or a production grant.
+# The 501 tokens are floor checks excluding system/agent UIDs, never
+# a hardcoded grant to mini1's user. 0o700 denies group/other access.
+# Any source drift re-exposes the original D8 findings; no scanner exemption
+# or global identity-token allowlist has been altered.
+REVIEWED_FILES['integrations/mastermind_browser_plugin/workbench_credentials.py'] = {
+    'sha256': '586949fb768ae8278e46e31d8d1d69745a1c6923793970477c1272bfb3dc7adf',
+    'sites': ((149, 76, 81, 'int', '0o700'),),
+}
+REVIEWED_FILES['integrations/studio_direct_mcp/workbench_host_service.py'] = {
+    'sha256': '9e4de0a60aae5629fda94c15ba610cd70cc6df79413575b7bdddd80d0bbb26a0',
+    'sites': ((96, 13, 16, 'int', '501'),),
+}
+REVIEWED_FILES['ops/executive_os/company_mcp_edge.py'] = {
+    'sha256': '6ec0b8561fe933d8fd50836c8ee1e6bb69c0feba93c946ed939a9e20adbfb258',
+    'sites': ((280, 89, 92, 'int', '501'),),
+}
+REVIEWED_FILES['ops/executive_os/workbench_mcp_runtime.py'] = {
+    'sha256': 'fc45b3a80c32adc7b38dbae644e784bdd4f9b36d50b23a4e3b0ac9724ea627f3',
+    'sites': ((38, 61, 64, 'int', '501'), (248, 45, 48, 'int', '501')),
+}

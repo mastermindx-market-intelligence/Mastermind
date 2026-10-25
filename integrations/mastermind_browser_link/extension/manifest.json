@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Mastermind Browser Link",
+  "version": "0.1.0",
+  "description": "Let authorized Mastermind agents use the tabs you choose to share.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "nativeMessaging",
+    "debugger",
+    "tabs",
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.mjs",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Mastermind Browser Link"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
+  }
+}

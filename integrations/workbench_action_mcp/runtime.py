@@ -30,6 +30,7 @@ from common.bounded_sync_executor import (
     SyncExecutorLoopConflict,
 )
 from control_plane.browser_resource_contract import READ_ONLY_BROWSER_TOOLS
+from integrations.mastermind_browser_link.tool_contract import LINK_READ_TOOLS
 from control_plane.codex_worker import ProcessInspector
 from integrations.business_mcp_auth.audit import (
     AuditAcquisitionUncertain,
@@ -833,7 +834,7 @@ class WorkbenchActionRuntime:
         self, tool: str, operation: Callable[[], object]
     ) -> object:
         """Run only an existing read-only browser tool on the original executor."""
-        if type(tool) is not str or tool not in READ_ONLY_BROWSER_TOOLS or not callable(operation):
+        if type(tool) is not str or tool not in READ_ONLY_BROWSER_TOOLS | LINK_READ_TOOLS or not callable(operation):
             raise RuntimeClosed("browser recovery tool is not read-only")
         with self._gate:
             if self._revoked or self._closing or self._closed:

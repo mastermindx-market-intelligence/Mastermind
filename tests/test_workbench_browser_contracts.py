@@ -192,3 +192,27 @@ def test_action_binds_exact_browser_ref_and_allowed_tool():
         validate_prepared_browser_action(
             dataclasses.replace(action, arguments_json='{"a":1, "b":2}'), now_ms=1500
         )
+
+
+def test_extension_signed_start_and_resource_require_profile_identity():
+    start = _start(
+        mode=BrowserMode.EXTENSION.value,
+        profile_ref="human-chrome-c2",
+    )
+    assert validate_prepared_browser_start(start, now_ms=1000) == start
+    resource = _resource(
+        mode=BrowserMode.EXTENSION.value,
+        profile_ref="human-chrome-c2",
+    )
+    assert validate_browser_resource_ref(resource, now_ms=1100) == resource
+
+    with pytest.raises(BrowserContractError):
+        validate_prepared_browser_start(
+            _start(mode=BrowserMode.EXTENSION.value, profile_ref=None),
+            now_ms=1000,
+        )
+    with pytest.raises(BrowserContractError):
+        validate_browser_resource_ref(
+            _resource(mode=BrowserMode.EXTENSION.value, profile_ref=None),
+            now_ms=1100,
+        )

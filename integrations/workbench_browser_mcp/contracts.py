@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from control_plane.browser_resource_contract import ALLOWED_BROWSER_TOOLS, BrowserMode
+from integrations.mastermind_browser_link.tool_contract import LINK_TOOLS
 
 
 START_SCHEMA = "mastermind.workbench_browser_start.v1"
@@ -141,14 +142,18 @@ def _time_window(issued: object, expires: object, *, now_ms: int, require_fresh:
 
 
 def _mode_profile(mode: object, profile_ref: object) -> tuple[str, str | None]:
-    if mode not in {BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value}:
+    if mode not in {
+        BrowserMode.ISOLATED.value,
+        BrowserMode.PERSISTENT.value,
+        BrowserMode.EXTENSION.value,
+    }:
         raise BrowserContractError("browser mode is invalid")
     if mode == BrowserMode.ISOLATED.value:
         if profile_ref is not None:
-            raise BrowserContractError("isolated browser cannot carry a persistent profile")
+            raise BrowserContractError("isolated browser cannot carry a profile")
         return mode, None
     if profile_ref is None:
-        raise BrowserContractError("persistent browser requires a profile reference")
+        raise BrowserContractError("profile-bound browser requires a profile reference")
     return mode, _ref(profile_ref, "profile_ref")
 
 
@@ -317,7 +322,7 @@ def validate_prepared_browser_action(
     )
     _hex(value.action_id, _HEX32, "action_id")
     _hex(value.browser_ref_sha256, _HEX64, "browser_ref_sha256")
-    if value.tool_name not in ALLOWED_BROWSER_TOOLS:
+    if value.tool_name not in ALLOWED_BROWSER_TOOLS | LINK_TOOLS:
         raise BrowserContractError("browser tool is not granted")
     try:
         parsed = json.loads(value.arguments_json)

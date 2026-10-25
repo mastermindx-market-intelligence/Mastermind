@@ -62,6 +62,13 @@ def stage(tmp_path, bundle, source):
     lock = repo / provenance["lock_path"]
     lock.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(ROOT / provenance["lock_path"], lock)
+    for relative in ("ops/executive_os/workbench_mcp_runtime.py", "ops/executive_os/company_mcp_edge.py",
+                     "integrations/studio_direct_mcp/workbench_host_service.py",
+                     "integrations/workbench_action_mcp/service.py",
+                     "requirements/workbench-browser-macos-arm64-py312.lock"):
+        p = repo / relative
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# inert Browser source fixture\n")
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c",
                     "user.email=t@example.invalid", "commit", "-qm", "surface"], check=True)
@@ -125,7 +132,8 @@ print(owner+":"+oct(stat.S_IMODE(os.lstat(p).st_mode))[2:])
            "SOURCE_REPO": str(repo), "EXPECTED_SHA": sha, "TREE_SHA": tree,
            "SCRIPT_DIR": str(ROOT / "ops/executive_os"), "PYTHON_BINARY": str(runner),
            "OS_WEB_ASSETS": str(out), "OS_WEB_ASSETS_DIGEST": digest,
-           "STAGE_RELEASE_ONLY": "1", "ALLOW_FROZEN_ACCEPTED_ANCESTOR": "0",
+           "STAGE_RELEASE_ONLY": "1", "STAGE_WORKBENCH_BROWSER_RELEASE_ONLY": "0",
+           "ALLOW_FROZEN_ACCEPTED_ANCESTOR": "0",
            "ARM_PRIVILEGED_BROKER": "0", "CONTROL_CONFIG_SOURCE": "", "PROTECTED_MASTER_SHA": "",
            "CALLS": str(tmp_path / "calls"), "FAIL": ""}
     shared = section("shared sealed release staging").replace("/Library", str(library))
@@ -137,8 +145,12 @@ print(owner+":"+oct(stat.S_IMODE(os.lstat(p).st_mode))[2:])
                + "\n" + TEXT[TEXT.index("# Optional build artifact is qualified"):TEXT.index('CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"')]
                + "\nrequire_native_no_acl() { [ \"${BAD_ACL:-}\" != \"$2\" ]; }\n"
                + "rename_codex_path_exclusive() {" + rename + shared)
-    def run(*, extra="", ordinary=False, **updates):
-        current = {**env, **updates}
+    def run(*, extra="", ordinary=False, browser=False, **updates):
+        current = dict(env)
+        if browser:
+            current.update(STAGE_RELEASE_ONLY="0", STAGE_WORKBENCH_BROWSER_RELEASE_ONLY="1",
+                           OS_WEB_ASSETS="", OS_WEB_ASSETS_DIGEST="")
+        current.update(updates)
         if ordinary:
             current["STAGE_RELEASE_ONLY"] = "0"
         script = program + extra + ("\nstage_sealed_release || exit 65\n" if ordinary else section("stage-only dispatch"))
@@ -211,7 +223,8 @@ def test_preflight_refuses_before_staging(stage, updates):
 
 
 @pytest.mark.parametrize("damage", ["dirty", "stale", "missing", "acl", "mode", "symlink"])
-def test_source_and_ancestry_guards(stage, damage):
+@pytest.mark.parametrize("browser", [False, True])
+def test_source_and_ancestry_guards(stage, damage, browser):
     updates = {}
     if damage == "dirty": (stage["repo"] / "untracked").write_text("dirty")
     if damage == "stale":
@@ -222,7 +235,7 @@ def test_source_and_ancestry_guards(stage, damage):
     if damage == "symlink":
         (stage["system"] / "releases").rename(stage["system"] / "saved")
         (stage["system"] / "releases").symlink_to("saved")
-    r = stage["run"](**updates)
+    r = stage["run"](browser=browser, **updates)
     assert r.returncode == 65, r.stderr
     assert not stage["release"].exists()
     unchanged(stage)
@@ -230,13 +243,14 @@ def test_source_and_ancestry_guards(stage, damage):
 
 @pytest.mark.parametrize("target,kind", [("stage","dir"),("stage","symlink"),("release","dir"),
                                          ("release","symlink"),("release","file")])
-def test_occupied_destination_never_adopted_or_overwritten(stage, target, kind):
+@pytest.mark.parametrize("browser", [False, True])
+def test_occupied_destination_never_adopted_or_overwritten(stage, target, kind, browser):
     p = stage[target]
     if kind == "dir": p.mkdir(); (p / "sentinel").write_text("original")
     elif kind == "symlink": p.symlink_to("missing")
     else: p.write_text("original")
     before = (p.lstat().st_ino, p.lstat().st_mode)
-    r = stage["run"]()
+    r = stage["run"](browser=browser)
     assert r.returncode == 65, r.stderr
     assert before == (p.lstat().st_ino, p.lstat().st_mode)
     unchanged(stage)
@@ -314,3 +328,62 @@ def test_dispatch_precedes_all_installed_mutations_and_keeps_preflight():
     shared = section("shared sealed release staging")
     assert all(word not in shared for word in ("launchctl", "rm -", "CONTROL_CONFIG", "RUNTIME_ROOT"))
     assert TEXT.count('archive --format=tar "$EXPECTED_SHA"') == 1
+
+
+def test_browser_source_stage_without_assets_and_existing_generation_are_read_only(stage):
+    result = stage["run"](browser=True)
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["release_purpose"] == "workbench-browser" and value["staged_unselected"]
+    assert not any(v for k, v in value.items() if k.endswith("_changed"))
+    assert "os_release_assets.py" not in stage["calls"].read_text()
+    before = snapshot(stage["release"])
+    stage["calls"].write_text("")
+    assert stage["run"](browser=True).returncode == 0
+    assert snapshot(stage["release"]) == before
+    assert "create" not in stage["calls"].read_text()
+    # The sealed same-SHA namespace cannot have assets grafted into it later.
+    assert stage["run"]().returncode == 65
+    assert snapshot(stage["release"]) == before
+    unchanged(stage)
+
+
+@pytest.mark.parametrize("updates", [
+    {"STAGE_RELEASE_ONLY": "1"}, {"OS_WEB_ASSETS": "/not-read"},
+    {"ALLOW_FROZEN_ACCEPTED_ANCESTOR": "1"}, {"PROTECTED_MASTER_SHA": "f" * 40},
+    {"ARM_PRIVILEGED_BROKER": "1"}, {"CONTROL_CONFIG_SOURCE": "/not-read"},
+])
+def test_browser_stage_rejects_conflicting_options_before_publication(stage, updates):
+    result = stage["run"](browser=True, **updates)
+    assert result.returncode == 65
+    assert not stage["release"].exists() and not stage["stage"].exists()
+    unchanged(stage)
+
+
+@pytest.mark.parametrize("failure", ["chown", "release_manifest.py:create", "release_manifest.py:verify"])
+def test_browser_stage_interruption_preserves_unselected_evidence(stage, failure):
+    result = stage["run"](browser=True, FAIL=failure)
+    assert result.returncode == 65
+    assert stage["stage"].is_dir() and not stage["release"].exists()
+    before = snapshot(stage["stage"])
+    assert stage["run"](browser=True).returncode == 65
+    assert snapshot(stage["stage"]) == before
+    unchanged(stage)
+
+
+def test_browser_surface_is_checked_before_sealing(stage):
+    extra = 'verify_workbench_browser_surface() { return 65; }\n'
+    result = stage["run"](browser=True, extra=extra)
+    assert result.returncode == 65
+    assert stage["stage"].is_dir() and not stage["release"].exists()
+    assert "release_manifest.py:create" not in stage["calls"].read_text()
+    unchanged(stage)
+
+
+def test_browser_stage_reuses_one_publisher_before_installed_mutations():
+    dispatch = section("stage-only dispatch")
+    assert 'STAGE_WORKBENCH_BROWSER_RELEASE_ONLY' in dispatch
+    assert dispatch.count("stage_sealed_release || exit 65") == 1
+    shared = section("shared sealed release staging")
+    assert shared.index('verify_workbench_browser_surface "$STAGING"') < shared.index('release_manifest.py" create')
+    assert 'verify_workbench_browser_surface "$RELEASE_ROOT"' in shared
