@@ -223,6 +223,93 @@ _MEASURED_THREE_JOB_PLACEMENT = {
 }
 
 
+_MEASURED_SIX_JOB_PLACEMENT = {
+    # Exact CI_MODULE hosted run 39105226641; 96 slowest reviewed modules.
+    # Changes require new timings and policy review. Hash placement for all others.
+    'tests/research_read_mcp/test_selected_refresh.py': 0,  # 8.2s
+    'tests/test_autonomy_first_stratum.py': 3,  # 10.2s
+    'tests/test_cap_s1_mastermind_operator_canary.py': 1,  # 19.1s
+    'tests/test_capacity_host_artifacts.py': 4,  # 458.5s
+    'tests/test_ceo_submit_armed_composition.py': 0,  # 13.6s
+    'tests/test_company_consultation_host.py': 0,  # 24.8s
+    'tests/test_company_consultation_target_resolution.py': 4,  # 8.0s
+    'tests/test_company_consultation_targeted_carrier.py': 2,  # 9.0s
+    'tests/test_company_inbox_iac1.py': 0,  # 31.6s
+    'tests/test_control_room_remote_install.py': 3,  # 11.4s
+    'tests/test_executive_autonomy_control.py': 1,  # 16.2s
+    'tests/test_executive_backup.py': 5,  # 19.9s
+    'tests/test_executive_codex_sidecar_install.py': 2,  # 44.9s
+    'tests/test_executive_codex_worker.py': 3,  # 9.0s
+    'tests/test_executive_coo_active_review_frontier.py': 3,  # 20.4s
+    'tests/test_executive_coo_review_drain.py': 0,  # 12.1s
+    'tests/test_executive_coo_tick_liveness.py': 3,  # 8.0s
+    'tests/test_executive_dr.py': 3,  # 14.6s
+    'tests/test_executive_finite_guards.py': 1,  # 10.5s
+    'tests/test_executive_identity_review.py': 5,  # 22.6s
+    'tests/test_executive_inbox.py': 1,  # 13.1s
+    'tests/test_executive_mcp.py': 3,  # 8.6s
+    'tests/test_executive_mcp_installed_fabric_composition.py': 3,  # 19.0s
+    'tests/test_executive_mcp_mutation.py': 2,  # 7.9s
+    'tests/test_executive_mcp_web_ceo_v2.py': 0,  # 33.7s
+    'tests/test_executive_os_phase1fc.py': 1,  # 32.4s
+    'tests/test_executive_os_sqlite.py': 0,  # 69.7s
+    'tests/test_executive_release_actuator.py': 2,  # 19.2s
+    'tests/test_executive_release_closure.py': 0,  # 15.0s
+    'tests/test_executive_release_root_start.py': 5,  # 13.1s
+    'tests/test_executive_release_stage_only.py': 3,  # 12.7s
+    'tests/test_executive_runtime_bounded_acquisition.py': 3,  # 23.3s
+    'tests/test_executive_runtime_bounded_role_result.py': 2,  # 76.9s
+    'tests/test_executive_service_control.py': 2,  # 31.3s
+    'tests/test_executive_supervisor.py': 3,  # 48.6s
+    'tests/test_executive_terminal_return.py': 0,  # 9.7s
+    'tests/test_fabric_result_projection.py': 3,  # 14.2s
+    'tests/test_finite_initial_physical_admission.py': 5,  # 17.8s
+    'tests/test_finite_initial_transaction.py': 1,  # 14.6s
+    'tests/test_fresh_sol_eval.py': 2,  # 8.1s
+    'tests/test_liquidity_transmission.py': 2,  # 12.2s
+    'tests/test_market_view.py': 5,  # 57.8s
+    'tests/test_mas115_profile_search_health.py': 2,  # 9.3s
+    'tests/test_mastermind_cortex_contracts.py': 0,  # 20.1s
+    'tests/test_mastermind_steward_app_live_window.py': 5,  # 15.8s
+    'tests/test_mastermind_window_reader_static_fences.py': 1,  # 20.7s
+    'tests/test_mastermind_workspace_repositories.py': 3,  # 7.6s
+    'tests/test_mcp_stdio_boundary.py': 2,  # 10.5s
+    'tests/test_native_capacity_source_closure.py': 2,  # 8.2s
+    'tests/test_native_company_answer_dispatch.py': 3,  # 34.9s
+    'tests/test_native_company_consumption.py': 5,  # 29.2s
+    'tests/test_nonseat_canary.py': 0,  # 9.0s
+    'tests/test_os_public_edge_publication.py': 1,  # 8.0s
+    'tests/test_os_release_assets.py': 0,  # 8.1s
+    'tests/test_product_acceptance_acquisition_mount.py': 5,  # 8.1s
+    'tests/test_product_acceptance_acquisition_service.py': 3,  # 32.0s
+    'tests/test_product_acceptance_full_read_chain.py': 1,  # 11.3s
+    'tests/test_product_acceptance_installed_target.py': 2,  # 15.8s
+    'tests/test_product_acceptance_original_selector.py': 0,  # 80.0s
+    'tests/test_product_acceptance_read_projection.py': 1,  # 28.2s
+    'tests/test_product_acceptance_relay_composition.py': 3,  # 11.2s
+    'tests/test_product_acceptance_request_owner.py': 2,  # 14.2s
+    'tests/test_product_acceptance_ruling_owner.py': 1,  # 23.4s
+    'tests/test_product_acceptance_subject_read.py': 5,  # 9.1s
+    'tests/test_product_acceptance_workspace_read.py': 5,  # 9.4s
+    'tests/test_remote_worker_gateway.py': 1,  # 8.1s
+    'tests/test_response_cache.py': 5,  # 10.1s
+    'tests/test_rotation_tensor.py': 1,  # 9.2s
+    'tests/test_source_continuity_census_budget.py': 1,  # 8.7s
+    'tests/test_trend_persistence_group.py': 2,  # 56.9s
+    'tests/test_trend_persistence_null.py': 3,  # 25.0s
+    'tests/test_trend_persistence_panel.py': 2,  # 23.5s
+    'tests/test_validate_perception.py': 0,  # 12.9s
+    'tests/test_w6c2_consultation_runtime.py': 0,  # 18.6s
+    'tests/test_web_ceo_offline_delivery_canary.py': 3,  # 110.4s
+    'tests/test_worker_browser_b1.py': 0,  # 10.9s
+    'tests/test_worker_execution_contract.py': 1,  # 9.7s
+    'tests/test_workspace_admitted_plan_read.py': 5,  # 23.7s
+    'tests/test_workspace_result_http.py': 0,  # 7.9s
+    'tests/test_workspace_result_service.py': 2,  # 21.4s
+    'tests/workbench_read_mcp/test_observer.py': 2,  # 10.6s
+}
+
+
 def partition_modules(
     included: Sequence[str], *, jobs: int
 ) -> tuple[tuple[str, ...], ...]:
@@ -261,7 +348,9 @@ def partition_modules(
     for path in included:
         digest = hashlib.sha256(path.encode("utf-8")).digest()
         hashed = int.from_bytes(digest[:8], "big") % jobs
-        target = _MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3 else hashed
+        target = (_MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3
+                  else _MEASURED_SIX_JOB_PLACEMENT.get(path, hashed) if jobs == 6
+                  else hashed)
         buckets[target].append(path)
     shards = tuple(tuple(bucket) for bucket in buckets)
     verify_partition(included, shards)
