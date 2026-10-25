@@ -231,10 +231,11 @@ def effect_volume_pair_ok(root_volume: dict, cache_volume: dict) -> bool:
 
 def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
     """Only package-manager cache APIs; no arbitrary rm, /tmp or Git pruning."""
-    if mode == "CALM":
-        return [{"state": "SKIPPED_CALM"}]
+    # A prior uncertain manager effect is never a green calm-hour receipt.
     if (state / HOLD).exists():
         return [{"state": "HELD_EFFECT_UNVERIFIED"}]
+    if mode == "CALM":
+        return [{"state": "SKIPPED_CALM"}]
     if package_busy():
         return [{"state": "SKIPPED_PACKAGE_ACTIVITY"}]
     pip_cache = root / ".cache/pip"
@@ -388,12 +389,18 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
               "fabric_reserve": configured,
               "fabric_admission": "UNVERIFIED",  # incumbent picker alone admits workers
               "worktrees": worktrees, "cleanup": []}
-    if apply_safe_caches and mode in ("CAUTION", "CRITICAL") and mandatory_ok:
+    # PRE_EFFECT survives uncertain manager outcomes. Report the hold even when
+    # pressure has receded or the current invocation is report-only; otherwise
+    # the recurring timer can falsely report a healthy hour after an unknown effect.
+    if (state / HOLD).exists():
+        result["cleanup"] = [{"state": "HELD_EFFECT_UNVERIFIED"}]
+    elif apply_safe_caches and mode in ("CAUTION", "CRITICAL") and mandatory_ok:
         result["cleanup"] = cache_cleanup(root, state, mode)
     elif apply_safe_caches and not mandatory_ok:
         result["cleanup"] = [{"state": "SKIPPED_MANDATORY_OBSERVATION_UNVERIFIED"}]
     else:
         result["cleanup"] = [{"state": "REPORT_ONLY" if not apply_safe_caches else "NO_PRESSURE"}]
+    result["effect_hold"] = "PRESENT" if (state / HOLD).exists() else "ABSENT"
     result["root_after"] = volume(Path("/"))
     result["finished_epoch"] = time.time()
     after = result["root_after"]
@@ -407,7 +414,8 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
         and type(after.get("available_bytes")) is int else None)
     result["attributable_reclaimed_bytes"] = 0
     result["reclaim_attribution"] = "NO_VERIFIED_MANAGER_SPECIFIC_BYTE_EVIDENCE"
-    result["degraded"] = (not mandatory_ok or after.get("state") != "OK"
+    result["degraded"] = (result["effect_hold"] == "PRESENT"
+                          or not mandatory_ok or after.get("state") != "OK"
                           or after.get("inodes_free_fraction") is None
                           or (before.get("state") == "OK" and after.get("device") != before.get("device"))
                           or any(x.get("state") in ("FAILED", "EFFECT_UNVERIFIED",

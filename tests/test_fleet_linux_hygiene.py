@@ -77,6 +77,31 @@ class FleetLinuxHygieneTests(unittest.TestCase):
                 (base / h.HOLD).write_text("unknown effect")
                 self.assertEqual(h.cache_cleanup(base, base, "CRITICAL"),
                                  [{"state": "HELD_EFFECT_UNVERIFIED"}])
+                self.assertEqual(h.cache_cleanup(base, base, "CALM"),
+                                 [{"state": "HELD_EFFECT_UNVERIFIED"}])
+
+    def test_calm_or_report_only_after_unknown_effect_never_looks_green(self):
+        # A persisted PRE_EFFECT is not erased/ignored when disk pressure drops.
+        # No package manager is allowed to execute in this hermetic test.
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d)
+            marker = state / h.HOLD
+            marker.write_text("PRE_EFFECT UNKNOWN")
+            good = {"state": "OK", "total_gib": 900, "free_gib": 700,
+                    "inodes_free_fraction": 0.5, "available_bytes": 700 * 1024**3,
+                    "inodes_available": 500, "device": 1}
+            with patch.object(h, "volume", return_value=good), patch.object(
+                    h, "memory", return_value={"state": "OK"}), patch.object(
+                    h, "reserve", return_value={"state": "CONFIGURED", "floor_gib": 60}), patch.object(
+                    h, "candidates", return_value={"state": "OBSERVED_ONLY"}), patch.object(
+                    h, "cache_cleanup", side_effect=AssertionError("must not purge")):
+                for apply in (False, True):
+                    receipt = h.run(state, state, apply)
+                    self.assertEqual(receipt["mode"], "CALM")
+                    self.assertEqual(receipt["cleanup"], [{"state": "HELD_EFFECT_UNVERIFIED"}])
+                    self.assertEqual(receipt["effect_hold"], "PRESENT")
+                    self.assertTrue(receipt["degraded"])
+                    self.assertTrue(marker.exists())
 
     def test_explicit_report_only_does_not_trigger_cache_mutation(self):
         with tempfile.TemporaryDirectory() as d:
