@@ -27,7 +27,9 @@ class Cognition(Enum):
 def _request(**overrides):
     fields = dict(root_id="root-1", attempt_id="attempt-1", question="What should be built?",
                   evidence_brief="The primary decision is disputed between docs A and B.",
-                  source_refs=("https://github.com/example/repo/pull/1",), max_output_tokens=2000)
+                  source_refs=("https://github.com/example/repo/pull/1",),
+                  frontier_witness="conflicting canonical owners across two separate products",
+                  max_output_tokens=2000)
     fields.update(overrides)
     return FableRequest(**fields)
 
@@ -68,7 +70,8 @@ def _harness(*, enabled=True, cost=3.0, credential="sk-ant-test-do-not-use", sen
     def fake_send(headers, body):
         events.append(("send", dict(headers), body))
         return 200, _response()
-    api = FableApiPrincipal(router=router, decision=decision, reserve=reserve,
+    api = FableApiPrincipal(router=router, decision=decision,
+                            bound_root_id="root-1", bound_attempt_id="attempt-1", reserve=reserve,
                             credential_loader=load_key, send=send or fake_send)
     return api, events
 
@@ -107,6 +110,7 @@ def test_default_disabled_and_wrong_route_refuse_without_credentials(change):
 
 @pytest.mark.parametrize("invalid", [
     {"question": "  "}, {"evidence_brief": ""},
+    {"frontier_witness": ""}, {"task_complexity": "C1_ROUTINE_BOUNDED"},
     {"source_refs": ()}, {"source_refs": ("bad\nref",)},
     {"root_id": "/tmp/outside"}, {"attempt_id": "bad space"},
     {"max_output_tokens": 8193}, {"max_output_tokens": True},
@@ -133,6 +137,7 @@ def test_validated_atomic_reservation_required_before_api_secret():
         calls.append("reserve")
         return CapacityReservation("wrong-root", "attempt-1", "capacity-envelope-1", 5, "r-1")
     api = FableApiPrincipal(router=router, decision=decision,
+                            bound_root_id="root-1", bound_attempt_id="attempt-1",
                             reserve=bad_reserve, credential_loader=lambda: calls.append("secret"),
                             send=lambda *_: calls.append("send"))
     with pytest.raises(FableApiRefused, match="reservation identity"):
@@ -181,6 +186,7 @@ def test_reject_unapproved_cognition_even_if_provider_enabled():
     router, decision = _routing()
     decision.cognition_route = "CHAT_INCLUDED_DEFAULT"
     api = FableApiPrincipal(router=router, decision=decision,
+                            bound_root_id="root-1", bound_attempt_id="attempt-1",
                             reserve=lambda *_: None, credential_loader=lambda: "test-secret-12345",
                             send=lambda *_: (200, _response()))
     with pytest.raises(FableApiRefused, match="not a qualified"):
@@ -191,7 +197,15 @@ def test_unapproved_budget_receipt_fails_closed():
     router, decision = _routing()
     decision.metered_cognition_receipt.budget_authority = ""
     api = FableApiPrincipal(router=router, decision=decision,
+                            bound_root_id="root-1", bound_attempt_id="attempt-1",
                             reserve=lambda *_: None, credential_loader=lambda: "test-secret-12345",
                             send=lambda *_: (200, _response()))
     with pytest.raises(FableApiRefused, match="receipt incomplete"):
         api.invoke(_request())
+
+
+def test_mismatched_original_attempt_refuses_before_any_capacity_effect():
+    api, events = _harness()
+    with pytest.raises(FableApiRefused, match="owner-bound original Attempt"):
+        api.invoke(_request(root_id="other-root"))
+    assert events == []
