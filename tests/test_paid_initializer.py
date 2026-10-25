@@ -48,7 +48,62 @@ def _linux_completion(request,profile=None):
                 +(' launch_fixture='+profile if profile else ''))
 
 
-def _system_fixture_launch(*,no_site=False):
+_SYSTEM_FIXTURE_STAGES=frozenset(('selector_resolution','selector_version','image_custody','ancestor_custody',
+    'startup_library','startup_entry','startup_count','ignored_link','startup_zip','startup_overrides',
+    'getpath_execution','getpath_version','getpath_prefixes'))
+
+
+def _system_fixture_failure_metadata(error,stage):
+    if type(stage)is not str or stage not in _SYSTEM_FIXTURE_STAGES:return None
+    value=dict(schema='mastermind.inert_system_fixture.v1',stage=stage,function=None,line=None,errno=None,fields=[])
+    trace=error.__traceback__
+    while trace is not None:
+        code=trace.tb_frame.f_code
+        if code.co_filename==__file__ and code.co_name in ('_system_fixture_launch','guarded'):
+            if type(trace.tb_lineno)is int and 0<trace.tb_lineno<=1000000:
+                value.update(function=code.co_name,line=trace.tb_lineno)
+                if code.co_name=='guarded':
+                    import stat
+                    info=trace.tb_frame.f_locals.get('info')
+                    if type(info)is os.stat_result:
+                        if info.st_uid!=0:value['fields'].append('uid')
+                        if stat.S_ISLNK(info.st_mode):
+                            if not trace.tb_frame.f_locals.get('allow_link'):value['fields'].append('kind')
+                        elif info.st_mode&0o022:value['fields'].append('write_mode')
+                    if trace.tb_frame.f_locals.get('key') in ('system.posix_acl_access','system.posix_acl_default'):value['fields'].append('acl')
+        trace=trace.tb_next
+    if type(error) in (OSError,PermissionError,FileNotFoundError,NotADirectoryError,IsADirectoryError,TimeoutError):
+        if type(error.errno)is int and 0<=error.errno<=4096:value['errno']=error.errno
+    return value
+
+
+def _system_fixture_metadata_safe(value):
+    return (type(value)is dict and set(value)=={'schema','stage','function','line','errno','fields'}
+        and value['schema']=='mastermind.inert_system_fixture.v1'
+        and type(value['stage'])is str and value['stage'] in _SYSTEM_FIXTURE_STAGES
+        and (value['function'] is None or type(value['function'])is str and value['function'] in ('_system_fixture_launch','guarded'))
+        and (value['line'] is None or type(value['line'])is int and 0<value['line']<=1000000)
+        and (value['errno'] is None or type(value['errno'])is int and 0<=value['errno']<=4096)
+        and type(value['fields'])is list and len(value['fields'])<=4
+        and all(type(field)is str and field in ('uid','kind','write_mode','acl')for field in value['fields']))
+
+
+def _system_fixture_failure_notice(fixture,error,stage):
+    # Entire diagnostic is best effort. Never render exception text or replace
+    # the real precondition failure; interrupts are deliberately not caught.
+    if fixture is None:return
+    try:
+        value=_system_fixture_failure_metadata(error,stage)
+        if not _system_fixture_metadata_safe(value):return
+        reporter=fixture.config.pluginmanager.getplugin('terminalreporter')
+        if reporter is not None:
+            with fixture.getfixturevalue('capsys').disabled():
+                reporter.write_line('\n::error file=tests/test_paid_initializer.py,title=H1 Root system fixture precondition::'
+                    +json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False))
+    except Exception:pass
+
+
+def _system_fixture_launch(*,no_site=False,diagnostic_request=None):
     """Select only an existing fixed Root/ACL-free CPython3.12 distribution.
 
     This test precondition cannot grant production trust. The actual owner and
@@ -56,10 +111,11 @@ def _system_fixture_launch(*,no_site=False):
     """
     import errno
     import stat
-    logical=Path('/usr/bin/python3')
+    logical=Path('/usr/bin/python3');stage='selector_resolution'
     try:
         real=logical.resolve(strict=True)
-        if real.name!='python3.12':return None
+        stage='selector_version'
+        if real.name!='python3.12':raise ValueError()
         def guarded(path,allow_link=False):
             info=path.lstat()
             if stat.S_ISLNK(info.st_mode):
@@ -74,41 +130,56 @@ def _system_fixture_launch(*,no_site=False):
                     if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):raise
                 else:raise ValueError()
         for path in (logical,real):
-            guarded(path,allow_link=path==logical)
-            for ancestor in path.parents:guarded(ancestor)
+            stage='image_custody';guarded(path,allow_link=path==logical)
+            for ancestor in path.parents:
+                stage='ancestor_custody';guarded(ancestor)
         count=0
         # The fixed system fixture supports only the existing /usr layout.
         # Qualify its image/startup metadata before executing getpath.
         for prefix in ('/usr',):
-            library=Path(prefix)/'lib/python3.12';guarded(library)
+            stage='startup_library';library=Path(prefix)/'lib/python3.12';guarded(library)
             if no_site:
+                stage='startup_entry'
                 for name,info in m._no_site_startup_entries(str(library)):
-                    count+=1
-                    if count>20000:raise ValueError()
+                    stage='startup_entry';count+=1
+                    if count>20000:
+                        stage='startup_count';raise ValueError()
                     if name==str(library/'sitecustomize.py') and stat.S_ISLNK(info.st_mode):
+                        stage='ignored_link'
                         directory=os.open(library,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
                         try:
                             with m._IgnoredNoSiteNode(directory):pass
                         finally:os.close(directory)
                     else:guarded(Path(name))
+                    stage='startup_entry'
             else:
                 for parent,dirs,files in os.walk(library,followlinks=False):
                     dirs[:]=[v for v in dirs if v not in ('site-packages','dist-packages')]
                     for leaf in dirs+files:
-                        count+=1
-                        if count>20000:raise ValueError()
+                        stage='startup_entry';count+=1
+                        if count>20000:
+                            stage='startup_count';raise ValueError()
                         guarded(Path(parent)/leaf)
-            optional=Path(prefix)/'lib/python312.zip'
+            stage='startup_zip';optional=Path(prefix)/'lib/python312.zip'
             if optional.exists():guarded(optional)
+        stage='startup_overrides'
         for directory in (logical.parent,logical.parent.parent):
-            if (directory/'pyvenv.cfg').exists() or any(v.name.endswith('._pth') for v in directory.iterdir()):return None
+            if (directory/'pyvenv.cfg').exists() or any(v.name.endswith('._pth') for v in directory.iterdir()):raise ValueError()
         code='import json,sys;print(json.dumps(dict(version=list(sys.version_info[:2]),prefixes=[sys.prefix,sys.exec_prefix,sys.base_prefix,sys.base_exec_prefix])))'
         if no_site:code=m.NO_SITE_PREAMBLE+code+'\n_paid_no_site_check()'
+        stage='getpath_execution'
         data=json.loads(subprocess.check_output([str(logical),'-I','-S','-B','-c',code],stderr=subprocess.DEVNULL,timeout=5))
-        if data['version']!=[3,12]:return None
-        if data['prefixes']!=['/usr']*4:return None
+        stage='getpath_version'
+        if data['version']!=[3,12]:raise ValueError()
+        stage='getpath_prefixes'
+        if data['prefixes']!=['/usr']*4:raise ValueError()
         return logical
-    except (OSError,ValueError,subprocess.SubprocessError):return None
+    except Exception as error:
+        if diagnostic_request is not None:
+            _system_fixture_failure_notice(diagnostic_request,error,stage)
+            return None
+        if isinstance(error,(OSError,ValueError,subprocess.SubprocessError)):return None
+        raise
 
 
 def _observer_metadata_fixture(probe,*,exact,prefixes,root_directories=(),root_files=()):
@@ -624,7 +695,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         with monkeypatch.context() as current:
             current.setattr(os,'stat',rawstat);current.setattr(os,'fstat',rawfstat)
             current.setattr(os,'lstat',rawlstat);current.setattr(os,'getxattr',rawxattr)
-            system=_system_fixture_launch(no_site=True)
+            system=_system_fixture_launch(no_site=True,diagnostic_request=request)
             assert system is not None,'required Root system fixture cannot establish native no-site custody'
             # The real Root profile cannot adopt a HOME-owned logical image.
             # Remove only this fixture's own selector; let actual PATH choose
