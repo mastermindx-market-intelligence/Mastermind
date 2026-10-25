@@ -189,5 +189,38 @@ class FleetStorageVolumeTests(unittest.TestCase):
             self.assertEqual([row["degraded"] for row in recorded], [True, False])
 
 
+    def test_denied_grants_requires_verified_loopback_completion(self):
+        # Hermetic receipt classification only: never run ssh or cleanup.
+        clean_child = {"grants": "ok", "degraded": False, "mode": "calm",
+                       "free_gib_after": 180.0, "incomplete_substeps": []}
+        rows = [
+            ({"grants": "denied", "skipped": "grant-requiring passes"},
+             ["grant_requiring_passes"], 1),
+            ({"grants": "denied", "loopback": "rc=75 busy"},
+             ["grant_requiring_passes"], 1),
+            ({"grants": "denied", "loopback": {"grants": "ok", "degraded": False}},
+             ["grant_requiring_passes"], 1),
+            ({"grants": "denied", "loopback": {**clean_child,
+                                              "degraded": True,
+                                              "incomplete_substeps": ["stale_packs"]}},
+             ["grant_requiring_passes"], 1),
+            ({"grants": "denied", "loopback": clean_child}, [], 0),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.object(self.sweep, "STATE", pathlib.Path(temp)), mock.patch.object(
+                self.sweep, "_external_volume_snapshots", return_value=[]
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=180 * 1024 ** 3)
+            ):
+                for data, expected, code in rows:
+                    with self.subTest(data=data), contextlib.redirect_stdout(io.StringIO()) as stdout:
+                        actual = self.sweep.finish({"mode": "calm", "hung_rc": 0, **data})
+                        receipt = json.loads(stdout.getvalue())
+                        self.assertEqual(actual, code)
+                        self.assertEqual(receipt["incomplete_substeps"], expected)
+                        self.assertEqual(receipt["degraded"], bool(expected))
+
+
 if __name__ == "__main__":
     unittest.main()

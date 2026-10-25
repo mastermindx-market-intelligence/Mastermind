@@ -276,6 +276,24 @@ def finish(out: dict) -> int:
     # StartInterval continues recurring even when this invocation exits 1.
     incomplete = sorted(key[:-3] for key, rc in out.items()
                         if key.endswith('_rc') and type(rc) is int and rc != 0)
+    # The launchd parent can lack filesystem grants and delegate to its
+    # existing forced-command loopback child. A string/partial/old child
+    # response, or no child at all, is NOT a completed sweep: do not print a
+    # green top-level receipt merely because hung-process triage succeeded.
+    if 'grants' in out and out['grants'] != 'ok':
+        child = out.get('loopback')
+        child_qualified = (
+            isinstance(child, dict)
+            and child.get('grants') == 'ok'
+            and child.get('degraded') is False
+            and type(child.get('free_gib_after')) in (int, float)
+            and type(child.get('mode')) is str
+            and child.get('incomplete_substeps') == []
+            and not child.get('skipped')
+        )
+        if not child_qualified:
+            incomplete.append('grant_requiring_passes')
+    incomplete.sort()
     out['incomplete_substeps'] = incomplete
     out['degraded'] = bool(incomplete)
     out['free_gib_after'] = round(shutil.disk_usage('/').free / GIB, 1)
