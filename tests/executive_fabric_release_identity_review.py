@@ -465,3 +465,10 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 
 # Input-mode bounds and exact ignored Linux symlink mode, never target authority.
 REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': 'a0d8095c1e32f25449bfb27de062565956c118d3fffbcec2bf6cbed681c7b2ae', 'sites': ((78, 47, 52, 'int', '0o777'), (246, 36, 41, 'int', '0o777'), (256, 48, 53, 'int', '0o777'))}
+
+# Source-only stateless H1 packet: fixed outer byte length/permission mode and
+# native transport UID. Exact file hash, AST Constants and whole tokens only.
+REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
+    'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
+    'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
+}
