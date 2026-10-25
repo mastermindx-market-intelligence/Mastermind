@@ -1,0 +1,25 @@
+--- a/ext/tests/test_r31_glm_burn_down.py
++++ b/ext/tests/test_r31_glm_burn_down.py
+@@ -192,16 +192,18 @@
+     })
+     _use(monkeypatch, [("chairman-max", 0.0, 6.7)])
+     assert pick.burn_down_urgent("glm") is False
+ 
+ 
+-# ── 5. MiniMax now requires provider evidence; Grok is unchanged ──────────────────────────────────
+-
+-def test_minimax_requires_observation_and_grok_keeps_legacy_policy(monkeypatch):
++# ── 5. R31 urgency requires positive evidence, never a fabricated 100% ──────────────────────────────
++
++def test_minimax_glm_and_grok_refuse_unknown_remaining_pct(monkeypatch):
++    # A disappeared/expired Grok screenshot is not proof of unspent weekly
++    # quota. No pool may self-promote from missing provider evidence.
+     monkeypatch.setattr(pick, "_weekly_remaining_pct", lambda p: None)
+     assert pick._burn_down_remaining_pct_r31("minimax") is None
+-    assert pick._burn_down_remaining_pct_r31("grok") == 100.0
++    assert pick._burn_down_remaining_pct_r31("grok") is None
+     assert pick._burn_down_remaining_pct_r31("glm") is None
+ 
+ 
+ def test_glm_readers_do_not_touch_minimax_or_grok_hours(monkeypatch):
+     monkeypatch.setattr(pick, "_minimax_burn_down_window", lambda doc=None: None)

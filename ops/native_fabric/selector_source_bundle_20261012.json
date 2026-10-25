@@ -1,0 +1,92 @@
+{
+  "live_install_supported": false,
+  "mode": "SOURCE_ONLY_PREFLIGHT",
+  "operation": "fabric-expiry-selector-20261011-sol-001",
+  "patches": [
+    {
+      "path": "ops/native_fabric/patches/fabric_task_expiry_host_select_20261012_v2.patch",
+      "sha256": "fa3f5b769e3fe7fecde9fe9b4f734ec57aa881fa12ae9ded942f0c983b911ad8"
+    },
+    {
+      "path": "ops/native_fabric/patches/pick_exact_model_selection_20261012.patch",
+      "sha256": "d671477a12dc0e9f10fe2eb895bf20d0e9b87c7316f145f0d18a928cc244155d"
+    },
+    {
+      "path": "ops/native_fabric/patches/pick_glm_paired_window_urgency_20261012.patch",
+      "sha256": "3a0777974c7c52c6e8f9831495fecb6eb78e218e5c17f05a039d6a8ee580c1d0"
+    },
+    {
+      "path": "ops/native_fabric/patches/lease_broker_glm_expiry_preference_20261013.patch",
+      "sha256": "9fc2376397f58819c7a2debab389ef9bd4b9abef9f9400ecd210f011591ef95e"
+    },
+    {
+      "path": "ops/native_fabric/patches/test_r31_paired_quota_truth_20261012.patch",
+      "sha256": "1cce3943581ffaac74071de7120d1dfc3edc296fdd0ae6a43dc013459c9d61ff"
+    },
+    {
+      "path": "ops/native_fabric/patches/pool_cli_selector_20261012.patch",
+      "sha256": "1da60bc01a0dece687907e238c0ee267582e329977ef3dbd77790543f73577a0"
+    },
+    {
+      "path": "ops/native_fabric/patches/test_pick_policy_host_mock_20261013.patch",
+      "sha256": "bba6fa59a75272a54cc240f49ed498253c3123446cb3e08b562ce3a0e90ae252"
+    }
+  ],
+  "schema": "mastermind.fabric_selector_source_bundle.v1",
+  "source_pin": "25c4b7923734392b1013afae179966985819d847",
+  "sources": [
+    {
+      "patched_sha256": "d2bb8218f74d8d4b17ef51dc7d0ae1c9c27a1f0788583de394a5ce41157b9525",
+      "path": "ext/fabric_task.py",
+      "sha256": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207"
+    },
+    {
+      "patched_sha256": "48500967290e621b74ae33efb6563ae0c9f50c020c1ba1a4c36aa7b7c643df70",
+      "path": "ext/pick.py",
+      "sha256": "c2d5420bbaf5b06b47788fecd999b7f920f60fe5f25154f2ab8a22afa2d58b29"
+    },
+    {
+      "patched_sha256": "ed864e162238280fa17bc0b05aca6a06b45f700cac5e5160ec020c59c9633567",
+      "path": "ext/lease_broker.py",
+      "sha256": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c"
+    },
+    {
+      "patched_sha256": "30da09d2964c0e3a7be5840bfa5ac0f6c68fe255f28b8fb6c526db03cf5c3203",
+      "path": "ext/tests/test_r31_glm_burn_down.py",
+      "sha256": "23cf5a9269c553f9e09cf82ec326878a492b712b73fcae5b3ad32777f4a85d5e"
+    },
+    {
+      "patched_sha256": "2331854c1613d588094bcca34e75f9c3dd7de4396272e78cf03efbcfcb4d0f8e",
+      "path": "bin/pool",
+      "sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78"
+    },
+    {
+      "patched_sha256": "348a9a20354ac181546c0be56fc9f4b8c63bab1047289941fa3c6a3c7525be47",
+      "path": "ext/tests/test_pick_policy.py",
+      "sha256": "08be5ff6202ee78fe32a720e5aab026a9f0eac6be07da3a3d451b0c7eb5d0e79"
+    }
+  ],
+  "supersedes_test_patch": "ops/native_fabric/patches/test_r31_quota_truth_20261012.patch",
+  "test_proof": {
+    "broker_new_test_cases": 32,
+    "cache_toctou_guard": "descriptor_nofollow_same_inode_mtime_ctime_after_read",
+    "current_source_ownership": "SOURCE_ONLY_NOT_INSTALLED",
+    "current_source_recovery_date": "2026-10-13",
+    "host_qualification_subset_tests": 2,
+    "identity_guard_local_filename_fix": "GREEN:1 test (security scanner unchanged)",
+    "identity_guard_local_pre_fix": "RED:[\"755\",\"757\",\"808\",\"912\"]",
+    "identity_guard_negative_uid": "worker_uid=451 remains REFUSED",
+    "integrated_tests_passed": 366,
+    "m2_source_compatible_isolated": true,
+    "native_transport_subtests_passed": 7,
+    "native_transport_tests_passed": 59,
+    "original_live_source_unchanged": true,
+    "original_source_installed_untouched": true,
+    "patch_count": 7,
+    "production_install_proven": false,
+    "provider_account_consumption_proven": false,
+    "source_file_count": 6,
+    "source_fixture_drift": "test_pick_policy host route mock accepts route_key kwargs",
+    "wrapper_forward_cases": 2
+  }
+}
