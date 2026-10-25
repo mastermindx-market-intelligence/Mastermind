@@ -120,7 +120,10 @@ def launch_observer(here, packet_path, key, model, receipt, *, entry_request=Non
     from lane_runtime import _append_process_receipt, DEFAULT_CAPTURE_LIMIT_BYTES
     import paid_provider_entry as entry
     entry_request=entry.validate_request(entry_request)
-    if entry_request['run_id']!=key or entry_request['model']!=model:raise ValueError('paid_entry_request_refused')
+    if (entry_request['run_id']!=key or entry_request['model']!=model
+            or Path(receipt)!=Path(entry_request['capture_root'])/(key+'.process.jsonl')
+            or Path(packet_path)!=Path(entry_request['capture_root']).parent.parent/'tmp'/(key+'.txt')):
+        raise ValueError('paid_entry_request_refused')
     here, packet_path = Path(here), Path(packet_path)
     body = private_input(packet_path, 2 * 1024 * 1024)
     validate_body(body, model)
@@ -142,6 +145,12 @@ def launch_observer(here, packet_path, key, model, receipt, *, entry_request=Non
         capture_identity=dict(
             device=info.st_dev,inode=info.st_ino,mode=info.st_mode,uid=info.st_uid,gid=info.st_gid)
         os.mkdir(key + '.paid', 0o700, dir_fd=root_fd)
+        # Reserve the incumbent receipt before the initializer pins this
+        # directory. Later normal appends do not mutate its directory entry.
+        receipt_fd=os.open(Path(receipt).name,
+            os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=root_fd)
+        try:os.fsync(receipt_fd)
+        finally:os.close(receipt_fd)
         os.fsync(root_fd)
     finally:
         os.close(root_fd)

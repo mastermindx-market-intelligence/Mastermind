@@ -45,14 +45,14 @@ def bound_material(tmp_path=None):
     physical.update(schema_version='mastermind.paid_fabric_host_binding/v1',
                     worker_source_config_digest=digest(source))
     p.update(paid_physical_binding=physical,physical_binding_sha256=digest(physical))
-    binding=dict(schema_version='mastermind.paid_host_readiness_binding/v1',host='ubuntu3',
+    binding=dict(schema_version='mastermind.paid_host_readiness_context/v1',host='ubuntu3',
         transport_alias='ubuntu3',worker_id=physical['worker_id'],account=p['paid_account'],
         model=physical['model'],boot_id=q['boot_id'],source_config_sha256=digest(source),
         release_manifest_sha256=q['qualifier_source_manifest_sha256'],registry_sha256=q['registry_sha256'],
         initializer_commitment_sha256=q['initializer_commitment_sha256'],validator_sha256='d'*64,
         readiness_source_sha256='e'*64)
-    descriptor=wire.provider_entry_descriptor(p,sources_sha256={n:'f'*64 for n in entry.SOURCE_NAMES},
-                                               readiness_binding=binding)
+    descriptor=wire.provider_entry_descriptor(p,sources_sha256={n:('c' if n in entry.INITIALIZER_NAMES else 'f')*64 for n in entry.SOURCE_NAMES},
+                                               readiness_binding=binding,config_identity=[1,20,0o100600,os.getuid(),os.getgid(),1,30,5,6])
     return p,frame,lease,authority,descriptor
 
 
@@ -70,7 +70,7 @@ def inputs(tmp_path,*,with_payload=False):
     p.update(paid_physical_binding=physical,physical_binding_sha256=digest(physical))
     binding=descriptor['readiness_binding'];binding['source_config_sha256']=digest(p['paid_source_config'])
     descriptor=wire.provider_entry_descriptor(p,sources_sha256=descriptor['sources_sha256'],
-                                               readiness_binding=binding)
+                                               readiness_binding=binding,config_identity=descriptor['config_identity'])
     body=compile_request(p)
     descriptor['body_sha256']=hashlib.sha256(body).hexdigest()
     capsule=dict(token='v2.inert-test-data-not-a-grant',expires_at=time.time()+60,
@@ -104,10 +104,10 @@ def test_descriptor_requires_real_correlated_installed_projection():
     for field in ('host','account','model','registry_sha256','source_config_sha256','boot_id'):
         bad=deepcopy(d['readiness_binding']);bad[field]='foreign'
         with pytest.raises(wire.PaidWireRefused):
-            wire.provider_entry_descriptor(p,sources_sha256=d['sources_sha256'],readiness_binding=bad)
+            wire.provider_entry_descriptor(p,sources_sha256=d['sources_sha256'],readiness_binding=bad,config_identity=d['config_identity'])
     p['paid_physical_binding']['qualification'].pop('initializer_commitment')
     with pytest.raises(wire.PaidWireRefused):
-        wire.provider_entry_descriptor(p,sources_sha256=d['sources_sha256'],readiness_binding=d['readiness_binding'])
+        wire.provider_entry_descriptor(p,sources_sha256=d['sources_sha256'],readiness_binding=d['readiness_binding'],config_identity=d['config_identity'])
 
 
 @pytest.mark.parametrize('key,value',[('purpose','canonical-paid-qualification.v1'),
@@ -177,6 +177,42 @@ def test_slow_ready_time_does_not_refresh_original_client_budget(tmp_path,monkey
     monkeypatch.setattr(client,'execute',lambda *a,**k:posts.append('FORBIDDEN_POST'))
     with pytest.raises(entry.ProviderEntryRefused):entry._run_model_entry(request,client,context)
     assert (capture/'entry-ready.json').exists() and posts==[]
+
+
+def test_fixed_compiler_measures_actual_utf8_commands_and_never_contains_token(tmp_path,record_property):
+    import shlex
+    request,_,raw,_,_=inputs(tmp_path)
+    capsule=json.loads(raw);d=capsule['provider_entry']
+    root=Path(__file__).parents[1]/'ops/native_fabric/quota_continuity/candidate'
+    hashes={n:hashlib.sha256((root/n).read_bytes()).hexdigest() for n in entry.SOURCE_NAMES}
+    d['sources_sha256']=hashes
+    raw=entry.canonical(capsule)
+    support={n:hashes.get(n,'f'*64) for n in entry.SUPPORT_FILES}
+    command=entry.executor_command(raw,support,root)
+    argc=shlex.split(command)
+    assert argc[0]=='/usr/bin/env' and argc[3]==d['python_path']
+    assert argc[4:7]==['-I','-S','-B'] and argc[9]=='executor'
+    assert b'v2.inert-test' not in command.encode() and 'source ' not in command[:command.index('-c')]
+    request=entry.request_from_capsule(capsule,capsule_raw=raw,timeout_seconds=55,entry_nonce='a'*64)
+    model=entry.model_command(root,request,support)
+    assert model[:4]==[d['python_path'],'-I','-S','-B'] and model[6]=='model'
+    measured=dict(executor_utf8_nul=len(command.encode())+1,
+                  model_argv_utf8_nuls=sum(len(v.encode())+1 for v in model))
+    assert all(value<=100000 for value in measured.values())
+    record_property('canonical_entry_transport_bounds',json.dumps(measured,sort_keys=True))
+    with pytest.raises(entry.ProviderEntryRefused):
+        entry.executor_command(raw,{**support,'caller.py':'f'*64},root)
+
+
+def test_source_sets_preserve_every_prior_generation_exactly():
+    from ops.native_fabric.quota_continuity.candidate import support_bundle as support
+    from ops.native_fabric.quota_continuity.candidate import paid_model_owner
+    assert entry.SUPPORT_FILES==paid_model_owner._PAID_SUPPORT_FILES==support.PAID_INITIALIZED_SOURCE_FILES
+    assert support.PAID_INITIALIZED_SOURCE_FILES-support.PAID_MODEL_SOURCE_FILES=={
+        'paid_provider_entry.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py'}
+    assert support.PAID_MODEL_SOURCE_FILES in support.SOURCE_GENERATIONS
+    assert support.PAID_MODEL_PHYSICAL_ROOT_SOURCE_FILES in support.SOURCE_GENERATIONS
+    assert support.SOURCE_FILES in support.SOURCE_GENERATIONS
 
 
 @pytest.mark.parametrize('failure',[None,'foreign-ready','wrong-lease','revoked-control',
@@ -255,6 +291,7 @@ def test_actual_observer_gateway_intent_and_client_join(tmp_path,monkeypatch,mod
     observer=model_owner.launch_observer(Path(__file__).parents[1]/'ops/native_fabric/quota_continuity/candidate',
         Path(request['capture_root']).parent.parent/'tmp/ATT-1.txt','ATT-1',request['model'],
         Path(request['capture_root'])/'ATT-1.process.jsonl',entry_request=request)
+    root_before=entry._identity(Path(request['capture_root']).stat())
     posts=[];provider_entries=[]
     class Response:
         status=200
@@ -291,7 +328,35 @@ def test_actual_observer_gateway_intent_and_client_join(tmp_path,monkeypatch,mod
     context=SimpleNamespace(pre_execution=pre,check=lambda:None)
     try:
         if failure is None:
-            assert entry._run_model_entry(request,client,context)==b'{"summary":"retained"}'
+            result_bytes=entry._run_model_entry(request,client,context)
+            assert result_bytes==b'{"summary":"retained"}'
+            # Normal owner appends and artifact retention MUST NOT invalidate
+            # the exact initializer-held capture-root directory identity.
+            assert entry._identity(Path(request['capture_root']).stat())==root_before
+            cleanup=dict(census_proven=True,identity_verified=True,residual_count=0,status='not_needed',
+                stdout_capture_complete=True,stderr_capture_complete=True,stdin_delivery_complete=True)
+            terminal=dict(schema=lane_runtime.PROCESS_RECEIPT_SCHEMA,label='ATT-1',pid=proc.pid,pgid=proc.pid,
+                started_at='2026-10-24T00:00:00+00:00',ended_at='2026-10-24T00:00:01+00:00',
+                returncode=0,timed_out=False,nice_requested=10,nice_applied=True,
+                stdout_bytes=len(result_bytes),stdout_sha256=hashlib.sha256(result_bytes).hexdigest(),
+                stderr_bytes=0,stderr_sha256=hashlib.sha256(b'').hexdigest(),
+                stdout_truncated=False,stderr_truncated=False,runtime_failure_code=None,cleanup=cleanup)
+            receipt=Path(request['capture_root'])/'ATT-1.process.jsonl'
+            lane_runtime._append_process_receipt(receipt,terminal)
+            # Empty stderr is part of the capture owner contract.
+            result=lane_runtime.OwnedProcessResult(0,result_bytes.decode(),'',False,proc.pid,proc.pid,cleanup)
+            model_owner.retain_result(receipt,'ATT-1',result)
+            owned=model_owner.retained_record(receipt,'ATT-1','terminal')
+            wire.validate_owned_terminal(owned,operation.launch_frame)
+            collection=wire.paid_collection_from_owned_terminal(p,operation.start_result,owned,result_bytes)
+            assert collection['result']['structured_output']=={'summary':'retained'}
+            assert entry._identity(Path(request['capture_root']).stat())==root_before
+            old=receipt.read_bytes()
+            with pytest.raises(FileExistsError):
+                model_owner.launch_observer(Path(__file__).parents[1]/'ops/native_fabric/quota_continuity/candidate',
+                    Path(request['capture_root']).parent.parent/'tmp/ATT-1.txt','ATT-1',request['model'],
+                    receipt,entry_request=request)
+            assert receipt.read_bytes()==old
         else:
             with pytest.raises(Exception):entry._run_model_entry(request,client,context)
         assert posts==['loopback-post']

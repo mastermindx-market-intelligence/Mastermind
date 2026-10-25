@@ -32,9 +32,10 @@ SUPPORT_FILES = frozenset(['artifact_production.py', 'artifact_reader.py', 'bail
 _EXECUTOR_SEAL = object()
 FIELDS = frozenset(('schema_version purpose host_ref transport_alias python_path capture_root '
     'initializer_commitment initializer_commitment_sha256 run_id model lease_id account '
-    'body_sha256 capsule_sha256 entry_descriptor_sha256 entry_nonce sources_sha256 timeout_seconds expires_at boot_id deadline_monotonic_ns').split())
+    'body_sha256 capsule_sha256 entry_descriptor_sha256 entry_nonce sources_sha256 timeout_seconds expires_at boot_id deadline_monotonic_ns config_identity').split())
 _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z')
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
+_FIXED_CLIENT_SHA256 = 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e'
 
 
 class ProviderEntryRefused(ValueError):
@@ -56,6 +57,18 @@ def canonical(value):
 
 def digest(value):
     return hashlib.sha256(canonical(value)).hexdigest()
+
+
+def validate_config_identity(value,commitment):
+    try:
+        if (type(value)is not list or len(value)!=9
+                or any(type(v)is not int or v<0 for v in value)
+                or not value[1] or value[2]!=(stat.S_IFREG|0o600)
+                or value[3]!=commitment['account']['uid']
+                or value[4]!=commitment['account']['gid'] or value[5]!=1
+                or not 0<value[6]<=1024*1024):refuse()
+        return list(value)
+    except (KeyError,TypeError,ValueError):refuse()
 
 
 def validate_request(value):
@@ -89,6 +102,7 @@ def validate_request(value):
                 or c['lane_root'] + '/ext/lanes' != value['capture_root']
                 or c['startup']['profile'] != 'cpython-3.12-linux-root-prefix-nosite.v1'
                 or digest(c) != value['initializer_commitment_sha256']):refuse()
+        validate_config_identity(value['config_identity'],c)
         for key in ('timeout_seconds', 'expires_at'):
             if type(value[key]) not in (int, float) or not math.isfinite(value[key]):refuse()
         if not 0 < value['timeout_seconds'] <= 7200 or not 0 < value['expires_at'] <= 2**53:refuse()
@@ -111,7 +125,7 @@ def request_from_capsule(capsule, *, capsule_raw, timeout_seconds, entry_nonce):
         fields = {'schema_version','purpose','host_ref','transport_alias','python_path','capture_root',
             'initializer_commitment','initializer_commitment_sha256','sources_sha256',
             'readiness_binding','readiness_binding_sha256','physical_binding_sha256',
-            'run_id','account','model','body_sha256','timeout_seconds'}
+            'run_id','account','model','body_sha256','timeout_seconds','config_identity'}
         if (type(d) is not dict or set(d) != fields
                 or d['schema_version'] != 'mastermind.paid_provider_binding/v1'
                 or digest(d['readiness_binding']) != d['readiness_binding_sha256']
@@ -124,7 +138,7 @@ def request_from_capsule(capsule, *, capsule_raw, timeout_seconds, entry_nonce):
         return validate_request(dict(schema_version=SCHEMA,purpose=PURPOSE,
             **{k:d[k] for k in ('host_ref','transport_alias','python_path','capture_root',
                 'initializer_commitment','initializer_commitment_sha256','sources_sha256',
-                'run_id','model','account','body_sha256')},
+                'run_id','model','account','body_sha256','config_identity')},
             lease_id=capsule['lease_id'],capsule_sha256=hashlib.sha256(capsule_raw).hexdigest(),
             entry_descriptor_sha256=digest(d),entry_nonce=entry_nonce,
             timeout_seconds=timeout_seconds,expires_at=capsule['expires_at'],
@@ -245,18 +259,25 @@ class _SupportSources:
         self.here=Path(here);self.expected=expected;self.held=[];self.sources={}
     def __enter__(self):
         try:
-            if (not self.here.is_absolute() or self.here.resolve(strict=True)!=self.here
+            if (not self.here.is_absolute() or '..' in self.here.parts
                     or type(self.expected)is not dict or set(self.expected) not in (SUPPORT_FILES, SUPPORT_FILES|{'artifact_delivery.py'})):refuse()
-            for directory in (self.here.parent,self.here):
-                fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-                info=os.fstat(fd);self.held.append((fd,directory,_identity(info),None))
-                if info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o555:refuse()
+            parent=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+            self.held.append((parent,Path('/'),_identity(os.fstat(parent)),None,None))
+            current=Path('/')
+            for part in self.here.parts[1:]:
+                fd=os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+                current=current/part;info=os.fstat(fd)
+                self.held.append((fd,current,_identity(info),None,parent))
+                if info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:refuse()
+                if current in (self.here.parent,self.here):
+                    if info.st_uid!=os.geteuid() or stat.S_IMODE(info.st_mode)!=0o555:refuse()
+                parent=fd
             for name,sha in sorted(self.expected.items()):
                 if (type(name)is not str or Path(name).name!=name or name in {'.','..'}
                         or type(sha)is not str or not _SHA.fullmatch(sha)):refuse()
                 path=self.here/name
-                fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
-                info=os.fstat(fd);self.held.append((fd,path,_identity(info),sha))
+                fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+                info=os.fstat(fd);self.held.append((fd,path,_identity(info),sha,parent))
                 if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid()
                         or stat.S_IMODE(info.st_mode)!=0o555 or info.st_nlink!=1
                         or not 0<info.st_size<=2*1024*1024):refuse()
@@ -267,8 +288,9 @@ class _SupportSources:
         except BaseException:
             self.close();raise
     def check(self):
-        for fd,path,before,sha in self.held:
-            if _identity(os.fstat(fd))!=before or _identity(path.lstat())!=before:refuse()
+        for fd,path,before,sha,parent in self.held:
+            visible=os.stat(path.name,dir_fd=parent,follow_symlinks=False) if parent is not None else os.lstat('/')
+            if _identity(os.fstat(fd))!=before or _identity(visible)!=before:refuse()
             if sha is not None and hashlib.sha256(os.pread(fd,before[6]+1,0)).hexdigest()!=sha:refuse()
     def close(self):
         for fd,*_ in reversed(self.held):os.close(fd)
@@ -407,6 +429,7 @@ def require_executor_context(value):
 def executor_command(capsule_raw, support, here):
     """Local sealed-source compiler. Emits no token or private input bytes."""
     try:
+        if type(support)is not dict or set(support) not in (SUPPORT_FILES,SUPPORT_FILES|{'artifact_delivery.py'}):refuse()
         capsule=_decode(base64.b64encode(capsule_raw))
         # Build a bounded request solely to validate descriptor/capsule shape.
         request=request_from_capsule(capsule,capsule_raw=capsule_raw,
@@ -432,6 +455,7 @@ def executor_command(capsule_raw, support, here):
 
 def model_command(here, request, support):
     request=validate_request(request)
+    if type(support)is not dict or set(support) not in (SUPPORT_FILES,SUPPORT_FILES|{'artifact_delivery.py'}):refuse()
     source=Path(here).joinpath('paid_provider_entry.py').read_bytes()
     if hashlib.sha256(source).hexdigest()!=request['sources_sha256']['paid_provider_entry.py']:refuse()
     command=[request['python_path'],'-I','-S','-B','-c',_bootstrap_source(source),
@@ -526,9 +550,23 @@ def main(args=None):
     try:
         if len(args)!=4 or args[0]!='executor-command':refuse()
         # Local original controller owns this private file and sealed source.
-        from paid_glm_model_client import private_input,parse,MAX_CAPSULE
-        raw=private_input(args[1],MAX_CAPSULE)
-        support=parse(Path(args[2]).read_bytes())
+        # -I deliberately omits the script directory. Load only this one
+        # independently pinned sealed sibling, never repair ambient sys.path.
+        import types
+        path=Path(__file__).absolute().with_name('paid_glm_model_client.py')
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        try:
+            info=os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022
+                    or info.st_nlink!=1 or not 0<info.st_size<=65536):refuse()
+            source=os.pread(fd,65537,0)
+            if (_identity(os.fstat(fd))!=_identity(info) or _identity(path.lstat())!=_identity(info)
+                    or hashlib.sha256(source).hexdigest()!=_FIXED_CLIENT_SHA256):refuse()
+        finally:os.close(fd)
+        client=types.ModuleType('_fixed_paid_compiler_client')
+        exec(compile(source,'<fixed-paid-compiler-client>','exec'),client.__dict__)
+        raw=client.private_input(args[1],client.MAX_CAPSULE)
+        support=client.parse(client.private_input(args[2],65536))
         sys.stdout.write(executor_command(raw,support,args[3]));return 0
     except Exception:return 78
 

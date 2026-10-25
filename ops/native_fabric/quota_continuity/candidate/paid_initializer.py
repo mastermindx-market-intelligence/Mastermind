@@ -28,6 +28,8 @@ _paid_no_site_check()
 NESTED_OUTER_SHA256 = 'c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0379b2f6'
 NESTED_OUTER_SIZE = 587
 _TOKEN_DATA = _NESTED_DATA = None  # qualified private-package producer only
+_INITIALIZER_SOURCE_HASHES = None  # installed by the same verified peer loader
+_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '6376a30b368e314b6f9b8890c595b0f1b1ecf60421851a3e4b121d69b683675f', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}  # fixed reviewed entry programs
 PURPOSE = 'canonical-paid-qualification.v1'
 LIMIT = 16384
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
@@ -291,7 +293,7 @@ def _bounded_child(argv,*,timeout,**kwargs):
             child.kill();child.wait()
 
 
-def _capture_environment(snapshot,commitment,environment=None):
+def _capture_environment(snapshot,commitment,environment=None,*,timeout=15):
     import shlex
     # Even a forged env emitter can supply only DATA. No expected request,
     # observer code or executable FD is inherited by the initializer shell.
@@ -300,10 +302,126 @@ def _capture_environment(snapshot,commitment,environment=None):
         +'source /proc/self/fd/'+str(snapshot)+' >/dev/null 2>&1 || exit 78; '
         +'/usr/bin/env -0')
     return _bounded_child(['/bin/bash','--noprofile','--norc','-c',script],
-        pass_fds=(snapshot,),env=environment,timeout=15)
+        pass_fds=(snapshot,),env=environment,timeout=timeout)
+
+
+def _pre_execution_witness(request,commitment,prepared,hs,helper_identity):
+    def identity(s):
+        return [s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,
+                s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+    result=dict(commitment_sha256=request['initializer_commitment_sha256'],
+        snapshot_sha256=(prepared.witness['transformed_outer_sha256'] if prepared is not None
+                         else commitment['host_env']['sha256']),snapshot_sealed=True,
+        host_env_identity=identity(hs),bootstrap_sha256=commitment['bootstrap_python']['sha256'],
+        launch_sha256=commitment['launch_python']['sha256'])
+    if prepared is not None:
+        result.update(nested_inputs=prepared.witness,helper_origin_identity=helper_identity)
+    return result
+
+
+def _read_boot_id():
+    import stat
+    fd=os.open('/proc/sys/kernel/random/boot_id',os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022:refuse()
+        raw=os.read(fd,129)
+        if not 0<len(raw)<=128:refuse()
+        value=raw.decode('ascii').strip()
+        if not _ID.fullmatch(value):refuse()
+        return value
+    finally:os.close(fd)
+
+
+class _CanonicalEntryRun:
+    """One fixed same-process purpose, not a reusable qualification object."""
+    def __init__(self,request,entry,client):
+        import time
+        self.request=request;self.entry=entry;self.client=client
+        self.pid=os.getpid();self.active_environment=None
+        self.deadline=min(request['deadline_monotonic_ns'],
+            time.monotonic_ns()+int(request['timeout_seconds']*1_000_000_000))
+        self.check()
+    def remaining(self,maximum):
+        import time
+        self.check()
+        value=min(maximum,(self.deadline-time.monotonic_ns())/1_000_000_000,
+                  self.request['expires_at']-time.time())
+        if value<=0:refuse()
+        return value
+    def check(self):
+        import time
+        require_no_site_policy()
+        if (self.pid!=os.getpid() or _read_boot_id()!=self.request['boot_id']
+                or time.monotonic_ns()>=self.deadline
+                or time.time()>=self.request['expires_at']):refuse()
+        if self.active_environment is not None and dict(os.environ)!=self.active_environment:refuse()
+    def execute(self,initialized,pre_execution,check,prepared):
+        # These are exclusively ACTUAL captured/validated values. Expected
+        # selector/config/HOME values are never injected to repair a mismatch.
+        before=dict(os.environ)
+        self.active_environment=dict(initialized)
+        class Context:
+            @property
+            def pre_execution(_self):return json.loads(canonical(pre_execution))
+            def check(_self):
+                check()
+                if prepared is not None:prepared.check_environment(os.environ)
+        try:
+            os.environ.clear();os.environ.update(initialized)
+            context=Context();context.check()
+            result=self.entry._run_model_entry(self.request,self.client,context)
+            context.check()
+            if type(result)is not bytes or not 0<len(result)<=2*1024*1024:refuse()
+            return result
+        finally:
+            self.active_environment=None
+            os.environ.clear();os.environ.update(before)
+
+
+def run_canonical_entry(request, *, source_bundle):
+    """Additive finite purpose; original Control/gateway still authorizes IO.
+
+    Only the independently pinned three programs can execute. The verified
+    bootstrap also joins these initializer peers to the actual source vector.
+    No supplied callback/environment/qualification receipt is an execution grant.
+    """
+    import sys,types
+    require_no_site_policy()
+    names=('paid_provider_entry.py','paid_glm_model_client.py','linux_process_identity.py')
+    peers={'paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py'}
+    if (type(source_bundle)is not dict or set(source_bundle)!=set(names)
+            or set(_CANONICAL_ENTRY_SOURCES)!=set(names)
+            or type(_INITIALIZER_SOURCE_HASHES)is not dict or set(_INITIALIZER_SOURCE_HASHES)!=peers):refuse()
+    for name in names:
+        raw=source_bundle[name]
+        if type(raw)is not bytes or hashlib.sha256(raw).hexdigest()!=_CANONICAL_ENTRY_SOURCES[name]:refuse()
+    package_name='_fixed_canonical_paid_entry'
+    if package_name in sys.modules:refuse()
+    package=types.ModuleType(package_name);package.__path__=[];sys.modules[package_name]=package
+    modules={}
+    try:
+        for name in names:
+            qualified=package_name+'.'+name[:-3]
+            module=types.ModuleType(qualified);module.__package__=package_name
+            module.__file__='<fixed-'+name+'>';sys.modules[qualified]=module;modules[name]=module
+            exec(compile(source_bundle[name],module.__file__,'exec'),module.__dict__)
+        entry=modules['paid_provider_entry.py'];request=entry.validate_request(request)
+        if (any(request['sources_sha256'].get(name)!=sha for name,sha in _INITIALIZER_SOURCE_HASHES.items())
+                or any(request['sources_sha256'].get(name)!=sha for name,sha in _CANONICAL_ENTRY_SOURCES.items())):refuse()
+        run=_CanonicalEntryRun(request,entry,modules['paid_glm_model_client.py'])
+        return _run_owner(request,None,_entry=run)
+    finally:
+        for name in names:sys.modules.pop(package_name+'.'+name[:-3],None)
+        sys.modules.pop(package_name,None)
 
 
 def run_bootstrap(request, probe_source):
+    """Original qualification purpose: ten-second probe, 64 KiB DATA return."""
+    return _run_owner(request,probe_source)
+
+
+def _run_owner(request, probe_source, *, _entry=None):
     """One Linux qualification child; caller already owns request/source trust.
 
     The fixed bootstrap image is an independently approved platform prerequisite,
@@ -328,7 +446,8 @@ def run_bootstrap(request, probe_source):
     no_site=commitment['startup']['profile']==NO_SITE_PROFILE
     if no_site:
         require_no_site_policy()
-        if type(probe_source)is not str or hashlib.sha256(probe_source.encode()).hexdigest()!=request['probe_sha256']:refuse()
+        if _entry is None and (type(probe_source)is not str or hashlib.sha256(probe_source.encode()).hexdigest()!=request['probe_sha256']):refuse()
+    if _entry is not None:_entry.check()
     account=commitment['account'];uid=account['uid'];gid=account['gid']
     if (os.getuid()!=uid or os.geteuid()!=uid or os.getgid()!=gid or os.getegid()!=gid
             or pwd.getpwuid(uid).pw_name!=account['user']
@@ -376,6 +495,7 @@ def run_bootstrap(request, probe_source):
         except BaseException:
             raise
     def check():
+        if _entry is not None:_entry.check()
         if no_site:require_no_site_policy()
         for node in ignored_nodes:node.check()
         for fd,parent,name,before in held:
@@ -476,12 +596,20 @@ def run_bootstrap(request, probe_source):
         if no_site:startup_code=NO_SITE_PREAMBLE+startup_code+'\n_paid_no_site_check()'
         startup_child=subprocess.run([logical,'-I','-S','-B','-c',startup_code],
             executable='/proc/self/fd/'+str(launch_fd),pass_fds=(launch_fd,),
-            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5)
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+            timeout=5 if _entry is None else _entry.remaining(5))
         if startup_child.returncode or len(startup_child.stdout)>8192:refuse()
         startup=json.loads(startup_child.stdout)
         if (startup['executable']!=logical or any(startup[k]!=commitment['startup'][k]
                 for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix'))):refuse()
         check()
+        if _entry is not None:
+            # Fresh readiness authenticated this exact mutable DATA inode.
+            # Hold metadata only: never read config/credential values here.
+            config_fd,_=pin(commitment['initialized_context']['glm_config'],
+                            maximum=1024*1024,read_file=False)
+            if list(identity(os.fstat(config_fd)))!=_entry.request['config_identity']:refuse()
+            check()
         hook_fd,raw=pin(commitment['host_env']['path'],maximum=65536)
         hs=os.fstat(hook_fd);expected=commitment['host_env']
         if (len(raw)!=expected['size'] or hashlib.sha256(raw).hexdigest()!=expected['sha256']
@@ -511,19 +639,24 @@ def run_bootstrap(request, probe_source):
         check()
         # The post-initialization selector is observed, never overwritten. The
         # child receives no credential bytes in argv or this expected document.
-        encoded=base64.b64encode(canonical(request)).decode('ascii')
-        probe_source=("import sys,json,base64\n_p=json.loads(base64.b64decode(sys.argv[1],validate=True))\n"
-            +"assert sys.version_info[:2]==(3,12) and sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode\n"
-            +"assert all(getattr(sys,k)==_p['initializer_commitment']['startup'][k] for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix'))\n"
-            +probe_source)
+        if _entry is None:
+            encoded=base64.b64encode(canonical(request)).decode('ascii')
+            probe_source=("import sys,json,base64\n_p=json.loads(base64.b64decode(sys.argv[1],validate=True))\n"
+                +"assert sys.version_info[:2]==(3,12) and sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode\n"
+                +"assert all(getattr(sys,k)==_p['initializer_commitment']['startup'][k] for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix'))\n"
+                +probe_source)
         # Bash can redefine builtins, functions, traps and options. It is never
         # trusted to launch/attest the observer. Its entire return is untrusted
         # environment DATA; only this still-running pinned Python parent can
         # validate it and launch the held image with the fixed probe source.
-        environment_raw=_capture_environment(snapshot,commitment,initial_environment)
+        environment_raw=(_capture_environment(snapshot,commitment,initial_environment) if _entry is None else
+            _capture_environment(snapshot,commitment,initial_environment,timeout=_entry.remaining(15)))
         initialized=_initialized_environment(environment_raw,commitment)
         if prepared is not None:prepared.check_environment(initialized)
         check()
+        if _entry is not None:
+            pre_execution=_pre_execution_witness(request,commitment,prepared,hs,helper_identity)
+            return _entry.execute(initialized,pre_execution,check,prepared)
         if no_site:probe_source=NO_SITE_PREAMBLE+probe_source+'\n_paid_no_site_check()'
         child=_bounded_child([logical,'-I','-S','-B','-c',probe_source,encoded],
             executable='/proc/self/fd/'+str(launch_fd),pass_fds=(launch_fd,),
@@ -533,13 +666,7 @@ def run_bootstrap(request, probe_source):
             if identity(os.lstat(name))!=before or os.readlink(name)!=target:refuse()
         if prepared is not None:prepared.check_environment(initialized)
         result=json.loads(child)
-        result['pre_execution']={'commitment_sha256':request['initializer_commitment_sha256'],
-            'snapshot_sha256':prepared.witness['transformed_outer_sha256'] if prepared is not None else expected['sha256'],'snapshot_sealed':True,
-            'host_env_identity':list(identity(hs)),
-            'bootstrap_sha256':commitment['bootstrap_python']['sha256'],
-            'launch_sha256':commitment['launch_python']['sha256']}
-        if prepared is not None:
-            result['pre_execution'].update(nested_inputs=prepared.witness,helper_origin_identity=helper_identity)
+        result['pre_execution']=_pre_execution_witness(request,commitment,prepared,hs,helper_identity)
         output=canonical(result)
         if len(output)>65536:refuse()
         return output

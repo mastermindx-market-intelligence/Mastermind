@@ -28,7 +28,7 @@ _ENTRY_BINDING_FIELDS = frozenset(('schema_version host transport_alias worker_i
     'initializer_commitment_sha256 validator_sha256 readiness_source_sha256').split())
 
 
-def provider_entry_descriptor(payload, *, sources_sha256, readiness_binding):
+def provider_entry_descriptor(payload, *, sources_sha256, readiness_binding, config_identity):
     """Project owner-derived DATA; neither argument mints admission authority."""
     from ops.native_fabric.quota_continuity.candidate import paid_provider_entry as entry
     try:
@@ -39,7 +39,9 @@ def provider_entry_descriptor(payload, *, sources_sha256, readiness_binding):
                 or c['startup']['profile'] != 'cpython-3.12-linux-root-prefix-nosite.v1'
                 or type(sources_sha256) is not dict or set(sources_sha256) != entry.SOURCE_NAMES
                 or any(type(h) is not str or not _SHA.fullmatch(h) for h in sources_sha256.values())
-                or type(readiness_binding) is not dict or set(readiness_binding) != _ENTRY_BINDING_FIELDS):
+                or any(sources_sha256[n]!=q['qualifier_sources_sha256'][n] for n in entry.INITIALIZER_NAMES)
+                or type(readiness_binding) is not dict or set(readiness_binding) != _ENTRY_BINDING_FIELDS
+                or readiness_binding['schema_version']!='mastermind.paid_host_readiness_context/v1'):
             _refuse()
         expected = dict(host=q['registry_key'], transport_alias=q['transport_alias'],
             worker_id=physical['worker_id'], account=payload['paid_account'], model=physical['model'],
@@ -54,6 +56,7 @@ def provider_entry_descriptor(payload, *, sources_sha256, readiness_binding):
             purpose=entry.PURPOSE, host_ref=q['registry_key'], transport_alias=q['transport_alias'],
             python_path=physical['binary']['path'], capture_root=physical['capture_root'],
             initializer_commitment=c, initializer_commitment_sha256=q['initializer_commitment_sha256'],
+            config_identity=entry.validate_config_identity(config_identity,c),
             sources_sha256=sources_sha256, readiness_binding=readiness_binding,
             readiness_binding_sha256=digest(readiness_binding),
             physical_binding_sha256=payload['physical_binding_sha256'],
@@ -197,7 +200,7 @@ def paid_start_from_owned_launch(payload, frame, *, capsule, lease, controller, 
             from ops.native_fabric.quota_continuity.candidate import paid_provider_entry as entry
             d=capsule['provider_entry']
             expected=provider_entry_descriptor(payload,sources_sha256=d['sources_sha256'],
-                                               readiness_binding=d['readiness_binding'])
+                readiness_binding=d['readiness_binding'],config_identity=d['config_identity'])
             if d!=expected:_refuse()
             request=entry.request_from_capsule(capsule,capsule_raw=json.dumps(capsule,
                 sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode('ascii'),

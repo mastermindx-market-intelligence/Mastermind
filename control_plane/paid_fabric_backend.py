@@ -449,7 +449,8 @@ class CanonicalPaidBackend:
                 if self._startup.sources.get(str(path.relative_to(self._startup.release_root))) != sha:_refuse()
                 hashes[name] = sha
             value = provider_entry_descriptor(payload, sources_sha256=hashes,
-                                               readiness_binding=context.binding)
+                readiness_binding=context.binding,
+                config_identity=readiness.qualified_config_identity(context))
             context.check()
         return value
 
