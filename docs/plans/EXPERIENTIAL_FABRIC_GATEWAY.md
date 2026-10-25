@@ -26,8 +26,8 @@
 | P1.T2 | P1 | P1.T1 | SQLite persisted rolling per-key admission, optional org-shared RPM across rotated keys, FIFO, bounded queue count/bytes, stream slot release, no blind POST replay; regression suite | implementation_complete |
 | P1.T3 | P1 | P1.T2 | Dedicated native OpenAI SDK CI on candidate: run 40122896228 passed 21 tests, real SDK imported; no vendor calls | implementation_complete |
 | P2 | — | P1 | Standard source release and independent reviewer acceptance | blocked |
-| P2.T1 | P2 | P1 | Fix standard CI async fixture gap by declaring `pytest-asyncio` in `[project.optional-dependencies].dev`; full hosted CI passes exact integrated head | ready |
-| P2.T2 | P2 | P2.T1 | Preserve all 8 gateway source files and protected master changes; test exact new combined head and security analysis | ready |
+| P2.T1 | P2 | P1 | Run async regression tests with local stdlib `asyncio.run` adapter to preserve hash-locked dev environment; verify normal + SDK CI | implementation_complete |
+| P2.T2 | P2 | P2.T1 | Preserve all gateway source and protected master changes; prove exact-head full CI and security analysis | blocked |
 | P2.T3 | P2 | P2.T2 | Independent non-author adversarial review of rate/queue/auth and code; no remaining actionable blockers | blocked |
 | P2.T4 | P2 | P2.T3 | Protected merge only after review + mandatory exact-head checks and approved normal release path | blocked |
 | P3 | — | P2 | Authorized M2 live transport and SDK consumer canary | blocked |
@@ -41,9 +41,9 @@
 
 **Input:** Protected master `a4525e3e7e9251951567a9142392df962bd06ba2` and original draft PR #1849 head `53f96d226848cd6c102b208eb77ca541e95e3ac5`. Standard CI 40122896249 failed on shard 2 because async pytest support is not in the repository dev installation; 20 async tests refused to execute. Dedicated isolated SDK workflow `40122896228` passed 21 tests with the correct plugin installed. Master at `a4525e3e7e9251951567a9142392df962bd06ba2` has independent green CI `40191846689`; old shard 1 failure in CEO topology is not sufficient evidence that the proxy changes that test.
 
-**Work:** Add only the established pytest plugin to the dev extra; preserve test discovery and existing tests, do not suppress failures or weaken CI. Integrate protected master without overwriting unrelated changes. Run exact-head normal CI and dedicated SDK suite; inspect failures and repair only caused issues.
+**Work:** The first integrated candidate added `pytest-asyncio` to the dev extra, which made the RWE-P0 shadow gate correctly reject stale Linux/macOS hash-locked environment files. Rather than weakening that evidence contract or manually changing locks, restore the protected master `pyproject.toml` blob unchanged. Keep every async test coroutine and assertion intact; wrap only the test callable with `functools.wraps` + stdlib `asyncio.run`, leaving pytest parametrization and fixture signatures intact. This was verified locally with `pytest --noconftest -p no:asyncio` (20 passed, one native SDK skip) and again with the normal plugin present (same result). The dedicated SDK workflow retains the actual `AsyncOpenAI` installation/import and runs all 21 tests on hosted CI without needing `pytest-asyncio`. Run both hosted workflows and reconcile standard full CI.
 
-**Acceptance falsifier:** A green SDK-only workflow with red normal `test` gate, a skipped async test set, a stale branch base, or a merge without non-author review is *not* P2 completion. A real `tests/test_ceo_submit_armed_composition.py` regression on integrated source must be investigated, not explained away.
+**Acceptance falsifier:** A green SDK-only workflow with red normal `test` gate, failures on async cases without the plugin, a stale hash-locked RWE environment, a stale branch base, or a merge without non-author review is *not* P2 completion. A real `tests/test_ceo_submit_armed_composition.py` regression on integrated source must be investigated, not explained away.
 
 **Route/review:** routine implementation by incumbent source writer; independent reviewer for security, queue and cancellation path. No Fabric child is implied by this task tree.
 
@@ -52,7 +52,7 @@
 - Candidate source: `53f96d226848cd6c102b208eb77ca541e95e3ac5`, PR #1849, published 8 new source/test/workflow files.
 - Host-independent suite: 21 native-SDK tests completed successfully under isolated CI; CodeQL success on the candidate.
 - Standard main CI failed: shard 2 lacked async plugin; shard 1 had an unexpected `503` in the CEO submission topology assertion.
-- Current protected master is newer and green, but candidate is behind. No merge or release is claimed.
+- Candidate integrated protected master `a4525e3e7e9251951567a9142392df962bd06ba2` through the two-parent commit `9b0adb5b9fa81f33af95167e489e3777a5e76f98` without rewriting source history. After integration, the initially added pytest dependency triggered RWE shadow lock refusal; this subsequent repair keeps the protected master dependency manifest unchanged. Neither green full CI nor release is claimed.
 - Non-author reviewer `MastermindX1` requested, not accepted.
 - Prior Studio Direct `studio_ping`/fleet transport returned an MCP SSE 429; no live credentials or Fabric requests were attempted on its behalf.
 

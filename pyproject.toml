@@ -28,8 +28,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<10",
-    # Native Fabric Experiential gateway uses @pytest.mark.asyncio in the full suite.
-    "pytest-asyncio>=0.23,<2",
     # The historical mcp>= floor is intentionally retired; the maintained v1
     # release below is exact so unrelated SDK movement cannot red hosted CI.
     # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.

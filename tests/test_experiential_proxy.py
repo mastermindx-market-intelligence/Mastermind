@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import wraps
 import json
 import time
 
@@ -15,6 +16,17 @@ from ops.native_fabric.experiential_proxy.gateway import (
     SlidingWindowAdmissions,
     create_app,
 )
+
+def run_async_test(fn):
+    """Run async tests with stdlib asyncio in any pytest environment.
+
+    functools.wraps preserves each fixture/parametrization signature.
+    """
+    @wraps(fn)
+    def run(*args, **kwargs):
+        return asyncio.run(fn(*args, **kwargs))
+    return run
+
 
 TOKEN = "local-test-token-32-characters-minimum"
 
@@ -37,7 +49,7 @@ def settings(tmp_path, **kw):
     return Settings(**base)
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_balances_keys_and_never_forwards_local_secret(tmp_path):
     seen = []
 
@@ -59,7 +71,7 @@ async def test_balances_keys_and_never_forwards_local_secret(tmp_path):
     assert all(TOKEN not in str(record) for record in seen)
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_queued_instead_of_429_when_all_slots_reach_ceiling(tmp_path):
     seen = []
 
@@ -81,7 +93,7 @@ async def test_queued_instead_of_429_when_all_slots_reach_ceiling(tmp_path):
     assert seen[2] - seen[1] >= 0.06
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_persistent_admission_survives_restart(tmp_path):
     cfg = settings(tmp_path, api_keys=("upstream-A",), window_s=0.11, max_queue_wait_s=0.02)
     first = SlidingWindowAdmissions(cfg)
@@ -95,7 +107,7 @@ async def test_persistent_admission_survives_restart(tmp_path):
     second.close()
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_rejects_duplicate_keys_and_same_state_owner(tmp_path):
     with pytest.raises(ValueError, match="duplicate"):
         settings(tmp_path, api_keys=("same", "same"))
@@ -105,7 +117,7 @@ async def test_rejects_duplicate_keys_and_same_state_owner(tmp_path):
     first.close()
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_provider_429_is_not_replayed_across_credentials(tmp_path):
     seen = []
 
@@ -123,7 +135,7 @@ async def test_provider_429_is_not_replayed_across_credentials(tmp_path):
     assert seen == ["Bearer upstream-A"]
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_auth_and_allowlist_and_no_direct_upstream_contact(tmp_path):
     requests = []
 
@@ -140,7 +152,7 @@ async def test_auth_and_allowlist_and_no_direct_upstream_contact(tmp_path):
     assert requests == []
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_openai_async_sdk_chat_and_sse(tmp_path):
     openai = pytest.importorskip("openai", reason="OpenAI SDK unavailable in isolated test container")
     AsyncOpenAI = getattr(openai, "AsyncOpenAI", None)
@@ -169,7 +181,7 @@ async def test_openai_async_sdk_chat_and_sse(tmp_path):
             assert chunks[0].choices[0].delta.content == "ok"
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_inflight_capacity_waits_and_releases(tmp_path):
     cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=3, window_s=0.4,
                    max_inflight_per_key=1, max_queue_wait_s=0.15)
@@ -184,7 +196,7 @@ async def test_inflight_capacity_waits_and_releases(tmp_path):
     limit.close()
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_queue_full_fails_503_not_429(tmp_path):
     cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=1, window_s=0.3,
                    max_pending=1, max_queue_wait_s=0.13)
@@ -201,7 +213,7 @@ async def test_queue_full_fails_503_not_429(tmp_path):
             assert (await pending).status_code == 504
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_raw_sse_passthrough_no_chunks_transformed(tmp_path):
     original = 'data: {"id":"abc","object":"chat.completion.chunk","choices":[]}\n\ndata: [DONE]\n\n'
     app = create_app(settings(tmp_path), transport=httpx.MockTransport(
@@ -217,7 +229,7 @@ async def test_raw_sse_passthrough_no_chunks_transformed(tmp_path):
             assert response.headers["content-type"].startswith("text/event-stream")
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_compressed_upstream_error_is_not_double_decoded(tmp_path):
     import gzip
 
@@ -234,7 +246,7 @@ async def test_compressed_upstream_error_is_not_double_decoded(tmp_path):
             assert response.json()["error"]["code"] == "insufficient_quota"
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_upstream_redirect_is_refused_without_following(tmp_path):
     seen = []
 
@@ -250,7 +262,7 @@ async def test_upstream_redirect_is_refused_without_following(tmp_path):
     assert len(seen) == 1
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_cancelled_upstream_connect_releases_inflight_slot(tmp_path):
     started = asyncio.Event()
 
@@ -272,7 +284,7 @@ async def test_cancelled_upstream_connect_releases_inflight_slot(tmp_path):
             assert app.state.admissions._inflight == [0]
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_key_fingerprints_are_salted_and_durable_without_plain_secrets(tmp_path):
     import hashlib
     import sqlite3
@@ -291,7 +303,7 @@ async def test_key_fingerprints_are_salted_and_durable_without_plain_secrets(tmp
     second.close()
 
 
-@pytest.mark.asyncio
+@run_async_test
 @pytest.mark.parametrize("fail_on", ["http.response.start", "http.response.body"])
 async def test_disconnect_before_first_stream_byte_releases_slot(tmp_path, fail_on):
     """ASGI failures before or during first body send cannot strand a slot."""
@@ -331,7 +343,7 @@ async def test_disconnect_before_first_stream_byte_releases_slot(tmp_path, fail_
         assert app.state.admissions._inflight == [0]
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
     app = create_app(settings(tmp_path), transport=httpx.MockTransport(
         lambda req: streamed_json({"ok": True})
@@ -354,7 +366,7 @@ async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
             assert "upstream-B" not in json.dumps(status)
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_shared_org_ceiling_queues_across_keys_and_survives_restart(tmp_path):
     fake_time = [1000.0]
     cfg = settings(tmp_path, safe_rpm=3, safe_rpm_shared=1, window_s=0.1)
@@ -382,7 +394,7 @@ def test_shared_org_ceiling_rejects_nonpositive_values(tmp_path):
         settings(tmp_path, safe_rpm_shared=0)
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_shared_org_ceiling_counts_retired_key_admissions_after_rotation(tmp_path):
     fake_time = [1500.0]
     first_config = settings(tmp_path, api_keys=("old-key", "shared-key"),
@@ -404,7 +416,7 @@ async def test_shared_org_ceiling_counts_retired_key_admissions_after_rotation(t
     new.close()
 
 
-@pytest.mark.asyncio
+@run_async_test
 async def test_pending_byte_budget_rejects_oversized_queued_body(tmp_path):
     cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=1,
                    window_s=0.5, max_queue_wait_s=0.12, max_pending_bytes=5)

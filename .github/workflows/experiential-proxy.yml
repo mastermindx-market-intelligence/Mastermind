@@ -35,7 +35,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check \
             -r ops/native_fabric/experiential_proxy/requirements.txt \
-            'pytest>=8,<10' 'pytest-asyncio>=0.23,<2'
+            'pytest>=8,<10'
       - name: Ensure native SDK is actually installed
         run: python -c 'from openai import AsyncOpenAI; print("Native SDK import verified")'
       - name: Check syntax and run full proxy suite including SDK
