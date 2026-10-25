@@ -94,13 +94,25 @@ write_state() { # $1 host, $2 probe rc, $3 probe stdout
 
 # Both modes use this one incumbent authenticated transport. Qualification
 # never enters the telemetry writer, daemon, account-readiness or fleet loop.
+# A fixed, short SSH command receives the full generated probe on stdin. On
+# Linux the original single remote argv reached ~140.5 KB (MAX_ARG_STRLEN
+# 131072 bytes), masking healthy hosts as probe_exit_1. A private 0600 remote
+# spool separates script from child stdin. Resolve Python3 using the same
+# non-login SSH installation paths as the existing probe before launching
+# the supervisor (inherited PATH can omit Homebrew or ~/.local/bin).
+# A Python3 supervisor starts only
+# the probe shell in its own OS session/process group and reaps it. HUP/INT/TERM
+# cancel that group (bounded SIGKILL fallback), not the surrounding SSH group.
+# EXIT unlinks the private spool; all probes keep child stdin at /dev/null. Keep the existing
+# fixed host, SSH policy, probe, and single collector unchanged.
+HOST_PULL_REMOTE_STDIN_EXEC='umask 077; PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"; export PATH; command -v python3 >/dev/null 2>&1 || exit 78; t=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/host_pull_probe.XXXXXXXX") || exit 70; p=; trap '"'"'/bin/rm -f -- "$t"'"'"' EXIT; trap '"'"'if test -n "$p"; then kill -HUP "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 129 ] || exit 78; fi; exit 129'"'"' HUP; trap '"'"'if test -n "$p"; then kill -INT "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 130 ] || exit 78; fi; exit 130'"'"' INT; trap '"'"'if test -n "$p"; then kill -TERM "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 143 ] || exit 78; fi; exit 143'"'"' TERM; /bin/cat >"$t" || exit 70; python3 -c '"'"'exec('"'"'"'"'"'"'"'"'import os,signal,subprocess,sys,time\nseen=[0]\ndef notice(sig,frame):\n    seen[0]=sig\nfor sig in (signal.SIGHUP,signal.SIGINT,signal.SIGTERM):\n    signal.signal(sig,notice)\nchild=subprocess.Popen([os.environ.get("SHELL") or "/bin/sh",sys.argv[1]],stdin=subprocess.DEVNULL,start_new_session=True)\nstatus=None\nwhile not seen[0] and status is None:\n    try:\n        status=child.wait(timeout=0.04)\n    except subprocess.TimeoutExpired:\n        pass\nif seen[0]:\n    for sig in (seen[0],):\n        try:\n            os.killpg(child.pid,sig)\n        except (ProcessLookupError,PermissionError):\n            pass\n    time.sleep(0.12)\n    try:\n        os.killpg(child.pid,signal.SIGKILL)\n    except (ProcessLookupError,PermissionError):\n        pass\n    deadline=time.monotonic()+2\n    while True:\n        check=subprocess.run(["/bin/ps","-Ao","pgid=,stat="],capture_output=True,text=True,timeout=2)\n        if check.returncode!=0:\n            raise SystemExit(78)\n        live=False\n        for line in check.stdout.splitlines():\n            cells=line.split()\n            if len(cells)>1 and cells[0]==str(child.pid) and cells[1][0] not in "ZX":\n                live=True\n                break\n        if not live:\n            break\n        if time.monotonic()>=deadline:\n            raise SystemExit(78)\n        time.sleep(0.04)\n    try:\n        child.wait(timeout=2)\n    except subprocess.TimeoutExpired:\n        raise SystemExit(78)\n    raise SystemExit(128+seen[0])\nraise SystemExit(status if status>=0 else 128-status)\n'"'"'"'"'"'"'"'"')'"'"' "$t" </dev/null & p=$!; wait "$p"'
 run_probe() {
   local is_local="$1" alias="$2" probe="$3" key_guard="${4:-}"
-  local key_options=()
+  local key_options=(-o BatchMode=yes -o ConnectTimeout=8)
   if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ]; then
     # This read-only inspection must never enroll/update a host key. Normal
     # telemetry retains its existing inherited transport policy unchanged.
-    key_options=(-o StrictHostKeyChecking=yes -o UpdateHostKeys=no)
+    key_options+=(-o StrictHostKeyChecking=yes -o UpdateHostKeys=no)
   elif [ -n "$key_guard" ]; then
     return 78
   fi
@@ -109,7 +121,7 @@ run_probe() {
   elif [ -z "$alias" ]; then
     return 255
   else
-    perl -e 'alarm 25; exec @ARGV' ssh -o BatchMode=yes -o ConnectTimeout=8 "${key_options[@]}" "$alias" "$probe" 2>/dev/null </dev/null
+    perl -e 'alarm 25; exec @ARGV' ssh "${key_options[@]}" "$alias" "$HOST_PULL_REMOTE_STDIN_EXEC" 2>/dev/null <<< "$probe"
   fi
 }
 

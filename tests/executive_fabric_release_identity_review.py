@@ -459,7 +459,7 @@ REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
-    'sha256': 'cf7e5933fc8d97d9aaddd28b5c21888414cc5f98ade69fd4f99ab4b8a2f25fa4',
+    'sha256': 'eabe51db9bb94dc3589b8d05a7f4bbe42799d179d8c8d26e6be534a68612c0ee',
     'sites': ((60, 21, 24, 'int', '501'),),
 }
 
@@ -469,4 +469,12 @@ REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
 REVIEWED_FILES['control_plane/executive_backup.py'] = {
     'sha256': '058965ae78b61f072ba3720f877bac7b54538a6e06f296db7135217cf05721cd',
     'sites': ((3505, 39, 44, 'int', '0o711'), (3507, 43, 48, 'int', '0o700'), (3509, 39, 44, 'int', '0o755')),
+}
+
+
+# Source-only stateless H1 packet: fixed outer byte length/permission mode and
+# native transport UID. Exact file hash, AST Constants and whole tokens only.
+REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
+    'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
+    'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
 }

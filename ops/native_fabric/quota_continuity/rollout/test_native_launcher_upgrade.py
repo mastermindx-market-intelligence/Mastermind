@@ -135,6 +135,28 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     raise AssertionError('historical collector preimage differs')
                 (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
                 cls.manifest['ext/' + name] = digest
+            # The historical 8bc -> d044 launcher fixture also predates the
+            # two-hunk #1797 reviewer-judgment picker. Restore its exact old
+            # bytes ONLY inside this disposable stage, never in source/runtime.
+            pick = cls.built / 'native-code-stage/ext/pick.py'
+            selected_pick = pick.read_bytes()
+            rollback_hunks = (
+                (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
+                 b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
+                (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
+                 b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
+                 b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
+                 b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
+            )
+            for current_hunk, historical_hunk in rollback_hunks:
+                if selected_pick.count(current_hunk) != 1:
+                    raise AssertionError('historical picker fixture postimage differs')
+                selected_pick = selected_pick.replace(current_hunk, historical_hunk)
+            historical_pick_sha = 'a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee'
+            if g.digest(selected_pick) != historical_pick_sha:
+                raise AssertionError('historical picker inverse differs')
+            pick.write_bytes(selected_pick)
+            cls.manifest['ext/pick.py'] = historical_pick_sha
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
@@ -145,11 +167,28 @@ class PairedLauncherUpgrade(unittest.TestCase):
     def tearDownClass(cls):
         _cleanup(cls.shared)
 
+    @staticmethod
+    def _reset_fixture_audit():
+        global _active
+        _active = False
+
     def setUp(self):
         global _active
         _active = True
+        # Unittest invokes addCleanup even when setUp raises. Keep the global
+        # audit sentinel and throwaway fixture from poisoning later test packs.
+        self.addCleanup(self._reset_fixture_audit)
         self.temp = tempfile.TemporaryDirectory(prefix='paired-upgrade-')
+        self.addCleanup(_cleanup, self.temp)
         self.root = Path(self.temp.name).resolve()
+        # Reuse the real Studio pin-census owner with an enumerable, throwaway
+        # zero-consumer fixture. Never consult actual private Studio accounts.
+        studio_root = self.root / 'studio-consumers'
+        studio_root.mkdir(mode=0o700)
+        patch = mock.patch.object(installer.studio_consumer_owner,
+                                  'STUDIO_CONSUMER_ROOT', studio_root)
+        patch.start()
+        self.addCleanup(patch.stop)
         self.ext = self.root / 'kit/ext'
         self.ext.mkdir(parents=True)
         (self.root / 'bin').mkdir()
@@ -196,7 +235,8 @@ class PairedLauncherUpgrade(unittest.TestCase):
     def tearDown(self):
         global _active
         _active = False
-        _cleanup(self.temp)
+        # Registered cleanups restore the census binding and dispose the
+        # throwaway owner even if an assertion or setUp fails.
         self.assertEqual(_unexpected, [], 'a forbidden fallback was attempted')
 
     def assert_complete(self):

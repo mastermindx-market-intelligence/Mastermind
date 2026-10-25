@@ -121,13 +121,13 @@ class CleanupDiagnosticsTests(unittest.TestCase):
     def test_field_names_survive_without_values(self):
         expected = os.fstat(self.held)
         changed = SimpleNamespace(**{name: getattr(expected, name) +
-            (1 if name == 'st_nlink' else 0) for name in reader._IDENTITY_FIELDS})
+            (1 if name == 'st_uid' else 0) for name in reader._IDENTITY_FIELDS})
         real = os.fstat
         with mock.patch.object(os, 'fstat',
                 side_effect=lambda fd: changed if fd == self.held else real(fd)):
             with self.assertRaises(reader.StudioObservationError) as caught:
                 self.walk.close_all()
-        self.assertTrue(any(x['fields'] == ['st_nlink']
+        self.assertTrue(any(x['fields'] == ['st_uid']
                             for x in self.records(caught.exception)))
         self.assertDisposed()
 

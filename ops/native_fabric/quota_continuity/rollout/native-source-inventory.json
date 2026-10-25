@@ -258,9 +258,9 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 8628,
+      "bytes": 11854,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "08f908f912c1ad3bbe79d0683c2107530909209377b1f086140b7bca3d9d3255",
+      "sha256": "d15cdb7c9a9bbf0adc9626d3269371eeec00afed5b60b8a83e20f70c448d9d3e",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
@@ -474,9 +474,9 @@
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
-      "bytes": 117292,
+      "bytes": 117518,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee",
+      "sha256": "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
