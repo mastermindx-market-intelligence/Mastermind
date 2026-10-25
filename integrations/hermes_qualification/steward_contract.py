@@ -36,7 +36,8 @@ EXPECTED_CAPABILITIES = {
     "elicitation": False,
     "dynamic_registration": False,
 }
-MAX_ADVERTISEMENT_BYTES = 128 * 1024
+MAX_ADVERTISEMENT_BYTES = 1024 * 1024  # Upper cap for actual owner-generated closed schema
+MAX_ADVERTISEMENT_OVERAGE_BYTES = 4096  # Drift headroom, not an authority grant
 
 
 def inspect_advertisement(advertised: object) -> dict[str, Any]:
@@ -83,7 +84,16 @@ def inspect_advertisement(advertised: object) -> dict[str, Any]:
         except (TypeError, ValueError, OverflowError, RecursionError):
             errors.add("ADVERTISED_SHAPE_INVALID")
         else:
-            if len(encoded.encode("utf-8")) > MAX_ADVERTISEMENT_BYTES:
+            # The reviewed six-tool owner expands to a substantial nested
+            # JSON Schema. Base the advertisement allowance on *that exact
+            # canonical source*, not an undersized arbitrary fixed threshold.
+            # The independent hard ceiling still refuses unexpected growth.
+            source_size = len(current.encode("utf-8"))
+            candidate_size = len(encoded.encode("utf-8"))
+            if source_size > MAX_ADVERTISEMENT_BYTES:
+                errors.add("OWNER_ADVERTISEMENT_TOO_LARGE")
+            permitted_size = min(MAX_ADVERTISEMENT_BYTES, source_size + MAX_ADVERTISEMENT_OVERAGE_BYTES)
+            if candidate_size > permitted_size:
                 errors.add("ADVERTISED_SIZE_EXCEEDED")
             if encoded != current:
                 errors.add("ADVERTISED_SOURCE_DRIFT")
