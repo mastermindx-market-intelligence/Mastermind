@@ -209,3 +209,51 @@ def test_mismatched_original_attempt_refuses_before_any_capacity_effect():
     with pytest.raises(FableApiRefused, match="owner-bound original Attempt"):
         api.invoke(_request(root_id="other-root"))
     assert events == []
+
+
+def test_sender_pins_tls_host_endpoint_and_never_redirects(monkeypatch):
+    from control_plane import fable_api_principal as module
+    calls = []
+
+    class Response:
+        status = 200
+        def read(self, max_bytes):
+            calls.append(("read", max_bytes))
+            return b'{"ok":true}'
+
+    class FakeConnection:
+        def __init__(self, host, **kw):
+            calls.append(("connect", host, kw["timeout"], kw["context"] is not None))
+        def request(self, method, path, body, headers):
+            calls.append(("request", method, path, body, dict(headers)))
+        def getresponse(self):
+            return Response()
+        def close(self):
+            calls.append(("close",))
+
+    monkeypatch.setattr(module.http.client, "HTTPSConnection", FakeConnection)
+    status, raw = module.send_anthropic_once({"x-api-key":"unit-secret"}, b'{}')
+    assert status == 200 and raw == b'{"ok":true}'
+    assert calls[0][:2] == ("connect", "api.anthropic.com")
+    assert calls[1][0:3] == ("request", "POST", "/v1/messages")
+    assert len([x for x in calls if x[0] == "request"]) == 1
+    assert calls[-1] == ("close",)
+
+
+def test_sender_never_retries_when_network_fails(monkeypatch):
+    from control_plane import fable_api_principal as module
+    calls = []
+
+    class FailingConnection:
+        def __init__(self, host, **kw):
+            calls.append("connect")
+        def request(self, *args, **kw):
+            calls.append("request")
+            raise TimeoutError("external provider state uncertain")
+        def close(self):
+            calls.append("close")
+
+    monkeypatch.setattr(module.http.client, "HTTPSConnection", FailingConnection)
+    with pytest.raises(TimeoutError):
+        module.send_anthropic_once({"x-api-key":"unit-secret"}, b'{}')
+    assert calls == ["connect", "request", "close"]
