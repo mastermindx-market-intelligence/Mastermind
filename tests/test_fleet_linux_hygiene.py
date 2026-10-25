@@ -184,7 +184,7 @@ class FleetLinuxHygieneTests(unittest.TestCase):
 
     def test_lock_contention_does_not_run(self):
         with tempfile.TemporaryDirectory() as d, patch.object(
-                h.fcntl, "flock", side_effect=BlockingIOError):
+                h.fcntl, "flock", side_effect=[BlockingIOError(), None]):
             with patch.object(h, "run", side_effect=AssertionError("duplicate pass")):
                 self.assertEqual(h.main(["--state-dir", d]), 75)
             rows = (Path(d) / h.LEDGER).read_text().splitlines()
@@ -202,10 +202,23 @@ class FleetLinuxHygieneTests(unittest.TestCase):
              b"install"],
             [b"pnpm", b"--config.foo=x", b"add", b"pkg"],
             [b"yarn", b"--cwd", b"/tmp/build", b"add", b"pkg"],
+            [b"/usr/bin/env", b"pip", b"install", b"pkg"],
+            [b"/usr/bin/sudo", b"-u", b"builder", b"pip3", b"wheel", b"."],
+            [b"/usr/bin/nice", b"-n", b"10", b"uv", b"cache", b"clean"],
+            [b"python3", b"-mpip", b"install", b"pkg"],
+            [b"python3", b"-mpip._internal", b"wheel", b"."],
         ):
             self.assertTrue(h.package_command(b"\x00".join(arguments) + b"\x00"),
                             arguments)
         self.assertFalse(h.package_command(b"python3\x00-c\x00print(3)\x00"))
+        self.assertFalse(h.package_command(b"/usr/bin/env\x00python3\x00-c\x00print(3)\x00"))
+
+    def test_ledger_append_refuses_a_concurrent_writer_without_partial_row(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d)
+            with patch.object(h.fcntl, "flock", side_effect=BlockingIOError):
+                self.assertFalse(h.append_receipt(state, {"schema": "test"}))
+            self.assertEqual((state / h.LEDGER).read_bytes(), b"")
 
     def test_redirected_or_symlink_parent_never_calls_cache_api(self):
         with tempfile.TemporaryDirectory() as d:
