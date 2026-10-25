@@ -1,9 +1,14 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import { bindMissionHost, type RawClient } from "../host";
-import { decodeMission, type MissionDocument } from "../mission";
+import { decodeMission, type MissionDocument, type Missionv3Document } from "../mission";
 import fixture from "../fixtures/mission-v2-current-128c46f6.json";
-import { captureMissionOfficeRead, completeMissionOfficeRead } from "./mission-adapter";
+import { decodeMissionResultBytes } from "../mission-result";
+import { normalizeResultSelection, type ResultEnvelopeDigestShape, type ResultSelection } from "../result";
+import { captureMissionOfficeRead, completeMissionOfficeRead, completeMissionResultOfficeRead, captureMissionResultOfficeRead } from "./mission-adapter";
 import { projectOffice, type ProjectionContext } from "./projection";
+import { useOfficeProjection } from "./useOfficeProjection";
 
 const context: ProjectionContext = {
   authGeneration: 3, selection: { workRef: "WS:ONE", rootJobId: "JOB-1" },
@@ -174,5 +179,143 @@ describe("Mission owner receipt to Office adapter", () => {
     expect(projected(result).mission.source.state).toBe("UNKNOWN");
     expect(result.snapshot.source.observed_at).toBeNull();
     expect(result.snapshot.value).toBeNull();
+  });
+});
+
+describe("compound Mission/Result presentation", () => {
+  const acquiredAt = "2026-10-24T21:40:00Z";
+  let selection: ResultSelection;
+  let mission: Missionv3Document;
+  let result: ResultEnvelopeDigestShape;
+  const load = async () => {
+    if (mission) return;
+    const cwd = (globalThis as { process?: { cwd?: () => string } }).process?.cwd?.();
+    if (!cwd) throw new Error("producer fixture path requires the vitest worker cwd");
+    // @ts-expect-error node:fs/promises is resolved by the vitest worker.
+    const fs = (await import("node:fs/promises")) as { readFile(path: string): Promise<Uint8Array> };
+    const bytes = new Uint8Array(await fs.readFile(
+      `${cwd}/src/meta-ceo/fixtures/mission-result-producer/actual-pair.json`,
+    ));
+    const wire = (JSON.parse(new TextDecoder().decode(bytes)) as { selection: Record<string, string> }).selection;
+    const normalized = normalizeResultSelection({
+      workRef: wire.work_ref, rootJobId: wire.root_job_id, jobId: wire.job_id,
+      attemptId: wire.attempt_id, resultEnvelopeDigest: wire.result_envelope_digest,
+    });
+    if (!normalized) throw new Error("producer selection missing");
+    const decoded = decodeMissionResultBytes(bytes, normalized);
+    if (!decoded.ok || decoded.document.availability !== "AVAILABLE")
+      throw new Error("producer bytes did not yield a pair");
+    selection = normalized;
+    mission = decoded.document.mission;
+    result = decoded.document.roleResult;
+  };
+
+  it("publishes both revisions from the unchanged producer bytes and discards a late pair", async () => {
+    await load();
+    const base: ProjectionContext = {
+      authGeneration: 1,
+      selection: { workRef: selection.workRef, rootJobId: selection.rootJobId },
+      sessionRef: null, bindingGeneration: null,
+      revisions: { mission: null, programs: "programs:kept", result: null, conversation: null },
+    };
+    const pending = captureMissionResultOfficeRead(base, 1);
+    const observed = completeMissionResultOfficeRead(pending, base, mission, result, acquiredAt);
+    expect(observed.kind).toBe("observed");
+    if (observed.kind !== "observed") return;
+    expect(observed.context.revisions.programs).toBe("programs:kept");
+    expect(observed.context.revisions.mission).toBe(observed.mission.source.revision);
+    expect(observed.context.revisions.result).toBe(observed.result.source.revision);
+    expect(observed.mission.source.observed_at_kind).toBe("LOCAL_ACQUISITION");
+    expect(observed.result.source.observed_at_kind).toBe("LOCAL_ACQUISITION");
+    expect(observed.context.sessionRef).toBeNull();
+    expect(observed.context.bindingGeneration).toBeNull();
+    const projection = projectOffice(
+      { mission: observed.mission, programs: null, result: observed.result, conversation: null },
+      observed.context,
+    );
+    expect(projection.result.value?.result?.review?.verdict).toBe("reject");
+    expect(projection.result.value?.result?.acceptance).toBe("NOT_PROJECTED");
+    expect(projection.result.value?.result?.execution_status).toBe("COMPLETED");
+    expect(projection.receipts.review).not.toBe("reject");
+    expect(projection.receipts.acceptance).toBe("NOT_PROJECTED");
+    expect(projection.receipts.return).toBe("RETURNED");
+    const late = completeMissionResultOfficeRead(pending, observed.context, mission, result, acquiredAt);
+    expect(late).toEqual({ kind: "discarded", state: "STALE", reason: "READ_SUPERSEDED" });
+    expect(projectOffice(
+      { mission: observed.mission, programs: null, result: observed.result, conversation: null },
+      observed.context,
+    ).result.value).not.toBeNull();
+  });
+
+  it("refuses a synthetic crossed tuple through projectOffice instead of relaxing the join", async () => {
+    await load();
+    const base: ProjectionContext = {
+      authGeneration: 1,
+      selection: { workRef: selection.workRef, rootJobId: selection.rootJobId },
+      sessionRef: null, bindingGeneration: null,
+      revisions: { mission: null, programs: null, result: null, conversation: null },
+    };
+    const crossed = structuredClone(result);
+    crossed.selection.result_envelope_digest = "f".repeat(64);
+    const outcome = completeMissionResultOfficeRead(
+      captureMissionResultOfficeRead(base, 1), base, mission, crossed, acquiredAt,
+    );
+    expect(outcome).toMatchObject({ kind: "discarded", reason: "RESULT_TUPLE_NOT_ASSOCIATED" });
+  });
+
+  it("keeps a synthetic nested content-budget result associated and incomplete", async () => {
+    await load();
+    const fallback = structuredClone(result);
+    if (!fallback.result) throw new Error("producer result has no role view");
+    fallback.availability = "CONTENT_OVER_BUDGET";
+    fallback.reason_codes = ["CONTENT_OVER_BUDGET"];
+    fallback.result.availability = "CONTENT_OVER_BUDGET";
+    fallback.result.content = null;
+    fallback.result.content_complete = false;
+    fallback.result.omitted = ["role_result", "summary", "next_actions"];
+    const base: ProjectionContext = {
+      authGeneration: 1,
+      selection: { workRef: selection.workRef, rootJobId: selection.rootJobId },
+      sessionRef: null, bindingGeneration: null,
+      revisions: { mission: null, programs: null, result: null, conversation: null },
+    };
+    const observed = completeMissionResultOfficeRead(
+      captureMissionResultOfficeRead(base, 4), base, mission, fallback, acquiredAt,
+    );
+    expect(observed.kind).toBe("observed");
+    if (observed.kind !== "observed") return;
+    const projection = projectOffice(
+      { mission: observed.mission, programs: null, result: observed.result, conversation: null },
+      observed.context,
+    );
+    expect(projection.result.reason).toBe("CONTENT_OVER_BUDGET");
+    expect(projection.result.source.coverage).toBe("INCOMPLETE");
+    expect(projection.result.value?.result?.content).toBeNull();
+    expect(projection.result.value?.result?.review?.verdict).toBe("reject");
+  });
+
+  it("commits and fences the pair through the hook refs without a programs reset", async () => {
+    await load();
+    const hook = renderHook(() => useOfficeProjection(1, { workRef: selection.workRef, rootJobId: selection.rootJobId }));
+    let first!: ReturnType<typeof hook.result.current.beginMissionResult>;
+    act(() => { first = hook.result.current.beginMissionResult(); });
+    act(() => { hook.result.current.acceptMissionResult(first, mission, result, acquiredAt); });
+    expect(hook.result.current.projection.result.value?.selection.job_id).toBe(selection.jobId);
+    expect(hook.result.current.projection.mission.value?.schema).toBe("mastermind.mission_workspace.v3");
+    const programsBefore = hook.result.current.projection.programs;
+    act(() => { hook.result.current.beginPrograms(); });
+    expect(hook.result.current.projection.result.value?.selection.job_id).toBe(selection.jobId);
+    expect(hook.result.current.projection.programs.source.state).toBe(programsBefore.source.state);
+    let second!: ReturnType<typeof hook.result.current.beginMissionResult>;
+    act(() => { second = hook.result.current.beginMissionResult(); });
+    act(() => { hook.result.current.acceptMissionResult(first, mission, result, acquiredAt); });
+    expect(hook.result.current.projection.result.value).toBeNull();
+    act(() => { hook.result.current.acceptMissionResult(second, mission, result, acquiredAt); });
+    expect(hook.result.current.projection.result.value?.selection.job_id).toBe(selection.jobId);
+    const visible = hook.result.current.projection.result.value?.result?.content?.summary;
+    act(() => { hook.result.current.supersedePair(); });
+    expect(hook.result.current.projection.result.value).toBeNull();
+    expect(hook.result.current.projection.mission.value).toBeNull();
+    expect(visible).toBe("bounded typed fixture result");
   });
 });
