@@ -164,3 +164,15 @@ def test_unjoined_frames_never_acquire_private_fixture_role():
     child=run('def run_bootstrap():\n def pin():\n  def no_acl():raise ValueError("PRIVATE_CANARY")\n  no_acl()\n pin()\ntry:\n run_bootstrap()')
     value=d.decode_failure(child.stderr)
     assert child.returncode==78 and value['node_role']==value['acl_key']=='UNKNOWN'
+
+
+def test_qualified_named_frames_with_different_fds_do_not_join():
+    code=('def run_bootstrap():\n'
+        ' commitment={"account":{"home":"/PRIVATE_CANARY/account"}}\n request={}\n'
+        ' def pin(name):\n  fd=7\n  parts=["PRIVATE_CANARY","account"]\n  index=1\n'
+        '  def no_acl(fd):\n   key="system.posix_acl_access"\n   raise ValueError("PRIVATE_CANARY")\n'
+        '  no_acl(8)\n pin("/PRIVATE_CANARY/account")\n')
+    child=run('namespace={"__file__":"<qualified-paid_initializer.py>"}\nexec('+repr(code)+',namespace)\ntry:\n namespace["run_bootstrap"]()')
+    value=d.decode_failure(child.stderr)
+    assert child.returncode==78 and value['node_role']==value['acl_key']=='UNKNOWN'
+    assert b'CANARY' not in child.stderr
