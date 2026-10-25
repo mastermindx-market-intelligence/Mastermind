@@ -14,7 +14,7 @@ The 2026-10-25 teaching snapshot was ported as procedures, guards, and shadow de
 
 6. **Resolved in `roster.json`.** The standing-authorized post rooms are `#dotsandgroksecretary` `C0CBC6AEAQZ` and `#metaceo` `C0C5FCK1F45`. A thread reply there of kind receipt, PICKUP, or RESULT is pre-authorized. Everything else is draft-only. Shadow mode still posts nothing.
 
-7. **Resolved on the catalog clock.** Every job is `America/Cancun` (UTC-5, no DST). Original wall clocks are on each job as `wall_clock_intent`. Every-hour minute crons and the 30-minute interval did not change expression. `*/3` and `*/2` match Pacific and Mountain standard time; during US daylight time those two jobs fire one hour later than the source wall clock. The BLOCKED listener is still not a cron.
+7. **Resolved on the catalog clock, with one Denver residual.** Every job is `America/Cancun` (UTC-5, no DST) under tzdata 2026e. Vancouver stays UTC-7 after the 2026-11-01 PDT-to-MST change, so `40 */3 * * *` is `40 2-23/3 * * *` and the every-hour minute crons are unchanged. Denver still observes MDT/MST, so `20 */2 * * *` matches standard time and is one hour later during MDT. The 30-minute usage job is an interval. The BLOCKED listener is still not a cron.
 
 8. **BLOCKED keyword trigger.** Hermes cron at pin `1c0cd66` has duration, interval, and five-field cron, not a Slack keyword. The listener is stored as a trigger and exercised by `run_shadow(mode="blocked_trigger")`. It is not a cron job.
 
