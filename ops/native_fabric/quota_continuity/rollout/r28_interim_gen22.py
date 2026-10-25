@@ -19,8 +19,7 @@ FUSED="4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
 TARGET="854dd5456c005f6385daecb6e93658025d59f94e496dd5f9374d7896d06eed87"
 PIN="fbb0c69818edeb4217cdc1b2f353df2f00cd70fc"
 SRC="ops/native_fabric/quota_continuity/candidate/pick.py"
-EXT=(Path.home()/".claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard"
-     /"handoff_kits/meta-ceo-b-2026-09-08/ext")
+EXT=Path("/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext")
 MANIFEST=HERE/"r28_interim_gen22_manifest.json"
 PROVENANCE=HERE/"r28_interim_gen22_provenance.json"
 HUNKS=(
