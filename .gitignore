@@ -94,3 +94,6 @@ data/*.log
 research/evidence/ohf_p0/**
 !research/evidence/ohf_p0/.gitkeep
 !research/evidence/.gitkeep
+
+# Pinned Rakazo qualification installs its exact contract deps locally.
+integrations/rakazo_qualification/node_modules/
