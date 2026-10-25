@@ -463,3 +463,10 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_host_readiness
            (807, 26, 29, 'int', '501'),
            (811, 63, 66, 'int', '501'),
            (857, 57, 60, 'int', '501'))}
+
+# Source-only stateless H1 packet: fixed outer byte length/permission mode and
+# native transport UID. Exact file hash, AST Constants and whole tokens only.
+REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
+    'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
+    'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
+}

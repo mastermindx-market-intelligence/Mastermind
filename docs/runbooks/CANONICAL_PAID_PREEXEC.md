@@ -246,6 +246,55 @@ and directories retain their existing getxattr ACL guards. Changed node,
 foreign owner, other symlink/type, writable namespace or excess count refuses.
 All image, zip, `._pth`, pyvenv, getpath, immutable snapshot and source guards remain.
 
+
+The same explicit new profile also supports exactly the immediate
+`_sysconfigdata__linux_x86_64-linux-gnu.py` alias to the exact same-directory
+ordinary file `_sysconfigdata__x86_64-linux-gnu.py`. This is a deliberately finite
+supported policy, not a claim that the hosted or deployed alias target was
+observed. The public Ubuntu 3.12.3-1ubuntu0.17 stdlib package declares this literal alias,
+and its minimal package supplies the ordinary target. This public packaging
+evidence is separate from hosted/deployed identity: the actual alias and target
+must satisfy this policy in Linux CI and at action time.
+[CPython `sysconfig._init_posix`](https://github.com/python/cpython/blob/v3.12.3/Lib/sysconfig.py#L495-L501)
+can import this dependency, so it is qualified,
+not ignored or tombstoned. No target code is executed by qualification.
+
+The held library and its held Root ancestors retain their existing ACL and
+namespace guards. The alias has no-follow O_PATH/full-nine-field custody and must
+name only that literal target before any target bytes are read. The target opens
+relative to the held library with O_NOFOLLOW, must be an ordinary Root-owned
+nonwritable single-link file of at most 1 MiB, and retains its FD, ACL, full
+metadata, named identity and content hash through bootstrap/handoffs/return.
+Retargeting, absolute/escaping/other relative names, chains, writable/foreign
+files, hard links, changed content or unsupported native proof refuse. Both names
+still count toward the unchanged startup limit; all other links still refuse,
+and the old strict profile remains unchanged.
+
+
+For the fixed `/usr` layout only, the new profile additionally qualifies exactly
+`config-3.12-x86_64-linux-gnu/libpython3.12.so` with literal payload
+`../../x86_64-linux-gnu/libpython3.12.so.1`, followed by the literal
+`libpython3.12.so.1` → `libpython3.12.so.1.0` in the separately held fixed
+`/usr/lib/x86_64-linux-gnu` directory. The existing owner holds and rechecks both
+directory namespaces and their Root/nonwrite/ACL-qualified ancestors. Both links
+retain no-follow/full-nine-field/native metadata and exact payload checks; the
+ordinary Root/nonwrite/single-link final file retains its FD, ACL, named identity,
+metadata and SHA256 through handoffs and return. No arbitrary resolution, extra
+hop, absolute alternative or other target is accepted, and the checker never
+loads, imports or executes the library. This is dependency custody, not a claim
+that a held FD authenticates an already loaded kernel image.
+
+The ordinary library bound is 16 MiB, distinct from the 1 MiB configuration-data
+bound. Official Ubuntu 3.12.3-1ubuntu0.17 t64 package metadata lists the ordinary
+Root0:0/0644 final target at 9,061,000 bytes, so 16 MiB is the smallest power-of-two
+byte bound above that public binary. Public metadata does not prove installed
+identity. The actual bounded CI inventory covered 1,308 stdlib nodes with no
+incomplete/overflow condition and only the sitecustomize, sysconfig and this
+build-library link; its normalized lexical targets do not prove raw payloads or
+the second hop. Those exact payloads and the final target remain prospectively
+checked by the runtime guard. All other symlinks remain refused, old strict
+behavior stays unchanged, and the 100,000-byte final command cap is retained.
+
 These tombstones are normal-import controls under exact pinned code, not a Python
 sandbox. An arbitrary alias/file loader could execute another file; no such loader
 or caller-supplied Python is admitted. The canonical request still binds the fixed
@@ -260,3 +309,18 @@ hosted execution. The Linux fixture distinguishes its old-profile finite ownersh
 premise from its added actual Root-system-image no-site segment; unsupported native
 proof fails rather than qualifying a simulation. The final quoted UTF-8 paid command
 including its NUL remains bounded at 100,000 bytes before SSH.
+
+
+For a failed explicit CI system-fixture startup precondition, the original
+failure remains primary. A separate best-effort structural inventory walks only
+`/usr/lib/python3.12` with held/no-follow directory operations, excluding the
+existing site-package roots. It opens no ordinary file or link target and runs
+no getpath, import, initializer or provider operation after failure. The report
+is not an ACL, complete platform, readiness or admission proof. It caps traversal
+at 20,000 nodes/five seconds, records at 64 and encoded output at 16 KiB; any
+limit, unavailable metadata, unsafe name, unqualified directory or namespace
+change explicitly marks it incomplete. Only bounded canonical ASCII relative
+names, kind/reason enums and optional lexical targets within `/usr/lib` appear.
+Outside/unsafe targets remain OUTSIDE/UNKNOWN without raw values. The diagnostic
+is preloaded before the test; diagnostic failure cannot replace or fix the
+original assertion, and interrupts propagate.

@@ -121,6 +121,9 @@ jobs:
           tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook
           tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
           tests/test_paid_initializer_nosite.py
+          tests/test_paid_initializer_sysconfig.py
+          tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed
+          tests/test_paid_provider_entry_linux.py
 
       - name: Run repository test shard
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}

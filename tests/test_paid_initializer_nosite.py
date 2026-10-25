@@ -200,6 +200,31 @@ def test_real_new_profile_compiler_early_policy_and_final_utf8_ceiling(monkeypat
     assert size<=q.MAX_REMOTE_COMMAND_BYTES==100000
 
 
+def test_normalized_request_system_selector_uses_current_commitment(monkeypatch,record_property):
+    from tests import test_paid_initializer_nested_join as joined
+    from tests import test_paid_host_qualification as fixture
+    q=fixture.m;source=Path(m.__file__).read_bytes()
+    monkeypatch.setattr(q,'_initializer_module',lambda expected:(m,source) if expected==hashlib.sha256(source).hexdigest() else q._refuse())
+    req=joined._compiled_fixture(q,monkeypatch)
+    original=req['initializer_commitment'];req=q._request(req)
+    assert req['initializer_commitment'] is not original
+    # Reproduce the Linux fixture's stale construction-object update. The
+    # canonical compiler must continue refusing that mismatched request.
+    original['startup']['profile']=m.NO_SITE_PROFILE
+    original['launch_python'].update(path='/usr/bin/python3',real_path='/usr/bin/python3.12')
+    req['python_path']='/usr/bin/python3'
+    req['initializer_commitment_sha256']=q._digest(original)
+    with pytest.raises(ValueError):q.build_paid_probe(req)
+    current=req['initializer_commitment']
+    current['startup']['profile']=m.NO_SITE_PROFILE
+    current['launch_python'].update(path='/usr/bin/python3',real_path='/usr/bin/python3.12')
+    req['initializer_commitment_sha256']=q._digest(current)
+    alias,command=q.build_paid_probe(req)
+    size=len(command.encode('utf-8'))+1
+    record_property('normalized_request_command_bytes_with_nul',size)
+    assert alias==req['transport_alias'] and size<=q.MAX_REMOTE_COMMAND_BYTES==100000
+
+
 @pytest.mark.parametrize('uid,mode,count',[
     (1,stat.S_IFREG|0o644,1),(0,stat.S_IFREG|0o664,1),
     (0,stat.S_IFDIR|0o777,1),(0,stat.S_IFLNK|0o777,1),
