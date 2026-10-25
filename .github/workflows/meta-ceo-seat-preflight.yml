@@ -1,0 +1,48 @@
+name: Meta-CEO DSH interaction-seat preflight
+
+# This validates only our add-on launch layer, never starts a provider/model,
+# DSH native app, Mastermind Executive Job, or external effect.
+on:
+  pull_request:
+    paths:
+      - 'integrations/meta_ceo_open_harness/**'
+      - 'tests/meta_ceo_open_harness/**'
+      - '.github/workflows/meta-ceo-seat-preflight.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'integrations/meta_ceo_open_harness/**'
+      - 'tests/meta_ceo_open_harness/**'
+      - '.github/workflows/meta-ceo-seat-preflight.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-only-launch-preflight:
+    name: Offline launcher tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    steps:
+      - name: Checkout exact PR source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned offline YAML parser for persona contract tests
+        run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+      - name: Compile launch layer
+        run: python -m compileall -q integrations/meta_ceo_open_harness tests/meta_ceo_open_harness
+      - name: Run no-network negative tests
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -W error::ResourceWarning -m unittest discover -s tests/meta_ceo_open_harness -v
