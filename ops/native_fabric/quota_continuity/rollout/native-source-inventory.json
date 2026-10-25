@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 80826,
+      "bytes": 85543,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b",
+      "sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -486,9 +486,9 @@
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
-      "bytes": 117292,
+      "bytes": 118474,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee",
+      "sha256": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
@@ -600,9 +600,9 @@
       "source": "source/yes"
     },
     "pool": {
-      "bytes": 2856,
+      "bytes": 3215,
       "installed_preimage_sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
-      "sha256": "4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059",
+      "sha256": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
       "source": "candidate/pool_launcher.sh"
     }
   },
