@@ -176,3 +176,79 @@ def test_selected_qualified_mode_never_accepts_extra_service_arguments(workspace
     assert life.launch_log(ctx)[len(before):].count('bootout ')==0
     assert life.launch_log(ctx)[len(before):].count('bootstrap ')==0
     life.assert_not_executed(ctx)
+
+
+def _durability_fixture(ctx, failure='none'):
+    """Intercept only fsync/unlink in actual disposable helper children."""
+    import sys
+    script = '''#!EXECUTABLE
+import os,stat,sys
+if len(sys.argv)>2 and sys.argv[1]=='-' and sys.argv[2] in ('write-receipt','install-transaction-complete'):
+    source=sys.stdin.read();sys.argv=sys.argv[1:]
+    command=sys.argv[1];expected=sys.argv[2]
+    original_sync=os.fsync;original_unlink=os.unlink
+    log=os.environ['DURABILITY_LOG'];failure=os.environ['DURABILITY_FAIL']
+    def emit(value):
+        with open(log,'a') as out:out.write(value+'\\n')
+    def sync(fd):
+        info=os.fstat(fd);kind='dir' if stat.S_ISDIR(info.st_mode) else 'file'
+        if kind=='dir':
+            actual=os.stat(expected,follow_symlinks=False)
+            if (info.st_dev,info.st_ino)!=(actual.st_dev,actual.st_ino):
+                raise RuntimeError('wrong fixture directory synced')
+        emit(command+':'+kind)
+        if failure==command+':'+kind:raise OSError('injected fixture durability failure')
+        return original_sync(fd)
+    def unlink(path,*args,**kwargs):
+        if str(path).endswith('.install-transaction.marker'):emit('marker-unlink')
+        return original_unlink(path,*args,**kwargs)
+    os.fsync=sync;os.unlink=unlink
+    exec(compile(source,'<actual-publisher-helper>','exec'),{'__name__':'__main__'})
+else:os.execv(sys.executable,[sys.executable]+sys.argv[1:])
+'''.replace('EXECUTABLE',sys.executable)
+    launcher=Path(ctx['env']['PATH'].split(':')[0])/'python3'
+    launcher.write_text(script);launcher.chmod(0o755)
+    log=ctx['stub']/'durability.log'
+    ctx['env'].update(DURABILITY_LOG=str(log),DURABILITY_FAIL=failure)
+    return log
+
+
+def test_clean_outcome_receipt_directory_commits_before_marker_removal(workspace):
+    ctx=fixture_context(workspace);life.arm_running(ctx,workspace)
+    (ctx['stub']/'bootout-rc').write_text('1\n')
+    log=_durability_fixture(ctx)
+    result=run(ctx)
+    assert result.returncode==78 and 'bootout had no effect' in result.stderr
+    assert log.read_text().splitlines()==[
+        'write-receipt:file','write-receipt:dir','marker-unlink','install-transaction-complete:dir']
+    assert life.receipt_body(ctx)['outcome']=='NO_EFFECT'
+    assert not (ctx['store']/'.install-transaction.marker').exists()
+
+
+@pytest.mark.parametrize('failure',['write-receipt:file','write-receipt:dir'])
+def test_failed_receipt_commit_retains_marker_and_blocks_next_mutation(workspace,failure):
+    ctx=fixture_context(workspace);life.arm_running(ctx,workspace)
+    (ctx['stub']/'bootout-rc').write_text('1\n')
+    log=_durability_fixture(ctx,failure)
+    result=run(ctx)
+    assert result.returncode==78 and 'receipt failed' in result.stderr
+    assert (ctx['store']/'.install-transaction.marker').exists()
+    assert 'marker-unlink' not in log.read_text()
+    before=life.launch_log(ctx)
+    again=run(ctx)
+    assert again.returncode==78 and 'install transaction incomplete' in again.stderr
+    assert life.launch_log(ctx)==before
+
+
+def test_marker_unlink_directory_failure_never_claims_durable_clean_completion(workspace):
+    ctx=fixture_context(workspace);life.arm_running(ctx,workspace)
+    (ctx['stub']/'bootout-rc').write_text('1\n')
+    log=_durability_fixture(ctx,'install-transaction-complete:dir')
+    result=run(ctx)
+    assert result.returncode==78 and 'clean marker closure unconfirmed' in result.stderr
+    assert log.read_text().splitlines()==[
+        'write-receipt:file','write-receipt:dir','marker-unlink','install-transaction-complete:dir']
+    assert life.receipt_body(ctx)['outcome']=='NO_EFFECT'
+    assert not (ctx['store']/'.install-transaction.marker').exists()
+    assert life.launch_log(ctx).count('bootout ')==1
+    assert life.launch_log(ctx).count('bootstrap ')==0

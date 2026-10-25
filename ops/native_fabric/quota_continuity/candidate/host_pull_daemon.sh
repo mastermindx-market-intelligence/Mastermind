@@ -933,10 +933,18 @@ elif cmd == "write-receipt":
         fail("receipt already exists")
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        os.write(fd, body)
+        if os.write(fd, body) != len(body):
+            fail("receipt write incomplete")
         os.fsync(fd)
     finally:
         os.close(fd)
+    # The clean-outcome caller may remove its original install marker only
+    # after this newly created receipt name is committed by the same owner.
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 elif cmd == "install-transaction-prepare":
     path = sys.argv[2]
@@ -989,6 +997,13 @@ elif cmd == "install-transaction-complete":
     if stat.S_ISLNK(st_marker.st_mode) or not stat.S_ISREG(st_marker.st_mode):
         fail("install transaction marker kind")
     os.unlink(marker)
+    # A failed durability edge remains a non-success; never re-create an
+    # already removed marker or imply a retry of the original service effect.
+    directory_fd = os.open(store, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 elif cmd == "ensure-receipt-dir":
     directory = sys.argv[2]
