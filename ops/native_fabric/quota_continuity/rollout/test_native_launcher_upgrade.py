@@ -135,6 +135,28 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     raise AssertionError('historical collector preimage differs')
                 (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
                 cls.manifest['ext/' + name] = digest
+            # The historical 8bc -> d044 launcher fixture also predates the
+            # two-hunk #1797 reviewer-judgment picker. Restore its exact old
+            # bytes ONLY inside this disposable stage, never in source/runtime.
+            pick = cls.built / 'native-code-stage/ext/pick.py'
+            selected_pick = pick.read_bytes()
+            rollback_hunks = (
+                (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
+                 b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
+                (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
+                 b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
+                 b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
+                 b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
+            )
+            for current_hunk, historical_hunk in rollback_hunks:
+                if selected_pick.count(current_hunk) != 1:
+                    raise AssertionError('historical picker fixture postimage differs')
+                selected_pick = selected_pick.replace(current_hunk, historical_hunk)
+            historical_pick_sha = 'a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee'
+            if g.digest(selected_pick) != historical_pick_sha:
+                raise AssertionError('historical picker inverse differs')
+            pick.write_bytes(selected_pick)
+            cls.manifest['ext/pick.py'] = historical_pick_sha
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
