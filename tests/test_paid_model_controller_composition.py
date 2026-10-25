@@ -8,23 +8,25 @@ ROOT = Path(__file__).parents[1]
 QUOTA = ROOT / 'ops/native_fabric/quota_continuity'
 
 
-def test_actual_staged_candidate_selects_only_model_client(tmp_path):
+def test_actual_staged_candidate_requires_original_context_before_model_entry(tmp_path):
     built = subprocess.run([sys.executable, str(QUOTA/'rollout/build_review_stage.py'),
                             '--output',str(tmp_path)],capture_output=True,text=True)
     assert built.returncode == 0, built.stderr
     stage = tmp_path/'native-code-stage/ext'
     code = '''
-import os
+import os,hashlib
 from pathlib import Path
 import remote_sub_exec as remote
 root=Path(os.environ['FIXTURE_SUPPORT'])
 lanes=Path('/inert/lanes')
 env={'FABRIC_CANONICAL_PAID_MODE':'sealed-model-only-v1',
  'REMOTE_SUB_LANES':str(lanes),'GLM_REMOTE_CAPABILITY_FILE':str(lanes/'tmp/a.glm-cap.json')}
-command=remote._canonical_model_command(root,lanes/'tmp/a.txt','a','glm','glm-5.3',env)
-assert command[1:4]==['-I','-S','-B']
-assert Path(command[4]).name=='paid_glm_model_client.py'
-assert 'sub.sh' not in command
+try:remote._canonical_model_command(root,lanes/'tmp/a.txt','a','glm','glm-5.3',env)
+except ValueError:pass
+else:raise AssertionError('environment labels manufactured original source custody')
+import paid_initializer
+for name,expected in paid_initializer._CANONICAL_ENTRY_SOURCES.items():
+ assert hashlib.sha256((root/name).read_bytes()).hexdigest()==expected
 assert remote._canonical_model_command(root,lanes/'tmp/a.txt','a','glm','glm-5.3',{}) is None
 for extra in ({'FABRIC_OPERATOR_CAPSULE':'fake'},{'FABRIC_NEW_MACRO_COMMIT':'f'*40},
               {'FABRIC_CANONICAL_PAID_MODE':'other'},{'GLM_REMOTE_CAPABILITY_FILE':'/private/credential'}):
@@ -41,7 +43,7 @@ print('staged_model_only_selection_pass')
     inventory=json.loads((tmp_path/'native-source-inventory.json').read_text())
     expected_sources = {
         'remote_sub.sh': 'candidate/remote_sub.sh',
-        'remote_sub_exec.py': '../grok47/overlay/remote_sub_exec.py',
+        'remote_sub_exec.py': 'candidate/remote_sub_exec.py',
         'support_bundle.py': 'candidate/support_bundle.py',
         'paid_glm_model_client.py': 'candidate/paid_glm_model_client.py',
     }
@@ -77,6 +79,9 @@ def test_manual_and_paid_support_closures_are_distinct(tmp_path):
     code='''
 import support_bundle as support
 assert support.PAID_MODEL_SOURCE_FILES-support.SOURCE_FILES=={'paid_glm_model_client.py','paid_model_owner.py','linux_process_identity.py'}
+assert support.PAID_INITIALIZED_SOURCE_FILES-support.PAID_MODEL_SOURCE_FILES=={'paid_provider_entry.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py'}
+assert support.PAID_MODEL_SOURCE_FILES in support.SOURCE_GENERATIONS
+assert support.PAID_INITIALIZED_SOURCE_FILES in support.SOURCE_GENERATIONS
 assert 'paid_glm_model_client.py' not in support.PHYSICAL_ROOT_SOURCE_FILES
 assert support.SOURCE_FILES in support.SOURCE_GENERATIONS
 assert support.PHYSICAL_ROOT_SOURCE_FILES in support.SOURCE_GENERATIONS
