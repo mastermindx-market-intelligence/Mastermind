@@ -68,7 +68,7 @@ def suite(name: str, source: str, expected: set[str], upstream: bool = False, st
     (CACHE / f'{name}.log').write_text(output)
     data = json.loads(destination.read_text())
     assertions = [a for s in data['testResults'] for a in s.get('assertionResults', [])]
-    count = 19 if profile else 12 if stdio else 121 if upstream else 32
+    count = 19 if profile else 14 if stdio else 121 if upstream else 32
     failed = {a['title'] for a in assertions if a['status'] == 'failed'}
     assert len(assertions) == data['numTotalTests'] == count, f'{name}: missing cases'
     assert all(a['status'] in {'passed', 'failed'} for a in assertions), f'{name}: skipped cases'
@@ -156,7 +156,7 @@ def stdio_checks() -> dict:
         result = suite(name, source, expected, stdio=True)
         raw = (CACHE / 'stdio-observations.json').read_bytes()
         rows = json.loads(raw)
-        assert len(rows) == 12, 'Missing stdio cleanup evidence'
+        assert len(rows) == 14, 'Missing stdio cleanup evidence'
         assert all(row['childCount'] == 2 and row['childAbsentAfterDispose']
                    and row['inputsUnchanged'] for row in rows)
         (CACHE / f'{name}-observations.json').write_bytes(raw)
