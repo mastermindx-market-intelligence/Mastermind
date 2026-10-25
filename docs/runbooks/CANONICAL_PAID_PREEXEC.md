@@ -284,3 +284,18 @@ hosted execution. The Linux fixture distinguishes its old-profile finite ownersh
 premise from its added actual Root-system-image no-site segment; unsupported native
 proof fails rather than qualifying a simulation. The final quoted UTF-8 paid command
 including its NUL remains bounded at 100,000 bytes before SSH.
+
+
+For a failed explicit CI system-fixture startup precondition, the original
+failure remains primary. A separate best-effort structural inventory walks only
+`/usr/lib/python3.12` with held/no-follow directory operations, excluding the
+existing site-package roots. It opens no ordinary file or link target and runs
+no getpath, import, initializer or provider operation after failure. The report
+is not an ACL, complete platform, readiness or admission proof. It caps traversal
+at 20,000 nodes/five seconds, records at 64 and encoded output at 16 KiB; any
+limit, unavailable metadata, unsafe name, unqualified directory or namespace
+change explicitly marks it incomplete. Only bounded canonical ASCII relative
+names, kind/reason enums and optional lexical targets within `/usr/lib` appear.
+Outside/unsafe targets remain OUTSIDE/UNKNOWN without raw values. The diagnostic
+is preloaded before the test; diagnostic failure cannot replace or fix the
+original assertion, and interrupts propagate.

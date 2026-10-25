@@ -10,6 +10,7 @@ import venv
 
 import pytest
 from ops.native_fabric.quota_continuity.candidate import paid_initializer as m
+from tests import system_fixture_inventory as _PUBLIC_INVENTORY
 
 
 def commitment():
@@ -126,6 +127,11 @@ def _system_fixture_failure_notice(fixture,error,stage):
             with fixture.getfixturevalue('capsys').disabled():
                 reporter.write_line('\n::error file=tests/test_paid_initializer.py,title=H1 Root system fixture precondition::'
                     +json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False))
+                if stage in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link'):
+                    try:inventory=_PUBLIC_INVENTORY.collect()
+                    except Exception:inventory=_PUBLIC_INVENTORY.unavailable()
+                    raw=_PUBLIC_INVENTORY.encode(inventory)
+                    if raw is not None:reporter.write_line('\n::error file=tests/test_paid_initializer.py,title=H1 public stdlib structural inventory::'+raw)
     except Exception:pass
 
 
