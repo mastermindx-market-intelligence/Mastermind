@@ -155,9 +155,9 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             [b"pnpm", b"--config.foo=x", b"add", b"pkg"],
             [b"yarn", b"--cwd", b"/tmp/build", b"add", b"pkg"],
         ):
-            self.assertTrue(h.package_command(b"\\x00".join(arguments) + b"\\x00"),
+            self.assertTrue(h.package_command(b"\x00".join(arguments) + b"\x00"),
                             arguments)
-        self.assertFalse(h.package_command(b"python3\\x00-c\\x00print(3)\\x00"))
+        self.assertFalse(h.package_command(b"python3\x00-c\x00print(3)\x00"))
 
     def test_redirected_or_symlink_parent_never_calls_cache_api(self):
         with tempfile.TemporaryDirectory() as d:
