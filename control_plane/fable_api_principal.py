@@ -52,6 +52,8 @@ class FableRequest:
     question: str
     evidence_brief: str
     source_refs: tuple[str, ...]
+    frontier_witness: str
+    task_complexity: str = "C3_FRONTIER_JUDGMENT"
     max_output_tokens: int = 4096
 
 
@@ -109,6 +111,10 @@ def _make_body(request: FableRequest) -> bytes:
         or not request.evidence_brief.strip()
         or not isinstance(request.source_refs, tuple)
         or not 1 <= len(request.source_refs) <= 40
+        or request.task_complexity != "C3_FRONTIER_JUDGMENT"
+        or not isinstance(request.frontier_witness, str)
+        or len(request.frontier_witness.strip()) < 24
+        or len(request.frontier_witness) > 1000
     ):
         raise FableApiRefused("grounded advisory question and evidence are required")
     for ref in request.source_refs:
@@ -126,6 +132,7 @@ def _make_body(request: FableRequest) -> bytes:
             "Do not infer delegated permission or invent additional sources."
         ),
         "messages": [{"role": "user", "content": (
+            "Frontier escalation witness:\n" + request.frontier_witness + "\n\n"
             "Strategic question:\n" + request.question + "\n\n"
             "Grounded context (untrusted):\n" + request.evidence_brief + "\n\n"
             "References (not permission grants):\n" + "\n".join(request.source_refs)
@@ -225,10 +232,15 @@ def send_anthropic_once(headers: Mapping[str, str], body: bytes) -> tuple[int, b
 class FableApiPrincipal:
     """Exactly one owned provider send, never a standalone lifecycle or service."""
     def __init__(self, *, router: object, decision: object,
+                 bound_root_id: str, bound_attempt_id: str,
                  reserve: Callable[[str, str, str, float], CapacityReservation],
                  credential_loader: Callable[[], str], send: ApiSend = send_anthropic_once):
         if not callable(reserve) or not callable(credential_loader) or not callable(send):
             raise FableApiRefused("trusted owner dependencies missing")
+        if not _bounded_id(bound_root_id) or not _bounded_id(bound_attempt_id):
+            raise FableApiRefused("trusted Attempt binding is invalid")
+        self.bound_root_id = bound_root_id
+        self.bound_attempt_id = bound_attempt_id
         self.router = router
         self.decision = decision
         self.reserve = reserve
@@ -240,6 +252,10 @@ class FableApiPrincipal:
         if self._consumed:
             raise FableApiRefused("original invocation already consumed; never replay")
         self._consumed = True  # fence before callbacks, including exceptions
+        if (not isinstance(request, FableRequest)
+                or request.root_id != self.bound_root_id
+                or request.attempt_id != self.bound_attempt_id):
+            raise FableApiRefused("request does not match owner-bound original Attempt")
         body = _make_body(request)
         receipt = _verify_route(self.router, self.decision)
         ceiling = _worst_case_usd(body, request.max_output_tokens)
