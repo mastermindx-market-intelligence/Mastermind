@@ -1,16 +1,20 @@
-# M2 Codex Switcher credit fallback - independent review mirror
+# M2 Codex Switcher paid-credit fallback - GitHub independent review mirror v2
 
-**REVIEW EVIDENCE ONLY - NOT IMPLEMENTATION OWNER OR DEPLOYMENT AUTHORITY.**
+**REVIEW-ONLY evidence. DO NOT merge or install this as proof of delivery.**
 
-Canonical source commit 10a1b9af293e6f4f4da20529e2dde9d1192a3525 and review-only local packet commit f8a48f4e8b281c587d05d3777baddca5b67ed791 (direct child).
+Exact unchanged feature source SHA: 10a1b9af293e6f4f4da20529e2dde9d1192a3525. Original local packet SHA f8a48f4e8b281c587d05d3777baddca5b67ed791. This document now contains the **newer Github-review-capable installer helper and runbook**; the original packet evidence remains a historical immutable snapshot.
 
-This GitHub-hosted review copy does not claim source was pushed, installed, reviewed, verified live, or accepted. No cookies, private credentials, tokens or auth stores included.
+Current helper SHA256: 7a01dfd3f74bf7152e8ff9d242d267cfd28549f85aef8b2b1c5b6b2b0bbda049. Current fixture tests SHA256: 06bfaaba5c8fe582257fe3c02dd4251a953fe52459854529df80cdd4139d5a33. Current runbook SHA256: 0afcde273aaf69731c5afe553d606e040f00ee9bb1fbf0db66f499c8ea5b2b48.
 
-The changed-file source patch SHA256 is 8e0d04c287578ed569f810d51375c56343be602dc620126677452af48cf29f8f verified from local Git. The staged release helper is not approved for use until independent review and session-safety acceptance.
+Source patch verified SHA256 8e0d04c287578ed569f810d51375c56343be602dc620126677452af48cf29f8f. No auth stores, cookies, tokens, quota/paid credit amounts, or API secrets included.
 
-## Included review materials
+The reviewed original source has NOT changed. GitHub PR #1866 needs an independently authored APPROVED review with an explicit DISPOSITION: PASS and BOTH the source commit and CURRENT helper SHA256 in the review body. The script checks the precise current PR head, one expected changed file, review identity, and absence of conflicting change requests, then separately requires safe zero Codex-process installation. No approval or deployment has happened yet.
 
-### Assignment and full review scope - README.md
+Original source/build tests: 86 Rust passing (one ignored), 13 frontend passing. New release helper: 4 hermetic passing tests and a negative live GitHub approval gate that refused before effects.
+
+## Review materials
+
+### Assignment & original review scope - README.md
 
 SHA256: 50ea9398d88963da65d9a2c005df006d06dadbe3e34a6db5c94a3605f702a168
 
@@ -104,7 +108,7 @@ The builder was an attended OpenAI ChatGPT session; `subject_pool=openai` descri
 No one should mistake committing this packet, green Rust tests, a transport receipt, or a reviewer summary for a real paid-credit switching proof.
 ~~~
 
-### Evidence and test results - EVIDENCE.md
+### Historical source/build evidence (dated 2026-10-24) - EVIDENCE.md
 
 SHA256: 0b3a791e7fcdaf6ce968dd10bb9d46eb65b34cd51114af510190f094f4e088bf
 
@@ -177,9 +181,9 @@ Staged app `codesign --verify --deep --strict` passed at latest read. Installer 
 No production data, account ID values, account balances, cookies, refresh tokens, credentials, auth databases, or source secret files are included.
 ~~~
 
-### Reviewer result contract - REVIEW_RESPONSE_TEMPLATE.md
+### Independent review response template - REVIEW_RESPONSE_TEMPLATE.md
 
-SHA256: c5e3545b5516527e36cde43ddc6e5e0219d399364cda688b9b42865d4d02dd78
+SHA256: 5005941ff3fc1284329b56c0de8ccfacf3a1de5400f56254cfbc1286ce09a1cb
 
 ~~~markdown
 # Independent reviewer response template — DO NOT PRE-FILL AS PASS
@@ -190,7 +194,7 @@ Submit the completed review from a genuinely separate author/session. The packet
 - Independence from source author (attended OpenAI ChatGPT implementation):
 - Reviewed implementation SHA: `10a1b9af293e6f4f4da20529e2dde9d1192a3525`
 - Reviewed tree SHA: `d629c5be1e4da36ac0dbc451507aece99283460f`
-- Reviewed release-helper SHA256 (if reviewed): `d462da91678736e472784d1f76871360c2237fb8ccc6dbce8c5b4a2f5246604c`
+- Reviewed release-helper SHA256 (if reviewed): `7a01dfd3f74bf7152e8ff9d242d267cfd28549f85aef8b2b1c5b6b2b0bbda049`
 - Compared patch SHA256 and checked dependent source?:
 - Evidence not accessible / review limitations:
 
@@ -234,7 +238,7 @@ Include minor quality suggestions, or NONE.
 - Exact recommended next action:
 ~~~
 
-### Implementation exact source diff - candidate-10a1b9af.patch
+### Exact candidate implementation patch - candidate-10a1b9af.patch
 
 SHA256: 8e0d04c287578ed569f810d51375c56343be602dc620126677452af48cf29f8f
 
@@ -728,9 +732,9 @@ index 01eb5ce..cafa8c9 100644
          let expected = AppSettings::default();
 ~~~
 
-### Guarded release helper source - guarded_release.py
+### Current guarded release helper (successor) - guarded_release.py
 
-SHA256: d462da91678736e472784d1f76871360c2237fb8ccc6dbce8c5b4a2f5246604c
+SHA256: 7a01dfd3f74bf7152e8ff9d242d267cfd28549f85aef8b2b1c5b6b2b0bbda049
 
 ~~~python
 #!/usr/bin/env python3
@@ -858,6 +862,64 @@ def accepted_review(run_id, response_sha):
             "REVIEW_NO_EXPLICIT_PASS")
     return status
 
+def accepted_github_review():
+    """Read GitHub's immutable review objects; never accept a self-authored claim."""
+    repo = "mastermindx-market-intelligence/Mastermind"
+    pr_number = 1866
+    expected_branch = "review/codex-switcher-credit-fallback-20261025"
+    expected_path = "research/CODEX_SWITCHER_CREDIT_FALLBACK_REVIEW_MIRROR_2026_10_25.md"
+    expected_reviewer = "mastermindxryan"
+    gh = "/opt/homebrew/bin/gh"
+    require(Path(gh).is_file(), "GITHUB_CLI_UNAVAILABLE")
+
+    def github_api(endpoint):
+        result = command(gh, "api", endpoint, timeout=30)
+        return json.loads(result.decode("utf-8"))
+
+    base = f"repos/{repo}/pulls/{pr_number}"
+    pr = github_api(base)
+    head = pr.get("head") or {}
+    author = (pr.get("user") or {}).get("login")
+    head_repo = (head.get("repo") or {}).get("full_name")
+    require(pr.get("number") == pr_number and pr.get("state") == "open"
+            and head.get("ref") == expected_branch
+            and head_repo == repo and author != expected_reviewer,
+            "GITHUB_REVIEW_PR_IDENTITY_MISMATCH")
+    head_sha = head.get("sha")
+    require(bool(re.fullmatch(r"[0-9a-f]{40}", head_sha or "")),
+            "GITHUB_REVIEW_HEAD_INVALID")
+    files = github_api(base + "/files?per_page=100")
+    require(isinstance(files, list) and len(files) == 1
+            and files[0].get("filename") == expected_path,
+            "GITHUB_REVIEW_PATHS_CHANGED")
+    reviews = github_api(base + "/reviews?per_page=100")
+    require(isinstance(reviews, list), "GITHUB_REVIEWS_NOT_ARRAY")
+    matching = [review for review in reviews
+                if (review.get("user") or {}).get("login") == expected_reviewer
+                and review.get("submitted_at")]
+    require(bool(matching), "GITHUB_INDEPENDENT_REVIEW_MISSING")
+    matching.sort(key=lambda review: (review["submitted_at"], review.get("id", 0)))
+    selected = matching[-1]
+    require(selected.get("state") == "APPROVED"
+            and selected.get("commit_id") == head_sha,
+            "GITHUB_INDEPENDENT_APPROVAL_NOT_ON_CURRENT_HEAD")
+    require(not any(review.get("state") == "CHANGES_REQUESTED"
+                    and review.get("commit_id") == head_sha for review in reviews),
+            "GITHUB_UNRESOLVED_CHANGE_REQUESTS")
+    body = selected.get("body") or ""
+    require(bool(re.search(r"(?im)^\s*(?:#{1,6}\s*)?DISPOSITION\s*:\s*PASS\b", body)),
+            "GITHUB_SOURCE_REVIEW_NO_EXPLICIT_PASS")
+    require(HEAD in body, "GITHUB_SOURCE_REVIEW_WRONG_CANDIDATE")
+    helper_sha = digest(Path(__file__))
+    require(helper_sha in body, "GITHUB_RELEASE_HELPER_NOT_REVIEWED")
+    return {"review_run": f"github-pr-{pr_number}",
+            "review_response_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            "review_source": "github_exact_head_independent",
+            "github_review_id": selected["id"],
+            "github_review_head": head_sha,
+            "github_reviewer": expected_reviewer}
+
+
 def preflight():
     baseline()
     guarded_settings()
@@ -895,9 +957,20 @@ def start_and_verify(expected, timeout=15):
         time.sleep(0.4)
     raise RuntimeError("NEW_APP_DID_NOT_LAUNCH_VERIFIABLY")
 
-def install(review_run, response_sha):
+def install(review_run, response_sha, github_pr=False):
     # Review and immutable-source checks occur BEFORE copying or stopping anything.
-    accepted_review(review_run, response_sha)
+    if github_pr:
+        require(review_run is None and response_sha is None,
+                "REVIEW_SOURCE_AMBIGUOUS")
+        review_meta = accepted_github_review()
+    else:
+        require(bool(review_run and response_sha), "FABRIC_REVIEW_RECEIPT_REQUIRED")
+        accepted_review(review_run, response_sha)
+        review_meta = {
+            "review_run": review_run,
+            "review_response_sha256": response_sha,
+            "review_source": "fabric_exact_head_independent",
+        }
     baseline()
     guarded_settings()
     require(not RECEIPT.exists(), "EXISTING_INSTALL_RECEIPT_RECONCILE_FIRST")
@@ -960,7 +1033,7 @@ def install(review_run, response_sha):
     record = {
         "schema": "mmx.codex_switcher_local_release_receipt.v1",
         "installed_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "review_run": review_run, "review_response_sha256": response_sha,
+        **review_meta,
         "candidate_head": HEAD, "installed_sha256": TARGET_SHA,
         "original_sha256": ORIGINAL_SHA, "original_bundle_backup": str(backup),
         "original_bundle_rollback": str(ROLLBACK),
@@ -1001,15 +1074,22 @@ def main():
     parser.add_argument("action", choices=["preflight", "install", "verify"])
     parser.add_argument("--review-run")
     parser.add_argument("--review-response-sha256")
+    parser.add_argument("--github-approved-pr", type=int)
     args = parser.parse_args()
     if args.action == "preflight":
         preflight()
     elif args.action == "verify":
         verify()
     else:
-        require(bool(args.review_run and args.review_response_sha256),
-                "ACCEPTED_INDEPENDENT_REVIEW_REQUIRED")
-        install(args.review_run, args.review_response_sha256)
+        if args.github_approved_pr is not None:
+            require(args.github_approved_pr == 1866, "GITHUB_REVIEW_PR_NOT_OWNED")
+            require(not args.review_run and not args.review_response_sha256,
+                    "REVIEW_SOURCE_AMBIGUOUS")
+            install(None, None, github_pr=True)
+        else:
+            require(bool(args.review_run and args.review_response_sha256),
+                    "ACCEPTED_INDEPENDENT_REVIEW_REQUIRED")
+            install(args.review_run, args.review_response_sha256)
 
 if __name__ == "__main__":
     try:
@@ -1023,9 +1103,9 @@ if __name__ == "__main__":
         sys.exit(78 if effect_unknown else 75)
 ~~~
 
-### Release fixture tests - test_guarded_release.py
+### Current hermetic release tests (successor) - test_guarded_release.py
 
-SHA256: ef647f7fc3e464b279d5f3435f72029658a21f7e234d98ce1f5ced62df95ad38
+SHA256: 06bfaaba5c8fe582257fe3c02dd4251a953fe52459854529df80cdd4139d5a33
 
 ~~~python
 #!/usr/bin/env python3
@@ -1109,13 +1189,82 @@ class GuardedReleaseFixtureTests(unittest.TestCase):
         self.assertEqual(a.digest(a.FAILED / a.EXEC), a.TARGET_SHA)
         self.assertFalse(a.RECEIPT.exists())
 
+    def test_github_review_requires_exact_head_and_helper_attestation(self):
+        a = self.mod
+        reviewer_head = "b7b1fce3cf1cad86faea6396237aa84b78b63c4f"
+        helper_sha = a.digest(HELPER)
+        pr = {
+            "number": 1866, "state": "open",
+            "user": {"login": "chriswong6031-creator"},
+            "head": {"ref": "review/codex-switcher-credit-fallback-20261025",
+                     "repo": {"full_name": "mastermindx-market-intelligence/Mastermind"},
+                     "sha": reviewer_head},
+        }
+        files = [{"filename": "research/CODEX_SWITCHER_CREDIT_FALLBACK_REVIEW_MIRROR_2026_10_25.md"}]
+        review = {
+            "id": 7821, "state": "APPROVED", "submitted_at": "2026-10-25T15:00:00Z",
+            "commit_id": reviewer_head, "user": {"login": "mastermindxryan"},
+            "body": "DISPOSITION: PASS\n" + a.HEAD + "\n" + helper_sha,
+        }
+        cases = {"pr": pr, "files": files, "reviews": [review]}
+
+        def mock_gh(*args, **_):
+            if args[:2] != ("/opt/homebrew/bin/gh", "api"):
+                raise AssertionError("Unexpected command")
+            path = args[2]
+            key = ("reviews" if "/reviews?" in path
+                   else "files" if "/files?" in path else "pr")
+            return json.dumps(cases[key]).encode()
+
+        a.command = mock_gh
+        result = a.accepted_github_review()
+        self.assertEqual(result["review_run"], "github-pr-1866")
+        self.assertEqual(result["github_review_id"], 7821)
+        self.assertEqual(result["github_review_head"], reviewer_head)
+
+        review["body"] = "DISPOSITION: PASS\n" + a.HEAD
+        with self.assertRaisesRegex(RuntimeError, "GITHUB_RELEASE_HELPER_NOT_REVIEWED"):
+            a.accepted_github_review()
+        review["body"] = "DISPOSITION: PASS\n" + a.HEAD + "\n" + helper_sha
+        review["commit_id"] = "0" * 40
+        with self.assertRaisesRegex(RuntimeError, "GITHUB_INDEPENDENT_APPROVAL_NOT_ON_CURRENT_HEAD"):
+            a.accepted_github_review()
+        review["commit_id"] = reviewer_head
+        cases["reviews"].append({
+            "id": 7822, "state": "CHANGES_REQUESTED",
+            "submitted_at": "2026-10-25T15:01:00Z",
+            "commit_id": reviewer_head,
+            "user": {"login": "second_independent_reviewer"},
+            "body": "Blocker",
+        })
+        with self.assertRaisesRegex(RuntimeError, "GITHUB_UNRESOLVED_CHANGE_REQUESTS"):
+            a.accepted_github_review()
+
+    def test_hermetic_install_accepts_validated_github_receipt(self):
+        a = self.mod
+        a.accepted_github_review = lambda: {
+            "review_run": "github-pr-1866",
+            "review_response_sha256": "a" * 64,
+            "review_source": "github_exact_head_independent",
+            "github_review_id": 7821,
+            "github_review_head": "b7b1fce3cf1cad86faea6396237aa84b78b63c4f",
+            "github_reviewer": "mastermindxryan",
+        }
+        a.start_and_verify = lambda expected: [67890]
+        a.install(None, None, github_pr=True)
+        receipt = json.loads(a.RECEIPT.read_text())
+        self.assertEqual(receipt["review_source"], "github_exact_head_independent")
+        self.assertEqual(receipt["review_run"], "github-pr-1866")
+        self.assertEqual(receipt["github_review_id"], 7821)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 ~~~
 
-### Deployment and rollback runbook - RELEASE_RUNBOOK.md
+### Current release runbook (successor) - RELEASE_RUNBOOK.md
 
-SHA256: ab8fa5a7e432416ce45795a0c570a9cb125473c8291cc045e778e171a4bc5870
+SHA256: 0afcde273aaf69731c5afe553d606e040f00ee9bb1fbf0db66f499c8ea5b2b48
 
 ~~~markdown
 # M2 Codex Switcher — paid-credit fallback, guarded local release
@@ -1135,8 +1284,8 @@ Status as of 2026-10-24: **BUILT_NOT_PROVEN / RELEASE HOLD**. This is a manual r
 
 ## Release gates — all required before application replacement
 
-1. A new eligible, independent reviewer actually executes through an admitted Fabric provider/host, reviews this exact source HEAD and dependency closure, and returns explicit **DISPOSITION: PASS**. The current operator adjudicates any findings. Modified source requires new exact-head tests/build/signature and a fresh independent review.
-2. Native Fabric terminal status for that reviewer has `rc=0`, `signal=ok`, `result_available=true`, `accepted=true`, `accepted_by=reviewer`, `acceptance_state=ACCEPTED`, and the correct parent root. Record the exact *complete* result SHA256. Merely delivering the request or acquiring a provider lease is insufficient.
+1. A genuinely **independent, non-authoring reviewer** evaluates the exact source HEAD, its dependency closure, and the *current release helper*. Reviewer can return either an accepted native Fabric review or an exact-head GitHub approval of Mastermind review-only PR #1866. The review body must explicitly include `DISPOSITION: PASS`, exact candidate SHA and **current release-helper SHA256**. The current operator separately adjudicates actual findings; changing implementation source requires refreshed tests/build/signature and review.
+2. For Fabric: terminal status must have `rc=0`, `signal=ok`, `result_available=true`, `accepted=true`, `accepted_by=reviewer`, `acceptance_state=ACCEPTED`, correct root and full response digest. For GitHub: the M2 helper checks read-only authenticated GitHub API for PR #1866's single expected mirror path, current branch HEAD, a latest independent review by the named reviewer in `APPROVED` state on that **same** commit, no current-head `CHANGES_REQUESTED` review, plus explicit source and helper digest attestation. A review request, comment, bot output, author/self-review, or transported packet alone is NOT approval.
 3. Source and staged bundle are byte-identical to the hashes above, clean Git HEAD, valid macOS signatures, and installed baseline executable still matches the old hash. Otherwise stop and reconcile.
 4. Codex session protection remains enabled. **Zero local Codex-related processes other than the Switcher itself** is required for this conservative installer. The prior preflight saw 46 such processes. Do not kill worker or interactive Codex processes to meet the gate. The installer only SIGTERMs the known Switcher, never SIGKILLs and never operates on other Codex processes.
 5. Existing auth/profile files remain owned by the application: `~/.codex-switcher/accounts.json`, `~/.codex-switcher/settings.json`, `~/.codex/auth.json`. Do not copy, restore or replay an old OAuth refresh token. An updated or uncertain reset pause must be inspected rather than cleared to facilitate installation.
@@ -1150,7 +1299,7 @@ python3 ~/agent-workspaces/codex-switcher-paid-credit-release-20261024/guarded_r
 python3 ~/agent-workspaces/codex-switcher-paid-credit-release-20261024/guarded_release.py verify
 ```
 
-After an actual Fabric reviewer PASS and reviewer acceptance receipt **and only when the session gate is QUIESCENT**, set `RUN_ID` to the actual *new successful* review and `RESPONSE_SHA256` to the verified full result digest, then run:
+After an actual independent review PASS with verified acceptance **and only when the session gate is QUIESCENT**, choose exactly one of the following release paths (never both). For an accepted native Fabric review:
 
 ```sh
 RUN_ID='<accepted-independent-Fabric-review-run-id>'
@@ -1159,7 +1308,14 @@ python3 ~/agent-workspaces/codex-switcher-paid-credit-release-20261024/guarded_r
 python3 ~/agent-workspaces/codex-switcher-paid-credit-release-20261024/guarded_release.py verify
 ```
 
-The script refuses installation unless it can read an independently **reviewer-accepted** status for the exact root and exact commit, validates result digest and explicit PASS, rechecks original/staged executable hashes and signatures, and requires no other Codex processes. It backs up the original app bundle (not auth) under this directory, makes an additional rollback app inside `/Applications`, stages and verifies a complete signed app bundle, terminates only the old Switcher after quiescence, atomically renames the staged app into place, launches the new app, checks its running process and executable hash, and writes an exclusive permission-0600 installation receipt. Automatic failure rollback restores **code only**, never an OAuth/account/settings snapshot. Any uncertain swap or missing receipt requires direct readback before retry, not blind replay. This helper's real install branch has **not** been exercised or independently audited; review the specific release script before invoking it for real.
+Alternatively, after a genuinely independent GitHub reviewer approves the exact current PR #1866 HEAD and attests to the exact candidate SHA and current helper digest in an explicit `DISPOSITION: PASS` review, run:
+
+```sh
+python3 ~/agent-workspaces/codex-switcher-paid-credit-release-20261024/guarded_release.py install --github-approved-pr 1866
+python3 ~/agent-workspaces/codex-switcher-paid-credit-release-20261024/guarded_release.py verify
+```
+
+No review has yet been accepted; do not run either install path to force progress. The script refuses installation unless the selected authority provides an **independently approved, exact-head** review. It validates review provenance and exact-source/helper identity, rechecks original/staged executable hashes and signatures, and requires no other Codex processes. It backs up the original app bundle (not auth) under this directory, makes an additional rollback app inside `/Applications`, stages and verifies a complete signed app bundle, terminates only the old Switcher after quiescence, atomically renames the staged app into place, launches the new app, checks its running process and executable hash, and writes an exclusive permission-0600 installation receipt. Automatic failure rollback restores **code only**, never an OAuth/account/settings snapshot. Any uncertain swap or missing receipt requires direct readback before retry, not blind replay. This helper's real install branch has **not** been exercised or independently audited; review the specific release script before invoking it for real.
 
 ## After installation: live product-path verification
 
@@ -1178,54 +1334,36 @@ The script refuses installation unless it can read an independently **reviewer-a
 
 ## Durable continuation
 
-Source is ready; currently missing gate is **admitted non-Qwen reviewer host/provider and accepted independent exact-head review**. The previously pinned GLM task was refused before launch. Do not use the terminal run IDs as approval. After a genuine provider/host eligibility change, commission a fresh lawful reviewer and carry accepted findings through requalification and guarded release. See the existing cumulative checkpoint at `~/agent-workspaces/CODEX_SWITCHER_PAID_CREDIT_FALLBACK_CHECKPOINT_20261024.md`.
+Source is ready. Missing gates are **accepted independent exact-head review** (via Fabric when capacity legitimately recovers, or a separate actual non-authoring session reviewing GitHub PR #1866) and a safe zero-Codex-process installation window. M2 GitHub CLI authentication does not establish reviewer-session independence; this active implementation/coordination session MUST NOT self-approve as the alternate GitHub user. Fabric denied/terminal run IDs are never approval. The GitHub mirror is review-only, not canonical Switcher source. Adjudicate real findings and requalify changed code before installation. See the existing cumulative checkpoint at `~/agent-workspaces/CODEX_SWITCHER_PAID_CREDIT_FALLBACK_CHECKPOINT_20261024.md`.
 ~~~
 
-### Machine-readable manifest - MANIFEST.json
-
-SHA256: addbb5b47643adcdeef51970e8abf6a41f84e114969190f16f21cd062d34f8d0
+### Current machine-readable mirror manifest - CURRENT_MANIFEST.json
 
 ~~~json
 {
-  "accepted_independent_review": false,
-  "base_sha": "a744e4f8128db1074e91b4f18e16b445fab40af6",
-  "candidate_tree_sha": "d629c5be1e4da36ac0dbc451507aece99283460f",
+  "current_release_tests": {
+    "hermetic_fixture_passed": 4,
+    "live_approval_negative_gate": "FAIL_CLOSED",
+    "real_install": false
+  },
   "files_sha256": {
     "EVIDENCE.md": "0b3a791e7fcdaf6ce968dd10bb9d46eb65b34cd51114af510190f094f4e088bf",
     "README.md": "50ea9398d88963da65d9a2c005df006d06dadbe3e34a6db5c94a3605f702a168",
-    "RELEASE_RUNBOOK.md": "ab8fa5a7e432416ce45795a0c570a9cb125473c8291cc045e778e171a4bc5870",
-    "REVIEW_RESPONSE_TEMPLATE.md": "c5e3545b5516527e36cde43ddc6e5e0219d399364cda688b9b42865d4d02dd78",
+    "RELEASE_RUNBOOK.md": "0afcde273aaf69731c5afe553d606e040f00ee9bb1fbf0db66f499c8ea5b2b48",
+    "REVIEW_RESPONSE_TEMPLATE.md": "5005941ff3fc1284329b56c0de8ccfacf3a1de5400f56254cfbc1286ce09a1cb",
     "candidate-10a1b9af.patch": "8e0d04c287578ed569f810d51375c56343be602dc620126677452af48cf29f8f",
-    "guarded_release.py": "d462da91678736e472784d1f76871360c2237fb8ccc6dbce8c5b4a2f5246604c",
-    "test_guarded_release.py": "ef647f7fc3e464b279d5f3435f72029658a21f7e234d98ce1f5ced62df95ad38"
+    "guarded_release.py": "7a01dfd3f74bf7152e8ff9d242d267cfd28549f85aef8b2b1c5b6b2b0bbda049",
+    "test_guarded_release.py": "06bfaaba5c8fe582257fe3c02dd4251a953fe52459854529df80cdd4139d5a33"
+  },
+  "historical_source_tests": {
+    "frontend_passed": 13,
+    "rust_ignored": 1,
+    "rust_passed": 86
   },
   "implementation_sha": "10a1b9af293e6f4f4da20529e2dde9d1192a3525",
-  "installed_previous_executable_sha256": "edc5260ff8272d7928d2db5f2988346bf4d388643febc0a8c2ee326790716aec",
-  "packaged_app_executable_sha256": "e0c615f92a5975e313e25e7454002000a61da107530e421f64c6751e0ea2b9cb",
-  "read_only_review": true,
-  "schema": "mmx.codex_switcher_independent_review_packet.v1",
-  "source_owned_path": "src-tauri/src/tray.rs",
-  "test_results": {
-    "frontend_pass": 13,
-    "production_credit_switch_proven": false,
-    "release_fixture_pass": 2,
-    "rust_ignored": 1,
-    "rust_pass": 86
-  }
+  "original_local_review_packet_sha": "f8a48f4e8b281c587d05d3777baddca5b67ed791",
+  "original_source_patch_sha256": "8e0d04c287578ed569f810d51375c56343be602dc620126677452af48cf29f8f",
+  "review_only_no_approval": true,
+  "schema": "mmx.codex_switcher_review_mirror.v2"
 }
-~~~
-
-### Manifest content digests - SHA256SUMS.txt
-
-SHA256: bab1489459e27e1d739e8272692a1671480cf0c7c181f7404c37e5fd17348b07
-
-~~~text
-50ea9398d88963da65d9a2c005df006d06dadbe3e34a6db5c94a3605f702a168  README.md
-0b3a791e7fcdaf6ce968dd10bb9d46eb65b34cd51114af510190f094f4e088bf  EVIDENCE.md
-c5e3545b5516527e36cde43ddc6e5e0219d399364cda688b9b42865d4d02dd78  REVIEW_RESPONSE_TEMPLATE.md
-8e0d04c287578ed569f810d51375c56343be602dc620126677452af48cf29f8f  candidate-10a1b9af.patch
-d462da91678736e472784d1f76871360c2237fb8ccc6dbce8c5b4a2f5246604c  guarded_release.py
-ef647f7fc3e464b279d5f3435f72029658a21f7e234d98ce1f5ced62df95ad38  test_guarded_release.py
-ab8fa5a7e432416ce45795a0c570a9cb125473c8291cc045e778e171a4bc5870  RELEASE_RUNBOOK.md
-addbb5b47643adcdeef51970e8abf6a41f84e114969190f16f21cd062d34f8d0  MANIFEST.json
 ~~~
