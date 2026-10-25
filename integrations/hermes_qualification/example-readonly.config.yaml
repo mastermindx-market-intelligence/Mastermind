@@ -35,25 +35,5 @@ agent:
     - computer_use
     - a2a
 toolsets:
-    - terminal
-    - file
-    - browser
-    - computer_use
-    - code_execution
-    - delegation
-    - cronjob
-    - memory
-    - session_search
-    - skills
-    - messaging
-    - discord
-    - discord_admin
-    - kanban
-    - image_gen
-    - web
-    - vision
-    - tts
-    - debugging
-toolsets:
   - clarify
 # MCP, plugins, schedules, messaging, local commands and gateway deliberately absent.
