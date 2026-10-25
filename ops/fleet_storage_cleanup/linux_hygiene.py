@@ -265,6 +265,7 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
             results.append({"cache": name, "state": "SKIPPED_UNVERIFIED_EFFECT_VOLUME"})
             break
         marker = state / HOLD
+        effect_id = f"{time.time_ns()}-{os.getpid()}"
         try:
             # Fail closed BEFORE entering the destructive package-manager API.
             # A crash or interrupted parent then leaves a durable hold which
@@ -272,8 +273,9 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
             with marker.open("x") as intent:
                 intent.write(f"{time.time()}: PRE_EFFECT cache={name}\n")
                 intent.write(json.dumps({"schema": "mastermind.cache_effect_preimage.v1",
-                                         "cache": name, "root": before_root,
-                                         "target": before_cache}, sort_keys=True) + "\n")
+                                         "cache": name, "effect_id": effect_id,
+                                         "root": before_root, "target": before_cache},
+                                        sort_keys=True) + "\n")
                 intent.flush()
                 os.fsync(intent.fileno())
             directory_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
@@ -327,6 +329,21 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
             "attributable_reclaimed_bytes": 0,
             "reclaim_attribution": "NOT_ESTABLISHED_BY_MANAGER",
         }
+        # Durable settlement in the ORIGINAL JSONL owner must precede release
+        # of PRE_EFFECT. Otherwise a crash between unlink and the run's final
+        # heartbeat silently loses evidence that the manager had an effect.
+        settlement = {
+            "schema": "mastermind.cache_effect_settlement.v1",
+            "effect_id": effect_id, "epoch": time.time(),
+            "host": socket.gethostname(), "cache": name,
+            "state": "POST_EFFECT_VERIFIED", "exit_code": 0,
+            **measurement,
+            "duration_sec": round(time.monotonic() - started, 2),
+        }
+        if not append_receipt(state, settlement):
+            results.append({"cache": name, "state": "EFFECT_UNVERIFIED",
+                            "reason": "settlement_receipt_unavailable"})
+            break  # preserve PRE_EFFECT for original-owner reconciliation
         try:
             marker.unlink()
         except OSError as exc:
@@ -408,6 +425,14 @@ def append_receipt(state: Path, report: dict) -> bool:
         if os.write(fd, row) != len(row):
             return False
         os.fsync(fd)
+        # The first successful effect may create the ledger's directory entry.
+        # Persist that name before declaring PRE_EFFECT safely settled.
+        directory_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY |
+                               os.O_CLOEXEC | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
         return True
     except OSError:
         return False

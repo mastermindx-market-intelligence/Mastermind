@@ -14,7 +14,10 @@ watcher lifecycle, worker queue, or Git authority. See `README.md` and issue #16
   and no previous cleanup effect is held unverified. Each manager invocation
   requires exact same-device root/cache before-and-after bytes and available
   inodes, and the durable PRE_EFFECT marker carries its exact preimage. Loss of
-  device identity or postimage retains the EFFECT_UNVERIFIED hold. An observed
+  device identity or postimage retains the EFFECT_UNVERIFIED hold. Before
+  releasing the marker after a verified exit, a separate per-effect settlement
+  is fsynced to the SAME canonical JSONL ledger, including its directory entry;
+  settlement write failure retains the hold and forbids unattended replay. An observed
   free-space delta is NOT attributed to package-manager reclamation; until
   distinct manager-specific byte proof exists the attributable counter stays
   zero with an explicit NOT_ESTABLISHED attribution field.

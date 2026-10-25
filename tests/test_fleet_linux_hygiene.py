@@ -126,6 +126,50 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             self.assertEqual(results[0]["state"], "OK")
             self.assertFalse((base / h.HOLD).exists())
 
+    def test_success_settlement_is_durable_before_hold_release(self):
+        from types import SimpleNamespace
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".cache/pip").mkdir(parents=True)
+            real_append = h.append_receipt
+            receipts = []
+            def record_while_held(state, report):
+                self.assertTrue((state / h.HOLD).exists())
+                self.assertEqual(report["state"], "POST_EFFECT_VERIFIED")
+                self.assertIn(report["effect_id"], (state / h.HOLD).read_text())
+                receipts.append(report)
+                return real_append(state, report)
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    h.subprocess, "run", return_value=SimpleNamespace(returncode=0, stderr="")), patch.object(
+                    h, "append_receipt", side_effect=record_while_held):
+                rows = h.cache_cleanup(root, root, "CAUTION")
+            self.assertEqual(rows[0]["state"], "OK")
+            self.assertFalse((root / h.HOLD).exists())
+            self.assertEqual(len(receipts), 1)
+            recorded = json.loads((root / h.LEDGER).read_text().splitlines()[0])
+            self.assertEqual(recorded["effect_id"], receipts[0]["effect_id"])
+            self.assertEqual(recorded["attributable_reclaimed_bytes"], 0)
+            self.assertEqual(recorded["state"], "POST_EFFECT_VERIFIED")
+
+    def test_settlement_write_failure_keeps_pre_effect_and_refuses_replay(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".cache/pip").mkdir(parents=True)
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    h.subprocess, "run", return_value=SimpleNamespace(returncode=0, stderr="")) as manager, patch.object(
+                    h, "append_receipt", return_value=False):
+                rows = h.cache_cleanup(root, root, "CAUTION")
+                self.assertEqual(manager.call_count, 1)
+            self.assertEqual(rows[0]["state"], "EFFECT_UNVERIFIED")
+            self.assertEqual(rows[0]["reason"], "settlement_receipt_unavailable")
+            self.assertTrue((root / h.HOLD).exists())
+            self.assertEqual(h.cache_cleanup(root, root, "CRITICAL"),
+                             [{"state": "HELD_EFFECT_UNVERIFIED"}])
+
     def test_degraded_receipt_returns_nonzero_without_disarming_timer(self):
         with tempfile.TemporaryDirectory() as d, patch.object(
                 h, "run", return_value={"schema": "mastermind.fleet_linux_hygiene.v1",
