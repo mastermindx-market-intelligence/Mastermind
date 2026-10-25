@@ -27,7 +27,7 @@
 | P1.T3 | P1 | P1.T2 | Dedicated native OpenAI SDK CI on candidate: run 40122896228 passed 21 tests, real SDK imported; no vendor calls | implementation_complete |
 | P2 | — | P1 | Standard source release and independent reviewer acceptance | blocked |
 | P2.T1 | P2 | P1 | Run async regression tests with local stdlib `asyncio.run` adapter to preserve hash-locked dev environment; verify normal + SDK CI | implementation_complete |
-| P2.T2 | P2 | P2.T1 | Preserve all gateway source and protected master changes; prove exact-head full CI and security analysis | blocked |
+| P2.T2 | P2 | P2.T1 | Preserve source and protected master, address D8 HTTP status classification and prove exact-head full CI/security | in_progress |
 | P2.T3 | P2 | P2.T2 | Independent non-author adversarial review of rate/queue/auth and code; no remaining actionable blockers | blocked |
 | P2.T4 | P2 | P2.T3 | Protected merge only after review + mandatory exact-head checks and approved normal release path | blocked |
 | P3 | — | P2 | Authorized M2 live transport and SDK consumer canary | blocked |
@@ -59,3 +59,9 @@
 ## Continuity pointers
 
 The pinned organizational plan remains whichever existing Agent OS workstream the authorized organizational writer confirms. Read its current waves, `next_action` and latest dated valid handoff if linked. GitHub [PR #1849](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1849) is this implementation's durable source/evidence pointer; the current PR head and CI/checks are authoritative for implementation facts. Executive OS remains authority for admitted runtime execution, not this task tree. Update these tasks at material source or acceptance boundaries only.
+
+### P2.T2 source guard correction — 2026-10-25
+
+- Normal CI run `40195557499` tested the async-suite repair: shards 0 and 2 passed. Shard 1 failed only `tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults`; its protection scanner reported `['503']` from changed source. The scanner must remain intact.
+- Explicit gateway overload responses now pass the Python standard-library `HTTPStatus.SERVICE_UNAVAILABLE` IntEnum to `JSONResponse.status_code` instead of the ambiguous bare 503 constant. This retains the wire status: `int(HTTPStatus.SERVICE_UNAVAILABLE) == 503` and FastAPI JSONResponse still emits 503. No queue behavior or caller contract changed. The gateway's positive offline suite passed 20 cases, one optional native-SDK skip locally, with actual native SDK proven separately in CI; full source guard awaits hosted proof on the integrated head.
+- Protected master advanced two non-overlapping commits from `a4525e3e7e9251951567a9142392df962bd06ba2` to `bb85b429f2ffffd38408080ce4df7d6378c34100`; those source paths remain preserved by a new two-parent continuation commit on original PR #1849. Review/merge still require fresh exact-head CI and non-author verdict. No live keys or host installation.

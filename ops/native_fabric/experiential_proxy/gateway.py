@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import fcntl
 import hashlib
 import hmac
+from http import HTTPStatus
 import os
 from pathlib import Path
 import sqlite3
@@ -372,11 +373,11 @@ def create_app(
             )
         except QueueFull:
             # Hard overload protection; NOT a provider or per-key 429.
-            return JSONResponse({"error": {"message": "local queue full"}}, status_code=503, headers={"retry-after": "1"})
+            return JSONResponse({"error": {"message": "local queue full"}}, status_code=HTTPStatus.SERVICE_UNAVAILABLE, headers={"retry-after": "1"})
         except QueueExpired:
             return JSONResponse({"error": {"message": "local queue wait deadline exceeded"}}, status_code=504)
         except sqlite3.Error:
-            return JSONResponse({"error": {"message": "rate admission unavailable"}}, status_code=503)
+            return JSONResponse({"error": {"message": "rate admission unavailable"}}, status_code=HTTPStatus.SERVICE_UNAVAILABLE)
 
         headers = {"authorization": f"Bearer {cfg.api_keys[slot]}", "accept-encoding": "identity"}
         if request.method == "POST":
