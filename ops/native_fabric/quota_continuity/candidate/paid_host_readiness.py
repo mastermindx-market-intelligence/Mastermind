@@ -161,47 +161,169 @@ def _identity(s):
             s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
 
 
-def _root_interfaces():
-    # This first read selects only a fixed protected release directory. It is
-    # NOT source authority: full owner/ACL/manifest verification follows before
-    # any observation or private remote input can be prepared.
-    path = _DEFINITION/'profile.json'
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+def _bootstrap_acl(fd):
+    # Same Darwin descriptor ACL contract as fs_security, before that module
+    # can be trusted. A missing ACL is ONLY native ENOENT; no errno waiver.
+    import ctypes
+    import errno
+    if sys.platform != 'darwin':_refuse()
+    library=ctypes.CDLL(None,use_errno=True)
+    get=library.acl_get_fd;get.argtypes=[ctypes.c_int];get.restype=ctypes.c_void_p
+    free=library.acl_free;free.argtypes=[ctypes.c_void_p];free.restype=ctypes.c_int
+    ctypes.set_errno(0);acl=get(fd);error=ctypes.get_errno()
+    if acl:
+        free(acl);_refuse()
+    if error!=errno.ENOENT:_refuse()
+
+
+class _RootSourceBootstrap:
+    """Held fixed Root source snapshots; DATA files never select caller code."""
+    def __init__(self):
+        self.stack=ExitStack();self.held={};self.total=0
+        try:
+            profile=_decode(self.read(_DEFINITION/'profile.json',MAX_BYTES))
+            release=profile.get('release_commit') if type(profile)is dict else None
+            if type(release)is not str or not re.fullmatch(r'[0-9a-f]{40}',release):_refuse()
+            self.root=_RELEASES/release
+            raw=self.read(self.root/'.executive-release-manifest.json',4*1024*1024)
+            if hashlib.sha256(raw).hexdigest()!=profile.get('release_manifest_sha256'):_refuse()
+            manifest=_decode(raw)
+            if (type(manifest)is not dict or set(manifest)!={'schema_version','commit_sha','tree_sha','entries'}
+                    or manifest['schema_version']!='mastermind.executive_release_manifest/v1'
+                    or manifest['commit_sha']!=release or manifest['tree_sha']!=profile.get('release_tree')
+                    or type(manifest['entries'])is not list):_refuse()
+            self.entries={}
+            for entry in manifest['entries']:
+                name=entry.get('path') if type(entry)is dict else None
+                if (type(name)is not str or not name or Path(name).is_absolute()
+                        or any(v in ('','.','..') for v in name.split('/')) or name in self.entries):_refuse()
+                self.entries[name]=entry
+            self.check()
+        except BaseException:
+            self.stack.close();raise
+
+    def hold(self,path,*,directory=False):
+        path=Path(path)
+        if not path.is_absolute() or any(p in ('.','..') for p in path.parts):_refuse()
+        if path in self.held:return self.held[path][0]
+        if len(self.held)>=1024:_refuse()
+        if path==Path('/'):
+            parent=None;name='/'
+        else:
+            parent=self.hold(path.parent,directory=True);name=path.name
+        search=(getattr(os,'O_SEARCH',0x40000000|os.O_DIRECTORY)
+                if sys.platform=='darwin' else getattr(os,'O_PATH',os.O_RDONLY))
+        flags=(search|os.O_DIRECTORY if directory else os.O_RDONLY|os.O_NONBLOCK)
+        fd=os.open(name,flags|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=parent)
+        self.stack.callback(os.close,fd)
+        info=os.fstat(fd)
+        if (not (stat.S_ISDIR if directory else stat.S_ISREG)(info.st_mode)
+                or info.st_uid!=0 or info.st_mode&0o022
+                or (not directory and info.st_nlink!=1)):_refuse()
+        _bootstrap_acl(fd)
+        before=_identity(info)
+        self.held[path]=(fd,before,parent,name)
+        self.check()
+        return fd
+
+    def read(self,path,maximum):
+        fd=self.hold(path);info=os.fstat(fd)
+        if not 0<=info.st_size<=maximum:_refuse()
+        raw=os.pread(fd,info.st_size+1,0)
+        if len(raw)!=info.st_size:_refuse()
+        self.check();return raw
+
+    def source(self,path):
+        path=Path(path)
+        try:name=path.relative_to(self.root).as_posix()
+        except ValueError:_refuse()
+        entry=self.entries.get(name)
+        if (type(entry)is not dict or set(entry)!={'path','type','mode','uid','gid','size','sha256'}
+                or entry['type']!='file' or entry['uid']!=0 or entry['gid']!=0
+                or type(entry['size'])is not int or not _SHA.fullmatch(str(entry['sha256']))):_refuse()
+        raw=self.read(path,4*1024*1024)
+        info=os.fstat(self.held[path][0])
+        if (stat.S_IMODE(info.st_mode)!=entry['mode'] or info.st_gid!=entry['gid']
+                or len(raw)!=entry['size'] or hashlib.sha256(raw).hexdigest()!=entry['sha256']):_refuse()
+        self.total+=len(raw)
+        if self.total>32*1024*1024:_refuse()
+        return raw
+
+    def check(self):
+        for fd,before,parent,name in self.held.values():
+            if (_identity(os.fstat(fd))!=before
+                    or _identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=before):_refuse()
+            _bootstrap_acl(fd)
+
+    def close(self):self.stack.close()
+
+
+class _RootInterfaces(tuple):
+    def __new__(cls,values,check):
+        result=super().__new__(cls,values);result.check=check;return result
+
+
+@contextmanager
+def _qualified_root_interfaces():
+    # This finder compiles held manifest-matched snapshots, never path-loader
+    # bytes acquired after qualification. Keep it through the caller interval.
+    import importlib.abc
+    import importlib.util
+    import importlib.machinery
+    packages=('ops','control_plane','scripts','common')
+    bootstrap=_RootSourceBootstrap()
+    root=bootstrap.root
+    class Sources(importlib.abc.MetaPathFinder,importlib.abc.Loader):
+        def find_spec(self,fullname,path=None,target=None):
+            if not any(fullname==p or fullname.startswith(p+'.') for p in packages):
+                other=importlib.machinery.PathFinder.find_spec(fullname,path)
+                origins=([other.origin] if other and other.origin and other.origin not in ('built-in','frozen') else [])
+                if other and other.submodule_search_locations:origins+=list(other.submodule_search_locations)
+                if any(Path(p).absolute().is_relative_to(root) for p in origins):_refuse()
+                return None
+            relative=Path(*fullname.split('.'))
+            package=root/relative
+            init=package/'__init__.py'
+            if init.relative_to(root).as_posix() in bootstrap.entries:
+                origin=init;is_package=True
+            elif relative.as_posix()+'.py' in bootstrap.entries:
+                origin=root/(relative.as_posix()+'.py');is_package=False
+            else:
+                entry=bootstrap.entries.get(relative.as_posix())
+                if type(entry)is not dict or entry.get('type')!='directory':_refuse()
+                bootstrap.hold(package,directory=True)
+                spec=importlib.util.spec_from_loader(fullname,loader=None,is_package=True)
+                spec.submodule_search_locations=[str(package)];return spec
+            spec=importlib.util.spec_from_loader(fullname,self,origin=str(origin),is_package=is_package)
+            spec.has_location=True
+            if is_package:spec.submodule_search_locations=[str(package)]
+            return spec
+        def create_module(self,spec):return None
+        def exec_module(self,module):
+            raw=bootstrap.source(Path(module.__spec__.origin))
+            bootstrap.check();exec(compile(raw,module.__spec__.origin,'exec',dont_inherit=True),module.__dict__)
+            bootstrap.check()
+    finder=Sources()
     try:
-        before = os.fstat(fd)
-        if (not stat.S_ISREG(before.st_mode) or before.st_uid != 0 or before.st_gid != 0
-                or before.st_mode & 0o022 or before.st_nlink != 1
-                or not 0 < before.st_size <= MAX_BYTES):
-            _refuse()
-        raw = os.read(fd, MAX_BYTES+1)
-        if len(raw) != before.st_size or _identity(before) != _identity(os.fstat(fd)):
-            _refuse()
+        for name,loaded in tuple(sys.modules.items()):
+            if any(name==p or name.startswith(p+'.') for p in packages):
+                origin=getattr(loaded,'__file__',None)
+                if origin is not None:bootstrap.source(Path(origin))
+                else:
+                    paths=list(getattr(loaded,'__path__',()))
+                    if paths!=[str(root/Path(*name.split('.')))]:_refuse()
+                    bootstrap.hold(Path(paths[0]),directory=True)
+        sys.meta_path.insert(0,finder)
+        qualification=importlib.import_module('ops.executive_os.canonical_paid_qualification')
+        manifest=importlib.import_module('ops.executive_os.release_manifest')
+        native=importlib.import_module('control_plane.codex_provider_realm')
+        backend=importlib.import_module('control_plane.paid_fabric_backend')
+        bootstrap.check()
+        yield _RootInterfaces((root,qualification,manifest,native._native_open,backend._root_source),bootstrap.check)
+        bootstrap.check()
     finally:
-        os.close(fd)
-    profile = _decode(raw)
-    release = profile.get('release_commit') if type(profile) is dict else None
-    if type(release) is not str or not re.fullmatch(r'[0-9a-f]{40}', release):
-        _refuse()
-    root = _RELEASES/release
-    # The fixed Root installation is the code-trust premise, as for the normal
-    # installed owner. No caller directory, PYTHONPATH or fallback is accepted.
-    for name, loaded in tuple(sys.modules.items()):
-        if name == 'control_plane' or name.startswith(('control_plane.', 'ops.')):
-            origin = getattr(loaded, '__file__', None)
-            if origin is not None and not Path(origin).absolute().is_relative_to(root):
-                _refuse()
-    sys.path.insert(0, str(root))
-    try:
-        qualification = importlib.import_module('ops.executive_os.canonical_paid_qualification')
-        manifest = importlib.import_module('ops.executive_os.release_manifest')
-        native = importlib.import_module('control_plane.codex_provider_realm')
-        backend = importlib.import_module('control_plane.paid_fabric_backend')
-        for module in (qualification, manifest, native, backend):
-            if not Path(module.__file__).absolute().is_relative_to(root):
-                _refuse()
-        return root, qualification, manifest, native._native_open, backend._root_source
-    finally:
-        sys.path.remove(str(root))
+        if finder in sys.meta_path:sys.meta_path.remove(finder)
+        bootstrap.close()
 
 
 class InstalledReadinessContext:
@@ -276,9 +398,10 @@ def open_installed_context():
     """Only the fixed real Root definition/release; no caller DATA input."""
     result = None
     try:
-        root, owner, release_manifest, native_open, root_read = _root_interfaces()
         with ExitStack() as stack:
-            checks = []
+            interfaces=stack.enter_context(_qualified_root_interfaces())
+            root, owner, release_manifest, native_open, root_read = interfaces
+            checks = [interfaces.check]
             def held(path):
                 fd, info = stack.enter_context(native_open(path))
                 before = _identity(info)
@@ -806,12 +929,12 @@ def _correction_interval():
     # The SAME existing canonical CONFIG_ROOT publication mutex serializes
     # explicit administrative corrections and install/qualification writers.
     import fcntl
-    _root,_owner,_manifest,native_open,_read=_root_interfaces()
-    with native_open(_DEFINITION.parent,directory=True) as (fd,_info):
-        try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:_refuse()
-        try:yield
-        finally:fcntl.flock(fd,fcntl.LOCK_UN)
+    with _qualified_root_interfaces() as (_root,_owner,_manifest,native_open,_read):
+        with native_open(_DEFINITION.parent,directory=True) as (fd,_info):
+            try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:_refuse()
+            try:yield
+            finally:fcntl.flock(fd,fcntl.LOCK_UN)
 
 
 def correct_refusal(*, expected_context_sha256, expected_refusal_sha256):

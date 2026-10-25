@@ -594,3 +594,60 @@ def main(args=None):
 
 
 if __name__=='__main__':raise SystemExit(main())
+
+
+class _CanonicalEntryRun:
+    """One fixed same-process purpose, not a reusable qualification object."""
+    def __init__(self,request,entry,client,owner):
+        import time
+        self.owner=owner;self.request=request;self.entry=entry;self.client=client
+        self.pid=os.getpid();self.active_environment=None
+        self.deadline=min(request['deadline_monotonic_ns'],
+            time.monotonic_ns()+int(request['timeout_seconds']*1_000_000_000))
+        self.check()
+    def remaining(self,maximum):
+        import time
+        self.check()
+        value=min(maximum,(self.deadline-time.monotonic_ns())/1_000_000_000,
+                  self.request['expires_at']-time.time())
+        if value<=0:self.owner.refuse()
+        return value
+    def check(self):
+        import time
+        self.owner.require_no_site_policy()
+        self.owner._require_current_entry_runtime(self.request)
+        if (self.pid!=os.getpid() or self.owner._read_boot_id()!=self.request['boot_id']
+                or time.monotonic_ns()>=self.deadline
+                or time.time()>=self.request['expires_at']):self.owner.refuse()
+        if self.active_environment is not None and dict(os.environ)!=self.active_environment:self.owner.refuse()
+    def execute(self,initialized,pre_execution,check,prepared):
+        # These are exclusively ACTUAL captured/validated values. Expected
+        # selector/config/HOME values are never injected to repair a mismatch.
+        before=dict(os.environ)
+        self.active_environment=dict(initialized)
+        class Context:
+            @property
+            def pre_execution(_self):return json.loads(self.owner.canonical(pre_execution))
+            def check(_self):
+                check()
+                if prepared is not None:prepared.check_environment(os.environ)
+        try:
+            os.environ.clear();os.environ.update(initialized)
+            context=Context();context.check()
+            result=self.entry._run_model_entry(self.request,self.client,context)
+            context.check()
+            if type(result)is not bytes or not 0<len(result)<=2*1024*1024:self.owner.refuse()
+            return result
+        finally:
+            self.active_environment=None
+            os.environ.clear();os.environ.update(before)
+
+
+
+def _run_initialized_entry(owner,request,modules):
+    """Only the fixed Parent loader calls this with its live held engine."""
+    request=validate_request(request)
+    if (any(request['sources_sha256'].get(name)!=sha for name,sha in owner._INITIALIZER_SOURCE_HASHES.items())
+            or any(request['sources_sha256'].get(name)!=sha for name,sha in owner._CANONICAL_ENTRY_SOURCES.items())):owner.refuse()
+    run=_CanonicalEntryRun(request,modules['paid_provider_entry.py'],modules['paid_glm_model_client.py'],owner)
+    return owner._run_owner(request,None,_entry=run)

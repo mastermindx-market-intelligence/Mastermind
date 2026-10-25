@@ -640,3 +640,131 @@ def test_provider_config_identity_refuses_foreign_or_drifted_observation(state,m
     monkeypatch.setattr(m,'_OWNER',directory.parent)
     read=m._state_read;monkeypatch.setattr(m,'_state_read',lambda _:read(directory))
     with pytest.raises(ValueError):m.qualified_config_identity(ctx)
+
+# Reuse the original qualifier's complete four-file pure verifier and explicit
+# disposable Root-install metadata premise, not a synthetic ready/context object.
+from tests.test_canonical_paid_qualification import env as canonical_env
+
+
+@pytest.fixture
+def installed_context_fixture(canonical_env,tmp_path,monkeypatch):
+    import os
+    from contextlib import contextmanager
+    from tests import test_canonical_paid_qualification as fixture
+    from ops.native_fabric.quota_continuity.candidate import paid_initializer_nested_data as nested
+    m=module();env=canonical_env
+    native=env.release/fixture.QUALIFIER_EXT
+    for name,raw in {
+        'paid_host_readiness.py':(SOURCE/'paid_host_readiness.py').read_bytes(),
+        'glm_keys.py':(ROOT/'ops/native_fabric/quota_continuity/source/glm_keys.py').read_bytes(),
+    }.items():
+        (native/name).write_bytes(raw)
+    manifest=json.loads((env.release/fixture.base._MANIFEST_NAME).read_bytes())
+    for name in ('paid_host_readiness.py','glm_keys.py'):
+        raw=(native/name).read_bytes()
+        manifest['entries'].append(dict(path=fixture.QUALIFIER_EXT+'/'+name,type='file',
+            size=len(raw),sha256=fixture.digest_raw(raw),uid=0,gid=0,mode=0o644))
+    manifest_raw=fixture.canonical(manifest)
+    (env.release/fixture.base._MANIFEST_NAME).write_bytes(manifest_raw)
+    env.registry.write_bytes(fixture.canonical({'ubuntu0':dict(platform='linux',roles=['lanes'],
+        local=False,allowed_modes=['glm'],qualification_only_modes=[],ssh_alias='mmx-ubuntu0')}))
+    request=fixture.probe_request(env,tmp_path)
+    request.update(host_ref='ubuntu0',transport_alias='mmx-ubuntu0',
+        registry_sha256=fixture.digest_raw(env.registry.read_bytes()),
+        source_manifest_sha256=fixture.digest_raw(manifest_raw))
+    c=request['initializer_commitment'];c.update(host_ref='ubuntu0',transport_alias='mmx-ubuntu0',
+        initialization_contract=nested.CONTRACT)
+    request['capture_root']='/Users/chriswong/lanes/ext/lanes';request['python_path']='/usr/bin/python3.12'
+    c['lane_root']='/Users/chriswong/lanes'
+    c['host_env']['path']=c['lane_root']+'/ext/HOST_ENV.sh'
+    c['initialized_context']['glm_config']='/Users/chriswong/.glm/config.json'
+    c['launch_python'].update(path='/usr/bin/python3.12',real_path='/usr/bin/python3.12')
+    c['bootstrap_python'].update(path='/usr/bin/python3.12',real_path='/usr/bin/python3.12',sha256=c['launch_python']['sha256'])
+    c['startup']['profile']='cpython-3.12-linux-root-prefix-nosite.v1'
+    c['host_env'].update(sha256=nested.LEGACY_SHA256,size=len(nested._ORIGINAL))
+    c['nested_helper']=dict(path=c['lane_root']+'/ext/.host_glm_token.sh',sha256='d'*64,
+        size=57,uid=c['account']['uid'],gid=c['account']['gid'],mode=0o600)
+    request['initializer_commitment_sha256']=m._digest(c)
+    profile=json.loads((env.destination/'profile.json').read_bytes())
+    profile.update(schema_version=fixture.qual.PROFILE_SCHEMA_V2,
+        release_manifest_sha256=fixture.digest_raw(manifest_raw),
+        host_ref=fixture.contract.paid_host_reference('ubuntu0','mmx-ubuntu0'))
+    registration=dict(worker_id=fixture.base.WORKER_ID,quota_class='standard',account_label='acct-01')
+    observed=fixture.observation_document(request)
+    profile.update(expected_remote_binary=observed['binary'],remote_worker_identity={
+        'worker_uid':observed['worker_uid'],'worker_gid':observed['worker_gid'],
+        'worker_user':observed['worker_user']},registration=registration)
+    physical,source=fixture.qual._paid_source_document(profile,observed,registration)
+    raw_bindings=fixture.canonical(dict(schema_version=fixture.qual.BINDINGS_DOC_SCHEMA,
+        bindings=[dict(physical_binding=physical,source_config=source,quota_class='standard')]))
+    profile['bindings_sha256']=fixture.digest_raw(raw_bindings)
+    artifacts={'profile.json':fixture.canonical(profile),'bridge.json':env.original['bridge.json'],
+        'bindings.json':raw_bindings,fixture.base.PAID_LABEL+'.plist':env.original[fixture.base.PAID_LABEL+'.plist']}
+    assert fixture.qual.verify_qualified_artifacts(artifacts)['bindings'][0]['source_config']==source
+    for name,raw in artifacts.items():(env.destination/name).write_bytes(raw)
+    # Mechanical Root ownership/ACL and fixed namespace are the ONLY premise
+    # replaced here. Actual held files/complete pure schema/source hashes run.
+    # Finite Root-namespace metadata premise, preserving real nanosecond
+    # identity fields. Reconstructing os.stat_result(tuple) loses those fields
+    # and cannot match the actual retained/named inode on Darwin.
+    owner=tmp_path/'incumbent/ext';owner.mkdir(parents=True)
+    (owner/'hosts.json').write_bytes(env.registry.read_bytes())
+    raw_fstat,raw_stat,raw_lstat=os.fstat,env.raw_stat,env.raw_lstat
+    roots=(env.release,env.destination,owner)
+    paths=set()
+    for root in roots:paths.update([root,*root.parents,*root.rglob('*')])
+    identities={(raw_lstat(p).st_dev,raw_lstat(p).st_ino) for p in paths}
+    class RootMetadata:
+        def __init__(self,value):self.value=value
+        @property
+        def st_uid(self):return 0
+        @property
+        def st_gid(self):return 0
+        @property
+        def st_mode(self):return self.value.st_mode&~0o022
+        def __getattr__(self,name):return getattr(self.value,name)
+    def calibrated(info):
+        return RootMetadata(info) if (info.st_dev,info.st_ino) in identities else info
+    monkeypatch.setattr(os,'fstat',lambda fd:calibrated(raw_fstat(fd)))
+    monkeypatch.setattr(os,'stat',lambda *a,**kw:calibrated(raw_stat(*a,**kw)))
+    monkeypatch.setattr(os,'lstat',lambda *a,**kw:calibrated(raw_lstat(*a,**kw)))
+    @contextmanager
+    def native_open(path,**kwargs):
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|(os.O_DIRECTORY if kwargs.get('directory') else 0))
+        try:yield fd,os.fstat(fd)
+        finally:os.close(fd)
+    monkeypatch.setattr(m,'_DEFINITION',env.destination)
+    monkeypatch.setattr(m,'_OWNER',owner)
+    @contextmanager
+    def root_interfaces():
+        yield m._RootInterfaces((env.release,fixture.qual,fixture.manifest_owner,native_open,lambda p:Path(p).read_bytes()),lambda:None)
+    monkeypatch.setattr(m,'_qualified_root_interfaces',root_interfaces)
+    return m,env,owner,artifacts,source
+
+
+def test_actual_installed_loader_derives_whole_root_material_and_closes(installed_context_fixture):
+    m,env,owner,artifacts,source=installed_context_fixture
+    with m.open_installed_context() as current:
+        assert current.binding['source_config_sha256']==m._digest(source)
+        assert current.binding['host']=='ubuntu0' and current.binding['account']=='acct-01'
+        assert current.initializer_commitment==source['qualification']['initializer_commitment']
+        assert current.source_hashes['paid_initializer.py']==source['qualification']['qualifier_sources_sha256']['paid_initializer.py']
+        current.check()
+    with pytest.raises(ValueError):current.check()
+
+
+@pytest.mark.parametrize('changed',['source','registry','definition','late_registry'])
+def test_installed_loader_refuses_actual_origin_drift(installed_context_fixture,changed):
+    m,env,owner,artifacts,source=installed_context_fixture
+    if changed=='source':
+        path=env.release/'ops/native_fabric/quota_continuity/rollout/native-code-stage/ext/paid_initializer.py'
+        path.write_bytes(path.read_bytes()+b'changed')
+    elif changed=='registry':(owner/'hosts.json').write_text('{}')
+    elif changed=='definition':(env.destination/'bindings.json').write_text('{}')
+    if changed=='late_registry':
+        with pytest.raises(ValueError):
+            with m.open_installed_context() as current:
+                (owner/'hosts.json').write_text('{}');current.check()
+    else:
+        with pytest.raises(ValueError):
+            with m.open_installed_context():pass
