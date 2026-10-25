@@ -16,8 +16,15 @@ from integrations.hermes_runtime.errors import RuntimeRefusal  # noqa: E402
 from integrations.hermes_runtime.registry import (  # noqa: E402
     assert_registered_tools_exact,
     clear_extension_tools,
+    extension_tools_for,
     inspect_tool_registry,
     register_extension_tools,
+)
+from integrations.hermes_runtime.secrets import (  # noqa: E402
+    Secrets,
+    child_env,
+    clear_child_secret_env,
+    register_child_secret_env,
 )
 from integrations.hermes_runtime.tests._support import CENSUS, load_preflight  # noqa: E402
 
@@ -27,6 +34,7 @@ CENSUS_TEXT = CENSUS.read_text(encoding="utf-8")
 class RegistryTests(unittest.TestCase):
     def tearDown(self) -> None:
         clear_extension_tools()
+        clear_child_secret_env()
 
     def test_allowlist_equals_registered_tools_with_empty_stderr(self) -> None:
         result = assert_registered_tools_exact(CENSUS_TEXT, "", {"clarify"}, ())
@@ -93,6 +101,36 @@ class RegistryTests(unittest.TestCase):
             set(passed["registered"]),
             {"clarify", "list_responsibilities"},
         )
+
+    def test_every_refused_toolset_collides_as_an_extension(self) -> None:
+        for name in sorted(REFUSED_HERMES_TOOLSETS):
+            clear_extension_tools()
+            register_extension_tools("probe", lambda profile, name=name: frozenset({name}))
+            with self.assertRaises(RuntimeRefusal) as ctx:
+                extension_tools_for(object())
+            self.assertEqual(ctx.exception.code, "EXTENSION_TOOL_COLLIDES_WITH_HERMES")
+        clear_extension_tools()
+
+        def batch(profile: object) -> frozenset[str]:
+            del profile
+            return frozenset({"delegation", "skills", "terminal"})
+
+        register_extension_tools("probe", batch)
+        with self.assertRaises(RuntimeRefusal) as ctx:
+            extension_tools_for(object())
+        self.assertEqual(ctx.exception.code, "EXTENSION_TOOL_COLLIDES_WITH_HERMES")
+
+    def test_registered_child_secret_names_are_forwarded_and_the_gateway_token_is_not(self) -> None:
+        register_child_secret_env(["ZAI_API_KEY"])
+        with self.assertRaises(RuntimeRefusal) as ctx:
+            register_child_secret_env(["HERMES_GATEWAY_TOKEN"])
+        self.assertEqual(ctx.exception.code, "GATEWAY_TOKEN_STAYS_ON_THE_FRONT_DOOR")
+        token = "local-test-gateway-token"
+        secrets = Secrets(token, "hermes", token, {"ZAI_API_KEY": "distinct-provider-value", "HERMES_GATEWAY_TOKEN": token})
+        env = child_env(secrets, home=Path("/tmp/hermes-home-test"))
+        self.assertEqual(env["ZAI_API_KEY"], "distinct-provider-value")
+        self.assertNotIn("HERMES_GATEWAY_TOKEN", env)
+        self.assertNotIn("distinct-provider-value", repr(secrets))
 
     def test_refused_set_matches_the_qualification_census(self) -> None:
         preflight = load_preflight()

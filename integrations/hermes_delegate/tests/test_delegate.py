@@ -681,6 +681,58 @@ class DelegateEdgePaths(unittest.TestCase):
         self.assertEqual(fabric.submits, [])
         self.assertEqual(cursor.submits, [])
 
+    def test_uppercase_sha_is_refused(self):
+        bridge, _admission, fabric, _cursor = bridge_for()
+        loads(dispatch(request(idempotency_key="child-impl-0091"), bridge))
+        sha = hashlib.sha256(fabric.body).hexdigest().upper()
+        denied = loads(dispatch(_review("child-impl-0091", REVIEWER, sha), bridge))
+        self.assertEqual(denied["state"], "REFUSED")
+        self.assertEqual(denied["reason"], "REVIEW_INVALID")
+
+    def test_live_submit_policy_is_refused_before_admission(self):
+        policy = load_policy()
+        policy["live_submit"] = True
+        bridge, admission, fabric, cursor = bridge_for(policy=policy)
+        refused = loads(dispatch(request(idempotency_key="child-impl-0092"), bridge))
+        self.assertEqual(refused["state"], "REFUSED")
+        self.assertEqual(refused["reason"], "DELEGATION_POLICY_INVALID")
+        self.assertEqual(admission.calls, [])
+        self.assertEqual(fabric.submits, [])
+        self.assertEqual(cursor.submits, [])
+
+    def test_absent_replay_of_submits_a_new_child(self):
+        body = request(idempotency_key="child-impl-0093")
+        self.assertNotIn("replay_of", body)
+        bridge, admission, fabric, _cursor = bridge_for()
+        submitted = loads(dispatch(body, bridge))
+        self.assertEqual(submitted["state"], "SUBMITTED")
+        self.assertEqual(len(fabric.submits), 1)
+        self.assertIsNone(admission.calls[0].get("replay_of"))
+
+    def test_secret_shaped_objective_is_not_stored(self):
+        bridge, admission, _fabric, _cursor = bridge_for()
+        refused = loads(dispatch(
+            request(idempotency_key="child-impl-0094", objective="api_key=sk-should-not-store"),
+            bridge,
+        ))
+        self.assertEqual(refused["state"], "REFUSED")
+        self.assertEqual(refused["reason"], "SECRET_MATERIAL_REFUSED")
+        self.assertEqual(admission.calls, [])
+        missing = loads(dispatch({"action": "status", "idempotency_key": "child-impl-0094"}, bridge))
+        self.assertEqual(missing["state"], "NOT_FOUND")
+
+    def test_admitted_unbound_carrier_latches_unknown(self):
+        bridge = Bridge(FakeAdmission())
+        refused = loads(dispatch(request(idempotency_key="child-impl-0095"), bridge))
+        self.assertEqual(refused["state"], "UNKNOWN")
+        self.assertIn("CarrierNotBound", refused["detail"])
+        again = loads(dispatch(
+            request(idempotency_key="child-impl-0095", carrier="cursor_cloud"),
+            bridge,
+        ))
+        self.assertEqual(again["state"], "UNKNOWN")
+        self.assertTrue(again["deduped"])
+
 
 if __name__ == "__main__":
     unittest.main()

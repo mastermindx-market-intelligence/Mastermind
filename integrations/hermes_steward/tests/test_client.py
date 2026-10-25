@@ -396,6 +396,46 @@ class ClientTests(unittest.TestCase):
         self.assertNotIn("Bearer", blob)
         self.assertNotIn("fixture-good-token", blob)
 
+    def test_clock_advances_between_reads(self) -> None:
+        # Policy clock skew is 30s, so expiry is now > exp + skew.
+        instants = iter((NOW, NOW + 331))
+        upstream = ScriptedUpstream(
+            [
+                {
+                    "schema": "mastermind.secretary_grounding_mcp_result.v2",
+                    "tool": "list_responsibilities",
+                    "ok": True,
+                    "data": {"state": "UNKNOWN", "subjects": [], "reason_codes": ["NO_SOURCE"]},
+                    "error": None,
+                }
+            ]
+        )
+        client = StewardReadClient(
+            policy=self.policy,
+            verifier=self.verifier,
+            upstream=upstream,
+            now=NOW,
+            clock=lambda: next(instants),
+        )
+        first = client.read("list_responsibilities", {}, authorization="Bearer fixture-good-token")
+        second = client.read("list_responsibilities", {}, authorization="Bearer fixture-good-token")
+        self.assertTrue(first["forwarded"])
+        self.assertEqual(second["error"]["code"], "TOKEN_EXPIRED")
+        self.assertEqual(len(upstream.calls), 1)
+
+    def test_non_ascii_and_oversized_bearers_are_rejected(self) -> None:
+        non_ascii = self.client.read(
+            "list_responsibilities",
+            {},
+            authorization="Bearer fixture-good-token\u00e9",
+        )
+        self.assertEqual(non_ascii["error"]["code"], "TOKEN_REJECTED")
+        self.assertEqual(self.upstream.calls, [])
+        huge = "a" * ((16 * 1024) + 1)
+        oversized = self.client.read("list_responsibilities", {}, authorization=f"Bearer {huge}")
+        self.assertEqual(oversized["error"]["code"], "TOKEN_REJECTED")
+        self.assertNotIn(huge, json.dumps(oversized))
+
     def test_client_source_has_no_write_or_network_entry(self) -> None:
         source = (ROOT / "integrations" / "hermes_steward" / "client.py").read_text(encoding="utf-8")
         self.assertNotIn("def write", source)

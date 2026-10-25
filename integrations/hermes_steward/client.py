@@ -12,7 +12,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
 from integrations.business_mcp_auth.claims import validate_verified_claims
@@ -36,6 +36,9 @@ REQUIRED_SCOPE = "mastermind.steward.read"
 ALLOWED_TOOLS = tuple(spec.name for spec in TOOL_SPECS)
 _ALLOWED = frozenset(ALLOWED_TOOLS)
 RESULT_SCHEMA = "mastermind.hermes_steward_read.v1"
+# Same byte cap as the business MCP verifier. Compact JWT shape stays on the
+# injected verifier; fixture tokens in the offline suite are not compact JWTs.
+MAX_BEARER_TOKEN_BYTES = 16 * 1024
 
 # Names and argument keys that ask for a mutation. These are refused before
 # any transport call. The six Steward tools are not in this set.
@@ -122,8 +125,14 @@ def _bearer_token(authorization: object) -> str:
         or any(ord(character) < 32 or ord(character) == 127 for character in authorization)
     ):
         raise AuthError(AuthErrorCode.AUTHORIZATION_MALFORMED)
+    try:
+        authorization.encode("ascii")
+    except UnicodeEncodeError:
+        raise AuthError(AuthErrorCode.AUTHORIZATION_MALFORMED) from None
     scheme, token = authorization.split(" ", 1)
     if scheme.lower() != "bearer" or not token:
+        raise AuthError(AuthErrorCode.AUTHORIZATION_MALFORMED)
+    if len(token.encode("ascii")) > MAX_BEARER_TOKEN_BYTES:
         raise AuthError(AuthErrorCode.AUTHORIZATION_MALFORMED)
     return token
 
@@ -195,6 +204,7 @@ class StewardReadClient:
         verifier: ClaimsVerifier,
         upstream: StewardUpstream,
         now: int,
+        clock: Callable[[], int] | None = None,
     ) -> None:
         if not isinstance(policy, ResourcePolicy):
             raise TypeError("policy must be ResourcePolicy")
@@ -206,10 +216,21 @@ class StewardReadClient:
             raise TypeError("upstream must provide call")
         if type(now) is not int:
             raise TypeError("now must be an int unix second")
+        if clock is not None and not callable(clock):
+            raise TypeError("clock must be callable")
         self._policy = policy
         self._verifier = verifier
         self._upstream = upstream
         self._now = now
+        self._clock = clock
+
+    def _unix_now(self) -> int:
+        if self._clock is None:
+            return self._now
+        instant = self._clock()
+        if type(instant) is not int:
+            raise TypeError("clock must return an int unix second")
+        return instant
 
     def read(
         self,
@@ -238,7 +259,7 @@ class StewardReadClient:
             claims = self._verifier.verify(token)
             if not isinstance(claims, Mapping):
                 raise AuthError(AuthErrorCode.TOKEN_CLAIMS_REFUSED)
-            validate_verified_claims(claims, self._policy, now=self._now)
+            validate_verified_claims(claims, self._policy, now=self._unix_now())
         except AuthError as exc:
             code = _AUTH_REFUSAL.get(exc.code, "TOKEN_REJECTED")
             _log_refusal(code, tool)

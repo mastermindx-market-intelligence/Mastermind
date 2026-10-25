@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 import stat
 import subprocess
 import sys
@@ -178,6 +179,37 @@ class SecretTests(unittest.TestCase):
         self.assertEqual(result.backoff_seconds, 5.0)
         self.assertEqual(len(calls), 1)
         self.assertNotIn(CANARY, calls[0].full_url)
+
+    def test_symlink_hardlink_loose_mode_and_bad_json_do_not_leak(self):
+        spec = PROVIDERS["zai.glm-5.3"]
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            target = root / "zai.key"
+            target.write_text(CANARY + "\n", encoding="utf-8")
+            target.chmod(0o600)
+            link = root / "zai.link"
+            link.symlink_to(target)
+            with self.assertRaises(CredentialUnavailable) as linked:
+                load_credential(spec, {spec.credential_file_env: str(link), spec.credential_env: CANARY})
+            self.assertNotIn(CANARY, str(linked.exception))
+            hard = root / "zai.hard"
+            os.link(target, hard)
+            with self.assertRaises(CredentialUnavailable) as hard_link:
+                load_credential(spec, {spec.credential_file_env: str(hard)})
+            self.assertNotIn(CANARY, str(hard_link.exception))
+            loose = root / "zai.loose"
+            loose.write_text(CANARY + "\n", encoding="utf-8")
+            loose.chmod(0o700)
+            with self.assertRaises(CredentialUnavailable):
+                load_credential(spec, {spec.credential_file_env: str(loose)})
+            broken = root / "zai.json"
+            broken.write_text("{not-json " + CANARY, encoding="utf-8")
+            broken.chmod(0o600)
+            with self.assertRaises(CredentialUnavailable) as bad_json:
+                load_credential(spec, {spec.credential_file_env: str(broken)})
+            self.assertIsNone(bad_json.exception.__cause__)
+            self.assertNotIn(CANARY, str(bad_json.exception))
+            self.assertNotIn(CANARY, repr(bad_json.exception))
 
 
 if __name__ == "__main__":

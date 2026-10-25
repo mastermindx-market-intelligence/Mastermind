@@ -188,6 +188,54 @@ class InstallLifecycleTests(unittest.TestCase):
             assert_checkout_sha(repo)
         self.assertEqual(ctx.exception.code, "CHECKOUT_SHA_MISMATCH")
 
+    def test_secrets_file_inside_the_state_directory_is_refused(self) -> None:
+        from integrations.hermes_runtime.install import install
+
+        self.state.mkdir()
+        nested = self.state / "nested.secrets.env"
+        write_secrets(nested)
+        with self.assertRaises(RuntimeRefusal) as ctx:
+            install(
+                profile_path=PROFILE,
+                state_dir=self.state,
+                systemd_user_dir=self.unit_dir,
+                secrets_file=nested,
+                hermes_bin=STUB,
+                upstream_source=self.upstream,
+            )
+        self.assertEqual(ctx.exception.code, "SECRETS_INSIDE_STATE_DIR")
+        self.assertTrue(nested.is_file())
+
+    def test_unit_path_outside_the_user_dir_is_refused(self) -> None:
+        from integrations.hermes_runtime.install import _remove_unit_file
+
+        outside = self.root / "escape.service"
+        outside.write_text("nope\n", encoding="utf-8")
+        with self.assertRaises(RuntimeRefusal) as ctx:
+            _remove_unit_file(outside, self.unit_dir)
+        self.assertEqual(ctx.exception.code, "UNIT_PATH_ESCAPES")
+        self.assertTrue(outside.is_file())
+
+    def test_placeholder_and_short_tokens_are_refused(self) -> None:
+        from integrations.hermes_runtime.secrets import load_secrets
+
+        short = self.root / "short.env"
+        write_secrets(short, token="short-token")
+        with self.assertRaises(RuntimeRefusal) as ctx:
+            load_secrets(short)
+        self.assertEqual(ctx.exception.code, "SECRETS_TOKEN_UNUSABLE")
+        placeholder = self.root / "placeholder.env"
+        write_secrets(placeholder, token="changeme")
+        with self.assertRaises(RuntimeRefusal) as ctx:
+            load_secrets(placeholder)
+        self.assertEqual(ctx.exception.code, "SECRETS_TOKEN_PLACEHOLDER")
+        loose = self.root / "mode.env"
+        write_secrets(loose)
+        os.chmod(loose, 0o700)
+        with self.assertRaises(RuntimeRefusal) as ctx:
+            load_secrets(loose)
+        self.assertEqual(ctx.exception.code, "SECRETS_MODE_NOT_0600")
+
     def test_package_source_does_not_embed_a_secret(self) -> None:
         import integrations.hermes_runtime as runtime
         self.assertEqual(runtime.PINNED_UPSTREAM_SHA, PINNED_UPSTREAM_SHA)
@@ -247,6 +295,8 @@ class InstallLifecycleTests(unittest.TestCase):
         self.assertIn("Restart=on-failure", text)
         self.assertIn("IPAddressAllow=localhost", text)
         self.assertIn("IPAddressDeny=any", text)
+        self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET\n", text)
+        self.assertNotIn("AF_INET6", text)
         self.assertIn(PINNED_UPSTREAM_SHA, text)
         self.assertNotIn("0.0.0.0", text)
         self.assertNotIn("EnvironmentFile=", text)

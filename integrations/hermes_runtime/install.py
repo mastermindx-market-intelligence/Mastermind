@@ -82,6 +82,7 @@ def install(
     if fetch == bool(upstream_source):
         raise RuntimeRefusal("UPSTREAM_SOURCE_REQUIRED")
     profile = load_profile(profile_path, state_dir=state_dir, secrets_file=secrets_file)
+    _assert_secrets_outside_state(profile.secrets_file, state_dir)
     # Touch the secrets file for mode and ownership before creating state.
     load_secrets(profile.secrets_file)
     unit_dir = assert_systemd_user_dir(systemd_user_dir)
@@ -188,6 +189,18 @@ def uninstall(*, state_dir: Path, systemd_user_dir: Path) -> dict:
         "secrets_file_preserved": str(secrets_file),
         "secrets_recorded": False,
     }
+
+
+def _assert_secrets_outside_state(secrets_file: Path, state_dir: Path) -> None:
+    secret = secrets_file.expanduser().resolve()
+    state = state_dir.expanduser().resolve()
+    if secret == state:
+        raise RuntimeRefusal("SECRETS_INSIDE_STATE_DIR")
+    try:
+        secret.relative_to(state)
+    except ValueError:
+        return
+    raise RuntimeRefusal("SECRETS_INSIDE_STATE_DIR")
 
 
 def _hermes_bin(path: Path) -> Path:

@@ -54,7 +54,11 @@ def _load_file(path_text: str) -> str:
         raise CredentialUnavailable("provider credential is unavailable") from exc
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+        ):
             raise CredentialUnavailable("provider credential is unavailable")
         if info.st_size > _MAX_FILE_BYTES:
             raise CredentialUnavailable("provider credential is unavailable")
@@ -79,8 +83,8 @@ def _parse_secret_text(text: str) -> str:
     if stripped.startswith("{"):
         try:
             payload = json.loads(stripped)
-        except json.JSONDecodeError as exc:
-            raise CredentialUnavailable("provider credential is unavailable") from exc
+        except json.JSONDecodeError:
+            raise CredentialUnavailable("provider credential is unavailable") from None
         if not isinstance(payload, dict):
             raise CredentialUnavailable("provider credential is unavailable")
         value = payload.get("api_key")

@@ -220,7 +220,7 @@ def chain_for(role_id: str, *, provider_id: str | None = None) -> tuple[Provider
     spec = role(role_id)
     if provider_id is None:
         return tuple(provider(item) for item in spec.provider_ids)
-    if provider_id not in spec.provider_ids and provider_id not in PROVIDERS:
-        raise KeyError(f"unknown hermes provider {provider_id!r}")
+    if provider_id not in spec.provider_ids:
+        raise KeyError(f"provider {provider_id!r} is outside role {role_id!r}")
     # An explicit provider pin is one attempt. It does not walk the failover chain.
     return (provider(provider_id),)

@@ -101,10 +101,12 @@ def load_secrets(path: Path) -> Secrets:
 
 
 def _validate_token(token: str) -> None:
-    if not isinstance(token, str) or len(token) < 16 or any(ch.isspace() for ch in token):
+    if not isinstance(token, str) or not token or any(ch.isspace() for ch in token):
         raise RuntimeRefusal("SECRETS_TOKEN_UNUSABLE")
     if token.lower() in _PLACEHOLDERS:
         raise RuntimeRefusal("SECRETS_TOKEN_PLACEHOLDER")
+    if len(token) < 16:
+        raise RuntimeRefusal("SECRETS_TOKEN_UNUSABLE")
 
 
 def _parse(text: str) -> dict[str, str]:

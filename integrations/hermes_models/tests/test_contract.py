@@ -17,6 +17,7 @@ from integrations.hermes_models.contract import (  # noqa: E402
     PROVIDERS,
     ROLES,
     ProviderSpec,
+    chain_for,
 )
 from integrations.hermes_models.router_binding import ContractDrift, bind_model_router  # noqa: E402
 
@@ -40,6 +41,12 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(ROLES[role_id].logical_model, "MiniMax-M3")
         for spec in ROLES.values():
             self.assertEqual(spec.provider_ids[-1], "cursor-pool")
+        with self.assertRaises(KeyError):
+            chain_for("meta-ceo", provider_id="byteplus-modelark.glm-5.3-flash")
+        self.assertEqual(
+            [item.provider_id for item in chain_for("meta-ceo")],
+            ["zai.glm-5.3", "cursor-pool"],
+        )
 
     def test_modelark_contract_is_commercial_not_personal_plan(self):
         self.assertEqual(MODELARK_CONTRACT["source_pr"], 1824)
