@@ -79,7 +79,7 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
-    "openai-compatible": AdapterDescriptor(
+    # Read-only metered principal source seam, deliberately NOT an eligible Worker.\n    # Executive/Capacity owner must qualify the API and install a trusted composition.\n    "anthropic-api-principal": AdapterDescriptor(\n        adapter_id="anthropic-api-principal", implemented=False,\n        implementation="control_plane.fable_api_principal.FableApiPrincipal",\n    ),\n    "openai-compatible": AdapterDescriptor(
         adapter_id="openai-compatible", implemented=False
     ),
     "acp": AdapterDescriptor(
