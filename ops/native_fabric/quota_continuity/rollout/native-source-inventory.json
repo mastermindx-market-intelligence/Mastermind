@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 80826,
+      "bytes": 85543,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b",
+      "sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -192,9 +192,9 @@
       "source": "source/glm_host_account_readiness.py"
     },
     "ext/glm_host_account_source.py": {
-      "bytes": 5339,
+      "bytes": 6884,
       "installed_preimage_sha256": "1ec07bd756e8b3edc66f39218b69876f2e9aa898b0b539319e93d8c2ff68587c",
-      "sha256": "34501b394c24fffd13374894c2c375d2b123c28580ed02335c5e7e19a29d83ab",
+      "sha256": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
       "source": "candidate/glm_host_account_source.py"
     },
     "ext/glm_keys.py": {
@@ -258,16 +258,28 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 12351,
+      "bytes": 15118,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "5ccbf6e92ffd91137542bf7e97480dfd3be668926f487e1ee4fd46f75fc5565c",
+      "sha256": "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
-      "bytes": 40186,
+      "bytes": 45033,
       "installed_preimage_sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
-      "sha256": "742f0bf4f90d1ad4bd10851e3acec6564b9172d2c8185b013b58946071955659",
+      "sha256": "d00ff264dcb1a51b73d1e1f772da22a2130873f517299e8c430f060a8191f248",
       "source": "candidate/host_pull_backend.py"
+    },
+    "ext/host_pull_daemon.sh": {
+      "bytes": 84466,
+      "installed_preimage_sha256": null,
+      "sha256": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
+      "source": "candidate/host_pull_daemon.sh"
+    },
+    "ext/host_pull_launchd.plist.template": {
+      "bytes": 1427,
+      "installed_preimage_sha256": null,
+      "sha256": "160e322306f197149c2bf5343c08f00bd38e46768ed21cf3dd35d077869c4ac3",
+      "source": "candidate/host_pull_launchd.plist.template"
     },
     "ext/host_pull_probe.template": {
       "bytes": 10919,
@@ -432,9 +444,9 @@
       "source": "candidate/paid_controller_spawn.py"
     },
     "ext/paid_glm_model_client.py": {
-      "bytes": 7502,
+      "bytes": 7819,
       "installed_preimage_sha256": null,
-      "sha256": "ea2d98c4360f981872b3b0b081447a70a969f42792675bf54f9e12557e24a773",
+      "sha256": "d35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e",
       "source": "candidate/paid_glm_model_client.py"
     },
     "ext/paid_host_qualification.py": {
@@ -443,16 +455,22 @@
       "sha256": "e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0",
       "source": "candidate/paid_host_qualification.py"
     },
-    "ext/paid_incumbent_state.py": {
-      "bytes": 7438,
+    "ext/paid_host_readiness.py": {
+      "bytes": 50570,
       "installed_preimage_sha256": null,
-      "sha256": "2fd23881b84ca8ee32a93b5e15267de117f40b37dd53fe095cb1d3dee658454d",
+      "sha256": "115bad457d738af088ec4eed79ff56f56b0f154e56521e0093839daf087b9a66",
+      "source": "candidate/paid_host_readiness.py"
+    },
+    "ext/paid_incumbent_state.py": {
+      "bytes": 7645,
+      "installed_preimage_sha256": null,
+      "sha256": "6245beb53a5251bb6e352454f4e1bda4a55b009fbf2a79ebf7540cdf566d2395",
       "source": "candidate/paid_incumbent_state.py"
     },
     "ext/paid_initializer.py": {
-      "bytes": 31643,
+      "bytes": 31701,
       "installed_preimage_sha256": null,
-      "sha256": "a0d8095c1e32f25449bfb27de062565956c118d3fffbcec2bf6cbed681c7b2ae",
+      "sha256": "30b61b297534a972f5da09f47e901487d7307e05e4d44283407c91a95fb23cdc",
       "source": "candidate/paid_initializer.py"
     },
     "ext/paid_initializer_nested_data.py": {
@@ -468,10 +486,16 @@
       "source": "candidate/paid_initializer_token_data.py"
     },
     "ext/paid_model_owner.py": {
-      "bytes": 15953,
+      "bytes": 16870,
       "installed_preimage_sha256": null,
-      "sha256": "a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c",
+      "sha256": "1ff9487916942eefd2e586891be160cc16c5e93cd501a720363d4e9c7297ea0c",
       "source": "candidate/paid_model_owner.py"
+    },
+    "ext/paid_provider_entry.py": {
+      "bytes": 36314,
+      "installed_preimage_sha256": null,
+      "sha256": "3e9b821dd345162cef12bce6a2d5b40be16d8711fb7a2c3750de17c7261c03cf",
+      "source": "candidate/paid_provider_entry.py"
     },
     "ext/paid_pyyaml_6_0_3.zip": {
       "bytes": 222968,
@@ -492,9 +516,9 @@
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
-      "bytes": 117518,
+      "bytes": 118474,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df",
+      "sha256": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
@@ -546,16 +570,16 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 103240,
+      "bytes": 103957,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7",
+      "sha256": "eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 58131,
+      "bytes": 59042,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1",
-      "source": "../grok47/overlay/remote_sub_exec.py"
+      "sha256": "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d",
+      "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {
       "bytes": 75868,
@@ -594,9 +618,9 @@
       "source": "../grok47/overlay/sub.sh"
     },
     "ext/support_bundle.py": {
-      "bytes": 18306,
+      "bytes": 18662,
       "installed_preimage_sha256": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
-      "sha256": "4c1741eb2593aefb73e9c0b5a5348f631ab0c7bd0953794a3a799cc40e68759c",
+      "sha256": "5fecd5fa93617a720476c9e2c5cf17de78de245e9cc04c811ba213265a41f2bb",
       "source": "candidate/support_bundle.py"
     },
     "ext/yes": {
@@ -606,18 +630,20 @@
       "source": "source/yes"
     },
     "pool": {
-      "bytes": 2856,
+      "bytes": 3215,
       "installed_preimage_sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
-      "sha256": "4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059",
+      "sha256": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 98,
+  "native_code_files": 102,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
     "current_source_observation.py",
     "fabric_continuation.py",
+    "host_pull_daemon.sh",
+    "host_pull_launchd.plist.template",
     "linux_process_identity.py",
     "native_plain_packet_check.py",
     "native_plain_packet_reconcile.py",
@@ -626,11 +652,13 @@
     "paid_controller_spawn.py",
     "paid_glm_model_client.py",
     "paid_host_qualification.py",
+    "paid_host_readiness.py",
     "paid_incumbent_state.py",
     "paid_initializer.py",
     "paid_initializer_nested_data.py",
     "paid_initializer_token_data.py",
     "paid_model_owner.py",
+    "paid_provider_entry.py",
     "paid_pyyaml_6_0_3.zip",
     "paid_pyyaml_provenance.json",
     "paid_yaml_runtime.py",

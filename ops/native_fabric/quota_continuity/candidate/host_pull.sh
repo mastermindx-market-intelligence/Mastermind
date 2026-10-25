@@ -26,6 +26,19 @@ PAID_HOST=""
 PAID_REQUESTED=0
 INSPECT_HOST=""
 PHYSICAL_HOST=""
+PHYSICAL_ONLY=0
+QUALIFIED_REFRESH=0
+READINESS_TRANSPORT=0
+if [ "${1:-}" = "--physical-only" ] || [ "${1:-}" = "--qualified-readiness" ]; then
+  PHYSICAL_ONLY=1
+  [ "$1" != "--qualified-readiness" ] || QUALIFIED_REFRESH=1
+  shift
+fi
+if [ "${1:-}" = "--qualified-readiness-transport" ]; then
+  [ "$#" -eq 2 ] && [ "$2" = ubuntu0 ] || exit 78
+  READINESS_TRANSPORT=1
+  shift 2
+fi
 if [ "$#" -gt 0 ] && [ "$1" = "--diagnose-physical" ]; then
   [ "$#" -eq 2 ] && [ "$2" = "ubuntu0" ] || { echo "host_pull: fixed physical diagnostic arguments refused" >&2; exit 78; }
   PHYSICAL_HOST="$2"
@@ -61,6 +74,12 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
+if [ "$PHYSICAL_ONLY" -eq 1 ] && { [ -n "$PHYSICAL_HOST" ] || [ -n "$INSPECT_HOST" ] || [ "$PAID_REQUESTED" -eq 1 ] || [ "$READINESS_TRANSPORT" -eq 1 ]; }; then
+  echo "host_pull: physical publication modes are exclusive" >&2; exit 78
+fi
+if [ "$PHYSICAL_ONLY" -eq 1 ] && [ -n "$SELECTED" ]; then
+  echo "host_pull: qualified physical target is fixed" >&2; exit 78
+fi
 if [ -n "$SELECTED" ] && [ "$ONCE" -ne 1 ]; then
   echo "host_pull: selected hosts require --once" >&2
   exit 2
@@ -105,11 +124,15 @@ write_state() { # $1 host, $2 probe rc, $3 probe stdout
 # cancel that group (bounded SIGKILL fallback), not the surrounding SSH group.
 # EXIT unlinks the private spool; all probes keep child stdin at /dev/null. Keep the existing
 # fixed host, SSH policy, probe, and single collector unchanged.
-HOST_PULL_REMOTE_STDIN_EXEC='umask 077; PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"; export PATH; command -v python3 >/dev/null 2>&1 || exit 78; t=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/host_pull_probe.XXXXXXXX") || exit 70; p=; trap '"'"'/bin/rm -f -- "$t"'"'"' EXIT; trap '"'"'if test -n "$p"; then kill -HUP "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 129 ] || exit 78; fi; exit 129'"'"' HUP; trap '"'"'if test -n "$p"; then kill -INT "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 130 ] || exit 78; fi; exit 130'"'"' INT; trap '"'"'if test -n "$p"; then kill -TERM "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 143 ] || exit 78; fi; exit 143'"'"' TERM; /bin/cat >"$t" || exit 70; python3 -c '"'"'exec('"'"'"'"'"'"'"'"'import os,signal,subprocess,sys,time\nseen=[0]\ndef notice(sig,frame):\n    seen[0]=sig\nfor sig in (signal.SIGHUP,signal.SIGINT,signal.SIGTERM):\n    signal.signal(sig,notice)\nchild=subprocess.Popen([os.environ.get("SHELL") or "/bin/sh",sys.argv[1]],stdin=subprocess.DEVNULL,start_new_session=True)\nstatus=None\nwhile not seen[0] and status is None:\n    try:\n        status=child.wait(timeout=0.04)\n    except subprocess.TimeoutExpired:\n        pass\nif seen[0]:\n    for sig in (seen[0],):\n        try:\n            os.killpg(child.pid,sig)\n        except (ProcessLookupError,PermissionError):\n            pass\n    time.sleep(0.12)\n    try:\n        os.killpg(child.pid,signal.SIGKILL)\n    except (ProcessLookupError,PermissionError):\n        pass\n    deadline=time.monotonic()+2\n    while True:\n        check=subprocess.run(["/bin/ps","-Ao","pgid=,stat="],capture_output=True,text=True,timeout=2)\n        if check.returncode!=0:\n            raise SystemExit(78)\n        live=False\n        for line in check.stdout.splitlines():\n            cells=line.split()\n            if len(cells)>1 and cells[0]==str(child.pid) and cells[1][0] not in "ZX":\n                live=True\n                break\n        if not live:\n            break\n        if time.monotonic()>=deadline:\n            raise SystemExit(78)\n        time.sleep(0.04)\n    try:\n        child.wait(timeout=2)\n    except subprocess.TimeoutExpired:\n        raise SystemExit(78)\n    raise SystemExit(128+seen[0])\nraise SystemExit(status if status>=0 else 128-status)\n'"'"'"'"'"'"'"'"')'"'"' "$t" </dev/null & p=$!; wait "$p"'
+HOST_PULL_REMOTE_STDIN_EXEC='umask 077; PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"; export PATH; command -v python3 >/dev/null 2>&1 || exit 78; t=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/host_pull_probe.XXXXXXXX") || exit 70; p=; trap '"'"'/bin/rm -f -- "$t"'"'"' EXIT; trap '"'"'if test -n "$p"; then kill -HUP "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 129 ] || exit 78; fi; exit 129'"'"' HUP; trap '"'"'if test -n "$p"; then kill -INT "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 130 ] || exit 78; fi; exit 130'"'"' INT; trap '"'"'if test -n "$p"; then kill -TERM "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 143 ] || exit 78; fi; exit 143'"'"' TERM; /bin/cat >"$t" || exit 70; python3 -c '"'"'exec('"'"'"'"'"'"'"'"'import os,signal,subprocess,sys,time\nseen=[0]\ndef notice(sig,frame):\n    seen[0]=sig\nfor sig in (signal.SIGHUP,signal.SIGINT,signal.SIGTERM):\n    signal.signal(sig,notice)\nchild=subprocess.Popen([os.environ.get("SHELL") or "/bin/sh",sys.argv[1]],stdin=subprocess.DEVNULL,start_new_session=True)\nstatus=None\nwhile not seen[0] and status is None:\n    try:\n        status=child.wait(timeout=0.04)\n    except subprocess.TimeoutExpired:\n        pass\nif seen[0]:\n    for sig in (signal.SIGSTOP,signal.SIGKILL):\n        try:\n            os.killpg(child.pid,sig)\n        except (ProcessLookupError,PermissionError):\n            pass\n    deadline=time.monotonic()+2\n    while True:\n        check=subprocess.run(["/bin/ps","-Ao","pgid=,stat="],capture_output=True,text=True,timeout=2)\n        if check.returncode!=0:\n            raise SystemExit(78)\n        live=False\n        for line in check.stdout.splitlines():\n            cells=line.split()\n            if len(cells)>1 and cells[0]==str(child.pid) and cells[1][0] not in "ZX":\n                live=True\n                break\n        if not live:\n            break\n        if time.monotonic()>=deadline:\n            raise SystemExit(78)\n        time.sleep(0.04)\n    try:\n        child.wait(timeout=2)\n    except subprocess.TimeoutExpired:\n        raise SystemExit(78)\n    raise SystemExit(128+seen[0])\nraise SystemExit(status if status>=0 else 128-status)\n'"'"'"'"'"'"'"'"')'"'"' "$t" </dev/null & p=$!; wait "$p"'
 run_probe() {
   local is_local="$1" alias="$2" probe="$3" key_guard="${4:-}"
+  # macOS /bin/bash is 3.2. With set -u, "${name[@]}" is unbound when the
+  # array has no elements; Bash 4.4 stopped treating that expansion as unset.
+  # The normal telemetry path therefore starts with the incumbent BatchMode
+  # and ConnectTimeout flags. Diagnostics only append key policy.
   local key_options=(-o BatchMode=yes -o ConnectTimeout=8)
-  if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ] || [ "$key_guard" = "fixed-paid-qualification" ]; then
+  if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ] || [ "$key_guard" = "fixed-paid-qualification" ] || [ "$key_guard" = "fixed-qualified-readiness" ]; then
     # Fixed inspection/qualification must never enroll/update a host key. Normal
     # telemetry retains its existing inherited transport policy unchanged.
     key_options+=(-o StrictHostKeyChecking=yes -o UpdateHostKeys=no)
@@ -121,7 +144,10 @@ run_probe() {
   elif [ -z "$alias" ]; then
     return 255
   else
-    if [ "$key_guard" = "fixed-paid-qualification" ]; then
+    if [ "$key_guard" = "fixed-qualified-readiness" ]; then
+      [ "$#" -eq 5 ] && [ -n "$5" ] || return 78
+      perl -e 'alarm 35; exec @ARGV' ssh "${key_options[@]}" "$alias" "$probe" <<< "$5"
+    elif [ "$key_guard" = "fixed-paid-qualification" ]; then
       # The closed compiler bounds the FINAL UTF-8 command plus its NUL before
       # this branch. Keep the committed bootstrap direct: the telemetry spool's
       # ambient Python/SHELL and mutable path are not paid-bootstrap authority.
@@ -131,6 +157,27 @@ run_probe() {
     fi
   fi
 }
+
+if [ "$READINESS_TRANSPORT" -eq 1 ]; then
+  # One request owned by the fixed refresh producer. No state write or loop.
+  PREPARED=$(python3 -I -S -B "$BACKEND_FILE" qualified-readiness-prepare) || exit 78
+  case "$PREPARED" in *$'\n'*) ;; *) exit 78 ;; esac
+  # The private correction socket belongs only to local parent/compiler.
+  # No copy is inherited by SSH, its remote child or any provider process.
+  if [ -n "${H1_READINESS_CORRECTION_FD:-}" ]; then
+    case "$H1_READINESS_CORRECTION_FD" in ''|*[!0-9]*) exit 78 ;; esac
+    [ "$H1_READINESS_CORRECTION_FD" = 9 ] || exit 78
+    exec 9>&-
+    unset H1_READINESS_CORRECTION_FD
+  fi
+  READINESS_ALIAS="${PREPARED%%$'\n'*}"
+  PREPARED="${PREPARED#*$'\n'}"
+  READINESS_COMMAND="${PREPARED%%$'\n'*}"
+  READINESS_INPUT="${PREPARED#*$'\n'}"
+  [ "$READINESS_INPUT" != "$PREPARED" ] || exit 78
+  run_probe 0 "$READINESS_ALIAS" "$READINESS_COMMAND" fixed-qualified-readiness "$READINESS_INPUT"
+  exit $?
+fi
 
 if [ -n "$PHYSICAL_HOST" ]; then
   # Diagnostic return only: never publish shared telemetry, load account
@@ -171,6 +218,20 @@ if [ "$PAID_REQUESTED" -eq 1 ]; then
   run_probe 0 "$PAID_ALIAS" "$PAID_PROBE" fixed-paid-qualification
   exit $?
 fi
+
+pass_physical_only() {
+  local prepared alias probe out rc
+  prepared=$(python3 -B "$BACKEND_FILE" physical-publication-prepare "$HOSTS_JSON" ubuntu0) || return 78
+  case "$prepared" in *$'\n'*) ;; *) return 78 ;; esac
+  alias="${prepared%%$'\n'*}"
+  probe="${prepared#*$'\n'}"
+  out=$(run_probe 0 "$alias" "$probe" fixed-physical-diagnostic)
+  rc=$?
+  python3 -B "$BACKEND_FILE" write-physical-state "$STATE_DIR" ubuntu0 "$rc" "$out" "$alias" || return $?
+  if [ "$QUALIFIED_REFRESH" -eq 1 ]; then
+    python3 -I -S -B "$HERE/paid_host_readiness.py" refresh || return $?
+  fi
+}
 
 pass_once() {
   local host is_local alias wr probe rc t0 summary runtime local_runtime rows glm_probe glm_admitted
@@ -222,7 +283,7 @@ if [ "$ONCE" -eq 0 ]; then
 fi
 
 while true; do
-  pass_once
+  if [ "$PHYSICAL_ONLY" -eq 1 ]; then pass_physical_only; else pass_once; fi
   PASS_RC=$?
   [ "$ONCE" -eq 1 ] && exit "$PASS_RC"
   sleep "$INTERVAL"

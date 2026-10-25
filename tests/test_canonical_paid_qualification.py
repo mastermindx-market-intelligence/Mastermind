@@ -460,6 +460,7 @@ def env(tmp_path, monkeypatch, request):
     real_loader = qual._load_qualifier
     monkeypatch.setattr(qual, '_load_qualifier', lambda ext_dir, verified: loaded)
     return SimpleNamespace(
+        raw_stat=real_stat, raw_lstat=real_lstat,
         real_loader=real_loader, reads=reads,
         scratch=scratch, config_root=config_root, release=release,
         destination=destination, staging=staging, original=artifacts,

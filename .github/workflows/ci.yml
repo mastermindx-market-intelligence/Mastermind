@@ -123,6 +123,7 @@ jobs:
           tests/test_paid_initializer_nosite.py
           tests/test_paid_initializer_sysconfig.py
           tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed
+          tests/test_paid_provider_entry_linux.py
 
       - name: Run repository test shard
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}

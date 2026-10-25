@@ -401,7 +401,29 @@ def read_hosts():
             fields.append("1" if account_readiness else "0")
         print("|".join(fields))
 
-def write_state():
+def write_state(*, physical_only=False):
+    # Both physical preservation and readiness publication serialize on this
+    # existing directory inode. Hold it before reading the old observation,
+    # through replacement/fsync; no separate retry or authority ledger.
+    if not physical_only:
+        return _write_state_unlocked(physical_only=False)
+    import fcntl, os, stat, sys
+    fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        directory = os.fstat(fd)
+        if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid()
+                or directory.st_mode & 0o022):
+            raise SystemExit("host_pull: observation directory custody unavailable")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        current = os.stat(sys.argv[1], follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (directory.st_dev, directory.st_ino):
+            raise SystemExit("host_pull: observation directory changed")
+        return _write_state_unlocked(physical_only=True, publication_directory=directory)
+    finally:
+        os.close(fd)
+
+
+def _write_state_unlocked(*, physical_only=False, publication_directory=None):
     import json, os, sys, time, tempfile, stat, math, re
     state_dir, host, out = sys.argv[1], sys.argv[2], sys.argv[4]
     raw_rc = sys.argv[3]
@@ -409,6 +431,26 @@ def write_state():
     if rc is not None and rc > 255:
         rc = None
     transport_alias = sys.argv[5] if len(sys.argv) > 5 else None
+    boot = None
+    if physical_only:
+        import hashlib
+        from pathlib import Path
+        from glm_host_account_source import owned_bytes
+        digest = hashlib.sha256(owned_bytes(Path(__file__).resolve().parent/'lane_runtime.py')).hexdigest()
+        observed = physical_diagnostic_result(out, rc, digest)
+        boots = [line[8:] for line in out.splitlines() if line.startswith('boot_id=')]
+        valid_boot = len(boots)==1 and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}',boots[0])
+        if observed['status']!='OBSERVED' or not valid_boot:
+            if rc==0:rc=78
+            out=''
+        else:
+            boot=boots[0]
+            # Do not forward any account/config projection into the old parser.
+            safe='\n'.join(line for line in out.splitlines() if '=' in line
+                and not line.startswith(('glm_local_account_readiness=','bailian_local_account_readiness=')))
+            out=('HOST_PULL_STAGE_V1 PHYSICAL_BEGIN\n'+safe+'\n'
+                 'HOST_PULL_STAGE_V1 PHYSICAL_EXIT 0\nHOST_PULL_STAGE_V1 READINESS_BEGIN\n'
+                 'HOST_PULL_STAGE_V1 READINESS_EXIT 0\n')
     diagnostic = probe_diagnostic(out, rc)
     framing_valid = diagnostic["framing"] == "COMPLETE"
     doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None,
@@ -439,8 +481,8 @@ def write_state():
             doc["ts"] = int(ts)
         # Same existing telemetry envelope for both admitted account validators.
         # The legacy --glm-readiness column means any supported account readiness.
-        for provider, mode, validator in (("glm", "glm", "glm_keys.py"),
-                                           ("bailian", "qwen", "bailian_keys.py")):
+        for provider, mode, validator in (() if physical_only else (("glm", "glm", "glm_keys.py"),
+                                           ("bailian", "qwen", "bailian_keys.py"))):
             try:
                 from pathlib import Path
                 from glm_host_account_source import owned_bytes
@@ -707,8 +749,22 @@ def write_state():
     else:
         doc["error"] = "probe_exit_%d" % rc
         summary = "reachable=false error=probe_exit_%d" % rc
+    if physical_only:
+        doc['telemetry_mode']='physical-only.v1'
+        doc['probe_diagnostic']['optional_readiness']={'state':'NOT_REQUESTED','exit_status':None}
+        if boot is not None:doc['boot_id']=boot
+        # A typed account observation keeps its OWN original time. Physical
+        # refresh/restart never freshens it or clears original refusal evidence.
+        try:
+            from glm_host_account_source import owned_bytes
+            prior=json.loads(owned_bytes(Path(state_dir)/(host+'.json')))
+            refusal=prior.get('glm_local_account_readiness')
+            if (type(refusal)is dict and refusal.get('schema')=='mastermind.glm_qualified_account_readiness/v1'
+                    and refusal.get('status') in ('known','unknown','refused')):
+                doc['glm_local_account_readiness']=refusal
+        except (OSError,ValueError,TypeError):pass
     path = os.path.join(state_dir, host + ".json")
-    directory = os.stat(state_dir, follow_symlinks=False)
+    directory = publication_directory or os.stat(state_dir, follow_symlinks=False)
     if (not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid()
             or directory.st_mode & 0o022):
         raise SystemExit("host_pull: observation directory custody unavailable")
@@ -738,11 +794,45 @@ def write_state():
     # replace the shared host snapshot before its caller reads it.
     print(summary + " probe_diagnostic=" + json.dumps(diagnostic, sort_keys=True, separators=(",", ":")))
 
+def prepare_physical_publication(registry_path, host):
+    alias, probe = prepare_physical_diagnostic(registry_path, host)
+    marker='\nphysical_rc=$?'
+    if probe.count(marker)!=1:raise ValueError()
+    probe=probe.replace(marker, marker+"\nboot_id=$(/bin/cat /proc/sys/kernel/random/boot_id) || exit 78\nprintf 'boot_id=%s\\n' \"$boot_id\"")
+    return alias, probe
+
+
+def _readiness_module():
+    import importlib.util
+    from pathlib import Path
+    path=Path(__file__).absolute().with_name('paid_host_readiness.py')
+    spec=importlib.util.spec_from_file_location('_owned_qualified_readiness',path)
+    value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value)
+    return value
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit(2)
     command = sys.argv.pop(1)
-    if command == "physical-diagnostic-prepare":
+    if command == "qualified-readiness-prepare":
+        try:
+            if len(sys.argv)!=1:raise ValueError()
+            m=_readiness_module()
+            plan=m.prepare_transport_request(sys.stdin.buffer.read(65537))
+            print(plan['alias']);print(plan['command']);print(plan['stdin'])
+        except Exception:
+            sys.stderr.write('host_pull: qualified readiness refused\n');raise SystemExit(78)
+    elif command == "physical-publication-prepare":
+        try:
+            if len(sys.argv)!=3 or sys.argv[2]!='ubuntu0':raise ValueError()
+            alias,probe=prepare_physical_publication(sys.argv[1],sys.argv[2])
+            print(alias);print(probe)
+        except Exception:
+            sys.stderr.write('host_pull: physical publication refused\n');raise SystemExit(78)
+    elif command == "write-physical-state":
+        write_state(physical_only=True)
+    elif command == "physical-diagnostic-prepare":
         try:
             if len(sys.argv) != 3:
                 raise ValueError()

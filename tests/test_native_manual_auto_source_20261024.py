@@ -28,6 +28,47 @@ AFTER = {
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
+COMPOSED_PICK = "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
+
+
+def _inverse_manual_member(value: bytes, member: str) -> bytes:
+    """Undo only SHA-bound reviewed F1 hunks in disposable source bytes."""
+    blob = PATCH.read_bytes()
+    heading = ("diff --git a/" + member + " b/" + member + "\n").encode()
+    assert blob.count(heading) == 1
+    section = blob.split(heading, 1)[1].split(b"\ndiff --git ", 1)[0]
+    groups = []
+    group = None
+    for line in section.splitlines(keepends=True):
+        if line.startswith(b"@@ "):
+            group = []
+            groups.append(group)
+        elif group is not None and line[:1] in (b" ", b"+", b"-"):
+            group.append(line)
+    assert groups
+    for group in reversed(groups):
+        newer = b"".join(x[1:] for x in group if x[:1] in (b" ", b"+"))
+        older = b"".join(x[1:] for x in group if x[:1] in (b" ", b"-"))
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    return value
+
+
+def _inverse_judgment(value: bytes) -> bytes:
+    """Preserve R28 review routing in release while testing its pre-F1 base."""
+    pairs = (
+        (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
+         b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
+        (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
+         b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
+         b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
+         b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == AFTER["ext/pick.py"]
+    return value
 
 
 COMPOSED_JUDGMENT_PICK = "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df"
@@ -68,12 +109,17 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     stage = built / "native-code-stage"
     for relative, (name, original_sha) in SOURCE.items():
         source = NATIVE / "candidate" / name
+        # Current 97-member release is ALREADY composed. Do not require
+        # its source to match a historical 95-member preimage.
+        current = source.read_bytes()
         if relative == "ext/pick.py":
-            historical = _restore_historical_picker(source.read_bytes())
-            (stage / relative).write_bytes(historical)
+            assert sha(source) == COMPOSED_PICK
+            current = _inverse_judgment(current)
         else:
-            assert sha(source) == original_sha
-            shutil.copy2(source, stage / relative)
+            assert sha(source) == AFTER[relative]
+        historical = _inverse_manual_member(current, relative)
+        assert hashlib.sha256(historical).hexdigest() == original_sha
+        (stage / relative).write_bytes(historical)
     for action in ("--check", None):
         args = ["git", "apply"] + ([action] if action else []) + [str(PATCH)]
         proc = subprocess.run(args, cwd=stage, capture_output=True, text=True, timeout=18)
@@ -89,8 +135,10 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
                           env=env, capture_output=True, text=True, timeout=35)
     assert proc.returncode == 0, (proc.stdout + proc.stderr)[-3800:]
     assert re.search(r"Ran 14 tests", proc.stderr) and "\nOK\n" in proc.stderr
-    # Native source code may be staged/reviewed, but never installed by this test.
+    # The historical F1 regression is preserved; independently verify R28
+    # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
-
-
-# Reviewed judgment routing is preserved in the current native release source.
+    assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
+    assert b'if tc not in {"review", "audit"}' in (
+        NATIVE / "candidate/pick.py").read_bytes()
+    # Neither stage nor source is published/selected by this test.

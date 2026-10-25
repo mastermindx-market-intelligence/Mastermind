@@ -859,7 +859,8 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
         'tests/test_paid_initializer_nosite.py',
         'tests/test_paid_initializer_sysconfig.py',
-        'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed']
+        'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed',
+        'tests/test_paid_provider_entry_linux.py']
     assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}'
     assert full[0][1].get('if') is None
 

@@ -23,6 +23,48 @@ _SOURCE_FIELDS = frozenset('schema_version worker_id provider host_ref model wor
 _PHYSICAL_FIELDS = (_SOURCE_FIELDS - {'capacity_capability_id'}) | {'worker_source_config_digest'}
 _EMPTY = hashlib.sha256(b'').hexdigest()
 
+_ENTRY_BINDING_FIELDS = frozenset(('schema_version host transport_alias worker_id account model '
+    'boot_id source_config_sha256 release_manifest_sha256 registry_sha256 '
+    'initializer_commitment_sha256 validator_sha256 readiness_source_sha256').split())
+
+
+def provider_entry_descriptor(payload, *, sources_sha256, readiness_binding, config_identity):
+    """Project owner-derived DATA; neither argument mints admission authority."""
+    from ops.native_fabric.quota_continuity.candidate import paid_provider_entry as entry
+    try:
+        physical = require_paid_physical(payload)
+        q = physical['qualification']
+        c = q['initializer_commitment']
+        if (not entry.same_entry_image(c)
+                or c['startup']['profile'] != 'cpython-3.12-linux-root-prefix-nosite.v1'
+                or type(sources_sha256) is not dict or set(sources_sha256) != entry.SOURCE_NAMES
+                or any(type(h) is not str or not _SHA.fullmatch(h) for h in sources_sha256.values())
+                or any(sources_sha256[n]!=q['qualifier_sources_sha256'][n] for n in entry.INITIALIZER_NAMES)
+                or type(readiness_binding) is not dict or set(readiness_binding) != _ENTRY_BINDING_FIELDS
+                or readiness_binding['schema_version']!='mastermind.paid_host_readiness_context/v1'):
+            _refuse()
+        expected = dict(host=q['registry_key'], transport_alias=q['transport_alias'],
+            worker_id=physical['worker_id'], account=payload['paid_account'], model=physical['model'],
+            boot_id=q['boot_id'], source_config_sha256=digest(payload['paid_source_config']),
+            release_manifest_sha256=q['qualifier_source_manifest_sha256'],
+            registry_sha256=q['registry_sha256'],
+            initializer_commitment_sha256=q['initializer_commitment_sha256'])
+        if any(readiness_binding.get(k) != v for k,v in expected.items()):_refuse()
+        for key in ('validator_sha256', 'readiness_source_sha256'):
+            if type(readiness_binding[key]) is not str or not _SHA.fullmatch(readiness_binding[key]):_refuse()
+        return json.loads(canonical(dict(schema_version='mastermind.paid_provider_binding/v1',
+            purpose=entry.PURPOSE, host_ref=q['registry_key'], transport_alias=q['transport_alias'],
+            python_path=physical['binary']['path'], capture_root=physical['capture_root'],
+            initializer_commitment=c, initializer_commitment_sha256=q['initializer_commitment_sha256'],
+            config_identity=entry.validate_config_identity(config_identity,c),
+            sources_sha256=sources_sha256, readiness_binding=readiness_binding,
+            readiness_binding_sha256=digest(readiness_binding),
+            physical_binding_sha256=payload['physical_binding_sha256'],
+            run_id=payload['binding']['attempt_id'], account=payload['paid_account'],
+            model=physical['model'], timeout_seconds=payload['launch_spec']['timeout_seconds'],
+            body_sha256=descriptor(payload)['request_body_sha256'])))
+    except (KeyError, TypeError, ValueError, OverflowError):_refuse()
+
 
 class PaidWireRefused(ValueError):
     pass
@@ -134,6 +176,8 @@ def paid_start_from_owned_launch(payload, frame, *, capsule, lease, controller, 
     try:
         physical = require_paid_physical(payload)
         fields = frozenset('schema run_id model transport_host lease_id pid process_identity observed_user launch_nonce started_at python_path python_version source_manifest_sha256 request_body_sha256 capsule_binding_sha256 capture_contract capture_paths host_context'.split())
+        initialized='initializer_commitment' in physical['qualification']
+        if initialized:fields=fields|{'provider_entry'}
         if type(frame) is not dict or set(frame) != fields:
             _refuse()
         binding, route, spec = payload['binding'], payload['paid_route'], payload['launch_spec']
@@ -143,7 +187,8 @@ def paid_start_from_owned_launch(payload, frame, *, capsule, lease, controller, 
                 or frame['transport_host'] != physical['qualification']['registry_key']
                 or lease['host'] != physical['qualification']['registry_key']
                 or frame['lease_id'] != lease['id'] or lease['account'] != payload['paid_account']
-                or frame['capsule_binding_sha256'] != digest(capsule)
+                or frame['capsule_binding_sha256'] != hashlib.sha256(json.dumps(capsule,
+                    sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode('ascii')).hexdigest()
                 or frame['request_body_sha256'] != descriptor(payload)['request_body_sha256']):
             _refuse()
         image = frame['process_identity']
@@ -151,6 +196,16 @@ def paid_start_from_owned_launch(payload, frame, *, capsule, lease, controller, 
         if type(image) is not dict or set(image) != image_fields:
             _refuse()
         pid = frame['pid']
+        if initialized:
+            from ops.native_fabric.quota_continuity.candidate import paid_provider_entry as entry
+            d=capsule['provider_entry']
+            expected=provider_entry_descriptor(payload,sources_sha256=d['sources_sha256'],
+                readiness_binding=d['readiness_binding'],config_identity=d['config_identity'])
+            if d!=expected:_refuse()
+            request=entry.request_from_capsule(capsule,capsule_raw=json.dumps(capsule,
+                sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False).encode('ascii'),
+                timeout_seconds=1,entry_nonce=frame['launch_nonce'])
+            entry.validate_ready(frame['provider_entry'],request,process_identity=image,pid=pid)
         if (type(pid) is not int or pid <= 0 or image['pgid'] != pid or image['session_id'] != pid
                 or frame['observed_user'] != physical['worker_user']
                 or any(image[k] != physical[v] for k,v in (
