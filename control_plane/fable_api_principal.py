@@ -17,6 +17,7 @@ import json
 import math
 import re
 import ssl
+import threading
 from dataclasses import dataclass, field
 from typing import Callable, Mapping, Protocol
 
@@ -247,11 +248,15 @@ class FableApiPrincipal:
         self.credential_loader = credential_loader
         self.send = send
         self._consumed = False
+        self._once_lock = threading.Lock()
 
     def invoke(self, request: FableRequest) -> FableAdvice:
-        if self._consumed:
-            raise FableApiRefused("original invocation already consumed; never replay")
-        self._consumed = True  # fence before callbacks, including exceptions
+        # A shared live instance must not allow simultaneous callers to dispatch
+        # duplicate paid effects; process-level fencing remains Executive-owned.
+        with self._once_lock:
+            if self._consumed:
+                raise FableApiRefused("original invocation already consumed; never replay")
+            self._consumed = True  # fence before callbacks, including exceptions
         if (not isinstance(request, FableRequest)
                 or request.root_id != self.bound_root_id
                 or request.attempt_id != self.bound_attempt_id):
