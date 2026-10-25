@@ -744,6 +744,9 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             # Remove only this fixture's own selector; let actual PATH choose
             # the existing Root system path instead of relabelling the venv.
             image=system.resolve();logical.unlink()
+            # _request detached the validated commitment; update that current
+            # request rather than the pre-normalization construction object.
+            c=req['initializer_commitment']
             c['startup'].update(profile=owner.NO_SITE_PROFILE,prefix='/usr',exec_prefix='/usr',base_prefix='/usr',base_exec_prefix='/usr')
             c['bootstrap_python']=dict(path=str(system),real_path=str(image),sha256=hashlib.sha256(image.read_bytes()).hexdigest())
             c['launch_python']=dict(path=str(system),real_path=str(image),sha256=c['bootstrap_python']['sha256'])
@@ -764,7 +767,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         current=lane.lstat()
         assert (current.st_dev,current.st_ino)==(owned.st_dev,owned.st_ino)
         shutil.rmtree(lane)
-    _linux_completion(request,'old-profile-finite-premise+real-system-nosite')
+    _linux_completion(request,'old-profile-finite-premise+real-system-nosite command_bytes_with_nul='+str(len(command.encode('utf-8'))+1))
 
 
 def test_observer_metadata_fixture_is_finite_and_does_not_hide_other_errors():
