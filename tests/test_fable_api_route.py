@@ -62,6 +62,7 @@ def test_paid_route_selection_carries_receipt_but_not_api_execution_authority():
         router=router, decision=decision,
         bound_root_id="source-root", bound_attempt_id="source-attempt",
         reserve=lambda *_: emitted.append("reserve"),
+        record_dispatch=lambda *_: emitted.append("dispatch"),
         credential_loader=lambda: emitted.append("credential"),
         send=lambda *_: emitted.append("provider"),
     )
