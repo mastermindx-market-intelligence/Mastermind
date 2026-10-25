@@ -337,7 +337,7 @@ def load_os_app(source):
 
 
 def build_optional_apps(raw, source, config_path, sink):
-    """Compose existing read owners using only sealed public projections."""
+    """Compose existing App owners using only sealed public projections."""
     from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
     from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
     from integrations.mastermind_executive_app.gateway import _default_jwks_cache, _jwks_cache_contract
@@ -355,12 +355,23 @@ def build_optional_apps(raw, source, config_path, sink):
     mounts = {}
     if 'workspace' in raw:
         from integrations.mastermind_workspace_app.app import WorkspaceAppConfig, create_workspace_app
-        from integrations.mastermind_workspace_app.contract import workspace_authorizers
+        from integrations.mastermind_workspace_app.contract import (
+            workspace_authorizers, workspace_control_room_authorizers,
+        )
+        from common.workspace_control_room_action_contract import OPERATIONS
         from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
         loader = current_projection_loader(config_path, source, raw, 'workspace', 'bindings')
         gate, _ = workspace_authorizers(policy=policies['workspace'], load_bindings=loader)
+        discovery_gate, _ = workspace_control_room_authorizers(
+            policy=policies['workspace'], load_bindings=loader, action='discover')
+        action_gates = {
+            operation: workspace_control_room_authorizers(
+                policy=policies['workspace'], load_bindings=loader, action=operation)[0]
+            for operation in OPERATIONS
+        }
         app = create_workspace_app(WorkspaceAppConfig(authenticator=authenticators['workspace'],
             now=lambda: int(time.time()), authorize_principal=gate,
+            authorize_discovery=discovery_gate, authorize_actions=action_gates,
             client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path'])))
         mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'])
     if 'steward' in raw:

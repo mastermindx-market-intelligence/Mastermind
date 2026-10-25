@@ -700,6 +700,298 @@ describe("authenticated admitted-plan Web host transport", () => {
   });
 });
 
+
+import {
+  ControlRoomActionTransportError, CONTROL_ROOM_UNKNOWN_OUTCOME,
+  type ControlRoomOperation,
+} from "./control-room-actions";
+
+describe("fixed acquisition Control Room action transport", () => {
+  const terminal = (
+    operation: ControlRoomOperation = "open",
+    disposition = "OWNER_RETURNED",
+    outcome: Record<string, unknown> = { ok: false, detail: "original owner refused" },
+  ) => ({
+    schema: "mastermind.workspace_control_room_action_result.v1",
+    operation, status: disposition === "OWNER_RETURNED" ? 200 : disposition === "NOT_DISPATCHED" ? 409 : 503,
+    disposition, outcome,
+  });
+  const actionResponse = (value = terminal(), status = value.status) =>
+    new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+  const invoke = (
+    client: ReturnType<typeof createWebAuth>, operation: ControlRoomOperation = "open",
+    signal = new AbortController().signal,
+    payload: Record<string, unknown> = { binding_id: "original-binding" },
+  ) => {
+    switch (operation) {
+      case "open": return client.openControlRoomSurface!({ payload, signal });
+      case "bind": return client.bindControlRoomSurface!({ payload, signal });
+      case "unbind": return client.unbindControlRoomSurface!({ payload, signal });
+      case "refresh-builds": return client.refreshControlRoomBuilds!({ signal });
+    }
+  };
+  const login = async (expires = 3600) => {
+    const e = setup({ executiveResource: "https://fixture-resource.mastermind-x.com/executive" });
+    e.fetcher.mockImplementation(async () => {
+      const url = new URL(e.popup.location);
+      return response({
+        token_type: "Bearer", access_token: url.searchParams.get("audience") === ACQUISITION_AUDIENCE
+          ? "fixture-acquisition-token" : "fixture-other-token",
+        expires_in: expires, scope: url.searchParams.get("scope"),
+      });
+    });
+    await e.login();
+    e.fetcher.mockReset();
+    e.fetcher.mockResolvedValue(actionResponse());
+    return e;
+  };
+  const uncertain = (operation = "open") => ({ operation, disposition: "EFFECT_UNKNOWN" });
+
+  it.each([
+    ["open", { binding_id: "original-binding", target_surface: "desktop", owed_context: null }],
+    ["bind", { work_ref: "WS:A", role: "ceo", provider: "codex", locator: { session_id: "explicit" } }],
+    ["unbind", { binding_id: "original-binding" }],
+    ["refresh-builds", {}],
+  ] as const)("sends exactly one fixed %s call with the acquisition bearer", async (operation, payload) => {
+    const e = await login();
+    const expected = terminal(operation);
+    e.fetcher.mockResolvedValueOnce(actionResponse(expected));
+    expect(await invoke(e.client, operation, undefined, payload)).toEqual(expected);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url, init] = e.fetcher.mock.calls[0]!;
+    expect(url).toBe(ORIGIN + "/workspace/control-room/" + operation);
+    expect(init).toMatchObject({
+      method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
+      headers: { Accept: "application/json", "Content-Type": "application/json",
+        Authorization: "Bearer fixture-acquisition-token" },
+    });
+    expect(JSON.parse(String(init?.body))).toEqual(payload);
+    expect(new TextEncoder().encode(String(init?.body)).length).toBeLessThanOrEqual(8192);
+  });
+
+  it("keeps Discovery as the separate fixed authenticated READ", async () => {
+    const e = await login();
+    e.fetcher.mockResolvedValueOnce(response({ observed: true }));
+    expect(await e.client.readControlRoomDiscovery!({ signal: new AbortController().signal })).toEqual({ observed: true });
+    expect(e.fetcher).toHaveBeenCalledExactlyOnceWith(
+      ORIGIN + "/workspace/control-room/discover/current",
+      expect.objectContaining({ method: "GET", headers: expect.objectContaining({ Authorization: "Bearer fixture-acquisition-token" }) }),
+    );
+  });
+
+  it.each(["signed_out", "unconfigured", "aborted", "invalid", "oversized", "expired"] as const)(
+    "proves no outgoing action for %s preflight", async (why) => {
+      const e = why === "unconfigured" ? setup({ configured: false }) : await login();
+      if (why === "signed_out") await e.client.signOut();
+      if (why === "expired") await vi.advanceTimersByTimeAsync(3_600_001);
+      e.fetcher.mockClear();
+      const controller = new AbortController();
+      if (why === "aborted") controller.abort();
+      const payload = why === "invalid" ? { wrong: "field" } : why === "oversized"
+        ? { binding_id: "x".repeat(8192) } : { binding_id: "original-binding" };
+      await expect(invoke(e.client, "open", controller.signal, payload)).rejects.toMatchObject({
+        operation: "open", disposition: "NOT_DISPATCHED",
+      });
+      expect(e.fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects auth movement while inspecting a detached request before fetch", async () => {
+    const e = await login();
+    const payload = new Proxy({ binding_id: "original-binding" }, {
+      ownKeys(target) { void e.client.signOut(); return Reflect.ownKeys(target); },
+    });
+    await expect(invoke(e.client, "open", undefined, payload)).rejects.toMatchObject({
+      operation: "open", disposition: "NOT_DISPATCHED",
+    });
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    new Error("fetch failed"),
+    new ControlRoomActionTransportError("open", "NOT_DISPATCHED"),
+    new ControlRoomActionTransportError("bind", "NOT_DISPATCHED"),
+  ])("classifies a synchronous fetch exception from its own dispatch fact", async (error) => {
+    const e = await login();
+    e.fetcher.mockImplementationOnce(() => { throw error; });
+    await expect(invoke(e.client)).rejects.toMatchObject(uncertain());
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("classifies rejected fetch without trusting a foreign transport error", async () => {
+    const e = await login();
+    e.fetcher.mockRejectedValueOnce(new ControlRoomActionTransportError("unbind", "NOT_DISPATCHED"));
+    await expect(invoke(e.client)).rejects.toMatchObject(uncertain());
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["logout", "expiry"] as const)("retains the qualified owner result after %s", async (why) => {
+    const e = await login(why === "expiry" ? 2 : 3600);
+    const late = deferred<Response>(); e.fetcher.mockReturnValueOnce(late.promise);
+    const pending = invoke(e.client);
+    await flush();
+    if (why === "logout") await e.client.signOut();
+    else await vi.advanceTimersByTimeAsync(2001);
+    const expected = terminal();
+    late.resolve(actionResponse(expected));
+    expect(await pending).toEqual(expected);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows Refresh builds beyond the incumbent READ timeout without a retry", async () => {
+    const e = await login(), late = deferred<Response>();
+    e.fetcher.mockReturnValueOnce(late.promise);
+    const pending = invoke(e.client, "refresh-builds");
+    await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS + 1);
+    const expected = terminal("refresh-builds");
+    late.resolve(actionResponse(expected));
+    expect(await pending).toEqual(expected);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles at the single total deadline even when fetch ignores abort", async () => {
+    const e = await login(), late = deferred<Response>();
+    e.fetcher.mockReturnValueOnce(late.promise);
+    const pending = invoke(e.client).catch(error => error);
+    await vi.advanceTimersByTimeAsync(489_999);
+    let settled = false; void pending.then(() => { settled = true; }); await flush();
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await pending).toMatchObject(uncertain());
+    const cancel = vi.fn(async () => {});
+    late.resolve({ body: { cancel }, headers: new Headers(), status: 200 } as unknown as Response);
+    await flush();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restart its deadline at headers and never awaits stalled cleanup", async () => {
+    const e = await login(), late = deferred<Response>();
+    e.fetcher.mockReturnValueOnce(late.promise);
+    const pending = invoke(e.client).catch(error => error);
+    await vi.advanceTimersByTimeAsync(300_000);
+    const reader = {
+      read: vi.fn(() => new Promise<ReadableStreamReadResult<Uint8Array>>(() => {})),
+      cancel: vi.fn(() => new Promise<void>(() => {})), releaseLock: vi.fn(),
+    };
+    late.resolve({ status: 200, headers: new Headers({ "content-type": "application/json" }),
+      body: { getReader: () => reader } } as unknown as Response);
+    await flush();
+    await vi.advanceTimersByTimeAsync(190_000);
+    expect(await pending).toMatchObject(uncertain());
+    expect(reader.cancel).toHaveBeenCalledTimes(1);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns uncertainty promptly on caller abort with an uncooperative fetch", async () => {
+    const e = await login(), controller = new AbortController(), late = deferred<Response>();
+    e.fetcher.mockReturnValueOnce(late.promise);
+    const pending = invoke(e.client, "open", controller.signal).catch(error => error);
+    controller.abort();
+    expect(await pending).toMatchObject(uncertain());
+    late.resolve(actionResponse()); await flush();
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a qualified result when cleanup triggers abort and throws", async () => {
+    const e = await login(), controller = new AbortController(), expected = terminal();
+    const bytes = new TextEncoder().encode(JSON.stringify(expected));
+    const reader = {
+      read: vi.fn().mockResolvedValueOnce({ done: false, value: bytes }).mockResolvedValueOnce({ done: true }),
+      cancel: vi.fn(() => { throw new Error("cleanup"); }),
+      releaseLock: vi.fn(() => { controller.abort(); throw new Error("release"); }),
+    };
+    e.fetcher.mockResolvedValueOnce({ status: 200, headers: new Headers({ "content-type": "application/json" }),
+      body: { getReader: () => reader } } as unknown as Response);
+    expect(await invoke(e.client, "open", controller.signal)).toEqual(expected);
+  });
+
+  it("owns copies of chunks before a source reader reuses its buffer", async () => {
+    const e = await login(), expected = terminal();
+    const bytes = new TextEncoder().encode(JSON.stringify(expected));
+    const first = bytes.slice(0, 20), second = bytes.slice(20);
+    const reader = {
+      read: vi.fn().mockResolvedValueOnce({ done: false, value: first })
+        .mockImplementationOnce(async () => { first.fill(0); return { done: false, value: second }; })
+        .mockResolvedValueOnce({ done: true }),
+      cancel: vi.fn(async () => {}), releaseLock: vi.fn(),
+    };
+    e.fetcher.mockResolvedValueOnce({ status: 200, headers: new Headers({ "content-type": "application/json" }),
+      body: { getReader: () => reader } } as unknown as Response);
+    expect(await invoke(e.client)).toEqual(expected);
+  });
+
+  it.each(["NOT_DISPATCHED", "EFFECT_UNKNOWN"])("retains a qualified non-2xx %s envelope", async disposition => {
+    const e = await login();
+    const expected = terminal("open", disposition,
+      disposition === "EFFECT_UNKNOWN" ? CONTROL_ROOM_UNKNOWN_OUTCOME : { ok: false, failure_kind: "stale_context" });
+    e.fetcher.mockResolvedValueOnce(actionResponse(expected));
+    expect(await invoke(e.client)).toEqual(expected);
+  });
+
+  it.each(["wide", "spoofed", "data-view"])("refuses a non-byte %s stream without normalization", async kind => {
+    const e = await login();
+    const bytes = new TextEncoder().encode(JSON.stringify(terminal()));
+    const wide = new Uint16Array(bytes);
+    if (kind === "spoofed") Object.defineProperty(wide, Symbol.toStringTag, { value: "Uint8Array" });
+    const value = kind === "data-view" ? new DataView(bytes.buffer) : wide;
+    const reader = {
+      read: vi.fn().mockResolvedValueOnce({ done: false, value }).mockResolvedValueOnce({ done: true }),
+      cancel: vi.fn(async () => {}), releaseLock: vi.fn(),
+    };
+    e.fetcher.mockResolvedValueOnce({ status: 200, headers: new Headers({ "content-type": "application/json" }),
+      body: { getReader: () => reader } } as unknown as Response);
+    await expect(invoke(e.client)).rejects.toMatchObject(uncertain());
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts synchronous preflight against its original deadline before dispatch", async () => {
+    const e = await login();
+    let expired = false;
+    const payload = new Proxy({ binding_id: "original-binding" }, {
+      ownKeys(target) {
+        if (!expired) { expired = true; vi.advanceTimersByTime(490_001); }
+        return Reflect.ownKeys(target);
+      },
+    });
+    await expect(invoke(e.client, "open", undefined, payload)).rejects.toMatchObject({
+      operation: "open", disposition: "NOT_DISPATCHED",
+    });
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("retains a canonical unknown outcome regardless of JSON member order", async () => {
+    const e = await login();
+    const outcome = Object.fromEntries(Object.entries(CONTROL_ROOM_UNKNOWN_OUTCOME).sort(([a], [b]) => a.localeCompare(b)));
+    const expected = terminal("open", "EFFECT_UNKNOWN", outcome);
+    e.fetcher.mockResolvedValueOnce(actionResponse(expected));
+    expect(await invoke(e.client)).toEqual(expected);
+  });
+
+  it.each([
+    "wrong_operation", "status_mismatch", "duplicate_keys", "escaped_duplicate",
+    "invalid_utf8", "html", "bare_auth_refusal", "length_not_decimal", "length_over_cap", "actual_over_cap",
+  ] as const)("withholds an unqualified %s response after the sole fetch", async why => {
+    const e = await login();
+    let raw: string | Uint8Array = JSON.stringify(terminal());
+    let status = 200;
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (why === "wrong_operation") raw = JSON.stringify(terminal("bind"));
+    if (why === "status_mismatch") status = 409;
+    if (why === "duplicate_keys") raw = raw.replace('"operation":"open"', '"operation":"bind","operation":"open"');
+    if (why === "escaped_duplicate") raw = raw.replace('"operation":"open"', '"oper\\u0061tion":"bind","operation":"open"');
+    if (why === "invalid_utf8") raw = new Uint8Array([0xc3, 0x28]);
+    if (why === "html") { raw = "<html>refused</html>"; headers["content-type"] = "text/html"; }
+    if (why === "bare_auth_refusal") { raw = '{"detail":"not authorized"}'; status = 403; }
+    if (why === "length_not_decimal") headers["content-length"] = "1e3";
+    if (why === "length_over_cap") headers["content-length"] = "2000001";
+    if (why === "actual_over_cap") raw = " ".repeat(2_000_001);
+    e.fetcher.mockResolvedValueOnce(new Response(raw as BodyInit, { status, headers }));
+    await expect(invoke(e.client)).rejects.toMatchObject(uncertain());
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("fixed H2 direct-native authenticated routes",()=>{
   const resource="https://fixture-resource.mastermind-x.com/executive";
   const selection={work_ref:"WS:H2-FIXTURE",job_id:"JOB-123",attempt_id:null};

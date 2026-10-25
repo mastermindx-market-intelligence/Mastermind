@@ -12,14 +12,26 @@ import stat
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 
 HOST = "mcp.mastermind-x.com"
-POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
-GET_ROUTES = (
+# The deployed public edge may still hold the previous exact fixed profile.
+# Preserve it for a fail-closed, two-phase Caddy publication migration; no
+# wildcard or unregistered URL is admitted by either profile.
+LEGACY_POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
+POST_ROUTES = LEGACY_POST_ROUTES + (
+    "/workspace/control-room/open", "/workspace/control-room/bind",
+    "/workspace/control-room/unbind", "/workspace/control-room/refresh-builds",
+)
+LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
     "/workspace/work/current", "/workspace/mission/current",
     "/workspace/mission/v3/current", "/workspace/result/current",
     "/workspace/plan/current",
     "/workspace/operator/activity/current",
     "/workspace/window/current",
+)
+GET_ROUTES = LEGACY_GET_ROUTES + (
+    "/workspace/control-room/state/current",
+    "/workspace/control-room/discover/current",
+    "/workspace/mission/v4/current",
 )
 _TEMPLATE = Path(__file__).with_name("os_public_edge.caddy.template")
 

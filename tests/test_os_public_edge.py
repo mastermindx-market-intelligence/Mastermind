@@ -23,6 +23,53 @@ def manifest(noir=False, notices=False):
     ]}
 
 
+def test_authenticated_control_room_routes_are_exact_and_method_scoped():
+    from ops.executive_os.os_public_edge import (
+        GET_ROUTES, LEGACY_GET_ROUTES, POST_ROUTES, LEGACY_POST_ROUTES,
+    )
+
+    # The client and the MCP source already consume mission/v4. Requiring an
+    # exact allowlist delta catches accidental omission without opening a
+    # wildcard route or silently expanding the legacy installed profile.
+    expected_get = {
+        "/workspace/control-room/state/current",
+        "/workspace/control-room/discover/current",
+        "/workspace/mission/v4/current",
+    }
+    expected_post = {
+        "/workspace/control-room/open",
+        "/workspace/control-room/bind",
+        "/workspace/control-room/unbind",
+        "/workspace/control-room/refresh-builds",
+    }
+    assert set(GET_ROUTES) == set(LEGACY_GET_ROUTES) | expected_get
+    assert set(POST_ROUTES) == set(LEGACY_POST_ROUTES) | expected_post
+    assert len(GET_ROUTES) == len(set(GET_ROUTES))
+    assert len(POST_ROUTES) == len(set(POST_ROUTES))
+    assert set(GET_ROUTES).isdisjoint(POST_ROUTES)
+    config = render(manifest(), 49152)
+    get_branch, post_branch = config.split("    handle @get {", 1)[0], config.split("    handle @post {", 1)[0]
+    assert get_branch.count("      path ") == 1
+    assert post_branch.count("      path ") == 2
+    # The rendered Caddy contract must match the closed Python route contract,
+    # not merely contain a few exemplar paths. Query strings are not routes.
+    caddy_get = set(get_branch.split("      path ", 1)[1].splitlines()[0].split())
+    caddy_post = set(post_branch.rsplit("      path ", 1)[1].splitlines()[0].split())
+    assert caddy_get == set(GET_ROUTES) | set(asset_routes(manifest()))
+    assert caddy_post == set(POST_ROUTES)
+    for route in expected_get:
+        assert route in get_branch
+    for route in expected_post:
+        assert route not in get_branch
+        assert route in post_branch
+    for route in expected_get:
+        assert route not in post_branch.split("    @post {", 1)[1]
+    assert "      method GET" in get_branch
+    assert "      method POST" in post_branch
+    assert "max_size 64KB" in config
+    assert "    abort" in config
+
+
 @pytest.mark.parametrize("noir,notices,count", [(False, False, 3), (True, False, 9), (True, True, 11)])
 def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
     value = manifest(noir, notices)

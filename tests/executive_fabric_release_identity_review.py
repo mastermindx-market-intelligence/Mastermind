@@ -471,6 +471,27 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
     'sites': ((3505, 39, 44, 'int', '0o711'), (3507, 43, 48, 'int', '0o700'), (3509, 39, 44, 'int', '0o755')),
 }
 
+# #1515 source-pin alignment candidate on unchanged app.py blob.
+# Eight exact action refusal statuses manually inspected; independent current-
+# head re-review remains required before protected release. These are HTTP response statuses,
+# not account/UID/GID values. Any changed byte/site restores ordinary D8.
+REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
+    'sha256': 'ff72b9f6d5165cd07bc41052fc322da84e02eef2e3041f58e7569de4f37bfb50',
+    'sites': ((135, 58, 61, 'int', '409'),),
+}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
+    'sha256': 'aafbdfcc401105829a40974f16bb4963862349f76b14ec74c1dc6d037f468e75',
+    'sites': (
+        (758, 71, 74, 'int', '400'),
+        (769, 71, 74, 'int', '403'),
+        (777, 71, 74, 'int', '400'),
+        (783, 79, 82, 'int', '400'),
+        (792, 71, 74, 'int', '400'),
+        (802, 71, 74, 'int', '403'),
+        (807, 76, 79, 'int', '503'),
+        (813, 71, 74, 'int', '403'),
+    ),
+}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
