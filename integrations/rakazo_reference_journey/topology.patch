@@ -1,0 +1,180 @@
+--- a/packages/testkit/src/cli/topology.ts
++++ b/packages/testkit/src/cli/topology.ts
+@@ -1,0 +2 @@ import { spawnSync } from "node:child_process";
++import { appendFileSync, readFileSync } from "node:fs";
+@@ -7,0 +9,94 @@ import { computerNetworkNameFor } from "../../../../infra/sandboxes/supervisor/s
++// Derived attempt-owned runner. These bytes are not an unchanged upstream run.
++const DONOR_APP_IMAGE = "rakazo/app:topology";
++const DONOR_COMPUTER_IMAGE = "rakazo/computer:topology";
++const SHARED_DOCKER_SOCKET = "/var/run/docker.sock";
++
++type Attempt = {
++  project: string;
++  overrideFile: string;
++  appImage: string;
++  computerImage: string;
++  evidencePath: string;
++  dockerHost: string;
++  dockerSocket: string;
++  ownedRoot: string;
++};
++
++function attemptManifestPath(): string {
++  const index = process.argv.indexOf("--mmx-attempt");
++  const manifestPath = index >= 0 ? process.argv[index + 1] : undefined;
++  if (!manifestPath || manifestPath.startsWith("-")) {
++    throw new Error("derived topology runner requires --mmx-attempt <owned-manifest>");
++  }
++  return manifestPath;
++}
++
++function requireOwned(value: string, ownedRoot: string, label: string): string {
++  const parts = value.split("/");
++  if (!value.startsWith(`${ownedRoot}/`) || value.includes("\0") || parts.includes("..")) {
++    throw new Error(`${label} is outside the owned attempt root`);
++  }
++  return value;
++}
++
++function loadAttempt(): Attempt {
++  if (process.argv.includes("--keep")) {
++    throw new Error("derived topology runner refuses --keep");
++  }
++  const raw = JSON.parse(readFileSync(attemptManifestPath(), "utf8")) as Record<string, unknown>;
++  const ownedRoot = raw.owned_root;
++  const project = raw.project;
++  const overrideFile = raw.override_file;
++  const appImage = raw.app_image;
++  const computerImage = raw.computer_image;
++  const evidencePath = raw.evidence_path;
++  const dockerHost = raw.docker_host;
++  const dockerSocket = raw.docker_socket;
++  if (
++    typeof ownedRoot !== "string" ||
++    typeof project !== "string" ||
++    typeof overrideFile !== "string" ||
++    typeof appImage !== "string" ||
++    typeof computerImage !== "string" ||
++    typeof evidencePath !== "string" ||
++    typeof dockerHost !== "string" ||
++    typeof dockerSocket !== "string"
++  ) {
++    throw new Error("attempt manifest is incomplete");
++  }
++  if (!/^mmx-rakazo-journey-[0-9a-f]{32}$/.test(project)) {
++    throw new Error("attempt project is not owned");
++  }
++  if (
++    appImage === DONOR_APP_IMAGE ||
++    computerImage === DONOR_COMPUTER_IMAGE ||
++    appImage.startsWith("rakazo/") ||
++    computerImage.startsWith("rakazo/")
++  ) {
++    throw new Error("refusing donor shared topology image tags");
++  }
++  if (
++    dockerSocket === SHARED_DOCKER_SOCKET ||
++    dockerHost === `unix://${SHARED_DOCKER_SOCKET}` ||
++    dockerHost.startsWith("tcp:") ||
++    dockerHost.startsWith("ssh:") ||
++    dockerHost.startsWith("http:")
++  ) {
++    throw new Error("refusing unqualified docker daemon");
++  }
++  requireOwned(overrideFile, ownedRoot, "override");
++  requireOwned(evidencePath, ownedRoot, "evidence");
++  requireOwned(dockerSocket, ownedRoot, "docker socket");
++  return {
++    project,
++    overrideFile,
++    appImage,
++    computerImage,
++    evidencePath,
++    dockerHost,
++    dockerSocket,
++    ownedRoot,
++  };
++}
++
++const attempt = loadAttempt();
+@@ -9 +104,2 @@ const composeFile = path.resolve("infra/compose/docker-compose.topology.yml");
+-const keep = process.argv.includes("--keep");
++const overrideFile = path.resolve(attempt.overrideFile);
++const keep = false;
+@@ -11 +107,19 @@ const skipBuild = process.argv.includes("--skip-build");
+-const project = `rakazo-topology-${process.pid}-${Date.now().toString(36)}`;
++const project = attempt.project;
++const closedEnv: NodeJS.ProcessEnv = {
++  PATH: "/usr/bin:/bin",
++  HOME: attempt.ownedRoot,
++  TMPDIR: `${attempt.ownedRoot}/tmp`,
++  LANG: "C.UTF-8",
++  LC_ALL: "C",
++  DOCKER_HOST: attempt.dockerHost,
++  DOCKER_CONFIG: `${attempt.ownedRoot}/config/docker`,
++  MMX_ADMITTED_DOCKER_SOCKET: attempt.dockerSocket,
++  TOPOLOGY_APP_IMAGE: attempt.appImage,
++  TOPOLOGY_COMPUTER_IMAGE: attempt.computerImage,
++};
++
++function evidence(event: Record<string, unknown>) {
++  const line = JSON.stringify({ derived: true, ...event });
++  if (Buffer.byteLength(line) > 2048) throw new Error("evidence line exceeds bound");
++  appendFileSync(attempt.evidencePath, `${line}\n`);
++}
+@@ -13,0 +128 @@ async function main() {
++  evidence({ stage: "runner_start", project, appImage: attempt.appImage, computerImage: attempt.computerImage });
+@@ -15 +130 @@ async function main() {
+-  const port = Number(process.env.TOPOLOGY_API_PORT ?? (await freePort()));
++  const port = await freePort();
+@@ -17,2 +132,2 @@ async function main() {
+-  const env = {
+-    ...process.env,
++  const env: NodeJS.ProcessEnv = {
++    ...closedEnv,
+@@ -20,2 +134,0 @@ async function main() {
+-    TOPOLOGY_APP_IMAGE: process.env.TOPOLOGY_APP_IMAGE ?? "rakazo/app:topology",
+-    TOPOLOGY_COMPUTER_IMAGE: process.env.TOPOLOGY_COMPUTER_IMAGE ?? "rakazo/computer:topology",
+@@ -26 +139,10 @@ async function main() {
+-      ["compose", "--project-name", project, "--file", composeFile, ...args],
++      [
++        "compose",
++        "--project-name",
++        project,
++        "--file",
++        composeFile,
++        "--file",
++        overrideFile,
++        ...args,
++      ],
+@@ -81,0 +204 @@ async function main() {
++    evidence({ stage: "file_bytes", runId: sent.runId, botId: bot.id, fileBytes: file.content });
+@@ -120 +243 @@ async function main() {
+-      console.error(compose(["logs", "--no-color", "--tail", "250"], true));
++      console.error(compose(["logs", "--no-color", "--tail", "40"], true));
+@@ -136,0 +260 @@ async function main() {
++        evidence({ stage: "compose_down", disposition: "exit_zero_not_a_clean_receipt" });
+@@ -138 +262,3 @@ async function main() {
+-        console.error(`topology cleanup failed: ${error instanceof Error ? error.message : error}`);
++        const message = error instanceof Error ? error.message : String(error);
++        evidence({ stage: "compose_down", disposition: "failed", message: message.slice(0, 300) });
++        console.error(`topology cleanup failed: ${message}`);
+@@ -261 +387 @@ function docker(args: string[]) {
+-  return command("docker", args, process.env, true);
++  return command("docker", args, closedEnv, true);
+@@ -388,3 +514,7 @@ function removeManagedComputers(
+-    console.error(
+-      `managed computer cleanup failed: ${error instanceof Error ? error.message : error}`,
+-    );
++    const message = error instanceof Error ? error.message : String(error);
++    try {
++      evidence({ stage: "computer_cleanup", disposition: "failed", message: message.slice(0, 300) });
++    } catch {
++      // Keep the cleanup failure visible if the evidence file itself cannot be written.
++    }
++    console.error(`managed computer cleanup failed: ${message}`);
+--- a/infra/compose/docker-compose.topology.yml
++++ b/infra/compose/docker-compose.topology.yml
+@@ -53 +53 @@ services:
+-      - /var/run/docker.sock:/var/run/docker.sock
++      - ${MMX_ADMITTED_DOCKER_SOCKET:?admitted-isolated-docker-socket-required}:/var/run/docker.sock
