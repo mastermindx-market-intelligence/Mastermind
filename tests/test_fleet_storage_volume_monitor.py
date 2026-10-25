@@ -255,7 +255,7 @@ class FleetStorageVolumeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             key = pathlib.Path(temp) / "loopback-fixture"
             key.write_text("fixture")
-            proc = mock.Mock(returncode=42, stdout=json.dumps(clean) + "\\n",
+            proc = mock.Mock(returncode=42, stdout=json.dumps(clean),
                              stderr="not for top-level success")
             with mock.patch.object(self.sweep, "LOOPBACK_KEY", key), mock.patch.object(
                 self.sweep.subprocess, "run", return_value=proc
