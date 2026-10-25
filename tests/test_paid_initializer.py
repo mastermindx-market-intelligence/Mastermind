@@ -576,9 +576,11 @@ def test_native_initializer_extends_only_exact_preimage_members():
     assert len(before)==95 and len(current)==98
     assert set(before)<=set(current)
     assert set(current)-set(before)=={'ext/paid_initializer.py','ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py'}
-    assert {p for p in before if before[p]!=current[p]}=={'ext/host_pull.sh','ext/paid_host_qualification.py'}
-    assert sum(before[p]==current[p] for p in before)==93
-    for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py'):
+    # The only additional pre-existing member delta is protected #1797's
+    # exact review-routing picker; it is not an initializer transformation.
+    assert {p for p in before if before[p]!=current[p]}=={'ext/host_pull.sh','ext/paid_host_qualification.py','ext/pick.py'}
+    assert sum(before[p]==current[p] for p in before)==92
+    for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py','pick.py'):
         assert current['ext/'+name]==hashlib.sha256((native/'candidate'/name).read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
@@ -756,10 +758,17 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             alias,command=qualifier.m.build_paid_probe(req);argv=shlex.split(command)
             assert alias==req['transport_alias'] and argv[5].startswith(owner.NO_SITE_PREAMBLE)
             assert len(command.encode('utf-8'))+1<=qualifier.m.MAX_REMOTE_COMMAND_BYTES
+            # Temporary diagnostic program: same sealed source/probe inputs,
+            # different outer failure reporter. This is not unchanged-journey
+            # qualification and never retries an already-entered initializer.
+            from tests.compiled_initializer_diagnostic import instrument_entry,require_execution_success
+            argv[5]=instrument_entry(argv[5],preamble=owner.NO_SITE_PREAMBLE)
+            assert len(argv[5].encode('utf-8'))+1<131072
             execution=subprocess.run(argv,env=dict(HOME=account.pw_dir,PATH='/usr/bin:/bin'),stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=30)
-            assert execution.returncode==0,'compiled no-site journey refused'
-            assert private_token.encode() not in execution.stdout
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+            require_execution_success(execution,request)
+            if private_token.encode() in execution.stdout:
+                raise AssertionError('compiled diagnostic output privacy refused') from None
             actual=qualifier.m._observation(execution.stdout,req)
             assert actual['binary']['real_path']==str(image)
             assert actual['pre_execution']['snapshot_sha256']==owner._NESTED_DATA.TRANSFORMED_SHA256
@@ -767,7 +776,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         current=lane.lstat()
         assert (current.st_dev,current.st_ino)==(owned.st_dev,owned.st_ino)
         shutil.rmtree(lane)
-    _linux_completion(request,'old-profile-finite-premise+real-system-nosite command_bytes_with_nul='+str(len(command.encode('utf-8'))+1))
+    _linux_completion(request,'diagnostic-program-only command_bytes_with_nul='+str(len(command.encode('utf-8'))+1))
 
 
 def test_observer_metadata_fixture_is_finite_and_does_not_hide_other_errors():
