@@ -137,17 +137,23 @@ def package_command(argv: bytes) -> bool:
               for part in argv.split(b"\x00") if part]
     if not tokens:
         return False
-    executable = os.path.basename(tokens[0])
-    if (executable in {"pip", "pip3", "pipx", "uv", "npm", "npm.cmd",
-                       "pnpm", "yarn", "npx", "corepack"}
-            or executable.startswith("pip3.")):
+    # A manager may be launched behind env/sudo/nice or another argv0
+    # wrapper. Prefer a harmless skipped purge over missing a live writer.
+    managers = {"pip", "pip3", "pipx", "uv", "npm", "npm.cmd",
+                "pnpm", "yarn", "npx", "corepack"}
+    if any(os.path.basename(token) in managers or
+           os.path.basename(token).startswith("pip3.")
+           for token in tokens):
         return True
     if any(token.endswith(("/npm-cli.js", "/pnpm.cjs", "/yarn.js",
                              "/pip/__main__.py")) for token in tokens):
         return True
-    return any(token == "-m" and index + 1 < len(tokens)
-               and (tokens[index + 1] == "pip"
-                    or tokens[index + 1].startswith("pip."))
+    return any((token == "-m" and index + 1 < len(tokens)
+                and (tokens[index + 1] == "pip"
+                     or tokens[index + 1].startswith("pip.")))
+               or (token.startswith("-mpip") and
+                   token[5:] in ("",) or
+                   token.startswith("-mpip.") )
                for index, token in enumerate(tokens))
 
 
@@ -422,6 +428,10 @@ def append_receipt(state: Path, report: dict) -> bool:
     try:
         fd = os.open(state / LEDGER, os.O_APPEND | os.O_CREAT | os.O_WRONLY |
                      os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        # Even DEFERRED_ALREADY_RUNNING appends must serialize with the
+        # current holder's settlement; never permit torn JSONL receipts.
+        # A busy ledger fails closed instead of waiting or tearing a row.
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         if os.write(fd, row) != len(row):
             return False
         os.fsync(fd)
