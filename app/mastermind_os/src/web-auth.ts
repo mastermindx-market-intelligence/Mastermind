@@ -617,8 +617,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const token = tokens.executive, ticket = executiveGeneration;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
-    // READ-only may observe but must never originate a SEND request.
-    if ((route === "submit" || route === "session/send") && token.executiveSend !== true)
+    // READ-only may observe but must never originate a SEND or Event ACK effect.
+    if ((route === "submit" || route === "session/send" || route === "direct-native/consume") &&
+      token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
     const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || direct) ? arguments_ : { arguments: arguments_ });

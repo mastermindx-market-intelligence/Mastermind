@@ -756,6 +756,29 @@ describe("fixed H2 direct-native authenticated routes",()=>{
   const resource="https://fixture-resource.mastermind-x.com/executive";
   const selection={work_ref:"WS:H2-FIXTURE",job_id:"JOB-123",attempt_id:null};
   const unavailable={schema:"mastermind.direct_native_result_response.v1",selection,availability:"UNAVAILABLE",reason_codes:["NOT_TERMINAL"],result:null,consumption:null};
+  it("refuses READ-only direct-native Event ACK before network while allowing result reads", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? "mastermind.executive.read"
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    expect(e.client.executive!.available()).toBe(true);
+    e.fetcher.mockClear();
+    e.fetcher.mockResolvedValue(response(unavailable));
+    const signal = new AbortController().signal;
+    await e.client.executive!.directNative!.read(selection, signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    await expect(e.client.executive!.directNative!.consume({
+      ...selection, attempt_id: "ATT-456", result_digest: "d".repeat(64),
+      operation_key: "mmos-readonly-ack-denied",
+    }, signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/direct-native/result",
+    ]);
+  });
   it("uses the existing executive bearer and exact direct bodies without automatic consumption",async()=>{
     const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
     e.fetcher.mockImplementation(async()=>response(unavailable));
