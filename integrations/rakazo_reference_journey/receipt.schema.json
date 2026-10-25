@@ -212,25 +212,35 @@
         "patch_sha256",
         "override_sha256",
         "config_manifest_sha256",
+        "config_manifest_cause",
         "cache_manifest_sha256",
+        "cache_manifest_cause",
         "tmp_manifest_sha256",
+        "tmp_manifest_cause",
         "source_manifest_sha256",
-        "staging_manifest_sha256"
+        "source_manifest_cause",
+        "staging_manifest_sha256",
+        "staging_manifest_cause"
       ],
       "properties": {
         "patch_sha256": {"type": "string"},
         "override_sha256": {"type": "string"},
-        "config_manifest_sha256": {"type": "string"},
-        "cache_manifest_sha256": {"type": "string"},
-        "tmp_manifest_sha256": {"type": "string"},
-        "source_manifest_sha256": {"type": "string"},
-        "staging_manifest_sha256": {"type": "string"}
+        "config_manifest_sha256": {"type": ["string", "null"]},
+        "config_manifest_cause": {"type": ["string", "null"]},
+        "cache_manifest_sha256": {"type": ["string", "null"]},
+        "cache_manifest_cause": {"type": ["string", "null"]},
+        "tmp_manifest_sha256": {"type": ["string", "null"]},
+        "tmp_manifest_cause": {"type": ["string", "null"]},
+        "source_manifest_sha256": {"type": ["string", "null"]},
+        "source_manifest_cause": {"type": ["string", "null"]},
+        "staging_manifest_sha256": {"type": ["string", "null"]},
+        "staging_manifest_cause": {"type": ["string", "null"]}
       }
     },
     "limits": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["deadlines_seconds", "log_max_bytes", "execution_armed", "automatic_retry", "notes"],
+      "required": ["deadlines_seconds", "log_max_bytes", "execution_armed", "automatic_retry", "notes", "budget"],
       "properties": {
         "deadlines_seconds": {"type": "object"},
         "log_max_bytes": {"const": 8192},
@@ -239,6 +249,26 @@
         "notes": {
           "type": "array",
           "items": {"type": "string"}
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "elapsed_seconds",
+            "remaining_seconds",
+            "exhausted_phase",
+            "cleanup_reserve_seconds",
+            "reap_reserve_seconds",
+            "hash_budget_seconds"
+          ],
+          "properties": {
+            "elapsed_seconds": {"type": ["number", "null"]},
+            "remaining_seconds": {"type": ["number", "null"]},
+            "exhausted_phase": {"type": ["string", "null"]},
+            "cleanup_reserve_seconds": {"const": 20},
+            "reap_reserve_seconds": {"const": 2},
+            "hash_budget_seconds": {"const": 10}
+          }
         }
       }
     },
@@ -268,6 +298,30 @@
         "required": ["status"]
       },
       "then": false
+    },
+    {
+      "if": {
+        "properties": {"source_phase": {"const": "SOURCE_PREPARED"}},
+        "required": ["source_phase"]
+      },
+      "then": {
+        "properties": {
+          "hashes": {
+            "properties": {
+              "config_manifest_sha256": {"type": "string"},
+              "config_manifest_cause": {"type": "null"},
+              "cache_manifest_sha256": {"type": "string"},
+              "cache_manifest_cause": {"type": "null"},
+              "tmp_manifest_sha256": {"type": "string"},
+              "tmp_manifest_cause": {"type": "null"},
+              "source_manifest_sha256": {"type": "string"},
+              "source_manifest_cause": {"type": "null"},
+              "staging_manifest_sha256": {"type": "string"},
+              "staging_manifest_cause": {"type": "null"}
+            }
+          }
+        }
+      }
     }
   ]
 }

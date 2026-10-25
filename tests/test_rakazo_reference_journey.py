@@ -12,8 +12,10 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import zlib
 from pathlib import Path
 
@@ -376,6 +378,26 @@ def test_cleanup_outside_owned_scope_and_exit_zero_uncertainty():
     assert journey.classify_cleanup(
         exit_code=0, before=["owned"], after=[], observation_present=True, owned_project_only=False,
     ) == "REFUSED"
+    with pytest.raises(journey.Refusal) as unrelated:
+        journey.plan_owned_cleanup(project, ["ubuntu:24.04", images[1]])
+    assert unrelated.value.reason == "unowned_image"
+    with pytest.raises(journey.Refusal) as duplicate:
+        journey.plan_owned_cleanup(project, [images[0], images[0]])
+    assert duplicate.value.reason == "unowned_image"
+    with pytest.raises(journey.Refusal) as mismatched:
+        journey.plan_owned_cleanup(project, [
+            "mmx-rakazo-journey/app:" + "cd" * 16,
+            "mmx-rakazo-journey/computer:" + "cd" * 16,
+        ])
+    assert mismatched.value.reason == "unowned_image"
+    with pytest.raises(journey.Refusal) as extra:
+        journey.plan_owned_cleanup(project, [*images, images[0]])
+    assert extra.value.reason == "unowned_image"
+    flat_rm = [argv for argv in plan if "rm" in argv]
+    assert flat_rm == [
+        ("/usr/bin/docker", "image", "rm", images[0]),
+        ("/usr/bin/docker", "image", "rm", images[1]),
+    ]
 
 
 def test_fixture_cannot_mint_journey_passed(tmp_path):
@@ -466,7 +488,8 @@ def test_redact_bounds_and_strips_donor_test_secrets():
     assert "secret-value" not in journey.redact("password=secret-value")
     assert "topology-only-password" not in journey.redact("see topology-only-password")
     bounded = journey.redact("a" * 9000)
-    assert len(bounded.encode("utf-8")) < 9000
+    assert len(bounded.encode("utf-8")) <= journey.LOG_MAX_BYTES
+    assert bounded.endswith("\n[truncated]")
 
 
 def test_node_engine_range_matches_donor():
@@ -475,6 +498,210 @@ def test_node_engine_range_matches_donor():
     assert journey.node_satisfies("v24.0.0") is True
     assert journey.node_satisfies("v25.1.0") is False
     assert journey.node_satisfies("v26.0.0") is True
+
+
+def test_cumulative_deadline_is_not_reset_for_each_command():
+    clock = {"now": 0.0}
+
+    def now():
+        return clock["now"]
+
+    budget = journey.AttemptBudget(now=now)
+    assert budget.take("fetch") == 90
+    clock["now"] = 100
+    assert budget.take("fetch") == 60
+    clock["now"] = 160
+    with pytest.raises(journey.Refusal) as exhausted:
+        budget.take("admit")
+    assert exhausted.value.reason == "deadline_exhausted"
+    with pytest.raises(journey.Refusal) as again:
+        budget.take("derive")
+    assert again.value.reason == "deadline_exhausted"
+    assert budget.elapsed() == 160
+    assert budget.remaining() == 20
+    assert budget.facts()["exhausted_phase"] == "admit"
+    assert budget.take("owned_cleanup") == 20
+    with pytest.raises(journey.Refusal) as armed:
+        journey.AttemptBudget(now=now).take("execution")
+    assert armed.value.reason == "execution_not_authorized_for_initial_placement"
+
+    timeouts = []
+
+    def spawn(argv, **kwargs):
+        assert clock["now"] < 160
+        timeouts.append(kwargs["timeout"])
+        clock["now"] += 80
+        code = 0 if len(timeouts) == 1 else 1
+        return journey.CommandRecord(tuple(argv), code, "", "fetch-failed", False, False)
+
+    clock["now"] = 0.0
+    receipt = journey.run_readiness(now=now, spawn=spawn)
+    assert timeouts == [90, 80]
+    assert receipt["status"] == "READINESS_BLOCKED"
+    assert receipt["limits"]["budget"]["exhausted_phase"] == "hash_manifest"
+    assert receipt["limits"]["budget"]["elapsed_seconds"] == 160
+    assert receipt["limits"]["budget"]["remaining_seconds"] == 20
+    assert receipt["hashes"]["config_manifest_cause"] == "deadline_exhausted"
+    assert receipt["source_phase"] != "SOURCE_PREPARED"
+    assert "deadline_exhausted" in receipt["limits"]["notes"]
+    assert journey.receipt_problems(receipt) == []
+
+
+def test_streamed_captures_stop_at_the_ceiling(tmp_path):
+    owned = journey.create_owned_root()
+    try:
+        env = journey.build_closed_env(owned)
+        text = journey.default_spawn(
+            [sys.executable, "-I", "-c", "import sys; sys.stdout.write('Z' * 2000000)"],
+            env=env, cwd=owned.path / "tmp", timeout=5,
+        )
+        assert len(text.stdout.encode("utf-8")) <= journey.LOG_MAX_BYTES
+        assert text.stdout.endswith("\n[truncated]")
+        assert text.uncertain is False
+        err = journey.default_spawn(
+            [sys.executable, "-I", "-c", "import sys; sys.stderr.write('E' * 2000000)"],
+            env=env, cwd=owned.path / "tmp", timeout=5,
+        )
+        assert len(err.stderr.encode("utf-8")) <= journey.LOG_MAX_BYTES
+        assert err.stderr.endswith("\n[truncated]")
+        exact = journey.default_spawn(
+            [sys.executable, "-I", "-c", f"import sys; sys.stdout.buffer.write(b'B'*{journey.BINARY_OBJECT_CEILING})"],
+            env=env, cwd=owned.path / "tmp", timeout=5, binary=True,
+        )
+        assert exact.capture_refusal is None
+        assert exact.stdout_bytes is not None
+        assert len(exact.stdout_bytes) == journey.BINARY_OBJECT_CEILING
+        flooded = journey.default_spawn(
+            [sys.executable, "-I", "-c", f"import sys; sys.stdout.buffer.write(b'B'*{journey.BINARY_OBJECT_CEILING + 32})"],
+            env=env, cwd=owned.path / "tmp", timeout=5, binary=True,
+        )
+        assert flooded.capture_refusal == "binary_capture_exceeded"
+        assert flooded.stdout_bytes is None
+        assert flooded.uncertain is False
+    finally:
+        journey.remove_owned_root(owned)
+
+
+def test_operational_failure_returns_a_receipt(tmp_path):
+    def allocate():
+        raise FileNotFoundError("missing-temp")
+
+    def spawn(argv, **kwargs):
+        raise AssertionError("spawned")
+
+    receipt = journey.run_readiness(allocate_root=allocate, spawn=spawn)
+    assert receipt["status"] == "READINESS_BLOCKED"
+    assert receipt["source_phase"] != "SOURCE_PREPARED"
+    assert receipt["source"]["reason"] == "operational_failure"
+    assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+    assert receipt["hashes"]["config_manifest_sha256"] is None
+    assert receipt["hashes"]["config_manifest_cause"] == "FileNotFoundError"
+    assert journey.EMPTY_SHA256 not in receipt["hashes"].values()
+    assert journey.receipt_problems(receipt) == []
+
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    before = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*"))
+
+    def failing(argv, **kwargs):
+        raise OSError("closed")
+
+    receipt = journey.run_readiness(object_store=git_dir, spawn=failing)
+    after = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*"))
+    assert after == before
+    assert receipt["status"] == "READINESS_BLOCKED"
+    assert receipt["source"]["reason"] == "operational_failure"
+    assert receipt["cleanup"]["owned_root"] == "REMOVED"
+    assert journey.receipt_problems(receipt) == []
+
+
+def test_uncertain_child_does_not_continue_or_delete(tmp_path):
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    calls = []
+
+    def spawn(argv, **kwargs):
+        calls.append(tuple(argv))
+        return journey.CommandRecord(tuple(argv), -1, "", "", True, True)
+
+    before = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*"))
+    receipt = journey.run_readiness(object_store=git_dir, spawn=spawn)
+    created = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*")) - before
+    try:
+        assert len(calls) == 1
+        assert receipt["status"] == "READINESS_BLOCKED"
+        assert receipt["source"]["reason"] == "uncertain_child"
+        assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+        assert "uncertain_child" in receipt["limits"]["notes"]
+        assert receipt["hashes"]["config_manifest_cause"] == "uncertain_child"
+        assert receipt["source_phase"] != "SOURCE_PREPARED"
+        assert len(created) == 1
+        assert journey.receipt_problems(receipt) == []
+    finally:
+        for path in created:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+
+
+def test_manifest_failure_is_unavailable_not_an_empty_hash():
+    owned = journey.create_owned_root()
+    try:
+        (owned.path / "config" / "link").symlink_to(owned.path / "config" / "gitconfig")
+        hashes = journey._owned_hashes(owned, journey.AttemptBudget())
+        assert hashes["config_manifest_sha256"] is None
+        assert hashes["config_manifest_cause"] == "symlink_in_owned_root"
+        for key in journey.MANIFEST_KEYS:
+            if hashes[key] is None:
+                assert hashes[journey._hash_cause(key)]
+            elif hashes[key] == journey.EMPTY_SHA256:
+                assert hashes[journey._hash_cause(key)] is None
+        with pytest.raises(journey.Refusal) as bounded:
+            journey.directory_manifest_sha256(
+                owned.path / "config", journey.AttemptBudget(), max_files=1,
+            )
+        assert bounded.value.reason == "manifest_bound_exceeded"
+        receipt = journey.build_receipt(
+            source_state="ADMITTED",
+            source_reason="",
+            blobs={},
+            derivation_state="PREPARED",
+            derivation_reason="",
+            assertions=True,
+            derived={},
+            identity=journey.new_identity(),
+            daemon=journey.qualify_observation(journey.DaemonObservation(
+                "absent", False, None, None, None, False, False, "not_probed",
+            )),
+            toolchain=journey._empty_toolchain(),
+            env_keys=sorted(journey.ALLOWED_ENV_KEYS),
+            owned_root="RETAINED",
+            hashes=hashes,
+            commands=(),
+            notes=["symlink_in_owned_root"],
+            budget=journey.AttemptBudget(),
+        )
+        assert receipt["source_phase"] == "NOT_PREPARED"
+        assert receipt["status"] == "READINESS_BLOCKED"
+        assert journey.receipt_problems(receipt) == []
+    finally:
+        journey.remove_owned_root(owned)
+
+
+def test_phase_cap_bounds_a_real_child():
+    owned = journey.create_owned_root()
+    try:
+        env = journey.build_closed_env(owned)
+        budget = journey.AttemptBudget()
+        budget.started = budget._now() - (journey.DEADLINES_SECONDS["overall"] - journey.DEADLINES_SECONDS["owned_cleanup"] - 0.3)
+        allowance = budget.take("toolchain_probe")
+        assert allowance <= 0.3
+        record = journey.default_spawn(
+            [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+            env=env, cwd=owned.path / "tmp", timeout=allowance, budget=budget,
+        )
+        assert record.timed_out is True
+        assert record.uncertain is False
+        assert record.returncode != 0
+    finally:
+        journey.remove_owned_root(owned)
 
 TOPOLOGY_Z64 = """
 eNrFO2tz2ziS3/0rEFZqQlZZlJO93duTo+iymWTWe0nsip3buvL4YliELI4okkOAtrWK/vt14w2KUjzZubuaGY8INhr9RncD

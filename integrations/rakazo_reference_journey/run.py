@@ -19,11 +19,13 @@ import json
 import os
 import re
 import secrets
+import select
 import shutil
 import signal
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,9 +66,32 @@ DEADLINES_SECONDS = {
     "derive": 20,
     "daemon_probe": 15,
     "toolchain_probe": 15,
+    "hash_manifest": 10,
     "owned_cleanup": 20,
+    "reap": 2,
     "execution": 900,
 }
+# Byte sizes of the pinned required blobs. The binary capture ceiling is the
+# largest of those objects (pnpm-lock.yaml, 817721 bytes).
+PINNED_BLOB_BYTES = {
+    "packages/testkit/src/cli/topology.ts": 15316,
+    "infra/compose/docker-compose.topology.yml": 6661,
+    "package.json": 2880,
+    "pnpm-lock.yaml": 817721,
+    "pnpm-workspace.yaml": 93,
+}
+BINARY_OBJECT_CEILING = max(PINNED_BLOB_BYTES.values())
+TRUNCATION_MARKER = "\n[truncated]"
+MANIFEST_KEYS = (
+    "config_manifest_sha256",
+    "cache_manifest_sha256",
+    "tmp_manifest_sha256",
+    "source_manifest_sha256",
+    "staging_manifest_sha256",
+)
+MANIFEST_MAX_FILES = 20000
+MANIFEST_MAX_BYTES = 128 * 1024 * 1024
+EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 REQUIRED_BLOBS = {
     "packages/testkit/src/cli/topology.ts": {
         "git_blob": "6e56619314d78fecc1e3425a7b83d93ebd7bb190",
@@ -200,6 +225,59 @@ class CommandRecord:
     timed_out: bool
     uncertain: bool
     stdout_bytes: bytes | None = None
+    capture_refusal: str | None = None
+
+
+class AttemptBudget:
+    """One monotonic overall budget. Phase caps never restart it."""
+
+    def __init__(self, *, now: Callable[[], float] | None = None, overall: float | None = None) -> None:
+        self._now = now or time.monotonic
+        self.started = self._now()
+        self.overall = float(DEADLINES_SECONDS["overall"] if overall is None else overall)
+        self.exhausted_phase: str | None = None
+        self.uncertain = False
+        self.blocked: str | None = None
+
+    def elapsed(self) -> float:
+        return self._now() - self.started
+
+    def remaining(self) -> float:
+        return self.overall - self.elapsed()
+
+    def schedulable(self) -> float:
+        return self.remaining() - float(DEADLINES_SECONDS["owned_cleanup"])
+
+    def take(self, phase: str) -> float:
+        if phase == "execution":
+            raise Refusal("execution_not_authorized_for_initial_placement")
+        reserve_phase = phase in {"owned_cleanup", "reap"}
+        if self.blocked and not (self.blocked == "deadline_exhausted" and reserve_phase):
+            raise Refusal(self.blocked)
+        if phase not in DEADLINES_SECONDS:
+            raise Refusal("deadline_exhausted")
+        cap = float(DEADLINES_SECONDS[phase])
+        left = self.remaining() if reserve_phase else self.schedulable()
+        if left <= 0 or cap <= 0:
+            if self.exhausted_phase is None:
+                self.exhausted_phase = phase
+            self.blocked = "deadline_exhausted"
+            raise Refusal("deadline_exhausted")
+        return min(cap, left)
+
+    def mark_uncertain(self) -> None:
+        self.uncertain = True
+        self.blocked = "uncertain_child"
+
+    def facts(self) -> dict[str, object]:
+        return {
+            "elapsed_seconds": self.elapsed(),
+            "remaining_seconds": self.remaining(),
+            "exhausted_phase": self.exhausted_phase,
+            "cleanup_reserve_seconds": DEADLINES_SECONDS["owned_cleanup"],
+            "reap_reserve_seconds": DEADLINES_SECONDS["reap"],
+            "hash_budget_seconds": DEADLINES_SECONDS["hash_manifest"],
+        }
 
 
 @dataclass(frozen=True)
@@ -278,14 +356,78 @@ def assert_readiness_argv(argv: Sequence[str]) -> None:
             raise Refusal("readiness_forbids_topology_execution")
 
 
-def redact(text: str) -> str:
+def redact(text: str, *, truncated: bool = False) -> str:
+    """Redact, then fit the text plus a truncation marker inside the log cap."""
     cleaned = _SECRET_RE.sub(r"\1\2[redacted]", text)
     for literal in _LITERAL_SECRETS:
         cleaned = cleaned.replace(literal, "[redacted]")
     raw = cleaned.encode("utf-8", errors="replace")
-    if len(raw) > LOG_MAX_BYTES:
-        cleaned = raw[:LOG_MAX_BYTES].decode("utf-8", errors="ignore") + "\n[truncated]"
-    return cleaned
+    marker = TRUNCATION_MARKER.encode("utf-8")
+    if not truncated and len(raw) <= LOG_MAX_BYTES:
+        return cleaned
+    room = LOG_MAX_BYTES - len(marker)
+    clipped = raw[:room]
+    text_out = clipped.decode("utf-8", errors="ignore")
+    while text_out and len(text_out.encode("utf-8")) + len(marker) > LOG_MAX_BYTES:
+        text_out = text_out[:-1]
+    return text_out + TRUNCATION_MARKER
+
+
+def _group_gone(pid: int) -> bool:
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _reap_owned_group(proc: subprocess.Popen[bytes], seconds: float) -> tuple[bool, int]:
+    """SIGKILL and wait only for this process group. False means uncertain."""
+    pid = proc.pid
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        return False, -1
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except OSError:
+                return False, -1
+    try:
+        code = proc.wait(timeout=max(0.0, seconds))
+    except (subprocess.TimeoutExpired, OSError):
+        return False, -1
+    if not _group_gone(pid):
+        return False, code if code is not None else -1
+    return True, code if code is not None else -1
+
+
+def _read_capped(fd: int, buf: bytearray, *, binary: bool, ceiling: int) -> tuple[bool, bool]:
+    """Read into buf up to ceiling. Returns (eof, overflow). Overflow is not stored."""
+    room = ceiling - len(buf)
+    if room <= 0:
+        try:
+            extra = os.read(fd, 1)
+        except BlockingIOError:
+            return False, False
+        except OSError:
+            return True, False
+        return (not extra), bool(extra)
+    try:
+        chunk = os.read(fd, min(65536, room))
+    except BlockingIOError:
+        return False, False
+    except OSError:
+        return True, False
+    if not chunk:
+        return True, False
+    buf += chunk
+    return False, False
 
 
 def default_spawn(
@@ -296,7 +438,9 @@ def default_spawn(
     timeout: float,
     binary: bool = False,
     stdin_bytes: bytes | None = None,
+    budget: AttemptBudget | None = None,
 ) -> CommandRecord:
+    """Stream child output with a hard ceiling. Do not buffer via communicate()."""
     assert_closed_env(env)
     assert_readiness_argv(tuple(argv))
     proc = subprocess.Popen(
@@ -308,33 +452,113 @@ def default_spawn(
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
+    assert proc.stdout is not None and proc.stderr is not None
+    out_buf = bytearray()
+    err_buf = bytearray()
+    out_fd = proc.stdout.fileno()
+    err_fd = proc.stderr.fileno()
+    os.set_blocking(out_fd, False)
+    os.set_blocking(err_fd, False)
+    stdin_fd = None
+    stdin_pos = 0
+    stdin_view = memoryview(stdin_bytes) if stdin_bytes else None
+    if proc.stdin is not None and stdin_view is not None:
+        stdin_fd = proc.stdin.fileno()
+        os.set_blocking(stdin_fd, False)
+    elif proc.stdin is not None:
+        proc.stdin.close()
+    out_open = True
+    err_open = True
+    binary_overflow = False
+    out_capped = False
+    err_capped = False
     timed_out = False
-    uncertain = False
-    try:
-        stdout, stderr = proc.communicate(stdin_bytes, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    text_ceiling = LOG_MAX_BYTES
+    out_ceiling = BINARY_OBJECT_CEILING if binary else text_ceiling
+    while out_open or err_open or stdin_fd is not None:
+        if time.monotonic() >= deadline:
+            timed_out = True
+            break
+        readable = [fd for fd, open_ in ((out_fd, out_open), (err_fd, err_open)) if open_]
+        writable = [stdin_fd] if stdin_fd is not None else []
+        if not readable and not writable:
+            break
+        wait = max(0.0, deadline - time.monotonic())
+        ready_r, ready_w, _ = select.select(readable, writable, [], min(0.05, wait))
+        if stdin_fd is not None and stdin_fd in ready_w and stdin_view is not None:
+            try:
+                written = os.write(stdin_fd, stdin_view[stdin_pos:stdin_pos + 65536])
+            except BlockingIOError:
+                written = 0
+            except OSError:
+                written = 0
+                stdin_fd = None
+            stdin_pos += written
+            if stdin_view is not None and stdin_pos >= len(stdin_view):
+                if proc.stdin is not None:
+                    proc.stdin.close()
+                stdin_fd = None
+        if out_fd in ready_r and out_open:
+            eof, overflow = _read_capped(out_fd, out_buf, binary=binary, ceiling=out_ceiling)
+            if overflow:
+                if binary:
+                    binary_overflow = True
+                else:
+                    out_capped = True
+                break
+            if eof:
+                out_open = False
+        if err_fd in ready_r and err_open:
+            eof, overflow = _read_capped(err_fd, err_buf, binary=False, ceiling=text_ceiling)
+            if overflow:
+                err_capped = True
+                break
+            if eof:
+                err_open = False
+        if proc.poll() is not None and not ready_r and not ready_w and not out_open and not err_open:
+            break
+    if proc.poll() is None and not timed_out and not binary_overflow and not out_capped and not err_capped:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except OSError:
-            uncertain = True
-        try:
-            stdout, stderr = proc.communicate(timeout=2)
+            proc.wait(timeout=min(1.0, max(0.05, float(timeout))))
         except subprocess.TimeoutExpired:
-            uncertain = True
-            stdout, stderr = b"", b""
-            proc.kill()
-    stdout = stdout or b""
-    stderr = stderr or b""
-    text_out = "" if binary else redact(stdout.decode("utf-8", errors="replace"))
+            timed_out = True
+    capture_refusal = "binary_capture_exceeded" if binary_overflow else None
+    uncertain = False
+    must_stop = timed_out or binary_overflow or out_capped or err_capped or proc.poll() is None or not _group_gone(proc.pid)
+    if must_stop:
+        if budget is None:
+            reap_seconds = float(DEADLINES_SECONDS["reap"])
+        else:
+            reap_seconds = min(float(DEADLINES_SECONDS["reap"]), max(0.0, budget.remaining()))
+        reaped, code = _reap_owned_group(proc, reap_seconds)
+        uncertain = not reaped
+        returncode = code
+    else:
+        returncode = proc.returncode if proc.returncode is not None else 0
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+    if binary_overflow:
+        out_buf.clear()
+    stdout_text = ""
+    if not binary:
+        stdout_text = redact(bytes(out_buf).decode("utf-8", errors="replace"), truncated=out_capped)
+    stderr_text = redact(bytes(err_buf).decode("utf-8", errors="replace"), truncated=err_capped)
+    if len(stdout_text.encode("utf-8")) > LOG_MAX_BYTES:
+        stdout_text = redact(stdout_text, truncated=True)
+    if len(stderr_text.encode("utf-8")) > LOG_MAX_BYTES:
+        stderr_text = redact(stderr_text, truncated=True)
+    kept = bytes(out_buf) if binary and not binary_overflow else None
     return CommandRecord(
         tuple(argv),
-        proc.returncode if proc.returncode is not None else -1,
-        text_out,
-        redact(stderr.decode("utf-8", errors="replace")),
+        returncode,
+        stdout_text,
+        stderr_text,
         timed_out,
         uncertain,
-        stdout if binary else None,
+        kept,
+        capture_refusal,
     )
 
 
@@ -344,21 +568,22 @@ def _write(path: Path, text: str) -> None:
 
 def create_owned_root() -> OwnedRoot:
     path = Path(tempfile.mkdtemp(prefix="mmx-rakazo-journey-"))
-    if path.is_symlink() or path.resolve() != path:
-        raise Refusal("owned_root_unresolved")
-    token = secrets.token_hex(32)
-    os.chmod(path, 0o700)
-    for name in (
-        "config", "config/docker", "cache", "cache/npm", "cache/pnpm",
-        "tmp", "home", "staging", "source",
-    ):
-        directory = path / name
-        directory.mkdir(parents=True, exist_ok=True)
-        os.chmod(directory, 0o700)
-    _write(path / ".mmx-owned", token + "\n")
-    _write(
-        path / "config" / "gitconfig",
-        """[core]
+    try:
+        if path.is_symlink() or path.resolve() != path:
+            raise Refusal("owned_root_unresolved")
+        token = secrets.token_hex(32)
+        os.chmod(path, 0o700)
+        for name in (
+            "config", "config/docker", "cache", "cache/npm", "cache/pnpm",
+            "tmp", "home", "staging", "source",
+        ):
+            directory = path / name
+            directory.mkdir(parents=True, exist_ok=True)
+            os.chmod(directory, 0o700)
+        _write(path / ".mmx-owned", token + "\n")
+        _write(
+            path / "config" / "gitconfig",
+            """[core]
 	hooksPath = /dev/null
 	fsmonitor =
 	attributesFile = /dev/null
@@ -383,13 +608,16 @@ def create_owned_root() -> OwnedRoot:
 [init]
 	defaultBranch = master
 """,
-    )
-    _write(path / "config" / "gitconfig-system", "")
-    npmrc = "ignore-scripts=true\nfund=false\naudit=false\n"
-    _write(path / "config" / "npmrc", npmrc)
-    _write(path / "config" / "npmrc-global", npmrc)
-    _write(path / "config" / "docker" / "config.json", "{}\n")
-    return OwnedRoot(path, token)
+        )
+        _write(path / "config" / "gitconfig-system", "")
+        npmrc = "ignore-scripts=true\nfund=false\naudit=false\n"
+        _write(path / "config" / "npmrc", npmrc)
+        _write(path / "config" / "npmrc-global", npmrc)
+        _write(path / "config" / "docker" / "config.json", "{}\n")
+        return OwnedRoot(path, token)
+    except OSError:
+        shutil.rmtree(path, ignore_errors=True)
+        raise
 
 
 def _marker_ok(owned: OwnedRoot) -> bool:
@@ -426,19 +654,70 @@ def remove_owned_root(owned: OwnedRoot) -> str:
     return "REMOVED"
 
 
-def directory_manifest_sha256(root: Path) -> str:
+def directory_manifest_sha256(
+    root: Path,
+    budget: AttemptBudget,
+    *,
+    max_files: int = MANIFEST_MAX_FILES,
+    max_bytes: int = MANIFEST_MAX_BYTES,
+) -> str:
+    """Hash an owned directory without following symlinks or walking off the clock."""
     lines: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
+    files = 0
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        if budget.remaining() <= 0:
+            budget.exhausted_phase = budget.exhausted_phase or "hash_manifest"
+            budget.blocked = "deadline_exhausted"
+            raise Refusal("deadline_exhausted")
+        kept: list[str] = []
+        for name in sorted(dirnames):
+            candidate = Path(dirpath) / name
+            if candidate.is_symlink():
+                raise Refusal("symlink_in_owned_root")
+            kept.append(name)
+        dirnames[:] = kept
         for name in sorted(filenames):
             path = Path(dirpath) / name
             if path.is_symlink():
                 raise Refusal("symlink_in_owned_root")
+            files += 1
+            if files > max_files:
+                raise Refusal("manifest_bound_exceeded")
+            data = path.read_bytes()
+            total += len(data)
+            if total > max_bytes:
+                raise Refusal("manifest_bound_exceeded")
             rel = path.relative_to(root).as_posix()
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            digest = hashlib.sha256(data).hexdigest()
             mode = oct(path.stat().st_mode & 0o777)
             lines.append(f"{rel}\0{mode}\0{digest}")
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def _invoke(
+    spawn: Spawn,
+    argv: Sequence[str],
+    *,
+    phase: str,
+    budget: AttemptBudget | None,
+    **kwargs: object,
+) -> CommandRecord:
+    """Cap this command by the remaining overall budget. Do not restart it."""
+    if budget is None:
+        kwargs.setdefault("timeout", float(DEADLINES_SECONDS[phase]))
+    else:
+        kwargs["timeout"] = budget.take(phase)
+        kwargs["budget"] = budget
+    record = spawn(argv, **kwargs)
+    if not isinstance(record, CommandRecord):
+        raise Refusal("spawn_contract")
+    if budget is not None and record.uncertain:
+        budget.mark_uncertain()
+        raise Refusal("uncertain_child")
+    if record.capture_refusal:
+        raise Refusal(record.capture_refusal)
+    return record
 
 
 def validate_git_dir(path: Path) -> Path:
@@ -471,10 +750,12 @@ def _failed(record: CommandRecord) -> bool:
 def _git_text(
     spawn: Spawn, env: Mapping[str, str], cwd: Path, git_dir: Path | None,
     args: Sequence[str], timeout: float, stdin_bytes: bytes | None = None,
+    budget: AttemptBudget | None = None,
 ) -> str:
-    record = spawn(
-        git_argv(git_dir, *args), env=env, cwd=cwd, timeout=timeout,
-        binary=False, stdin_bytes=stdin_bytes,
+    del timeout
+    record = _invoke(
+        spawn, git_argv(git_dir, *args), phase="admit", budget=budget,
+        env=env, cwd=cwd, binary=False, stdin_bytes=stdin_bytes,
     )
     if _failed(record):
         raise Refusal("git_command_failed")
@@ -483,11 +764,11 @@ def _git_text(
 
 def _git_bytes(
     spawn: Spawn, env: Mapping[str, str], cwd: Path, git_dir: Path,
-    args: Sequence[str], timeout: float,
+    args: Sequence[str], budget: AttemptBudget | None = None,
 ) -> bytes:
-    record = spawn(
-        git_argv(git_dir, *args), env=env, cwd=cwd, timeout=timeout,
-        binary=True, stdin_bytes=None,
+    record = _invoke(
+        spawn, git_argv(git_dir, *args), phase="admit", budget=budget,
+        env=env, cwd=cwd, binary=True, stdin_bytes=None,
     )
     if _failed(record) or record.stdout_bytes is None:
         raise Refusal("git_command_failed")
@@ -495,17 +776,28 @@ def _git_bytes(
 
 
 def admit_source(
-    git_dir: Path, *, owned: OwnedRoot, env: Mapping[str, str], spawn: Spawn,
+    git_dir: Path,
+    *,
+    owned: OwnedRoot,
+    env: Mapping[str, str],
+    spawn: Spawn,
+    budget: AttemptBudget | None = None,
 ) -> dict[str, bytes]:
     """Verify immutable donor objects. A caller checkout is not adopted."""
     git_dir = validate_git_dir(git_dir)
     cwd = owned.path / "tmp"
-    timeout = float(DEADLINES_SECONDS["admit"])
+
+    def _text(git: Path | None, args: Sequence[str], stdin_bytes: bytes | None = None) -> str:
+        return _git_text(spawn, env, cwd, git, args, 0, stdin_bytes, budget)
+
+    def _bytes(git: Path, args: Sequence[str]) -> bytes:
+        return _git_bytes(spawn, env, cwd, git, args, budget)
+
     try:
-        commit = _git_text(
-            spawn, env, cwd, git_dir, ("rev-parse", f"{DONOR_COMMIT}^{{commit}}"), timeout,
-        )
+        commit = _text(git_dir, ("rev-parse", f"{DONOR_COMMIT}^{{commit}}"))
     except Refusal as exc:
+        if exc.reason in {"uncertain_child", "deadline_exhausted", "binary_capture_exceeded"}:
+            raise
         raise Refusal("pin_not_present") from exc
     if commit != DONOR_COMMIT:
         raise Refusal("pin_mismatch")
@@ -513,20 +805,17 @@ def admit_source(
     identities: dict[str, dict[str, str]] = {}
     for rel, expected in REQUIRED_BLOBS.items():
         try:
-            blob = _git_text(
-                spawn, env, cwd, git_dir, ("rev-parse", f"{DONOR_COMMIT}:{rel}"), timeout,
-            )
+            blob = _text(git_dir, ("rev-parse", f"{DONOR_COMMIT}:{rel}"))
         except Refusal as exc:
+            if exc.reason in {"uncertain_child", "deadline_exhausted", "binary_capture_exceeded"}:
+                raise
             raise Refusal("blob_mismatch") from exc
         if blob != expected["git_blob"]:
             raise Refusal("blob_mismatch")
-        data = _git_bytes(spawn, env, cwd, git_dir, ("cat-file", "blob", blob), timeout)
-        if hashlib.sha256(data).hexdigest() != expected["sha256"]:
+        data = _bytes(git_dir, ("cat-file", "blob", blob))
+        if len(data) != PINNED_BLOB_BYTES[rel] or hashlib.sha256(data).hexdigest() != expected["sha256"]:
             raise Refusal("byte_mismatch")
-        hashed = _git_text(
-            spawn, env, cwd, None, ("hash-object", "--no-filters", "--stdin"), timeout,
-            stdin_bytes=data,
-        )
+        hashed = _text(None, ("hash-object", "--no-filters", "--stdin"), data)
         if hashed != expected["git_blob"]:
             raise Refusal("filter_or_replace_mismatch")
         destination = owned.path / "source" / rel
@@ -573,6 +862,7 @@ def derive_runner(
     spawn: Spawn,
     patch_bytes: bytes | None = None,
     override_bytes: bytes | None = None,
+    budget: AttemptBudget | None = None,
 ) -> dict[str, str]:
     """Apply the reviewed patch only after the pinned bytes match."""
     patch = PATCH_PATH.read_bytes() if patch_bytes is None else patch_bytes
@@ -598,10 +888,11 @@ def derive_runner(
     patch_path = owned.path / "config" / "topology.patch"
     patch_path.write_bytes(patch)
     (staging / "offline.compose.yaml").write_bytes(override)
-    applied = spawn(
+    applied = _invoke(
+        spawn,
         git_argv(None, "apply", "--unidiff-zero", "--whitespace=nowarn", str(patch_path)),
-        env=env, cwd=staging, timeout=float(DEADLINES_SECONDS["derive"]),
-        binary=False, stdin_bytes=None,
+        phase="derive", budget=budget,
+        env=env, cwd=staging, binary=False, stdin_bytes=None,
     )
     if _failed(applied):
         raise Refusal("source_anchor_mismatch")
@@ -620,22 +911,24 @@ def derive_runner(
     }
 
 
-def fetch_donor(owned: OwnedRoot, env: Mapping[str, str], spawn: Spawn) -> Path:
+def fetch_donor(
+    owned: OwnedRoot, env: Mapping[str, str], spawn: Spawn, budget: AttemptBudget | None = None,
+) -> Path:
     repo = owned.path / "source" / "donor.git"
-    timeout = float(DEADLINES_SECONDS["fetch"])
     cwd = owned.path / "tmp"
-    init = spawn(
-        git_argv(None, "init", "--bare", str(repo)),
-        env=env, cwd=cwd, timeout=timeout, binary=False, stdin_bytes=None,
+    init = _invoke(
+        spawn, git_argv(None, "init", "--bare", str(repo)),
+        phase="fetch", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
     )
     if _failed(init):
         raise Refusal("fetch_failed")
-    fetched = spawn(
+    fetched = _invoke(
+        spawn,
         git_argv(
             repo, "fetch", "--depth=1", "--no-tags", "--no-recurse-submodules",
             DONOR_URL, DONOR_COMMIT,
         ),
-        env=env, cwd=cwd, timeout=timeout, binary=False, stdin_bytes=None,
+        phase="fetch", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
     )
     if _failed(fetched):
         raise Refusal("fetch_failed")
@@ -704,20 +997,21 @@ def _exact_executable(path: str) -> bool:
     return candidate.is_file() and not candidate.is_symlink() and os.access(candidate, os.X_OK)
 
 
-def probe_daemon(env: Mapping[str, str], spawn: Spawn, cwd: Path) -> dict[str, object]:
+def probe_daemon(
+    env: Mapping[str, str], spawn: Spawn, cwd: Path, budget: AttemptBudget | None = None,
+) -> dict[str, object]:
     socket_present = Path("/var/run/docker.sock").exists() or Path("/run/docker.sock").exists()
     if not _exact_executable(DOCKER):
         return qualify_observation(DaemonObservation(
             "absent", False, None, None, None, socket_present, False, "docker_binary_absent",
         ))
-    timeout = float(DEADLINES_SECONDS["daemon_probe"])
-    info = spawn(
-        [DOCKER, "info", "--format", "{{.ID}}"],
-        env=env, cwd=cwd, timeout=timeout, binary=False, stdin_bytes=None,
+    info = _invoke(
+        spawn, [DOCKER, "info", "--format", "{{.ID}}"],
+        phase="daemon_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
     )
-    context = spawn(
-        [DOCKER, "context", "inspect"],
-        env=env, cwd=cwd, timeout=timeout, binary=False, stdin_bytes=None,
+    context = _invoke(
+        spawn, [DOCKER, "context", "inspect"],
+        phase="daemon_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
     )
     complete = not _failed(info) and not _failed(context) and bool(info.stdout.strip())
     endpoint = endpoint_from_context(context.stdout) if complete else None
@@ -744,15 +1038,18 @@ def node_satisfies(version: str | None) -> bool:
 
 
 def _first_version(
-    candidates: Sequence[str], env: Mapping[str, str], spawn: Spawn, cwd: Path,
+    candidates: Sequence[str],
+    env: Mapping[str, str],
+    spawn: Spawn,
+    cwd: Path,
+    budget: AttemptBudget | None = None,
 ) -> tuple[str | None, str | None]:
-    timeout = float(DEADLINES_SECONDS["toolchain_probe"])
     for candidate in candidates:
         if not _exact_executable(candidate):
             continue
-        record = spawn(
-            [candidate, "--version"],
-            env=env, cwd=cwd, timeout=timeout, binary=False, stdin_bytes=None,
+        record = _invoke(
+            spawn, [candidate, "--version"],
+            phase="toolchain_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
         )
         if _failed(record):
             continue
@@ -763,18 +1060,19 @@ def _first_version(
     return None, None
 
 
-def probe_toolchain(env: Mapping[str, str], spawn: Spawn, cwd: Path) -> dict[str, object]:
-    timeout = float(DEADLINES_SECONDS["toolchain_probe"])
+def probe_toolchain(
+    env: Mapping[str, str], spawn: Spawn, cwd: Path, budget: AttemptBudget | None = None,
+) -> dict[str, object]:
     git_state: dict[str, object] = {"path": GIT, "version": None, "state": "ABSENT"}
     if _exact_executable(GIT):
-        record = spawn(
-            [GIT, "--version"],
-            env=env, cwd=cwd, timeout=timeout, binary=False, stdin_bytes=None,
+        record = _invoke(
+            spawn, [GIT, "--version"],
+            phase="toolchain_probe", budget=budget, env=env, cwd=cwd, binary=False, stdin_bytes=None,
         )
         if not _failed(record) and record.stdout.strip():
             git_state = {"path": GIT, "version": record.stdout.strip().splitlines()[0], "state": "OBSERVED"}
-    node_path, node_version = _first_version(NODE_CANDIDATES, env, spawn, cwd)
-    pnpm_path, pnpm_version = _first_version(PNPM_CANDIDATES, env, spawn, cwd)
+    node_path, node_version = _first_version(NODE_CANDIDATES, env, spawn, cwd, budget)
+    pnpm_path, pnpm_version = _first_version(PNPM_CANDIDATES, env, spawn, cwd, budget)
     pnpm_state = "ABSENT"
     if pnpm_version == DONOR_PNPM:
         pnpm_state = "EXACT"
@@ -835,21 +1133,37 @@ def classify_cleanup(
     return "CORROBORATED"
 
 
+def _attempt_images(attempt: str) -> tuple[str, str]:
+    return (
+        f"mmx-rakazo-journey/app:{attempt}",
+        f"mmx-rakazo-journey/computer:{attempt}",
+    )
+
+
 def plan_owned_cleanup(project: str, images: Sequence[str]) -> tuple[tuple[str, ...], ...]:
-    """Describe owned cleanup. Readiness does not spawn this plan."""
+    """Name the future cleanup of this attempt's two images.
+
+    Matching those names is not daemon admission. The admitted id set stays
+    empty, and this planner is not spawned during readiness.
+    """
     if not PROJECT_RE.fullmatch(project):
         raise Refusal("unowned_project")
-    if not images:
-        raise Refusal("unowned_image")
-    commands = [(DOCKER, "compose", "--project-name", project, "down", "--volumes", "--remove-orphans")]
+    attempt = project[len("mmx-rakazo-journey-"):]
+    expected = _attempt_images(attempt)
     for image in images:
-        if image.startswith("rakazo/") or image.endswith(":topology"):
+        if image in {DONOR_APP_IMAGE, DONOR_COMPUTER_IMAGE} or image.startswith("rakazo/") or image.endswith(":topology"):
             raise Refusal("donor_image_tag")
-        commands.append((DOCKER, "image", "rm", image))
+    if tuple(images) != expected:
+        raise Refusal("unowned_image")
+    commands = [
+        (DOCKER, "compose", "--project-name", project, "down", "--volumes", "--remove-orphans"),
+        (DOCKER, "image", "rm", expected[0]),
+        (DOCKER, "image", "rm", expected[1]),
+    ]
     for argv in commands:
         if "prune" in argv or "system" in argv:
             raise Refusal("host_prune_forbidden")
-    return tuple(commands)
+    return tuple(tuple(item) for item in commands)
 
 
 def execute_journey() -> dict[str, object]:
@@ -865,21 +1179,35 @@ def execute_journey() -> dict[str, object]:
     }
 
 
-def _empty_hashes() -> dict[str, str]:
-    empty = hashlib.sha256(b"").hexdigest()
-    return {
+def _hash_cause(key: str) -> str:
+    return key.replace("_sha256", "_cause")
+
+
+def _unavailable_hashes(cause: str) -> dict[str, str | None]:
+    hashes: dict[str, str | None] = {
         "patch_sha256": PATCH_SHA256,
         "override_sha256": OVERRIDE_SHA256,
-        "config_manifest_sha256": empty,
-        "cache_manifest_sha256": empty,
-        "tmp_manifest_sha256": empty,
-        "source_manifest_sha256": empty,
-        "staging_manifest_sha256": empty,
     }
+    for key in MANIFEST_KEYS:
+        hashes[key] = None
+        hashes[_hash_cause(key)] = cause
+    return hashes
 
 
-def _owned_hashes(owned: OwnedRoot) -> dict[str, str]:
-    hashes = _empty_hashes()
+def _manifests_measured(hashes: Mapping[str, object]) -> bool:
+    for key in MANIFEST_KEYS:
+        value = hashes.get(key)
+        cause = hashes.get(_hash_cause(key))
+        if not isinstance(value, str) or len(value) != 64 or cause is not None:
+            return False
+    return True
+
+
+def _owned_hashes(owned: OwnedRoot, budget: AttemptBudget) -> dict[str, str | None]:
+    hashes: dict[str, str | None] = {
+        "patch_sha256": PATCH_SHA256,
+        "override_sha256": OVERRIDE_SHA256,
+    }
     mapping = {
         "config_manifest_sha256": owned.path / "config",
         "cache_manifest_sha256": owned.path / "cache",
@@ -887,11 +1215,17 @@ def _owned_hashes(owned: OwnedRoot) -> dict[str, str]:
         "source_manifest_sha256": owned.path / "source",
         "staging_manifest_sha256": owned.path / "staging",
     }
-    try:
-        for key, directory in mapping.items():
-            hashes[key] = directory_manifest_sha256(directory)
-    except (OSError, Refusal):
-        hashes["config_manifest_sha256"] = hashes.get("config_manifest_sha256", "")
+    for key, directory in mapping.items():
+        try:
+            budget.take("hash_manifest")
+            hashes[key] = directory_manifest_sha256(directory, budget)
+            hashes[_hash_cause(key)] = None
+        except Refusal as exc:
+            hashes[key] = None
+            hashes[_hash_cause(key)] = exc.reason
+        except OSError:
+            hashes[key] = None
+            hashes[_hash_cause(key)] = "manifest_unreadable"
     return hashes
 
 
@@ -920,11 +1254,14 @@ def build_receipt(
     toolchain: dict[str, object],
     env_keys: Sequence[str],
     owned_root: str,
-    hashes: dict[str, str],
+    hashes: Mapping[str, str | None],
     commands: Sequence[CommandRecord],
     notes: Sequence[str],
+    budget: AttemptBudget | None = None,
+    evidence_complete: bool | None = None,
 ) -> dict[str, object]:
-    prepared = source_state == "ADMITTED" and derivation_state == "PREPARED"
+    measured = _manifests_measured(hashes) if evidence_complete is None else evidence_complete
+    prepared = source_state == "ADMITTED" and derivation_state == "PREPARED" and measured
     if source_state == "REFUSED" or derivation_state == "REFUSED":
         source_phase = "REFUSED"
     elif prepared:
@@ -973,6 +1310,14 @@ def build_receipt(
             "execution_armed": False,
             "automatic_retry": False,
             "notes": list(notes),
+            "budget": (budget or AttemptBudget(now=lambda: 0.0, overall=0.0)).facts() if budget is not None else {
+                "elapsed_seconds": None,
+                "remaining_seconds": None,
+                "exhausted_phase": None,
+                "cleanup_reserve_seconds": DEADLINES_SECONDS["owned_cleanup"],
+                "reap_reserve_seconds": DEADLINES_SECONDS["reap"],
+                "hash_budget_seconds": DEADLINES_SECONDS["hash_manifest"],
+            },
         },
         "commands": [_command_public(item) for item in commands],
     }
@@ -1036,6 +1381,8 @@ def _type_ok(instance: object, expected: object) -> bool:
             return True
         if kind == "integer" and isinstance(instance, int) and not isinstance(instance, bool):
             return True
+        if kind == "number" and isinstance(instance, (int, float)) and not isinstance(instance, bool):
+            return True
         if kind == "null" and instance is None:
             return True
     return False
@@ -1060,6 +1407,19 @@ def receipt_problems(receipt: Mapping[str, object]) -> list[str]:
         problems.append("daemon")
     if not isinstance(daemon, dict) or daemon.get("admitted_daemon_ids") != []:
         problems.append("admitted_daemon_ids")
+    if receipt.get("source_phase") == "SOURCE_PREPARED":
+        hashes = receipt.get("hashes")
+        if not isinstance(hashes, dict) or not _manifests_measured(hashes):
+            problems.append("source_phase")
+    commands = receipt.get("commands")
+    if isinstance(commands, list):
+        for command in commands:
+            if not isinstance(command, dict):
+                continue
+            for field in ("stdout", "stderr"):
+                text = command.get(field)
+                if isinstance(text, str) and len(text.encode("utf-8")) > LOG_MAX_BYTES:
+                    problems.append("log_bound")
     return problems
 
 
@@ -1079,8 +1439,11 @@ def run_readiness(
     seal_process: bool = False,
     spawn: Spawn | None = None,
     retain_owned: bool = False,
+    now: Callable[[], float] | None = None,
+    allocate_root: Callable[[], OwnedRoot] | None = None,
 ) -> dict[str, object]:
-    owned = create_owned_root()
+    budget = AttemptBudget(now=now)
+    owned: OwnedRoot | None = None
     records: list[CommandRecord] = []
     source_state = "NOT_ATTEMPTED"
     source_reason = ""
@@ -1093,18 +1456,18 @@ def run_readiness(
         "absent", False, None, None, None, False, False, "not_probed",
     ))
     toolchain = _empty_toolchain()
-    env = build_closed_env(owned)
-    if seal_process:
-        os.environ.clear()
-        os.environ.update(env)
-    if environ is not None:
-        environ.clear()
-        environ.update(env)
+    env: dict[str, str] = {}
+    hashes: dict[str, str | None] = _unavailable_hashes("not_measured")
+    stage = "setup"
+    uncertain = False
+    stop_reason = ""
 
     def recorded(argv: Sequence[str], **kwargs: object) -> CommandRecord:
         assert_readiness_argv(tuple(argv))
         if len(records) >= 48:
             raise Refusal("command_budget_exceeded")
+        if budget.uncertain or budget.blocked == "uncertain_child":
+            raise Refusal("uncertain_child")
         fn = spawn or default_spawn
         record = fn(argv, **kwargs)
         if not isinstance(record, CommandRecord):
@@ -1112,36 +1475,102 @@ def run_readiness(
         records.append(record)
         return record
 
-    try:
-        if object_store is None:
-            git_dir = fetch_donor(owned, env, recorded)
-        else:
-            git_dir = validate_git_dir(object_store)
-        admitted = admit_source(git_dir, owned=owned, env=env, spawn=recorded)
-        source_state = "ADMITTED"
-        blobs = json.loads(admitted.pop("__identities__").decode("utf-8"))
-        derived = derive_runner(admitted, owned=owned, env=env, spawn=recorded)
-        derivation_state = "PREPARED"
-        assertions = True
-    except Refusal as exc:
-        if source_state != "ADMITTED":
+    def _note_refusal(exc: Refusal) -> None:
+        nonlocal source_state, source_reason, derivation_state, derivation_reason, uncertain, stop_reason
+        if exc.reason == "uncertain_child":
+            uncertain = True
+            budget.mark_uncertain()
+            stop_reason = "uncertain_child"
+            if source_state != "ADMITTED":
+                source_state = "REFUSED"
+                source_reason = "uncertain_child"
+            elif derivation_state != "PREPARED":
+                derivation_state = "REFUSED"
+                derivation_reason = "uncertain_child"
+            return
+        if exc.reason == "deadline_exhausted":
+            stop_reason = "deadline_exhausted"
+            if stage in {"setup", "fetch", "admit"} and source_state != "ADMITTED":
+                source_state = "REFUSED"
+                source_reason = exc.reason
+            elif stage == "derive" and derivation_state != "PREPARED":
+                derivation_state = "REFUSED"
+                derivation_reason = exc.reason
+            return
+        if stage in {"setup", "fetch", "admit"} and source_state != "ADMITTED":
             source_state = "REFUSED"
             source_reason = exc.reason
-        else:
+        elif stage == "derive" and derivation_state != "PREPARED":
             derivation_state = "REFUSED"
             derivation_reason = exc.reason
+        else:
+            stop_reason = exc.reason
+
     try:
-        daemon = probe_daemon(env, recorded, owned.path / "tmp")
-        toolchain = probe_toolchain(env, recorded, owned.path / "tmp")
-    except Refusal as exc:
-        daemon = qualify_observation(DaemonObservation(
-            "absent", False, None, None, None, False, False, exc.reason,
-        ))
-    hashes = _owned_hashes(owned)
+        try:
+            owned = (allocate_root or create_owned_root)()
+        except OSError as exc:
+            stop_reason = type(exc).__name__
+            source_state = "REFUSED"
+            source_reason = "operational_failure"
+            hashes = _unavailable_hashes(stop_reason)
+        else:
+            env = build_closed_env(owned)
+            if seal_process:
+                os.environ.clear()
+                os.environ.update(env)
+            if environ is not None:
+                environ.clear()
+                environ.update(env)
+            try:
+                if object_store is None:
+                    stage = "fetch"
+                    git_dir = fetch_donor(owned, env, recorded, budget)
+                else:
+                    stage = "admit"
+                    git_dir = validate_git_dir(object_store)
+                stage = "admit"
+                admitted = admit_source(git_dir, owned=owned, env=env, spawn=recorded, budget=budget)
+                source_state = "ADMITTED"
+                blobs = json.loads(admitted.pop("__identities__").decode("utf-8"))
+                stage = "derive"
+                derived = derive_runner(admitted, owned=owned, env=env, spawn=recorded, budget=budget)
+                derivation_state = "PREPARED"
+                assertions = True
+                if not budget.blocked:
+                    stage = "probe"
+                    daemon = probe_daemon(env, recorded, owned.path / "tmp", budget)
+                    toolchain = probe_toolchain(env, recorded, owned.path / "tmp", budget)
+            except Refusal as exc:
+                _note_refusal(exc)
+            except OSError as exc:
+                stop_reason = type(exc).__name__
+                if source_state != "ADMITTED":
+                    source_state = "REFUSED"
+                    source_reason = "operational_failure"
+                elif derivation_state != "PREPARED":
+                    derivation_state = "REFUSED"
+                    derivation_reason = "operational_failure"
+            if owned is not None and not uncertain and budget.blocked != "uncertain_child":
+                stage = "hash"
+                try:
+                    hashes = _owned_hashes(owned, budget)
+                except Refusal as exc:
+                    _note_refusal(exc)
+                    hashes = _unavailable_hashes(exc.reason)
+            elif uncertain or budget.blocked == "uncertain_child":
+                hashes = _unavailable_hashes("uncertain_child")
+    except OSError as exc:
+        stop_reason = type(exc).__name__
+        source_state = "REFUSED"
+        source_reason = "operational_failure"
+        hashes = _unavailable_hashes(stop_reason)
+
     identity = new_identity()
     notes = [
         "Admitted isolated daemon id set is empty.",
         "A project name does not qualify a shared Docker daemon.",
+        "Lexical image tags are not daemon admission.",
         "Topology execution is not authorized in this placement.",
         "Automatic retry is not allowed.",
         "Process exit zero is not a clean-resource receipt.",
@@ -1150,6 +1579,14 @@ def run_readiness(
         notes.append(f"source: {source_reason}")
     if derivation_reason:
         notes.append(f"derivation: {derivation_reason}")
+    if stop_reason:
+        notes.append(stop_reason)
+    if budget.exhausted_phase and "deadline_exhausted" not in notes:
+        notes.append("deadline_exhausted")
+    for key in MANIFEST_KEYS:
+        cause = hashes.get(_hash_cause(key))
+        if isinstance(cause, str) and cause not in notes:
+            notes.append(cause)
     notes.append(f"daemon: {daemon.get('reason')}")
     pnpm = toolchain.get("pnpm")
     if isinstance(pnpm, dict) and pnpm.get("state") != "EXACT":
@@ -1157,33 +1594,37 @@ def run_readiness(
     node = toolchain.get("node")
     if isinstance(node, dict) and node.get("state") == "OBSERVED" and not node.get("satisfies_donor_engine"):
         notes.append("Observed node does not satisfy the donor engine range.")
-    receipt: dict[str, object] | None = None
-    try:
-        receipt = build_receipt(
-            source_state=source_state,
-            source_reason=source_reason,
-            blobs=blobs,
-            derivation_state=derivation_state,
-            derivation_reason=derivation_reason,
-            assertions=assertions,
-            derived=derived,
-            identity=identity,
-            daemon=daemon,
-            toolchain=toolchain,
-            env_keys=sorted(env),
-            owned_root="UNKNOWN",
-            hashes=hashes,
-            commands=records,
-            notes=notes,
-        )
-    finally:
-        owned_state = "RETAINED" if retain_owned else remove_owned_root(owned)
-        if receipt is not None:
-            cleanup = receipt["cleanup"]
-            if isinstance(cleanup, dict):
-                cleanup["owned_root"] = owned_state
-    if receipt is None:
-        raise Refusal("receipt_not_built")
+    if not env:
+        env = {key: "" for key in sorted(ALLOWED_ENV_KEYS)}
+    receipt = build_receipt(
+        source_state=source_state,
+        source_reason=source_reason,
+        blobs=blobs,
+        derivation_state=derivation_state,
+        derivation_reason=derivation_reason,
+        assertions=assertions,
+        derived=derived,
+        identity=identity,
+        daemon=daemon,
+        toolchain=toolchain,
+        env_keys=sorted(env),
+        owned_root="UNKNOWN",
+        hashes=hashes,
+        commands=records,
+        notes=notes,
+        budget=budget,
+    )
+    if uncertain or budget.uncertain:
+        owned_state = "UNKNOWN"
+    elif owned is None:
+        owned_state = "UNKNOWN"
+    elif retain_owned:
+        owned_state = "RETAINED"
+    else:
+        owned_state = remove_owned_root(owned)
+    cleanup = receipt["cleanup"]
+    if isinstance(cleanup, dict):
+        cleanup["owned_root"] = owned_state
     return receipt
 
 
@@ -1217,6 +1658,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     store = Path(args.object_store) if args.object_store else None
     try:
         receipt = run_readiness(object_store=store, seal_process=True)
+    except OSError as exc:
+        receipt = build_receipt(
+            source_state="REFUSED",
+            source_reason="operational_failure",
+            blobs={},
+            derivation_state="NOT_PREPARED",
+            derivation_reason="",
+            assertions=None,
+            derived={},
+            identity=new_identity(),
+            daemon=qualify_observation(DaemonObservation(
+                "absent", False, None, None, None, False, False, type(exc).__name__,
+            )),
+            toolchain=_empty_toolchain(),
+            env_keys=sorted(ALLOWED_ENV_KEYS),
+            owned_root="UNKNOWN",
+            hashes=_unavailable_hashes(type(exc).__name__),
+            commands=(),
+            notes=[type(exc).__name__, "Topology execution is not authorized in this placement."],
+        )
     except Refusal as exc:
         receipt = build_receipt(
             source_state="REFUSED",
@@ -1233,7 +1694,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             toolchain=_empty_toolchain(),
             env_keys=sorted(ALLOWED_ENV_KEYS),
             owned_root="UNKNOWN",
-            hashes=_empty_hashes(),
+            hashes=_unavailable_hashes(exc.reason),
             commands=(),
             notes=[exc.reason, "Topology execution is not authorized in this placement."],
         )

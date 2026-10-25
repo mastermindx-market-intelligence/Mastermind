@@ -53,9 +53,10 @@ daemon the supervisor would otherwise mount.
    the hashes pinned in `run.py`.
 5. Reads `/usr/bin/docker` and `/var/run/docker.sock` if they exist. It does
    not pull, build, or start containers. The admitted daemon id set is empty.
-6. Prints one receipt and removes the owned root. Cleanup that is not proven
-   stays `UNKNOWN`. Exit zero is not a clean-resource receipt. There is no
-   automatic retry.
+6. Prints one receipt. A reaped owned root is removed. An uncertain child
+   is not followed by later probes, and its directory is left in place with
+   `owned_root=UNKNOWN`. Exit zero is not a clean-resource receipt. There is
+   no automatic retry.
 
 ```sh
 python3 -B integrations/rakazo_reference_journey/run.py readiness
@@ -64,8 +65,10 @@ python3 -B integrations/rakazo_reference_journey/run.py readiness
 `--object-store PATH` reads an existing Git directory and does not fetch. The
 objects still have to be the pinned blobs. This placement's receipt status is
 `READINESS_BLOCKED` when admission or daemon isolation is not proven.
-`source_phase` may be `SOURCE_PREPARED` when the bytes were admitted and
-derived. That is not a journey result.
+`source_phase` is `SOURCE_PREPARED` only when the bytes were admitted, the
+runner was derived, and every owned manifest hash was measured. A null hash
+has a cause and is not replaced with the SHA-256 of empty input. That is not
+a journey result. A caller-supplied path or image name is not daemon admission.
 
 `JOURNEY_PASSED`, `RUN_FAILED`, and `EFFECT_UNKNOWN` are named in the receipt
 schema and are rejected for this placement. Unit fixtures cannot mint them.
@@ -74,10 +77,25 @@ Execution stays `NOT_RUN`. The planned command, which is not spawned, is
 
 ## Limits
 
-Deadlines are finite: readiness overall 180 seconds, and a recorded execution
-budget of 900 seconds that is not armed. Logs are truncated at 8192 bytes and
-redacted. Donor pnpm `9.15.0` is required and is not installed here. Observed
-Node on a Cursor VM is not adopted as the journey toolchain.
+One monotonic overall budget of 180 seconds is consumed across the attempt.
+Each command timeout is the phase cap or the time still schedulable, whichever
+is smaller. The clock is not restarted per command. Twenty seconds stay reserved
+for owned cleanup, and the process-group reap is capped at 2 seconds inside that
+reserve. Manifest hashing is capped at 10 seconds per directory and by the same
+clock. The recorded execution budget of 900 seconds is not armed and is not
+added to the 180 seconds. The receipt states elapsed time, remaining time, and
+the exhausted phase.
+
+Child stdout and stderr are capped while they are read. A truncation marker is
+included inside the 8192-byte log cap. Binary Git objects are capped at the
+largest pinned blob, `pnpm-lock.yaml` at 817721 bytes. Overflow refuses the
+attempt and reaps that process group. Donor pnpm `9.15.0` is required and is
+not installed here. Observed Node on a Cursor VM is not adopted as the journey
+toolchain.
+
+Future image cleanup accepts exactly two tags, `mmx-rakazo-journey/app:<attempt>`
+and `mmx-rakazo-journey/computer:<attempt>`, for the same attempt id. Any other
+tag is refused. That name check does not admit a Docker daemon.
 
 A later one-attempt execution needs a separate reviewed continuation, a
 non-empty admitted isolated daemon, and the exact donor toolchain. This
