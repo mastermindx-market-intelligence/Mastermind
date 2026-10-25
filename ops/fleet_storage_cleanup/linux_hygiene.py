@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -128,27 +129,75 @@ def candidates(root: Path, min_days: int = 3, limit: int = 20) -> dict:
         return {"state": "UNVERIFIED", "reason": type(exc).__name__}
 
 
+def package_command(argv: bytes) -> bool:
+    """Conservatively recognize every manager invocation, including flag variants."""
+    tokens = [part.decode("utf-8", "replace").lower()
+              for part in argv.split(b"\x00") if part]
+    if not tokens:
+        return False
+    executable = os.path.basename(tokens[0])
+    if (executable in {"pip", "pip3", "pipx", "uv", "npm", "npm.cmd",
+                       "pnpm", "yarn", "npx", "corepack"}
+            or executable.startswith("pip3.")):
+        return True
+    if any(token.endswith(("/npm-cli.js", "/pnpm.cjs", "/yarn.js",
+                             "/pip/__main__.py")) for token in tokens):
+        return True
+    return any(token == "-m" and index + 1 < len(tokens)
+               and (tokens[index + 1] == "pip"
+                    or tokens[index + 1].startswith("pip."))
+               for index, token in enumerate(tokens))
+
+
 def package_busy() -> bool:
-    """If another package command is visible, do not modify shared caches."""
+    """Unreadable/truncated process snapshots and ANY cache writer fail closed."""
     try:
         for proc in Path("/proc").iterdir():
             if not proc.name.isdigit() or int(proc.name) == os.getpid():
                 continue
             try:
-                cmd = (proc / "cmdline").read_bytes()[:500].replace(b"\x00", b" ").lower()
+                with (proc / "cmdline").open("rb") as source:
+                    raw = source.read(4097)
             except FileNotFoundError:
-                # A process that exited while observed is no longer a cache user.
-                continue
-            except (OSError, PermissionError):
-                # An unreadable live process could be a package writer.
-                return True
-            if any(key in cmd for key in
-                   (b"pip install", b"pip3 install", b"uv pip", b"uv sync",
-                    b"npm install", b"npm ci", b"pnpm install", b"yarn install")):
+                continue  # pid exited during the census
+            except OSError:
+                return True  # potentially active writer; no guessing
+            if len(raw) > 4096 or package_command(raw):
                 return True
     except OSError:
         return True
     return False
+
+
+def trusted_cache_target(root: Path, cache: Path) -> bool:
+    """Approved same-user path only; no symlinks or writable directory parents."""
+    try:
+        root, cache = root.absolute(), cache.absolute()
+        parts = cache.relative_to(root).parts
+        if not parts or root.is_symlink() or root.resolve(strict=True) != root:
+            return False
+        for path in (root, *(root.joinpath(*parts[:i]) for i in range(1, len(parts)+1))):
+            info = path.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+                    or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+                return False
+        return cache.resolve(strict=True) == cache
+    except (OSError, ValueError, RuntimeError):
+        return False
+
+
+def cache_redirected(name: str) -> bool:
+    """Fail closed on ambient manager config; CLI also pins the exact path."""
+    overrides = {"XDG_CACHE_HOME"}
+    if name == "pip":
+        overrides |= {"PIP_CACHE_DIR", "PIP_CONFIG_FILE"}
+    elif name == "uv":
+        overrides |= {"UV_CACHE_DIR", "UV_CONFIG_FILE", "UV_NO_CACHE"}
+    else:
+        overrides |= {"npm_config_cache", "NPM_CONFIG_CACHE",
+                      "npm_config_userconfig", "NPM_CONFIG_USERCONFIG",
+                      "npm_config_globalconfig", "NPM_CONFIG_GLOBALCONFIG"}
+    return any(key in os.environ for key in overrides)
 
 
 def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
@@ -159,22 +208,33 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
         return [{"state": "HELD_EFFECT_UNVERIFIED"}]
     if package_busy():
         return [{"state": "SKIPPED_PACKAGE_ACTIVITY"}]
+    pip_cache = root / ".cache/pip"
+    uv_cache = root / ".cache/uv"
+    npm_root = root / ".npm"
     plans = [
-        ("pip", root / ".cache/pip", [sys.executable, "-m", "pip", "cache", "purge"],
-         ("PIP_CACHE_DIR",)),
-        ("uv", root / ".cache/uv", ["uv", "cache", "clean"], ("UV_CACHE_DIR",)),
+        ("pip", pip_cache, [sys.executable, "-m", "pip", "--isolated",
+                           "--cache-dir", str(pip_cache), "cache", "purge"]),
+        ("uv", uv_cache, ["uv", "--cache-dir", str(uv_cache), "cache", "clean"]),
     ]
     if mode == "CRITICAL":
-        plans.append(("npm", root / ".npm/_cacache",
-                      ["npm", "cache", "clean", "--force"], ("npm_config_cache",)))
+        plans.append(("npm", npm_root / "_cacache",
+                      ["npm", "--cache", str(npm_root), "cache", "clean", "--force"]))
     results = []
-    for name, cache, argv, overrides in plans:
-        if any(os.environ.get(key) for key in overrides):
+    for name, cache, argv in plans:
+        if cache_redirected(name):
             results.append({"cache": name, "state": "SKIPPED_CUSTOM_CACHE_PATH"})
             continue
-        if not cache.is_dir() or cache.is_symlink() or not shutil.which(argv[0]):
+        if not trusted_cache_target(root, cache):
+            results.append({"cache": name, "state": "SKIPPED_UNTRUSTED_CACHE_PATH"})
+            continue
+        if not shutil.which(argv[0]):
             results.append({"cache": name, "state": "SKIPPED_UNAVAILABLE"})
             continue
+        # A different writer can start between consecutive cache purges.
+        # Recheck before EACH destructive manager API, not only at entry.
+        if package_busy():
+            results.append({"cache": name, "state": "SKIPPED_PACKAGE_ACTIVITY"})
+            break
         marker = state / HOLD
         try:
             # Fail closed BEFORE entering the destructive package-manager API.
@@ -232,25 +292,56 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
     floor = configured.get("floor_gib")
     mode = classify(before["total_gib"], before["free_gib"],
                     before["inodes_free_fraction"], floor) if before.get("state") == "OK" else "UNVERIFIED"
+    worktrees = candidates(root, 1 if mode == "CRITICAL" else 3)
+    mandatory_ok = (mode != "UNVERIFIED" and mem.get("state") == "OK"
+                    and lanes.get("state") == "OK"
+                    and worktrees.get("state") == "OBSERVED_ONLY"
+                    and configured.get("state") == "CONFIGURED"
+                    and before.get("inodes_free_fraction") is not None)
     result = {"schema": "mastermind.fleet_linux_hygiene.v1",
               "epoch": time.time(), "host": socket.gethostname(),
               "mode": mode, "root": before, "lanes": lanes, "memory": mem,
               "fabric_reserve": configured,
-              "fabric_admission": "UNVERIFIED",  # only the incumbent host picker can admit
-              "worktrees": candidates(root, 1 if mode == "CRITICAL" else 3),
-              "cleanup": []}
-    if apply_safe_caches and mode in ("CAUTION", "CRITICAL"):
+              "fabric_admission": "UNVERIFIED",  # incumbent picker alone admits workers
+              "worktrees": worktrees, "cleanup": []}
+    if apply_safe_caches and mode in ("CAUTION", "CRITICAL") and mandatory_ok:
         result["cleanup"] = cache_cleanup(root, state, mode)
+    elif apply_safe_caches and not mandatory_ok:
+        result["cleanup"] = [{"state": "SKIPPED_MANDATORY_OBSERVATION_UNVERIFIED"}]
     else:
         result["cleanup"] = [{"state": "REPORT_ONLY" if not apply_safe_caches else "NO_PRESSURE"}]
     result["root_after"] = volume(Path("/"))
     result["finished_epoch"] = time.time()
-    result["degraded"] = (mode == "UNVERIFIED" or mem.get("state") != "OK" or
-                          any(x.get("state") in ("FAILED", "EFFECT_UNVERIFIED",
-                                                 "HELD_EFFECT_UNVERIFIED",
-                                                 "MARKER_UNAVAILABLE")
-                              for x in result["cleanup"]))
+    after = result["root_after"]
+    result["degraded"] = (not mandatory_ok or after.get("state") != "OK"
+                          or after.get("inodes_free_fraction") is None
+                          or (before.get("state") == "OK" and after.get("device") != before.get("device"))
+                          or any(x.get("state") in ("FAILED", "EFFECT_UNVERIFIED",
+                                                   "HELD_EFFECT_UNVERIFIED",
+                                                   "MARKER_UNAVAILABLE",
+                                                   "SKIPPED_MANDATORY_OBSERVATION_UNVERIFIED")
+                                 for x in result["cleanup"]))
     return result
+
+
+def append_receipt(state: Path, report: dict) -> bool:
+    """One O_APPEND write + fsync; never follow a replaced ledger symlink."""
+    row = (json.dumps(report, sort_keys=True) + "\n").encode("utf-8")
+    if len(row) > 32768:
+        return False
+    fd = None
+    try:
+        fd = os.open(state / LEDGER, os.O_APPEND | os.O_CREAT | os.O_WRONLY |
+                     os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        if os.write(fd, row) != len(row):
+            return False
+        os.fsync(fd)
+        return True
+    except OSError:
+        return False
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def main(argv=None) -> int:
@@ -263,26 +354,37 @@ def main(argv=None) -> int:
         print(json.dumps({"state": "REFUSED_SYMLINK_STATE"}))
         return 2
     state.mkdir(parents=True, exist_ok=True)
-    with (state / "linux-hygiene.lock").open("a+") as lock:
+    try:
+        fd = os.open(state / "linux-hygiene.lock",
+                     os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    except OSError as exc:
+        print(json.dumps({"state": "LOCK_UNAVAILABLE", "error": type(exc).__name__}),
+              file=sys.stderr)
+        return 2
+    with os.fdopen(fd, "a+") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print(json.dumps({"state": "DEFERRED_ALREADY_RUNNING"}))
-            return 0
+            report = {"schema": "mastermind.fleet_linux_hygiene.v1",
+                      "epoch": time.time(), "host": socket.gethostname(),
+                      "state": "DEFERRED_ALREADY_RUNNING", "degraded": True}
+            recorded = append_receipt(state, report)
+            print(json.dumps(report, sort_keys=True),
+                  file=sys.stdout if recorded else sys.stderr)
+            # A deferred run is NOT success; the original hourly timer survives.
+            return 75
         try:
             report = run(state, Path.home(), args.apply_safe_caches)
         except Exception as exc:
-            # Preserve an explicit failed heartbeat, not a false green.
             report = {"schema": "mastermind.fleet_linux_hygiene.v1",
                       "epoch": time.time(), "host": socket.gethostname(),
                       "state": "FAILED", "error": type(exc).__name__}
-        with (state / LEDGER).open("a") as ledger:
-            ledger.write(json.dumps(report, sort_keys=True) + "\n")
-        print(json.dumps(report, sort_keys=True))
-        # A receipt is written even on failure. Return nonzero to systemd so
-        # a failed/degraded run cannot be mistaken for a healthy last service.
-        # The persistent timer stays enabled and future hours still heartbeat.
-        return 1 if report.get("state") == "FAILED" or report.get("degraded") else 0
+        recorded = append_receipt(state, report)
+        print(json.dumps(report, sort_keys=True),
+              file=sys.stdout if recorded else sys.stderr)
+        # A missing receipt, failure or degraded observation can never be green.
+        return 1 if (not recorded or report.get("state") == "FAILED"
+                     or report.get("degraded")) else 0
 
 
 if __name__ == "__main__":
