@@ -53,7 +53,7 @@ def require_no_site_policy():
 
 
 class _IgnoredNoSiteNode:
-    """Hold the exact no-follow link node, never its target; require native ACL."""
+    """Hold the exact link, never its target; require empty visible metadata."""
     def __init__(self,directory):
         import stat
         self.directory=directory;self.fd=None
@@ -70,20 +70,21 @@ class _IgnoredNoSiteNode:
     def _identity(info):
         return (info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid,info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
     def check(self):
-        import errno,stat
+        import stat
         if self.fd is None or self._identity(os.fstat(self.directory))!=self.directory_before:refuse()
         info=os.fstat(self.fd)
         if (not stat.S_ISLNK(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1
                 or stat.S_IMODE(info.st_mode)!=0o777 or not 0<info.st_size<=4096 or self._identity(info)!=self.before
                 or self._identity(os.stat('sitecustomize.py',dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
-        # The last node is not followed. Its alias uses the held directory FD.
+        # Linux POSIX ACL semantics exclude symlink inodes. This successful
+        # no-follow query proves only an empty VISIBLE name list, not absence
+        # of hidden attributes or an LSM/sandbox guarantee.
         alias='/proc/self/fd/'+str(self.directory)+'/sitecustomize.py'
-        for key in ('system.posix_acl_access','system.posix_acl_default'):
-            try:os.getxattr(alias,key,follow_symlinks=False)
-            except OSError as error:
-                if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):refuse()
-            else:refuse()
-        if (self._identity(os.fstat(self.fd))!=self.before
+        try:names=os.listxattr(alias,follow_symlinks=False)
+        except OSError:refuse()
+        if type(names) is not list or names:refuse()
+        if (self._identity(os.fstat(self.directory))!=self.directory_before
+                or self._identity(os.fstat(self.fd))!=self.before
                 or self._identity(os.stat('sitecustomize.py',dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
     def __enter__(self):self.check();return self
     def __exit__(self,*ignored):

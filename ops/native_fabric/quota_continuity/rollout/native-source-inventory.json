@@ -450,9 +450,9 @@
       "source": "candidate/paid_incumbent_state.py"
     },
     "ext/paid_initializer.py": {
-      "bytes": 29956,
+      "bytes": 30009,
       "installed_preimage_sha256": null,
-      "sha256": "2d34fa0ef1353c991783574e6a7af4f3011ecbea1f07caed3e967c5f1e6b2f7c",
+      "sha256": "0ed3d942dcda3675e124e5b1a0c2a918df066f5d8332d1439f6f178eaf9d9661",
       "source": "candidate/paid_initializer.py"
     },
     "ext/paid_initializer_nested_data.py": {

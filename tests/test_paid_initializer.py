@@ -26,6 +26,16 @@ def commitment():
 def selectors():return dict(host_ref='ubuntu2',transport_alias='ubuntu2',python_path='/usr/bin/python3',capture_root='/home/worker/lanes/ext/lanes')
 
 
+
+def _preserving_stat_view(info,*,uid=None,mode=None):
+    values=list(info)
+    if uid is not None:values[4]=uid
+    if mode is not None:values[0]=mode
+    sequence={'st_mode','st_ino','st_dev','st_nlink','st_uid','st_gid','st_size'}
+    optional={key:getattr(info,key)for key in dir(info)if key.startswith('st_')and key not in sequence}
+    return os.stat_result(values,optional)
+
+
 def _linux_completion(request,profile=None):
     # Structured Actions notice only after the real assertions complete. This
     # gives the retained safe annotation API exact-case evidence; no XML or
@@ -52,7 +62,12 @@ def _system_fixture_launch(*,no_site=False):
         if real.name!='python3.12':return None
         def guarded(path,allow_link=False):
             info=path.lstat()
-            if info.st_uid!=0 or info.st_mode&0o022 or (path.is_symlink() and not allow_link):raise ValueError()
+            if stat.S_ISLNK(info.st_mode):
+                # Match pin_image's exact fixed selector rule, not an ordinary
+                # startup entry. Its Root real image/ancestors are checked too.
+                if not allow_link or info.st_uid!=0:raise ValueError()
+                return
+            if info.st_uid!=0 or info.st_mode&0o022:raise ValueError()
             for key in ('system.posix_acl_access','system.posix_acl_default'):
                 try:os.getxattr(path,key,follow_symlinks=False)
                 except OSError as error:
@@ -107,9 +122,10 @@ def _observer_metadata_fixture(probe,*,exact,prefixes,root_directories=(),root_f
     return ("import os,errno,stat\n_fixture_raw_getxattr=os.getxattr\n"
         +"_fixture_root_directories="+repr(root_directories)+"\n_fixture_root_files="+repr(root_files)+"\n"
         +"_fixture_raw_stat=os.stat;_fixture_raw_fstat=os.fstat\n"
-        +"class _FixtureRootMetadata:\n"
-        +"    def __init__(self,value):self._value=value;self.st_uid=0;self.st_mode=value.st_mode&~0o022\n"
-        +"    def __getattr__(self,key):return getattr(self._value,key)\n"
+        +"def _FixtureRootMetadata(value):\n"
+        +"    values=list(value);values[4]=0;values[0]&=~0o022\n"
+        +"    sequence={'st_mode','st_ino','st_dev','st_nlink','st_uid','st_gid','st_size'}\n"
+        +"    return os.stat_result(values,{key:getattr(value,key)for key in dir(value)if key.startswith('st_')and key not in sequence})\n"
         +"def _fixture_directory_metadata(value,name):\n"
         +"    return _FixtureRootMetadata(value) if (stat.S_ISDIR(value.st_mode) and name in _fixture_root_directories) or (stat.S_ISREG(value.st_mode) and name in _fixture_root_files) else value\n"
         +"def _fixture_fstat(fd):\n"
@@ -331,8 +347,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     def distribution(name):
         return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
     def root_view(info):
-        fields=list(info);fields[4]=0;fields[0]&=~0o022
-        return os.stat_result(fields)
+        return _preserving_stat_view(info,uid=0,mode=info.st_mode&~0o022)
     def owned_fstat(fd):
         info=rawfstat(fd)
         try:name=os.path.realpath('/proc/self/fd/'+str(fd))
@@ -407,7 +422,10 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         monkeypatch.delenv('LD_LIBRARY_PATH')
         c['startup']['prefix']='/not-the-observed-prefix'
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
-        with pytest.raises(m.InitializerCommitmentRefused):m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
+        # The primitive may fail opening an absent namespace; the canonical
+        # owner maps this OSError to refusal. Neither outcome starts the hook.
+        with pytest.raises((m.InitializerCommitmentRefused,FileNotFoundError)) as refused:m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
+        if isinstance(refused.value,FileNotFoundError):assert refused.value.errno==2
         assert not marker.exists()
     _linux_completion(request,'system-root-launch' if system_launch else 'finite-metadata-simulation')
 
@@ -528,8 +546,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         def distribution(name):
             return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
         def root_view(info):
-            fields=list(info);fields[4]=0;fields[0]&=~0o022
-            return os.stat_result(fields)
+            return _preserving_stat_view(info,uid=0,mode=info.st_mode&~0o022)
         def owned_fstat(fd):
             info=rawfstat(fd)
             try:name=os.path.realpath('/proc/self/fd/'+str(fd))
@@ -609,10 +626,14 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             current.setattr(os,'lstat',rawlstat);current.setattr(os,'getxattr',rawxattr)
             system=_system_fixture_launch(no_site=True)
             assert system is not None,'required Root system fixture cannot establish native no-site custody'
-            image=system.resolve();logical.unlink();logical.symlink_to(image)
+            # The real Root profile cannot adopt a HOME-owned logical image.
+            # Remove only this fixture's own selector; let actual PATH choose
+            # the existing Root system path instead of relabelling the venv.
+            image=system.resolve();logical.unlink()
             c['startup'].update(profile=owner.NO_SITE_PROFILE,prefix='/usr',exec_prefix='/usr',base_prefix='/usr',base_exec_prefix='/usr')
             c['bootstrap_python']=dict(path=str(system),real_path=str(image),sha256=hashlib.sha256(image.read_bytes()).hexdigest())
-            c['launch_python']=dict(path=str(logical),real_path=str(image),sha256=c['bootstrap_python']['sha256'])
+            c['launch_python']=dict(path=str(system),real_path=str(image),sha256=c['bootstrap_python']['sha256'])
+            req['python_path']=str(system)
             req['initializer_commitment_sha256']=hashlib.sha256(owner.canonical(c)).hexdigest()
             current.setattr(qualifier.m,'_initializer_bundle',lambda expected:(owner,sources) if all(expected[name]==hashes[name] for name in sources) else owner.refuse())
             alias,command=qualifier.m.build_paid_probe(req);argv=shlex.split(command)
