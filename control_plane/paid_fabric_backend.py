@@ -127,7 +127,9 @@ def qualify_paid_startup(release_root, *, config):
     required = ('remote_sub.sh', 'paid_controller_spawn.py', 'paid_controller_channel.py',
                 'paid_model_owner.py', 'paid_glm_model_client.py', 'linux_process_identity.py',
                 'paid_incumbent_state.py','host_pull.sh','host_pull_backend.py',
-                'host_pull_probe.template','paid_host_qualification.py')
+                'host_pull_probe.template','paid_host_qualification.py',
+                'paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py',
+                'paid_provider_entry.py','paid_host_readiness.py')
     manifest = json.loads(_root_source(root / '.executive-release-manifest.json'))
     if (type(manifest) is not dict
             or set(manifest) != {'schema_version', 'commit_sha', 'tree_sha', 'entries'}
@@ -428,6 +430,29 @@ class CanonicalPaidBackend:
                 or account!=payload['paid_account']):_refuse()
         self._require_account_status(account)
 
+    def _provider_entry_descriptor(self, payload):
+        """Re-open the actual installed owner, not a supplied context dictionary."""
+        self._require_source_context(payload)
+        import paid_host_readiness as readiness
+        from control_plane.paid_fabric_wire import provider_entry_descriptor
+        from ops.native_fabric.quota_continuity.candidate import paid_provider_entry
+        if Path(readiness.__file__).resolve()!=self._startup.native_ext/'paid_host_readiness.py':_refuse()
+        with readiness.open_installed_context() as context:
+            context.check()
+            source = payload['paid_source_config']
+            if context.initializer_commitment != source['qualification']['initializer_commitment']:_refuse()
+            hashes = {}
+            for name in paid_provider_entry.SOURCE_NAMES:
+                path = self._startup.native_ext/name
+                raw = _root_source(path)
+                sha = hashlib.sha256(raw).hexdigest()
+                if self._startup.sources.get(str(path.relative_to(self._startup.release_root))) != sha:_refuse()
+                hashes[name] = sha
+            value = provider_entry_descriptor(payload, sources_sha256=hashes,
+                                               readiness_binding=context.binding)
+            context.check()
+        return value
+
     def require_original_controller(self, payload, lease, *, expected=None):
         self.require_gateway(self._gateway)
         self._require_source_context(payload)
@@ -512,6 +537,9 @@ class CanonicalPaidBackend:
             capsule = self._gateway._issue_canonical(operation.payload,
                 authority=operation.authority, lease_id=lease_id, ttl=ttl,
                 request_body=json.loads(compile_request(operation.payload)))
+            # This addition is correlation DATA on the already authenticated
+            # original channel. Only the actual issuer/Control/lease owns auth.
+            capsule['provider_entry'] = self._provider_entry_descriptor(operation.payload)
             operation.capsule = capsule
             self._channel.answer_lease(sock, run_id=operation.payload['binding']['attempt_id'],
                 lease_id=lease_id, nonce=operation.nonce, capsule=capsule)
@@ -539,6 +567,7 @@ class CanonicalPaidBackend:
             _refuse()
         operation.authority.require(operation.payload)
         self.require_original_controller(operation.payload, operation.lease)
+        if operation.capsule.get('provider_entry') != self._provider_entry_descriptor(operation.payload):_refuse()
 
     def consume_provider_intent(self, claims):
         self.require_canonical_request(claims)
@@ -553,6 +582,9 @@ class CanonicalPaidBackend:
         if operation.launch_frame is not None:
             _refuse()
         self.require_original_controller(operation.payload, operation.lease)
+        if (operation.capsule is None
+                or operation.capsule.get('provider_entry') != self._provider_entry_descriptor(operation.payload)):
+            _refuse()
         support = json.loads(_private_read(
             self._startup.log_dir/(operation.payload['binding']['attempt_id']+'.support.json'), 65536))
         if type(support) is not dict:
@@ -633,6 +665,7 @@ class CanonicalPaidBackend:
         authority.require(payload)
         body = compile_request(payload)
         self._require_source_context(payload)
+        self._provider_entry_descriptor(payload)
         from control_plane.paid_fabric_wire import require_paid_physical
         require_paid_physical(payload)
         run_id = payload['binding']['attempt_id']

@@ -26,7 +26,7 @@ def canonical(value):
                       ensure_ascii=True, allow_nan=False).encode('ascii')
 
 
-_PAID_SUPPORT_FILES = frozenset(['artifact_production.py', 'artifact_reader.py', 'bailian_keys.py', 'capacity_preflight.py', 'codex_usage.py', 'commission_deadline.py', 'fabric_client_projection.py', 'fabric_cpu_scope.py', 'fabric_operator_client.py', 'fabric_operator_diagnostics.py', 'fabric_operator_stop.py', 'fabric_policy_snapshot.py', 'glm_bound_claude.py', 'glm_codex_exec.sh', 'glm_keys.py', 'go_codex_exec.sh', 'go_remote_capsule.py', 'go_remote_codex.py', 'lane_runtime.py', 'lease_broker.py', 'linux_process_identity.py', 'mm_codex_exec.sh', 'mm_feeder_lib.py', 'model_tier.py', 'native_remote.py', 'native_runtime_bindings.py', 'paid_glm_model_client.py', 'paid_model_owner.py', 'pick.py', 'pool_ledger.py', 'pools.yaml', 'provider_outcome.py', 'quota_circuit.py', 'qwen_exec.sh', 'recovery_artifacts.py', 'remote_sub_exec.py', 'slot.py', 'studio_mcp_projection.sh', 'sub.sh', 'yes'])
+_PAID_SUPPORT_FILES = frozenset(['artifact_production.py', 'artifact_reader.py', 'bailian_keys.py', 'capacity_preflight.py', 'codex_usage.py', 'commission_deadline.py', 'fabric_client_projection.py', 'fabric_cpu_scope.py', 'fabric_operator_client.py', 'fabric_operator_diagnostics.py', 'fabric_operator_stop.py', 'fabric_policy_snapshot.py', 'glm_bound_claude.py', 'glm_codex_exec.sh', 'glm_keys.py', 'go_codex_exec.sh', 'go_remote_capsule.py', 'go_remote_codex.py', 'lane_runtime.py', 'lease_broker.py', 'linux_process_identity.py', 'mm_codex_exec.sh', 'mm_feeder_lib.py', 'model_tier.py', 'native_remote.py', 'native_runtime_bindings.py', 'paid_glm_model_client.py', 'paid_model_owner.py', 'pick.py', 'pool_ledger.py', 'pools.yaml', 'provider_outcome.py', 'quota_circuit.py', 'qwen_exec.sh', 'recovery_artifacts.py', 'remote_sub_exec.py', 'slot.py', 'studio_mcp_projection.sh', 'sub.sh', 'yes', 'paid_provider_entry.py', 'paid_initializer.py', 'paid_initializer_token_data.py', 'paid_initializer_nested_data.py'])
 _SUPPORT_EXT_LINKS = frozenset(['GROK_EXHAUSTED', 'active', 'bailian_policy.json', 'bailian_usage.json', 'broker', 'codex_glm', 'codex_go', 'codex_minimax', 'glm_shim', 'glm_window_state.json', 'go_shim', 'hosts.json', 'lane_bin', 'lanes', 'slots', 'state'])
 _SUPPORT_ROOT_LINKS = frozenset(['codex_bailian', 'glm_claude_home', 'go_claude_home', 'minimax_claude_home', 'orch'])
 
@@ -111,13 +111,16 @@ def canonical_state_ext(here, env):
     return stable
 
 
-def launch_observer(here, packet_path, key, model, receipt):
+def launch_observer(here, packet_path, key, model, receipt, *, entry_request=None):
     if not _ID.fullmatch(key) or model not in {'glm-5.3', 'glm-5.3-flash'}:
         raise ValueError('paid_owned_launch_refused')
     # Imports resolve only in the immutable verified executor support closure.
     from linux_process_identity import inspect_linux_process_image
     from paid_glm_model_client import private_input, validate_body, parse
     from lane_runtime import _append_process_receipt, DEFAULT_CAPTURE_LIMIT_BYTES
+    import paid_provider_entry as entry
+    entry_request=entry.validate_request(entry_request)
+    if entry_request['run_id']!=key or entry_request['model']!=model:raise ValueError('paid_entry_request_refused')
     here, packet_path = Path(here), Path(packet_path)
     body = private_input(packet_path, 2 * 1024 * 1024)
     validate_body(body, model)
@@ -125,7 +128,10 @@ def launch_observer(here, packet_path, key, model, receipt):
     value = parse(capsule)
     if (value.get('run_id') != key or value.get('model') != model
             or value.get('host') != os.environ.get('LANE_REMOTE_HOST')
-            or value.get('lease_id') != os.environ.get('POOL_LEASE_ID')):
+            or value.get('lease_id') != os.environ.get('POOL_LEASE_ID')
+            or hashlib.sha256(body).hexdigest()!=entry_request['body_sha256']
+            or hashlib.sha256(capsule).hexdigest()!=entry_request['capsule_sha256']
+            or entry.digest(value.get('provider_entry'))!=entry_request['entry_descriptor_sha256']):
         raise ValueError('paid_owned_launch_refused')
     root = Path(receipt).parent
     root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -139,20 +145,6 @@ def launch_observer(here, packet_path, key, model, receipt):
         os.fsync(root_fd)
     finally:
         os.close(root_fd)
-    context_path=root.parent/'HOST_ENV.sh'
-    context_fd=os.open(context_path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
-    try:
-        before=os.fstat(context_fd)
-        if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
-                or before.st_mode&0o022 or not 0<before.st_size<=262144):
-            raise ValueError('paid_host_context_refused')
-        context_raw=os.read(context_fd,262145)
-        identity=lambda i:(i.st_dev,i.st_ino,i.st_uid,i.st_gid,i.st_mode,i.st_nlink,
-            i.st_size,i.st_mtime_ns,i.st_ctime_ns)
-        if (identity(before)!=identity(os.fstat(context_fd)) or len(context_raw)!=before.st_size
-                or (before.st_dev,before.st_ino)!=(context_path.lstat().st_dev,context_path.lstat().st_ino)):
-            raise ValueError('paid_host_context_refused')
-    finally:os.close(context_fd)
     capture = root / (key + '.paid')
     capture_paths = dict(stdout_path=str(capture/'stdout'),
                          stderr_path=str(capture/'stderr'),
@@ -161,6 +153,13 @@ def launch_observer(here, packet_path, key, model, receipt):
     if re.fullmatch(r'[0-9a-f]{64}', source) is None:
         raise ValueError('paid_owned_launch_refused')
     def observe(proc, started_at):
+        import time
+        deadline=min(time.monotonic()+30.0,entry_request['deadline_monotonic_ns']/1_000_000_000)
+        ready_path=capture/'entry-ready.json'
+        while not ready_path.exists():
+            if proc.poll() is not None or time.monotonic()>=deadline:raise ValueError('paid_entry_ready_unavailable')
+            time.sleep(0.02)
+        ready=parse(private_input(ready_path,32768))
         if proc.poll() is not None or proc.pid <= 0:
             raise ValueError('paid_owned_process_unavailable')
         image = inspect_linux_process_image(proc.pid)
@@ -171,6 +170,7 @@ def launch_observer(here, packet_path, key, model, receipt):
                 or image['effective_gid'] != os.getegid()
                 or image['real_gid'] != os.getgid()):
             raise ValueError('paid_owned_process_unqualified')
+        ready=entry.validate_ready(ready,entry_request,process_identity=image,pid=proc.pid)
         # This image is read from the actual child, not the configured path.
         # sys.executable is version/source DATA only; admission compares hash
         # and principal against the independently qualified remote binding.
@@ -178,12 +178,13 @@ def launch_observer(here, packet_path, key, model, receipt):
             transport_host=value['host'], lease_id=value['lease_id'],
             pid=proc.pid, process_identity=image,
             observed_user=pwd.getpwuid(image['effective_uid']).pw_name,
-            launch_nonce=secrets.token_hex(32), started_at=started_at,
+            launch_nonce=entry_request['entry_nonce'], started_at=started_at,
             python_path=sys.executable, python_version=sys.version.split()[0],
             capture_paths=capture_paths,
-            host_context=dict(host_env_path=str(context_path),
-                host_env_sha256=hashlib.sha256(context_raw).hexdigest(),boot_id=image['boot_id'],
+            host_context=dict(host_env_path=entry_request['initializer_commitment']['host_env']['path'],
+                host_env_sha256=entry_request['initializer_commitment']['host_env']['sha256'],boot_id=image['boot_id'],
                 capture_identity=capture_identity),
+            provider_entry=ready,
             source_manifest_sha256=source,
             request_body_sha256=hashlib.sha256(body).hexdigest(),
             capsule_binding_sha256=hashlib.sha256(capsule).hexdigest(),
