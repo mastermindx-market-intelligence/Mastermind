@@ -14,14 +14,15 @@ READINESS_BLOCKED and runs nothing.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
 import re
 import secrets
 import select
-import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -91,6 +92,12 @@ MANIFEST_KEYS = (
 )
 MANIFEST_MAX_FILES = 20000
 MANIFEST_MAX_BYTES = 128 * 1024 * 1024
+FILE_READ_CHUNK = 65536
+HELPER_REQUEST_MAX = 4096
+COMMAND_CAPACITY = 48
+CLEANUP_COMMAND_RESERVE = 2
+WORK_COMMAND_LIMIT = COMMAND_CAPACITY - CLEANUP_COMMAND_RESERVE
+CAPTURE_FAULTS = frozenset({"set_blocking", "select", "read"})
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 REQUIRED_BLOBS = {
     "packages/testkit/src/cli/topology.ts": {
@@ -214,6 +221,17 @@ class Refusal(Exception):
 class OwnedRoot:
     path: Path
     token: str
+    allocation_base: Path | None = None
+    device: int = -1
+    inode: int = -1
+
+
+class PartialAllocation(Exception):
+    """Setup failed after mkdtemp. The directory is retained, not deleted."""
+
+    def __init__(self, owned: OwnedRoot) -> None:
+        self.owned = owned
+        super().__init__("partial_allocation")
 
 
 @dataclass(frozen=True)
@@ -226,6 +244,9 @@ class CommandRecord:
     uncertain: bool
     stdout_bytes: bytes | None = None
     capture_refusal: str | None = None
+    pid: int | None = None
+    pgid: int | None = None
+    settled: bool = True
 
 
 class AttemptBudget:
@@ -238,6 +259,7 @@ class AttemptBudget:
         self.exhausted_phase: str | None = None
         self.uncertain = False
         self.blocked: str | None = None
+        self.settlement = "settled"
 
     def elapsed(self) -> float:
         return self._now() - self.started
@@ -268,6 +290,7 @@ class AttemptBudget:
     def mark_uncertain(self) -> None:
         self.uncertain = True
         self.blocked = "uncertain_child"
+        self.settlement = "uncertain"
 
     def facts(self) -> dict[str, object]:
         return {
@@ -277,6 +300,7 @@ class AttemptBudget:
             "cleanup_reserve_seconds": DEADLINES_SECONDS["owned_cleanup"],
             "reap_reserve_seconds": DEADLINES_SECONDS["reap"],
             "hash_budget_seconds": DEADLINES_SECONDS["hash_manifest"],
+            "settlement": self.settlement,
         }
 
 
@@ -407,27 +431,46 @@ def _reap_owned_group(proc: subprocess.Popen[bytes], seconds: float) -> tuple[bo
     return True, code if code is not None else -1
 
 
-def _read_capped(fd: int, buf: bytearray, *, binary: bool, ceiling: int) -> tuple[bool, bool]:
-    """Read into buf up to ceiling. Returns (eof, overflow). Overflow is not stored."""
+def _read_capped(fd: int, buf: bytearray, *, binary: bool, ceiling: int) -> str:
+    """Read into buf up to ceiling.
+
+    A pipe OSError is "error", not EOF. Overflow bytes are not stored.
+    """
+    del binary
     room = ceiling - len(buf)
-    if room <= 0:
-        try:
-            extra = os.read(fd, 1)
-        except BlockingIOError:
-            return False, False
-        except OSError:
-            return True, False
-        return (not extra), bool(extra)
     try:
+        if room <= 0:
+            extra = os.read(fd, 1)
+            if not extra:
+                return "eof"
+            return "overflow"
         chunk = os.read(fd, min(65536, room))
     except BlockingIOError:
-        return False, False
+        return "pending"
     except OSError:
-        return True, False
+        return "error"
     if not chunk:
-        return True, False
+        return "eof"
     buf += chunk
-    return False, False
+    return "data"
+
+
+def _close_pipes(proc: subprocess.Popen[bytes]) -> bool:
+    closed = True
+    for stream in (proc.stdin, proc.stdout, proc.stderr):
+        if stream is not None and not stream.closed:
+            try:
+                stream.close()
+            except OSError:
+                closed = False
+    return closed
+
+
+def _reap_allowance(budget: AttemptBudget | None) -> float:
+    cap = float(DEADLINES_SECONDS["reap"])
+    if budget is None:
+        return cap
+    return min(cap, max(0.0, budget.remaining()))
 
 
 def default_spawn(
@@ -439,10 +482,18 @@ def default_spawn(
     binary: bool = False,
     stdin_bytes: bytes | None = None,
     budget: AttemptBudget | None = None,
+    capture_fault: str | None = None,
 ) -> CommandRecord:
-    """Stream child output with a hard ceiling. Do not buffer via communicate()."""
+    """Stream one owned process group. Settle it before returning.
+
+    An OSError from Popen means no child exists and propagates. Any failure
+    after Popen settles that group or returns uncertainty. A later caller must
+    not hash or delete after an uncertain record.
+    """
     assert_closed_env(env)
     assert_readiness_argv(tuple(argv))
+    if capture_fault is not None and capture_fault not in CAPTURE_FAULTS:
+        raise Refusal("capture_fault_unknown")
     proc = subprocess.Popen(
         list(argv),
         cwd=None if cwd is None else str(cwd),
@@ -452,104 +503,152 @@ def default_spawn(
         stderr=subprocess.PIPE,
         start_new_session=True,
     )
-    assert proc.stdout is not None and proc.stderr is not None
+    pid = proc.pid
     out_buf = bytearray()
     err_buf = bytearray()
-    out_fd = proc.stdout.fileno()
-    err_fd = proc.stderr.fileno()
-    os.set_blocking(out_fd, False)
-    os.set_blocking(err_fd, False)
-    stdin_fd = None
-    stdin_pos = 0
-    stdin_view = memoryview(stdin_bytes) if stdin_bytes else None
-    if proc.stdin is not None and stdin_view is not None:
-        stdin_fd = proc.stdin.fileno()
-        os.set_blocking(stdin_fd, False)
-    elif proc.stdin is not None:
-        proc.stdin.close()
-    out_open = True
-    err_open = True
     binary_overflow = False
     out_capped = False
     err_capped = False
     timed_out = False
-    deadline = time.monotonic() + max(0.0, float(timeout))
-    text_ceiling = LOG_MAX_BYTES
-    out_ceiling = BINARY_OBJECT_CEILING if binary else text_ceiling
-    while out_open or err_open or stdin_fd is not None:
-        if time.monotonic() >= deadline:
-            timed_out = True
-            break
-        readable = [fd for fd, open_ in ((out_fd, out_open), (err_fd, err_open)) if open_]
-        writable = [stdin_fd] if stdin_fd is not None else []
-        if not readable and not writable:
-            break
-        wait = max(0.0, deadline - time.monotonic())
-        ready_r, ready_w, _ = select.select(readable, writable, [], min(0.05, wait))
-        if stdin_fd is not None and stdin_fd in ready_w and stdin_view is not None:
-            try:
-                written = os.write(stdin_fd, stdin_view[stdin_pos:stdin_pos + 65536])
-            except BlockingIOError:
-                written = 0
-            except OSError:
-                written = 0
-                stdin_fd = None
-            stdin_pos += written
-            if stdin_view is not None and stdin_pos >= len(stdin_view):
-                if proc.stdin is not None:
-                    proc.stdin.close()
-                stdin_fd = None
-        if out_fd in ready_r and out_open:
-            eof, overflow = _read_capped(out_fd, out_buf, binary=binary, ceiling=out_ceiling)
-            if overflow:
-                if binary:
-                    binary_overflow = True
-                else:
-                    out_capped = True
-                break
-            if eof:
-                out_open = False
-        if err_fd in ready_r and err_open:
-            eof, overflow = _read_capped(err_fd, err_buf, binary=False, ceiling=text_ceiling)
-            if overflow:
-                err_capped = True
-                break
-            if eof:
-                err_open = False
-        if proc.poll() is not None and not ready_r and not ready_w and not out_open and not err_open:
-            break
-    if proc.poll() is None and not timed_out and not binary_overflow and not out_capped and not err_capped:
-        try:
-            proc.wait(timeout=min(1.0, max(0.05, float(timeout))))
-        except subprocess.TimeoutExpired:
-            timed_out = True
-    capture_refusal = "binary_capture_exceeded" if binary_overflow else None
+    capture_error = False
+    capture_refusal: str | None = None
+    settled = False
     uncertain = False
-    must_stop = timed_out or binary_overflow or out_capped or err_capped or proc.poll() is None or not _group_gone(proc.pid)
-    if must_stop:
-        if budget is None:
-            reap_seconds = float(DEADLINES_SECONDS["reap"])
-        else:
-            reap_seconds = min(float(DEADLINES_SECONDS["reap"]), max(0.0, budget.remaining()))
-        reaped, code = _reap_owned_group(proc, reap_seconds)
-        uncertain = not reaped
-        returncode = code
-    else:
-        returncode = proc.returncode if proc.returncode is not None else 0
-        for stream in (proc.stdin, proc.stdout, proc.stderr):
-            if stream is not None and not stream.closed:
-                stream.close()
+    returncode = -1
+    pending_exc: BaseException | None = None
+    try:
+        if proc.stdout is None or proc.stderr is None:
+            raise OSError("capture_pipes_missing")
+        out_fd = proc.stdout.fileno()
+        err_fd = proc.stderr.fileno()
+        if capture_fault == "set_blocking":
+            raise OSError("injected_set_blocking")
+        os.set_blocking(out_fd, False)
+        os.set_blocking(err_fd, False)
+        stdin_fd = None
+        stdin_pos = 0
+        stdin_view = memoryview(stdin_bytes) if stdin_bytes else None
+        if proc.stdin is not None and stdin_view is not None:
+            stdin_fd = proc.stdin.fileno()
+            os.set_blocking(stdin_fd, False)
+        elif proc.stdin is not None:
+            proc.stdin.close()
+        out_open = True
+        err_open = True
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        text_ceiling = LOG_MAX_BYTES
+        out_ceiling = BINARY_OBJECT_CEILING if binary else text_ceiling
+        while out_open or err_open or stdin_fd is not None:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
+            readable = [fd for fd, open_ in ((out_fd, out_open), (err_fd, err_open)) if open_]
+            writable = [stdin_fd] if stdin_fd is not None else []
+            if not readable and not writable:
+                break
+            wait = max(0.0, deadline - time.monotonic())
+            if capture_fault == "select":
+                raise OSError("injected_select")
+            ready_r, ready_w, _ = select.select(readable, writable, [], min(0.05, wait))
+            if capture_fault == "read":
+                raise OSError("injected_read")
+            if stdin_fd is not None and stdin_fd in ready_w and stdin_view is not None:
+                try:
+                    written = os.write(stdin_fd, stdin_view[stdin_pos:stdin_pos + 65536])
+                except BlockingIOError:
+                    written = 0
+                except OSError:
+                    written = 0
+                    stdin_fd = None
+                stdin_pos += written
+                if stdin_view is not None and stdin_pos >= len(stdin_view):
+                    if proc.stdin is not None:
+                        proc.stdin.close()
+                    stdin_fd = None
+            if out_fd in ready_r and out_open:
+                status = _read_capped(out_fd, out_buf, binary=binary, ceiling=out_ceiling)
+                if status == "error":
+                    capture_error = True
+                    capture_refusal = "capture_oserror"
+                    break
+                if status == "overflow":
+                    if binary:
+                        binary_overflow = True
+                    else:
+                        out_capped = True
+                    break
+                if status == "eof":
+                    out_open = False
+            if err_fd in ready_r and err_open:
+                status = _read_capped(err_fd, err_buf, binary=False, ceiling=text_ceiling)
+                if status == "error":
+                    capture_error = True
+                    capture_refusal = "capture_oserror"
+                    break
+                if status == "overflow":
+                    err_capped = True
+                    break
+                if status == "eof":
+                    err_open = False
+            if proc.poll() is not None and not ready_r and not ready_w and not out_open and not err_open:
+                break
+        if (
+            proc.poll() is None
+            and not timed_out
+            and not binary_overflow
+            and not out_capped
+            and not err_capped
+            and not capture_error
+        ):
+            try:
+                proc.wait(timeout=min(1.0, max(0.05, float(timeout))))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+        clean = (
+            not timed_out
+            and not binary_overflow
+            and not out_capped
+            and not err_capped
+            and not capture_error
+            and proc.poll() is not None
+            and _group_gone(pid)
+        )
+        if clean and _close_pipes(proc):
+            returncode = proc.returncode if proc.returncode is not None else 0
+            settled = True
+    except OSError:
+        capture_error = True
+        capture_refusal = capture_refusal or "capture_oserror"
+    except BaseException as exc:
+        pending_exc = exc
+    finally:
+        if not settled:
+            reaped, code = _reap_owned_group(proc, _reap_allowance(budget))
+            settled = reaped
+            uncertain = not reaped
+            returncode = code
+            if uncertain and budget is not None:
+                budget.mark_uncertain()
+    if pending_exc is not None:
+        if not settled and budget is not None:
+            budget.mark_uncertain()
+        raise pending_exc
     if binary_overflow:
         out_buf.clear()
+        capture_refusal = "binary_capture_exceeded"
+    if capture_error:
+        capture_refusal = capture_refusal or "capture_oserror"
     stdout_text = ""
-    if not binary:
+    if not binary and not capture_error:
         stdout_text = redact(bytes(out_buf).decode("utf-8", errors="replace"), truncated=out_capped)
     stderr_text = redact(bytes(err_buf).decode("utf-8", errors="replace"), truncated=err_capped)
     if len(stdout_text.encode("utf-8")) > LOG_MAX_BYTES:
         stdout_text = redact(stdout_text, truncated=True)
     if len(stderr_text.encode("utf-8")) > LOG_MAX_BYTES:
         stderr_text = redact(stderr_text, truncated=True)
-    kept = bytes(out_buf) if binary and not binary_overflow else None
+    kept = bytes(out_buf) if binary and not binary_overflow and not capture_error else None
+    if uncertain:
+        settled = False
     return CommandRecord(
         tuple(argv),
         returncode,
@@ -559,6 +658,9 @@ def default_spawn(
         uncertain,
         kept,
         capture_refusal,
+        pid,
+        pid,
+        settled,
     )
 
 
@@ -568,10 +670,17 @@ def _write(path: Path, text: str) -> None:
 
 def create_owned_root() -> OwnedRoot:
     path = Path(tempfile.mkdtemp(prefix="mmx-rakazo-journey-"))
+    allocation_base = path.parent
     try:
-        if path.is_symlink() or path.resolve() != path:
-            raise Refusal("owned_root_unresolved")
+        described = os.lstat(path)
+    except OSError as exc:
+        raise PartialAllocation(OwnedRoot(path, "", allocation_base, -1, -1)) from exc
+    owned = OwnedRoot(path, "", allocation_base, described.st_dev, described.st_ino)
+    try:
+        if stat.S_ISLNK(described.st_mode) or not stat.S_ISDIR(described.st_mode):
+            raise PartialAllocation(owned)
         token = secrets.token_hex(32)
+        owned = OwnedRoot(path, token, allocation_base, described.st_dev, described.st_ino)
         os.chmod(path, 0o700)
         for name in (
             "config", "config/docker", "cache", "cache/npm", "cache/pnpm",
@@ -614,27 +723,38 @@ def create_owned_root() -> OwnedRoot:
         _write(path / "config" / "npmrc", npmrc)
         _write(path / "config" / "npmrc-global", npmrc)
         _write(path / "config" / "docker" / "config.json", "{}\n")
-        return OwnedRoot(path, token)
-    except OSError:
-        shutil.rmtree(path, ignore_errors=True)
+        if not _marker_ok(owned):
+            raise PartialAllocation(owned)
+        return owned
+    except PartialAllocation:
         raise
+    except OSError as exc:
+        raise PartialAllocation(owned) from exc
 
 
 def _marker_ok(owned: OwnedRoot) -> bool:
+    """Admit the stored allocation identity. Do not reread the process temp dir."""
     path = owned.path
-    if not owned.token or path.is_symlink() or not path.is_dir():
+    if not owned.token or owned.allocation_base is None:
         return False
     try:
-        if path.resolve() != path:
-            return False
+        described = os.lstat(path)
     except OSError:
         return False
-    if path.parent != Path(tempfile.gettempdir()):
+    if stat.S_ISLNK(described.st_mode) or not stat.S_ISDIR(described.st_mode):
+        return False
+    if described.st_dev != owned.device or described.st_ino != owned.inode:
+        return False
+    if path.parent != owned.allocation_base:
         return False
     if not path.name.startswith("mmx-rakazo-journey-"):
         return False
     marker = path / ".mmx-owned"
-    if not marker.is_file() or marker.is_symlink():
+    try:
+        marker_stat = os.lstat(marker)
+    except OSError:
+        return False
+    if stat.S_ISLNK(marker_stat.st_mode) or not stat.S_ISREG(marker_stat.st_mode):
         return False
     try:
         return marker.read_text(encoding="utf-8").strip() == owned.token
@@ -642,16 +762,122 @@ def _marker_ok(owned: OwnedRoot) -> bool:
         return False
 
 
-def remove_owned_root(owned: OwnedRoot) -> str:
-    if not _marker_ok(owned):
-        return "REFUSED"
+def _command_room(used: int, *, reserve: bool) -> None:
+    limit = COMMAND_CAPACITY if reserve else WORK_COMMAND_LIMIT
+    if used >= limit:
+        raise Refusal("command_budget_exceeded")
+
+
+def _scan_entries(directory: Path) -> list[os.DirEntry[str]]:
+    with os.scandir(directory) as iterator:
+        return sorted(iterator, key=lambda entry: entry.name)
+
+
+def _hash_regular(path: Path, described: os.stat_result, deadline: float) -> str:
+    if time.monotonic() >= deadline:
+        raise Refusal("deadline_exhausted")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    if hasattr(os, "O_NONBLOCK"):
+        flags |= os.O_NONBLOCK
     try:
-        shutil.rmtree(owned.path)
-    except OSError:
-        return "UNKNOWN"
-    if owned.path.exists():
-        return "UNKNOWN"
-    return "REMOVED"
+        handle = os.open(path, flags)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise Refusal("symlink_in_owned_root") from exc
+        raise Refusal("manifest_unreadable") from exc
+    digest = hashlib.sha256()
+    remaining = described.st_size
+    try:
+        while remaining > 0:
+            if time.monotonic() >= deadline:
+                raise Refusal("deadline_exhausted")
+            chunk = os.read(handle, min(FILE_READ_CHUNK, remaining))
+            if not chunk:
+                raise Refusal("manifest_read_incomplete")
+            digest.update(chunk)
+            remaining -= len(chunk)
+        current = os.fstat(handle)
+    except Refusal:
+        raise
+    except OSError as exc:
+        raise Refusal("manifest_unreadable") from exc
+    finally:
+        os.close(handle)
+    if (
+        current.st_dev != described.st_dev
+        or current.st_ino != described.st_ino
+        or current.st_size != described.st_size
+    ):
+        raise Refusal("manifest_identity_changed")
+    return digest.hexdigest()
+
+
+def _manifest_tree(
+    root: Path,
+    *,
+    deadline: float,
+    max_files: int = MANIFEST_MAX_FILES,
+    max_bytes: int = MANIFEST_MAX_BYTES,
+) -> str:
+    """Hash one owned directory. Missing or unreadable entries are failures."""
+    try:
+        root_stat = os.lstat(root)
+    except FileNotFoundError as exc:
+        raise Refusal("manifest_root_missing") from exc
+    except OSError as exc:
+        raise Refusal("manifest_traversal_error") from exc
+    if stat.S_ISLNK(root_stat.st_mode):
+        raise Refusal("symlink_in_owned_root")
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise Refusal("manifest_type_mismatch")
+    lines: list[str] = []
+    files = 0
+    total = 0
+
+    def walk(directory: Path) -> None:
+        nonlocal files, total
+        if time.monotonic() >= deadline:
+            raise Refusal("deadline_exhausted")
+        try:
+            entries = _scan_entries(directory)
+        except OSError as exc:
+            raise Refusal("manifest_traversal_error") from exc
+        children: list[os.DirEntry[str]] = []
+        for entry in entries:
+            if time.monotonic() >= deadline:
+                raise Refusal("deadline_exhausted")
+            try:
+                described = entry.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise Refusal("manifest_traversal_error") from exc
+            if stat.S_ISLNK(described.st_mode):
+                raise Refusal("symlink_in_owned_root")
+            if stat.S_ISDIR(described.st_mode):
+                children.append(entry)
+                continue
+            if not stat.S_ISREG(described.st_mode):
+                raise Refusal("manifest_type_mismatch")
+            files += 1
+            if files > max_files or described.st_size > max_bytes - total:
+                raise Refusal("manifest_bound_exceeded")
+            digest = _hash_regular(Path(entry.path), described, deadline)
+            total += described.st_size
+            rel = Path(entry.path).relative_to(root).as_posix()
+            lines.append(f"{rel}\0{oct(described.st_mode & 0o777)}\0{digest}")
+        for entry in children:
+            walk(Path(entry.path))
+
+    walk(root)
+    try:
+        finished = os.lstat(root)
+    except OSError as exc:
+        raise Refusal("manifest_identity_changed") from exc
+    if finished.st_dev != root_stat.st_dev or finished.st_ino != root_stat.st_ino:
+        raise Refusal("manifest_identity_changed")
+    lines.sort()
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def directory_manifest_sha256(
@@ -661,38 +887,303 @@ def directory_manifest_sha256(
     max_files: int = MANIFEST_MAX_FILES,
     max_bytes: int = MANIFEST_MAX_BYTES,
 ) -> str:
-    """Hash an owned directory without following symlinks or walking off the clock."""
-    lines: list[str] = []
-    files = 0
-    total = 0
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        if budget.remaining() <= 0:
-            budget.exhausted_phase = budget.exhausted_phase or "hash_manifest"
-            budget.blocked = "deadline_exhausted"
+    """Hash with the phase allowance. Do not spend the cleanup reserve."""
+    allowance = budget.take("hash_manifest")
+    deadline = time.monotonic() + allowance
+    return _manifest_tree(root, deadline=deadline, max_files=max_files, max_bytes=max_bytes)
+
+
+_HELPER_KEYS = frozenset({
+    "allocation_base", "deadline", "marker", "max_bytes", "max_files", "op",
+    "root", "root_device", "root_inode", "target", "target_device", "target_inode",
+})
+
+
+def _helper_argv() -> list[str]:
+    return [sys.executable, "-I", str(Path(__file__).resolve()), "--fs-helper"]
+
+
+def _as_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _fs_request(
+    owned: OwnedRoot,
+    target: Path,
+    op: str,
+    timeout: float,
+    *,
+    max_files: int = MANIFEST_MAX_FILES,
+    max_bytes: int = MANIFEST_MAX_BYTES,
+    deadline: float | None = None,
+) -> bytes:
+    described = os.lstat(target)
+    moment = time.monotonic() + max(0.0, timeout) if deadline is None else deadline
+    payload = {
+        "allocation_base": str(owned.allocation_base),
+        "deadline": moment,
+        "marker": owned.token,
+        "max_bytes": max_bytes,
+        "max_files": max_files,
+        "op": op,
+        "root": str(owned.path),
+        "root_device": owned.device,
+        "root_inode": owned.inode,
+        "target": str(target),
+        "target_device": described.st_dev,
+        "target_inode": described.st_ino,
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(raw) > HELPER_REQUEST_MAX:
+        raise Refusal("helper_request_bounded")
+    return raw
+
+
+def _path_token(value: object) -> Path | None:
+    if not isinstance(value, str) or "\0" in value or not value.startswith("/"):
+        return None
+    path = Path(value)
+    if any(part == ".." for part in path.parts):
+        return None
+    return path
+
+
+def _admit_request(payload: Mapping[str, object]) -> tuple[Path, Path, str] | str:
+    """Return (root, target, op) or a cause. Never consult tempfile.gettempdir()."""
+    if set(payload) != _HELPER_KEYS:
+        return "identity_refused"
+    op = payload.get("op")
+    if op not in {"manifest", "remove"}:
+        return "identity_refused"
+    root = _path_token(payload.get("root"))
+    target = _path_token(payload.get("target"))
+    allocation_base = _path_token(payload.get("allocation_base"))
+    marker = payload.get("marker")
+    root_device = _as_int(payload.get("root_device"))
+    root_inode = _as_int(payload.get("root_inode"))
+    target_device = _as_int(payload.get("target_device"))
+    target_inode = _as_int(payload.get("target_inode"))
+    max_files = _as_int(payload.get("max_files"))
+    max_bytes = _as_int(payload.get("max_bytes"))
+    deadline = payload.get("deadline")
+    if (
+        root is None or target is None or allocation_base is None
+        or root_device is None or root_inode is None
+        or target_device is None or target_inode is None
+        or max_files is None or max_bytes is None
+        or not isinstance(marker, str) or re.fullmatch(r"[0-9a-f]{64}", marker) is None
+        or isinstance(deadline, bool) or not isinstance(deadline, (int, float))
+    ):
+        return "identity_refused"
+    if not 1 <= max_files <= MANIFEST_MAX_FILES or not 1 <= max_bytes <= MANIFEST_MAX_BYTES:
+        return "identity_refused"
+    if not root.name.startswith("mmx-rakazo-journey-") or root.parent != allocation_base:
+        return "identity_refused"
+    if op == "remove" and target != root:
+        return "identity_refused"
+    if op == "manifest" and target != root and target.parent != root:
+        return "identity_refused"
+    try:
+        root_stat = os.lstat(root)
+    except FileNotFoundError:
+        return "manifest_root_missing"
+    except OSError:
+        return "manifest_traversal_error"
+    if stat.S_ISLNK(root_stat.st_mode):
+        return "symlink_in_owned_root"
+    if not stat.S_ISDIR(root_stat.st_mode):
+        return "manifest_type_mismatch"
+    if root_stat.st_dev != root_device or root_stat.st_ino != root_inode:
+        return "identity_refused"
+    marker_path = root / ".mmx-owned"
+    try:
+        marker_stat = os.lstat(marker_path)
+        text = marker_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return "identity_refused"
+    if stat.S_ISLNK(marker_stat.st_mode) or not stat.S_ISREG(marker_stat.st_mode) or text != marker:
+        return "identity_refused"
+    try:
+        target_stat = os.lstat(target)
+    except FileNotFoundError:
+        return "manifest_root_missing"
+    except OSError:
+        return "manifest_traversal_error"
+    if stat.S_ISLNK(target_stat.st_mode):
+        return "symlink_in_owned_root"
+    if not stat.S_ISDIR(target_stat.st_mode):
+        return "manifest_type_mismatch"
+    if target_stat.st_dev != target_device or target_stat.st_ino != target_inode:
+        return "identity_refused"
+    return root, target, op
+
+
+def _remove_tree(directory: Path, deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise Refusal("deadline_exhausted")
+    try:
+        entries = _scan_entries(directory)
+    except OSError as exc:
+        raise Refusal("manifest_traversal_error") from exc
+    for entry in entries:
+        if time.monotonic() >= deadline:
             raise Refusal("deadline_exhausted")
-        kept: list[str] = []
-        for name in sorted(dirnames):
-            candidate = Path(dirpath) / name
-            if candidate.is_symlink():
-                raise Refusal("symlink_in_owned_root")
-            kept.append(name)
-        dirnames[:] = kept
-        for name in sorted(filenames):
-            path = Path(dirpath) / name
-            if path.is_symlink():
-                raise Refusal("symlink_in_owned_root")
-            files += 1
-            if files > max_files:
-                raise Refusal("manifest_bound_exceeded")
-            data = path.read_bytes()
-            total += len(data)
-            if total > max_bytes:
-                raise Refusal("manifest_bound_exceeded")
-            rel = path.relative_to(root).as_posix()
-            digest = hashlib.sha256(data).hexdigest()
-            mode = oct(path.stat().st_mode & 0o777)
-            lines.append(f"{rel}\0{mode}\0{digest}")
-    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+        path = Path(entry.path)
+        try:
+            described = os.lstat(path)
+        except OSError as exc:
+            raise Refusal("manifest_traversal_error") from exc
+        if stat.S_ISLNK(described.st_mode) or not stat.S_ISDIR(described.st_mode):
+            try:
+                os.unlink(path)
+            except OSError as exc:
+                raise Refusal("manifest_unreadable") from exc
+            continue
+        _remove_tree(path, deadline)
+        if time.monotonic() >= deadline:
+            raise Refusal("deadline_exhausted")
+        try:
+            os.rmdir(path)
+        except OSError as exc:
+            raise Refusal("manifest_unreadable") from exc
+
+
+def _fs_helper_dispatch(payload: Mapping[str, object]) -> dict[str, object]:
+    admitted = _admit_request(payload)
+    if isinstance(admitted, str):
+        return {"cause": admitted, "ok": False}
+    root, target, op = admitted
+    deadline = float(payload["deadline"])
+    if time.monotonic() >= deadline:
+        return {"cause": "deadline_exhausted", "ok": False}
+    if op == "manifest":
+        try:
+            digest = _manifest_tree(
+                target,
+                deadline=deadline,
+                max_files=int(payload["max_files"]),
+                max_bytes=int(payload["max_bytes"]),
+            )
+        except Refusal as exc:
+            return {"cause": exc.reason, "ok": False}
+        return {"ok": True, "sha256": digest}
+    try:
+        _remove_tree(root, deadline)
+        if time.monotonic() >= deadline:
+            raise Refusal("deadline_exhausted")
+        os.rmdir(root)
+    except Refusal as exc:
+        return {"cause": exc.reason, "ok": False}
+    except OSError:
+        return {"cause": "manifest_unreadable", "ok": False}
+    return {"ok": True, "removed": True}
+
+
+def _fs_helper_main() -> int:
+    try:
+        raw = sys.stdin.buffer.read(HELPER_REQUEST_MAX + 1)
+        if len(raw) > HELPER_REQUEST_MAX:
+            result = {"cause": "helper_request_bounded", "ok": False}
+        else:
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError):
+                payload = None
+            if not isinstance(payload, dict):
+                result = {"cause": "helper_request_bounded", "ok": False}
+            else:
+                result = _fs_helper_dispatch(payload)
+    except Exception:
+        result = {"cause": "helper_failed", "ok": False}
+    sys.stdout.write(json.dumps(result, sort_keys=True) + "\n")
+    return 0 if result.get("ok") is True else 1
+
+
+def _settled_payload(record: CommandRecord) -> tuple[dict[str, object] | None, str]:
+    """Parse helper stdout only after the owned process is confirmed settled."""
+    if record.uncertain or not record.settled:
+        return None, "uncertain_child"
+    if record.timed_out:
+        return None, "deadline_exhausted"
+    if record.capture_refusal:
+        return None, record.capture_refusal
+    try:
+        payload = json.loads(record.stdout.strip())
+    except json.JSONDecodeError:
+        return None, "helper_output_unreadable"
+    if not isinstance(payload, dict) or payload.get("ok") not in (True, False):
+        return None, "helper_output_unreadable"
+    return payload, ""
+
+
+def _manifest_from_record(record: CommandRecord) -> tuple[str | None, str]:
+    payload, cause = _settled_payload(record)
+    if payload is None:
+        return None, cause or "helper_output_unreadable"
+    if payload.get("ok") is not True:
+        reason = payload.get("cause")
+        if not isinstance(reason, str) or not reason or len(reason) > 80:
+            return None, "helper_output_unreadable"
+        return None, reason
+    digest = payload.get("sha256")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        return None, "helper_output_unreadable"
+    return digest, ""
+
+
+def remove_owned_root(
+    owned: OwnedRoot,
+    budget: AttemptBudget | None = None,
+    spawn: Spawn | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Delete only through the settled helper. Partial cleanup stays UNKNOWN."""
+    if not _marker_ok(owned):
+        return "REFUSED"
+    active = budget or AttemptBudget()
+    if active.uncertain or active.blocked == "uncertain_child":
+        active.settlement = "uncertain"
+        return "UNKNOWN"
+    try:
+        timeout = active.take("owned_cleanup")
+    except Refusal:
+        active.settlement = "uncertain"
+        return "UNKNOWN"
+    try:
+        request = _fs_request(owned, owned.path, "remove", timeout)
+    except OSError:
+        active.settlement = "uncertain"
+        return "UNKNOWN"
+    launcher = spawn or default_spawn
+    closed = env or build_closed_env(owned)
+    try:
+        record = launcher(
+            _helper_argv(),
+            env=closed,
+            cwd=owned.path / "tmp",
+            timeout=timeout,
+            binary=False,
+            stdin_bytes=request,
+            budget=active,
+        )
+    except OSError:
+        active.mark_uncertain()
+        return "UNKNOWN"
+    if not isinstance(record, CommandRecord):
+        active.settlement = "uncertain"
+        return "UNKNOWN"
+    payload, cause = _settled_payload(record)
+    if payload is None or record.uncertain or not record.settled:
+        active.settlement = "uncertain"
+        return "UNKNOWN"
+    if payload.get("ok") is True and not owned.path.exists():
+        return "REMOVED"
+    if payload.get("cause") == "identity_refused":
+        return "REFUSED"
+    active.settlement = "uncertain"
+    return "UNKNOWN"
 
 
 def _invoke(
@@ -1203,7 +1694,13 @@ def _manifests_measured(hashes: Mapping[str, object]) -> bool:
     return True
 
 
-def _owned_hashes(owned: OwnedRoot, budget: AttemptBudget) -> dict[str, str | None]:
+def _owned_hashes(
+    owned: OwnedRoot,
+    budget: AttemptBudget,
+    spawn: Spawn | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str | None]:
+    """Measure five manifests through the settled helper. Do not spend cleanup time."""
     hashes: dict[str, str | None] = {
         "patch_sha256": PATCH_SHA256,
         "override_sha256": OVERRIDE_SHA256,
@@ -1215,17 +1712,64 @@ def _owned_hashes(owned: OwnedRoot, budget: AttemptBudget) -> dict[str, str | No
         "source_manifest_sha256": owned.path / "source",
         "staging_manifest_sha256": owned.path / "staging",
     }
+    launcher = spawn or default_spawn
+    closed = env or build_closed_env(owned)
+    uncertain_cause = False
     for key, directory in mapping.items():
+        cause_key = _hash_cause(key)
+        if uncertain_cause or budget.uncertain or budget.blocked == "uncertain_child":
+            hashes[key] = None
+            hashes[cause_key] = "uncertain_child"
+            continue
         try:
-            budget.take("hash_manifest")
-            hashes[key] = directory_manifest_sha256(directory, budget)
-            hashes[_hash_cause(key)] = None
+            timeout = budget.take("hash_manifest")
         except Refusal as exc:
             hashes[key] = None
-            hashes[_hash_cause(key)] = exc.reason
+            hashes[cause_key] = exc.reason
+            continue
+        try:
+            request = _fs_request(owned, directory, "manifest", timeout)
+        except FileNotFoundError:
+            hashes[key] = None
+            hashes[cause_key] = "manifest_root_missing"
+            continue
         except OSError:
             hashes[key] = None
-            hashes[_hash_cause(key)] = "manifest_unreadable"
+            hashes[cause_key] = "manifest_unreadable"
+            continue
+        try:
+            record = launcher(
+                _helper_argv(),
+                env=closed,
+                cwd=owned.path / "tmp",
+                timeout=timeout,
+                binary=False,
+                stdin_bytes=request,
+                budget=budget,
+            )
+        except OSError:
+            budget.mark_uncertain()
+            uncertain_cause = True
+            hashes[key] = None
+            hashes[cause_key] = "uncertain_child"
+            continue
+        if not isinstance(record, CommandRecord):
+            budget.mark_uncertain()
+            uncertain_cause = True
+            hashes[key] = None
+            hashes[cause_key] = "uncertain_child"
+            continue
+        digest, cause = _manifest_from_record(record)
+        if cause == "uncertain_child" or record.uncertain or not record.settled:
+            budget.mark_uncertain()
+            uncertain_cause = True
+            hashes[key] = None
+            hashes[cause_key] = "uncertain_child"
+            continue
+        hashes[key] = digest
+        hashes[cause_key] = None if digest is not None else cause
+    if uncertain_cause:
+        return _unavailable_hashes("uncertain_child")
     return hashes
 
 
@@ -1302,6 +1846,13 @@ def build_receipt(
             "exit_zero_is_clean_receipt": False,
             "host_prune": False,
             "absence_of_log_is_absence_of_effects": False,
+            "custody": {
+                "pid": None,
+                "pgid": None,
+                "root": None,
+                "kill_authority": False,
+                "settled": budget is not None and budget.settlement == "settled",
+            },
         },
         "hashes": hashes,
         "limits": {
@@ -1310,13 +1861,14 @@ def build_receipt(
             "execution_armed": False,
             "automatic_retry": False,
             "notes": list(notes),
-            "budget": (budget or AttemptBudget(now=lambda: 0.0, overall=0.0)).facts() if budget is not None else {
+            "budget": budget.facts() if budget is not None else {
                 "elapsed_seconds": None,
                 "remaining_seconds": None,
                 "exhausted_phase": None,
                 "cleanup_reserve_seconds": DEADLINES_SECONDS["owned_cleanup"],
                 "reap_reserve_seconds": DEADLINES_SECONDS["reap"],
                 "hash_budget_seconds": DEADLINES_SECONDS["hash_manifest"],
+                "settlement": "uncertain",
             },
         },
         "commands": [_command_public(item) for item in commands],
@@ -1463,16 +2015,26 @@ def run_readiness(
     stop_reason = ""
 
     def recorded(argv: Sequence[str], **kwargs: object) -> CommandRecord:
+        nonlocal uncertain
         assert_readiness_argv(tuple(argv))
-        if len(records) >= 48:
-            raise Refusal("command_budget_exceeded")
+        reserve = bool(kwargs.pop("reserve_command", False))
+        kwargs.pop("capture_fault", None)
+        _command_room(len(records), reserve=reserve)
         if budget.uncertain or budget.blocked == "uncertain_child":
             raise Refusal("uncertain_child")
         fn = spawn or default_spawn
-        record = fn(argv, **kwargs)
+        try:
+            record = fn(argv, **kwargs)
+        except OSError:
+            uncertain = True
+            budget.mark_uncertain()
+            raise
         if not isinstance(record, CommandRecord):
             raise Refusal("spawn_contract")
         records.append(record)
+        if record.uncertain or not record.settled:
+            uncertain = True
+            budget.mark_uncertain()
         return record
 
     def _note_refusal(exc: Refusal) -> None:
@@ -1509,6 +2071,14 @@ def run_readiness(
     try:
         try:
             owned = (allocate_root or create_owned_root)()
+        except PartialAllocation as exc:
+            owned = exc.owned
+            uncertain = True
+            budget.settlement = "uncertain"
+            stop_reason = "partial_allocation"
+            source_state = "REFUSED"
+            source_reason = "operational_failure"
+            hashes = _unavailable_hashes("partial_allocation")
         except OSError as exc:
             stop_reason = type(exc).__name__
             source_state = "REFUSED"
@@ -1544,27 +2114,38 @@ def run_readiness(
             except Refusal as exc:
                 _note_refusal(exc)
             except OSError as exc:
+                uncertain = True
+                budget.mark_uncertain()
                 stop_reason = type(exc).__name__
+                hashes = _unavailable_hashes("uncertain_child")
                 if source_state != "ADMITTED":
                     source_state = "REFUSED"
                     source_reason = "operational_failure"
                 elif derivation_state != "PREPARED":
                     derivation_state = "REFUSED"
                     derivation_reason = "operational_failure"
-            if owned is not None and not uncertain and budget.blocked != "uncertain_child":
+            if (
+                owned is not None
+                and not uncertain
+                and not budget.uncertain
+                and budget.blocked != "uncertain_child"
+            ):
                 stage = "hash"
                 try:
-                    hashes = _owned_hashes(owned, budget)
+                    hashes = _owned_hashes(owned, budget, recorded, env)
                 except Refusal as exc:
                     _note_refusal(exc)
                     hashes = _unavailable_hashes(exc.reason)
-            elif uncertain or budget.blocked == "uncertain_child":
-                hashes = _unavailable_hashes("uncertain_child")
+            elif uncertain or budget.uncertain or budget.blocked == "uncertain_child":
+                if hashes.get("config_manifest_cause") in (None, "not_measured"):
+                    hashes = _unavailable_hashes(stop_reason or "uncertain_child")
     except OSError as exc:
+        uncertain = True
+        budget.mark_uncertain()
         stop_reason = type(exc).__name__
         source_state = "REFUSED"
         source_reason = "operational_failure"
-        hashes = _unavailable_hashes(stop_reason)
+        hashes = _unavailable_hashes("uncertain_child")
 
     identity = new_identity()
     notes = [
@@ -1621,15 +2202,53 @@ def run_readiness(
     elif retain_owned:
         owned_state = "RETAINED"
     else:
-        owned_state = remove_owned_root(owned)
+        def cleanup_spawn(argv: Sequence[str], **kwargs: object) -> CommandRecord:
+            return recorded(argv, reserve_command=True, **kwargs)
+
+        try:
+            owned_state = remove_owned_root(owned, budget, cleanup_spawn, env or None)
+        except Refusal:
+            owned_state = "UNKNOWN"
+            budget.settlement = "uncertain"
+    if owned is not None and owned_state == "UNKNOWN":
+        budget.settlement = "uncertain"
+    if budget.uncertain:
+        budget.settlement = "uncertain"
+    custody_pid = None
+    custody_pgid = None
+    for item in records:
+        if item.pid is not None:
+            custody_pid = item.pid
+            custody_pgid = item.pgid
+    receipt["commands"] = [_command_public(item) for item in records]
+    limits = receipt["limits"]
+    if isinstance(limits, dict):
+        limits["budget"] = budget.facts()
+        note_list = limits.get("notes")
+        if isinstance(note_list, list) and budget.settlement == "uncertain":
+            for line in (
+                "elapsed_seconds is a parent sample and does not prove an unsettled kernel operation stopped.",
+                "UNKNOWN cleanup is not absence and is not safe to retry.",
+                "A stale pid or pgid is not later kill authority.",
+            ):
+                if line not in note_list:
+                    note_list.append(line)
     cleanup = receipt["cleanup"]
     if isinstance(cleanup, dict):
         cleanup["owned_root"] = owned_state
+        cleanup["custody"] = {
+            "pid": custody_pid,
+            "pgid": custody_pgid,
+            "root": None if owned is None else str(owned.path),
+            "kill_authority": False,
+            "settled": budget.settlement == "settled" and owned_state != "UNKNOWN",
+        }
     return receipt
 
 
 def probe_first_child() -> int:
     owned = create_owned_root()
+    settled_child = False
     try:
         env = build_closed_env(owned)
         os.environ.clear()
@@ -1640,19 +2259,24 @@ def probe_first_child() -> int:
             timeout=float(DEADLINES_SECONDS["toolchain_probe"]),
             binary=False, stdin_bytes=None,
         )
+        settled_child = record.settled and not record.uncertain
         sys.stdout.write(record.stdout)
         if not record.stdout.endswith("\n"):
             sys.stdout.write("\n")
         return 0 if record.returncode == 0 and not record.timed_out and not record.uncertain else 1
     finally:
-        remove_owned_root(owned)
+        if settled_child:
+            remove_owned_root(owned)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    raw = list(sys.argv[1:] if argv is None else argv)
+    if raw[:1] == ["--fs-helper"]:
+        return _fs_helper_main()
     parser = argparse.ArgumentParser(prog="rakazo_reference_journey")
     parser.add_argument("command", choices=("readiness", "probe-first-child"))
     parser.add_argument("--object-store")
-    args = parser.parse_args(None if argv is None else list(argv))
+    args = parser.parse_args(raw)
     if args.command == "probe-first-child":
         return probe_first_child()
     store = Path(args.object_store) if args.object_store else None

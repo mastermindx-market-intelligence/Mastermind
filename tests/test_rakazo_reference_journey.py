@@ -13,9 +13,11 @@ import importlib.util
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import zlib
 from pathlib import Path
 
@@ -528,6 +530,8 @@ def test_cumulative_deadline_is_not_reset_for_each_command():
     timeouts = []
 
     def spawn(argv, **kwargs):
+        if clock["now"] >= 160:
+            return journey.default_spawn(argv, **kwargs)
         assert clock["now"] < 160
         timeouts.append(kwargs["timeout"])
         clock["now"] += 80
@@ -606,12 +610,18 @@ def test_operational_failure_returns_a_receipt(tmp_path):
         raise OSError("closed")
 
     receipt = journey.run_readiness(object_store=git_dir, spawn=failing)
-    after = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*"))
-    assert after == before
-    assert receipt["status"] == "READINESS_BLOCKED"
-    assert receipt["source"]["reason"] == "operational_failure"
-    assert receipt["cleanup"]["owned_root"] == "REMOVED"
-    assert journey.receipt_problems(receipt) == []
+    created = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*")) - before
+    try:
+        assert len(created) == 1
+        assert receipt["status"] == "READINESS_BLOCKED"
+        assert receipt["source"]["reason"] == "operational_failure"
+        assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+        assert receipt["hashes"]["config_manifest_sha256"] is None
+        assert receipt["cleanup"]["custody"]["kill_authority"] is False
+        assert journey.receipt_problems(receipt) == []
+    finally:
+        for path in created:
+            shutil.rmtree(path)
 
 
 def test_uncertain_child_does_not_continue_or_delete(tmp_path):
@@ -702,6 +712,306 @@ def test_phase_cap_bounds_a_real_child():
         assert record.returncode != 0
     finally:
         journey.remove_owned_root(owned)
+
+
+def test_post_popen_capture_fault_settles_the_owned_group():
+    owned = journey.create_owned_root()
+    try:
+        env = journey.build_closed_env(owned)
+        script = "import time\ntime.sleep(30)\n"
+        for fault in ("set_blocking", "select", "read"):
+            record = journey.default_spawn(
+                [sys.executable, "-I", "-c", script],
+                env=env,
+                cwd=owned.path / "tmp",
+                timeout=5,
+                capture_fault=fault,
+            )
+            assert record.capture_refusal == "capture_oserror"
+            assert record.settled is True
+            assert record.uncertain is False
+            assert record.returncode != 0
+            assert record.pid is not None
+            with pytest.raises(ProcessLookupError):
+                os.kill(record.pid, 0)
+    finally:
+        journey.remove_owned_root(owned)
+
+
+def test_pipe_read_error_is_not_successful_eof():
+    owned = journey.create_owned_root()
+    real_capped = journey._read_capped
+    real_os_read = os.read
+
+    def capped(fd, buf, *, binary, ceiling):
+        def boom(_read_fd, _size):
+            raise OSError("injected-pipe")
+
+        os.read = boom
+        try:
+            return real_capped(fd, buf, binary=binary, ceiling=ceiling)
+        finally:
+            os.read = real_os_read
+
+    journey._read_capped = capped
+    try:
+        env = journey.build_closed_env(owned)
+        record = journey.default_spawn(
+            [sys.executable, "-I", "-c", "print('ready')"],
+            env=env,
+            cwd=owned.path / "tmp",
+            timeout=5,
+        )
+        assert record.capture_refusal == "capture_oserror"
+        assert "ready" not in record.stdout
+        assert record.returncode != 0
+        assert record.pid is not None
+        assert record.uncertain is False
+        with pytest.raises(ProcessLookupError):
+            os.kill(record.pid, 0)
+    finally:
+        journey._read_capped = real_capped
+        os.read = real_os_read
+        journey.remove_owned_root(owned)
+
+
+def test_unsettled_child_stops_later_work_and_keeps_the_root(tmp_path):
+    git_dir = make_unrelated_repo(tmp_path / "repo")
+    calls = []
+    real_reap = journey._reap_owned_group
+
+    def fail_reap(_proc, _seconds):
+        return False, -1
+
+    def spawn(argv, **kwargs):
+        calls.append(tuple(argv))
+        return journey.default_spawn(
+            [sys.executable, "-I", "-c", "import time; time.sleep(30)"],
+            env=kwargs["env"],
+            cwd=kwargs.get("cwd"),
+            timeout=0.2,
+            budget=kwargs.get("budget"),
+        )
+
+    journey._reap_owned_group = fail_reap
+    before = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*"))
+    receipt = None
+    try:
+        receipt = journey.run_readiness(object_store=git_dir, spawn=spawn)
+        created = set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*")) - before
+        assert len(calls) == 1
+        assert len(receipt["commands"]) == 1
+        assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+        assert receipt["hashes"]["config_manifest_cause"] == "uncertain_child"
+        assert receipt["cleanup"]["custody"]["kill_authority"] is False
+        assert receipt["cleanup"]["custody"]["settled"] is False
+        assert receipt["limits"]["budget"]["settlement"] == "uncertain"
+        pid = receipt["cleanup"]["custody"]["pid"]
+        assert isinstance(pid, int)
+        os.kill(pid, 0)
+        assert journey.receipt_problems(receipt) == []
+        assert len(created) == 1
+    finally:
+        journey._reap_owned_group = real_reap
+        pid = None if receipt is None else receipt["cleanup"]["custody"]["pid"]
+        if isinstance(pid, int):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
+        for path in set(Path(tempfile.gettempdir()).glob("mmx-rakazo-journey-*")) - before:
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+
+
+def test_manifest_errors_are_null_and_bounded():
+    owned = journey.create_owned_root()
+    try:
+        missing = owned.path / "missing-root"
+        with pytest.raises(journey.Refusal) as absent:
+            journey.directory_manifest_sha256(missing, journey.AttemptBudget())
+        assert absent.value.reason == "manifest_root_missing"
+
+        link = owned.path / "cache" / "link"
+        link.symlink_to(owned.path / "cache" / "npm")
+        with pytest.raises(journey.Refusal) as linked:
+            journey.directory_manifest_sha256(owned.path / "cache", journey.AttemptBudget())
+        assert linked.value.reason == "symlink_in_owned_root"
+
+        fifo = owned.path / "tmp" / "stall"
+        os.mkfifo(fifo)
+        started = time.monotonic()
+        with pytest.raises(journey.Refusal) as stalled:
+            journey.directory_manifest_sha256(owned.path / "tmp", journey.AttemptBudget())
+        assert stalled.value.reason == "manifest_type_mismatch"
+        assert time.monotonic() - started < 1
+
+        big = owned.path / "staging" / "big"
+        handle = os.open(big, os.O_CREAT | os.O_WRONLY, 0o600)
+        os.ftruncate(handle, 8_000_000)
+        os.close(handle)
+        reads = {"n": 0}
+        real_read = os.read
+
+        def counting(fd, size):
+            reads["n"] += 1
+            return real_read(fd, size)
+
+        os.read = counting
+        try:
+            with pytest.raises(journey.Refusal) as oversized:
+                journey.directory_manifest_sha256(
+                    owned.path / "staging", journey.AttemptBudget(), max_bytes=10,
+                )
+            assert oversized.value.reason == "manifest_bound_exceeded"
+            assert reads["n"] == 0
+        finally:
+            os.read = real_read
+
+        real_scan = journey._scan_entries
+
+        def nested(directory):
+            if directory.name == "docker":
+                raise OSError("nested")
+            return real_scan(directory)
+
+        journey._scan_entries = nested
+        try:
+            with pytest.raises(journey.Refusal) as traversed:
+                journey.directory_manifest_sha256(owned.path / "config", journey.AttemptBudget())
+            assert traversed.value.reason == "manifest_traversal_error"
+        finally:
+            journey._scan_entries = real_scan
+    finally:
+        journey.remove_owned_root(owned)
+
+
+def test_helper_keeps_allocation_identity_and_past_deadline():
+    owned = journey.create_owned_root()
+    try:
+        env = journey.build_closed_env(owned)
+        assert env["TMPDIR"] == str(owned.path / "tmp")
+        assert owned.allocation_base == owned.path.parent
+        assert str(owned.allocation_base) != env["TMPDIR"]
+        wrong = json.loads(journey._fs_request(owned, owned.path / "staging", "manifest", 5))
+        wrong["allocation_base"] = env["TMPDIR"]
+        refused = journey._fs_helper_dispatch(wrong)
+        assert refused["ok"] is False
+        assert refused["cause"] == "identity_refused"
+        assert owned.path.exists()
+        request = journey._fs_request(
+            owned, owned.path, "remove", 5, deadline=time.monotonic() - 1,
+        )
+        record = journey.default_spawn(
+            journey._helper_argv(),
+            env=env,
+            cwd=owned.path / "tmp",
+            timeout=5,
+            stdin_bytes=request,
+        )
+        assert record.settled is True
+        assert record.uncertain is False
+        payload, cause = journey._settled_payload(record)
+        assert cause == ""
+        assert payload is not None
+        assert payload["cause"] == "deadline_exhausted"
+        assert owned.path.is_dir()
+        assert (owned.path / ".mmx-owned").is_file()
+    finally:
+        journey.remove_owned_root(owned)
+
+
+def test_partial_allocation_is_retained_unknown():
+    real_write = journey._write
+
+    def boom(path, text):
+        if path.name == "npmrc":
+            raise OSError("full")
+        return real_write(path, text)
+
+    journey._write = boom
+    created = None
+    try:
+        with pytest.raises(journey.PartialAllocation) as exc:
+            journey.create_owned_root()
+        created = exc.value.owned.path
+        assert created.exists()
+    finally:
+        journey._write = real_write
+        if created is not None and created.exists():
+            shutil.rmtree(created)
+
+    path = Path(tempfile.mkdtemp(prefix="mmx-rakazo-journey-"))
+    described = path.lstat()
+    owned = journey.OwnedRoot(path, "ab" * 32, path.parent, described.st_dev, described.st_ino)
+
+    def allocate():
+        raise journey.PartialAllocation(owned)
+
+    def spawn(argv, **kwargs):
+        raise AssertionError("spawned after partial allocation")
+
+    try:
+        receipt = journey.run_readiness(allocate_root=allocate, spawn=spawn)
+        assert receipt["cleanup"]["owned_root"] == "UNKNOWN"
+        assert receipt["source"]["reason"] == "operational_failure"
+        assert receipt["hashes"]["config_manifest_sha256"] is None
+        assert receipt["hashes"]["config_manifest_cause"] == "partial_allocation"
+        assert receipt["limits"]["budget"]["settlement"] == "uncertain"
+        assert receipt["cleanup"]["custody"]["kill_authority"] is False
+        assert path.exists()
+        assert journey.receipt_problems(receipt) == []
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def test_cleanup_command_reserve_and_final_timing():
+    journey._command_room(45, reserve=False)
+    with pytest.raises(journey.Refusal) as blocked:
+        journey._command_room(journey.WORK_COMMAND_LIMIT, reserve=False)
+    assert blocked.value.reason == "command_budget_exceeded"
+    journey._command_room(journey.WORK_COMMAND_LIMIT, reserve=True)
+    with pytest.raises(journey.Refusal) as full:
+        journey._command_room(journey.COMMAND_CAPACITY, reserve=True)
+    assert full.value.reason == "command_budget_exceeded"
+
+    owned = journey.create_owned_root()
+    budget = journey.AttemptBudget()
+    before = budget.elapsed()
+
+    def slow(argv, **kwargs):
+        time.sleep(0.15)
+        return journey.default_spawn(argv, **kwargs)
+
+    try:
+        state = journey.remove_owned_root(owned, budget, slow, journey.build_closed_env(owned))
+    finally:
+        if owned.path.exists():
+            journey.remove_owned_root(owned)
+    assert state == "REMOVED"
+    assert not owned.path.exists()
+    assert budget.elapsed() >= before + 0.1
+    assert budget.facts()["settlement"] == "settled"
+
+
+def test_settled_helper_failure_does_not_invent_a_hash():
+    record = journey.CommandRecord(
+        ("helper",),
+        0,
+        json.dumps({"ok": True, "sha256": journey.EMPTY_SHA256}),
+        "",
+        False,
+        True,
+        settled=False,
+    )
+    digest, cause = journey._manifest_from_record(record)
+    assert digest is None
+    assert cause == "uncertain_child"
+
 
 TOPOLOGY_Z64 = """
 eNrFO2tz2ziS3/0rEFZqQlZZlJO93duTo+iymWTWe0nsip3buvL4YliELI4okkOAtrWK/vt14w2KUjzZubuaGY8INhr9RncD

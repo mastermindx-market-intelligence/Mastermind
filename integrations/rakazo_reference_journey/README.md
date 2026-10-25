@@ -67,8 +67,19 @@ objects still have to be the pinned blobs. This placement's receipt status is
 `READINESS_BLOCKED` when admission or daemon isolation is not proven.
 `source_phase` is `SOURCE_PREPARED` only when the bytes were admitted, the
 runner was derived, and every owned manifest hash was measured. A null hash
-has a cause and is not replaced with the SHA-256 of empty input. That is not
-a journey result. A caller-supplied path or image name is not daemon admission.
+has a cause and is not replaced with the SHA-256 of empty input. A truly empty
+directory still hashes as empty input, with a null cause. That is not a
+journey result. A caller-supplied path or image name is not daemon admission.
+
+After a child starts, the launcher settles that process group or keeps the
+attempt uncertain. Uncertainty stops later probes, hashing, and deletion.
+Pipe read errors are not treated as a successful end of output. Manifest and
+cleanup filesystem work runs in a fixed helper in this file: it does not follow
+symlinks, it stats size before reading, and it stops at the attempt deadline.
+The receipt samples elapsed time after cleanup and reap. `UNKNOWN` is not
+absence and is not safe to retry. A recorded pid or pgid is not later kill
+authority. The helper keeps the allocation identity from the creating process;
+it does not re-read its own temp directory.
 
 `JOURNEY_PASSED`, `RUN_FAILED`, and `EFFECT_UNKNOWN` are named in the receipt
 schema and are rejected for this placement. Unit fixtures cannot mint them.
@@ -83,8 +94,9 @@ is smaller. The clock is not restarted per command. Twenty seconds stay reserved
 for owned cleanup, and the process-group reap is capped at 2 seconds inside that
 reserve. Manifest hashing is capped at 10 seconds per directory and by the same
 clock. The recorded execution budget of 900 seconds is not armed and is not
-added to the 180 seconds. The receipt states elapsed time, remaining time, and
-the exhausted phase.
+added to the 180 seconds. The receipt states elapsed time, remaining time, settlement, and
+the exhausted phase. Elapsed time is sampled after cleanup. It is a parent
+sample, not a promise that an unsettled kernel operation has stopped.
 
 Child stdout and stderr are capped while they are read. A truncation marker is
 included inside the 8192-byte log cap. Binary Git objects are capped at the
