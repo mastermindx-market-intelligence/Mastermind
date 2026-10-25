@@ -138,7 +138,109 @@ class FleetLinuxHygieneTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.object(
                 h.fcntl, "flock", side_effect=BlockingIOError):
             with patch.object(h, "run", side_effect=AssertionError("duplicate pass")):
-                self.assertEqual(h.main(["--state-dir", d]), 0)
+                self.assertEqual(h.main(["--state-dir", d]), 75)
+            rows = (Path(d) / h.LEDGER).read_text().splitlines()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(__import__("json").loads(rows[0])["state"],
+                             "DEFERRED_ALREADY_RUNNING")
+
+    def test_manager_argv_variants_are_detected_not_just_install_substrings(self):
+        for arguments in (
+            [b"python3", b"-m", b"pip", b"wheel", b"."],
+            [b"python3", b"-I", b"-m", b"pip", b"download", b"pkg"],
+            [b"uv", b"tool", b"install", b"pkg"],
+            [b"npm", b"--prefix", b"/tmp/build", b"install"],
+            [b"/usr/local/bin/node", b"/usr/lib/node_modules/npm/bin/npm-cli.js",
+             b"install"],
+            [b"pnpm", b"--config.foo=x", b"add", b"pkg"],
+            [b"yarn", b"--cwd", b"/tmp/build", b"add", b"pkg"],
+        ):
+            self.assertTrue(h.package_command(b"\\x00".join(arguments) + b"\\x00"),
+                            arguments)
+        self.assertFalse(h.package_command(b"python3\\x00-c\\x00print(3)\\x00"))
+
+    def test_redirected_or_symlink_parent_never_calls_cache_api(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d) / "home"
+            base.mkdir()
+            (base / ".cache/pip").mkdir(parents=True)
+            external = Path(d) / "external"
+            external.mkdir()
+            with patch.dict(h.os.environ, {"XDG_CACHE_HOME": str(external)}):
+                with patch.object(h.subprocess, "run", side_effect=AssertionError("redirected purge")):
+                    result = h.cache_cleanup(base, base, "CAUTION")
+            self.assertEqual(result[0]["state"], "SKIPPED_CUSTOM_CACHE_PATH")
+            (base / ".cache/pip").rmdir()
+            (base / ".cache").rmdir()
+            (base / ".cache").symlink_to(external, target_is_directory=True)
+            (external / "pip").mkdir()
+            with patch.object(h.subprocess, "run", side_effect=AssertionError("symlink purge")):
+                result = h.cache_cleanup(base, base, "CAUTION")
+            self.assertEqual(result[0]["state"], "SKIPPED_UNTRUSTED_CACHE_PATH")
+            self.assertTrue((external / "pip").exists())
+
+    def test_pip_cache_target_pinned_on_command_line_before_intent_cleared(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            cache = root / ".cache/pip"
+            cache.mkdir(parents=True)
+            def inspect(argv, **kwargs):
+                self.assertIn("--isolated", argv)
+                self.assertIn("--cache-dir", argv)
+                self.assertEqual(argv[argv.index("--cache-dir") + 1], str(cache))
+                self.assertTrue((root / h.HOLD).exists())
+                return SimpleNamespace(returncode=0, stderr="")
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    h.subprocess, "run", side_effect=inspect):
+                result = h.cache_cleanup(root, root, "CAUTION")
+            self.assertEqual(result[0]["state"], "OK")
+            self.assertFalse((root / h.HOLD).exists())
+
+    def test_writer_activity_rescanned_before_every_manager_effect(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / ".cache/pip").mkdir(parents=True)
+            (root / ".cache/uv").mkdir(parents=True)
+            with patch.object(h, "package_busy", side_effect=[False, False, True]) as busy, patch.object(
+                    h.shutil, "which", return_value="/usr/bin/uv"), patch.object(
+                    h.subprocess, "run",
+                    return_value=SimpleNamespace(returncode=0, stderr="")) as purge:
+                result = h.cache_cleanup(root, root, "CAUTION")
+            self.assertEqual([row["state"] for row in result],
+                             ["OK", "SKIPPED_PACKAGE_ACTIVITY"])
+            self.assertEqual(busy.call_count, 3)
+            self.assertEqual(purge.call_count, 1)
+
+    def test_unverified_reserve_lanes_worktrees_or_after_volume_degrades(self):
+        good = {"state": "OK", "total_gib": 900, "free_gib": 700,
+                "inodes_free_fraction": 0.5, "device": 2}
+        missing = {"state": "UNAVAILABLE"}
+        with tempfile.TemporaryDirectory() as d, patch.object(
+                h, "memory", return_value={"state": "OK"}), patch.object(
+                h, "candidates", return_value={"state": "OBSERVED_ONLY"}):
+            for snapshots, reserve in (
+                ([good, good, good], {"state": "UNVERIFIED"}),
+                ([good, missing, good], {"state": "CONFIGURED", "floor_gib": 75}),
+                ([good, good, missing], {"state": "CONFIGURED", "floor_gib": 75}),
+            ):
+                with patch.object(h, "volume", side_effect=snapshots), patch.object(
+                        h, "reserve", return_value=reserve), patch.object(
+                        h, "cache_cleanup", side_effect=AssertionError("must not purge")):
+                    result = h.run(Path(d), Path(d), True)
+                self.assertTrue(result["degraded"])
+                self.assertNotEqual(result["fabric_admission"], "ELIGIBLE")
+
+    def test_ledger_symlink_does_not_modify_target(self):
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d)
+            outside = state / "outside"
+            outside.write_text("keep")
+            (state / h.LEDGER).symlink_to(outside)
+            self.assertFalse(h.append_receipt(state, {"schema": "test"}))
+            self.assertEqual(outside.read_text(), "keep")
 
     def test_timer_keeps_running_and_has_no_end_date(self):
         timer = (SOURCE.parent / "mastermind-linux-hygiene.timer").read_text()
