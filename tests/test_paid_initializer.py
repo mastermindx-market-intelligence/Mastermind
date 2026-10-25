@@ -50,7 +50,7 @@ def _linux_completion(request,profile=None):
 
 
 _SYSTEM_FIXTURE_STAGES=frozenset(('selector_resolution','selector_version','image_custody','ancestor_custody',
-    'startup_library','startup_entry','startup_count','ignored_link','qualified_sysconfig_link','startup_zip','startup_overrides',
+    'startup_library','startup_entry','startup_count','ignored_link','qualified_sysconfig_link','qualified_runtime_library','startup_zip','startup_overrides',
     'getpath_execution','getpath_version','getpath_prefixes'))
 
 
@@ -78,10 +78,10 @@ def _system_fixture_failure_metadata(error,stage):
     while trace is not None:
         code=trace.tb_frame.f_code
         if ((code.co_filename==__file__ and code.co_name in ('_system_fixture_launch','guarded'))
-                or code.co_filename==m.__file__ and code.co_qualname in ('_QualifiedSysconfigLink.__init__','_QualifiedSysconfigLink._target_kind','_QualifiedSysconfigLink.check','_IgnoredNoSiteNode.check')):
+                or code.co_filename==m.__file__ and code.co_qualname in ('_QualifiedSysconfigLink.__init__','_QualifiedSysconfigLink._target_kind','_QualifiedSysconfigLink.check','_IgnoredNoSiteNode.check','_QualifiedRuntimeLibrary.__init__','_QualifiedRuntimeLibrary.check')):
             if type(trace.tb_lineno)is int and 0<trace.tb_lineno<=1000000:
                 value.update(function=code.co_name if code.co_filename==__file__ else code.co_qualname,line=trace.tb_lineno)
-                if stage in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link'):
+                if stage in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link','qualified_runtime_library'):
                     candidate=_system_fixture_public_node(trace.tb_frame.f_locals.get('path')if code.co_name=='guarded'else trace.tb_frame.f_locals.get('name'),trace.tb_frame.f_locals.get('info'))
                     if candidate is not None:value['node']=candidate
                 if code.co_name=='guarded':
@@ -103,10 +103,10 @@ def _system_fixture_metadata_safe(value):
     return (type(value)is dict and set(value)=={'schema','stage','function','line','errno','fields','node'}
         and value['schema']=='mastermind.inert_system_fixture.v1'
         and type(value['stage'])is str and value['stage'] in _SYSTEM_FIXTURE_STAGES
-        and (value['function'] is None or type(value['function'])is str and value['function'] in ('_system_fixture_launch','guarded','_QualifiedSysconfigLink.__init__','_QualifiedSysconfigLink._target_kind','_QualifiedSysconfigLink.check','_IgnoredNoSiteNode.check'))
+        and (value['function'] is None or type(value['function'])is str and value['function'] in ('_system_fixture_launch','guarded','_QualifiedSysconfigLink.__init__','_QualifiedSysconfigLink._target_kind','_QualifiedSysconfigLink.check','_IgnoredNoSiteNode.check','_QualifiedRuntimeLibrary.__init__','_QualifiedRuntimeLibrary.check'))
         and (value['line'] is None or type(value['line'])is int and 0<value['line']<=1000000)
         and (value['errno'] is None or type(value['errno'])is int and 0<=value['errno']<=4096)
-        and (value['node'] is None or value['stage'] in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link')
+        and (value['node'] is None or value['stage'] in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link','qualified_runtime_library')
             and type(value['node'])is dict and set(value['node'])=={'relative_name','kind'}
             and type(value['node']['relative_name'])is str and type(value['node']['kind'])is str
             and value['node']['kind'] in ('REGULAR','DIRECTORY','SYMLINK','FIFO','SOCKET','CHARACTER','BLOCK','UNKNOWN')
@@ -127,7 +127,7 @@ def _system_fixture_failure_notice(fixture,error,stage):
             with fixture.getfixturevalue('capsys').disabled():
                 reporter.write_line('\n::error file=tests/test_paid_initializer.py,title=H1 Root system fixture precondition::'
                     +json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False))
-                if stage in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link'):
+                if stage in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link','qualified_runtime_library'):
                     try:inventory=_PUBLIC_INVENTORY.collect()
                     except Exception:inventory=_PUBLIC_INVENTORY.unavailable()
                     raw=_PUBLIC_INVENTORY.encode(inventory)
@@ -183,6 +183,16 @@ def _system_fixture_launch(*,no_site=False,diagnostic_request=None):
                         try:
                             with factory(directory):pass
                         finally:os.close(directory)
+                    elif name==str(library/'config-3.12-x86_64-linux-gnu/libpython3.12.so') and stat.S_ISLNK(info.st_mode):
+                        stage='qualified_runtime_library';fds=[]
+                        try:
+                            for directory in (library/'config-3.12-x86_64-linux-gnu',Path('/usr/lib/x86_64-linux-gnu')):
+                                guarded(directory)
+                                for ancestor in directory.parents:guarded(ancestor)
+                                fds.append(os.open(directory,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW))
+                            with m._QualifiedRuntimeLibrary(*fds):pass
+                        finally:
+                            for fd in reversed(fds):os.close(fd)
                     else:guarded(Path(name))
                     stage='startup_entry';name=info=None
             else:
@@ -836,7 +846,8 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook',
         'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
         'tests/test_paid_initializer_nosite.py',
-        'tests/test_paid_initializer_sysconfig.py']
+        'tests/test_paid_initializer_sysconfig.py',
+        'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed']
     assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}'
     assert full[0][1].get('if') is None
 

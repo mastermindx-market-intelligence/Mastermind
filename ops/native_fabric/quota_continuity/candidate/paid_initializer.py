@@ -15,7 +15,6 @@ SCHEMA = 'mastermind.paid_initializer_commitment/v1'
 CONTRACT = 'paid-host-env-held-fd.v1'
 NESTED_CONTRACT = 'paid-host-env-held-fd-token-data.v1'
 NO_SITE_PROFILE = 'cpython-3.12-linux-root-prefix-nosite.v1'
-# Finite normal-import refusal under closed pinned code, not a sandbox.
 NO_SITE_PREAMBLE = """import sys
 if sys.version_info[:2]!=(3,12) or not (sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode):raise SystemExit(78)
 _paid_site_names=('site','sitecustomize','usercustomize')
@@ -57,7 +56,7 @@ class _IgnoredNoSiteNode:
     NAME='sitecustomize.py'
     def __init__(self,directory):
         import stat
-        if type(self) not in (_IgnoredNoSiteNode,_QualifiedSysconfigLink):refuse()
+        if type(self) not in (_IgnoredNoSiteNode,_QualifiedSysconfigLink,_RuntimeSonameLink,_QualifiedRuntimeLibrary):refuse()
         self.directory=directory;self.fd=None
         try:
             info=os.fstat(directory)
@@ -78,9 +77,6 @@ class _IgnoredNoSiteNode:
         if (not stat.S_ISLNK(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1
                 or stat.S_IMODE(info.st_mode)!=0o777 or not 0<info.st_size<=4096 or self._identity(info)!=self.before
                 or self._identity(os.stat(self.NAME,dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
-        # Linux POSIX ACL semantics exclude symlink inodes. This successful
-        # no-follow query proves only an empty VISIBLE name list, not absence
-        # of hidden attributes or an LSM/sandbox guarantee.
         alias='/proc/self/fd/'+str(self.directory)+'/'+self.NAME
         try:names=os.listxattr(alias,follow_symlinks=False)
         except OSError:refuse()
@@ -98,31 +94,32 @@ class _IgnoredNoSiteNode:
 
 class _QualifiedSysconfigLink(_IgnoredNoSiteNode):
     NAME='_sysconfigdata__linux_x86_64-linux-gnu.py'
-    TARGET='_sysconfigdata__x86_64-linux-gnu.py'
+    TARGET=LINK_VALUE='_sysconfigdata__x86_64-linux-gnu.py'
+    LIMIT=1048576
     def __init__(self,directory):
         self.target_fd=self.fd=None
         try:
             super().__init__(directory)
-            if os.readlink(self.NAME,dir_fd=directory)!=self.TARGET:refuse()
-            self.target_fd=os.open(self.TARGET,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+            if os.readlink(self.NAME,dir_fd=directory)!=self.LINK_VALUE:refuse()
+            self.target_directory=self.runtime_directory if type(self)is _QualifiedRuntimeLibrary else directory
+            self.target_fd=os.open(self.TARGET,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=self.target_directory)
             info=os.fstat(self.target_fd);self.target_before=self._identity(info)
             self._target_kind(info)
-            raw=os.pread(self.target_fd,1048577,0)
+            raw=os.pread(self.target_fd,self.LIMIT+1,0)
             if len(raw)!=info.st_size:refuse()
             self.target_hash=hashlib.sha256(raw).digest();self.check()
         except BaseException:
             if self.fd is not None:os.close(self.fd);self.fd=None
             if self.target_fd is not None:os.close(self.target_fd);self.target_fd=None
             raise
-    @staticmethod
-    def _target_kind(info):
+    def _target_kind(self,info):
         import stat
         if (not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022
-                or info.st_nlink!=1 or not 0<info.st_size<=1048576):refuse()
+                or info.st_nlink!=1 or not 0<info.st_size<=self.LIMIT):refuse()
     def check(self):
         import errno
         super().check()
-        if os.readlink(self.NAME,dir_fd=self.directory)!=self.TARGET:refuse()
+        if os.readlink(self.NAME,dir_fd=self.directory)!=self.LINK_VALUE:refuse()
         info=os.fstat(self.target_fd);self._target_kind(info)
         if self._identity(info)!=self.target_before:refuse()
         for key in ('system.posix_acl_access','system.posix_acl_default'):
@@ -130,15 +127,43 @@ class _QualifiedSysconfigLink(_IgnoredNoSiteNode):
             except OSError as error:
                 if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):refuse()
             else:refuse()
-        if (hashlib.sha256(os.pread(self.target_fd,1048577,0)).digest()!=self.target_hash
+        if (hashlib.sha256(os.pread(self.target_fd,self.LIMIT+1,0)).digest()!=self.target_hash
                 or self._identity(os.fstat(self.target_fd))!=self.target_before
-                or self._identity(os.stat(self.TARGET,dir_fd=self.directory,follow_symlinks=False))!=self.target_before
-                or os.readlink(self.NAME,dir_fd=self.directory)!=self.TARGET):refuse()
+                or self._identity(os.stat(self.TARGET,dir_fd=self.target_directory,follow_symlinks=False))!=self.target_before
+                or os.readlink(self.NAME,dir_fd=self.directory)!=self.LINK_VALUE):refuse()
         super().check()
     def __exit__(self,*args):
         try:super().__exit__(*args)
         finally:
             if self.target_fd is not None:os.close(self.target_fd);self.target_fd=None
+
+
+class _RuntimeSonameLink(_IgnoredNoSiteNode):
+    NAME='libpython3.12.so.1'
+
+
+class _QualifiedRuntimeLibrary(_QualifiedSysconfigLink):
+    NAME='libpython3.12.so'
+    TARGET='libpython3.12.so.1.0'
+    LINK_VALUE='../../x86_64-linux-gnu/libpython3.12.so.1'
+    LIMIT=16777216
+    def __init__(self,directory,runtime_directory):
+        self.soname=None;self.runtime_directory=runtime_directory
+        try:
+            self.soname=_RuntimeSonameLink(runtime_directory)
+            if os.readlink(self.soname.NAME,dir_fd=runtime_directory)!=self.TARGET:refuse()
+            super().__init__(directory)
+        except BaseException:
+            if self.soname is not None:self.soname.__exit__(None,None,None)
+            raise
+    def check(self):
+        self.soname.check()
+        if os.readlink(self.soname.NAME,dir_fd=self.runtime_directory)!=self.TARGET:refuse()
+        super().check();self.soname.check()
+        if os.readlink(self.soname.NAME,dir_fd=self.runtime_directory)!=self.TARGET:refuse()
+    def __exit__(self,*args):
+        try:super().__exit__(*args)
+        finally:self.soname.__exit__(*args)
 
 
 def _require_startup_entry(info,count):
@@ -293,8 +318,6 @@ def _initialized_environment(raw,commitment):
         if result.get('HOME')!=expected['home']:refuse()
         nested=commitment['initialization_contract']==NESTED_CONTRACT
         if not nested and result.get('GLM_CONFIG')!=expected['glm_config']:refuse()
-        # Reproduce the incumbent post-initializer lane-prefix operation. The
-        # observed PATH is otherwise retained; no fallback to another image.
         result['PATH']=commitment['lane_root']+'/venv/bin:'+result.get('PATH','')
         selected=None
         for directory in result['PATH'].split(':'):
@@ -340,8 +363,6 @@ def _bounded_child(argv,*,timeout,**kwargs):
 
 def _capture_environment(snapshot,commitment,environment=None):
     import shlex
-    # Even a forged env emitter can supply only DATA. No expected request,
-    # observer code or executable FD is inherited by the initializer shell.
     script=('export PATH='+shlex.quote(commitment['lane_root']+'/venv/bin')
         +':"$HOME/.local/bin":/opt/homebrew/bin:"$PATH"; '
         +'source /proc/self/fd/'+str(snapshot)+' >/dev/null 2>&1 || exit 78; '
@@ -468,6 +489,12 @@ def run_bootstrap(request, probe_source):
                         ignored_nodes.append(node);continue
                     if name==library+'/'+_QualifiedSysconfigLink.NAME and stat.S_ISLNK(info.st_mode):
                         node=contexts.enter_context(_QualifiedSysconfigLink(library_fd))
+                        if node.before!=identity(info):refuse()
+                        ignored_nodes.append(node);continue
+                    if library=='/usr/lib/python3.12' and name==library+'/config-3.12-x86_64-linux-gnu/libpython3.12.so' and stat.S_ISLNK(info.st_mode):
+                        config_fd,_=pin(library+'/config-3.12-x86_64-linux-gnu',directory=True,owners={0})
+                        runtime_fd,_=pin('/usr/lib/x86_64-linux-gnu',directory=True,owners={0})
+                        node=contexts.enter_context(_QualifiedRuntimeLibrary(config_fd,runtime_fd))
                         if node.before!=identity(info):refuse()
                         ignored_nodes.append(node);continue
                     _require_startup_entry(info,count)

@@ -270,6 +270,31 @@ files, hard links, changed content or unsupported native proof refuse. Both name
 still count toward the unchanged startup limit; all other links still refuse,
 and the old strict profile remains unchanged.
 
+
+For the fixed `/usr` layout only, the new profile additionally qualifies exactly
+`config-3.12-x86_64-linux-gnu/libpython3.12.so` with literal payload
+`../../x86_64-linux-gnu/libpython3.12.so.1`, followed by the literal
+`libpython3.12.so.1` → `libpython3.12.so.1.0` in the separately held fixed
+`/usr/lib/x86_64-linux-gnu` directory. The existing owner holds and rechecks both
+directory namespaces and their Root/nonwrite/ACL-qualified ancestors. Both links
+retain no-follow/full-nine-field/native metadata and exact payload checks; the
+ordinary Root/nonwrite/single-link final file retains its FD, ACL, named identity,
+metadata and SHA256 through handoffs and return. No arbitrary resolution, extra
+hop, absolute alternative or other target is accepted, and the checker never
+loads, imports or executes the library. This is dependency custody, not a claim
+that a held FD authenticates an already loaded kernel image.
+
+The ordinary library bound is 16 MiB, distinct from the 1 MiB configuration-data
+bound. Official Ubuntu 3.12.3-1ubuntu0.17 t64 package metadata lists the ordinary
+Root0:0/0644 final target at 9,061,000 bytes, so 16 MiB is the smallest power-of-two
+byte bound above that public binary. Public metadata does not prove installed
+identity. The actual bounded CI inventory covered 1,308 stdlib nodes with no
+incomplete/overflow condition and only the sitecustomize, sysconfig and this
+build-library link; its normalized lexical targets do not prove raw payloads or
+the second hop. Those exact payloads and the final target remain prospectively
+checked by the runtime guard. All other symlinks remain refused, old strict
+behavior stays unchanged, and the 100,000-byte final command cap is retained.
+
 These tombstones are normal-import controls under exact pinned code, not a Python
 sandbox. An arbitrary alias/file loader could execute another file; no such loader
 or caller-supplied Python is admitted. The canonical request still binds the fixed

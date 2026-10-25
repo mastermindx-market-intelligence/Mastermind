@@ -43,7 +43,9 @@ def test_every_precondition_exit_retains_closed_stage_without_qualifying(fault,m
         def exists(self):return(fault=='startup_overrides'and self.value.endswith('pyvenv.cfg'))or(fault=='startup_zip'and self.value.endswith('python312.zip'))
         def iterdir(self):return iter(())
     def scanner(library):
-        if fault in('ignored_link','qualified_sysconfig_link'):yield library+('/sitecustomize.py'if fault=='ignored_link'else'/'+m.m._QualifiedSysconfigLink.NAME),os.stat_result((stat.S_IFLNK|0o777,1,1,1,0,20,10,0,0,0))
+        if fault in('ignored_link','qualified_sysconfig_link','qualified_runtime_library'):
+            name='/sitecustomize.py'if fault=='ignored_link'else'/'+m.m._QualifiedSysconfigLink.NAME if fault=='qualified_sysconfig_link'else'/config-3.12-x86_64-linux-gnu/libpython3.12.so'
+            yield library+name,os.stat_result((stat.S_IFLNK|0o777,1,1,1,0,20,10,0,0,0))
         else:
             for _ in range(20001 if fault=='startup_count'else 1):yield library+'/entry',FixedPath(library+'/entry').lstat()
     def no_acl(*args,**kwargs):raise OSError(errno.ENODATA,PRIVATE)
@@ -66,7 +68,7 @@ def test_every_precondition_exit_retains_closed_stage_without_qualifying(fault,m
     assert value['function']in('_system_fixture_launch','guarded')and value['line']>0
     assert PRIVATE not in json.dumps(value)
     if fault in ('startup_entry','startup_count'):assert value['node']==dict(relative_name='entry',kind='REGULAR')
-    elif fault in('ignored_link','qualified_sysconfig_link'):assert value['node']==dict(relative_name='sitecustomize.py'if fault=='ignored_link'else m.m._QualifiedSysconfigLink.NAME,kind='SYMLINK')
+    elif fault in('ignored_link','qualified_sysconfig_link','qualified_runtime_library'):assert value['node']==dict(relative_name='sitecustomize.py'if fault=='ignored_link'else m.m._QualifiedSysconfigLink.NAME if fault=='qualified_sysconfig_link'else'config-3.12-x86_64-linux-gnu/libpython3.12.so',kind='SYMLINK')
     else:assert value['node']is None
     if fault=='selector_resolution':assert value['errno']==2
     if fault=='image_custody':assert value['fields']==['uid']
