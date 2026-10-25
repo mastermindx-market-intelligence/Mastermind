@@ -79,18 +79,31 @@ async def test_queued_instead_of_429_when_all_slots_reach_ceiling(tmp_path):
         seen.append(time.monotonic())
         return streamed_json({"ok": True})
 
-    app = create_app(settings(tmp_path, api_keys=("upstream-A",), window_s=0.09), transport=httpx.MockTransport(handler))
+    cfg = settings(tmp_path, api_keys=("upstream-A",), window_s=0.09)
+    app = create_app(cfg, transport=httpx.MockTransport(handler))
+    admitted_at = []
     async with app.router.lifespan_context(app):
+        limiter = app.state.admissions
+        original_acquire = limiter.acquire
+
+        async def observe_reservation(*args, **kwargs):
+            slot = await original_acquire(*args, **kwargs)
+            # Capture the committed admission timestamp, before the next await.
+            admitted_at.append(limiter.events[slot][-1])
+            return slot
+
+        limiter.acquire = observe_reservation
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
             async def send():
                 return await session.post("/v1/responses", headers={"Authorization": f"Bearer {TOKEN}"}, json={"model": "slug", "input": "hello"})
             responses = await asyncio.gather(send(), send(), send())
             assert [r.status_code for r in responses] == [200, 200, 200]
     assert len(seen) == 3
-    # The provider mock timestamps *after* the durable admission reservation;
-    # HTTP setup jitter makes the wire-level delta slightly shorter than 90ms.
-    assert seen[1] - seen[0] >= 0.06
-    assert seen[2] - seen[1] >= 0.06
+    # Clock time is measured at the durable RPM reservation, before forwarding;
+    # provider arrival is not a reliable admission clock under CI scheduler jitter.
+    assert len(admitted_at) == 3
+    for earlier, later in zip(admitted_at, admitted_at[1:]):
+        assert later - earlier >= cfg.window_s - 0.001
 
 
 @run_async_test
