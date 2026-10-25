@@ -24,10 +24,14 @@ from control_plane.codex_worker import (
     _path_identity,
     render_worker_sandbox_permission_overrides,
 )
+from control_plane.dsh_mcp_client_projection import project_dsh_mcp_tools
 from control_plane.executive_agent_capabilities import (
     ACP_EXECUTION_SURFACE,
     ACP_PROVIDER_FREE_AUTH_REALM,
+    ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+    ExecutionCapabilityProfile,
     ExecutionCapabilityRegistry,
+    observed_mcp_tool_schema_digest,
 )
 from control_plane.executive_worker_broker import BrokerPolicy
 from control_plane.worker_execution_contract import (
@@ -41,6 +45,7 @@ from integrations.acp_worker.adapter import AcpWorkerAdapter
 from integrations.acp_worker.native import AcpNativeProcessOwner, AcpNativeProfile
 from integrations.acp_worker.tool_admission import AcpNativeToolGate
 from integrations.acp_worker.turn import AcpProfile
+from integrations.acp_worker.workspace_read_mcp import tool_catalog
 
 _AUTH_NONE = "none"
 _ACP_PROFILE_ID = "worker.acp.providerfree.readonly.v1"
@@ -391,6 +396,7 @@ class AcpInstalledHostPacket:
             or profile.write_capable
         ):
             raise ValueError("ACP installed execution profile is not read-only")
+        self._validate_canonical_tool_gate(profile)
         for name, value in (
             ("execution_profile_id", profile.profile_id),
             ("execution_profile_digest", profile.profile_digest),
@@ -398,6 +404,47 @@ class AcpInstalledHostPacket:
             ("capability_policy_digest", registry.policy_digest),
         ):
             object.__setattr__(self, name, value)
+
+    def _validate_canonical_tool_gate(
+        self, profile: ExecutionCapabilityProfile
+    ) -> None:
+        """Join the existing gate to one current canonical source projection.
+
+        This checks the parent's construction and prelaunch inputs. It does not
+        attest installed child discovery, artifact admission or live currentness.
+        """
+        if (
+            profile.profile_id != _ACP_PROFILE_ID
+            or profile.sandbox_policy != "read-only"
+            or profile.network_policy != "disabled"
+            or tuple(
+                grant.capability_id for grant in profile.mcp_server_grants
+            ) != (ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,)
+        ):
+            raise ValueError("ACP installed canonical grant ceiling changed")
+        projection = project_dsh_mcp_tools(
+            profile,
+            capability_id=ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+            observed_tool_catalog={"tools": tool_catalog()},
+        ).configuration()
+        if self.tool_gate.projection_sha256 != hashlib.sha256(
+            _canonical(projection)
+        ).hexdigest():
+            raise ValueError("ACP installed canonical projection differs from tool gate")
+        namespace = projection["target"]["serverName"]
+        expected: dict[str, str] = {}
+        for tool in projection["tools"]:
+            name = tool["name"]
+            # Reuse the canonical owner's normalized singleton catalog digest.
+            # The raw contract name and qualified runtime name stay associated;
+            # hashing the qualified name would invent a different contract.
+            digest = observed_mcp_tool_schema_digest({"tools": {name: tool}})
+            if digest is None:
+                raise ValueError("ACP installed canonical tool contract is unavailable")
+            expected[f"mcp__{namespace}__{name}"] = digest
+        observed = {tool.name: tool.contract_sha256 for tool in self.tool_gate.tools}
+        if observed != expected:
+            raise ValueError("ACP installed canonical tool contracts differ from tool gate")
 
     def security_projection(self) -> dict[str, Any]:
         """Return a fresh canonical projection; never expose mutable owner state."""
@@ -423,6 +470,7 @@ class AcpInstalledHostPacket:
             or profile.write_capable
         ):
             raise ValueError("ACP installed capability policy changed")
+        self._validate_canonical_tool_gate(profile)
         if not isinstance(spec, WorkerLaunchSpec):
             raise ValueError("ACP runtime overlay requires WorkerLaunchSpec")
         authorities = set(spec.authorities)
