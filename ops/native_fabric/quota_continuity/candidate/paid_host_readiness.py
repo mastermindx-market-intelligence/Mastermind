@@ -304,6 +304,7 @@ def _qualified_root_interfaces():
             bootstrap.check();exec(compile(raw,module.__spec__.origin,'exec',dont_inherit=True),module.__dict__)
             bootstrap.check()
     finder=Sources()
+    had_root_path=str(root) in sys.path
     try:
         for name,loaded in tuple(sys.modules.items()):
             if any(name==p or name.startswith(p+'.') for p in packages):
@@ -323,6 +324,8 @@ def _qualified_root_interfaces():
         bootstrap.check()
     finally:
         if finder in sys.meta_path:sys.meta_path.remove(finder)
+        if not had_root_path:
+            while str(root) in sys.path:sys.path.remove(str(root))
         bootstrap.close()
 
 
