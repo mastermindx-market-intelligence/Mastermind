@@ -20,6 +20,8 @@ _PLACEHOLDERS = frozenset({
     "changeme", "password", "secret", "token", "hermes", "replace-me",
 })
 _CHILD_SECRET_ENV = set(DEFAULT_CHILD_SECRET_ENV)
+_SLACK_BOT_USER_ID_ENV = "HERMES_SLACK_BOT_USER_ID"
+_SLACK_BOT_TOKEN_ENV = "HERMES_SLACK_BOT_TOKEN"
 
 
 def register_child_secret_env(names: set[str] | frozenset[str] | list[str]) -> None:
@@ -147,10 +149,15 @@ def child_env(secrets: Secrets, *, home: Path, extra: dict[str, str] | None = No
         DASHBOARD_PASSWORD_ENV: secrets.dashboard_password,
     }
     for name in sorted(_CHILD_SECRET_ENV):
-        if name in env or name == GATEWAY_TOKEN_ENV:
+        if name in env or name in {GATEWAY_TOKEN_ENV, _SLACK_BOT_TOKEN_ENV}:
             continue
         if name in secrets.values:
             env[name] = secrets.values[name]
+    # The unit loads the whole secrets file. The child receives only its own
+    # Slack user id from that file, never the bot token or the gateway token.
+    user_id = secrets.values.get(_SLACK_BOT_USER_ID_ENV)
+    if user_id and _SLACK_BOT_USER_ID_ENV not in env:
+        env[_SLACK_BOT_USER_ID_ENV] = user_id
     for key, value in (extra or {}).items():
         if not isinstance(key, str) or not key.startswith("HERMES_STUB_"):
             raise RuntimeRefusal("EXTRA_CHILD_ENV_REFUSED")

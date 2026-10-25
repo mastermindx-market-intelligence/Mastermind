@@ -1,6 +1,7 @@
 """Allowlist equality and empty-stderr registry gate."""
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -131,6 +132,26 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(env["ZAI_API_KEY"], "distinct-provider-value")
         self.assertNotIn("HERMES_GATEWAY_TOKEN", env)
         self.assertNotIn("distinct-provider-value", repr(secrets))
+        os.environ["HERMES_SLACK_BOT_TOKEN"] = "parent-token-should-not-leak"
+        os.environ["HERMES_SLACK_BOT_USER_ID"] = "UPARENTSHOULDNOTWIN"
+        self.addCleanup(os.environ.pop, "HERMES_SLACK_BOT_TOKEN", None)
+        self.addCleanup(os.environ.pop, "HERMES_SLACK_BOT_USER_ID", None)
+        identified = Secrets(
+            token,
+            "hermes",
+            token,
+            {
+                "HERMES_GATEWAY_TOKEN": token,
+                "HERMES_SLACK_BOT_TOKEN": "file-bot-token-value1",
+                "HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1",
+            },
+        )
+        child = child_env(identified, home=Path("/tmp/hermes-home-test"))
+        self.assertEqual(child["HERMES_SLACK_BOT_USER_ID"], "UHERMESSELF1")
+        self.assertNotIn("HERMES_SLACK_BOT_TOKEN", child)
+        self.assertNotIn("HERMES_GATEWAY_TOKEN", child)
+        self.assertNotIn("file-bot-token-value1", child.values())
+        self.assertNotIn("parent-token-should-not-leak", child.values())
 
     def test_refused_set_matches_the_qualification_census(self) -> None:
         preflight = load_preflight()

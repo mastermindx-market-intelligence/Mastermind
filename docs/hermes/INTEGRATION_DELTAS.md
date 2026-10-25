@@ -1,6 +1,6 @@
 # Integration deltas inside the reviewed packages
 
-Commit `288c59a2` is the only commit that edits these four trees after their reviewed heads. `integrations/hermes_secretary/` matches #1873 `93c3942e`. The harness glue is `integrations/hermes_harness/`, `docs/hermes/DEPLOY_UBUNTU1.md`, and `.github/workflows/hermes-harness.yml`. None of the rows below are that glue.
+Commit `288c59a2` is the integration commit that edited these four trees after their reviewed heads. Later commits on this branch are listed after the tables. The harness glue is `integrations/hermes_harness/`, `docs/hermes/DEPLOY_UBUNTU1.md`, and `.github/workflows/hermes-harness.yml`. None of the rows below are that glue.
 
 Reviewed heads:
 
@@ -46,3 +46,12 @@ No production file changed.
 | File | Reason | Kind | Test |
 | --- | --- | --- | --- |
 | `integrations/hermes_delegate/tests/test_delegate.py` | Cover existing refusal paths: uppercase digest, `live_submit` before admission, a submit with no `replay_of`, a secret-shaped objective that is not stored, and an admitted child whose carrier is unbound. | fence | `DelegateEdgePaths.test_uppercase_sha_is_refused`, `test_live_submit_policy_is_refused_before_admission`, `test_absent_replay_of_submits_a_new_child`, `test_secret_shaped_objective_is_not_stored`, `test_admitted_unbound_carrier_latches_unknown` |
+
+## Later runtime edits
+
+These are not part of `288c59a2`. They load each agent's Slack id.
+
+| File | Reason | Kind | Test |
+| --- | --- | --- | --- |
+| `integrations/hermes_runtime/systemd_unit.py` | `EnvironmentFile=` is that unit's 0600 secrets path, so the unit process receives `HERMES_SLACK_BOT_USER_ID`. The unit text still has no secret bytes. | glue | `InstallLifecycleTests._assert_unit_has_no_secret` |
+| `integrations/hermes_runtime/secrets.py` | The Hermes child receives `HERMES_SLACK_BOT_USER_ID` from the secrets file and does not receive the bot token or the gateway token. | glue | `RegistryTests.test_registered_child_secret_names_are_forwarded_and_the_gateway_token_is_not` |

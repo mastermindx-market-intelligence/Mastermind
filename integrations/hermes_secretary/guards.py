@@ -36,6 +36,8 @@ class StandingRules:
         from roster import authorized_post_room_ids
 
         self.shadow_mode = shadow_mode
+        if not shadow_mode:
+            _require_bot_id_to_leave_shadow()
         self.voice_rooms = (
             authorized_post_room_ids() if voice_rooms is None else tuple(voice_rooms)
         )
@@ -56,6 +58,16 @@ class StandingRules:
         if self.hold and action not in {"chris_wait", "release_wait", "act_during_wait"}:
             raise GuardRefusal("CHRIS_WAIT")
         handler(self, ctx)
+
+
+def _require_bot_id_to_leave_shadow() -> None:
+    from integrations.hermes_harness.shadow_gate import assert_may_leave_shadow
+    from integrations.hermes_runtime.errors import RuntimeRefusal
+
+    try:
+        assert_may_leave_shadow()
+    except RuntimeRefusal as exc:
+        raise GuardRefusal(exc.code) from None
 
 
 def _chris_wait(rules: StandingRules, _ctx: dict) -> None:

@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
 from integrations.hermes_harness.doctor import doctor, format_doctor  # noqa: E402
+from integrations.hermes_harness.shadow_gate import assert_may_leave_shadow  # noqa: E402
+from integrations.hermes_runtime.errors import RuntimeRefusal  # noqa: E402
 from integrations.hermes_harness.extensions import extension_names_for  # noqa: E402
 from integrations.hermes_harness.stack import boot_stack  # noqa: E402
 from integrations.hermes_harness.tick import FIXTURE, routine_tick  # noqa: E402
@@ -193,6 +195,41 @@ class HarnessEndToEnd(unittest.TestCase):
         self.assertNotIn("UHERMESSELF1", rendered)
         self.assertNotIn(TOKEN, rendered)
 
+    def test_doctor_marks_a_non_list_agent_roster_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            roster = home / "roster.json"
+            roster.write_text('{"hermes_agents": {"name": "hermes-secretary"}}\n', encoding="utf-8")
+            report = doctor(
+                environ={},
+                home=home,
+                systemd_user=False,
+                upstream_attested=False,
+                roster_path=roster,
+            )
+        self.assertEqual(report["status"], "MISSING")
+        self.assertIn("config:hermes_agents:invalid", report["missing"])
+        for row in (
+            "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
+            "credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN",
+            "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
+            "credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN",
+        ):
+            self.assertNotIn(row, report["missing"])
+        rendered = format_doctor(report)
+        self.assertIn("- config:hermes_agents:invalid", rendered)
+
+    def test_harness_refuses_to_leave_shadow_without_a_bot_user_id(self) -> None:
+        with self.assertRaises(RuntimeRefusal) as caught:
+            assert_may_leave_shadow({})
+        self.assertEqual(caught.exception.code, "SHADOW_ID_REQUIRED")
+        with self.assertRaises(RuntimeRefusal):
+            assert_may_leave_shadow({"HERMES_SLACK_BOT_USER_ID": "not-an-id"})
+        self.assertEqual(
+            assert_may_leave_shadow({"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"}),
+            "UHERMESSELF1",
+        )
+
     def test_install_status_uninstall_and_cli(self) -> None:
         os.chmod(STUB, 0o755)
         os.chmod(CTL, 0o755)
@@ -237,6 +274,8 @@ class HarnessEndToEnd(unittest.TestCase):
         unit_text = (unit / "hermes-runtime-mmsecretary.service").read_text(encoding="utf-8")
         self.assertNotIn("AF_INET6", unit_text)
         self.assertNotIn(TOKEN, unit_text)
+        self.assertIn(f"EnvironmentFile={secrets.resolve()}\n", unit_text)
+        self.assertEqual(unit_text.count("EnvironmentFile="), 1)
         status = self._ctl("status", "--state", str(state))
         self.assertEqual(status.returncode, 0, status.stderr)
         self.assertEqual(json.loads(status.stdout)["status"], "INSTALLED")

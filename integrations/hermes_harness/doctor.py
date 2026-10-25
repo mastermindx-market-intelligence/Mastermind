@@ -50,6 +50,7 @@ def doctor(
     home: Path | None = None,
     systemd_user: bool | None = None,
     upstream_attested: bool | None = None,
+    roster_path: Path | None = None,
 ) -> dict:
     env = dict(os.environ if environ is None else environ)
     root = Path.home() if home is None else home
@@ -71,7 +72,7 @@ def doctor(
     manager = _systemd_user_manager() if systemd_user is None else systemd_user
     if not manager:
         missing.append("grant:ubuntu1_systemd_user_manager")
-    missing.extend(_agent_identity_gaps(root))
+    missing.extend(_agent_identity_gaps(root, roster_path=roster_path))
     missing.append("id:DOT_BOT_USER_IDS")
     missing = sorted(set(missing))
     return {
@@ -128,10 +129,10 @@ def _gateway_file_ok(path: Path) -> bool:
     return True
 
 
-def _agent_identity_gaps(home: Path) -> list[str]:
+def _agent_identity_gaps(home: Path, *, roster_path: Path | None = None) -> list[str]:
     """Per-agent Slack bot id and token. Names only; file bodies stay out."""
 
-    path = Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json"
+    path = roster_path or (Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -143,7 +144,7 @@ def _agent_identity_gaps(home: Path) -> list[str]:
         ]
     rows = data.get("hermes_agents") if isinstance(data, dict) else None
     if not isinstance(rows, list):
-        return []
+        return ["config:hermes_agents:invalid"]
     gaps: list[str] = []
     for row in rows:
         if not isinstance(row, dict):

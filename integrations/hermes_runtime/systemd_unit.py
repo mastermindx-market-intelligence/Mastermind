@@ -50,9 +50,12 @@ def render_user_unit(
         if label == "python" and not value:
             raise RuntimeRefusal("UNSAFE_PATH")
     state = str(profile.state_dir)
+    secrets = str(profile.secrets_file)
+    if any(ch in secrets for ch in _UNSAFE) or not secrets.startswith("/"):
+        raise RuntimeRefusal("UNSAFE_PATH")
     text = f"""# Mastermind Hermes runtime user unit. One unit per agent.
-# Loopback only. No secrets in this file.
-# HERMES_SLACK_BOT_USER_ID and HERMES_SLACK_BOT_TOKEN live in that unit's 0600 secrets file.
+# Loopback only. This file names the 0600 secrets path. It does not contain secret bytes.
+# EnvironmentFile loads that file, including HERMES_SLACK_BOT_USER_ID, into this unit.
 # Upstream pin {PINNED_UPSTREAM_SHA} is enforced by the profile loader.
 [Unit]
 Description=Mastermind Hermes runtime ({profile.role}, pinned loopback)
@@ -66,6 +69,7 @@ WorkingDirectory={state}
 ExecStart={python_executable} -m integrations.hermes_runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 Environment=PYTHONPATH={repo_root}
 Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile={secrets}
 Restart=on-failure
 RestartSec={_seconds(profile.restart_sec)}
 RestartPreventExitStatus={CONFIG_EXIT}
@@ -87,6 +91,8 @@ MemoryAccounting=true
 [Install]
 WantedBy=default.target
 """
-    if "0.0.0.0" in text or "EnvironmentFile=" in text:
+    if "0.0.0.0" in text or text.count("EnvironmentFile=") != 1:
+        raise RuntimeRefusal("UNIT_UNSAFE")
+    if f"EnvironmentFile={secrets}\n" not in text:
         raise RuntimeRefusal("UNIT_UNSAFE")
     return text

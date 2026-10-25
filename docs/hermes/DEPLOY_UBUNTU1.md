@@ -74,14 +74,19 @@ HERMES_SLACK_BOT_TOKEN=<this-agents-bot-token>
 
 `self` is only that unit's `HERMES_SLACK_BOT_USER_ID`. Sibling Hermes ids live
 in `roster.json` under `sibling_hermes_agent_ids` and are not a self loop.
-The supervisor forwards the user id into that unit's process. The bot token
-stays in the secrets file and is not written into the unit.
+Each user unit has `EnvironmentFile=` set to that unit's 0600 secrets file, so
+systemd loads `HERMES_SLACK_BOT_USER_ID` into the unit process. The unit text
+contains the path, not the secret bytes. The Hermes child receives that user
+id and does not receive `HERMES_SLACK_BOT_TOKEN` or `HERMES_GATEWAY_TOKEN`.
+
+The harness refuses to leave shadow mode when `HERMES_SLACK_BOT_USER_ID` is
+unset or malformed (`SHADOW_ID_REQUIRED`). Shadow mode remains the default
+and still posts nothing.
 
 Chairman Chris is `U0BRET6191C` (`chris@mastermind-x.com`). Grok Secretary
 `U0BTCHX8HMF` (`groksecretary@mastermind-x.com`) is a permanent peer. Hermes
 reads Grok's posts, can take assignments and receipts from Grok, and may
-address Grok in a pre-authorized thread. Shadow mode remains the default and
-still posts nothing.
+address Grok in a pre-authorized thread.
 
 Ids and credentials doctor still reports until they are provided:
 
@@ -136,7 +141,7 @@ from `--fetch`.
 - a `default.target.wants` symlink for each
 - loopback ports `127.0.0.1:8765` (Secretary) and `127.0.0.1:8865` (Meta-CEO)
 - `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, `IPAddressAllow=localhost`
-- no `EnvironmentFile=` and no secret bytes
+- `EnvironmentFile=` pointing at that unit's 0600 secrets file, and no secret bytes in the unit
 - provider overlay `provider-overlay.yaml` and `vision-overlay.yaml` under the role's `hermes-home`
 
 Model order in those overlays:

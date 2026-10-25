@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -68,6 +70,10 @@ class StandingRuleGuards(unittest.TestCase):
         self.assertGreaterEqual(len(seen), 16)
 
     def test_allowed_paths_stay_inside_the_guards(self):
+        with mock.patch.dict(os.environ, {"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"}):
+            self._allowed_paths_stay_inside_the_guards()
+
+    def _allowed_paths_stay_inside_the_guards(self):
         rules = StandingRules(shadow_mode=False, voice_rooms=("CONE000001", "CTWO000001"))
         rules.consider("approval_card", tool="terminal", choice="Allow terminal for this conversation")
         rules.consider("composer_input", method="paste")
@@ -167,7 +173,8 @@ class StandingRuleGuards(unittest.TestCase):
         rules.consider("composer_input", method="paste")
 
     def test_one_configured_voice_room_fails_closed(self):
-        rules = StandingRules(shadow_mode=False, voice_rooms=("CONE000001",))
+        with mock.patch.dict(os.environ, {"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"}):
+            rules = StandingRules(shadow_mode=False, voice_rooms=("CONE000001",))
         with self.assertRaises(GuardRefusal) as caught:
             rules.consider("slack_as_chris", channel="CONE000001")
         self.assertEqual(caught.exception.code, "DRAFT_ONLY")
@@ -184,6 +191,10 @@ class StandingRuleGuards(unittest.TestCase):
         self.assertEqual(caught.exception.code, "SHADOW_NO_POST")
 
     def test_only_receipt_pickup_and_result_thread_replies_are_preauthorized(self):
+        with mock.patch.dict(os.environ, {"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"}):
+            self._only_receipt_pickup_and_result_thread_replies_are_preauthorized()
+
+    def _only_receipt_pickup_and_result_thread_replies_are_preauthorized(self):
         rules = StandingRules(shadow_mode=False)
         rooms = rules.voice_rooms
         self.assertEqual(rooms, ("C0CBC6AEAQZ", "C0C5FCK1F45"))
@@ -236,29 +247,21 @@ class StandingRuleGuards(unittest.TestCase):
         self.assertIsNone(rules.fabric_state("missing-run"))
 
     def test_grok_is_addressable_and_the_agent_own_id_is_not(self):
-        import os
-        from unittest import mock
-
-        rules = StandingRules(shadow_mode=False)
-        rooms = rules.voice_rooms
-        rules.consider(
-            "slack_post",
-            channel=rooms[0],
-            thread_ts="1761410001.000100",
-            kind="PICKUP",
-            address_user="U0BTCHX8HMF",
-        )
-        shadow = StandingRules(shadow_mode=True)
+        saved = os.environ.pop("HERMES_SLACK_BOT_USER_ID", None)
+        self.addCleanup(lambda: saved is not None and os.environ.__setitem__("HERMES_SLACK_BOT_USER_ID", saved))
         with self.assertRaises(GuardRefusal) as caught:
-            shadow.consider(
+            StandingRules(shadow_mode=False)
+        self.assertEqual(caught.exception.code, "SHADOW_ID_REQUIRED")
+        with mock.patch.dict(os.environ, {"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"}):
+            rules = StandingRules(shadow_mode=False)
+            rooms = rules.voice_rooms
+            rules.consider(
                 "slack_post",
                 channel=rooms[0],
                 thread_ts="1761410001.000100",
                 kind="PICKUP",
                 address_user="U0BTCHX8HMF",
             )
-        self.assertEqual(caught.exception.code, "SHADOW_NO_POST")
-        with mock.patch.dict(os.environ, {"HERMES_SLACK_BOT_USER_ID": "UHERMESSELF1"}):
             with self.assertRaises(GuardRefusal) as caught:
                 rules.consider(
                     "slack_post",
@@ -268,6 +271,16 @@ class StandingRuleGuards(unittest.TestCase):
                     address_user="UHERMESSELF1",
                 )
             self.assertEqual(caught.exception.code, "SELF_LOOP")
+        shadow = StandingRules(shadow_mode=True)
+        with self.assertRaises(GuardRefusal) as caught:
+            shadow.consider(
+                "slack_post",
+                channel="C0CBC6AEAQZ",
+                thread_ts="1761410001.000100",
+                kind="PICKUP",
+                address_user="U0BTCHX8HMF",
+            )
+        self.assertEqual(caught.exception.code, "SHADOW_NO_POST")
 
 
 if __name__ == "__main__":
