@@ -49,6 +49,13 @@ python3 -m unittest discover -v -s integrations/hermes_qualification/tests
 
 The captured text must be from an observed verified executable and restricted profile, and **all stderr warnings must be absent**; it must not contain tokens or private content. The output parser validates **CLI only** and cannot inspect actual model calls, authorization, host/network isolation, TCC or a Desktop-injected `desktop_ui` tool.
 
+
+## Two separately scoped *candidate* role profiles
+
+`profiles/mmsecretary/config.yaml` selects **GLM-5.3-Flash** for a future economical Secretary role; `profiles/mmmeta/config.yaml` selects **GLM-5.3** for a future reasoning-heavy Meta-CEO. Both are source-only, provider-uncredentialed, zero-actuation `clarify`-only configurations with the **same 24 disabled toolset categories**. Their separate `SOUL.md` files provide presentation/organizational boundaries, **not permissions, durable memory or identity authority**.
+
+The actual pinned Hermes CLI supports `hermes profile create <name> --no-skills --no-alias`, separate profile paths, and `hermes -p <name> tools list --platform cli`. A controlled disposable staging procedure must first ensure an empty isolated `HOME`, no active provider credentials, no existing profile targets and no bot/channel cloning; create the named profiles, place the exact reviewed `config.yaml` and `SOUL.md` as private files, run per-profile unique-key preflight and per-profile CLI registry/stderr observation, and stop. Do **not** run their `setup`, `chat`, `gateway`, `kanban`, `cron` or `tools` for computer use until receiving-service policy and provider admission qualify them. Even if the two profiles share one Hermes backend process, they do not become two different Executive identities or Job owners.
+
 ## Follow-on acceptance, held
 
 1. On an authorized disposable host or qualified cloud instance with accepted source custody, pin an upstream stable release and its verified dependencies. Capture observed source SHA and packaged artifact provenance. Never execute an uninspected remote install script, reuse somebody else's profile credentials, or install to a busy GUI host just because port 9119 is free.
