@@ -80,6 +80,16 @@ EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their 
 owners. When the original session is itself the target of a proof, retain that precise
 proof obligation; it must not freeze unrelated permitted implementation or diagnosis.
 
+## Shared ChatGPT Web Project-instruction rollout
+
+For all Mastermind-assigned ChatGPT Web accounts, the **single canonical source** of the compact Project instruction is `docs/sol_skills/BOOTSTRAP_KERNEL.md` on accepted protected `master`. The rollout marker is `HANDOFF_SOURCE_LINK_V1`; it means source-anchored, short project commissions and no old-chat owner hunt, **not** permission to bypass a tool safety denial.
+
+A new approved bootstrap revision **does not automatically update ChatGPT UI settings**. A ChatGPT Project's owner/editor must inspect Project settings, preserve unrelated Project configuration and install the approved instruction block. One edit of the same Shared Project normally serves all eligible members, but **distinct Projects must each be inspected/updated**. Verify actual member access; personal account custom instructions are not a substitute for the Project instructions.
+
+If the Chairman delegates setup to Grok Secretary or another approved browser operator, use only the operator's currently authorized sessions and UI control. Do not collect passwords, reveal cookies, bypass sign-in, assume browser tabs are live or claim every account updated without readback. For each accessible target, capture a privacy-preserving Project identity, permission, installed `HANDOFF_SOURCE_LINK_V1` marker/content parity, and a newly opened chat's source-load proof. An unavailable account or Project remains a named open coverage gap, not an occasion to interrupt the Chairman for routine delivery details.
+
+The routine handoff is a short pointer to the canonical source with one actionable outcome and exact return location, not a duplicated instruction manual. Any explicit safety or permission rejection stops that specific attempted effect; continue permitted independent work and report the truthful limitation. See the current pinned `docs/sol_skills/WORKER_AVENUE_ROUTING.md` §10 and `BOOTSTRAP_KERNEL.md` for the full rules.
+
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and

@@ -385,3 +385,17 @@ Fable, Grok or another surface is exempt because it historically emitted or expe
 > eligible session is assignment. Exact-session continuation stays exact; after START, runtime changes
 > require canonical reconciliation. Prefer Terra and CTO Sol when sufficient. Fable is for the hardest
 > principal-level problems, not the default.**
+
+## 10. Source-linked cross-account delivery and setup requests
+
+For a substantive project, **the long brief belongs in the current GitHub plan or reviewed canonical carrier**, not in a several-thousand-character Slack ping. Favor one small, ordinary delivery message with the actual recipient, **one bounded requested outcome**, one source-of-truth link and a specific return destination. The recipient follows the linked approved source and applicable current admissions; a link does not grant any new source, browser, subscription or release authority.
+
+**The Chairman does not serve as the locator for abandoned Web conversations.** The fresh, lawfully assigned receiver reads current source and actual live writer/effect evidence once, protects proven active/unknown overlapping modifications and proceeds with a safe independent lane or lawful successor recovery. Do not require a historical PR author, ChatGPT account, archived tab or former session to acknowledge a brand-new independent commission.
+
+Do not pack detailed model-mode exception receipts, full permission policies, architecture decisions, bot spawn requests and source-custody transfers into one transport message. Those are separate receiving-owner decisions, documented in durable sources and applied only to the effects they govern. This is a clarity and reliability practice, **not** an attempt to identify or evade a platform safety classifier.
+
+An explicit safety/permission rejection of the requested transport or effect is terminal **for that action**. Record the exact refused action and do not repeatedly shorten, reword, relay through another bot, use alternate accounts or switch connectors to obtain the same denied effect. Keep unrelated authorized work moving. A new commission is distinct only when its objective and authority genuinely differ; do not use it as a disguised retry.
+
+For ChatGPT Web Project-instruction distribution across multiple accounts, the existing Shared Mastermind Project's **actual authorized owner/editor** first checks the protected `docs/sol_skills/BOOTSTRAP_KERNEL.md` and target Project settings. When all seats share one Project, one verified Project edit may serve the members; other Projects require their own authorized edit. Account-wide custom instructions are not a substitute. Do not assume UI access or a selected reasoning mode. Capture each target's permission/readback and a fresh-chat load result, treating unavailable accounts as UNKNOWN rather than success.
+
+**Receipt states remain distinct:** delivery sent; real pickup; session admitted and STARTed; and independently observed work/result. Neither a Slack link nor a Project setting edit establishes any other state.
