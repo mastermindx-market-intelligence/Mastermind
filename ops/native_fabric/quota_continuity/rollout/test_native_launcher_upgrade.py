@@ -108,10 +108,10 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 patch_raw = patch_file.read_bytes()
                 if g.digest(patch_raw) != '6b1dade16fe58b732064d66e0645396dd6dd02fc255c3befbf0d03e105b23e6b':
                     raise AssertionError('reviewed manual patch source drift')
-                section = b'diff --git a/' + member.encode() + b' b/' + member.encode() + b'\\n'
+                section = b'diff --git a/' + member.encode() + b' b/' + member.encode() + b'\n'
                 if patch_raw.count(section) != 1:
                     raise AssertionError('reviewed inverse member missing')
-                lines = patch_raw.split(section, 1)[1].split(b'\\ndiff --git ', 1)[0].splitlines(keepends=True)
+                lines = patch_raw.split(section, 1)[1].split(b'\ndiff --git ', 1)[0].splitlines(keepends=True)
                 groups, block = [], None
                 for line in lines:
                     if line.startswith(b'@@ '):
@@ -141,10 +141,10 @@ class PairedLauncherUpgrade(unittest.TestCase):
             judgment_hunks = (
                 (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
                  b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
-                (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\\n'
-                 b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\\n'
-                 b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\\n',
-                 b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\\n'),
+                (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
+                 b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
+                 b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
+                 b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
             )
             for current_hunk, old_hunk in judgment_hunks:
                 if reviewed_pick.count(current_hunk) != 1:
