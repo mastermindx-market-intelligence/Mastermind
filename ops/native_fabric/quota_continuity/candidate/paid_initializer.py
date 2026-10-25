@@ -54,15 +54,17 @@ def require_no_site_policy():
 
 class _IgnoredNoSiteNode:
     """Hold the exact link, never its target; require empty visible metadata."""
+    NAME='sitecustomize.py'
     def __init__(self,directory):
         import stat
+        if type(self) not in (_IgnoredNoSiteNode,_QualifiedSysconfigLink):refuse()
         self.directory=directory;self.fd=None
         try:
             info=os.fstat(directory)
             if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022:refuse()
             self.directory_before=self._identity(info)
-            self.fd=os.open('sitecustomize.py',os.O_PATH|os.O_NOFOLLOW,dir_fd=directory)
-            self.before=self._identity(os.fstat(self.fd));self.check()
+            self.fd=os.open(self.NAME,os.O_PATH|os.O_NOFOLLOW,dir_fd=directory)
+            self.before=self._identity(os.fstat(self.fd));_IgnoredNoSiteNode.check(self)
         except BaseException:
             if self.fd is not None:os.close(self.fd);self.fd=None
             raise
@@ -75,23 +77,68 @@ class _IgnoredNoSiteNode:
         info=os.fstat(self.fd)
         if (not stat.S_ISLNK(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1
                 or stat.S_IMODE(info.st_mode)!=0o777 or not 0<info.st_size<=4096 or self._identity(info)!=self.before
-                or self._identity(os.stat('sitecustomize.py',dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
+                or self._identity(os.stat(self.NAME,dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
         # Linux POSIX ACL semantics exclude symlink inodes. This successful
         # no-follow query proves only an empty VISIBLE name list, not absence
         # of hidden attributes or an LSM/sandbox guarantee.
-        alias='/proc/self/fd/'+str(self.directory)+'/sitecustomize.py'
+        alias='/proc/self/fd/'+str(self.directory)+'/'+self.NAME
         try:names=os.listxattr(alias,follow_symlinks=False)
         except OSError:refuse()
         if type(names) is not list or names:refuse()
         if (self._identity(os.fstat(self.directory))!=self.directory_before
                 or self._identity(os.fstat(self.fd))!=self.before
-                or self._identity(os.stat('sitecustomize.py',dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
+                or self._identity(os.stat(self.NAME,dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
     def __enter__(self):self.check();return self
     def __exit__(self,*ignored):
         try:self.check()
         finally:
             if self.fd is not None:os.close(self.fd);self.fd=None
 
+
+
+class _QualifiedSysconfigLink(_IgnoredNoSiteNode):
+    NAME='_sysconfigdata__linux_x86_64-linux-gnu.py'
+    TARGET='_sysconfigdata__x86_64-linux-gnu.py'
+    def __init__(self,directory):
+        self.target_fd=self.fd=None
+        try:
+            super().__init__(directory)
+            if os.readlink(self.NAME,dir_fd=directory)!=self.TARGET:refuse()
+            self.target_fd=os.open(self.TARGET,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+            info=os.fstat(self.target_fd);self.target_before=self._identity(info)
+            self._target_kind(info)
+            raw=os.pread(self.target_fd,1048577,0)
+            if len(raw)!=info.st_size:refuse()
+            self.target_hash=hashlib.sha256(raw).digest();self.check()
+        except BaseException:
+            if self.fd is not None:os.close(self.fd);self.fd=None
+            if self.target_fd is not None:os.close(self.target_fd);self.target_fd=None
+            raise
+    @staticmethod
+    def _target_kind(info):
+        import stat
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022
+                or info.st_nlink!=1 or not 0<info.st_size<=1048576):refuse()
+    def check(self):
+        import errno
+        super().check()
+        if os.readlink(self.NAME,dir_fd=self.directory)!=self.TARGET:refuse()
+        info=os.fstat(self.target_fd);self._target_kind(info)
+        if self._identity(info)!=self.target_before:refuse()
+        for key in ('system.posix_acl_access','system.posix_acl_default'):
+            try:os.getxattr(self.target_fd,key)
+            except OSError as error:
+                if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):refuse()
+            else:refuse()
+        if (hashlib.sha256(os.pread(self.target_fd,1048577,0)).digest()!=self.target_hash
+                or self._identity(os.fstat(self.target_fd))!=self.target_before
+                or self._identity(os.stat(self.TARGET,dir_fd=self.directory,follow_symlinks=False))!=self.target_before
+                or os.readlink(self.NAME,dir_fd=self.directory)!=self.TARGET):refuse()
+        super().check()
+    def __exit__(self,*args):
+        try:super().__exit__(*args)
+        finally:
+            if self.target_fd is not None:os.close(self.target_fd);self.target_fd=None
 
 
 def _require_startup_entry(info,count):
@@ -382,8 +429,6 @@ def run_bootstrap(request, probe_source):
             no_acl(fd)
             if identity(os.fstat(fd))!=before or identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=before:refuse()
     def pin_image(binding):
-        # Symlinks are accepted only as an exact bounded selector chain. The
-        # real ELF image is held and used by fd-exec, never reopened to execute.
         links=[];current=binding['path']
         for _ in range(9):
             before=os.lstat(current)
@@ -393,7 +438,6 @@ def run_bootstrap(request, probe_source):
             current=os.path.normpath(target if target.startswith('/') else os.path.join(os.path.dirname(current),target))
         else:refuse()
         if current!=binding['real_path'] or os.path.realpath(current)!=current:refuse()
-        # Hold every logical ancestor too; never dereference an unchecked path.
         pin(os.path.dirname(binding['path']),directory=True,owners={0})
         fd,raw=pin(current,owners={0})
         if not os.fstat(fd).st_mode&0o111 or hashlib.sha256(raw).hexdigest()!=binding['sha256']:refuse()
@@ -405,9 +449,6 @@ def run_bootstrap(request, probe_source):
         bootstrap_fd,bootstrap_links=pin_image(commitment['bootstrap_python'])
         if os.path.realpath('/proc/self/exe')!=commitment['bootstrap_python']['real_path']:refuse()
         launch_fd,launch_links=pin_image(commitment['launch_python'])
-        # The finite initial profile supports only a Root-protected CPython
-        # 3.12 distribution, not a mutable account virtualenv. Do not rewrite
-        # HOME/PATH/PYTHONHOME or infer equivalence from an ELF/argv0 alone.
         if sys.version_info[:2]!=(3,12):refuse()
         for variable in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             if variable in os.environ:refuse()
@@ -418,8 +459,6 @@ def run_bootstrap(request, probe_source):
             library_fd,_=pin(library,directory=True,owners={0})
             count=0
             if no_site:
-                # os.walk may follow links to classify them, even with
-                # followlinks=False. This finite variant never does so.
                 for name,info in _no_site_startup_entries(library):
                     count+=1
                     if count>20000:refuse()
@@ -427,35 +466,26 @@ def run_bootstrap(request, probe_source):
                         node=contexts.enter_context(_IgnoredNoSiteNode(library_fd))
                         if node.before!=identity(info):refuse()
                         ignored_nodes.append(node);continue
+                    if name==library+'/'+_QualifiedSysconfigLink.NAME and stat.S_ISLNK(info.st_mode):
+                        node=contexts.enter_context(_QualifiedSysconfigLink(library_fd))
+                        if node.before!=identity(info):refuse()
+                        ignored_nodes.append(node);continue
                     _require_startup_entry(info,count)
                     no_acl(name)
             else:
-                # Fixed distribution tree only; no caller-selected traversal or
-                # credential read. Root ownership of every entry excludes writes by
-                # the transport account. Concurrent external Root remains outside
-                # the existing trusted-platform premise; no custody is invented.
                 for parent,dirs,files in os.walk(library,followlinks=False):
-                    # -S excludes these two distribution site roots; no other
-                    # subtree is excluded from startup protection.
                     dirs[:]=[leaf for leaf in dirs if leaf not in ('site-packages','dist-packages')]
                     for leaf in dirs+files:
                         name=os.path.join(parent,leaf);info=os.lstat(name);count+=1
                         _require_startup_entry(info,count)
                         no_acl(name)
-            # An optional root-owned zip on sys.path is still startup code.
             zip_path=prefix+'/lib/python312.zip'
             if os.path.lexists(zip_path):pin(zip_path,owners={0})
-        # ._pth can replace import roots even in isolated mode. This finite
-        # profile admits none adjacent to the logical/real image or runtime
-        # library. All containing directories are Root-protected before this
-        # absence check; the account cannot race in a new entry.
         selector_dirs={os.path.dirname(commitment['launch_python'][k]) for k in ('path','real_path')}
         selector_dirs.update(commitment['startup'][k]+'/lib' for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix'))
         for directory in selector_dirs:
             pin(directory,directory=True,owners={0})
             if any(name.endswith('._pth') for name in os.listdir(directory)):refuse()
-        # pyvenv.cfg is startup code/configuration, not authenticated by the
-        # executable digest. Only fixed Root-protected selectors are supported.
         logical=commitment['launch_python']['path']
         for directory in (os.path.dirname(logical),os.path.dirname(os.path.dirname(logical))):
             config=directory+'/pyvenv.cfg'
@@ -470,8 +500,6 @@ def run_bootstrap(request, probe_source):
                         values[key]=value.strip()
                 if values.get('home') not in {commitment['startup'][k]+'/bin' for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')}:refuse()
                 pin(path(values['home']),directory=True,owners={0})
-        # Test actual CPython getpath before the initializer, through the held
-        # kernel image. argv0 is compared as DATA; it is never image authority.
         startup_code="import json,sys;print(json.dumps({k:getattr(sys,k) for k in ('executable','prefix','exec_prefix','base_prefix','base_exec_prefix')}))"
         if no_site:startup_code=NO_SITE_PREAMBLE+startup_code+'\n_paid_no_site_check()'
         startup_child=subprocess.run([logical,'-I','-S','-B','-c',startup_code],
@@ -491,8 +519,6 @@ def run_bootstrap(request, probe_source):
         if commitment['initialization_contract']==NESTED_CONTRACT:
             if _TOKEN_DATA is None or _NESTED_DATA is None:refuse()
             expected_helper=commitment['nested_helper']
-            # Open/hold the fixed private origin but read NO bytes until exact
-            # named/ancestor/ACL/account/mode metadata has been qualified.
             helper_fd,_=pin(expected_helper['path'],maximum=4096,read_file=False)
             private_info=os.fstat(helper_fd)
             if (private_info.st_uid!=uid or private_info.st_gid!=gid
@@ -509,17 +535,11 @@ def run_bootstrap(request, probe_source):
             snapshot=sealed_snapshot(raw);snapshots.append(snapshot)
         pin(request['capture_root'],directory=True)
         check()
-        # The post-initialization selector is observed, never overwritten. The
-        # child receives no credential bytes in argv or this expected document.
         encoded=base64.b64encode(canonical(request)).decode('ascii')
         probe_source=("import sys,json,base64\n_p=json.loads(base64.b64decode(sys.argv[1],validate=True))\n"
             +"assert sys.version_info[:2]==(3,12) and sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode\n"
             +"assert all(getattr(sys,k)==_p['initializer_commitment']['startup'][k] for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix'))\n"
             +probe_source)
-        # Bash can redefine builtins, functions, traps and options. It is never
-        # trusted to launch/attest the observer. Its entire return is untrusted
-        # environment DATA; only this still-running pinned Python parent can
-        # validate it and launch the held image with the fixed probe source.
         environment_raw=_capture_environment(snapshot,commitment,initial_environment)
         initialized=_initialized_environment(environment_raw,commitment)
         if prepared is not None:prepared.check_environment(initialized)

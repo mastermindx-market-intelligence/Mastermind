@@ -49,7 +49,7 @@ def _linux_completion(request,profile=None):
 
 
 _SYSTEM_FIXTURE_STAGES=frozenset(('selector_resolution','selector_version','image_custody','ancestor_custody',
-    'startup_library','startup_entry','startup_count','ignored_link','startup_zip','startup_overrides',
+    'startup_library','startup_entry','startup_count','ignored_link','qualified_sysconfig_link','startup_zip','startup_overrides',
     'getpath_execution','getpath_version','getpath_prefixes'))
 
 
@@ -76,10 +76,11 @@ def _system_fixture_failure_metadata(error,stage):
     trace=error.__traceback__
     while trace is not None:
         code=trace.tb_frame.f_code
-        if code.co_filename==__file__ and code.co_name in ('_system_fixture_launch','guarded'):
+        if ((code.co_filename==__file__ and code.co_name in ('_system_fixture_launch','guarded'))
+                or code.co_filename==m.__file__ and code.co_qualname in ('_QualifiedSysconfigLink.__init__','_QualifiedSysconfigLink._target_kind','_QualifiedSysconfigLink.check','_IgnoredNoSiteNode.check')):
             if type(trace.tb_lineno)is int and 0<trace.tb_lineno<=1000000:
-                value.update(function=code.co_name,line=trace.tb_lineno)
-                if stage in ('startup_entry','startup_count','ignored_link'):
+                value.update(function=code.co_name if code.co_filename==__file__ else code.co_qualname,line=trace.tb_lineno)
+                if stage in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link'):
                     candidate=_system_fixture_public_node(trace.tb_frame.f_locals.get('path')if code.co_name=='guarded'else trace.tb_frame.f_locals.get('name'),trace.tb_frame.f_locals.get('info'))
                     if candidate is not None:value['node']=candidate
                 if code.co_name=='guarded':
@@ -101,10 +102,10 @@ def _system_fixture_metadata_safe(value):
     return (type(value)is dict and set(value)=={'schema','stage','function','line','errno','fields','node'}
         and value['schema']=='mastermind.inert_system_fixture.v1'
         and type(value['stage'])is str and value['stage'] in _SYSTEM_FIXTURE_STAGES
-        and (value['function'] is None or type(value['function'])is str and value['function'] in ('_system_fixture_launch','guarded'))
+        and (value['function'] is None or type(value['function'])is str and value['function'] in ('_system_fixture_launch','guarded','_QualifiedSysconfigLink.__init__','_QualifiedSysconfigLink._target_kind','_QualifiedSysconfigLink.check','_IgnoredNoSiteNode.check'))
         and (value['line'] is None or type(value['line'])is int and 0<value['line']<=1000000)
         and (value['errno'] is None or type(value['errno'])is int and 0<=value['errno']<=4096)
-        and (value['node'] is None or value['stage'] in ('startup_entry','startup_count','ignored_link')
+        and (value['node'] is None or value['stage'] in ('startup_entry','startup_count','ignored_link','qualified_sysconfig_link')
             and type(value['node'])is dict and set(value['node'])=={'relative_name','kind'}
             and type(value['node']['relative_name'])is str and type(value['node']['kind'])is str
             and value['node']['kind'] in ('REGULAR','DIRECTORY','SYMLINK','FIFO','SOCKET','CHARACTER','BLOCK','UNKNOWN')
@@ -169,11 +170,12 @@ def _system_fixture_launch(*,no_site=False,diagnostic_request=None):
                     stage='startup_entry';count+=1
                     if count>20000:
                         stage='startup_count';raise ValueError()
-                    if name==str(library/'sitecustomize.py') and stat.S_ISLNK(info.st_mode):
-                        stage='ignored_link'
+                    factory=m._IgnoredNoSiteNode if name==str(library/'sitecustomize.py') else m._QualifiedSysconfigLink if name==str(library/m._QualifiedSysconfigLink.NAME) else None
+                    if factory is not None and stat.S_ISLNK(info.st_mode):
+                        stage='ignored_link'if factory is m._IgnoredNoSiteNode else'qualified_sysconfig_link'
                         directory=os.open(library,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
                         try:
-                            with m._IgnoredNoSiteNode(directory):pass
+                            with factory(directory):pass
                         finally:os.close(directory)
                     else:guarded(Path(name))
                     stage='startup_entry';name=info=None
@@ -827,7 +829,8 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup',
         'tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook',
         'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
-        'tests/test_paid_initializer_nosite.py']
+        'tests/test_paid_initializer_nosite.py',
+        'tests/test_paid_initializer_sysconfig.py']
     assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}'
     assert full[0][1].get('if') is None
 

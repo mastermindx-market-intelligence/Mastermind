@@ -246,6 +246,30 @@ and directories retain their existing getxattr ACL guards. Changed node,
 foreign owner, other symlink/type, writable namespace or excess count refuses.
 All image, zip, `._pth`, pyvenv, getpath, immutable snapshot and source guards remain.
 
+
+The same explicit new profile also supports exactly the immediate
+`_sysconfigdata__linux_x86_64-linux-gnu.py` alias to the exact same-directory
+ordinary file `_sysconfigdata__x86_64-linux-gnu.py`. This is a deliberately finite
+supported policy, not a claim that the hosted or deployed alias target was
+observed. The public Ubuntu 3.12.3-1ubuntu0.17 stdlib package declares this literal alias,
+and its minimal package supplies the ordinary target. This public packaging
+evidence is separate from hosted/deployed identity: the actual alias and target
+must satisfy this policy in Linux CI and at action time.
+[CPython `sysconfig._init_posix`](https://github.com/python/cpython/blob/v3.12.3/Lib/sysconfig.py#L495-L501)
+can import this dependency, so it is qualified,
+not ignored or tombstoned. No target code is executed by qualification.
+
+The held library and its held Root ancestors retain their existing ACL and
+namespace guards. The alias has no-follow O_PATH/full-nine-field custody and must
+name only that literal target before any target bytes are read. The target opens
+relative to the held library with O_NOFOLLOW, must be an ordinary Root-owned
+nonwritable single-link file of at most 1 MiB, and retains its FD, ACL, full
+metadata, named identity and content hash through bootstrap/handoffs/return.
+Retargeting, absolute/escaping/other relative names, chains, writable/foreign
+files, hard links, changed content or unsupported native proof refuse. Both names
+still count toward the unchanged startup limit; all other links still refuse,
+and the old strict profile remains unchanged.
+
 These tombstones are normal-import controls under exact pinned code, not a Python
 sandbox. An arbitrary alias/file loader could execute another file; no such loader
 or caller-supplied Python is admitted. The canonical request still binds the fixed

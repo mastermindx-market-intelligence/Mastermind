@@ -464,4 +464,4 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 }
 
 # Input-mode bounds and exact ignored Linux symlink mode, never target authority.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '0ed3d942dcda3675e124e5b1a0c2a918df066f5d8332d1439f6f178eaf9d9661', 'sites': ((77, 47, 52, 'int', '0o777'), (174, 36, 41, 'int', '0o777'), (184, 48, 53, 'int', '0o777'))}
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '987327e4e55fa4b23df55be14a4c279b1a22b34355bc934e75fd1fbb4ec5e409', 'sites': ((79, 47, 52, 'int', '0o777'), (221, 36, 41, 'int', '0o777'), (231, 48, 53, 'int', '0o777'))}
