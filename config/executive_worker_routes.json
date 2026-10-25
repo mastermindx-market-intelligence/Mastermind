@@ -19,6 +19,11 @@
       "enabled": false,
       "autonomous_allowed": false
     },
+    "anthropic_api": {
+      "adapter_id": "anthropic-api-principal",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
     "qwen": {
       "adapter_id": "openai-compatible",
       "enabled": false,
@@ -59,6 +64,15 @@
       "capabilities": [
         "research"
       ],
+      "worker_eligible": false
+    },
+    "fable.api.principal": {
+      "provider_alias": "anthropic_api",
+      "execution_profile_id": "operator.appserver.readonly.v1",
+      "model": "claude-fable-5-1",
+      "effort": "high",
+      "cost_class": "frontier",
+      "capabilities": ["planning", "judgment", "escalation"],
       "worker_eligible": false
     },
     "coo.sealed": {
