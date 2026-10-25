@@ -1002,6 +1002,7 @@ def test_external_github_source_contracts_are_publicly_exported():
         ({"state": "closed"}, gri.ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN.value),
         ({"draft": True}, gri.ReviewIntentRefusal.PULL_REQUEST_DRAFT.value),
         ({"head_repository": "malicious/fork"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
+        ({"number": 9001}, gri.ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value),
         ({"title": "xoxb-secret-shaped-token"}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
         ({"title": "A" * 13000, "body": "B" * 13000}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
     ],
@@ -1034,6 +1035,23 @@ def test_integrated_combined_objective_over_bound_refused_before_ledger():
     assert result.decision.refusal is gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED
     assert fabric.admit_calls == 0
     assert fabric.jobs == {}
+
+def test_publication_fetches_current_facts_not_admission_snapshot():
+    """Publication must refuse a moved head from the authenticated fresh read."""
+    _, admitted = _admitted_decision()
+    reads = FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA))
+    publications = FakePublications()
+    outcome = _publish(
+        admitted.decision,
+        admitted.job_id,
+        pull_requests=reads,
+        publications=publications,
+    )
+    assert reads.reads == 1
+    assert outcome.state is ing.PublishState.REFUSED
+    assert outcome.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
+    assert publications.calls == []
+
 
 def test_rendered_review_body_limit_refused_before_publisher():
     _, admitted = _admitted_decision()

@@ -1082,28 +1082,13 @@ def publish_verified_review(
             refusal="REVIEW_BODY_OVER_BOUND",
         )
 
-    # --- the current head, read here, immediately before the effect ---------
+    # Read fresh installation-scoped PR facts at the publication effect boundary.
+    # A preserved head alone cannot establish current state or actor/source.
     current = pull_read.read_pull_request(
         repository=decision.repository, pull_number=decision.pull_number
     )
     if not isinstance(current, PullRequestFacts):
         raise ReviewVerificationRefused("PullRequestReadPort returned a non-exact fact shape")
-    if current.repository != decision.repository or current.number != decision.pull_number:
-        # The read answered about a different pull request than the admitted
-        # decision froze; publishing here would aim the review at the wrong one.
-        return ReviewPublishOutcome(
-            state=PublishState.REFUSED,
-            publication_command_id=command,
-            refusal=ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value,
-        )
-    try:
-        verify_frozen_head(decision=decision, pull_request=current)
-    except ReviewIntentError:
-        return ReviewPublishOutcome(
-            state=PublishState.REFUSED,
-            publication_command_id=command,
-            refusal=ReviewIntentRefusal.HEAD_MOVED.value,
-        )
 
     # Revalidate the *full* current PR state before the single review effect.
     # An unchanged commit does not imply that draft/state/title/body did not move.
@@ -1113,6 +1098,14 @@ def publish_verified_review(
             publication_command_id=command,
             refusal=reason.value,
         )
+    # The authenticated read must match the signed request, and the frozen
+    # commit must still be current. This applies to native and advisory paths.
+    if current.repository != decision.repository or current.number != decision.pull_number:
+        return refuse_current(ReviewIntentRefusal.PULL_NUMBER_MISMATCH)
+    try:
+        verify_frozen_head(decision=decision, pull_request=current)
+    except ReviewIntentError:
+        return refuse_current(ReviewIntentRefusal.HEAD_MOVED)
     if current.state != "open":
         return refuse_current(ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN)
     # Draft EXTERNAL_GITHUB_SUBMITTER reviews are advisory COMMENT only.
