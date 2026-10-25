@@ -9,13 +9,8 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from constants import (
-    AGENT_DISPATCH,
-    CHANNELS,
-    RETURNS_CHANNEL,
-    SHADOW_SCHEMA,
-)
-from roster import Roster
+from constants import SHADOW_SCHEMA
+from roster import Roster, agent_dispatch_id, channel_names, returns_channel_id
 from wake_bridge import annotate
 
 _TS = re.compile(r"^[1-9][0-9]{9,15}\.[0-9]{6}$")
@@ -45,10 +40,8 @@ def contains_secret(text: str) -> bool:
     return _SECRET.search(text) is not None
 
 
-def addressed_to_secretary(text: str) -> bool:
-    from constants import SECRETARY_USER_ID
-
-    if f"<@{SECRETARY_USER_ID}>" in text:
+def addressed_to_secretary(text: str, secretary_user_id: str) -> bool:
+    if f"<@{secretary_user_id}>" in text:
         return True
     if re.search(r"(?i)\bto:\s*grok secretary\b", text):
         return True
@@ -195,13 +188,13 @@ def classify(
         return annotate(decision, message)
 
     signals: list[str] = []
-    if addressed_to_secretary(text):
+    if addressed_to_secretary(text, roster.secretary_user_id):
         signals.append("commission")
     if needs_placement(text):
         signals.append("placement")
-    if channel == AGENT_DISPATCH and blocked_actionable(text):
+    if channel == agent_dispatch_id() and blocked_actionable(text):
         signals.append("blocked")
-    tasks = tasks_mentioned(text, ledger) if include_returns and channel == RETURNS_CHANNEL else []
+    tasks = tasks_mentioned(text, ledger) if include_returns and channel == returns_channel_id() else []
     if tasks:
         signals.append("return")
     if not signals:
@@ -232,7 +225,7 @@ def _base(message: dict, roster: Roster, kind: str) -> dict:
         "schema": SHADOW_SCHEMA,
         "decision": kind,
         "channel": message["channel"],
-        "channel_name": CHANNELS.get(message["channel"]),
+        "channel_name": channel_names().get(message["channel"]),
         "ts": message["ts"],
         "thread_ts": message.get("thread_ts"),
         "author": roster.author_name(message["user"]),
@@ -256,7 +249,7 @@ def scan(
 ) -> list[dict]:
     allowed = set(channels)
     if include_returns:
-        allowed.add(RETURNS_CHANNEL)
+        allowed.add(returns_channel_id())
     ordered = sorted(messages, key=lambda item: (item["channel"], item["ts"]))
     decisions = []
     for message in ordered:

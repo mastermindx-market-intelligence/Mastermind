@@ -43,7 +43,14 @@ FORBIDDEN = (
     ("slack_post", {"channel": "C0BSBM78V1N", "text": "ACK"}, "SHADOW_NO_POST"),
     ("comment_review", {"body": "looks good"}, "VERDICT_REQUIRED"),
     ("comment_review", {"body": "VERDICT: APPROVE"}, "NEVER_APPROVE"),
+    ("comment_review", {"body": "VERDICT: APPROVED"}, "NEVER_APPROVE"),
+    ("comment_review", {"body": "VERDICT: LGTM"}, "NEVER_APPROVE"),
     ("comment_review", {"body": "VERDICT: MERGE"}, "NEVER_MERGE"),
+    ("comment_review", {"body": "VERDICT: MERGED"}, "NEVER_MERGE"),
+    ("message_chat", {"tier": "extra_high", "state": "idle", "input_method": "speed_type"}, "PASTE_ONLY"),
+    ("message_chat", {"tier": "extra_high", "state": "idle", "refusal_text": "I can't help with that."}, "REFUSAL_VERBATIM"),
+    ("fabric_status", {"run_id": "never-submitted"}, "FABRIC_UNKNOWN_RUN"),
+    ("fabric_uncertain", {"run_id": "never-submitted"}, "FABRIC_UNKNOWN_RUN"),
     ("not_a_real_action", {}, "UNKNOWN_ACTION"),
 )
 
@@ -73,7 +80,12 @@ class StandingRuleGuards(unittest.TestCase):
         )
         rules.consider("comment_review", body="VERDICT: COMMENT_ONLY\nNo merge.")
         rules.consider("draft_email", to="chris@example.invalid")
-        rules.consider("slack_as_chris", channel="CONE000001")
+        rules.consider(
+            "slack_as_chris",
+            channel="CONE000001",
+            thread_ts="1761410001.000100",
+            kind="receipt",
+        )
         rules.consider("switch_account", name="ChatGPT1", status="ok")
         rules.consider(
             "fabric_submit",
@@ -163,8 +175,65 @@ class StandingRuleGuards(unittest.TestCase):
     def test_shadow_mode_refuses_a_chris_voice_send_inside_the_two_rooms(self):
         rules = StandingRules(shadow_mode=True, voice_rooms=("CONE000001", "CTWO000001"))
         with self.assertRaises(GuardRefusal) as caught:
-            rules.consider("slack_as_chris", channel="CTWO000001")
+            rules.consider(
+                "slack_as_chris",
+                channel="CTWO000001",
+                thread_ts="1761410001.000100",
+                kind="RESULT",
+            )
         self.assertEqual(caught.exception.code, "SHADOW_NO_POST")
+
+    def test_only_receipt_pickup_and_result_thread_replies_are_preauthorized(self):
+        rules = StandingRules(shadow_mode=False)
+        rooms = rules.voice_rooms
+        self.assertEqual(rooms, ("C0CBC6AEAQZ", "C0C5FCK1F45"))
+        rules.consider("slack_post", channel=rooms[0], thread_ts="1761410001.000100", kind="PICKUP")
+        rules.consider("slack_post", channel=rooms[1], thread_ts="1761410001.000100", kind="RESULT")
+        for ctx in (
+            {"channel": rooms[0], "kind": "RESULT"},
+            {"channel": rooms[0], "thread_ts": "1761410001.000100", "kind": "ACK"},
+            {"channel": "C0BSBM78V1N", "thread_ts": "1761410001.000100", "kind": "receipt"},
+        ):
+            with self.subTest(ctx=ctx):
+                with self.assertRaises(GuardRefusal) as caught:
+                    rules.consider("slack_post", **ctx)
+                self.assertEqual(caught.exception.code, "DRAFT_ONLY")
+        shadow = StandingRules(shadow_mode=True)
+        with self.assertRaises(GuardRefusal) as caught:
+            shadow.consider(
+                "slack_post",
+                channel=rooms[1],
+                thread_ts="1761410001.000100",
+                kind="RESULT",
+            )
+        self.assertEqual(caught.exception.code, "SHADOW_NO_POST")
+
+    def test_review_flagged_branches_refuse(self):
+        rules = StandingRules()
+        cases = (
+            ("fabric_status", {"run_id": "missing-run"}, "FABRIC_UNKNOWN_RUN"),
+            ("fabric_uncertain", {"run_id": 4}, "FABRIC_UNKNOWN_RUN"),
+            (
+                "message_chat",
+                {"tier": "extra_high", "state": "idle", "input_method": "type"},
+                "PASTE_ONLY",
+            ),
+            (
+                "message_chat",
+                {"tier": "pro", "state": "idle", "refusal_text": "Refused verbatim."},
+                "REFUSAL_VERBATIM",
+            ),
+            ("comment_review", {"body": "VERDICT: APPROVED\nNo merge."}, "NEVER_APPROVE"),
+            ("comment_review", {"body": "VERDICT: LGTM"}, "NEVER_APPROVE"),
+            ("comment_review", {"body": "VERDICT: MERGED"}, "NEVER_MERGE"),
+        )
+        for action, ctx, code in cases:
+            with self.subTest(action=action, code=code):
+                with self.assertRaises(GuardRefusal) as caught:
+                    rules.consider(action, **ctx)
+                self.assertEqual(caught.exception.code, code)
+        self.assertIsNone(rules.refusal_text("never-recorded"))
+        self.assertIsNone(rules.fabric_state("missing-run"))
 
 
 if __name__ == "__main__":

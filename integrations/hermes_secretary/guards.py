@@ -32,9 +32,13 @@ _PACKET = ("parent", "root", "task_class", "complexity", "cwd", "task_text")
 
 
 class StandingRules:
-    def __init__(self, *, shadow_mode: bool = True, voice_rooms: tuple[str, ...] = ()) -> None:
+    def __init__(self, *, shadow_mode: bool = True, voice_rooms: tuple[str, ...] | None = None) -> None:
+        from roster import authorized_post_room_ids
+
         self.shadow_mode = shadow_mode
-        self.voice_rooms = tuple(voice_rooms)
+        self.voice_rooms = (
+            authorized_post_room_ids() if voice_rooms is None else tuple(voice_rooms)
+        )
         self.hold = False
         self._refusals: dict[str, str] = {}
         self._fabric: dict[str, str] = {}
@@ -195,16 +199,34 @@ def _draft_email(_rules: StandingRules, _ctx: dict) -> None:
     return None
 
 
-def _slack_as_chris(rules: StandingRules, ctx: dict) -> None:
+def _preauthorized_thread(rules: StandingRules, ctx: dict) -> bool:
+    from roster import authorized_reply_kinds
+
     channel = ctx.get("channel")
+    thread_ts = ctx.get("thread_ts")
+    kind = ctx.get("kind")
     if len(rules.voice_rooms) != 2 or channel not in rules.voice_rooms:
+        return False
+    if not isinstance(thread_ts, str) or thread_ts == "":
+        return False
+    if not isinstance(kind, str) or kind.upper() not in authorized_reply_kinds():
+        return False
+    return True
+
+
+def _slack_as_chris(rules: StandingRules, ctx: dict) -> None:
+    if not _preauthorized_thread(rules, ctx):
         raise GuardRefusal("DRAFT_ONLY")
     if rules.shadow_mode:
         raise GuardRefusal("SHADOW_NO_POST")
 
 
-def _slack_post(_rules: StandingRules, _ctx: dict) -> None:
-    raise GuardRefusal("SHADOW_NO_POST")
+def _slack_post(rules: StandingRules, ctx: dict) -> None:
+    if rules.shadow_mode:
+        raise GuardRefusal("SHADOW_NO_POST")
+    if _preauthorized_thread(rules, ctx):
+        return None
+    raise GuardRefusal("DRAFT_ONLY")
 
 
 def _switch_account(_rules: StandingRules, ctx: dict) -> None:

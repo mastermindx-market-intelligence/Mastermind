@@ -10,11 +10,11 @@ The 2026-10-25 teaching snapshot was ported as procedures, guards, and shadow de
 
 4. **Live `fabric_task.py` submission.** The once-only guard is implemented. The owner script, the m2studio shell, and `http://127.0.0.1:45119/readyz` are not called. Sibling `integrations/hermes_delegate/` is absent on this head, so there is no second submitter to wire.
 
-5. **Chris's Slack user id and the Dot bot user ids.** The snapshot names them and gives ids only for Grok Secretary, ChatGPT1, ChatGPT2, ChatGPT3/Sol, and Ryan. The default roster does not guess. A live shadow pass must be given those ids explicitly.
+5. **Chris's Slack user id and the Dot bot user ids.** `roster.json` has a required `CHRIS_SLACK_USER_ID` slot. It is null, and an unset or blank value adds nobody. Dot bot user ids are still unknown. Do not guess either.
 
-6. **The two rooms where a message under Chris's name may skip a draft.** The snapshot says "the two rooms" and does not name them. Zero or one configured room fails closed to draft-only. Shadow mode still refuses the send.
+6. **Resolved in `roster.json`.** The standing-authorized post rooms are `#dotsandgroksecretary` `C0CBC6AEAQZ` and `#metaceo` `C0C5FCK1F45`. A thread reply there of kind receipt, PICKUP, or RESULT is pre-authorized. Everything else is draft-only. Shadow mode still posts nothing.
 
-7. **One Hermes profile clock versus three timezones.** Ping scan is `America/Vancouver`, Codex usage is `America/Los_Angeles`, continuity audit is `America/Denver`. Hermes cron at this pin uses the profile timezone. Jobs whose routine named no zone are pinned to `America/Vancouver` and marked `assumed_secretary_home`. Do not install them into one profile clock without converting the expressions.
+7. **Resolved on the catalog clock.** Every job is `America/Cancun` (UTC-5, no DST). Original wall clocks are on each job as `wall_clock_intent`. Every-hour minute crons and the 30-minute interval did not change expression. `*/3` and `*/2` match Pacific and Mountain standard time; during US daylight time those two jobs fire one hour later than the source wall clock. The BLOCKED listener is still not a cron.
 
 8. **BLOCKED keyword trigger.** Hermes cron at pin `1c0cd66` has duration, interval, and five-field cron, not a Slack keyword. The listener is stored as a trigger and exercised by `run_shadow(mode="blocked_trigger")`. It is not a cron job.
 

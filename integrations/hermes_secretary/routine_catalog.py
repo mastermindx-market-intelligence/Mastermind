@@ -20,6 +20,11 @@ def load_catalog(path: Path | None = None) -> dict:
         raise CatalogError("catalog must stay uninstalled")
     if len(catalog.get("jobs", [])) != 7:
         raise CatalogError("catalog must carry the seven secretary routines")
+    if catalog.get("profile_timezone") != "America/Cancun":
+        raise CatalogError("profile clock must be America/Cancun")
+    for job in catalog["jobs"]:
+        if job.get("timezone") != "America/Cancun":
+            raise CatalogError("job timezone must be the profile clock")
     return catalog
 
 

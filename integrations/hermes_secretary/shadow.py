@@ -6,9 +6,15 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-from constants import AGENT_DISPATCH, ORIGINAL_ROOMS, PING_SCAN_CHANNELS, RETURNS_CHANNEL
 from detect import scan
-from roster import Roster, default_roster
+from roster import (
+    Roster,
+    agent_dispatch_id,
+    default_roster,
+    original_room_ids,
+    returns_channel_id,
+    watched_channel_ids,
+)
 from slack_readonly import ReadOnlySlackClient, assert_read_only_client
 
 
@@ -97,18 +103,21 @@ def run_shadow(
     assert_read_only_client(client)
     roster = roster or default_roster()
     if mode == "ping_scan":
-        messages = collect_messages(client, PING_SCAN_CHANNELS + (RETURNS_CHANNEL,))
-        channels: tuple[str, ...] = PING_SCAN_CHANNELS
+        watched = watched_channel_ids()
+        messages = collect_messages(client, watched)
+        returns = returns_channel_id()
+        channels = tuple(item for item in watched if item != returns)
         include_returns = True
     elif mode == "overnight_sweep":
-        messages = collect_messages(client, ORIGINAL_ROOMS)
-        channels = ORIGINAL_ROOMS
+        messages = collect_messages(client, original_room_ids())
+        channels = original_room_ids()
         include_returns = False
     elif mode == "blocked_trigger":
-        if channel != AGENT_DISPATCH or not thread_ts:
+        dispatch = agent_dispatch_id()
+        if channel != dispatch or not thread_ts:
             raise ValueError("blocked trigger requires the agent-dispatch thread")
         messages = collect_thread(client, channel=channel, thread_ts=thread_ts)
-        channels = (AGENT_DISPATCH,)
+        channels = (dispatch,)
         include_returns = False
     else:
         raise ValueError(f"unknown shadow mode {mode}")

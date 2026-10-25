@@ -8,10 +8,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from constants import SECRETARY_USER_ID
 from fixture_loader import load_fixture
 from parity import compare, load_decisions, secretary_posts_from_readonly
-from roster import roster_with
+from roster import default_roster, roster_with
+
+SECRETARY_USER_ID = default_roster().secretary_user_id
 from shadow import run_shadow
 from slack_readonly import ReadOnlySlackClient, ReadOnlySlackError
 

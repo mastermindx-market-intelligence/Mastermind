@@ -12,10 +12,10 @@ This runbook is the procedure. It is not permission to execute it. WP5 is shadow
 ## Before any cutover
 
 1. Independent non-author review of the exact head that would be enrolled.
-2. Fill the unresolved roster: Chris's Slack user id, each Dot bot user id, and the two rooms where a Chris-voiced message may skip a draft. Until those exist, the default roster ignores unknown users and the voice guard drafts everything.
+2. Set `CHRIS_SLACK_USER_ID` in `roster.json` and supply each Dot bot user id. Both fail closed while unset. The two post rooms are already `#dotsandgroksecretary` and `#metaceo`. Thread replies there of receipt, PICKUP, or RESULT are the only pre-authorized sends. Shadow mode still posts nothing.
 3. Run shadow mode against a read-only Slack export for a Chairman-chosen window. Compare with `parity.compare`. A refusal must show up as `withheld`, not as a post. Mismatches are investigated. They are not patched by posting.
 4. Keep the shadow JSONL. Dedup keys are `channel:ts`. A second pass must not grow the file for the same messages.
-5. Do not point Hermes cron at a live home. Profile timezone cannot represent Vancouver, Los Angeles, and Denver at once without converting expressions. See `UNPORTED.md`.
+5. Do not point Hermes cron at a live home. The catalog clock is already `America/Cancun` (UTC-5, no DST), with the original wall clock noted on each job. `install_into_hermes_home()` still refuses.
 6. Computer-use, Fabric submit, and Codex menu-bar reads stay unported until their own admission. Cutover of the Slack scanner does not turn those on.
 
 ## Cutover, only after a separate Chairman grant

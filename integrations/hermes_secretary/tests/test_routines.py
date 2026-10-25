@@ -30,16 +30,24 @@ class RoutineCatalog(unittest.TestCase):
                 "codex-continuity-audit",
             ],
         )
+        self.assertEqual(self.catalog["profile_timezone"], "America/Cancun")
+        self.assertEqual(self.catalog["profile_utc_offset"], "-05:00")
+        self.assertFalse(self.catalog["profile_observes_dst"])
         self.assertEqual(self.jobs["slack-secretary-ping-scan"]["hermes_schedule"], "12,42 * * * *")
-        self.assertEqual(self.jobs["slack-secretary-ping-scan"]["timezone"], "America/Vancouver")
+        self.assertIn("America/Vancouver", self.jobs["slack-secretary-ping-scan"]["wall_clock_intent"])
         self.assertEqual(self.jobs["overnight-three-room-sweep"]["hermes_schedule"], "34 * * * *")
-        self.assertEqual(self.jobs["overnight-three-room-sweep"]["timezone_source"], "assumed_secretary_home")
+        self.assertIn("America/Vancouver", self.jobs["overnight-three-room-sweep"]["wall_clock_intent"])
         self.assertEqual(self.jobs["chatgpt-browser-session-watcher"]["hermes_schedule"], "5,35 * * * *")
         self.assertEqual(self.jobs["codex-usage-reset-watcher"]["hermes_schedule"], "30m")
-        self.assertEqual(self.jobs["codex-usage-reset-watcher"]["timezone"], "America/Los_Angeles")
+        self.assertIn("America/Los_Angeles", self.jobs["codex-usage-reset-watcher"]["wall_clock_intent"])
         self.assertEqual(self.jobs["m2studio-browser-tab-sweep"]["hermes_schedule"], "40 */3 * * *")
+        self.assertIn("one hour later", self.jobs["m2studio-browser-tab-sweep"]["wall_clock_intent"])
         self.assertEqual(self.jobs["codex-continuity-audit"]["hermes_schedule"], "20 */2 * * *")
-        self.assertEqual(self.jobs["codex-continuity-audit"]["timezone"], "America/Denver")
+        self.assertIn("America/Denver", self.jobs["codex-continuity-audit"]["wall_clock_intent"])
+        self.assertEqual(self.jobs["blocked-hold-listener"]["timezone_source"], "not_a_clock")
+        for job in self.jobs.values():
+            self.assertEqual(job["timezone"], "America/Cancun")
+            self.assertIn("wall_clock_intent", job)
         for job in self.jobs.values():
             self.assertFalse(job["enabled"])
             self.assertEqual(job["state"], "paused")
