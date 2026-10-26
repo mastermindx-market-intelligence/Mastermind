@@ -259,8 +259,8 @@ class MacroResultPublication(unittest.TestCase):
             raise AssertionError("actual current-source stage failed:\n" + build.stderr)
         cls.source = staged / "native-code-stage"
         cls.manifest = json.loads((staged / "native-manifest.json").read_bytes())
-        if len(cls.manifest) != 97:
-            raise AssertionError("Paid source integration changed the reviewed 97-file closure")
+        if len(cls.manifest) != 100:
+            raise AssertionError("Integrated paid/collector stage changed the reviewed 100-file closure")
         spec = importlib.util.spec_from_file_location("macro_fixture_native_generation",
             ROOT / "rollout/native_generation.py")
         cls.generation = importlib.util.module_from_spec(spec)
@@ -275,7 +275,7 @@ class MacroResultPublication(unittest.TestCase):
         self.release = self.generation.publish(self.source, self.owner, self.manifest)
         verified, meta = self.generation.verify(self.release.parent, self.release.name)
         self.assertEqual(verified, self.release)
-        self.assertEqual(len(meta["files"]), 97)
+        self.assertEqual(len(meta["files"]), 100)
 
     def child(self, program):
         result = subprocess.run([sys.executable, "-B", "-c",

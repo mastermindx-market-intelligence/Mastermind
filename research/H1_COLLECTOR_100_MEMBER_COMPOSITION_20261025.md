@@ -98,3 +98,32 @@ live or that it should be installed with this held mode.
 and CI green. `QUALIFIED_READINESS_LIVE` remains held until the existing
 canonical H1 parent actually supplies a fresh authenticated per-pass
 commitment, not a JSON file or claimed token.
+
+## Hosted CI 40282712904 reconciliation — 100/95 source law remains distinct
+
+All three pytest shards and required fan-in failed on initial integration
+commit `04441f8cfacba075e8224a50d35317b654fcc496`.
+Shard0: native-security current-stage SHA was still fixed to old 97-stage
+`4897f593...` instead of new 100-stage `238d60fb...`.
+Shard1: historical paired-upgrade source test removed only the old collector's
+two later members, overlooking the three later H1 initializer members, so
+the reverse-composed historical 95 manifest could not match the immutable
+original importer; macro-result publication tests also pinned the prior
+97-file *current* stage. The repair removes all five only in the disposable
+historical fixture and updates the current-stage count independently.
+Shard2: the previously approved H1 diagnostics plugin
+`scripts/ci_pytest_timing.py` was unintentionally omitted from this
+integration donor, despite tests importing its allowlisted, privacy-safe
+failure annotations. Restored exact #1847 donor bytes SHA256
+`2d7d726c3a99dfc6d90d964a6c0643ec071d7ddd86470ef8c3614173fc6dc972`.
+H1 native extension fixture now checks exactly five new member names and
+exactly five changed member hashes, comparing retained 95 preimage with
+current 100 source rather than erroneously demanding the earlier 98.
+No production native_install, legacy `UPGRADE_MANIFEST`, ACL, token,
+reviewer admission, or live publisher is changed.
+The historical paired-upgrade fixture also restores its original
+`paid_host_qualification.py` bytes (SHA256 `d2f5be14...`) from the
+already retained and digest-checked f608 H1 preinitializer fixture, only
+inside the disposable stage. This source-only inverse retains the original
+95-member `native_install.UPGRADE_MANIFEST` and does not change the live
+or current 100-member qualified-host implementation.

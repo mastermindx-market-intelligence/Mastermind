@@ -573,13 +573,20 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current=json.loads((native/'rollout/native-manifest.json').read_bytes())
-    assert len(before)==95 and len(current)==98
+    assert len(before)==95 and len(current)==100
     assert set(before)<=set(current)
-    assert set(current)-set(before)=={'ext/paid_initializer.py','ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py'}
-    # The only additional pre-existing member delta is protected #1797's
-    # exact review-routing picker; it is not an initializer transformation.
-    assert {p for p in before if before[p]!=current[p]}=={'ext/host_pull.sh','ext/paid_host_qualification.py','ext/pick.py'}
-    assert sum(before[p]==current[p] for p in before)==92
+    # The original native 95 epoch gains exactly three H1 initializer members
+    # and the original #1836 collector+plist pair, never unrelated files.
+    assert set(current)-set(before)=={
+        'ext/paid_initializer.py','ext/paid_initializer_token_data.py',
+        'ext/paid_initializer_nested_data.py','ext/host_pull_daemon.sh',
+        'ext/host_pull_launchd.plist.template'}
+    # The original collector/F1+R28 fusion must retain precisely its five
+    # changed source members; no authority to alter the historical importer.
+    assert {p for p in before if before[p]!=current[p]}=={
+        'ext/fabric_task.py','ext/host_pull.sh',
+        'ext/paid_host_qualification.py','ext/pick.py','pool'}
+    assert sum(before[p]==current[p] for p in before)==90
     for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py','pick.py'):
         assert current['ext/'+name]==hashlib.sha256((native/'candidate'/name).read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
