@@ -8,6 +8,7 @@ import queue
 import threading
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -175,9 +176,13 @@ class FleetStorageVolumeTests(unittest.TestCase):
                 return_value=mock.Mock(free=200 * 1024 ** 3)
             ):
                 for steps, expected_incomplete, expected_exit in [
-                    ({"stale_packs_rc": 2, "scratch_reap_rc": 0},
+                    ({"stale_packs_rc": 2, "scratch_reap_rc": 0,
+                      "stale_packs": '{"status":"refused"}'},
                      ["stale_packs"], 1),
-                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0}, [], 0),
+                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0,
+                      "stale_packs": '{"status":"complete"}'}, [], 0),
+                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0,
+                      "stale_packs": ""}, ["stale_packs.receipt_unverified"], 1),
                 ]:
                     with contextlib.redirect_stdout(io.StringIO()) as stdout:
                         exit_code = self.sweep.finish({"mode": "calm", **steps})
@@ -188,13 +193,18 @@ class FleetStorageVolumeTests(unittest.TestCase):
                     self.assertEqual(receipt["stale_packs_rc"], steps["stale_packs_rc"])
             recorded = [json.loads(line) for line in
                         (state / "sweep-log.jsonl").read_text().splitlines()]
-            self.assertEqual([row["degraded"] for row in recorded], [True, False])
+            self.assertEqual([row["degraded"] for row in recorded], [True, False, True])
 
 
     def test_denied_grants_requires_verified_loopback_completion(self):
         # Hermetic receipt classification only: never run ssh or cleanup.
+        now = time.time()
+        mandatory = ("hung", "stale_packs", "temp_gc",
+                     "temp_gc_generic", "reap", "scratch_reap")
         clean_child = {"grants": "ok", "degraded": False, "mode": "calm",
-                       "free_gib_after": 180.0, "incomplete_substeps": []}
+                       "time": now, "free_gib_after": 180.0,
+                       "incomplete_substeps": [],
+                       **{key + "_rc": 0 for key in mandatory}}
         rows = [
             ({"grants": "denied", "skipped": "grant-requiring passes"},
              ["grant_requiring_passes"], 1),
@@ -205,6 +215,17 @@ class FleetStorageVolumeTests(unittest.TestCase):
             ({"grants": "denied", "loopback": {**clean_child,
                                               "degraded": True,
                                               "incomplete_substeps": ["stale_packs"]}},
+             ["grant_requiring_passes"], 1),
+            ({"grants": "denied", "loopback": {
+                "grants": "ok", "degraded": False, "mode": "calm",
+                "time": now, "free_gib_after": 180.0,
+                "incomplete_substeps": []}},
+             ["grant_requiring_passes"], 1),
+            ({"grants": "denied", "loopback": {**clean_child,
+                                                "time": now - 60}},
+             ["grant_requiring_passes"], 1),
+            ({"grants": "denied", "loopback": {**clean_child,
+                                                "stale_packs_rc": 2}},
              ["grant_requiring_passes"], 1),
             ({"grants": "denied", "loopback": clean_child}, [], 0),
         ]
@@ -217,7 +238,9 @@ class FleetStorageVolumeTests(unittest.TestCase):
             ):
                 for data, expected, code in rows:
                     with self.subTest(data=data), contextlib.redirect_stdout(io.StringIO()) as stdout:
-                        actual = self.sweep.finish({"mode": "calm", "hung_rc": 0, **data})
+                        actual = self.sweep.finish({"mode": "calm", "time": now - 1,
+                                                    "hung_rc": 0, "hung": '{"status":"ok"}',
+                                                    **data})
                         receipt = json.loads(stdout.getvalue())
                         self.assertEqual(actual, code)
                         self.assertEqual(receipt["incomplete_substeps"], expected)
@@ -235,22 +258,26 @@ class FleetStorageVolumeTests(unittest.TestCase):
                 self.sweep.shutil, "disk_usage",
                 return_value=mock.Mock(free=200 * 1024 ** 3)
             ):
-                good = json.dumps({
+                good_obj = {
                     "status": "REPORT_ONLY_SOURCE_PRESERVED",
                     "eligible_source_less_trees": 0,
                     "eligible_gib": 0.0,
                     "remote_deletions": 0,
                     "dest": "/Volumes/test/fleet-archive",
-                })
+                }
+                good_mb = json.dumps({**good_obj, "host": "mb"})
+                good_m1 = json.dumps({**good_obj, "host": "m1"})
                 for archive, expected, code in [
-                    ({"mb": good, "mb_rc": 2, "m1": good, "m1_rc": 0},
+                    ({"mb": good_mb, "mb_rc": 2, "m1": good_m1, "m1_rc": 0},
                      ["fleet_archive.mb"], 1),
-                    ({"mb": good, "mb_rc": 0, "m1": good, "m1_rc": 124},
+                    ({"mb": good_mb, "mb_rc": 0, "m1": good_m1, "m1_rc": 124},
                      ["fleet_archive.m1"], 1),
-                    ({"mb": good, "mb_rc": 0, "m1": good, "m1_rc": 0}, [], 0),
+                    ({"mb": good_mb, "mb_rc": 0, "m1": good_m1, "m1_rc": 0}, [], 0),
                 ]:
                     with self.subTest(archive=archive), contextlib.redirect_stdout(io.StringIO()) as output:
                         actual = self.sweep.finish({"mode": "calm", "hung_rc": 0,
+                                                    "hung": '{"status":"ok"}',
+                                                    "fleet_archive_expected_dest": "/Volumes/test/fleet-archive",
                                                     "fleet_archive": archive})
                     receipt = json.loads(output.getvalue())
                     self.assertEqual(actual, code)
@@ -262,8 +289,10 @@ class FleetStorageVolumeTests(unittest.TestCase):
         # This tests only the top-level receipt; no archives or cleaners run.
         good = {"status": "REPORT_ONLY_SOURCE_PRESERVED",
                 "eligible_source_less_trees": 0, "eligible_gib": 0.0,
-                "remote_deletions": 0, "dest": "/Volumes/test/fleet-archive"}
+                "remote_deletions": 0, "dest": "/Volumes/test/fleet-archive",
+                "host": "mb"}
         ok = json.dumps(good)
+        ok_m1 = json.dumps({**good, "host": "m1"})
         bad_rows = [
             ("not-json", "invalid JSON"),
             ("", "empty output"),
@@ -273,6 +302,8 @@ class FleetStorageVolumeTests(unittest.TestCase):
             (json.dumps({**good, "eligible_gib": "0"}), "wrong metric type"),
             (json.dumps({**good, "remote_deletions": 1}), "remote delete claim"),
             (json.dumps({k: v for k, v in good.items() if k != "dest"}), "missing dest"),
+            (json.dumps({**good, "host": "m1"}), "wrong peer identity"),
+            (json.dumps({**good, "dest": "/wrong/unverified"}), "wrong destination"),
         ]
         with tempfile.TemporaryDirectory() as temp:
             with mock.patch.object(self.sweep, "STATE", pathlib.Path(temp)), mock.patch.object(
@@ -284,9 +315,10 @@ class FleetStorageVolumeTests(unittest.TestCase):
                 for body, reason in bad_rows:
                     with self.subTest(reason=reason), contextlib.redirect_stdout(io.StringIO()) as output:
                         code = self.sweep.finish({
-                            "mode": "calm", "hung_rc": 0,
+                            "mode": "calm", "hung_rc": 0, "hung": '{"status":"ok"}',
+                            "fleet_archive_expected_dest": "/Volumes/test/fleet-archive",
                             "fleet_archive": {"mb": body, "mb_rc": 0,
-                                              "m1": ok, "m1_rc": 0},
+                                              "m1": ok_m1, "m1_rc": 0},
                         })
                     receipt = json.loads(output.getvalue())
                     self.assertEqual(code, 1)
@@ -294,13 +326,15 @@ class FleetStorageVolumeTests(unittest.TestCase):
                                      ["fleet_archive.mb_receipt_unverified"])
                     self.assertTrue(receipt["degraded"])
                 for archive, expected in [
-                    ({"mb": ok, "mb_rc": 0, "m1": ok, "m1_rc": 0}, []),
+                    ({"mb": ok, "mb_rc": 0, "m1": ok_m1, "m1_rc": 0}, []),
                     ({"mb": ok, "mb_rc": 0}, ["fleet_archive.m1_receipt_unverified"]),
                     ("malformed-archive-container", ["fleet_archive.receipt_unverified"]),
                 ]:
                     with self.subTest(archive=archive), contextlib.redirect_stdout(io.StringIO()) as output:
                         code = self.sweep.finish({
-                            "mode": "calm", "hung_rc": 0, "fleet_archive": archive,
+                            "mode": "calm", "hung_rc": 0, "hung": '{"status":"ok"}',
+                            "fleet_archive_expected_dest": "/Volumes/test/fleet-archive",
+                            "fleet_archive": archive,
                         })
                     receipt = json.loads(output.getvalue())
                     self.assertEqual(receipt["incomplete_substeps"], expected)

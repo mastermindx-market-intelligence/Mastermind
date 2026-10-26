@@ -279,6 +279,14 @@ def finish(out: dict) -> int:
     # StartInterval continues recurring even when this invocation exits 1.
     incomplete = sorted(key[:-3] for key, rc in out.items()
                         if key.endswith('_rc') and type(rc) is int and rc != 0)
+    # A helper's exit 0 without its expected --json receipt is not proof of a
+    # completed inventory. Never translate absent stdout into a clean sweep.
+    receipt_required = {'hung', 'stale_packs', 'temp_gc',
+                        'temp_gc_generic', 'reap', 'sparse'}
+    for key in sorted(receipt_required):
+        if out.get(key + '_rc') == 0 and (
+                not isinstance(out.get(key), str) or not out[key].strip()):
+            incomplete.append(f'{key}.receipt_unverified')
     # The archive pass invokes two remote substeps under a nested receipt.
     # A failed or refused peer must not disappear beneath a green top-level
     # heartbeat merely because its *_rc is not a direct member of out.
@@ -289,6 +297,7 @@ def finish(out: dict) -> int:
         if not isinstance(archive, dict):
             incomplete.append('fleet_archive.receipt_unverified')
         else:
+            expected_dest = out.get('fleet_archive_expected_dest')
             for peer in ('mb', 'm1'):
                 rc = archive.get(peer + '_rc')
                 if type(rc) is not int:
@@ -310,8 +319,11 @@ def finish(out: dict) -> int:
                         and 0 <= report['eligible_gib'] < float('inf')
                         and type(report.get('remote_deletions')) is int
                         and report['remote_deletions'] == 0
-                        and isinstance(report.get('dest'), str)
-                        and bool(report['dest'])
+                        and isinstance(expected_dest, str)
+                        and expected_dest.startswith('/')
+                        and '..' not in Path(expected_dest).parts
+                        and report.get('host') == peer
+                        and report.get('dest') == expected_dest
                     )
                     if not valid:
                         incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
@@ -321,14 +333,24 @@ def finish(out: dict) -> int:
     # green top-level receipt merely because hung-process triage succeeded.
     if 'grants' in out and out['grants'] != 'ok':
         child = out.get('loopback')
+        # The localhost forced command must attest to a complete *current*
+        # sweep, not merely supply a convenient success-shaped summary.
+        mandatory = ('hung', 'stale_packs', 'temp_gc',
+                     'temp_gc_generic', 'reap', 'scratch_reap')
         child_qualified = (
             isinstance(child, dict)
             and child.get('grants') == 'ok'
             and child.get('degraded') is False
             and type(child.get('free_gib_after')) in (int, float)
-            and type(child.get('mode')) is str
+            and 0 <= child['free_gib_after'] < float('inf')
+            and child.get('mode') in ('calm', 'caution', 'pressure')
             and child.get('incomplete_substeps') == []
             and not child.get('skipped')
+            and type(out.get('time')) in (int, float)
+            and type(child.get('time')) in (int, float)
+            and out['time'] <= child['time'] <= time.time() + 5
+            and all(type(child.get(key + '_rc')) is int
+                    and child[key + '_rc'] == 0 for key in mandatory)
         )
         if not child_qualified:
             incomplete.append('grant_requiring_passes')
@@ -592,6 +614,7 @@ def main() -> int:
             # UUID-verified SSD. Keep the pre-pool WD layout unchanged.
             archive_dest = (arch_vol / 'fleet-archive' if arch_vol == Path('/Volumes/WD 5TB')
                             else arch_vol / 'Offloaded' / 'fleet-archive')
+            out['fleet_archive_expected_dest'] = str(archive_dest)
             pulled = {}
             for peer in ('mb', 'm1'):
                 # Report candidate source-less trees without deleting remote data.
