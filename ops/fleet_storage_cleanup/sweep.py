@@ -282,11 +282,39 @@ def finish(out: dict) -> int:
     # The archive pass invokes two remote substeps under a nested receipt.
     # A failed or refused peer must not disappear beneath a green top-level
     # heartbeat merely because its *_rc is not a direct member of out.
-    archive = out.get('fleet_archive')
-    if isinstance(archive, dict):
-        incomplete.extend('fleet_archive.' + key[:-3]
-                          for key, rc in archive.items()
-                          if key.endswith('_rc') and type(rc) is int and rc != 0)
+    # Each archive peer's success exit must carry an interpretable receipt.
+    # This is report-only, never authority to remove remote worktrees.
+    if 'fleet_archive' in out:
+        archive = out['fleet_archive']
+        if not isinstance(archive, dict):
+            incomplete.append('fleet_archive.receipt_unverified')
+        else:
+            for peer in ('mb', 'm1'):
+                rc = archive.get(peer + '_rc')
+                if type(rc) is not int:
+                    incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
+                elif rc != 0:
+                    incomplete.append(f'fleet_archive.{peer}')
+                else:
+                    raw = archive.get(peer)
+                    try:
+                        report = json.loads(raw) if isinstance(raw, str) else None
+                    except (ValueError, TypeError):
+                        report = None
+                    valid = (
+                        isinstance(report, dict)
+                        and report.get('status') == 'REPORT_ONLY_SOURCE_PRESERVED'
+                        and type(report.get('eligible_source_less_trees')) is int
+                        and report['eligible_source_less_trees'] >= 0
+                        and type(report.get('eligible_gib')) in (int, float)
+                        and 0 <= report['eligible_gib'] < float('inf')
+                        and type(report.get('remote_deletions')) is int
+                        and report['remote_deletions'] == 0
+                        and isinstance(report.get('dest'), str)
+                        and bool(report['dest'])
+                    )
+                    if not valid:
+                        incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
     # The launchd parent can lack filesystem grants and delegate to its
     # existing forced-command loopback child. A string/partial/old child
     # response, or no child at all, is NOT a completed sweep: do not print a

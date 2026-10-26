@@ -235,10 +235,19 @@ class FleetStorageVolumeTests(unittest.TestCase):
                 self.sweep.shutil, "disk_usage",
                 return_value=mock.Mock(free=200 * 1024 ** 3)
             ):
+                good = json.dumps({
+                    "status": "REPORT_ONLY_SOURCE_PRESERVED",
+                    "eligible_source_less_trees": 0,
+                    "eligible_gib": 0.0,
+                    "remote_deletions": 0,
+                    "dest": "/Volumes/test/fleet-archive",
+                })
                 for archive, expected, code in [
-                    ({"mb_rc": 2, "m1_rc": 0}, ["fleet_archive.mb"], 1),
-                    ({"mb_rc": 0, "m1_rc": 124}, ["fleet_archive.m1"], 1),
-                    ({"mb_rc": 0, "m1_rc": 0}, [], 0),
+                    ({"mb": good, "mb_rc": 2, "m1": good, "m1_rc": 0},
+                     ["fleet_archive.mb"], 1),
+                    ({"mb": good, "mb_rc": 0, "m1": good, "m1_rc": 124},
+                     ["fleet_archive.m1"], 1),
+                    ({"mb": good, "mb_rc": 0, "m1": good, "m1_rc": 0}, [], 0),
                 ]:
                     with self.subTest(archive=archive), contextlib.redirect_stdout(io.StringIO()) as output:
                         actual = self.sweep.finish({"mode": "calm", "hung_rc": 0,
@@ -247,6 +256,56 @@ class FleetStorageVolumeTests(unittest.TestCase):
                     self.assertEqual(actual, code)
                     self.assertEqual(receipt["incomplete_substeps"], expected)
                     self.assertEqual(receipt["degraded"], bool(expected))
+
+    def test_archive_exit_zero_requires_verified_report_only_peer_receipts(self):
+        # A helper can exit 0 after output truncation or an invalid JSON report.
+        # This tests only the top-level receipt; no archives or cleaners run.
+        good = {"status": "REPORT_ONLY_SOURCE_PRESERVED",
+                "eligible_source_less_trees": 0, "eligible_gib": 0.0,
+                "remote_deletions": 0, "dest": "/Volumes/test/fleet-archive"}
+        ok = json.dumps(good)
+        bad_rows = [
+            ("not-json", "invalid JSON"),
+            ("", "empty output"),
+            ('{"status":', "truncated JSON"),
+            (json.dumps({**good, "status": "DONE"}), "wrong status"),
+            (json.dumps({**good, "eligible_source_less_trees": -1}), "negative count"),
+            (json.dumps({**good, "eligible_gib": "0"}), "wrong metric type"),
+            (json.dumps({**good, "remote_deletions": 1}), "remote delete claim"),
+            (json.dumps({k: v for k, v in good.items() if k != "dest"}), "missing dest"),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.object(self.sweep, "STATE", pathlib.Path(temp)), mock.patch.object(
+                self.sweep, "_external_volume_snapshots", return_value=[]
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ):
+                for body, reason in bad_rows:
+                    with self.subTest(reason=reason), contextlib.redirect_stdout(io.StringIO()) as output:
+                        code = self.sweep.finish({
+                            "mode": "calm", "hung_rc": 0,
+                            "fleet_archive": {"mb": body, "mb_rc": 0,
+                                              "m1": ok, "m1_rc": 0},
+                        })
+                    receipt = json.loads(output.getvalue())
+                    self.assertEqual(code, 1)
+                    self.assertEqual(receipt["incomplete_substeps"],
+                                     ["fleet_archive.mb_receipt_unverified"])
+                    self.assertTrue(receipt["degraded"])
+                for archive, expected in [
+                    ({"mb": ok, "mb_rc": 0, "m1": ok, "m1_rc": 0}, []),
+                    ({"mb": ok, "mb_rc": 0}, ["fleet_archive.m1_receipt_unverified"]),
+                    ("malformed-archive-container", ["fleet_archive.receipt_unverified"]),
+                ]:
+                    with self.subTest(archive=archive), contextlib.redirect_stdout(io.StringIO()) as output:
+                        code = self.sweep.finish({
+                            "mode": "calm", "hung_rc": 0, "fleet_archive": archive,
+                        })
+                    receipt = json.loads(output.getvalue())
+                    self.assertEqual(receipt["incomplete_substeps"], expected)
+                    self.assertEqual(code, 0 if not expected else 1)
+
 
     def test_nonzero_loopback_exit_cannot_return_success_shaped_json(self):
         # No ssh call: hermetic transport-exit fixture under disposable key path.
