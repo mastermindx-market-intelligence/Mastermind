@@ -81,7 +81,7 @@ def test_optional_failure_preserves_validated_physical_but_never_admits_account(
         backend,tmp_path,monkeypatch):
     # An optional command can fail after printing a plausible 'known' result.
     # The actual physical shell return is zero; readiness remains UNKNOWN.
-    untrusted='glm_local_account_readiness={"status":"known","accounts":{"x":true}}\\n'
+    untrusted='glm_local_account_readiness={"status":"known","accounts":{"x":true}}\n'
     value=write(backend,tmp_path,monkeypatch,framed(readiness=1)+physical()+untrusted,0)
     assert value['reachable'] is True and value['error'] is None
     assert value['load1']==0.5 and value['ncpu']==8
@@ -94,7 +94,7 @@ def test_optional_failure_preserves_validated_physical_but_never_admits_account(
 
 def test_successful_readiness_cannot_salvage_missing_physical_metrics(
         backend,tmp_path,monkeypatch):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=0)+'ncpu=8\\n',0)
+    value=write(backend,tmp_path,monkeypatch,framed(readiness=0)+'ncpu=8\n',0)
     assert value['reachable'] is False and value['error']=='bad_probe_output'
     assert 'ncpu' not in value and 'glm_local_account_readiness' not in value
 
