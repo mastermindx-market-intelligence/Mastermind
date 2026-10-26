@@ -93,6 +93,17 @@ def run(a, t=600, **kw):
         class R: returncode, stdout, stderr = 125, "", str(e)
         return R()
 
+def remote_archive_command(source_path):
+    """Shell-quote inventory paths and terminate tar options before the basename."""
+    return ("tar -czf - -C " + shlex.quote(os.path.dirname(source_path))
+            + " -- " + shlex.quote(os.path.basename(source_path)))
+
+
+def remote_remove_command(source_path):
+    """Prevent shell and option interpretation of any remote inventory name."""
+    return "rm -rf -- " + shlex.quote(source_path)
+
+
 def archive_predelete_proof(source_path, archive_path):
     """Require a fresh byte-level archive match and two idle-process probes.
 
@@ -114,7 +125,7 @@ def archive_predelete_proof(source_path, archive_path):
         directory = shlex.quote(os.path.dirname(source_path))
         basename = shlex.quote(os.path.basename(source_path))
         command = (
-            f'set -o pipefail; /usr/bin/tar -czf - -C {directory} {basename} '
+            f'set -o pipefail; /usr/bin/tar -czf - -C {directory} -- {basename} '
             '| /usr/bin/shasum -a 256'
         )
         result = run(SSH + [HOST, command], 6 * 3600)
@@ -217,7 +228,7 @@ for x in rows:
     t0 = time.time()
     try:
         with open(tarp, "wb") as fh:
-            c = subprocess.run(SSH + [HOST, f"tar -czf - -C {json.dumps(os.path.dirname(p))} {json.dumps(os.path.basename(p))}"],
+            c = subprocess.run(SSH + [HOST, remote_archive_command(p)],
                                stdout=fh, stderr=subprocess.PIPE, timeout=6 * 3600)
     except (OSError, subprocess.SubprocessError) as e:
         print(f"SKIP stream-error {p}: {type(e).__name__}: {str(e)[:160]}", flush=True)
@@ -237,7 +248,7 @@ for x in rows:
                 print(f"SKIP remote-delete pool below reserve {p}"); continue
         except (OSError, RuntimeError) as exc:
             print(f"SKIP remote-delete pool unavailable {p}: {str(exc)[:110]}"); continue
-    rm = run(SSH + [HOST, f"rm -rf {json.dumps(p)}"], 3600)
+    rm = run(SSH + [HOST, remote_remove_command(p)], 3600)
     if rm.returncode:
         print(f"ARCHIVED but remote rm failed {p}: {rm.stderr[-160:]}"); continue
     ok += 1; freed += x["kb"]

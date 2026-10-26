@@ -3,6 +3,8 @@ import ast
 import contextlib
 import io
 import json
+import os
+import shlex
 import pathlib
 import subprocess
 import unittest
@@ -97,6 +99,43 @@ class ParentReceiptContract(unittest.TestCase):
         for raw in invalid:
             with self.subTest(raw=raw), self.assertRaises((ValueError, TypeError, KeyError)):
                 verified_probe_rows(raw, 500)
+
+
+class RemoteApplyShellArgumentSafety(unittest.TestCase):
+    """Pure source regression: no SSH, filesystem deletion, or cleaner execution."""
+
+    @classmethod
+    def setUpClass(cls):
+        funcs = [node for node in TREE.body if isinstance(node, ast.FunctionDef)
+                 and node.name in ('remote_archive_command', 'remote_remove_command')]
+        if len(funcs) != 2:
+            raise AssertionError('both remote command builders must exist')
+        ns = {'os': os, 'shlex': shlex}
+        exec(compile(ast.Module(body=funcs, type_ignores=[]), str(SOURCE), 'exec'), ns)
+        cls.archive_cmd = staticmethod(ns['remote_archive_command'])
+        cls.remove_cmd = staticmethod(ns['remote_remove_command'])
+
+    def test_metacharacters_and_dash_prefix_are_literal_arguments(self):
+        for path in (
+            '/private/tmp/scratch$(touch /tmp/forbidden)',
+            '/private/tmp/scratch`touch-forbidden`',
+            "/private/tmp/a'b",
+            '/private/tmp/space with tabs',
+            '/private/tmp/-rf',
+            '/Users/example/lanes/name;echo-forbidden',
+        ):
+            with self.subTest(path=path):
+                a = self.archive_cmd(path)
+                r = self.remove_cmd(path)
+                self.assertEqual(
+                    a, 'tar -czf - -C ' + shlex.quote(os.path.dirname(path))
+                       + ' -- ' + shlex.quote(os.path.basename(path)))
+                self.assertEqual(r, 'rm -rf -- ' + shlex.quote(path))
+                self.assertEqual(
+                    shlex.split(a),
+                    ['tar', '-czf', '-', '-C', os.path.dirname(path),
+                     '--', os.path.basename(path)])
+                self.assertEqual(shlex.split(r), ['rm', '-rf', '--', path])
 
 
 if __name__ == '__main__':
