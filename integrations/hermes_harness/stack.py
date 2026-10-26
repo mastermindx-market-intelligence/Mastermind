@@ -101,8 +101,19 @@ def boot_stack(
     return Stack(runtime=runtime, ready=ready, overlays=overlays, chains=chains)
 
 
-def write_composed_profile(role: str, *, state_dir: Path, secrets_file: Path, dest: Path) -> None:
+def write_composed_profile(
+    role: str,
+    *,
+    state_dir: Path,
+    secrets_file: Path,
+    dest: Path,
+    installed_native_only: bool = False,
+) -> None:
     profile = compose_profile(role, state_dir=state_dir, secrets_file=secrets_file)
+    if installed_native_only:
+        # The shadow registry's Python names are not Hermes-native plugins.
+        # Do not advertise nonexistent execution tools to the live service.
+        profile = replace(profile, tool_allowlist=frozenset({"clarify"}))
     _write_private(dest, dump_profile(profile))
 
 

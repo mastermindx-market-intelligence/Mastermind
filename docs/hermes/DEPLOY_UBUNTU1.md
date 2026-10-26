@@ -150,9 +150,13 @@ Model order in those overlays:
 - `mmmeta`: Z.AI GLM-5.3, then Cursor
 - vision: MiniMax-M3, then Cursor
 
-Hermes built-in toolsets `delegation` and `skills` stay disabled. The
-composed allowlist adds the six Steward reads, `mmx_delegate`, and, on
-`mmsecretary` only, the three secretary skill names.
+Hermes built-in toolsets `delegation` and `skills` stay disabled.
+**The installed runnable profile now admits only the native `clarify` toolset.**
+Six Steward reads remain declared in a **disabled** MCP server. `mmx_delegate`
+and the three Secretary skill names exist only in non-authoritative Python
+shadow-mode declarations: they are **not** Hermes-native, executable tools and
+do not appear in the installed profile's allowlist. This is intentional until
+actual native plugin registration and receiving-owner admission are proven.
 
 **Native registration gate (unarmed):** The Hermes role's installed
 `hermes-home/profiles/<role>/config.yaml` now contains the exact upstream

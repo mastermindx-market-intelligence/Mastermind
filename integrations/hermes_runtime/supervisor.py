@@ -8,10 +8,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import threading
 
 from .constants import HEALTH_SCHEMA, LOOPBACK_HOST
+from .hermes_config import render_hermes_config
 from .errors import RuntimeRefusal
 from .gateway import Gateway, reserve_loopback_port
 from .memory import HighWaterLog, read_rss_kib
@@ -136,7 +138,48 @@ class ServiceRuntime:
     def _env(self) -> dict[str, str]:
         return child_env(self.secrets, home=self.profile.hermes_home, extra=self.extra_child_env)
 
+    def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
+        """Require exact on-disk native config before trusting any CLI summary.
+
+        A displayed MCP summary is not a connection or admission receipt.
+        The only accepted additional config is the reviewed, *disabled*
+        Steward source. No unknown or enabled MCP/server plugin is allowed.
+        """
+        path = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
+        if not path.exists() and not path.is_symlink():
+            if (self.profile.state_dir / "install-manifest.json").exists():
+                raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_MISSING")
+            # Uninstalled stub-runtime tests use a temporary profile without
+            # a native config. Real installs must carry that config.
+            return None
+        if path.is_symlink():
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_SYMLINK")
+        try:
+            info = path.stat()
+            if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.geteuid() or info.st_nlink != 1):
+                raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNSAFE")
+            if info.st_size > 64 * 1024:
+                raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_TOO_LARGE")
+            raw = path.read_bytes()
+        except OSError:
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
+        if raw == render_hermes_config(self.profile).encode("utf-8"):
+            return None
+        # The built-in WP1 package remains independent for non-integrated
+        # installs; this optional consumer is loaded only for the specific
+        # reviewed disabled native config.
+        from integrations.hermes_harness.native_mcp import render_disarmed_native_config
+        from integrations.hermes_steward.client import ALLOWED_TOOLS
+
+        if raw != render_disarmed_native_config(self.profile).encode("utf-8"):
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
+        if self.profile.extension_allowlist:
+            raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
+        return {"mastermind_steward": tuple(ALLOWED_TOOLS)}
+
     def _check_registry(self) -> None:
+        expected_disabled_mcp = self._expected_disabled_mcp()
         try:
             proc = subprocess.run(
                 build_tools_argv(self.hermes_bin, self.profile.role),
@@ -156,6 +199,7 @@ class ServiceRuntime:
             proc.stderr,
             self.profile.tool_allowlist,
             extension_tools_for(self.profile),
+            expected_disabled_mcp=expected_disabled_mcp,
         )
         if proc.returncode != 0:
             raise RuntimeRefusal("TOOLS_LIST_FAILED")

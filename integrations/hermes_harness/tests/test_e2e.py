@@ -267,8 +267,10 @@ class HarnessEndToEnd(unittest.TestCase):
         self.assertIn("enabled: false", overlay)
         self.assertNotIn("api_key:", overlay.lower())
         profile_text = (state / "current" / "profile.yaml").read_text(encoding="utf-8")
+        # Intended Python shadow extension names are NOT Hermes-native tools.
         for name in extension_names_for("mmsecretary"):
-            self.assertIn(f"- {name}", profile_text)
+            self.assertNotIn(f"- {name}", profile_text)
+        self.assertIn("- clarify\n", profile_text)
         self.assertNotIn("- delegation\n", profile_text)
         self.assertNotIn("- skills\n", profile_text)
         unit_text = (unit / "hermes-runtime-mmsecretary.service").read_text(encoding="utf-8")
