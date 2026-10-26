@@ -111,6 +111,11 @@ class NativeStewardConfigTests(unittest.TestCase):
             )
             self.assertEqual(payload["status"], "INSTALLED")
             self.assertEqual(payload["native_steward_mcp"], "CONFIGURED_DISABLED")
+            self.assertIs(payload["extensions_registered"], False)
+            from integrations.hermes_runtime.profile import load_profile
+            real_profile = load_profile(state / "current" / "profile.yaml")
+            self.assertEqual(real_profile.tool_allowlist, frozenset({"clarify"}))
+            self.assertEqual(real_profile.extension_allowlist, frozenset())
             self.assertIs(payload["native_steward_connected"], False)
             self.assertIs(payload["upstream_attested"], False)
             native = state / "current" / "hermes-home" / "profiles" / "mmsecretary" / "config.yaml"

@@ -9,7 +9,6 @@ from pathlib import Path
 import sys
 
 from integrations.hermes_harness.doctor import doctor, format_doctor
-from integrations.hermes_harness.extensions import boot_harness
 from integrations.hermes_harness.overlays import overlay_chain, render_overlays
 from integrations.hermes_harness.stack import write_composed_profile
 from integrations.hermes_harness.tick import FIXTURE, routine_tick
@@ -102,7 +101,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _install(args: argparse.Namespace) -> dict:
-    boot_harness()
     # Import on invocation: read-only shadow jobs must not depend on PyYAML.
     from integrations.hermes_harness.native_mcp import render_disarmed_native_config
     profile_path = args.state.parent / f"{args.role}.hermes-profile.yaml"
@@ -111,6 +109,7 @@ def _install(args: argparse.Namespace) -> dict:
         state_dir=args.state,
         secrets_file=args.secrets_file,
         dest=profile_path,
+        installed_native_only=True,
     )
     payload = runtime_install(
         profile_path=profile_path,
@@ -128,7 +127,8 @@ def _install(args: argparse.Namespace) -> dict:
     _write(home / "vision-overlay.yaml", overlays["vision"])
     payload["overlay_chain"] = list(overlay_chain(args.role))
     payload["vision_chain"] = list(overlay_chain("vision"))
-    payload["extensions_registered"] = True
+    payload["extensions_registered"] = False
+    payload["unbound_extension_names"] = "NOT_INSTALLED"
     payload["native_steward_mcp"] = "CONFIGURED_DISABLED"
     payload["native_steward_connected"] = False
     return payload

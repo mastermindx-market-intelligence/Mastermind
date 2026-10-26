@@ -121,6 +121,35 @@ class RegistryTests(unittest.TestCase):
             extension_tools_for(object())
         self.assertEqual(ctx.exception.code, "EXTENSION_TOOL_COLLIDES_WITH_HERMES")
 
+    def test_exact_disabled_mcp_summary_is_not_a_registered_tool(self) -> None:
+        names = (
+            "list_responsibilities", "get_responsibility", "get_attention",
+            "get_current_runtime", "explain_blocker", "resolve_surface",
+        )
+        expected = {"mastermind_steward": names}
+        summary = (
+            CENSUS_TEXT.rstrip() + "\n\nMCP servers:\n"
+            + f"  mastermind_steward  [include only: {', '.join(names)}]\n"
+        )
+        result = inspect_tool_registry(summary, b"", {"clarify"},
+                                       expected_disabled_mcp=expected)
+        self.assertEqual(result["status"], "PASS_REGISTRY_EXACT", result["issues"])
+        self.assertEqual(result["registered"], ["clarify"])
+        for changed, culprit in (
+            (summary.replace("resolve_surface]", "write_company_state]"), "MCP_SERVER_SUMMARY_MISMATCH"),
+            (summary.replace("mastermind_steward  [", "evil_server  ["), "MCP_SERVER_SUMMARY_MISMATCH"),
+            (summary + "  mastermind_steward  [include only: list_responsibilities]\n", "DUPLICATE_MCP_SERVER"),
+            (summary.replace("MCP servers:", "Other servers:"), "UNRECOGNIZED_TOOL_ROW_OR_SECTION"),
+        ):
+            self.assertIn(culprit, inspect_tool_registry(
+                changed, b"", {"clarify"}, expected_disabled_mcp=expected,
+            )["issues"])
+        self.assertIn("UNEXPECTED_MCP_SECTION",
+                      inspect_tool_registry(summary, b"", {"clarify"})["issues"])
+        self.assertIn("INCOMPLETE_MCP_SUMMARY",
+                      inspect_tool_registry(CENSUS_TEXT, b"", {"clarify"},
+                                            expected_disabled_mcp=expected)["issues"])
+
     def test_registered_child_secret_names_are_forwarded_and_the_gateway_token_is_not(self) -> None:
         register_child_secret_env(["ZAI_API_KEY"])
         with self.assertRaises(RuntimeRefusal) as ctx:

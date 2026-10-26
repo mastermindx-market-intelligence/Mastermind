@@ -7,7 +7,7 @@ built-ins. This process-local table is not a company tool authority.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 import re
 
 from .constants import (
@@ -22,6 +22,8 @@ from .profile import RuntimeProfile
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 TOOL_LINE = re.compile(r"^\s*([✓✗])\s+(enabled|disabled)\s+([a-z][a-z0-9_-]{0,63})(?:\s|$)")
 HEADINGS = {"Built-in toolsets (cli):": "builtins", "Plugin toolsets (cli):": "plugins"}
+MCP_HEADER = "MCP servers:"
+MCP_ROW = re.compile(r"^([a-z][a-z0-9_]{0,63})  \[include only: (.+)\]$")
 
 _REGISTRARS: dict[str, Callable[[RuntimeProfile], frozenset[str]]] = {}
 
@@ -65,6 +67,8 @@ def inspect_tool_registry(
     stderr: str | bytes | None,
     allowlist: Iterable[str],
     extension_tools: Iterable[str] = (),
+    *,
+    expected_disabled_mcp: Mapping[str, tuple[str, ...]] | None = None,
 ) -> dict:
     issues: set[str] = set()
     stderr_empty = False
@@ -85,7 +89,7 @@ def inspect_tool_registry(
         issues.add("TOOL_LIST_NOT_TEXT")
         tool_list = ""
 
-    enabled, observed, parse_issues = _parse_enabled(tool_list)
+    enabled, observed, parse_issues = _parse_enabled(tool_list, expected_disabled_mcp)
     issues.update(parse_issues)
     allow = frozenset(allowlist)
     extensions = frozenset(extension_tools)
@@ -124,8 +128,11 @@ def assert_registered_tools_exact(
     stderr: str | bytes | None,
     allowlist: Iterable[str],
     extension_tools: Iterable[str] = (),
+    *,
+    expected_disabled_mcp: Mapping[str, tuple[str, ...]] | None = None,
 ) -> dict:
-    result = inspect_tool_registry(tool_list, stderr, allowlist, extension_tools)
+    result = inspect_tool_registry(tool_list, stderr, allowlist, extension_tools,
+                                   expected_disabled_mcp=expected_disabled_mcp)
     if result["status"] != "PASS_REGISTRY_EXACT":
         raise RuntimeRefusal(",".join(result["issues"]) or "REGISTRY_BLOCKED")
     if set(result["registered"]) != set(result["allowlist"]) or not result["stderr_empty"]:
@@ -133,18 +140,44 @@ def assert_registered_tools_exact(
     return result
 
 
-def _parse_enabled(text: str) -> tuple[set[str], set[str], set[str]]:
+def _parse_enabled(
+    text: str,
+    expected_disabled_mcp: Mapping[str, tuple[str, ...]] | None = None,
+) -> tuple[set[str], set[str], set[str]]:
     issues: set[str] = set()
     enabled: set[str] = set()
     observed: set[str] = set()
     section: str | None = None
     seen: dict[str, set[str]] = {"builtins": set(), "plugins": set()}
+    seen_mcp: set[str] = set()
+    saw_mcp_heading = False
     for raw in ANSI.sub("", text).splitlines():
         line = raw.strip()
         if not line:
             continue
         if line in HEADINGS:
+            if section == "mcp":
+                issues.add("TOOLSET_AFTER_MCP_SECTION")
             section = HEADINGS[line]
+            continue
+        if line == MCP_HEADER:
+            if saw_mcp_heading or section != "plugins":
+                issues.add("UNEXPECTED_MCP_SECTION")
+            saw_mcp_heading = True
+            section = "mcp"
+            continue
+        if section == "mcp":
+            match = MCP_ROW.fullmatch(line)
+            if match is None or expected_disabled_mcp is None:
+                issues.add("UNQUALIFIED_MCP_SUMMARY")
+                continue
+            name, tools = match.groups()
+            if name in seen_mcp:
+                issues.add("DUPLICATE_MCP_SERVER")
+            seen_mcp.add(name)
+            expected = expected_disabled_mcp.get(name)
+            if expected is None or tools != ", ".join(expected):
+                issues.add("MCP_SERVER_SUMMARY_MISMATCH")
             continue
         if section is None:
             issues.add("UNEXPECTED_OUTPUT_PREAMBLE")
@@ -162,7 +195,11 @@ def _parse_enabled(text: str) -> tuple[set[str], set[str], set[str]]:
         observed.add(name)
         if state == "enabled":
             enabled.add(name)
-    if "builtins" not in HEADINGS.values() or not seen["builtins"] or not seen["plugins"]:
-        if not seen["builtins"] or not seen["plugins"]:
-            issues.add("INCOMPLETE_TOOLSET_REGISTRY")
+    if not seen["builtins"] or not seen["plugins"]:
+        issues.add("INCOMPLETE_TOOLSET_REGISTRY")
+    if expected_disabled_mcp is None:
+        if saw_mcp_heading:
+            issues.add("UNEXPECTED_MCP_SECTION")
+    elif not saw_mcp_heading or seen_mcp != set(expected_disabled_mcp):
+        issues.add("INCOMPLETE_MCP_SUMMARY")
     return enabled, observed, issues
