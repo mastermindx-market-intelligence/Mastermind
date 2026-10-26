@@ -154,6 +154,24 @@ Hermes built-in toolsets `delegation` and `skills` stay disabled. The
 composed allowlist adds the six Steward reads, `mmx_delegate`, and, on
 `mmsecretary` only, the three secretary skill names.
 
+**Native registration gate (unarmed):** The Hermes role's installed
+`hermes-home/profiles/<role>/config.yaml` now contains the exact upstream
+`mcp_servers.mastermind_steward` definition from the reviewed read-only WP3
+source. It has `enabled: false` in **every default install**, including when
+credential pointers exist. Its six `tools.include` names are exact; MCP
+resources and prompts remain disabled. This is only native configuration
+presence, not an authenticated connection or an actual callable tool.
+
+The Python `boot_harness()` registration table names intended extensions
+but is **not** a Hermes-native plugin or actual model-callable tool registry.
+The installed systemd supervisor is a fresh process and does not carry that
+table from the installer. Actual native Steward enablement, plugin
+installation for `mmx_delegate`, live tool discovery, Executive admission
+and original-parent result consumption all remain blocked until their
+receiving-owner evidence and independent review exist. Do not remove the
+`enabled: false` fence to make a model start or call a tool. No
+`hermesctl install` receipt or local health response can prove those grants.
+
 Enable each user unit on its own. One unit does not start the other.
 This still does not post to Slack:
 

@@ -6,6 +6,7 @@ refuses every revision except the pinned SHA. Tests use a local upstream tree.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 import os
 from pathlib import Path
 import shutil
@@ -78,6 +79,7 @@ def install(
     upstream_source: Path | None = None,
     fetch: bool = False,
     python_executable: str | None = None,
+    hermes_config_renderer: Callable[[RuntimeProfile], str] | None = None,
 ) -> dict:
     if fetch == bool(upstream_source):
         raise RuntimeRefusal("UPSTREAM_SOURCE_REQUIRED")
@@ -108,7 +110,7 @@ def install(
             assert upstream_source is not None
             _copy_upstream(upstream_source, release / "upstream")
             upstream_attested = False
-        _write_release(profile, release, bin_path, upstream_attested)
+        _write_release(profile, release, bin_path, upstream_attested, hermes_config_renderer)
         _switch_current(state_dir, release_id)
         unit = _install_unit(profile, unit_dir, python_executable or sys.executable)
         _write_manifest(profile, unit_dir, unit)
@@ -236,11 +238,23 @@ def _copy_upstream(source: Path, dest: Path) -> None:
     shutil.copytree(source, dest, symlinks=False)
 
 
-def _write_release(profile: RuntimeProfile, release: Path, bin_path: Path, upstream_attested: bool) -> None:
+def _write_release(
+    profile: RuntimeProfile,
+    release: Path,
+    bin_path: Path,
+    upstream_attested: bool,
+    hermes_config_renderer: Callable[[RuntimeProfile], str] | None = None,
+) -> None:
     home = release / "hermes-home"
     role_dir = home / "profiles" / profile.role
     role_dir.mkdir(parents=True, mode=0o700)
-    config = render_hermes_config(profile)
+    config = (
+        hermes_config_renderer(profile)
+        if hermes_config_renderer is not None
+        else render_hermes_config(profile)
+    )
+    if not isinstance(config, str) or len(config.encode("utf-8")) > 64 * 1024:
+        raise RuntimeRefusal("NATIVE_CONFIG_INVALID")
     _atomic_write(role_dir / "config.yaml", config.encode("utf-8"), 0o600)
     soul = _soul_bytes(profile.role)
     _atomic_write(role_dir / "SOUL.md", soul, 0o600)

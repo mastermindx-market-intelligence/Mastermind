@@ -103,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _install(args: argparse.Namespace) -> dict:
     boot_harness()
+    # Import on invocation: read-only shadow jobs must not depend on PyYAML.
+    from integrations.hermes_harness.native_mcp import render_disarmed_native_config
     profile_path = args.state.parent / f"{args.role}.hermes-profile.yaml"
     write_composed_profile(
         args.role,
@@ -118,6 +120,7 @@ def _install(args: argparse.Namespace) -> dict:
         hermes_bin=args.hermes_bin,
         upstream_source=args.upstream_source,
         fetch=bool(args.fetch),
+        hermes_config_renderer=render_disarmed_native_config,
     )
     home = args.state / "current" / "hermes-home"
     overlays = render_overlays()
@@ -126,6 +129,8 @@ def _install(args: argparse.Namespace) -> dict:
     payload["overlay_chain"] = list(overlay_chain(args.role))
     payload["vision_chain"] = list(overlay_chain("vision"))
     payload["extensions_registered"] = True
+    payload["native_steward_mcp"] = "CONFIGURED_DISABLED"
+    payload["native_steward_connected"] = False
     return payload
 
 
