@@ -76,6 +76,37 @@ def test_success_retains_physical_and_account_observation(backend,tmp_path,monke
     assert value['probe_diagnostic']['framing']=='COMPLETE'
 
 
+
+def test_optional_failure_preserves_validated_physical_but_never_admits_account(
+        backend,tmp_path,monkeypatch):
+    # An optional command can fail after printing a plausible 'known' result.
+    # The actual physical shell return is zero; readiness remains UNKNOWN.
+    untrusted='glm_local_account_readiness={"status":"known","accounts":{"x":true}}\\n'
+    value=write(backend,tmp_path,monkeypatch,framed(readiness=1)+physical()+untrusted,0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert 'glm_local_account_readiness' not in value
+    assert 'bailian_local_account_readiness' not in value
+    assert value['probe_diagnostic']['framing']=='COMPLETE'
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_ZERO','exit_status':0}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_NONZERO','exit_status':1}
+
+
+def test_successful_readiness_cannot_salvage_missing_physical_metrics(
+        backend,tmp_path,monkeypatch):
+    value=write(backend,tmp_path,monkeypatch,framed(readiness=0)+'ncpu=8\\n',0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+    assert 'ncpu' not in value and 'glm_local_account_readiness' not in value
+
+
+def test_no_eligible_validators_preserves_plain_physical_observation(
+        backend,tmp_path,monkeypatch):
+    value=write(backend,tmp_path,monkeypatch,framed()+physical(),0)
+    assert value['reachable'] is True
+    assert value['probe_diagnostic']['optional_readiness']['exit_status']==0
+    assert 'glm_local_account_readiness' not in value
+    assert 'bailian_local_account_readiness' not in value
+
 @pytest.mark.parametrize('rc,error',[(1,'probe_exit_1'),(78,'probe_exit_78'),
                                    (128,'probe_timeout'),(255,'ssh_unreachable')])
 def test_nonzero_remains_unavailable_even_with_complete_physical(backend,tmp_path,monkeypatch,rc,error):
@@ -103,7 +134,7 @@ def test_missing_partial_frames_fail_closed(backend,tmp_path,monkeypatch,suffix)
     framed().replace('PHYSICAL_EXIT 0','PHYSICAL_EXIT 00'),
     framed().replace('PHYSICAL_EXIT 0','PHYSICAL_EXIT '+SECRET),
     framed().replace('PHYSICAL_BEGIN','READINESS_BEGIN'),
-    framed(readiness=1),
+    framed(physical=1),
     framed()+PREFIX+SECRET+'\n'])
 def test_malformed_duplicate_inconsistent_frames_fail_closed(backend,tmp_path,monkeypatch,frame):
     value=write(backend,tmp_path,monkeypatch,physical()+frame,0)
@@ -132,7 +163,7 @@ def test_failure_diagnostic_never_copies_arbitrary_output(backend,tmp_path,monke
 
 
 @pytest.mark.parametrize('physical_status,readiness_status',[(0,0),(0,1),(1,0),(1,78)])
-def test_actual_shell_wrapper_preserves_context_and_last_status(tmp_path,physical_status,readiness_status):
+def test_actual_shell_wrapper_preserves_context_and_physical_status(tmp_path,physical_status,readiness_status):
     source=(SOURCE/'host_pull.sh').read_text()
     start=source.index('    probe="printf')
     end=source.index('\n    OUT=$(run_probe',start)
@@ -145,7 +176,7 @@ def test_actual_shell_wrapper_preserves_context_and_last_status(tmp_path,physica
                              capture_output=True,text=True,check=True).stdout
     result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',generated],env=env,
                           capture_output=True,text=True)
-    assert result.returncode==readiness_status
+    assert result.returncode==physical_status
     assert 'optional_fixture=true' in result.stdout
     assert PREFIX+f'PHYSICAL_EXIT {physical_status}' in result.stdout
     assert PREFIX+f'READINESS_EXIT {readiness_status}' in result.stdout

@@ -46,10 +46,10 @@ def probe_diagnostic(output, returncode):
                               "exit_status": code}
         index += 1
     result["framing"] = "COMPLETE" if index == 4 else "INCOMPLETE" if index else "MISSING"
-    # A zero transport result must agree with the final command's status.
-    # A transport failure can happen after complete remote output; it remains
-    # unavailable regardless of framing and is never converted into success.
-    if index == 4 and returncode == 0 and result["optional_readiness"]["exit_status"] != 0:
+    # The single shell exits with the physical stage status, not an optional
+    # validator status. Transport failures remain unavailable even if framing
+    # is complete. Optional readiness nonzero stays separate non-admitting DATA.
+    if index == 4 and returncode == 0 and result["physical"]["exit_status"] != 0:
         result["framing"] = "INVALID"
     return result
 
@@ -442,6 +442,10 @@ def write_state():
         for provider, mode, validator in (("glm", "glm", "glm_keys.py"),
                                            ("bailian", "qwen", "bailian_keys.py")):
             try:
+                # A failed optional block may print a plausible envelope before
+                # exiting. Never convert that data into account eligibility.
+                if diagnostic["optional_readiness"]["state"] != "RETURNED_ZERO":
+                    raise ValueError("optional readiness stage failed")
                 from pathlib import Path
                 from glm_host_account_source import owned_bytes
                 import hashlib

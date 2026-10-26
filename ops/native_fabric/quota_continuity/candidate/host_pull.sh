@@ -223,8 +223,8 @@ pass_once() {
     if [ "$glm_admitted" = "1" ]; then
       glm_probe=$(python3 -B "$GLM_PROBE_FILE" "$host" "$alias" "$ACCOUNTS_POLICY" 2>/dev/null) || glm_probe=":"
     fi
-    # Diagnostics are closed DATA, not admission. Keep the original shell
-    # context and final readiness-block status; never salvage a failed probe.
+    # One transport, two distinct results: physical status controls reachability;
+    # optional readiness failure is UNKNOWN, never account admission.
     probe="printf '%s\n' 'HOST_PULL_STAGE_V1 PHYSICAL_BEGIN'
 $probe
 HOST_PULL_DIAG_PHYSICAL_RC=\$?
@@ -233,7 +233,7 @@ printf '%s\n' 'HOST_PULL_STAGE_V1 READINESS_BEGIN'
 $glm_probe
 HOST_PULL_DIAG_READINESS_RC=\$?
 printf 'HOST_PULL_STAGE_V1 READINESS_EXIT %s\n' \"\$HOST_PULL_DIAG_READINESS_RC\"
-exit \"\$HOST_PULL_DIAG_READINESS_RC\""
+exit \"\$HOST_PULL_DIAG_PHYSICAL_RC\""
     OUT=$(run_probe "$is_local" "$alias" "$probe")
     rc=$?
     summary=$(write_state "$host" "$rc" "$OUT" "$alias") || return $?

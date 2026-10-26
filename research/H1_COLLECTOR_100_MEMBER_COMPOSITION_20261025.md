@@ -139,3 +139,21 @@ as exactly 100; only source/test fixture counts and prose changed. The
 original binary-alias/retained-result/second-generation scenario remains
 mandatory, not removed, skipped or relabeled green. No publisher, reader,
 account, identity or selected-generation implementation was changed.
+
+## Subsequent correction — physical reachability versus optional readiness (2026-10-26)
+
+A later read-only #1836/#1879 source census established that the single legacy
+shell used the optional readiness tail's exit status to mark all physical
+telemetry unreachable. The existing parser also rejected transport-zero with
+nonzero optional readiness. The corrected **source candidate**, not a native
+rollout, returns physical-stage status, validates complete ordered framing,
+and withholds every provider/account readiness field on an optional failure.
+Missing physical fields, malformed/incomplete stages, or nonzero transport
+remain non-reachable. No second transport, collector, publisher, credential,
+selector or recurring H1 producer is introduced; qualified-readiness remains
+rc78 before remote/state effects. These source changes require new exact-head
+hosted CI and fresh nonauthor review before any source admission.
+
+Updated 100-member manifest SHA256: `50a7ff3e78e8022d0d86af8bc3622cc0d607e2be976b8758d8c44a91c2508a45`.
+Updated source inventory SHA256: `e76374948a190bdcea5fe6f33b6499a603fdbbd986d7264807d790e5a49cfd4a`.
+Historical earlier hashes in this note describe earlier immutable commits.
