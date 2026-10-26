@@ -20,13 +20,14 @@ Linux account can exist. No existing account, ACL, credential or lane was change
 
 ## Source-only correction
 
-1. The existing hosted account continues to execute the compiled diagnostic.
-   An ACL-bearing account may only yield an expected **typed exit78 refusal**,
-   with empty stdout, no token and matching `HOME_ANCESTOR/DEFAULT` metadata;
-   the test marks the nonqualifying positive `XFAIL`. An unexpected refusal,
-   silent changed guard, different failure code/role or token leak is a FAIL.
-   If hosted ancestry is actually eligible, the original positive assertions
-   still execute without a skip.
+1. The hosted test's **read-only real HOME ancestry** classifier determines
+   fixture eligibility *before* the first observer, because an ACL-bearing
+   fixture can be refused by that earlier observer (not necessarily the final
+   compiled child). Any present ACL means the hosted fixture is an explicit
+   `SKIP`, **not a positive runtime receipt**. Unsupported metadata errors
+   remain hard failures. If the host is ACL-free, the entire original real
+   observer/compiled-child journey remains mandatory, and any nonzero return
+   is a hard failure. The required isolated step below cannot be skipped.
 2. A **new required job step in the same pytest shard 2**, not optional,
    runs the original positive Linux real process/observer path in a disposable
    container with a fresh non-root account and no HOME-ancestor default ACL.
@@ -55,6 +56,14 @@ Linux private-package/initializer/getpath/observer process and output
 real credential, production launch or remote worker effect. The initial
 unqualified image correctly refused two Python startup symlinks at
 `_require_startup_entry` and was repaired inside the disposable image.
+
+An adversarial negative-only disposable image with an actual POSIX DEFAULT
+ACL on its private `/home` tmpfs demonstrated an earlier
+`FINAL_OBSERVER_REFUSAL` before the final compiled child; an exit78-only
+classifier at the final child would miss this legitimate path. The source
+branch now rejects that ineligible test substrate *before* the observer,
+without altering production ACL checks. Only the isolated real positive
+step is accepted as a CI positive.
 
 The actual GitHub Actions result on this PR's *new exact head* and separate
 nonauthor source review are still owed. A compliant disposable positive is

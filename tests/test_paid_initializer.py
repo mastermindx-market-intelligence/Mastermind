@@ -660,6 +660,12 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
     from tests import test_paid_host_qualification as qualifier
     account=pwd.getpwuid(os.getuid())
     if os.getuid()==0:pytest.skip('requires a non-Root fixture account')
+    # Reject the *test host* as an eligible positive fixture before starting
+    # any modeled observer or helper when a real account ancestor carries an
+    # ACL. The required isolated Linux CI step still runs the full positive.
+    # This is never used by the actual production initializer.
+    if _real_home_ancestry_acl(account.pw_dir) is not None:
+        pytest.skip('host HOME ancestry has ACL; required isolated positive Linux journey runs separately')
     lane=Path(account.pw_dir)/'lanes'
     try:lane.mkdir(mode=0o700)
     except FileExistsError:pytest.skip('requires an unused credentialless HOME/lanes fixture namespace')
@@ -809,28 +815,11 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             from tests.compiled_initializer_diagnostic import instrument_entry,require_execution_success
             argv[5]=instrument_entry(argv[5],preamble=owner.NO_SITE_PREAMBLE)
             assert len(argv[5].encode('utf-8'))+1<131072
-            # The hosted runner can have a *real* default ACL on /home's
-            # ancestry. Its completed 78 refusal is a useful negative proof,
-            # not a genuine positive no-ACL Linux qualification. Never strip
-            # that ACL, mock it away in this child or call a refusal success.
-            actual_acl=_real_home_ancestry_acl(account.pw_dir)
+            # At this point ancestry was actually ACL-free on this account.
+            # Any nonzero compiled-child return is a hard failure; never call
+            # default-ACL refusal a positive proof or bypass no_acl.
             execution=subprocess.run(argv,env=dict(HOME=account.pw_dir,PATH='/usr/bin:/bin'),stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
-            if actual_acl is not None:
-                from tests.compiled_initializer_diagnostic import decode_failure
-                observed_failure=decode_failure(execution.stderr.strip())
-                assert execution.returncode==78 and not execution.stdout
-                assert private_token.encode() not in execution.stderr
-                assert observed_failure is not None,'real ACL refusal must have typed diagnostic evidence'
-                assert (observed_failure['stage']=='BOOTSTRAP'
-                    and observed_failure['kind']=='InitializerCommitmentRefused'
-                    and observed_failure['node_role']==actual_acl['node_role']
-                    and observed_failure['acl_key']==actual_acl['acl_key']
-                    and any(site['function']=='no_acl' for site in observed_failure['sites']))
-                # Mark the hosted account explicitly INELIGIBLE: no false
-                # assertion that the actual positive initializer ran. CI also
-                # requires a separately isolated non-root no-ACL real journey.
-                pytest.xfail('actual compiled initializer correctly refused ACL-bearing CI HOME; no positive journey on this host')
             require_execution_success(execution,request)
             if private_token.encode() in execution.stdout:
                 raise AssertionError('compiled diagnostic output privacy refused') from None
