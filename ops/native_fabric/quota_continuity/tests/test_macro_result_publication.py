@@ -47,7 +47,7 @@ assert HERE.parent.parent.name == "native-code-releases"
 assert stat.S_IMODE(HERE.stat().st_mode) == 0o555
 assert stat.S_IMODE(HERE.parent.stat().st_mode) == 0o555
 assert stat.S_IMODE((HERE.parent / "RELEASE.json").stat().st_mode) == 0o444
-assert len(json.loads((HERE.parent / "RELEASE.json").read_bytes())["files"]) == 97
+assert len(json.loads((HERE.parent / "RELEASE.json").read_bytes())["files"]) == 100
 assert (HERE / "lanes").is_symlink()
 assert bindings.owner_path(HERE / "lanes", HERE) == OWNER / "lanes"
 with delivery.DirectoryChain(HERE / "lanes") as chain:
@@ -692,7 +692,7 @@ class MacroResultPublication(unittest.TestCase):
         original_inode = (canonical.stat().st_dev, canonical.stat().st_ino)
         first_release = self.release
 
-        # Reuse the entire actual 97-file source closure, changing only an
+        # Reuse the entire actual 100-file source closure, changing only an
         # unrelated comment to mint a distinct fixture generation identity.
         next_source = self.base / "next-generation-source"
         shutil.copytree(self.source, next_source)
@@ -702,7 +702,7 @@ class MacroResultPublication(unittest.TestCase):
             b"\n# Offline Macro result fixture: distinct generation identity only.\n")
         next_manifest = dict(self.manifest)
         next_manifest[changed_name] = hashlib.sha256(changed_path.read_bytes()).hexdigest()
-        self.assertEqual(len(next_manifest), 97)
+        self.assertEqual(len(next_manifest), 100)
         self.assertEqual({name for name in next_manifest
             if next_manifest[name] != self.manifest[name]}, {changed_name})
 
@@ -713,7 +713,7 @@ class MacroResultPublication(unittest.TestCase):
 
         # child() starts a fresh interpreter, so task.HERE, delivery.HERE, and
         # owner_path all originate from B. Its existing prelude also proves B's
-        # sealed metadata, exact 97-file closure, and original state aliases.
+        # sealed metadata, exact 100-file closure, and original state aliases.
         self.release = second_release
         try:
             self.child(r'''

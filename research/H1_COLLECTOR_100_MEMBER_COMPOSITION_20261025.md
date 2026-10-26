@@ -127,3 +127,15 @@ already retained and digest-checked f608 H1 preinitializer fixture, only
 inside the disposable stage. This source-only inverse retains the original
 95-member `native_install.UPGRADE_MANIFEST` and does not change the live
 or current 100-member qualified-host implementation.
+
+## Hidden real Linux Macro publisher child source assertion (discriminating)
+
+A subsequent exact-head Ubuntu0 targeted macro publication test reached
+the sealed 100-file source successfully, then its fresh child process
+refused on its own stale `CHILD` `RELEASE.json` count==97 assertion.
+The same module had a 97 count in its generation-B fixture used for
+source-switch/continued result-retention proof. Both are now asserted
+as exactly 100; only source/test fixture counts and prose changed. The
+original binary-alias/retained-result/second-generation scenario remains
+mandatory, not removed, skipped or relabeled green. No publisher, reader,
+account, identity or selected-generation implementation was changed.

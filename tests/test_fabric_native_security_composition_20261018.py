@@ -38,7 +38,7 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 97-file closure composes protected #1720/#1729 with Qwen source feedback
+# The 100-file closure composes protected #1720/#1729 with Qwen source feedback
 # and request UTC narrowing, extended by the reviewed Grok forward delta. This
 # candidate pin is a changed-risk review input, not reuse of an earlier review.
 # The Grok delta's source risk was independently reviewed at 3d864/25efd; this
