@@ -149,6 +149,38 @@ def test_mandatory_physical_metrics_are_finite_unique_and_positive(
     assert value['reachable'] is False and value['error']=='bad_probe_output'
 
 
+
+def test_integrated_parent_physical_failure_with_optional_success_remains_unreachable(
+        backend,tmp_path,monkeypatch):
+    # Preserve the parent F1 regression with real stage-ordered physical bytes.
+    value=write(backend,tmp_path,monkeypatch,
+                staged(physical(),physical_rc=1),1)
+    assert value['reachable'] is False and value['error']=='probe_exit_1'
+    assert 'load1' not in value
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_NONZERO','exit_status':1}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_ZERO','exit_status':0}
+
+
+def test_integrated_parent_complete_forged_envelope_never_survives_failed_readiness(
+        backend,tmp_path,monkeypatch):
+    # This stronger parent fixture has an otherwise fully valid observation.
+    forged={'schema':'mastermind.glm_local_account_readiness.v1',
+            'host':'fixture-host','transport_alias':'fixture-alias','mode':'glm',
+            'config_scope':'launcher_glm_config.v1',
+            'validator_sha256':hashlib.sha256(b'inert validator').hexdigest(),
+            'status':'known','accounts':{'fixture-account':True}}
+    value=write(backend,tmp_path,monkeypatch,
+                staged(physical(),'glm_local_account_readiness='+
+                       json.dumps(forged)+'\n',readiness_rc=1),0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert 'glm_local_account_readiness' not in value
+    assert value['probe_diagnostic']['framing']=='COMPLETE'
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_ZERO','exit_status':0}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_NONZERO','exit_status':1}
+
+
+
 @pytest.mark.parametrize('rc,error',[(1,'probe_exit_1'),(78,'probe_exit_78'),
                                    (128,'probe_timeout'),(255,'ssh_unreachable')])
 def test_nonzero_remains_unavailable_even_with_complete_physical(backend,tmp_path,monkeypatch,rc,error):
@@ -252,7 +284,7 @@ def test_optional_multi_validator_failure_cannot_be_masked_by_later_success(
     assert result.stderr==''
 
 def test_own_return_retains_diagnostic_without_shared_state_reread(backend,tmp_path,monkeypatch,capsys):
-    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET,physical_rc=1,readiness_rc=1),1)
+    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET+'\n',physical_rc=1,readiness_rc=1),1)
     response=capsys.readouterr().out.strip()
     prefix,encoded=response.split(' probe_diagnostic=',1)
     assert prefix=='reachable=false error=probe_exit_1'
