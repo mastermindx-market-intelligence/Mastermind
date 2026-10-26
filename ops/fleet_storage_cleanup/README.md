@@ -1,15 +1,22 @@
 # Existing fleet storage-sweeper source snapshot
 
-This is checked-in source for two EXISTING installed scripts, not a new daemon,
-scheduler, storage authority, or alternative cleanup queue.
+This is auditable source for three EXISTING installed fleet-toolkit scripts,
+not a new daemon, scheduler, storage authority, or alternative cleanup queue.
+The archive-helper source here is a proposed fail-closed B7 repair only: the
+incumbent installed helper remains unchanged until separately qualified release.
 
 - Production install path on M2: ~/.local/lib/mastermind/storage-cleanup/
 - Existing launch agents: com.mastermind.storage-sweeper and
   com.mastermind.fleet-remote-sweeper.
 - M2 remote driver already synchronizes its toolkit to M1 and MacBook over SSH.
 - Other helper scripts remain in the installed toolkit; these source files are
-  not a standalone deployment bundle. Never run sweep.main() in CI or tests:
-  that entry point invokes active cleanup passes.
+  not a standalone deployment bundle. Never run sweep.main() or the archive helper
+  at top level in CI or tests: those entry points can invoke cleanup passes.
+- pull_remote_archive.py is the existing report-only/archive helper's source-bound
+  B7 candidate. It refuses success-shaped empty SSH output and failures of lsof,
+  find, du or invalid inventory rows; it does NOT install, arm, schedule or authorize
+  the helper's existing --apply mode. Original production helper provenance and
+  installer composition remain a separate protected-release gate.
 - This source snapshot is reviewable and tested to prevent unexplained host-local
   fixes. Source acceptance is separate from installed/armed/real-path proof.
 
@@ -44,3 +51,7 @@ Current program receipt: Mastermind GitHub issue #1632.
 
 A peer lacking the new telemetry field produces TELEMETRY_MISSING (unverified),
 and an unreadable volume policy is an unverified alert, not a healthy reading.
+
+B7 source-only hermetic regression: `python3 -m unittest discover -s tests -p test_fleet_storage_archive_probe_contract.py`.
+This AST-extracts only pure functions and the embedded probe, intercepts every
+subprocess call, and never connects to hosts or executes a production cleanup.
