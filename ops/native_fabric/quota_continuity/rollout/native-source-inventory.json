@@ -258,9 +258,9 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 12148,
+      "bytes": 13965,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "53156165c211599e47df95b465cf6257231adaed6a93f7a092b493e4f51f2858",
+      "sha256": "fb5eda0e271a7e360843ccbcc101cee8be7698bd5c7c727beed527d95ce52edc",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
@@ -270,15 +270,15 @@
       "source": "candidate/host_pull_backend.py"
     },
     "ext/host_pull_daemon.sh": {
-      "bytes": 78584,
+      "bytes": 79503,
       "installed_preimage_sha256": null,
-      "sha256": "586eb69d9c957e825925be6dae326a6157510ff72c8888e2c9a55c5a66a4e231",
+      "sha256": "a2e73d9dab832f52cfcab166e2c0c172541d8f52fcc0f845bc98af2203f1d1ee",
       "source": "candidate/host_pull_daemon.sh"
     },
     "ext/host_pull_launchd.plist.template": {
-      "bytes": 1385,
+      "bytes": 1471,
       "installed_preimage_sha256": null,
-      "sha256": "31a7108382df97357e8173b6edd7a5612178a042ecbc165591d89e9152846d9f",
+      "sha256": "4bb1c8d78b8a345d1c15405f515c85185d6c31118f739761fd4479eba28fb358",
       "source": "candidate/host_pull_launchd.plist.template"
     },
     "ext/host_pull_probe.template": {
@@ -450,9 +450,9 @@
       "source": "candidate/paid_glm_model_client.py"
     },
     "ext/paid_host_qualification.py": {
-      "bytes": 25456,
+      "bytes": 33073,
       "installed_preimage_sha256": null,
-      "sha256": "d2f5be14f345cf00b4bd4357d705713a24e373a7d1675229aab6202f0d500cad",
+      "sha256": "e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0",
       "source": "candidate/paid_host_qualification.py"
     },
     "ext/paid_incumbent_state.py": {
@@ -460,6 +460,24 @@
       "installed_preimage_sha256": null,
       "sha256": "2fd23881b84ca8ee32a93b5e15267de117f40b37dd53fe095cb1d3dee658454d",
       "source": "candidate/paid_incumbent_state.py"
+    },
+    "ext/paid_initializer.py": {
+      "bytes": 31643,
+      "installed_preimage_sha256": null,
+      "sha256": "a0d8095c1e32f25449bfb27de062565956c118d3fffbcec2bf6cbed681c7b2ae",
+      "source": "candidate/paid_initializer.py"
+    },
+    "ext/paid_initializer_nested_data.py": {
+      "bytes": 7380,
+      "installed_preimage_sha256": null,
+      "sha256": "47c476deedd42231206d528b656664c8b590414ea905ee2fe91571a90454d073",
+      "source": "candidate/paid_initializer_nested_data.py"
+    },
+    "ext/paid_initializer_token_data.py": {
+      "bytes": 9901,
+      "installed_preimage_sha256": null,
+      "sha256": "7a3e5d2642df12c48769490c6cb86301bad1843088bf2dae48181c7a307e2dfe",
+      "source": "candidate/paid_initializer_token_data.py"
     },
     "ext/paid_model_owner.py": {
       "bytes": 15953,
@@ -606,7 +624,7 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 97,
+  "native_code_files": 100,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
@@ -623,6 +641,9 @@
     "paid_glm_model_client.py",
     "paid_host_qualification.py",
     "paid_incumbent_state.py",
+    "paid_initializer.py",
+    "paid_initializer_nested_data.py",
+    "paid_initializer_token_data.py",
     "paid_model_owner.py",
     "paid_pyyaml_6_0_3.zip",
     "paid_pyyaml_provenance.json",

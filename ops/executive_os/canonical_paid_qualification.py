@@ -56,7 +56,8 @@ QUALIFIER_EXT_RELATIVE = ('ops/native_fabric/quota_continuity/rollout/'
                           'native-code-stage/ext')
 QUALIFIER_SOURCE_NAMES = frozenset({'host_pull.sh', 'host_pull_backend.py',
                                     'host_pull_probe.template',
-                                    'paid_host_qualification.py',
+                                    'paid_host_qualification.py', 'paid_initializer.py',
+                                    'paid_initializer_token_data.py', 'paid_initializer_nested_data.py',
                                     'remote_sub.sh'})
 _REGISTRATION_FIELDS = frozenset({'worker_id', 'quota_class', 'account_label'})
 _V2_FIELDS = base._PAID_PROFILE_FIELDS | {'registration', 'bindings_sha256'}
@@ -341,6 +342,8 @@ def _paid_source_document(profile: dict, observation: dict,
         'qualifier_source_manifest_sha256': request['source_manifest_sha256'],
         'qualifier_sources_sha256': dict(request['sources_sha256']),
         'probe_sha256': request['probe_sha256'],
+        'initializer_commitment': request['initializer_commitment'],
+        'initializer_commitment_sha256': request['initializer_commitment_sha256'],
     }
     source = {
         'schema_version': SOURCE_DOC_SCHEMA,
@@ -605,17 +608,51 @@ def _recheck_context(host, *, expected_release_sha, control_sha256, worker_sha25
 
 
 
-def _stage_target(target: dict[str, bytes]) -> None:
-    """Exclusive retained 0700 sibling; exact four root:wheel 0444 artifacts."""
-    os.mkdir(STAGING, 0o700)
-    os.chown(STAGING, 0, 0)
+def _reserve_qualification(binding, input_sha256, registration, control_sha256, worker_sha256):
+    """Exclusive fixed Root reservation before the sole remote child can start."""
+    os.mkdir(STAGING,0o700)
+    os.chown(STAGING,0,0)
+    raw=base._json({'schema_version':'mastermind.paid_qualification_reservation/v1',
+        'binding':binding,'initializer_input_sha256':input_sha256,
+        'registration':registration,'control_preimage_sha256':control_sha256,
+        'worker_preimage_sha256':worker_sha256})
+    owner._atomic_file(STAGING/'qualification-intent.json',raw,mode=0o400,
+                       uid=0,gid=0,replace=False)
+    owner._fsync_directory(STAGING);owner._fsync_directory(owner.CONFIG_ROOT)
+    info=STAGING.lstat()
+    return ((info.st_dev,info.st_ino),raw)
+
+
+def _check_reservation(reservation):
+    from control_plane.fs_security import has_macos_acl
+    identity,raw=reservation
+    info=STAGING.lstat()
+    if ((info.st_dev,info.st_ino)!=identity
+            or (info.st_uid,info.st_gid,stat.S_IMODE(info.st_mode))!=(0,0,0o700)
+            or has_macos_acl(STAGING,expected_identity=info)
+            or set(os.listdir(STAGING))!={'qualification-intent.json'}):
+        raise CanonicalPaidQualificationEffectUnknown('qualification reservation changed')
+    current,_=owner._read_root_file(STAGING/'qualification-intent.json',modes=frozenset({0o400}),uid=0,gid=0)
+    if current!=raw:raise CanonicalPaidQualificationEffectUnknown('qualification reservation bytes changed')
+
+
+def _stage_target(target: dict[str, bytes], *, reservation=None) -> None:
+    """Retained same reservation; exact four root:wheel 0444 artifacts."""
+    if reservation is None:
+        # Existing private stage fixture, not a production qualification route.
+        os.mkdir(STAGING,0o700);os.chown(STAGING,0,0)
+    else:
+        _check_reservation(reservation)
     for name in sorted(base.FILES):
         owner._atomic_file(STAGING / name, target[name], mode=0o444,
                            uid=0, gid=0, replace=False)
+    if reservation is not None:
+        # Never remove the directory or make it reusable. The completed four
+        # files carry the same commitment; any partial write remains a residue.
+        os.unlink(STAGING/'qualification-intent.json')
     os.chmod(STAGING, 0o755, follow_symlinks=False)
     owner._fsync_directory(STAGING)
     owner._fsync_directory(owner.CONFIG_ROOT)
-
 
 
 def _verify_staged(target: dict[str, bytes]) -> tuple[int, int]:
@@ -706,7 +743,8 @@ def qualify_and_publish(expected_release_sha: str,
                         expected_control_sha256: str,
                         expected_definition_sha256: str, *,
                         transport_host, python_path, capture_root, worker_id,
-                        quota_class, account_label) -> dict[str, object]:
+                        quota_class, account_label, initializer_raw=None,
+                        expected_initializer_sha256=None) -> dict[str, object]:
     """One root-owner disabled qualification and fixed-target RENAME_SWAP.
 
     Every input, principal, release, source, manifest, registry and service
@@ -792,11 +830,26 @@ def qualify_and_publish(expected_release_sha: str,
                          original_digests=original_digests,
                          expected_sources=expected_sources, ext_dir=ext_dir,
                          manifest_sha256=manifest_sha256)
+        # Root receives expected action DATA, never an observed hook hash as
+        # approval. The real caller/input review and platform trust remain
+        # separate prerequisites; no default commitment is synthesized.
+        initializer_module, _initializer_source = qualifier._initializer_module(
+            expected_sources['paid_initializer.py'])
+        snapshot = qualifier._snapshot(PAID_REGISTRY_NAMESPACE, transport_host, expected_sources)
+        initializer = initializer_module.decode_commitment(initializer_raw,
+            expected_initializer_sha256,host_ref=transport_host,
+            transport_alias=snapshot['alias'],python_path=python_path,capture_root=capture_root)
         binding = dict(host_ref=transport_host, hosts_path=PAID_REGISTRY_NAMESPACE,
                        release_sha=expected_release_sha,
                        source_manifest_sha256=manifest_sha256,
                        preimage_sha256=expected_definition_sha256,
-                       expected_sources=dict(expected_sources))
+                       expected_sources=dict(expected_sources), initializer_commitment=initializer)
+        # The fixed incumbent staging sibling is also the one-use reservation.
+        # It survives every transport/initializer failure; no second ledger.
+        effect = True
+        reservation = _reserve_qualification(binding, expected_initializer_sha256,
+            registration, control_sha256, worker_sha256)
+        _check_reservation(reservation)
         observed = qualifier.qualify_paid_host(python_path=python_path,
                                                capture_root=capture_root, **binding)
         observation = qualifier.consume_paid_host_qualification(observed, **binding)
@@ -840,9 +893,9 @@ def qualify_and_publish(expected_release_sha: str,
                          original_identity=original_identity,
                          original_digests=original_digests,
                          expected_sources=expected_sources, ext_dir=ext_dir,
-                         manifest_sha256=manifest_sha256)
-        effect = True
-        _stage_target(target)
+                         manifest_sha256=manifest_sha256,staging_absent=False)
+        _check_reservation(reservation)
+        _stage_target(target, reservation=reservation)
         staged_identity = _verify_staged(target)
         _recheck_context(host, expected_release_sha=expected_release_sha,
                          control_sha256=control_sha256,

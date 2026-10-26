@@ -26,6 +26,8 @@ PAID_HOST=""
 PAID_REQUESTED=0
 INSPECT_HOST=""
 PHYSICAL_HOST=""
+QUALIFICATION_MODE="off"
+QUALIFICATION_MODE_SEEN=0
 if [ "$#" -gt 0 ] && [ "$1" = "--diagnose-physical" ]; then
   [ "$#" -eq 2 ] && [ "$2" = "ubuntu0" ] || { echo "host_pull: fixed physical diagnostic arguments refused" >&2; exit 78; }
   PHYSICAL_HOST="$2"
@@ -45,6 +47,15 @@ fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --once) ONCE=1 ;;
+    --qualification-mode)
+      [ "$QUALIFICATION_MODE_SEEN" -eq 0 ] && [ "$#" -ge 2 ] || { echo "host_pull: qualification mode arguments refused" >&2; exit 78; }
+      QUALIFICATION_MODE_SEEN=1
+      shift
+      case "$1" in
+        off|physical-only|qualified-readiness) QUALIFICATION_MODE="$1" ;;
+        *) echo "host_pull: unknown qualification mode" >&2; exit 78 ;;
+      esac
+      ;;
     --host)
       [ "$#" -ge 2 ] || { echo "host_pull: --host requires HOST" >&2; exit 2; }
       shift
@@ -108,13 +119,9 @@ write_state() { # $1 host, $2 probe rc, $3 probe stdout
 HOST_PULL_REMOTE_STDIN_EXEC='umask 077; PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin${PATH:+:$PATH}"; export PATH; command -v python3 >/dev/null 2>&1 || exit 78; t=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/host_pull_probe.XXXXXXXX") || exit 70; p=; trap '"'"'/bin/rm -f -- "$t"'"'"' EXIT; trap '"'"'if test -n "$p"; then kill -HUP "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 129 ] || exit 78; fi; exit 129'"'"' HUP; trap '"'"'if test -n "$p"; then kill -INT "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 130 ] || exit 78; fi; exit 130'"'"' INT; trap '"'"'if test -n "$p"; then kill -TERM "$p" 2>/dev/null || :; wait "$p"; rc=$?; [ "$rc" -eq 143 ] || exit 78; fi; exit 143'"'"' TERM; /bin/cat >"$t" || exit 70; python3 -c '"'"'exec('"'"'"'"'"'"'"'"'import os,signal,subprocess,sys,time\nseen=[0]\ndef notice(sig,frame):\n    seen[0]=sig\nfor sig in (signal.SIGHUP,signal.SIGINT,signal.SIGTERM):\n    signal.signal(sig,notice)\nchild=subprocess.Popen([os.environ.get("SHELL") or "/bin/sh",sys.argv[1]],stdin=subprocess.DEVNULL,start_new_session=True)\nstatus=None\nwhile not seen[0] and status is None:\n    try:\n        status=child.wait(timeout=0.04)\n    except subprocess.TimeoutExpired:\n        pass\nif seen[0]:\n    for sig in (seen[0],):\n        try:\n            os.killpg(child.pid,sig)\n        except (ProcessLookupError,PermissionError):\n            pass\n    time.sleep(0.12)\n    try:\n        os.killpg(child.pid,signal.SIGKILL)\n    except (ProcessLookupError,PermissionError):\n        pass\n    deadline=time.monotonic()+2\n    while True:\n        check=subprocess.run(["/bin/ps","-Ao","pgid=,stat="],capture_output=True,text=True,timeout=2)\n        if check.returncode!=0:\n            raise SystemExit(78)\n        live=False\n        for line in check.stdout.splitlines():\n            cells=line.split()\n            if len(cells)>1 and cells[0]==str(child.pid) and cells[1][0] not in "ZX":\n                live=True\n                break\n        if not live:\n            break\n        if time.monotonic()>=deadline:\n            raise SystemExit(78)\n        time.sleep(0.04)\n    try:\n        child.wait(timeout=2)\n    except subprocess.TimeoutExpired:\n        raise SystemExit(78)\n    raise SystemExit(128+seen[0])\nraise SystemExit(status if status>=0 else 128-status)\n'"'"'"'"'"'"'"'"')'"'"' "$t" </dev/null & p=$!; wait "$p"'
 run_probe() {
   local is_local="$1" alias="$2" probe="$3" key_guard="${4:-}"
-  # macOS /bin/bash is 3.2. With set -u, "${name[@]}" is unbound when the
-  # array has no elements; Bash 4.4 stopped treating that expansion as unset.
-  # The normal telemetry path therefore starts with the incumbent BatchMode
-  # and ConnectTimeout flags. Diagnostics only append key policy.
   local key_options=(-o BatchMode=yes -o ConnectTimeout=8)
-  if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ]; then
-    # This read-only inspection must never enroll/update a host key. Normal
+  if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ] || [ "$key_guard" = "fixed-paid-qualification" ]; then
+    # Fixed inspection/qualification must never enroll/update a host key. Normal
     # telemetry retains its existing inherited transport policy unchanged.
     key_options+=(-o StrictHostKeyChecking=yes -o UpdateHostKeys=no)
   elif [ -n "$key_guard" ]; then
@@ -125,7 +132,14 @@ run_probe() {
   elif [ -z "$alias" ]; then
     return 255
   else
-    perl -e 'alarm 25; exec @ARGV' ssh "${key_options[@]}" "$alias" "$HOST_PULL_REMOTE_STDIN_EXEC" 2>/dev/null <<< "$probe"
+    if [ "$key_guard" = "fixed-paid-qualification" ]; then
+      # The closed compiler bounds the FINAL UTF-8 command plus its NUL before
+      # this branch. Keep the committed bootstrap direct: the telemetry spool's
+      # ambient Python/SHELL and mutable path are not paid-bootstrap authority.
+      perl -e 'alarm 25; exec @ARGV' ssh "${key_options[@]}" "$alias" "$probe" 2>/dev/null </dev/null
+    else
+      perl -e 'alarm 25; exec @ARGV' ssh "${key_options[@]}" "$alias" "$HOST_PULL_REMOTE_STDIN_EXEC" 2>/dev/null <<< "$probe"
+    fi
   fi
 }
 
@@ -165,8 +179,30 @@ if [ "$PAID_REQUESTED" -eq 1 ]; then
   esac
   PAID_ALIAS="${PREPARED%%$'\n'*}"
   PAID_PROBE="${PREPARED#*$'\n'}"
-  run_probe 0 "$PAID_ALIAS" "$PAID_PROBE"
+  run_probe 0 "$PAID_ALIAS" "$PAID_PROBE" fixed-paid-qualification
   exit $?
+fi
+
+# This finite side-pass deliberately cannot publish GLM/account readiness.
+# It only returns bounded DATA from the existing fixed ubuntu0 physical probe.
+physical_only_sidepass() {
+  local prepared alias probe output rc
+  prepared=$(python3 -B "$BACKEND_FILE" physical-diagnostic-prepare "$HOSTS_JSON" ubuntu0) || return 78
+  case "$prepared" in *$'\n'*) ;; *) return 78 ;; esac
+  alias="${prepared%%$'\n'*}"
+  probe="${prepared#*$'\n'}"
+  output=$(run_probe 0 "$alias" "$probe" fixed-physical-diagnostic)
+  rc=$?
+  printf '%s' "$output" | python3 -B "$BACKEND_FILE" physical-diagnostic-result "$rc"
+}
+
+# Qualified readiness has NO reusable daemon authorization token: the source
+# contract requires a fresh authenticated parent/boot/account/source commitment
+# on each pass. Until that canonical producer is integrated, refuse BEFORE any
+# collector / SSH / state effect. One-shot --paid-qualification is DATA only.
+if [ "$QUALIFICATION_MODE" = "qualified-readiness" ]; then
+  echo "host_pull: qualified readiness requires fresh parent-owned context" >&2
+  exit 78
 fi
 
 pass_once() {
@@ -221,6 +257,9 @@ fi
 while true; do
   pass_once
   PASS_RC=$?
+  if [ "$QUALIFICATION_MODE" = "physical-only" ]; then
+    physical_only_sidepass || PASS_RC=78
+  fi
   [ "$ONCE" -eq 1 ] && exit "$PASS_RC"
   sleep "$INTERVAL"
 done

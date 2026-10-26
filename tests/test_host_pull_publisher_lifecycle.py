@@ -296,7 +296,7 @@ exit 0
 
 
 def expected_argv(lock, pin):
-    return "/usr/bin/lockf\n-t\n0\n" + str(lock) + "\n/bin/bash\n" + str(pin) + "\n"
+    return "/usr/bin/lockf\n-t\n0\n" + str(lock) + "\n/bin/bash\n" + str(pin) + "\n--qualification-mode\noff\n"
 
 
 def prepare(workspace, *, body=b"#!/bin/bash\nexit 91\n", select=True):
@@ -384,7 +384,7 @@ def test_bash_syntax_and_no_pidfile_race():
     assert "kill -0" not in text
     assert "$HERE/host_pull.sh" not in text
     template = TEMPLATE.read_text()
-    for marker in ("__HOST_PULL__", "__STDOUT_LOG__", "__STDERR_LOG__", "__PATH__", "__LOCK__"):
+    for marker in ("__HOST_PULL__", "__STDOUT_LOG__", "__STDERR_LOG__", "__PATH__", "__LOCK__", "__QUALIFICATION_MODE__"):
         assert template.count(marker) == 1
     assert "__LOG__" not in template
     assert "com.mastermind.host-pull" in template
@@ -403,6 +403,7 @@ def test_stopped_publication_pins_only_verified_generation(workspace):
     assert plist["KeepAlive"] is True and plist["RunAtLoad"] is True
     assert plist["ProgramArguments"] == [
         "/usr/bin/lockf", "-t", "0", str(ctx["lock"]), "/bin/bash", str(ctx["pin"]),
+        "--qualification-mode", "off",
     ]
     assert plist["StandardOutPath"] == plist["StandardErrorPath"] == str(ctx["log"])
     text = ctx["plist"].read_text()
@@ -894,7 +895,7 @@ def test_lockf_contention_returns_75(workspace):
     out, err = first.communicate(timeout=5)
     assert first.returncode == 0, err
     recorded = (ctx["stub"] / "lockf.args").read_text().splitlines()
-    assert recorded == ["/bin/bash", str(ctx["pin"])]
+    assert recorded == ["/bin/bash", str(ctx["pin"]), "--qualification-mode", "off"]
     assert "/usr/bin/lockf" not in recorded
     log = (ctx["stub"] / "lockf.log").read_text()
     assert "-t 0 " in log
@@ -910,7 +911,7 @@ def test_production_launchctl_print_shape_is_accepted(workspace):
     result = run(ctx)
     assert result.returncode == 0, result.stderr
     plist = plistlib.loads(ctx["plist"].read_bytes())
-    assert plist["ProgramArguments"][-1] == str(ctx["pin"])
+    assert plist["ProgramArguments"][-3] == str(ctx["pin"])
     assert plist["EnvironmentVariables"]["PATH"] == SERVICE_PATH
     (ctx["stub"] / "launchctl.log").write_text("")
     second = run(ctx)
@@ -1030,7 +1031,7 @@ def test_loaded_idle_is_booted_out_before_one_bootstrap(workspace):
     assert log.index("bootout ") < log.index("bootstrap ")
     assert log.count("bootstrap ") == 1
     plist = plistlib.loads(ctx["plist"].read_bytes())
-    assert plist["ProgramArguments"][-1] == str(ctx["pin"])
+    assert plist["ProgramArguments"][-3] == str(ctx["pin"])
     assert_not_executed(ctx)
 
 
@@ -1357,6 +1358,7 @@ def test_second_installer_makes_no_mutation_while_first_holds_transaction(worksp
     plist = plistlib.loads(ctx["plist"].read_bytes())
     assert plist["ProgramArguments"] == [
         "/usr/bin/lockf", "-t", "0", str(ctx["lock"]), "/bin/bash", str(ctx["pin"]),
+        "--qualification-mode", "off",
     ]
     assert plist["ProgramArguments"].count("/bin/bash") == 1
     lockf_log = ctx["stub"] / "lockf.log"
@@ -1594,7 +1596,7 @@ def test_advance_rebinds_launchd_only_after_old_pid_settles(workspace):
     assert final["previous"] == selector.name
     assert final["sequence"] == before["sequence"] + 1
     plist = plistlib.loads(ctx["plist"].read_bytes())
-    assert plist["ProgramArguments"][-1] == str(pin)
+    assert plist["ProgramArguments"][-3] == str(pin)
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
     assert log.count("bootstrap ") == 1

@@ -251,7 +251,7 @@ SERVICE_PATH = re.compile(
     r"(?::/(?:[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*))*\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 ADMITTED_TEMPLATE_NAME = "host_pull_launchd.plist.template"
-ADMITTED_TEMPLATE_SHA256 = "31a7108382df97357e8173b6edd7a5612178a042ecbc165591d89e9152846d9f"
+ADMITTED_TEMPLATE_SHA256 = "4bb1c8d78b8a345d1c15405f515c85185d6c31118f739761fd4479eba28fb358"
 
 def fail(message):
     sys.stderr.write(message + "\n")
@@ -415,7 +415,9 @@ if cmd == "check-pin" or cmd == "check-advance":
     sys.stdout.write(digest + "\n")
 
 elif cmd == "render":
-    template, dest, pin, log_path, lock_path, service_path = sys.argv[2:8]
+    template, dest, pin, log_path, lock_path, service_path, mode = sys.argv[2:9]
+    if mode not in ("off", "physical-only", "qualified-readiness"):
+        fail("unrecognized qualification mode")
     for label, path in (("pin", pin), ("log", log_path), ("lock", lock_path),
                         ("template", template), ("dest", dest)):
         require_safe(path, label)
@@ -446,13 +448,13 @@ elif cmd == "render":
     if hashlib.sha256(raw_template).hexdigest() != ADMITTED_TEMPLATE_SHA256:
         fail("template digest")
     text = raw_template.decode("utf-8")
-    for marker in ("__HOST_PULL__", "__STDOUT_LOG__", "__STDERR_LOG__", "__PATH__", "__LOCK__"):
+    for marker in ("__HOST_PULL__", "__STDOUT_LOG__", "__STDERR_LOG__", "__PATH__", "__LOCK__", "__QUALIFICATION_MODE__"):
         if text.count(marker) != 1:
             fail("template marker " + marker)
     # Stdout and stderr share one operator log. Distinct markers keep the
     # exactly-once substitution check honest; a shared __LOG__ token cannot.
     values = {"__HOST_PULL__": pin, "__STDOUT_LOG__": log_path, "__STDERR_LOG__": log_path,
-              "__PATH__": service_path, "__LOCK__": lock_path}
+              "__PATH__": service_path, "__LOCK__": lock_path, "__QUALIFICATION_MODE__": mode}
     for marker, value in values.items():
         if any(ch in value for ch in "&<>\"'"):
             fail("xml value")
@@ -1454,7 +1456,7 @@ selector_moved_before_effect() {
 }
 
 expected_argv() {
-  printf '%s\n' /usr/bin/lockf -t 0 "$LOCK" /bin/bash "$PIN"
+  printf '%s\n' /usr/bin/lockf -t 0 "$LOCK" /bin/bash "$PIN" --qualification-mode "$QUALIFICATION_MODE"
 }
 
 argv_matches() {
@@ -1761,6 +1763,8 @@ HOLD_ARM=""
 LOCK_DESCENDANT=""
 HOLDER_REPORT=""
 EXPECT_OWNER_UID=""
+QUALIFICATION_MODE="off"
+QUALIFICATION_MODE_SEEN=0
 ADVANCE_FROM=""
 SELECTED_ADVANCE=0
 SELECT_FENCE=0
@@ -1782,6 +1786,11 @@ while [ "$#" -gt 0 ]; do
     --expect-current) EXPECT_CURRENT=${2:-}; shift 2 ;;
     --advance-from) ADVANCE_FROM=${2:-}; shift 2 ;;
     --publisher) PUBLISHER=${2:-}; shift 2 ;;
+    --qualification-mode)
+      [ "$QUALIFICATION_MODE_SEEN" -eq 0 ] && [ "$#" -ge 2 ] || die 78 "qualification mode arguments"
+      QUALIFICATION_MODE_SEEN=1
+      QUALIFICATION_MODE=$2; shift 2
+      ;;
     --plist) DEST_PLIST=${2:-}; shift 2 ;;
     --log) LOG_PATH=${2:-}; shift 2 ;;
     --lock) LOCK=${2:-}; shift 2 ;;
@@ -1807,6 +1816,10 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ -n "$STORE" ] && [ -n "$GENERATION" ] && [ -n "$EXPECT_CURRENT" ] && [ -n "$PUBLISHER" ] || usage
+case "$QUALIFICATION_MODE" in off|physical-only|qualified-readiness) ;; *) die 78 "unknown qualification mode" ;; esac
+# The original collector must not bootstrap a mode with no authenticated
+# per-pass producer; no one-shot <=60s token is reused as recurring authority.
+[ "$QUALIFICATION_MODE" != "qualified-readiness" ] || die 78 "qualified recurring context unavailable"
 if [ -n "$ADVANCE_FROM" ]; then
   case "$ADVANCE_FROM" in
     *[!0-9a-f]*) die 78 "advance-from identity" ;;
@@ -1854,7 +1867,7 @@ case "$COMMAND" in
     hold_if_requested "$HOLD_MUTATION"
     # exec transfers signals to lockf. A collector that cannot take the lock
     # returns lockf's status, including 75 when the single collector is held.
-    exec "$LOCKF" -t 0 "$LOCK" /bin/bash "$PIN"
+    exec "$LOCKF" -t 0 "$LOCK" /bin/bash "$PIN" --qualification-mode "$QUALIFICATION_MODE"
     ;;
   install-agent)
     [ -n "$DEST_PLIST" ] && [ -n "$LOG_PATH" ] && [ -n "$LOCK" ] && [ -n "$SERVICE_PATH" ] || usage
@@ -1882,7 +1895,7 @@ case "$COMMAND" in
       require_verified_pin
     fi
     py paths-ready "$LOCK" "$LOG_PATH" || die 78 "lock or log path"
-    RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH") \
+    RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH" "$QUALIFICATION_MODE") \
       || die 78 "render failed"
     launchctl_print || die 78 "launchctl state uncertain"
     NEED_BOOTOUT=0

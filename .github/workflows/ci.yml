@@ -111,6 +111,39 @@ jobs:
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
+      # Supplementary fast discrimination for the three observed Linux
+      # initializer failures. A green matrix still requires every full shard.
+      - name: H1 initializer Linux fast preflight
+        if: matrix.index == 2
+        run: >-
+          python -m pytest -q --tb=short -p scripts.ci_pytest_timing
+          tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup
+          tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook
+          tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+          tests/test_paid_initializer_nosite.py
+          tests/test_paid_initializer_sysconfig.py
+          tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed
+
+      # A hosted runner may inherit a POSIX default ACL on an account HOME
+      # ancestor. Its negative refusal is not a real positive initializer.
+      # Require the positive in an isolated non-root Linux account whose HOME
+      # has no ACL, with real /usr/bin/python3.12, real process and observer.
+      # This Docker environment has no provider/host credentials or network.
+      - name: H1 required real Linux no-ACL positive journey
+        if: matrix.index == 2
+        run: |
+          docker build --file tests/h1_ci_fixture/Dockerfile \
+            --tag mastermind-h1-noacl:${{ github.sha }} tests/h1_ci_fixture
+          docker run --rm --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,mode=1777 \
+            --tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700 \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            mastermind-h1-noacl:${{ github.sha }} \
+            /usr/bin/python3.12 -B -m pytest -q --noconftest \
+              -p no:cacheprovider \
+              tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+
       - name: Run repository test shard
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
 
