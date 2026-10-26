@@ -225,7 +225,7 @@ def test_actual_shell_wrapper_preserves_context_and_physical_status(tmp_path,phy
 
 
 def test_own_return_retains_diagnostic_without_shared_state_reread(backend,tmp_path,monkeypatch,capsys):
-    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET,readiness_rc=1),1)
+    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET,physical_rc=1,readiness_rc=1),1)
     response=capsys.readouterr().out.strip()
     prefix,encoded=response.split(' probe_diagnostic=',1)
     assert prefix=='reachable=false error=probe_exit_1'
