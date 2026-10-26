@@ -581,13 +581,14 @@ def test_native_initializer_extends_only_exact_preimage_members():
         'ext/paid_initializer.py','ext/paid_initializer_token_data.py',
         'ext/paid_initializer_nested_data.py','ext/host_pull_daemon.sh',
         'ext/host_pull_launchd.plist.template'}
-    # The original collector/F1+R28 fusion must retain precisely its five
-    # changed source members; no authority to alter the historical importer.
+    # The current reviewed collector/F1+R28 fusion has six changed source
+    # members, including the independently hardened physical-stage backend.
+    # Neither this correction nor the initializer changes the historical importer.
     assert {p for p in before if before[p]!=current[p]}=={
-        'ext/fabric_task.py','ext/host_pull.sh',
+        'ext/fabric_task.py','ext/host_pull.sh','ext/host_pull_backend.py',
         'ext/paid_host_qualification.py','ext/pick.py','pool'}
-    assert sum(before[p]==current[p] for p in before)==90
-    for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py','pick.py'):
+    assert sum(before[p]==current[p] for p in before)==89
+    for name in ('host_pull.sh','host_pull_backend.py','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py','pick.py'):
         assert current['ext/'+name]==hashlib.sha256((native/'candidate'/name).read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.

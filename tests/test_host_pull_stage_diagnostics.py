@@ -224,6 +224,33 @@ def test_actual_shell_wrapper_preserves_context_and_physical_status(tmp_path,phy
     assert result.stderr==''
 
 
+
+@pytest.mark.parametrize('first_rc,second_rc,expected_rc,second_ran',[
+    (0,0,0,True), (1,0,1,False), (0,78,78,True)])
+def test_optional_multi_validator_failure_cannot_be_masked_by_later_success(
+        tmp_path,first_rc,second_rc,expected_rc,second_ran):
+    # Generated GLM and Bailian commands are separate newline-delimited
+    # processes in the ORIGINAL single remote probe. No provider/network runs.
+    source=(SOURCE/'host_pull.sh').read_text()
+    start=source.index('    probe="printf')
+    end=source.index('\n    OUT=$(run_probe',start)
+    assignment=source[start:end]
+    body='PRESERVED=fixture; printf "load1=0.5\\nncpu=8\\n"; (exit 0)'
+    first=f'test "$PRESERVED" = fixture; printf "first_validator=known\\n"; (exit {first_rc})'
+    second=f'printf "second_validator=known\\n"; (exit {second_rc})'
+    env={'PATH':'','HOME':str(tmp_path)}
+    build='probe='+shlex.quote(body)+'\nglm_probe='+shlex.quote(first+'\n'+second)+'\n'+assignment+'\nprintf "%s" "$probe"'
+    generated=subprocess.run(['/bin/bash','--noprofile','--norc','-c',build],env=env,
+                             capture_output=True,text=True,check=True,timeout=8).stdout
+    result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',generated],env=env,
+                          capture_output=True,text=True,timeout=8)
+    assert result.returncode==0, result.stderr  # physical success unaffected
+    assert PREFIX+'PHYSICAL_EXIT 0' in result.stdout
+    assert PREFIX+f'READINESS_EXIT {expected_rc}' in result.stdout
+    assert 'first_validator=known' in result.stdout
+    assert ('second_validator=known' in result.stdout) is second_ran
+    assert result.stderr==''
+
 def test_own_return_retains_diagnostic_without_shared_state_reread(backend,tmp_path,monkeypatch,capsys):
     value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET,physical_rc=1,readiness_rc=1),1)
     response=capsys.readouterr().out.strip()

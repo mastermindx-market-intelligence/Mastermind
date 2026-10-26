@@ -171,3 +171,16 @@ stage tests now use actual physical/readiness stdout ordering and include
 injection, missing-base, duplicate/NaN/zero-core and out-of-stage negatives.
 This remains source-only, not live host proof or a qualified H1 recurring
 producer. Updated native 100-member manifest SHA256: `e4c173a0dd39312c3a28352da11b644d587e1da9feee29460e53476de721642a`.
+
+### Aggregate multi-provider failure masking correction (2026-10-26)
+
+A single optional readiness block can contain two generated validators (GLM
+and Bailian), but the final shell status previously reflected only the second.
+The current source encloses the original emitted commands in one fail-closed
+subshell, records its aggregate readiness status in the existing stage frame,
+and keeps the physical return status independent. Thus first-provider failure
+followed by second-provider success cannot authorize an earlier untrusted
+account envelope. Inert real-shell regressions check first failure/second
+skipped, both successes, final failure, physical reachability independence.
+No new collector, transport, account authority or recurring H1 producer.
+New 100-member manifest SHA256: `c319f3bff95aa46b66cda6617596415019fb661e3155e65f14810a093792afeb`.

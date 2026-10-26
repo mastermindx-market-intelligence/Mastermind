@@ -225,12 +225,17 @@ pass_once() {
     fi
     # One transport, two distinct results: physical status controls reachability;
     # optional readiness failure is UNKNOWN, never account admission.
+    # All emitted provider commands run in one isolated fail-closed group:
+    # an early failure cannot be masked by a later validator returning zero.
     probe="printf '%s\n' 'HOST_PULL_STAGE_V1 PHYSICAL_BEGIN'
 $probe
 HOST_PULL_DIAG_PHYSICAL_RC=\$?
 printf 'HOST_PULL_STAGE_V1 PHYSICAL_EXIT %s\n' \"\$HOST_PULL_DIAG_PHYSICAL_RC\"
 printf '%s\n' 'HOST_PULL_STAGE_V1 READINESS_BEGIN'
+(
+set -e
 $glm_probe
+)
 HOST_PULL_DIAG_READINESS_RC=\$?
 printf 'HOST_PULL_STAGE_V1 READINESS_EXIT %s\n' \"\$HOST_PULL_DIAG_READINESS_RC\"
 exit \"\$HOST_PULL_DIAG_PHYSICAL_RC\""
