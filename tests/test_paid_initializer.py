@@ -603,7 +603,6 @@ def test_completion_notice_has_own_line_with_real_ci_capture(tmp_path):
     assert len(notices)==1 and 'test_notice_fixture ASSERTIONS_COMPLETED' in notices[0]
 
 
-@pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux private package/initializer/FD execution')
 def _real_home_ancestry_acl(home):
     """Read only Linux ACL *presence* in actual pin traversal order.
 
@@ -649,6 +648,7 @@ def test_real_home_acl_classifier_cannot_invent_clean_metadata(tmp_path,monkeypa
     assert os.getxattr is original
 
 
+@pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux private package/initializer/FD execution')
 def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,monkeypatch,request):
     """Real mechanics/owner validators; trusted platform metadata is simulated.
 
