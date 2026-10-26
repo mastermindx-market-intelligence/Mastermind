@@ -52,6 +52,16 @@ def physical():
             'lease_legacy_lanes=0\nlease_unlocked_lanes=0\ntools=claude,python3\n')
 
 
+
+def staged(physical_output='',readiness_output='',physical_rc=0,readiness_rc=0):
+    # Real transport order: physical bytes between physical markers, optional
+    # provider bytes only between readiness markers.
+    return (PREFIX+'PHYSICAL_BEGIN\n'+physical_output+
+            PREFIX+f'PHYSICAL_EXIT {physical_rc}\n'+
+            PREFIX+'READINESS_BEGIN\n'+readiness_output+
+            PREFIX+f'READINESS_EXIT {readiness_rc}\n')
+
+
 def write(backend, tmp_path, monkeypatch, output, rc):
     directory = tmp_path/'observations';directory.mkdir(mode=0o700, exist_ok=True)
     with monkeypatch.context() as m:
@@ -68,8 +78,7 @@ def test_success_retains_physical_and_account_observation(backend,tmp_path,monke
              'transport_alias':'fixture-alias','mode':'glm','config_scope':'launcher_glm_config.v1',
              'validator_sha256':hashlib.sha256(b'inert validator').hexdigest(),
              'observed_at':1000,'status':'known','accounts':{'fixture-account':True}}
-    value=write(backend,tmp_path,monkeypatch,framed()+physical()+
-                'glm_local_account_readiness='+json.dumps(account)+'\n',0)
+    value=write(backend,tmp_path,monkeypatch,staged(physical(), 'glm_local_account_readiness='+json.dumps(account)+'\n'),0)
     assert value['reachable'] is True and value['error'] is None
     assert value['load1']==0.5 and value['ncpu']==8 and value['active_lanes']==0
     assert value['glm_local_account_readiness']==account
@@ -82,7 +91,7 @@ def test_optional_failure_preserves_validated_physical_but_never_admits_account(
     # An optional command can fail after printing a plausible 'known' result.
     # The actual physical shell return is zero; readiness remains UNKNOWN.
     untrusted='glm_local_account_readiness={"status":"known","accounts":{"x":true}}\n'
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=1)+physical()+untrusted,0)
+    value=write(backend,tmp_path,monkeypatch,staged(physical(), untrusted, readiness_rc=1),0)
     assert value['reachable'] is True and value['error'] is None
     assert value['load1']==0.5 and value['ncpu']==8
     assert 'glm_local_account_readiness' not in value
@@ -94,23 +103,56 @@ def test_optional_failure_preserves_validated_physical_but_never_admits_account(
 
 def test_successful_readiness_cannot_salvage_missing_physical_metrics(
         backend,tmp_path,monkeypatch):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=0)+'ncpu=8\n',0)
+    value=write(backend,tmp_path,monkeypatch,staged('ncpu=8\n'),0)
     assert value['reachable'] is False and value['error']=='bad_probe_output'
     assert 'ncpu' not in value and 'glm_local_account_readiness' not in value
 
 
 def test_no_eligible_validators_preserves_plain_physical_observation(
         backend,tmp_path,monkeypatch):
-    value=write(backend,tmp_path,monkeypatch,framed()+physical(),0)
+    value=write(backend,tmp_path,monkeypatch,staged(physical()),0)
     assert value['reachable'] is True
     assert value['probe_diagnostic']['optional_readiness']['exit_status']==0
     assert 'glm_local_account_readiness' not in value
     assert 'bailian_local_account_readiness' not in value
 
+
+def test_readiness_cannot_inject_or_replace_physical_metrics(backend,tmp_path,monkeypatch):
+    fake='load1=9999\nncpu=4096\nactive_lanes=0\n'
+    value=write(backend,tmp_path,monkeypatch,staged(physical(),fake,readiness_rc=1),0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert value['probe_diagnostic']['optional_readiness']['state']=='RETURNED_NONZERO'
+
+
+def test_readiness_cannot_rescue_incomplete_physical_even_when_stage_zero(
+        backend,tmp_path,monkeypatch):
+    fake='load1=0.5\nncpu=8\n'
+    value=write(backend,tmp_path,monkeypatch,staged('ts=1000\n',fake),0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+    assert 'load1' not in value and 'ncpu' not in value
+
+
+def test_metrics_outside_physical_frame_do_not_authorize_host(backend,tmp_path,monkeypatch):
+    value=write(backend,tmp_path,monkeypatch,framed()+physical(),0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+
+
+@pytest.mark.parametrize('invalid',[
+    physical().replace('load1=0.5','load1=nan'),
+    physical().replace('ncpu=8','ncpu=0'),
+    physical().replace('ncpu=8','ncpu=8\nncpu=8'),
+    physical().replace('load1=0.5','load1=0.5\nload1=0.7')])
+def test_mandatory_physical_metrics_are_finite_unique_and_positive(
+        backend,tmp_path,monkeypatch,invalid):
+    value=write(backend,tmp_path,monkeypatch,staged(invalid),0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+
+
 @pytest.mark.parametrize('rc,error',[(1,'probe_exit_1'),(78,'probe_exit_78'),
                                    (128,'probe_timeout'),(255,'ssh_unreachable')])
 def test_nonzero_remains_unavailable_even_with_complete_physical(backend,tmp_path,monkeypatch,rc,error):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=rc)+physical(),rc)
+    value=write(backend,tmp_path,monkeypatch,staged(physical(),readiness_rc=rc),rc)
     assert value['reachable'] is False and value['error']==error
     assert 'load1' not in value and 'tools' not in value
     assert value['probe_diagnostic']['transport']['exit_status']==rc
@@ -152,8 +194,7 @@ def test_invalid_transport_status_is_bounded_unknown(backend,tmp_path,monkeypatc
 
 
 def test_failure_diagnostic_never_copies_arbitrary_output(backend,tmp_path,monkeypatch):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=1)+physical()+SECRET+'\n'+
-                'stderr='+SECRET+'\n',1)
+    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET+'\n'+'stderr='+SECRET+'\n',readiness_rc=1),1)
     assert SECRET not in json.dumps(value)
     assert set(value)=={'host','ts','reachable','error','probe_diagnostic'}
     diagnostic=value['probe_diagnostic']
@@ -184,7 +225,7 @@ def test_actual_shell_wrapper_preserves_context_and_physical_status(tmp_path,phy
 
 
 def test_own_return_retains_diagnostic_without_shared_state_reread(backend,tmp_path,monkeypatch,capsys):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=1)+physical()+SECRET,1)
+    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET,readiness_rc=1),1)
     response=capsys.readouterr().out.strip()
     prefix,encoded=response.split(' probe_diagnostic=',1)
     assert prefix=='reachable=false error=probe_exit_1'

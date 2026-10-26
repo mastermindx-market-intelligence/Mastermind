@@ -420,19 +420,51 @@ def write_state():
         except (TypeError, ValueError):
             return None
 
-    kv = {}
+    # The optional validator shares one SSH stdout stream but has NO power
+    # to supply, replace, or rescue physical host capacity. Source each field
+    # solely from the verified stage in which it was actually produced.
+    kv, readiness_kv = {}, {}
     duplicate = set()
     if rc == 0 and framing_valid:
+        segment = None
         for line in out.splitlines():
+            if line == _STAGE_PREFIX + " PHYSICAL_BEGIN":
+                segment = "physical"
+                continue
+            if line.startswith(_STAGE_PREFIX + " PHYSICAL_EXIT "):
+                segment = None
+                continue
+            if line == _STAGE_PREFIX + " READINESS_BEGIN":
+                segment = "readiness"
+                continue
+            if line.startswith(_STAGE_PREFIX + " READINESS_EXIT "):
+                segment = None
+                continue
+            if segment is None:
+                continue
             line = line.strip()
             if line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
             k = k.strip()
             if k and all(c.isalnum() or c == "_" for c in k):
-                if k in kv: duplicate.add(k)
-                kv[k] = v.strip()
-    if rc == 0 and framing_valid and kv.get("load1") not in (None, "") and kv.get("ncpu") not in (None, ""):
+                if segment == "physical":
+                    target = kv
+                elif k in ("glm_local_account_readiness", "bailian_local_account_readiness"):
+                    target = readiness_kv
+                else:
+                    continue
+                if k in target: duplicate.add(k)
+                target[k] = v.strip()
+    load = num(kv.get("load1"))
+    cpus = num(kv.get("ncpu"))
+    physically_valid = (
+        rc == 0 and framing_valid and diagnostic["physical"]["state"] == "RETURNED_ZERO"
+        and "load1" not in duplicate and "ncpu" not in duplicate
+        and load is not None and math.isfinite(load) and 0 <= load <= 100000
+        and cpus is not None and math.isfinite(cpus) and cpus.is_integer()
+        and 1 <= cpus <= 4096)
+    if physically_valid:
         doc["reachable"] = True
         ts = num(kv.get("ts"))
         if ts and ts > 0:
@@ -450,7 +482,7 @@ def write_state():
                 from glm_host_account_source import owned_bytes
                 import hashlib
                 key = provider + "_local_account_readiness"
-                value = kv.get(key, "")
+                value = readiness_kv.get(key, "")
                 if len(value.encode()) > 16384 or key in duplicate:
                     raise ValueError("readiness envelope")
                 observation = json.loads(value)

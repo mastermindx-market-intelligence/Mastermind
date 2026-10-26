@@ -157,3 +157,17 @@ hosted CI and fresh nonauthor review before any source admission.
 Updated 100-member manifest SHA256: `50a7ff3e78e8022d0d86af8bc3622cc0d607e2be976b8758d8c44a91c2508a45`.
 Updated source inventory SHA256: `e76374948a190bdcea5fe6f33b6499a603fdbbd986d7264807d790e5a49cfd4a`.
 Historical earlier hashes in this note describe earlier immutable commits.
+
+### Frame-origin hardening — mandatory physical metrics cannot originate in optional output
+
+Follow-up independent source audit found that the original backend accepted
+`load1`/`ncpu` from ANY stream position, so a failing optional validator
+could emit plausible physical keys and salvage a physically incomplete probe.
+The existing one-transport parser now accepts telemetry only *inside the
+PHYSICAL_BEGIN/EXIT stage*, accepts GLM/Bailian account envelopes only inside
+the READINESS_BEGIN/EXIT stage when that optional stage returned zero, and
+rejects missing/nonfinite/duplicate mandatory physical capacity fields. The
+stage tests now use actual physical/readiness stdout ordering and include
+injection, missing-base, duplicate/NaN/zero-core and out-of-stage negatives.
+This remains source-only, not live host proof or a qualified H1 recurring
+producer. Updated native 100-member manifest SHA256: `e4c173a0dd39312c3a28352da11b644d587e1da9feee29460e53476de721642a`.
