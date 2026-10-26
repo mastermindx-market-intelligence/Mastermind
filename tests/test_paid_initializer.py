@@ -604,6 +604,51 @@ def test_completion_notice_has_own_line_with_real_ci_capture(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux private package/initializer/FD execution')
+def _real_home_ancestry_acl(home):
+    """Read only Linux ACL *presence* in actual pin traversal order.
+
+    This fixture classifier never supplies an ACL-free view, modifies an
+    ancestor, or returns a path/value. The production initializer remains the
+    sole trust decision, including any earlier system image refusal.
+    """
+    import errno
+    ancestry=list(reversed((Path(home),*Path(home).parents)))
+    for index,node in enumerate(ancestry):
+        for key,kind in (('system.posix_acl_access','ACCESS'),
+                         ('system.posix_acl_default','DEFAULT')):
+            try:os.getxattr(node,key,follow_symlinks=False)
+            except OSError as error:
+                if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):
+                    raise
+            else:
+                return dict(node_role='HOME' if index==len(ancestry)-1 else 'HOME_ANCESTOR',
+                            acl_key=kind)
+    return None
+
+
+def test_real_home_acl_classifier_cannot_invent_clean_metadata(tmp_path,monkeypatch):
+    """Metadata-only classifier used to LABEL an ineligible CI principal.
+
+    Production initializer does not call this helper, and this test does not
+    alter real ACLs. It refuses anything other than actual ENODATA absence.
+    """
+    import errno
+    if not hasattr(os,'getxattr'):pytest.skip('Linux-only POSIX xattr primitive')
+    home=tmp_path/'inert-home';home.mkdir()
+    original=os.getxattr;reads=[]
+    def xattr(node,key,*args,**kwargs):
+        reads.append((str(node),key))
+        if str(node)==str(tmp_path) and key=='system.posix_acl_default':
+            return b'inert-default-acl'
+        raise OSError(errno.ENODATA,'no ACL in this modeled metadata fixture')
+    with monkeypatch.context() as model:
+        model.setattr(os,'getxattr',xattr)
+        assert _real_home_ancestry_acl(str(home))==dict(node_role='HOME_ANCESTOR',acl_key='DEFAULT')
+        assert any(key=='system.posix_acl_default' for _,key in reads)
+    # The source preflight must never install an ACL shim in the real child.
+    assert os.getxattr is original
+
+
 def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,monkeypatch,request):
     """Real mechanics/owner validators; trusted platform metadata is simulated.
 
@@ -764,8 +809,28 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             from tests.compiled_initializer_diagnostic import instrument_entry,require_execution_success
             argv[5]=instrument_entry(argv[5],preamble=owner.NO_SITE_PREAMBLE)
             assert len(argv[5].encode('utf-8'))+1<131072
+            # The hosted runner can have a *real* default ACL on /home's
+            # ancestry. Its completed 78 refusal is a useful negative proof,
+            # not a genuine positive no-ACL Linux qualification. Never strip
+            # that ACL, mock it away in this child or call a refusal success.
+            actual_acl=_real_home_ancestry_acl(account.pw_dir)
             execution=subprocess.run(argv,env=dict(HOME=account.pw_dir,PATH='/usr/bin:/bin'),stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
+            if actual_acl is not None:
+                from tests.compiled_initializer_diagnostic import decode_failure
+                observed_failure=decode_failure(execution.stderr.strip())
+                assert execution.returncode==78 and not execution.stdout
+                assert private_token.encode() not in execution.stderr
+                assert observed_failure is not None,'real ACL refusal must have typed diagnostic evidence'
+                assert (observed_failure['stage']=='BOOTSTRAP'
+                    and observed_failure['kind']=='InitializerCommitmentRefused'
+                    and observed_failure['node_role']==actual_acl['node_role']
+                    and observed_failure['acl_key']==actual_acl['acl_key']
+                    and any(site['function']=='no_acl' for site in observed_failure['sites']))
+                # Mark the hosted account explicitly INELIGIBLE: no false
+                # assertion that the actual positive initializer ran. CI also
+                # requires a separately isolated non-root no-ACL real journey.
+                pytest.xfail('actual compiled initializer correctly refused ACL-bearing CI HOME; no positive journey on this host')
             require_execution_success(execution,request)
             if private_token.encode() in execution.stdout:
                 raise AssertionError('compiled diagnostic output privacy refused') from None
@@ -850,8 +915,13 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     assert set(value['jobs'])=={'pytest_shards','test'}
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
+    positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
     full=[(i,x) for i,x in enumerate(steps) if x.get('name')=='Run repository test shard']
-    assert len(preflight)==len(full)==1 and preflight[0][0]<full[0][0]
+    assert len(preflight)==len(positive)==len(full)==1 and preflight[0][0]<positive[0][0]<full[0][0]
+    real=positive[0][1]
+    assert real['if']=='matrix.index == 2' and not real.get('continue-on-error',False)
+    assert all(value in real['run'] for value in ('--network=none','--cap-drop=ALL','--read-only',
+        'tests/h1_ci_fixture/Dockerfile','tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire'))
     pre=preflight[0][1];assert pre['if']=='matrix.index == 2' and not pre.get('continue-on-error',False)
     assert shlex.split(pre['run'])==['python','-m','pytest','-q','--tb=short','-p','scripts.ci_pytest_timing',
         'tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup',
