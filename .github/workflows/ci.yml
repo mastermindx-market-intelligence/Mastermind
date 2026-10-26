@@ -137,7 +137,7 @@ jobs:
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
             --tmpfs /tmp:rw,mode=1777 \
-            --tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=700 \
+            --tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700 \
             --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
             mastermind-h1-noacl:${{ github.sha }} \
             /usr/bin/python3.12 -B -m pytest -q --noconftest \

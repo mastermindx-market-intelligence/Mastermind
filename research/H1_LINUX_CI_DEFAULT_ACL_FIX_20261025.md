@@ -77,3 +77,19 @@ current-head checks, independent review, and accepted H1 release gates.
 The #1836 97-member host-pull source and already-selected M2 native seq23
 are separate owners; this change does not publish, select, restart, merge,
 qualify providers, retry a refused run or change an ACL on any live host.
+
+## Current-head D8 identity-literal guard repair
+
+Hosted #1847 run 40269860803 on eb835d47 passed shards 0 and 2,
+including the mandatory no-ACL positive CI step, but failed shard 1 only:
+`test_d8_template_topology_and_protected_defaults` reported `['700']`.
+The D8 identity guard correctly treats an unqualified decimal 700 token
+inside a CI source/identity-bearing diff as suspicious; the source was the
+new Docker `--tmpfs ...mode=700` permission operand next to `uid/gid`.
+Use the explicit **octal** `mode=0700`, not an identity literal.
+The original guard is unchanged, its narrow scanner rejects mode=700 and
+accepts mode=0700 on the exact YAML diff. Docker on authorized Ubuntu0
+independently showed `--tmpfs ...mode=0700` creates a nonroot-owned home
+with actual `stat.S_IMODE=0o700`. Keep this exact permission pinned in the
+workflow source contract test. No default ACLs, user identities, services
+or credentials are modified on any actual host.

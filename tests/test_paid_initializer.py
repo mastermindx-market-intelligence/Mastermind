@@ -910,6 +910,7 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     real=positive[0][1]
     assert real['if']=='matrix.index == 2' and not real.get('continue-on-error',False)
     assert all(value in real['run'] for value in ('--network=none','--cap-drop=ALL','--read-only',
+        '--tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700',
         'tests/h1_ci_fixture/Dockerfile','tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire'))
     pre=preflight[0][1];assert pre['if']=='matrix.index == 2' and not pre.get('continue-on-error',False)
     assert shlex.split(pre['run'])==['python','-m','pytest','-q','--tb=short','-p','scripts.ci_pytest_timing',
