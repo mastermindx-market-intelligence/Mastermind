@@ -287,6 +287,32 @@ def finish(out: dict) -> int:
         if out.get(key + '_rc') == 0 and (
                 not isinstance(out.get(key), str) or not out[key].strip()):
             incomplete.append(f'{key}.receipt_unverified')
+    # The incumbent scratch_reap.py prints a final JSON ledger even when it
+    # has zero eligible trees. Exit 0 with empty/truncated output, an unrelated
+    # diagnostic line, or a partial scan cannot prove a completed sweep.
+    if out.get('scratch_reap_rc') == 0:
+        raw = out.get('scratch_reap')
+        try:
+            scratch = json.loads(raw) if isinstance(raw, str) else None
+        except (TypeError, ValueError):
+            scratch = None
+        counters = ('removed', 'bundled', 'skipped', 'swept_overcap_bundles')
+        valid = (
+            isinstance(scratch, dict)
+            and type(scratch.get('partial')) is bool
+            and all(type(scratch.get(key)) is int and scratch[key] >= 0
+                    for key in counters)
+            and type(scratch.get('freed_gib')) in (int, float)
+            and 0 <= scratch['freed_gib'] < float('inf')
+            and type(scratch.get('elapsed_s')) in (int, float)
+            and 0 <= scratch['elapsed_s'] < float('inf')
+            and type(scratch.get('deadline_s')) in (int, float)
+            and 0 < scratch['deadline_s'] < float('inf')
+        )
+        if not valid:
+            incomplete.append('scratch_reap.receipt_unverified')
+        elif scratch['partial']:
+            incomplete.append('scratch_reap.partial')
     # The archive pass invokes two remote substeps under a nested receipt.
     # A failed or refused peer must not disappear beneath a green top-level
     # heartbeat merely because its *_rc is not a direct member of out.

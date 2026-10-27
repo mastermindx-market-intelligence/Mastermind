@@ -167,6 +167,11 @@ class FleetStorageVolumeTests(unittest.TestCase):
     def test_incomplete_substep_never_masquerades_as_green_sweep(self):
         # Does not execute sweep.main or any cleanup helper; finish is a pure
         # receipt and exit-status boundary under a disposable state directory.
+        complete_scratch = json.dumps({
+            "removed": 0, "bundled": 0, "skipped": 0, "partial": False,
+            "deadline_s": 2700.0, "elapsed_s": 1,
+            "swept_overcap_bundles": 0, "freed_gib": 0.0,
+        })
         with tempfile.TemporaryDirectory() as temp:
             state = pathlib.Path(temp)
             with mock.patch.object(self.sweep, "STATE", state), mock.patch.object(
@@ -176,12 +181,12 @@ class FleetStorageVolumeTests(unittest.TestCase):
                 return_value=mock.Mock(free=200 * 1024 ** 3)
             ):
                 for steps, expected_incomplete, expected_exit in [
-                    ({"stale_packs_rc": 2, "scratch_reap_rc": 0,
+                    ({"stale_packs_rc": 2, "scratch_reap_rc": 0, "scratch_reap": complete_scratch,
                       "stale_packs": '{"status":"refused"}'},
                      ["stale_packs"], 1),
-                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0,
+                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0, "scratch_reap": complete_scratch,
                       "stale_packs": '{"status":"complete"}'}, [], 0),
-                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0,
+                    ({"stale_packs_rc": 0, "scratch_reap_rc": 0, "scratch_reap": complete_scratch,
                       "stale_packs": ""}, ["stale_packs.receipt_unverified"], 1),
                 ]:
                     with contextlib.redirect_stdout(io.StringIO()) as stdout:
@@ -195,6 +200,49 @@ class FleetStorageVolumeTests(unittest.TestCase):
                         (state / "sweep-log.jsonl").read_text().splitlines()]
             self.assertEqual([row["degraded"] for row in recorded], [True, False, True])
 
+
+
+    def test_scratch_reap_zero_exit_requires_complete_final_ledger(self):
+        # Pure finish() classification: no cleanup script or remote host runs.
+        complete = {
+            "removed": 0, "bundled": 0, "skipped": 0, "partial": False,
+            "deadline_s": 2700.0, "elapsed_s": 1,
+            "swept_overcap_bundles": 0, "freed_gib": 0.0,
+        }
+        invalid = dict(complete, removed=-1)
+        missing_partial = {key: value for key, value in complete.items()
+                           if key != "partial"}
+        cases = [
+            (None, ["scratch_reap.receipt_unverified"], 1),
+            ("", ["scratch_reap.receipt_unverified"], 1),
+            ("SKIP now-busy /somewhere", ["scratch_reap.receipt_unverified"], 1),
+            ("{broken", ["scratch_reap.receipt_unverified"], 1),
+            (json.dumps(missing_partial), ["scratch_reap.receipt_unverified"], 1),
+            (json.dumps(invalid), ["scratch_reap.receipt_unverified"], 1),
+            (json.dumps(dict(complete, partial=True)),
+             ["scratch_reap.partial"], 1),
+            (json.dumps(complete), [], 0),
+        ]
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            with mock.patch.object(self.sweep, "STATE", state), mock.patch.object(
+                self.sweep, "_external_volume_snapshots", return_value=[]
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ):
+                for raw, expected, exit_status in cases:
+                    with self.subTest(raw=raw), contextlib.redirect_stdout(
+                        io.StringIO()
+                    ) as output:
+                        status = self.sweep.finish({
+                            "mode": "calm", "scratch_reap_rc": 0,
+                            "scratch_reap": raw,
+                        })
+                    receipt = json.loads(output.getvalue())
+                    self.assertEqual(status, exit_status)
+                    self.assertEqual(receipt["incomplete_substeps"], expected)
+                    self.assertEqual(receipt["degraded"], bool(expected))
 
     def test_denied_grants_requires_verified_loopback_completion(self):
         # Hermetic receipt classification only: never run ssh or cleanup.
