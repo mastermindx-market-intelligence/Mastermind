@@ -119,3 +119,68 @@ def test_legacy_mode_remains_explicit_and_no_qualification_effect(tmp_path):
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
     assert not list((tmp_path / "disallowed-state").glob("*.json"))
+
+
+def test_b12_nonempty_host_physical_mode_excludes_account_reads_even_on_failure(tmp_path):
+    """One eligible remote host; all transport/backend effects are scratch stubs."""
+    host, env = fixture(tmp_path)
+    stage = host.parent
+    sentinel = tmp_path / "forbidden-account-probe"
+    capture = tmp_path / "probe-capture"
+    env["B12_SENTINEL"] = str(sentinel)
+    env["B12_CAPTURE"] = str(capture)
+    (stage / "glm_host_account_probe.py").write_text(
+        "import os,pathlib\n"
+        "pathlib.Path(os.environ['B12_SENTINEL']).write_text('read')\n"
+        "print('FORBIDDEN_PROVIDER_READINESS=known')\n")
+    (stage / "host_pull_backend.py").write_text(r'''import json, sys
+from pathlib import Path
+action = sys.argv[1]
+if action == "read-hosts":
+    print("ubuntu0|0|fixture-ssh|/worktrees|" +
+          ("0" if sys.argv[-1] == "--physical-only" else "1"))
+elif action == "write-state":
+    if len(sys.argv) != 8 or sys.argv[7] != "physical-only":
+        raise SystemExit(78)
+    raw = sys.argv[5]
+    if "FORBIDDEN_PROVIDER_READINESS" in raw:
+        raise SystemExit(78)
+    good = (sys.argv[4] == "0" and "PHYSICAL_EXIT 0" in raw
+            and "load1=0.25" in raw and "ncpu=4" in raw)
+    directory = Path(sys.argv[2])
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / (sys.argv[3] + ".json")).write_text(
+        json.dumps({"host": sys.argv[3], "reachable": good,
+                    "load1": 0.25 if good else None, "ncpu": 4 if good else None}))
+    print("physical-only-census")
+elif action == "physical-diagnostic-prepare":
+    print("fixture-ssh")
+    print(":")
+elif action == "physical-diagnostic-result":
+    print('{"status":"DIAGNOSTIC_ONLY","readiness":"NOT_REQUESTED"}')
+else:
+    raise SystemExit(78)
+''')
+    fake = tmp_path / "bin" / "perl"
+    fake.write_text(r'''#!/bin/sh
+cat > "$B12_CAPTURE"
+printf '%s\n' 'HOST_PULL_STAGE_V1 PHYSICAL_BEGIN' 'load1=0.25' 'ncpu=4'
+if [ "$B12_FAIL_PHYSICAL" = "1" ]; then
+    printf '%s\n' 'HOST_PULL_STAGE_V1 PHYSICAL_EXIT 1' \
+        'HOST_PULL_STAGE_V1 READINESS_BEGIN' 'HOST_PULL_STAGE_V1 READINESS_EXIT 0'
+    exit 1
+fi
+printf '%s\n' 'HOST_PULL_STAGE_V1 PHYSICAL_EXIT 0' \
+    'HOST_PULL_STAGE_V1 READINESS_BEGIN' 'HOST_PULL_STAGE_V1 READINESS_EXIT 0'
+''')
+    fake.chmod(0o755)
+    for failed in (False, True):
+        child_env = dict(env, B12_FAIL_PHYSICAL="1" if failed else "0")
+        result = run(host, child_env, "--qualification-mode", "physical-only", "--once")
+        assert result.returncode == 0, result.stderr
+        assert not sentinel.exists()
+        assert "FORBIDDEN_PROVIDER_READINESS" not in capture.read_text()
+        doc = json.loads((tmp_path / "disallowed-state" / "ubuntu0.json").read_text())
+        assert doc["reachable"] is not failed
+        assert "glm_local_account_readiness" not in doc
+        assert "bailian_local_account_readiness" not in doc

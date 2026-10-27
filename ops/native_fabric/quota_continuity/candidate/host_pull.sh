@@ -96,11 +96,16 @@ PROBE_TEMPLATE="$(< "$PROBE_FILE")"
 
 # host|is_local|ssh_alias|worktree_root — one line per probeable host.
 read_hosts() {
-  python3 -B "$BACKEND_FILE" read-hosts "$HOSTS_JSON" "$SELECTED" "$ONCE" --glm-readiness
+  # B12: keep one collector/physical publisher, but bypass account projection.
+  if [ "$QUALIFICATION_MODE" = "physical-only" ]; then
+    python3 -B "$BACKEND_FILE" read-hosts "$HOSTS_JSON" "$SELECTED" "$ONCE" --physical-only
+  else
+    python3 -B "$BACKEND_FILE" read-hosts "$HOSTS_JSON" "$SELECTED" "$ONCE" --glm-readiness
+  fi
 }
 
 write_state() { # $1 host, $2 probe rc, $3 probe stdout
-  python3 -B "$BACKEND_FILE" write-state "$STATE_DIR" "$1" "$2" "$3" "$4"
+  python3 -B "$BACKEND_FILE" write-state "$STATE_DIR" "$1" "$2" "$3" "$4" "$QUALIFICATION_MODE"
 }
 
 # Both modes use this one incumbent authenticated transport. Qualification
@@ -220,7 +225,7 @@ pass_once() {
     # Same existing transport. Nonsecret validator source and policy aliases only.
     # A failed projection stays absent; the eventual GLM join fails closed.
     glm_probe=":"
-    if [ "$glm_admitted" = "1" ]; then
+    if [ "$QUALIFICATION_MODE" != "physical-only" ] && [ "$glm_admitted" = "1" ]; then
       glm_probe=$(python3 -B "$GLM_PROBE_FILE" "$host" "$alias" "$ACCOUNTS_POLICY" 2>/dev/null) || glm_probe=":"
     fi
     # One transport, two distinct results: physical status controls reachability;

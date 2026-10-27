@@ -383,6 +383,10 @@ def read_hosts():
         alias = e.get("ssh_alias")
         if not isinstance(alias, str):
             alias = ""
+        if len(sys.argv) > 4 and sys.argv[4] == "--physical-only":
+            # B12: no provider-policy evaluation or host_pick import in this mode.
+            print("|".join([name, "1" if e.get("local") else "0", alias, wr]))
+            continue
         modes = e.get("allowed_modes")
         # Match incumbent host_pick structural mode and qualification rules.
         from host_pick import MODE_TOOLS
@@ -409,6 +413,9 @@ def write_state():
     if rc is not None and rc > 255:
         rc = None
     transport_alias = sys.argv[5] if len(sys.argv) > 5 else None
+    qualification_mode = sys.argv[6] if len(sys.argv) > 6 else "off"
+    if qualification_mode not in ("off", "physical-only"):
+        raise SystemExit(78)
     diagnostic = probe_diagnostic(out, rc)
     framing_valid = diagnostic["framing"] == "COMPLETE"
     doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None,
@@ -473,6 +480,8 @@ def write_state():
         # The legacy --glm-readiness column means any supported account readiness.
         for provider, mode, validator in (("glm", "glm", "glm_keys.py"),
                                            ("bailian", "qwen", "bailian_keys.py")):
+            if qualification_mode == "physical-only":
+                break  # Provider observations must never enter physical-only state.
             try:
                 # A failed optional block may print a plausible envelope before
                 # exiting. Never convert that data into account eligibility.
