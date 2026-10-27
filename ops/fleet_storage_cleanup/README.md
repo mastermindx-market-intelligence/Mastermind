@@ -15,7 +15,11 @@ incumbent installed helper remains unchanged until separately qualified release.
 - pull_remote_archive.py is the existing report-only/archive helper's source-bound
   B7 candidate. It refuses success-shaped empty SSH output and failures of lsof,
   find, du or invalid inventory rows; it does NOT install, arm, schedule or authorize
-  the helper's existing --apply mode. Original production helper provenance and
+  the helper's existing --apply mode. This candidate now explicitly refuses
+  --apply with exit 78 before SSH or destination effects: destructive remote
+  deletion needs an exclusive incumbent owner/identity lease spanning proof
+  through removal plus independent release review; the legacy double idle
+  probe alone is insufficient. Original production helper provenance and
   installer composition remain a separate protected-release gate.
 - This source snapshot is reviewable and tested to prevent unexplained host-local
   fixes. Source acceptance is separate from installed/armed/real-path proof.

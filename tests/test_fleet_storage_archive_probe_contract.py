@@ -7,6 +7,8 @@ import os
 import shlex
 import pathlib
 import subprocess
+import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -99,6 +101,38 @@ class ParentReceiptContract(unittest.TestCase):
         for raw in invalid:
             with self.subTest(raw=raw), self.assertRaises((ValueError, TypeError, KeyError)):
                 verified_probe_rows(raw, 500)
+
+
+class RemoteApplyEffectFence(unittest.TestCase):
+    """The unleased --apply path is refused before SSH or any filesystem effects."""
+
+    def test_apply_refuses_before_any_remote_probe_or_deletion(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            bindir = root / "bin"
+            bindir.mkdir()
+            marker = root / "ssh-was-called"
+            ssh = bindir / "ssh"
+            ssh.write_text('#!/bin/sh\nprintf called > "$REMOTE_ARCHIVE_SSH_MARKER"\nexit 79\n')
+            ssh.chmod(0o755)
+            dest = root / "not-created"
+            env = dict(os.environ)
+            env.update({
+                "HOME": str(root),
+                "PATH": str(bindir) + os.pathsep + env.get("PATH", ""),
+                "REMOTE_ARCHIVE_SSH_MARKER": str(marker),
+            })
+            result = subprocess.run(
+                [sys.executable, str(SOURCE), "unreachable.invalid", str(dest), "--apply"],
+                capture_output=True, text=True, env=env, timeout=10,
+            )
+            self.assertEqual(result.returncode, 78, result.stderr)
+            receipt = json.loads(result.stdout.strip())
+            self.assertEqual(receipt["status"], "REFUSED")
+            self.assertEqual(receipt["reason"], "REMOTE_ARCHIVE_APPLY_REQUIRES_OWNER_LEASE")
+            self.assertEqual(receipt["remote_deletions"], 0)
+            self.assertFalse(marker.exists(), "refusal must precede SSH invocation")
+            self.assertFalse(dest.exists(), "refusal must precede destination writes")
 
 
 class RemoteApplyShellArgumentSafety(unittest.TestCase):

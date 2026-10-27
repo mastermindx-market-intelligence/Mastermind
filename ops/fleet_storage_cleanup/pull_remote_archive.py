@@ -22,6 +22,18 @@ HOST, DEST = args[0], args[1]
 MIN_MB = int(os.environ.get("MIN_MB", "500"))
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20"]
 
+# B7 permits report-only inventory. Legacy --apply can delete a remote source
+# after an idle/checksum probe without a transaction-wide owner/identity lease.
+# Deny before ANY remote probe or destination write until a separately reviewed,
+# incumbent-coordinated proof-to-deletion fence is released.
+if APPLY:
+    print(json.dumps({
+        "status": "REFUSED",
+        "reason": "REMOTE_ARCHIVE_APPLY_REQUIRES_OWNER_LEASE",
+        "remote_deletions": 0,
+    }))
+    raise SystemExit(78)
+
 
 def _verified_archive_member(path):
     """Fail closed for the two-SSD pool; standalone WD archives stay compatible."""
