@@ -417,6 +417,21 @@ class FleetStorageVolumeTests(unittest.TestCase):
                           json.loads(output.getvalue())["incomplete_substeps"])
 
 
+    def test_installed_sparse_scan_headroom_behavior_survives_source_release(self):
+        # Source-only contract: neither main() nor any cleanup helper is run.
+        allow = self.sweep.sparse_scan_allowed
+        self.assertFalse(allow(260.0, 200.0), '60-GiB reserve defers 5400s scan')
+        self.assertFalse(allow(300.0, 200.0))
+        self.assertTrue(allow(259.99, 200.0))
+        self.assertTrue(allow(200.0, 200.0), 'never defer at the floor')
+        self.assertTrue(allow(199.0, 200.0), 'never weaken pressure floor')
+        self.assertTrue(allow(300.0, None), 'unknown floor does not skip')
+        self.assertTrue(allow(300.0, 0.0), 'unconfigured floor does not skip')
+        import inspect
+        main_source = inspect.getsource(self.sweep.main)
+        self.assertIn('sparse_scan_allowed(free / GIB, floor_gib)', main_source)
+        self.assertIn("out['sparse_deferred']", main_source)
+
     def test_atomic_original_sweep_lock_serializes_two_contenders(self):
         # Disposable lock only. Never calls the sweeper, SSH, launchd or cleanup.
         with tempfile.TemporaryDirectory() as temp:

@@ -207,6 +207,17 @@ def guarded(out: dict, key: str, argv: list, timeout: int, env=None, limit: int 
 
 
 
+
+def sparse_scan_allowed(free_gib: float, floor_gib: float | None) -> bool:
+    """Preserve incumbent above-floor headroom before costly sparse censuses.
+
+    This does NOT weaken the sparse-conversion gate near or below the
+    absolute storage floor. Only skips scans when reserve >= 60 GiB.
+    """
+    return not (floor_gib and free_gib >= floor_gib + 60.0)
+
+
+
 def _external_volume_snapshots() -> list[dict]:
     """Read-only observations of explicitly configured storage volumes and the lanes mount.
 
@@ -519,7 +530,19 @@ def main() -> int:
         floor_gib = floor_for_host()
         if floor_gib and free / GIB < floor_gib and mode == 'calm':
             mode, gc_age, sparse_idle = 'caution', 90, 24.0
+        # Installed M1/M2 source defers the 5,400 s full-worktree census when
+        # 60 GiB headroom remains above the immutable storage floor. Preserve
+        # this incumbent behavior while adding source-level receipt hardening.
+        if sparse_idle is not None and not sparse_scan_allowed(free / GIB, floor_gib):
+            sparse_idle = None
+            sparse_deferred = True
+        else:
+            sparse_deferred = False
         out = {'time': time.time(), 'free_gib_before': round(free / GIB, 1), 'mode': mode}
+        if sparse_deferred:
+            out['sparse_deferred'] = {'reason': 'above_floor_plus_60_gib',
+                                      'target_gib': floor_gib + 60.0,
+                                      'free_gib': round(free / GIB, 3)}
         if floor_gib:
             out['floor_gib'] = floor_gib
         # pass 0: git/gh transports stuck on the network for hours (ps + kill only, so
