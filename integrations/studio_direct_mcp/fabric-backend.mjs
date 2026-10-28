@@ -190,6 +190,65 @@ function resultReady(s,args) {
   if(s.result_bytes>(args.max_bytes??8192)) fail('RESULT_TOO_LARGE',{result_bytes:s.result_bytes,max_bytes:args.max_bytes??8192});
 }
 
+/**
+ * Read-only parent attention derived from the incumbent exact-run observation.
+ * It creates NO wake, retry, reviewer acceptance, lease, or new lifecycle.
+ * Parent consumers must independently check source/effects before acting.
+ */
+export function projectFabricParentRecovery(s, expectedRoot) {
+  if (!s || s.schema!=='mastermind.fabric_task_status.v1'
+      || typeof s.run_id!=='string' || !ID_RE.test(s.run_id)
+      || typeof expectedRoot!=='string' || !ID_RE.test(expectedRoot)
+      || typeof s.state!=='string' || typeof s.result_available!=='boolean')
+    throw new TypeError('FABRIC_PARENT_RECOVERY_STATUS_INVALID');
+  const rootVerified=s.root_id===expectedRoot;
+  // The native prelaunch refusal carries request correlation, not attested
+  // worker/ledger root. Expose it for diagnosis without authorizing parent wake.
+  const prelaunchCorrelated=s.state==='REQUEST_REFUSED_BEFORE_LAUNCH'
+    && s.execution_absence_proven===true && s.root_id===null
+    && s.request_root_id===expectedRoot;
+  const controller=s.continuation?.controller_return;
+  let disposition='WAIT_ORIGINAL_CONTROLLER';
+  // A foreign attested root is not our original run. Preserve its mismatch
+  // label; otherwise retain the native state-specific diagnosis even when
+  // the native root is legitimately unverified/null. No new parent authority.
+  const foreignRoot=typeof s.root_id==='string' && s.root_id!==expectedRoot;
+  // For this original run, controller uncertainty outranks apparent success.
+  if (foreignRoot) disposition='VERIFY_ORIGINAL_LINEAGE';
+  else if (s.state==='EFFECT_UNKNOWN' || controller==='UNCONFIRMED'
+      || ['STATUS_UNREADABLE','RESULT_UNAVAILABLE','REQUEST_RETAINED_NO_START_EVIDENCE'].includes(s.state))
+    disposition='RECONCILE_ORIGINAL_EFFECT';
+  else if (s.state==='TERMINAL' && s.rc===0 && s.signal==='ok'
+      && s.result_available===true) {
+    disposition=(s.accepted===true && s.acceptance_state==='ACCEPTED'
+        && ['reviewer','deterministic'].includes(s.accepted_by))
+      ? 'ACCEPTED_RESULT_OBSERVED' : 'RESULT_VERIFICATION_REQUIRED';
+  } else if (['TERMINAL','TERMINAL_FAILURE'].includes(s.state) && s.signal==='quota')
+    disposition='CAPACITY_BLOCKED_OR_REVIEW_FAILED';
+  else if (s.state==='REQUEST_REFUSED_BEFORE_LAUNCH'
+      && s.execution_absence_proven===true && (rootVerified || prelaunchCorrelated))
+    disposition='RECONCILE_PRELAUNCH_REFUSAL';
+  else if (['TERMINAL','TERMINAL_FAILURE','RECONCILED_PRESTART_FAILURE','RECONCILED_PREEXEC_FAILURE']
+      .includes(s.state))
+    disposition='RECONCILE_TERMINAL_FAILURE';
+  else if (['ACTIVE_OR_WAITING','SETTLING'].includes(s.state))
+    disposition='WAIT_ORIGINAL_CONTROLLER';
+  else if (!rootVerified)
+    disposition='VERIFY_ORIGINAL_LINEAGE';
+  const attentionRequired=!['WAIT_ORIGINAL_CONTROLLER','VERIFY_ORIGINAL_LINEAGE']
+    .includes(disposition);
+  return {
+    schema:'mastermind.fabric_parent_recovery_projection.v1',
+    requested_run_id:s.continuation?.requested_run_id??s.run_id,
+    effective_run_id:s.run_id, root_verified:rootVerified,
+    request_correlation_only:prelaunchCorrelated,
+    disposition, parent_attention_required:rootVerified && attentionRequired,
+    // The true lifecycle and provider state remain owned by the native run.
+    wake_proven:false, retry_authorized:false, dispatch_authorized:false,
+    result_consumption_authorized:false,
+  };
+}
+
 export function createFabricFacade(engine, options={}) {
   const cfg={adapterPath:DEFAULT_ADAPTER,python:'python3',workerCwd:'~',quotaFallback:false,...options};
   if(!isAbsolute(cfg.adapterPath) || cfg.adapterPath.includes('\0') || typeof cfg.python!=='string' || !cfg.python || cfg.python.includes('\0') || typeof cfg.workerCwd!=='string' || !cfg.workerCwd || cfg.workerCwd.includes('\0')) throw new TypeError('invalid operator configuration');
@@ -437,12 +496,12 @@ export function createFabricFacade(engine, options={}) {
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }
       const s=await status(args);
-      if(name==='fabric_status') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,expected_root_id:args.root_id,status:s,root_verified:s.root_id===args.root_id,execution_absence_proven:false});
+      if(name==='fabric_status') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,expected_root_id:args.root_id,status:s,parent_recovery:projectFabricParentRecovery(s,args.root_id),root_verified:s.root_id===args.root_id,execution_absence_proven:false});
       if(name==='fabric_wait') {
         const seconds=args.timeout_seconds??5;
         const waited=statusJSON(await runCapturedShort(['wait',args.run_id,'--timeout',String(seconds),'--interval','2',...(cfg.quotaFallback?['--follow']:[])],Math.min(12000,(seconds+2)*1000)),args.run_id,cfg.quotaFallback);
         checkRoot(waited,args);observeTerminal(waited,args);
-        return response({action:name,run_id:args.run_id,effective_run_id:waited.run_id,status:waited,root_verified:waited.root_id===args.root_id,execution_absence_proven:false});
+        return response({action:name,run_id:args.run_id,effective_run_id:waited.run_id,status:waited,parent_recovery:projectFabricParentRecovery(waited,args.root_id),root_verified:waited.root_id===args.root_id,execution_absence_proven:false});
       }
       if(name==='fabric_accept' && s.accepted===true) fail('ALREADY_ACCEPTED');
       if(name==='fabric_accept' && s.run_id!==args.run_id) fail('ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED',{effective_run_id:s.run_id});
