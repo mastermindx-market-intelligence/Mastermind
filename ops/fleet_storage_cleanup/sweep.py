@@ -173,8 +173,11 @@ def floor_for_host() -> float | None:
     default when the host has no config file, because that is what the guard does.
     """
     try:
-        v = float(json.loads(FLOOR_CONF.read_text())['internal_floor_gib'])
-        return v if v > 0 else None
+        configured = json.loads(FLOOR_CONF.read_text())['internal_floor_gib']
+        if isinstance(configured, bool):
+            return GUARD_DEFAULT_FLOOR_GIB
+        v = float(configured)
+        return v if 0.0 < v < float('inf') else GUARD_DEFAULT_FLOOR_GIB
     except FileNotFoundError:
         return GUARD_DEFAULT_FLOOR_GIB
     except Exception:

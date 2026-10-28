@@ -28,6 +28,26 @@ class FleetStorageVolumeTests(unittest.TestCase):
         cls.sweep = load("fleet_test_sweep", SOURCE / "sweep.py")
         cls.fleet = load("fleet_test_driver", SOURCE / "fleet_remote_sweep.py")
 
+    def test_nonpositive_nonfinite_or_boolean_floor_cannot_disable_guard(self):
+        # A malformed or invalid installed override must not silently erase
+        # the absolute storage floor. Valid M1 120 GiB remains authoritative.
+        with tempfile.TemporaryDirectory() as directory:
+            config = pathlib.Path(directory) / "storage-floor.json"
+            with mock.patch.object(self.sweep, "FLOOR_CONF", config):
+                self.assertEqual(
+                    self.sweep.floor_for_host(),
+                    self.sweep.GUARD_DEFAULT_FLOOR_GIB,
+                )
+                for value in (0, -1, True, False, "nan", "inf", "-inf", "bad"):
+                    with self.subTest(value=value):
+                        config.write_text(json.dumps({"internal_floor_gib": value}))
+                        self.assertEqual(
+                            self.sweep.floor_for_host(),
+                            self.sweep.GUARD_DEFAULT_FLOOR_GIB,
+                        )
+                config.write_text(json.dumps({"internal_floor_gib": 120}))
+                self.assertEqual(self.sweep.floor_for_host(), 120.0)
+
     @staticmethod
     def m1_sample(free=71.7):
         return {
