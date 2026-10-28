@@ -5781,7 +5781,8 @@ def test_cap_s1_observer_temp_root_normalizes_only_verified_descriptor(
         "open",
         lambda path, flags: calls.append(("open", os.fspath(path), flags)) or 91,
     )
-    monkeypatch.setattr(canary_module.os, "fstat", lambda fd: next(fstats))
+    real_fstat = os.fstat
+    monkeypatch.setattr(canary_module.os, "fstat", lambda fd: next(fstats) if fd == 91 else real_fstat(fd))
     monkeypatch.setattr(
         canary_module.os,
         "fchown",

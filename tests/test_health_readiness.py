@@ -37,7 +37,8 @@ def health_client(monkeypatch):
             monkeypatch.setenv("MASTERMIND_SERVE_ONLY", "1")
         else:
             monkeypatch.delenv("MASTERMIND_SERVE_ONLY", raising=False)
-        monkeypatch.setattr(main_mod.app.state, "scheduler", scheduler, raising=False)
+        # Repeated scheduler transitions must not undo via Starlette State.__delattr__.
+        monkeypatch.setitem(main_mod.app.state._state, "scheduler", scheduler)
         return TestClient(main_mod.app, raise_server_exceptions=True)
 
     return _client
