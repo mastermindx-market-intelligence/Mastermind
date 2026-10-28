@@ -172,6 +172,10 @@ class FleetStorageVolumeTests(unittest.TestCase):
             "deadline_s": 2700.0, "elapsed_s": 1,
             "swept_overcap_bundles": 0, "freed_gib": 0.0,
         })
+        complete_stale = json.dumps({
+            "applied": True, "removed": 0, "freed_bytes": 0,
+            "scratch_discovery": {"complete": True, "errors": []},
+        })
         with tempfile.TemporaryDirectory() as temp:
             state = pathlib.Path(temp)
             with mock.patch.object(self.sweep, "STATE", state), mock.patch.object(
@@ -185,7 +189,7 @@ class FleetStorageVolumeTests(unittest.TestCase):
                       "stale_packs": '{"status":"refused"}'},
                      ["stale_packs"], 1),
                     ({"stale_packs_rc": 0, "scratch_reap_rc": 0, "scratch_reap": complete_scratch,
-                      "stale_packs": '{"status":"complete"}'}, [], 0),
+                      "stale_packs": complete_stale}, [], 0),
                     ({"stale_packs_rc": 0, "scratch_reap_rc": 0, "scratch_reap": complete_scratch,
                       "stale_packs": ""}, ["stale_packs.receipt_unverified"], 1),
                 ]:
