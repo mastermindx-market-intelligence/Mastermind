@@ -335,6 +335,79 @@ def _stale_pack_inventory_complete(raw: str) -> bool:
             and report['freed_bytes'] >= 0)
 
 
+def _finite_nonnegative(value) -> bool:
+    return type(value) in (int, float) and 0 <= value < float('inf')
+
+
+def _helper_receipt_qualified(key: str, raw: str) -> bool:
+    """Validate helper completion, not just an exit-zero or text-shaped success.
+
+    Existing fleet_sparse/repack producers omit complete-attempt evidence.
+    Their zero-exit legacy receipts must remain HELD until the incumbent
+    producer contract is independently source-qualified and installed.
+    """
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else None
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(report, dict):
+        return False
+
+    def count(name):
+        return type(report.get(name)) is int and report[name] >= 0
+
+    if key == 'generated_cache_trim':
+        selected, verified, held = (report.get(name) for name in ('selected', 'verified', 'held'))
+        return (report.get('mode') == 'APPLY'
+                and isinstance(selected, list) and isinstance(verified, list)
+                and isinstance(held, dict)
+                and count('scanned') and count('held_count') and count('recovered_bytes')
+                and report['held_count'] >= len(held)
+                and 'refused' not in report and 'bounded' not in report
+                and all(isinstance(item, dict)
+                        and isinstance(item.get('name'), str) and item['name']
+                        and isinstance(item.get('head'), str) and item['head']
+                        and isinstance(item.get('caches'), list)
+                        for item in selected)
+                and all(isinstance(name, str) and name for name in verified)
+                and set(verified).issubset({item['name'] for item in selected})
+                and all(item['name'] in verified or item['name'] in held
+                        for item in selected))
+    if key == 'fleet_sparse':
+        return (count('sparsified') and count('skipped')
+                and count('conversion_failures') and report['conversion_failures'] == 0
+                and _finite_nonnegative(report.get('freed_gib'))
+                and report.get('discovery_complete') is True
+                and report.get('scan_failures') == []
+                and report.get('applied') is True)
+    if key == 'repack':
+        scope = report.get('discovery_scope')
+        return (count('repacked') and count('attempts_failed')
+                and report['attempts_failed'] == 0
+                and _finite_nonnegative(report.get('total_freed_gib'))
+                and _finite_nonnegative(report.get('free_after'))
+                and report.get('discovery_complete') is True
+                and report.get('scan_failures') == []
+                and isinstance(scope, dict)
+                and all(type(scope.get(name)) is int and scope[name] >= 0
+                        for name in ('durable_clones_checked', 'object_stores_identified')))
+    if key == 'chain_archive':
+        dst, manifest = report.get('dst'), report.get('manifest')
+        return (report.get('applied') is True and count('candidates')
+                and count('archived') and report['archived'] == report['candidates']
+                and count('errors') and report['errors'] == 0
+                and count('bytes') and _finite_nonnegative(report.get('archived_gib'))
+                and _finite_nonnegative(report.get('time'))
+                and isinstance(report.get('src'), str)
+                and report['src'].startswith('/')
+                and isinstance(dst, str) and dst.startswith('/')
+                and '..' not in Path(dst).parts
+                and isinstance(manifest, str)
+                and manifest.startswith(dst.rstrip('/') + '/_manifests/archive-')
+                and manifest.endswith('.json'))
+    return False
+
+
 def finish(out: dict) -> int:
     # A completed top-level pass is not a clean sweep when a bounded helper
     # refused or only partially scanned. Preserve its original return code
@@ -349,6 +422,11 @@ def finish(out: dict) -> int:
     for key in sorted(receipt_required):
         if out.get(key + '_rc') == 0 and (
                 not isinstance(out.get(key), str) or not out[key].strip()):
+            incomplete.append(f'{key}.receipt_unverified')
+    # Optional cleanup passes also require exact, interpretable completion ledgers.
+    # Legacy success-shaped stdout or missing discovery proof is NOT green.
+    for key in ('generated_cache_trim', 'fleet_sparse', 'repack', 'chain_archive'):
+        if out.get(key + '_rc') == 0 and not _helper_receipt_qualified(key, out.get(key)):
             incomplete.append(f'{key}.receipt_unverified')
     # Incumbent stale_pack_reaper.py may exit zero after a failed find(1) in
     # /private/tmp. That JSON's scratch_discovery.complete=false is binding.
@@ -755,7 +833,8 @@ def main() -> int:
             # frames cross the cutoff at a date boundary, so one look a day is the
             # design. rc != 0 (RTH window, writer lock held, volume unwritable) does
             # NOT stamp, so a refusal is retried on the next sweep.
-            if r5 is not None and r5.returncode == 0:
+            if (r5 is not None and r5.returncode == 0
+                    and _helper_receipt_qualified('chain_archive', out.get('chain_archive'))):
                 stamp.write_text(str(time.time()))
         return finish(out)
     finally:
