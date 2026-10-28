@@ -207,6 +207,22 @@ def guarded(out: dict, key: str, argv: list, timeout: int, env=None, limit: int 
 
 
 
+def hold_unqualified_apply(out: dict, key: str) -> None:
+    """Refuse an unqualified external producer BEFORE its --apply side effect.
+
+    The existing fleet_sparsify.py and fleet_repack.py are not source-enrolled
+    with the complete B10 receipt contract. A post-effect ledger cannot undo
+    an uncertain effect. Until immutable producer source, complete receipt
+    semantics and installed preimage are independently qualified, there is
+    deliberately no executable admission path for either helper.
+    """
+    if key not in ('fleet_sparse', 'repack'):
+        raise ValueError('unexpected producer admission key')
+    out[key] = 'PRE_EFFECT_HOLD: producer source and completion schema unqualified'
+    out[key + '_rc'] = 78
+    out[key + '_effect_state'] = 'NOT_APPLIED'
+
+
 
 def sparse_scan_allowed(free_gib: float, floor_gib: float | None) -> bool:
     """Preserve incumbent above-floor headroom before costly sparse censuses.
@@ -729,11 +745,10 @@ def main() -> int:
             # full 7 GiB lane trees faster than that, so a sweep on a MacBook at
             # 19.8 GiB free reclaimed exactly 0 while 52.8 GiB sat eligible but "too
             # young" (2026-09-20). Under pressure, trust the strong gates: ~30 min.
-            fsp_age = {'pressure': 0.02, 'caution': 0.25}.get(mode, round(sparse_idle / 24.0, 3))
-            fenv = dict(os.environ, MIN_AGE=str(fsp_age), MAX='60')
-            guarded(out, 'fleet_sparse', [sys.executable, str(HERE / 'fleet_sparsify.py'),
-                                          str(Path.home()), '/private/tmp', '--apply'],
-                    5400, fenv)
+            # B10: the installed sparse producer lacks complete discovery and
+            # conversion-attempt receipts. Never launch its --apply mode and
+            # only THEN discover that its completion ledger was unqualified.
+            hold_unqualified_apply(out, 'fleet_sparse')
 
         # pass 4b2: bound /private/tmp. Nothing ever reaped it, and it is the single
         # biggest generator on the compute hosts — 77 GiB on m1 and 73 GiB on the
@@ -759,12 +774,10 @@ def main() -> int:
         # ceiling could have idled the sweeper for four cycles. A timeout kill is safe --
         # the driver's failure path cleans the partial pack it leaves behind.
         if mode != 'calm':
-            renv = dict(os.environ, MAX='1', MIN_PACKS='6', MIN_GIB='4',
-                        DEADLINE_S='3300',
-                        MIN_FREE_GIB=str(int(max(20, 0.05 * total / GIB))))
-            guarded(out, 'repack', [sys.executable, str(HERE / 'fleet_repack.py'),
-                                    str(Path.home()), '/private/tmp', '--apply'],
-                    3600, renv)
+            # B10: the incumbent repack producer has no reviewed complete
+            # attempts_failed contract. Preserve all existing Git/worktree
+            # ownership and objects rather than executing an unqualified apply.
+            hold_unqualified_apply(out, 'repack')
 
         # pass 4d (Studio only): pull the OTHER hosts' unarchivable trees onto an
         # external volume here. The MacBook has no external drive of its own and no key

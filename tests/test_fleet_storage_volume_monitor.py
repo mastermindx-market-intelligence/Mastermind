@@ -535,6 +535,47 @@ class FleetStorageVolumeTests(unittest.TestCase):
                       main_source)
 
 
+    def test_b10_unqualified_sparse_and_repack_hold_before_any_apply(self):
+        # Execute only the sweep coordinator with every executable child mocked.
+        # This ensures an eligible caution/under-floor pass cannot invoke either
+        # unqualified producer; no installed cleaner/host/process is touched.
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            executed = []
+
+            def fake_guarded(out, key, *args, **kwargs):
+                executed.append(key)
+                out[key + '_rc'] = 0
+                out[key] = '{"status":"ok"}'
+
+            usage = mock.Mock(free=180 * self.sweep.GIB,
+                              total=460 * self.sweep.GIB)
+            with mock.patch.object(self.sweep, 'STATE', state), (
+                mock.patch.object(self.sweep, 'LOCK', state / 'sweep.lock')
+            ), mock.patch.object(self.sweep, 'ssd_receipts', return_value=[]), (
+                mock.patch.object(self.sweep, 'grants', return_value='ok')
+            ), mock.patch.object(self.sweep, 'guarded', side_effect=fake_guarded), (
+                mock.patch.object(self.sweep, '_pool_archive_mount', return_value=None)
+            ), mock.patch.object(self.sweep, 'floor_for_host', return_value=200.0), (
+                mock.patch.object(self.sweep.shutil, 'disk_usage', return_value=usage)
+            ), mock.patch.object(self.sweep, '_external_volume_snapshots', return_value=[]), (
+                mock.patch.object(self.sweep.Path, 'home', return_value=state)
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                status = self.sweep.main()
+            receipt = json.loads(output.getvalue())
+            self.assertIn('sparse', executed, 'existing native sparse helper stays eligible')
+            self.assertNotIn('fleet_sparse', executed)
+            self.assertNotIn('repack', executed)
+            self.assertEqual(status, 1)
+            for key in ('fleet_sparse', 'repack'):
+                with self.subTest(helper=key):
+                    self.assertEqual(receipt[key + '_rc'], 78)
+                    self.assertEqual(receipt[key + '_effect_state'], 'NOT_APPLIED')
+                    self.assertIn(key, receipt['incomplete_substeps'])
+            self.assertTrue(receipt['degraded'])
+            self.assertEqual(self.sweep.hold_unqualified_apply.__name__,
+                             'hold_unqualified_apply')
+
     def test_installed_sparse_scan_headroom_behavior_survives_source_release(self):
         # Source-only contract: neither main() nor any cleanup helper is run.
         allow = self.sweep.sparse_scan_allowed
