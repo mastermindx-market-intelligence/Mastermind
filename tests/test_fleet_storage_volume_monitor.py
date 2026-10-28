@@ -468,6 +468,73 @@ class FleetStorageVolumeTests(unittest.TestCase):
         self.assertIn('if _archive_cooldown_ready(pulled, str(archive_dest)):', source)
         self.assertIn('item = _qualified_archive_peer(', source)
 
+    def test_b10_helper_success_requires_complete_structured_receipts(self):
+        # Pure finish() classification, no live cleanup/archive/SSH/host effects.
+        cache = {'mode': 'APPLY', 'selected': [], 'verified': [], 'held': {},
+                 'held_count': 0, 'recovered_bytes': 0, 'scanned': 0}
+        sparse = {'applied': True, 'sparsified': 0, 'skipped': 0,
+                  'conversion_failures': 0, 'freed_gib': 0.0,
+                  'discovery_complete': True, 'scan_failures': []}
+        repack = {'repacked': 0, 'attempts_failed': 0, 'total_freed_gib': 0.0,
+                  'free_after': 200.0, 'discovery_complete': True,
+                  'scan_failures': [], 'discovery_scope':
+                  {'durable_clones_checked': 0, 'object_stores_identified': 0}}
+        chain = {'applied': True, 'src': '/tmp/test-chain', 'dst': '/tmp/test-archive',
+                 'manifest': '/tmp/test-archive/_manifests/archive-TEST.json',
+                 'candidates': 0, 'archived': 0, 'errors': 0, 'bytes': 0,
+                 'archived_gib': 0.0, 'time': 1.0}
+        fixtures = {'generated_cache_trim': cache, 'fleet_sparse': sparse,
+                    'repack': repack, 'chain_archive': chain}
+        for key, valid in fixtures.items():
+            with self.subTest(helper=key):
+                self.assertTrue(self.sweep._helper_receipt_qualified(key, json.dumps(valid)))
+                for bad in ('', '{truncated', '{"status":"ok"}'):
+                    self.assertFalse(self.sweep._helper_receipt_qualified(key, bad))
+                with tempfile.TemporaryDirectory() as temp, mock.patch.object(
+                    self.sweep, 'STATE', pathlib.Path(temp)
+                ), mock.patch.object(
+                    self.sweep, '_external_volume_snapshots', return_value=[]
+                ), mock.patch.object(
+                    self.sweep.shutil, 'disk_usage',
+                    return_value=mock.Mock(free=200 * 1024 ** 3)
+                ):
+                    for raw, expected in [(json.dumps(valid), []),
+                                          ('', [key + '.receipt_unverified']),
+                                          ('{"status":"ok"}', [key + '.receipt_unverified'])]:
+                        with contextlib.redirect_stdout(io.StringIO()) as output:
+                            status = self.sweep.finish({'mode': 'calm', key + '_rc': 0, key: raw})
+                        row = json.loads(output.getvalue())
+                        self.assertEqual(row['incomplete_substeps'], expected)
+                        self.assertEqual(status, 0 if not expected else 1)
+
+        for key, invalid in [
+            ('generated_cache_trim', {**cache, 'refused': 'unresolved_action'}),
+            ('generated_cache_trim', {**cache, 'bounded': 'time_budget'}),
+            ('fleet_sparse', {**sparse, 'discovery_complete': False}),
+            ('fleet_sparse', {**sparse, 'scan_failures': ['denied']}),
+            ('fleet_sparse', {**sparse, 'conversion_failures': 1}),
+            ('repack', {**repack, 'attempts_failed': 1}),
+            ('repack', {**repack, 'discovery_complete': False}),
+            ('chain_archive', {**chain, 'archived': 1}),
+            ('chain_archive', {**chain, 'errors': 1}),
+            ('chain_archive', {**chain, 'manifest': '/tmp/other/archive-TEST.json'}),
+        ]:
+            with self.subTest(helper=key, case=invalid):
+                self.assertFalse(self.sweep._helper_receipt_qualified(key, json.dumps(invalid)))
+
+        # The existing fleet_sparse and fleet_repack producers currently omit
+        # these proof fields. No false assertion that a matching producer is installed.
+        self.assertFalse(self.sweep._helper_receipt_qualified(
+            'fleet_sparse', json.dumps({'sparsified': 0, 'skipped': 0, 'freed_gib': 0.0})))
+        self.assertFalse(self.sweep._helper_receipt_qualified(
+            'repack', json.dumps({k: v for k, v in repack.items()
+                                  if k != 'attempts_failed'})))
+        import inspect
+        main_source = inspect.getsource(self.sweep.main)
+        self.assertIn("_helper_receipt_qualified('chain_archive', out.get('chain_archive'))",
+                      main_source)
+
+
     def test_installed_sparse_scan_headroom_behavior_survives_source_release(self):
         # Source-only contract: neither main() nor any cleanup helper is run.
         allow = self.sweep.sparse_scan_allowed
