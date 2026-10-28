@@ -283,6 +283,58 @@ def _external_volume_snapshots() -> list[dict]:
     return notes
 
 
+def _qualified_archive_peer(raw: str | None, peer: str,
+                            expected_dest: str | None) -> dict | None:
+    """One fail-closed receipt contract for archive inventory, cooldown and finish."""
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else None
+    except (ValueError, TypeError):
+        return None
+    if not (isinstance(report, dict)
+            and report.get('status') == 'REPORT_ONLY_SOURCE_PRESERVED'
+            and type(report.get('eligible_source_less_trees')) is int
+            and report['eligible_source_less_trees'] >= 0
+            and type(report.get('eligible_gib')) in (int, float)
+            and 0 <= report['eligible_gib'] < float('inf')
+            and type(report.get('remote_deletions')) is int
+            and report['remote_deletions'] == 0
+            and isinstance(expected_dest, str)
+            and expected_dest.startswith('/')
+            and '..' not in Path(expected_dest).parts
+            and report.get('host') == peer
+            and report.get('dest') == expected_dest):
+        return None
+    return report
+
+
+def _archive_cooldown_ready(pulled: dict, dest: str) -> bool:
+    """Only two independently verified successful peer inventories earn a cooldown."""
+    return all(
+        type(pulled.get(peer + '_rc')) is int
+        and pulled[peer + '_rc'] == 0
+        and _qualified_archive_peer(pulled.get(peer), peer, dest) is not None
+        for peer in ('mb', 'm1')
+    )
+
+
+def _stale_pack_inventory_complete(raw: str) -> bool:
+    """A zero-exit reaper may still fail to enumerate a protected scratch subtree."""
+    try:
+        report = json.loads(raw)
+    except (ValueError, TypeError):
+        return False
+    census = report.get('scratch_discovery') if isinstance(report, dict) else None
+    return (isinstance(census, dict)
+            and census.get('complete') is True
+            and isinstance(census.get('errors'), list)
+            and not census['errors']
+            and report.get('applied') is True
+            and type(report.get('removed')) is int
+            and report['removed'] >= 0
+            and type(report.get('freed_bytes')) is int
+            and report['freed_bytes'] >= 0)
+
+
 def finish(out: dict) -> int:
     # A completed top-level pass is not a clean sweep when a bounded helper
     # refused or only partially scanned. Preserve its original return code
@@ -298,6 +350,13 @@ def finish(out: dict) -> int:
         if out.get(key + '_rc') == 0 and (
                 not isinstance(out.get(key), str) or not out[key].strip()):
             incomplete.append(f'{key}.receipt_unverified')
+    # Incumbent stale_pack_reaper.py may exit zero after a failed find(1) in
+    # /private/tmp. That JSON's scratch_discovery.complete=false is binding.
+    if (out.get('stale_packs_rc') == 0
+            and isinstance(out.get('stale_packs'), str)
+            and out['stale_packs'].strip()
+            and not _stale_pack_inventory_complete(out['stale_packs'])):
+        incomplete.append('stale_packs.inventory_unverified')
     # The incumbent scratch_reap.py prints a final JSON ledger even when it
     # has zero eligible trees. Exit 0 with empty/truncated output, an unrelated
     # diagnostic line, or a partial scan cannot prove a completed sweep.
@@ -341,29 +400,8 @@ def finish(out: dict) -> int:
                     incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
                 elif rc != 0:
                     incomplete.append(f'fleet_archive.{peer}')
-                else:
-                    raw = archive.get(peer)
-                    try:
-                        report = json.loads(raw) if isinstance(raw, str) else None
-                    except (ValueError, TypeError):
-                        report = None
-                    valid = (
-                        isinstance(report, dict)
-                        and report.get('status') == 'REPORT_ONLY_SOURCE_PRESERVED'
-                        and type(report.get('eligible_source_less_trees')) is int
-                        and report['eligible_source_less_trees'] >= 0
-                        and type(report.get('eligible_gib')) in (int, float)
-                        and 0 <= report['eligible_gib'] < float('inf')
-                        and type(report.get('remote_deletions')) is int
-                        and report['remote_deletions'] == 0
-                        and isinstance(expected_dest, str)
-                        and expected_dest.startswith('/')
-                        and '..' not in Path(expected_dest).parts
-                        and report.get('host') == peer
-                        and report.get('dest') == expected_dest
-                    )
-                    if not valid:
-                        incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
+                elif _qualified_archive_peer(archive.get(peer), peer, expected_dest) is None:
+                    incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
     # The launchd parent can lack filesystem grants and delegate to its
     # existing forced-command loopback child. A string/partial/old child
     # response, or no child at all, is NOT a completed sweep: do not print a
@@ -676,35 +714,31 @@ def main() -> int:
             out['fleet_archive_hold'] = 'remote deletion disabled until archive content proof is verified'
             candidates = {}
             for peer in ('mb', 'm1'):
-                try:
-                    item = json.loads(pulled.get(peer, '{}'))
-                    if pulled.get(peer + '_rc') == 0 and item.get('status') == 'REPORT_ONLY_SOURCE_PRESERVED':
-                        candidates[peer] = {
-                            'eligible_source_less_trees': item['eligible_source_less_trees'],
-                            'eligible_gib': item['eligible_gib'],
-                            'remote_deletions': item['remote_deletions'],
-                            'dest': item['dest'],
-                        }
-                except (TypeError, ValueError, KeyError):
-                    continue
+                item = _qualified_archive_peer(pulled.get(peer), peer, str(archive_dest))
+                if pulled.get(peer + '_rc') == 0 and item is not None:
+                    candidates[peer] = {
+                        'eligible_source_less_trees': item['eligible_source_less_trees'],
+                        'eligible_gib': item['eligible_gib'],
+                        'remote_deletions': item['remote_deletions'],
+                        'dest': item['dest'],
+                    }
             out['fleet_archive_candidates'] = candidates
-            # Only burn the 6-hour cooldown when a pass can actually run.
-            # rc 2 indicates a storage identity, floor, or write-permission
-            # refusal. Stamping such a refusal would delay recovery; preserve
-            # the actual per-host reasons and retry on the next normal sweep.
-            if not all(pulled.get(peer + '_rc') == 2 for peer in ('mb', 'm1')):
+            # A timeout, nonzero exit, invalid receipt or partial peer does not
+            # consume six hours of recovery eligibility. Never stamp one good peer.
+            if _archive_cooldown_ready(pulled, str(archive_dest)):
                 arch_stamp.write_text(str(time.time()))
             else:
-                # rc=2 covers mount identity, floor and permission refusals,
-                # not only TCC. Report the actual preflight result instead of
-                # incorrectly saying every refusal is a write-grant problem.
                 reasons = []
                 for peer in ('mb', 'm1'):
+                    if peer in candidates:
+                        continue
                     try:
                         receipt = json.loads(pulled.get(peer, '{}'))
-                        reasons.append(f"{peer}: {str(receipt.get('reason', 'preflight refused'))[:140]}")
+                        reason = (str(receipt.get('reason', 'unverified receipt'))[:140]
+                                  if isinstance(receipt, dict) else 'unverified receipt')
                     except (TypeError, ValueError):
-                        reasons.append(f'{peer}: preflight refused')
+                        reason = 'unverified receipt'
+                    reasons.append(f"{peer}: rc={pulled.get(peer + '_rc', 'missing')} {reason}")
                 out['fleet_archive_blocked'] = '; '.join(reasons)[:360]
         elif arch_vol is None:
             out['fleet_archive_blocked'] = 'no verified external pool member'

@@ -417,6 +417,53 @@ class FleetStorageVolumeTests(unittest.TestCase):
                           json.loads(output.getvalue())["incomplete_substeps"])
 
 
+    def test_stale_pack_zero_exit_partial_discovery_is_degraded(self):
+        # Real incumbent M1: exit 0, but find(1) denied /private/tmp subtree.
+        receipt = {
+            'applied': True, 'removed': 0, 'freed_bytes': 0,
+            'scratch_discovery': {'complete': False, 'errors': [
+                '/private/tmp: find rc=1: Permission denied']},
+        }
+        self.assertFalse(self.sweep._stale_pack_inventory_complete(json.dumps(receipt)))
+        self.assertFalse(self.sweep._stale_pack_inventory_complete('not json'))
+        self.assertTrue(self.sweep._stale_pack_inventory_complete(json.dumps(
+            {**receipt, 'scratch_discovery': {'complete': True, 'errors': []}})))
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(
+            self.sweep, 'STATE', pathlib.Path(temp)
+        ), mock.patch.object(
+            self.sweep, '_external_volume_snapshots', return_value=[]
+        ), mock.patch.object(
+            self.sweep.shutil, 'disk_usage',
+            return_value=mock.Mock(free=200 * 1024 ** 3)
+        ), contextlib.redirect_stdout(io.StringIO()) as output:
+            code = self.sweep.finish({'mode': 'calm', 'stale_packs_rc': 0,
+                                      'stale_packs': json.dumps(receipt)})
+        self.assertEqual(code, 1)
+        self.assertIn('stale_packs.inventory_unverified',
+                      json.loads(output.getvalue())['incomplete_substeps'])
+
+    def test_archive_cooldown_fails_closed_on_partial_or_invalid_peer(self):
+        dest = '/Volumes/test/fleet-archive'
+        base = {'status': 'REPORT_ONLY_SOURCE_PRESERVED',
+                'eligible_source_less_trees': 0, 'eligible_gib': 0.0,
+                'remote_deletions': 0, 'dest': dest}
+        valid = {peer: json.dumps({**base, 'host': peer}) for peer in ('mb', 'm1')}
+        self.assertTrue(self.sweep._archive_cooldown_ready({
+            'mb': valid['mb'], 'mb_rc': 0, 'm1': valid['m1'], 'm1_rc': 0}, dest))
+        for bad_m1, bad_rc in [(valid['m1'], 124), (valid['m1'], 1),
+                               (valid['m1'], 2), ('', 0), ('truncated {', 0),
+                               (json.dumps({**base, 'host': 'm1',
+                                            'remote_deletions': 1}), 0),
+                               (json.dumps({**base, 'host': 'm1',
+                                            'eligible_gib': '0'}), 0)]:
+            with self.subTest(rc=bad_rc, receipt=bad_m1):
+                self.assertFalse(self.sweep._archive_cooldown_ready({
+                    'mb': valid['mb'], 'mb_rc': 0, 'm1': bad_m1, 'm1_rc': bad_rc}, dest))
+        import inspect
+        source = inspect.getsource(self.sweep.main)
+        self.assertIn('if _archive_cooldown_ready(pulled, str(archive_dest)):', source)
+        self.assertIn('item = _qualified_archive_peer(', source)
+
     def test_installed_sparse_scan_headroom_behavior_survives_source_release(self):
         # Source-only contract: neither main() nor any cleanup helper is run.
         allow = self.sweep.sparse_scan_allowed
