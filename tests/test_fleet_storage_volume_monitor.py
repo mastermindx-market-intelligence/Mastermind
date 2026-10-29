@@ -425,7 +425,7 @@ class FleetStorageVolumeTests(unittest.TestCase):
             with mock.patch.object(self.sweep, "LOOPBACK_KEY", key), mock.patch.object(
                 self.sweep.subprocess, "run", return_value=proc
             ), mock.patch.dict(self.sweep.os.environ, {"MM_SWEEP_LOOPBACK": "0"}):
-                self.assertEqual(self.sweep.via_loopback(),
+                self.assertEqual(self.sweep.via_loopback(parent_nonce='a' * 64),
                                  "loopback transport rc=42")
             # This invalid child must also degrade the original launchd receipt.
             with mock.patch.object(self.sweep, "STATE", pathlib.Path(temp)), (
@@ -610,6 +610,85 @@ class FleetStorageVolumeTests(unittest.TestCase):
         main_source = inspect.getsource(self.sweep.main)
         self.assertIn('sparse_scan_allowed(free / GIB, floor_gib)', main_source)
         self.assertIn("out['sparse_deferred']", main_source)
+
+    def test_b3_unbound_loopback_refuses_before_any_cleanup_helper(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            with mock.patch.object(self.sweep, 'STATE', state), mock.patch.object(
+                self.sweep, 'LOCK', state / 'sweep.lock'
+            ), mock.patch.dict(self.sweep.os.environ, {
+                'MM_SWEEP_NOLOCK': '1', 'MM_SWEEP_LOOPBACK': '1',
+                'SSH_ORIGINAL_COMMAND': 'sweep ' + 'a' * 64,
+            }), mock.patch.object(
+                self.sweep, 'guarded', side_effect=AssertionError('helper dispatched')
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(self.sweep.main(), 78)
+            self.assertEqual(json.loads(output.getvalue())['lock'], 'UNBOUND_CHILD')
+            self.assertFalse((state / 'sweep-loopback.lock').exists())
+
+    def test_b3_binding_needs_live_parent_matching_nonce_and_fresh_epoch(self):
+        # Disposable kernel locks and synthetic child identity, never SSH/cleanup.
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            lock = state / 'sweep.lock'
+            with mock.patch.object(self.sweep, 'LOCK', lock):
+                parent_fd = self.sweep._claim_sweep_lock(lock)
+                self.assertIsNotNone(parent_fd)
+                parent_pid = self.sweep.os.getpid()
+                nonce = self.sweep._read_lock_nonce(parent_fd)
+                try:
+                    with mock.patch.dict(self.sweep.os.environ, {
+                        'MM_SWEEP_LOOPBACK': '1',
+                        'SSH_ORIGINAL_COMMAND': 'sweep ' + nonce,
+                    }), mock.patch.object(self.sweep.os, 'getpid',
+                                          return_value=parent_pid + 10000):
+                        self.assertTrue(self.sweep._bound_loopback_parent())
+                        # The bound child acquires secondary while parent owns
+                        # canonical. Its own flock prevents later parent overlap.
+                        child_fd = self.sweep._claim_sweep_lock(
+                            state / 'sweep-loopback.lock')
+                        self.assertIsNotNone(child_fd)
+                        try:
+                            with mock.patch.dict(self.sweep.os.environ, {
+                                'SSH_ORIGINAL_COMMAND': 'sweep ' + 'b' * 64,
+                            }):
+                                self.assertFalse(self.sweep._bound_loopback_parent())
+                            old = {'pid': parent_pid, 'time': time.time() - 3600,
+                                   'nonce': nonce}
+                            self.sweep.os.ftruncate(parent_fd, 0)
+                            self.sweep.os.lseek(parent_fd, 0, self.sweep.os.SEEK_SET)
+                            self.sweep.os.write(parent_fd,
+                                                 json.dumps(old).encode('ascii'))
+                            self.sweep.os.fsync(parent_fd)
+                            self.assertFalse(self.sweep._bound_loopback_parent())
+                        finally:
+                            self.sweep.os.close(child_fd)
+                finally:
+                    self.sweep.os.close(parent_fd)
+                with mock.patch.dict(self.sweep.os.environ, {
+                    'MM_SWEEP_LOOPBACK': '1',
+                    'SSH_ORIGINAL_COMMAND': 'sweep ' + nonce,
+                }), mock.patch.object(self.sweep.os, 'getpid',
+                                      return_value=parent_pid + 10000):
+                    self.assertFalse(self.sweep._bound_loopback_parent())
+
+    def test_b3_ordinary_sweep_refuses_while_child_owns_helper_lock(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            child_fd = self.sweep._claim_sweep_lock(state / 'sweep-loopback.lock')
+            try:
+                with mock.patch.object(self.sweep, 'STATE', state), mock.patch.object(
+                    self.sweep, 'LOCK', state / 'sweep.lock'
+                ), mock.patch.dict(self.sweep.os.environ, {
+                    'MM_SWEEP_NOLOCK': '0', 'MM_SWEEP_LOOPBACK': '0',
+                }), mock.patch.object(
+                    self.sweep, 'guarded',
+                    side_effect=AssertionError('helper must not dispatch'),
+                ), contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(self.sweep.main(), 75)
+                self.assertEqual(json.loads(output.getvalue())['lock'], 'BUSY')
+            finally:
+                self.sweep.os.close(child_fd)
 
     def test_atomic_original_sweep_lock_serializes_two_contenders(self):
         # Disposable lock only. Never calls the sweeper, SSH, launchd or cleanup.
