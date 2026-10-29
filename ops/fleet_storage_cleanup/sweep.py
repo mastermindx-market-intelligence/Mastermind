@@ -32,6 +32,8 @@ import errno
 import fcntl
 import json
 import os
+import re
+import secrets
 import shutil
 import stat
 import subprocess
@@ -545,7 +547,7 @@ def finish(out: dict) -> int:
 LOOPBACK_KEY = Path.home() / '.ssh/id_mm_loopback'
 
 
-def via_loopback(timeout: int = 2400) -> dict | str | None:
+def via_loopback(timeout: int = 2400, parent_nonce: str | None = None) -> dict | str | None:
     """Re-enter this same sweep through ssh to 127.0.0.1, which HAS the grants.
 
     A launchd job holds no Documents/removable-volume grant; a Remote-Login
@@ -564,10 +566,12 @@ def via_loopback(timeout: int = 2400) -> dict | str | None:
     """
     if os.environ.get('MM_SWEEP_LOOPBACK') == '1' or not LOOPBACK_KEY.exists():
         return None
+    if not isinstance(parent_nonce, str) or not re.fullmatch(r'[0-9a-f]{64}', parent_nonce):
+        return 'loopback refused: missing canonical parent nonce'
     try:
         p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
                             '-o', 'StrictHostKeyChecking=accept-new', '-i', str(LOOPBACK_KEY),
-                            'localhost', 'sweep'],  # the command is ignored: authorized_keys forces it
+                            'localhost', f'sweep {parent_nonce}'],  # authorized_keys forces it
                            capture_output=True, text=True, timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as exc:
         return f'loopback failed: {exc!r}'[:300]
@@ -612,7 +616,8 @@ def _claim_sweep_lock(path: Path) -> int | None:
             return None
         if not qualified():
             raise OSError(errno.EPERM, 'lock path changed')
-        marker = json.dumps({'pid': os.getpid(), 'time': time.time()}).encode('ascii')
+        marker = json.dumps({'pid': os.getpid(), 'time': time.time(),
+                             'nonce': secrets.token_hex(32)}).encode('ascii')
         os.ftruncate(fd, 0)
         os.lseek(fd, 0, os.SEEK_SET)
         if os.write(fd, marker) != len(marker):
@@ -627,11 +632,73 @@ def _claim_sweep_lock(path: Path) -> int | None:
             os.close(fd)
 
 
+def _read_lock_nonce(fd: int) -> str:
+    """Read the one-time source-owned marker from our claimed canonical flock."""
+    os.lseek(fd, 0, os.SEEK_SET)
+    marker = json.loads(os.read(fd, 1024))
+    nonce = marker.get('nonce') if isinstance(marker, dict) else None
+    if not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{64}', nonce):
+        raise OSError(errno.EINVAL, 'canonical lock nonce unavailable')
+    return nonce
+
+
+def _bound_loopback_parent() -> bool:
+    """A forced-SSH child needs the live original parent lock and nonce.
+
+    The secondary lock serializes actual helpers: the parent owns it during
+    normal passes and releases it solely for an attested forced-command child.
+    If the parent dies, the child's held secondary lock fences new parents.
+    """
+    if os.environ.get('MM_SWEEP_LOOPBACK') != '1':
+        return False
+    match = re.fullmatch(r'sweep ([0-9a-f]{64})',
+                         os.environ.get('SSH_ORIGINAL_COMMAND', ''))
+    nofollow = getattr(os, 'O_NOFOLLOW', None)
+    if match is None or nofollow is None:
+        return False
+    try:
+        fd = os.open(LOCK, os.O_RDWR | os.O_CLOEXEC | nofollow)
+    except OSError:
+        return False
+    try:
+        held, named = os.fstat(fd), os.lstat(LOCK)
+        if (not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid()
+                or held.st_nlink != 1 or (held.st_mode & 0o022)
+                or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)):
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            pass  # another live process MUST hold the canonical lock
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+        os.lseek(fd, 0, os.SEEK_SET)
+        marker = json.loads(os.read(fd, 1024))
+        if not isinstance(marker, dict) or marker.get('nonce') != match.group(1):
+            return False
+        pid, started = marker.get('pid'), marker.get('time')
+        if (type(pid) is not int or pid <= 0 or pid == os.getpid()
+                or type(started) not in (int, float)
+                or not (0 <= time.time() - started <= 600)):
+            return False
+        os.kill(pid, 0)  # supplemental to flock; PID alone never authorizes
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+    finally:
+        os.close(fd)
+
+
 def main() -> int:
-    STATE.mkdir(parents=True, exist_ok=True)
-    # Preserve the original nested forced-command loopback: its own lock
-    # serializes children, while the parent retains the top-level lock.
+    # Refuse an unbound NOLOCK child BEFORE any executable cleanup helper.
     nolock = os.environ.get('MM_SWEEP_NOLOCK') == '1'
+    if nolock and not _bound_loopback_parent():
+        print(json.dumps({'degraded': True, 'lock': 'UNBOUND_CHILD'}))
+        return 78
+    STATE.mkdir(parents=True, exist_ok=True)
+    # Normal sweeps own BOTH inodes; the authenticated child owns the shared
+    # helper exclusion inode while its parent retains the canonical inode.
     lock_path = (STATE / 'sweep-loopback.lock') if nolock else LOCK
     try:
         lock_fd = _claim_sweep_lock(lock_path)
@@ -641,7 +708,21 @@ def main() -> int:
     if lock_fd is None:
         print(json.dumps({'degraded': True, 'lock': 'BUSY'}))
         return 75
+    exclusion_fd = None
     try:
+        if nolock:
+            if not _bound_loopback_parent():
+                print(json.dumps({'degraded': True, 'lock': 'UNBOUND_CHILD'}))
+                return 78
+        else:
+            try:
+                exclusion_fd = _claim_sweep_lock(STATE / 'sweep-loopback.lock')
+            except OSError:
+                print(json.dumps({'degraded': True, 'lock': 'UNVERIFIED'}))
+                return 78
+            if exclusion_fd is None:
+                print(json.dumps({'degraded': True, 'lock': 'BUSY'}))
+                return 75
         usage = shutil.disk_usage('/')
         free, total = usage.free, usage.total
         receipts = ssd_receipts('temp-worktree-gc')
@@ -693,7 +774,12 @@ def main() -> int:
             # Last resort before giving up: log into this same machine, where the
             # grants do exist. The child does the real work and writes its own
             # sweep-log line; this one records that it delegated.
-            lb = via_loopback()
+            # Relinquish only the helper-exclusion lock to the forced child.
+            # Retain the canonical parent lock until the delegated pass returns.
+            if exclusion_fd is not None:
+                os.close(exclusion_fd)
+                exclusion_fd = None
+            lb = via_loopback(parent_nonce=_read_lock_nonce(lock_fd)) if not nolock else None
             if lb is not None:
                 out['loopback'] = lb
                 return finish(out)
@@ -854,7 +940,9 @@ def main() -> int:
                 stamp.write_text(str(time.time()))
         return finish(out)
     finally:
-        # Auto-released on crash/process exit; never unlink the stable inode.
+        # Crash-release both kernel locks; never unlink a stable inode.
+        if exclusion_fd is not None:
+            os.close(exclusion_fd)
         os.close(lock_fd)
 
 
