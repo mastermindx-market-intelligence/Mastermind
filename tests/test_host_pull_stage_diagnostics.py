@@ -608,6 +608,53 @@ perl(){ printf 'INERT_TRANSPORT\\n'; };
     assert sentinel.read_text()==SECRET and sorted(p.name for p in state.iterdir())==['daemon-existing.json']
 
 
+@pytest.mark.parametrize(('selected', 'sidepass'), [('ubuntu2', False), ('ubuntu0', True)])
+def test_b12_physical_only_scoped_host_never_probes_unselected_ubuntu0(
+    tmp_path, selected, sidepass,
+):
+    # The actual Bash parser and one-pass control flow execute; local shell
+    # functions replace ALL external probes and state changes.
+    here=tmp_path/'collector';here.mkdir()
+    (here/'host_pull_probe.template').write_text('INERT_TEMPLATE')
+    (here/'host_pull_backend.py').write_text('INERT_BACKEND')
+    record=tmp_path/'observed-probes'
+    source=(SOURCE/'host_pull.sh').read_text()
+    source=source.replace('HERE="$(cd "$(dirname "$0")" && pwd)"',
+                          'HERE='+shlex.quote(str(here)),1)
+    marker='\nwhile true; do\n  pass_once'
+    assert source.count(marker)==1
+    spy="""run_probe(){
+      if [ "$#" -ge 4 ]; then marker="$4"; else marker=""; fi
+      printf 'RUN:%s:%s\\n' "$2" "$marker" >> RECORD_PATH
+      printf 'INERT_FRAME\\n'
+      return 0
+    };
+    """.replace('RECORD_PATH',shlex.quote(str(record)))
+    source=source.replace(marker,'\n'+spy+marker,1)
+    stubs="""mkdir(){ /bin/mkdir "$@"; };
+    date(){ if [ "$1" = "+%s" ]; then printf '1000'; else printf 'INERT_DATE'; fi; };
+    python3(){
+      if [ "$1" = "-c" ]; then printf "'inert_runtime'"; return 0; fi
+      case "$3" in
+        read-hosts) printf '%s|0|mmx-%s|/inert|0\\n' 'HOST' 'HOST';;
+        write-state) printf 'INERT_STATE';;
+        physical-diagnostic-prepare) printf 'mmx-ubuntu0\\nINERT_DIAGNOSTIC';;
+        physical-diagnostic-result) while IFS= read -r _line; do :; done; printf 'INERT_DONE';;
+        *) return 97;;
+      esac
+    };
+    """.replace('HOST',selected)
+    cmd=['/bin/bash','--noprofile','--norc','-c',stubs+source,'fixture',
+         '--once','--qualification-mode','physical-only','--host',selected]
+    result=subprocess.run(cmd,env={'PATH':'','HOME':str(tmp_path)},
+                          capture_output=True,text=True)
+    assert result.returncode==0,(result.stdout,result.stderr)
+    calls=record.read_text().splitlines()
+    assert calls[0]=='RUN:mmx-'+selected+':'
+    assert (calls[1:]==['RUN:mmx-ubuntu0:fixed-physical-diagnostic']
+            if sidepass else calls[1:]==[])
+
+
 @pytest.mark.parametrize('defect',['symlink','changed','oversize'])
 def test_occupancy_provenance_defects_never_execute(backend,tmp_path,monkeypatch,capsys,defect):
     import os

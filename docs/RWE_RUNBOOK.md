@@ -107,6 +107,20 @@ your platform's default location differs (e.g. a different Homebrew prefix).
 python scripts/rwe_env.py gate --env /path/to/venv
 ```
 
+
+The shadow workflow requests a complete three-shard plan by passing
+--jobs 3 to the RWE gate. All discovered modules remain partitioned
+into exactly three disjoint pytest processes. On the two-vCPU shadow
+runner, the canonical ci_pytest driver executes those processes one at
+a time (--max-parallel 1) instead of concurrently; a failed shard still
+fails the full gate. The receipt records the actual three-shard command,
+exit code and entire discovered count. Main CI's independently hosted
+three-way parallelism remains unchanged.
+
+The shadow workflow installs the same Node/npm consumer prerequisites
+as main CI before running the full test gate. Native nested test
+deadlines, Python hash-lock checks, and exclusions are not relaxed.
+
 Refuses first (before anything else, including any subprocess call) if the
 environment's interpreter is no longer CPython 3.12, or if a prior receipt
 exists and the lock file it recorded has since changed content on disk

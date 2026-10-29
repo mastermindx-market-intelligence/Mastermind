@@ -268,7 +268,11 @@ while true; do
   pass_once
   PASS_RC=$?
   if [ "$QUALIFICATION_MODE" = "physical-only" ]; then
-    physical_only_sidepass || PASS_RC=78
+    # The fixed diagnostic is for ubuntu0 only. A scoped physical pass must
+    # never probe another host which the caller did not select.
+    if [ -z "$SELECTED" ] || [[ " $SELECTED " == *" ubuntu0 "* ]]; then
+      physical_only_sidepass || PASS_RC=78
+    fi
   fi
   [ "$ONCE" -eq 1 ] && exit "$PASS_RC"
   sleep "$INTERVAL"

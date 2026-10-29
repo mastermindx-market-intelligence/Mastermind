@@ -77,6 +77,14 @@
 set -u
 set -o pipefail
 
+# Canonicalize caller temp root: macOS TMPDIR commonly ends with a slash.
+# The strict no-follow path guard must never see a double path separator.
+TMPROOT=${TMPDIR:-/tmp}
+while [ "${TMPROOT%/}" != "$TMPROOT" ]; do
+  TMPROOT=${TMPROOT%/}
+done
+[ -n "$TMPROOT" ] || { printf '%s\n' 'HOST_PULL_LIFECYCLE_REFUSED: unsafe TMPDIR' >&2; exit 78; }
+
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 LABEL="com.mastermind.host-pull"
 PHASE=START
@@ -135,9 +143,10 @@ die() {
   local code=$1
   shift
   release_admission
-  # A clean preflight refusal has not mutated. A crash cannot run this path,
+  # A clean START/VERIFIED preflight refusal has not mutated. A crash cannot run this path,
   # so an abandoned marker stays for the next installer.
-  if [ "${PHASE:-START}" = "START" ] && [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
+  if { [ "${PHASE:-START}" = "START" ] || [ "${PHASE:-START}" = "VERIFIED" ]; } \
+      && [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
     py install-transaction-complete "$STORE" || true
     MARKER_OWNED=0
   fi
@@ -1052,8 +1061,8 @@ launchctl_print() {
   local out err rc
   # Every launchd read is inside the helper's lifetime, including preflight.
   prove_install_holder
-  out=$(mktemp "${TMPDIR:-/tmp}/host-pull-lc-out.XXXXXX")
-  err=$(mktemp "${TMPDIR:-/tmp}/host-pull-lc-err.XXXXXX")
+  out=$(mktemp "$TMPROOT/host-pull-lc-out.XXXXXX")
+  err=$(mktemp "$TMPROOT/host-pull-lc-err.XXXXXX")
   "$LAUNCHCTL" print "$DOMAIN/$LABEL" >"$out" 2>"$err"
   rc=$?
   if ! parse_launchctl "$rc" "$out" "$err"; then
@@ -1069,7 +1078,7 @@ launchctl_print() {
 
 ps_state() {
   local pid=$1 out rc observed
-  out=$(mktemp "${TMPDIR:-/tmp}/host-pull-ps.XXXXXX")
+  out=$(mktemp "$TMPROOT/host-pull-ps.XXXXXX")
   "$PS" -p "$pid" -o pid= >"$out" 2>"$out.err"
   rc=$?
   if [ "$rc" -eq 0 ]; then
@@ -1149,12 +1158,12 @@ acquire_install_transaction() {
   local lockpath status line waited fence
   lockpath="$STORE/.install-transaction.lock"
   py install-transaction-prepare "$lockpath" || die 78 "install transaction lock refused"
-  status=$(mktemp "${TMPDIR:-/tmp}/host-pull-tx.XXXXXX")
+  status=$(mktemp "$TMPROOT/host-pull-tx.XXXXXX")
   if [ -n "${HOLDER_REPORT:-}" ]; then
     [ "$HERMETIC" -eq 1 ] || die 78 "holder report is hermetic-only"
     fence=$HOLDER_REPORT
   else
-    fence=$(mktemp "${TMPDIR:-/tmp}/host-pull-fence.XXXXXX")
+    fence=$(mktemp "$TMPROOT/host-pull-fence.XXXXXX")
   fi
   INSTALL_FENCE=$fence
   "$PYTHON" - "$STORE" "$GENERATION" "$status" "$$" "$fence" "${FAULT:-}" >"$status.out" 2>"$status.err" <<'PY' &
@@ -1425,7 +1434,7 @@ run_locked() {
   shift
   local pause rc
   prove_install_holder
-  LOCKED_DIR=$(mktemp -d "${TMPDIR:-/tmp}/host-pull-lock.XXXXXX") || return 78
+  LOCKED_DIR=$(mktemp -d "$TMPROOT/host-pull-lock.XXXXXX") || return 78
   LOCKED_DETAIL=""
   STOP_LOCKED=0
   pause="${HOLD_DURING_LOCK:-"-"}"
@@ -1581,7 +1590,7 @@ keep_select_unknown() {
 rollback_unacked_select() {
   local out verr rc
   SELECT_ROLLBACK=1
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select-back.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-select-back.XXXXXX")
   out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
@@ -1636,7 +1645,7 @@ advance_selector() {
   prove_install_holder
   snapshot_service
   arm_select_fence
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-select.XXXXXX")
   out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$GENERATION" --expect "$ADVANCE_FROM" 2>"$verr") && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
@@ -1665,7 +1674,7 @@ rollback_advanced_selector() {
   local out verr rc
   [ "$SELECTED_ADVANCE" -eq 1 ] || return 0
   prove_install_holder
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select-back.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-select-back.XXXXXX")
   out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
@@ -1696,7 +1705,7 @@ require_advance_pin() {
   PIN="$STORE/$GENERATION/ext/host_pull.sh"
   py check-advance "$STORE" "$GENERATION" "$ADVANCE_FROM" "$PUBLISHER" "$PIN" "$owner" >/dev/null \
     || die 78 "pin checks failed"
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-verify.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-verify.XXXXXX")
   verify_out=$("$PYTHON" "$PUBLISHER" verify --store "$STORE" --generation "$GENERATION" 2>"$verr") \
     || { rm -f -- "$verr"; die 78 "publisher verify failed"; }
   rm -f -- "$verr"
@@ -1723,7 +1732,7 @@ require_verified_pin() {
   PIN="$STORE/$GENERATION/ext/host_pull.sh"
   py check-pin "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" "$PIN" "$owner" >/dev/null \
     || die 78 "pin checks failed"
-  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-verify.XXXXXX")
+  verr=$(mktemp "$TMPROOT/host-pull-verify.XXXXXX")
   verify_out=$("$PYTHON" "$PUBLISHER" verify --store "$STORE" --generation "$GENERATION" 2>"$verr") \
     || { rm -f -- "$verr"; die 78 "publisher verify failed"; }
   rm -f -- "$verr"
