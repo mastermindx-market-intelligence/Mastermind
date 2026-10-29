@@ -1129,6 +1129,180 @@ def test_selector_move_before_plist_replace_restores_original_service(workspace)
     assert_not_executed(ctx)
 
 
+
+
+
+@pytest.mark.parametrize(
+    ("phase", "restore_expected"),
+    [("PLIST_REPLACED", True), ("BOOTSTRAP_STARTED", True),
+     ("BOOTSTRAPPED", False)],
+)
+def test_holder_loss_source_restores_only_pre_effect_plist(
+    tmp_path, phase, restore_expected,
+):
+    # Literal source function under an inert Bash environment; no launcher
+    # fixtures, fake launchctl argv, host services, installer or file effects.
+    raw = DAEMON.read_text()
+    start = raw.index("lose_install_holder() {\n")
+    end = raw.index("\n}\n\nprove_install_holder() {", start) + 2
+    function = raw[start:end]
+    fixture = (
+        "set -u\n"
+        + "PHASE=" + phase + "\n"
+        + 'restore_plist(){ printf "RESTORED\\n"; }\n'
+        + 'note_install_blocked(){ printf "RECEIPT\\n"; }\n'
+        + 'die(){ printf "REFUSED\\n"; exit "$1"; }\n'
+        + function + "\nlose_install_holder\n"
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", fixture],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 78, result.stderr
+    assert result.stdout.splitlines() == (
+        ["RESTORED", "RECEIPT", "REFUSED"] if restore_expected
+        else ["RECEIPT", "REFUSED"]
+    )
+
+
+def test_bootstrap_effect_return_79_after_started_is_not_holder_loss(tmp_path):
+    # Execute the literal run_locked Bash function with a harmless py stub
+    # simulating a child command returning 79 *after* its started receipt.
+    # The original rc79 shortcut mislabeled this as holder death.
+    raw = DAEMON.read_text()
+    start = raw.index("run_locked() {\n")
+    end = raw.index("\n}\n\neffect_was_not_started() {", start) + 2
+    function = raw[start:end]
+    fixture = (
+        'set -u\n'
+        + 'TMPROOT=' + str(tmp_path) + '\n'
+        + 'STORE=inert\nGENERATION=inert\nEXPECT_CURRENT=inert\n'
+        + 'PUBLISHER=inert\nINSTALL_FENCE=inert\nHOLD_DURING_LOCK=\n'
+        + 'prove_install_holder(){ :; }\n'
+        + 'lose_install_holder(){ printf "WRONG_HOLDER_LOSS\\n"; exit 90; }\n'
+        + 'py(){ if [ "$1" = "locked-effect" ]; then '
+          ': > "$LOCKED_DIR/started"; return 79; fi; return 0; }\n'
+        + function + '\n'
+        + 'run_locked bootstrap /bin/false\n'
+        + 'printf "EXIT=%s STOP=%s\\n" "$?" "$STOP_LOCKED"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", fixture],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["EXIT=79 STOP=0"]
+
+
+def test_absent_label_holder_death_at_bootstrap_admission_restores_preimage(workspace):
+    # Existing hermetic launcher helper only; no fake launchctl argv/stub edits,
+    # external service, original collector or native release effect.
+    ctx = prepare(workspace)
+    original = b"ORIGINAL-ABSENT-LABEL-PREIMAGE\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    hold = workspace / "hold-bootstrap"
+    hold.write_text("")
+    report = workspace / "holder-report"
+    fd = os.open(report, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    os.close(fd)
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold, holder_report=report),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert ctx["plist"].read_bytes() != original
+        deadline = time.time() + 8
+        while time.time() < deadline and b"armed\n" not in report.read_bytes():
+            if proc.poll() is not None:
+                raise AssertionError(proc.stderr.read())
+            time.sleep(0.05)
+        assert b"armed\n" in report.read_bytes()
+        fields = dict(line.split("=", 1)
+                      for line in report.read_text().splitlines() if "=" in line)
+        holder = int(fields["pid"])
+        assert "bootstrap " not in launch_log(ctx)
+        os.kill(holder, signal.SIGKILL)
+        _wait_transaction_unlocked(ctx)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 78, err
+        assert "install transaction holder lost" in err
+        assert ctx["plist"].read_bytes() == original
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "INSTALL_HOLDER_LOST"
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_absent_label_selector_move_before_bootstrap_restores_preimage_and_receipts(workspace):
+    # New negative-path coverage reuses the existing accepted hermetic stub;
+    # no launchctl argv/stub implementation change or real host effect.
+    ctx = prepare(workspace)
+    original = b"ORIGINAL-ABSENT-LABEL-PLIST\\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    hold = workspace / "hold-bootstrap"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert ctx["plist"].read_bytes() != original
+        _move_selector(ctx, workspace)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert ctx["plist"].read_bytes() == original
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "BOOTSTRAP_ADMIT"
+        assert "selector moved before bootstrap" in receipt["reason"]
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_fresh_absent_plist_pre_bootstrap_error_writes_receipt_without_backup(workspace):
+    ctx = prepare(workspace)
+    assert not ctx["plist"].exists() and not ctx["backup"].exists()
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    result = run(ctx, fault="pre-bootstrap-print")
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert not ctx["plist"].exists()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "PRE_BOOTSTRAP_PRINT"
+    assert "launchctl state uncertain" in receipt["reason"]
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+
 def test_selector_move_before_bootstrap_restores_original_service(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)

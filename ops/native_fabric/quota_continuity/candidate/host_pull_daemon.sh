@@ -1123,6 +1123,9 @@ write_receipt() {
   local outcome=$1 phase=$2
   shift 2
   [ -n "${BACKUP_DIR:-}" ] || return 1
+  # Fresh installs have no old plist to back up, yet uncertain effects
+  # must still leave a durable receipt in the publisher's receipt store.
+  py ensure-receipt-dir "$BACKUP_DIR" || return 1
   py write-receipt "$BACKUP_DIR" "$GENERATION" "$outcome" "$phase" "$*"
 }
 
@@ -1136,9 +1139,12 @@ note_install_blocked() {
 
 # The private fence flock is the lifetime proof. Process-liveness alone is not.
 lose_install_holder() {
-  if [ "${PHASE:-START}" = "PLIST_REPLACED" ]; then
-    restore_plist || true
-  fi
+  # Proven pre-effect only: prove_install_holder refuses before effect launch,
+  # and rc79 is a holder loss only if the per-effect started file is absent.
+  # Never restore on an effect that may have begun.
+  case "$PHASE" in
+    PLIST_REPLACED|BOOTSTRAP_STARTED) restore_plist || true ;;
+  esac
   note_install_blocked INSTALL_HOLDER_LOST "install transaction holder lost" || true
   die 78 "install transaction holder lost"
 }
@@ -1383,6 +1389,14 @@ recover_or_stop() {
   local rc
   release_admission
   if [ "$BOOTED" -ne 1 ]; then
+    # Before an admitted bootstrap starts, there was no pre-existing service
+    # to recover. Restore the displaced plist and record a durable hold;
+    # never bootstrap the old service or reverse a peer's moved selector.
+    if [ "$PHASE" = "BOOTSTRAP_STARTED" ] && effect_was_not_started; then
+      restore_plist || true
+      write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+      die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+    fi
     die 78 "admission refused: $reason"
   fi
   # A known-absent label can take the original plist back. Any other read
@@ -1442,7 +1456,9 @@ run_locked() {
   py locked-effect "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" \
     "$LOCKED_DIR" "$pause" "$kind" "$INSTALL_FENCE" "$@" 2>"$LOCKED_DIR/err"
   rc=$?
-  if [ "$rc" -eq 79 ]; then
+  # An effect command may itself exit 79 AFTER mark_started. Only a
+  # missing started marker proves the pre-effect transaction-fence refusal.
+  if [ "$rc" -eq 79 ] && [ ! -f "$LOCKED_DIR/started" ]; then
     lose_install_holder
   fi
   LOCKED_DETAIL=$(cat "$LOCKED_DIR/err" 2>/dev/null || true)
