@@ -948,6 +948,12 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
     present = vendor_present(root)
     subset = args.subset
+    # The standalone shadow gate shares the exact canonical three-way
+    # discovery/partition of ci_pytest. A bounded subset stays single-process.
+    jobs = getattr(args, "jobs", 1)
+    if jobs not in (1, 3) or (subset is not None and jobs != 1):
+        print("rwe_env gate refused: jobs must be 1, or 3 for a full gate", file=sys.stderr)
+        return 2
 
     if subset is None and not present:
         ref = read_pinned_ref(root)
@@ -979,6 +985,11 @@ def cmd_gate(args: argparse.Namespace) -> int:
         display_python = "<env>/bin/python"
         argv = [str(venv_python), str(root / GATE_SCRIPT_RELATIVE)]
         display_argv = [display_python, GATE_SCRIPT_RELATIVE.as_posix()]
+        if jobs == 3:
+            # ci_pytest performs exact total/disjoint module-cover validation,
+            # waits for ALL three shards, and propagates every failure.
+            argv.extend(["--jobs", "3"])
+            display_argv.extend(["--jobs", "3"])
         completed = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
         if completed.returncode == 0 and "full_gate_unavailable:vendor_absent" in degraded:
             # a full gate just ran successfully, so any stale degraded flag
@@ -1321,6 +1332,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate = sub.add_parser("gate", help="run the repository test gate inside an env")
     p_gate.add_argument("--env", required=True)
     p_gate.add_argument("--subset", default=None)
+    p_gate.add_argument("--jobs", type=int, default=1,
+                        help="1 historical process, or 3 complete canonical test shards")
     p_gate.add_argument("--root", default=None)
     p_gate.set_defaults(func=cmd_gate)
 

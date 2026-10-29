@@ -29,7 +29,10 @@ concurrency:
 jobs:
   shadow-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The full discovery-first test gate was serial and exceeded the original
+    # 45-minute budget on 2026-10-29; canonical three-way placement still
+    # competes on one runner, so retain bounded headroom without skipping tests.
+    timeout-minutes: 150
 
     steps:
       - uses: actions/checkout@v4
@@ -93,7 +96,9 @@ jobs:
         run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
 
       - name: Run repository test gate inside the realized environment
-        run: python scripts/rwe_env.py gate --env /tmp/rwe-env
+        # Same full module cover and three-way placement as main ci_pytest;
+        # the RWE receipt still records the exact gate command and exit.
+        run: python scripts/rwe_env.py gate --env /tmp/rwe-env --jobs 3
 
       - name: Upload receipt
         if: always()

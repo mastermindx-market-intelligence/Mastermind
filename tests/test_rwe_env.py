@@ -1537,3 +1537,152 @@ def test_record_run_gate_outcome_mismatch_fails_closed():
         "exit": 0,
         "gate_proof_recorded": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# Shadow gate full-cover placement: opt in to ci_pytest three-way partition
+# without changing default or skipping modules.
+# ---------------------------------------------------------------------------
+
+
+def test_shadow_full_gate_three_jobs_preserves_canonical_gate_command(tmp_path, monkeypatch):
+    import argparse
+
+    root = _fake_repo(tmp_path, ci_yml=CI_YML_FIXTURE)
+    vendor_dir = root / rwe.VENDOR_RELATIVE
+    vendor_dir.mkdir(parents=True)
+    (vendor_dir / "marker").write_text("present\n", encoding="utf-8")
+    env_dir = root / "fake-venv"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    actual = []
+
+    def fake_run(argv, **kwargs):
+        if "-c" in argv:
+            return _interpreter_probe_response(argv)
+        actual.append((argv, kwargs))
+        return _FakeCompleted(
+            "discovered=1615 excluded=0 running=1615 jobs=3 shard_modules=551,509,555\n"
+            "70 passed in 1.0s\n"
+        )
+
+    monkeypatch.setattr(rwe.subprocess, "run", fake_run)
+    rc = rwe.cmd_gate(
+        argparse.Namespace(root=str(root), env=str(env_dir), subset=None, jobs=3)
+    )
+    assert rc == 0
+    assert len(actual) == 1
+    argv, kwargs = actual[0]
+    assert argv == [
+        str(env_dir / "bin/python"), str(root / rwe.GATE_SCRIPT_RELATIVE),
+        "--jobs", "3",
+    ]
+    assert kwargs["cwd"] == root
+    assert kwargs["check"] is False
+    receipt = json.loads((env_dir / rwe.RECEIPT_FILENAME).read_text())
+    proof = receipt["proof"]["gate"]
+    assert proof["command"] == "<env>/bin/python scripts/ci_pytest.py --jobs 3"
+    assert proof["exit"] == 0
+    assert proof["discovered"] == 1615
+    assert proof["seconds"] >= 0
+
+
+@pytest.mark.parametrize("jobs", [0, 2, -1, 4])
+def test_shadow_full_gate_refuses_unqualified_job_counts(tmp_path, monkeypatch, jobs):
+    import argparse
+
+    root = _fake_repo(tmp_path)
+    env_dir = root / "fake-venv"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if "-c" in argv:
+            return _interpreter_probe_response(argv)
+        raise AssertionError("invalid shadow placement must not launch tests")
+
+    monkeypatch.setattr(rwe.subprocess, "run", fake_run)
+    assert rwe.cmd_gate(argparse.Namespace(root=str(root), env=str(env_dir),
+                                       subset=None, jobs=jobs)) == 2
+    assert calls and all("-c" in call for call in calls)
+
+
+def test_shadow_gate_refuses_parallel_subset_even_with_vendor(tmp_path, monkeypatch):
+    import argparse
+
+    root = _fake_repo(tmp_path)
+    env_dir = root / "fake-venv"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        if "-c" in argv:
+            return _interpreter_probe_response(argv)
+        raise AssertionError("subset must stay single-process")
+
+    monkeypatch.setattr(rwe.subprocess, "run", fake_run)
+    assert rwe.cmd_gate(argparse.Namespace(root=str(root), env=str(env_dir),
+                                       subset="tests/test_small.py", jobs=3)) == 2
+    assert calls and all("-c" in call for call in calls)
+
+
+def test_shadow_gate_cli_default_stays_one_process():
+    parser = rwe.build_parser()
+    assert parser.parse_args(["gate", "--env", "/tmp/venv"]).jobs == 1
+    assert parser.parse_args(["gate", "--env", "/tmp/venv", "--jobs", "3"]).jobs == 3
+
+
+@pytest.mark.parametrize("exit_code", [1, 2])
+def test_shadow_gate_propagates_canonical_full_shard_failure(tmp_path, monkeypatch, exit_code):
+    import argparse
+
+    root = _fake_repo(tmp_path, ci_yml=CI_YML_FIXTURE)
+    vendor_dir = root / rwe.VENDOR_RELATIVE
+    vendor_dir.mkdir(parents=True)
+    (vendor_dir / "marker").write_text("present\n", encoding="utf-8")
+    env_dir = root / "fake-venv"
+    (env_dir / "bin").mkdir(parents=True)
+    (env_dir / "bin" / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        if "-c" in argv:
+            return _interpreter_probe_response(argv)
+        calls.append(argv)
+        return _FakeCompleted("1 failed, 69 passed in 1.0s\n", returncode=exit_code)
+
+    monkeypatch.setattr(rwe.subprocess, "run", fake_run)
+    rc = rwe.cmd_gate(
+        argparse.Namespace(root=str(root), env=str(env_dir), subset=None, jobs=3)
+    )
+    assert rc == exit_code
+    assert len(calls) == 1 and calls[0][-2:] == ["--jobs", "3"]
+    receipt = json.loads((env_dir / rwe.RECEIPT_FILENAME).read_text())
+    assert receipt["proof"]["gate"]["exit"] == exit_code
+    assert receipt["proof"]["gate"]["discovered"] == 70
+
+
+def test_shadow_workflow_preserves_full_three_way_gate_and_bounded_timeout():
+    import yaml
+
+    path = _ROOT / ".github" / "workflows" / "rwe-shadow.yml"
+    data = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    job = data["jobs"]["shadow-gate"]
+    assert 90 <= int(job["timeout-minutes"]) <= 180
+    steps = job["steps"]
+    full_gate = [s for s in steps if s.get("name") ==
+                 "Run repository test gate inside the realized environment"]
+    assert len(full_gate) == 1
+    assert full_gate[0]["run"] == (
+        "python scripts/rwe_env.py gate --env /tmp/rwe-env --jobs 3"
+    )
+    assert "continue-on-error" not in job
+    assert "continue-on-error" not in full_gate[0]
+    realize = [s for s in steps if s.get("name") ==
+               "Realize hash-locked environment"]
+    assert len(realize) == 1
+    assert realize[0]["run"] == "python scripts/rwe_env.py realize --dest /tmp/rwe-env"
