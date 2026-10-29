@@ -1951,6 +1951,16 @@ class InstalledBootPacketCollector:
                 if failure is not None:
                     failures.append(failure)
             if failures:
+                # A peer may still be completing a security-relevant topology
+                # transition (including removal of a direct .git directory).
+                # Join only within the existing deadline before choosing which
+                # failure to report; never dispatch the helper on a failed read.
+                if pending:
+                    try:
+                        remaining = _remaining_deadline_seconds(deadline, label=label)
+                    except TimeoutError:
+                        remaining = 0.0
+                    _, pending = concurrent.futures.wait(pending, timeout=remaining)
                 wait_for_workers = not pending
                 # Concurrency can expose a lower-level Git error after repository
                 # metadata disappears.  Recheck the direct topology before returning
