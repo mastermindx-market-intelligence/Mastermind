@@ -1455,6 +1455,102 @@ def test_installed_collector_pair_enforces_outer_cumulative_deadline(
     assert time.monotonic() - started < 0.20
 
 
+def test_installed_collector_pair_finishes_peer_before_classifying_missing_direct_git(
+    tmp_path: Path, monkeypatch,
+):
+    """An error-first Git observer cannot outrun its peer's .git deletion."""
+    import concurrent.futures
+    import shutil
+    import threading
+    import time
+    from integrations.executive_mcp import installed
+    from integrations.executive_mcp.schemas import GatewayError
+
+    collector, _source, macro, source_sha, _macro_sha = _direct_pair_collector(tmp_path)
+    started = threading.Event()
+    let_peer_delete = threading.Event()
+    finished = threading.Event()
+    original_wait = concurrent.futures.wait
+    wait_modes = []
+
+    def observe_wait(futures, *, timeout=None, return_when=concurrent.futures.ALL_COMPLETED):
+        wait_modes.append(return_when)
+        # The FIRST_EXCEPTION wait must return the Macro worker failure first.
+        # Only the repair's second wait may release the source worker to remove
+        # direct Git metadata. Before the repair, no second wait occurs.
+        if return_when != concurrent.futures.FIRST_EXCEPTION:
+            let_peer_delete.set()
+        return original_wait(futures, timeout=timeout, return_when=return_when)
+
+    def source_observer():
+        started.set()
+        try:
+            if not let_peer_delete.wait(timeout=1.0):
+                raise AssertionError("peer failure was not reconciled")
+            shutil.rmtree(macro / ".git")
+            return source_sha, "source-seal"
+        finally:
+            finished.set()
+
+    def macro_observer():
+        assert started.wait(timeout=1.0)
+        raise GatewayError("backend_unavailable", "installed Macro source observation failed")
+
+    monkeypatch.setattr(installed.concurrent.futures, "wait", observe_wait)
+    try:
+        with pytest.raises(GatewayError, match="repository topology is unsafe"):
+            collector._repository_observation_pair(
+                source_observer, macro_observer,
+                deadline=time.monotonic() + 2.0, label="snapshot",
+            )
+        assert not (macro / ".git").exists()
+        assert wait_modes == [
+            concurrent.futures.FIRST_EXCEPTION,
+            concurrent.futures.ALL_COMPLETED,
+        ]
+    finally:
+        let_peer_delete.set()
+        assert finished.wait(timeout=1.0)
+
+
+def test_installed_collector_pair_error_first_never_waits_past_cumulative_deadline(
+    tmp_path: Path,
+):
+    """A peer that outlives the deadline cannot hold a failed observation open."""
+    import threading
+    import time
+    from integrations.executive_mcp.schemas import GatewayError
+
+    collector, _source, _macro, source_sha, _macro_sha = _direct_pair_collector(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def source_observer():
+        started.set()
+        try:
+            assert release.wait(timeout=2.0)
+            return source_sha, "source-seal"
+        finally:
+            finished.set()
+
+    def macro_observer():
+        assert started.wait(timeout=1.0)
+        raise GatewayError("backend_unavailable", "installed Macro source observation failed")
+
+    begin = time.monotonic()
+    try:
+        with pytest.raises(GatewayError, match="installed Macro source observation failed"):
+            collector._repository_observation_pair(
+                source_observer, macro_observer,
+                deadline=begin + 0.30, label="snapshot",
+            )
+        # Retain a cushion for contended CI, but refuse an unbounded peer join.
+        assert time.monotonic() - begin < 1.25
+    finally:
+        release.set()
+        assert finished.wait(timeout=1.0)
+
 def test_installed_collector_synthetic_snapshot_pair_stays_sequential(
     tmp_path: Path, monkeypatch,
 ):
