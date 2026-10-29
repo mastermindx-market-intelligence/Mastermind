@@ -1141,7 +1141,17 @@ lose_install_holder() {
   # and rc79 is a holder loss only if the per-effect started file is absent.
   # Never restore on an effect that may have begun.
   case "$PHASE" in
-    PLIST_REPLACED|BOOTSTRAP_STARTED) restore_plist || true ;;
+    PLIST_REPLACED) restore_plist || true ;;
+    BOOTSTRAP_STARTED)
+      # Restore only on a proven current-effect pre-start refusal. A holder
+      # lost after bootstrap may have begun must leave plist bytes untouched.
+      if effect_was_not_started \
+          && [ -n "${LOCKED_DIR:-}" ] \
+          && [ ! -e "$LOCKED_DIR/started" ] \
+          && [ ! -L "$LOCKED_DIR/started" ]; then
+        restore_plist || true
+      fi
+      ;;
   esac
   note_install_blocked INSTALL_HOLDER_LOST "install transaction holder lost" || true
   die 78 "install transaction holder lost"
