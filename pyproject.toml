@@ -27,7 +27,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8,<10",
+    # CI 2026-10-29: pytest 9.2.0 breaks existing pytest capture/teardown
+    # for global os.fstat/os.stat monkeypatch and Starlette state fixtures.
+    # Restore the last exact hosted-green 9.1.1 until the owning tests are
+    # adapted and independently validated on newer pytest.
+    "pytest==9.1.1",
     # The historical mcp>= floor is intentionally retired; the maintained v1
     # release below is exact so unrelated SDK movement cannot red hosted CI.
     # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.
