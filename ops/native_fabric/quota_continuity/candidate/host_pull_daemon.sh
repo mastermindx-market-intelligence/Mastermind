@@ -1137,9 +1137,12 @@ note_install_blocked() {
 
 # The private fence flock is the lifetime proof. Process-liveness alone is not.
 lose_install_holder() {
-  if [ "${PHASE:-START}" = "PLIST_REPLACED" ]; then
-    restore_plist || true
-  fi
+  # Proven pre-effect only: prove_install_holder refuses before effect launch,
+  # and rc79 is a holder loss only if the per-effect started file is absent.
+  # Never restore on an effect that may have begun.
+  case "$PHASE" in
+    PLIST_REPLACED|BOOTSTRAP_STARTED) restore_plist || true ;;
+  esac
   note_install_blocked INSTALL_HOLDER_LOST "install transaction holder lost" || true
   die 78 "install transaction holder lost"
 }
@@ -1451,7 +1454,9 @@ run_locked() {
   py locked-effect "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" \
     "$LOCKED_DIR" "$pause" "$kind" "$INSTALL_FENCE" "$@" 2>"$LOCKED_DIR/err"
   rc=$?
-  if [ "$rc" -eq 79 ]; then
+  # An effect command may itself exit 79 AFTER mark_started. Only a
+  # missing started marker proves the pre-effect transaction-fence refusal.
+  if [ "$rc" -eq 79 ] && [ ! -f "$LOCKED_DIR/started" ]; then
     lose_install_holder
   fi
   LOCKED_DETAIL=$(cat "$LOCKED_DIR/err" 2>/dev/null || true)
