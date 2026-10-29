@@ -988,8 +988,11 @@ def cmd_gate(args: argparse.Namespace) -> int:
         if jobs == 3:
             # ci_pytest performs exact total/disjoint module-cover validation,
             # waits for ALL three shards, and propagates every failure.
-            argv.extend(["--jobs", "3"])
-            display_argv.extend(["--jobs", "3"])
+            # Preserve three exact-cover shards but avoid running native
+            # qualification subprocesses against two contended vCPUs.
+            # Their original 300-second test deadline remains untouched.
+            argv.extend(["--jobs", "3", "--max-parallel", "1"])
+            display_argv.extend(["--jobs", "3", "--max-parallel", "1"])
         completed = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
         if completed.returncode == 0 and "full_gate_unavailable:vendor_absent" in degraded:
             # a full gate just ran successfully, so any stale degraded flag

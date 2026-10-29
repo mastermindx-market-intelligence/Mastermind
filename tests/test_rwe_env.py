@@ -1575,13 +1575,15 @@ def test_shadow_full_gate_three_jobs_preserves_canonical_gate_command(tmp_path, 
     argv, kwargs = actual[0]
     assert argv == [
         str(env_dir / "bin/python"), str(root / rwe.GATE_SCRIPT_RELATIVE),
-        "--jobs", "3",
+        "--jobs", "3", "--max-parallel", "1",
     ]
     assert kwargs["cwd"] == root
     assert kwargs["check"] is False
     receipt = json.loads((env_dir / rwe.RECEIPT_FILENAME).read_text())
     proof = receipt["proof"]["gate"]
-    assert proof["command"] == "<env>/bin/python scripts/ci_pytest.py --jobs 3"
+    assert proof["command"] == (
+        "<env>/bin/python scripts/ci_pytest.py --jobs 3 --max-parallel 1"
+    )
     assert proof["exit"] == 0
     assert proof["discovered"] == 1615
     assert proof["seconds"] >= 0
@@ -1660,7 +1662,7 @@ def test_shadow_gate_propagates_canonical_full_shard_failure(tmp_path, monkeypat
         argparse.Namespace(root=str(root), env=str(env_dir), subset=None, jobs=3)
     )
     assert rc == exit_code
-    assert len(calls) == 1 and calls[0][-2:] == ["--jobs", "3"]
+    assert len(calls) == 1 and calls[0][-4:] == ["--jobs", "3", "--max-parallel", "1"]
     receipt = json.loads((env_dir / rwe.RECEIPT_FILENAME).read_text())
     assert receipt["proof"]["gate"]["exit"] == exit_code
     assert receipt["proof"]["gate"]["discovered"] == 70
@@ -1686,3 +1688,14 @@ def test_shadow_workflow_preserves_full_three_way_gate_and_bounded_timeout():
                "Realize hash-locked environment"]
     assert len(realize) == 1
     assert realize[0]["run"] == "python scripts/rwe_env.py realize --dest /tmp/rwe-env"
+    node = [s for s in steps if s.get("uses") == "actions/setup-node@v4"]
+    assert len(node) == 1
+    assert node[0]["with"] == {
+        "node-version": "22.14.0",
+        "cache": "npm",
+        "cache-dependency-path": "app/mastermind_os/package-lock.json",
+    }
+    deps = [s for s in steps if s.get("name") == "Install Node dependencies"]
+    assert len(deps) == 1
+    assert deps[0]["run"] == "npm ci --prefix app/mastermind_os"
+    assert steps.index(node[0]) < steps.index(deps[0]) < steps.index(full_gate[0])

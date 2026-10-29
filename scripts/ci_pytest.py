@@ -296,6 +296,7 @@ def run_shards(
     *,
     root: Path,
     python: str | None = None,
+    max_parallel: int | None = None,
 ) -> int:
     """Run every shard and return the lowest-indexed nonzero exit code, else 0.
 
@@ -309,6 +310,12 @@ def run_shards(
     These records are diagnostics only; every process exit still governs.
     """
 
+    # Three disjoint test partitions stay complete when the resource-limited
+    # RWE runner runs only one child process at a time. Main CI defaults
+    # to its original concurrency.
+    parallel = len(shards) if max_parallel is None else max_parallel
+    if not 1 <= parallel <= len(shards):
+        raise PolicyError("max-parallel must be within the shard count")
     output_lock = threading.Lock()
 
     def _run(index: int) -> tuple[int, int, str, float]:
@@ -335,7 +342,7 @@ def run_shards(
         return index, returncode, "".join(captured), elapsed
 
     codes: dict[int, int] = {}
-    with ThreadPoolExecutor(max_workers=len(shards)) as pool:
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
         futures = [pool.submit(_run, index) for index in range(len(shards))]
         for future in as_completed(futures):
             index, returncode, output, elapsed = future.result()
@@ -600,11 +607,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "either way, and any shard failing fails the gate."
         ),
     )
+    parser.add_argument(
+        "--max-parallel", type=int, default=None,
+        help="limit running shard processes without changing the --jobs cover",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else repo_root()
     try:
         if args.jobs < 1:
             raise PolicyError("jobs must be at least 1")
+        if args.max_parallel is not None and (
+            args.jobs < 2 or not 1 <= args.max_parallel <= args.jobs
+        ):
+            raise PolicyError("max-parallel requires multiple shards and valid count")
         gate = resolve_gate(root)
         # jobs=1 keeps the historical single-process argv exactly, so the
         # default gate invocation is unchanged by this feature.
@@ -620,7 +635,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.plan_only:
         return 0
     if shards is not None:
-        return run_shards(shards, root=root)
+        return run_shards(shards, root=root, max_parallel=args.max_parallel)
     completed = subprocess.run(
         pytest_argv(gate["included"]),
         cwd=root,
