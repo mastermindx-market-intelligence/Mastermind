@@ -1228,6 +1228,41 @@ def test_bootstrap_effect_return_79_after_started_is_not_holder_loss(tmp_path):
     assert result.stdout.splitlines() == ["EXIT=79 STOP=0"]
 
 
+
+def test_bootstrap_effect_return_79_before_started_refuses_with_pre_effect_proof(tmp_path):
+    # Run the literal run_locked function. A pre-admission holder loss must
+    # retain the pre-effect PLIST_REPLACED phase; rc79 with no started marker
+    # must then furnish positive STOP_LOCKED proof before loss handling.
+    raw = DAEMON.read_text()
+    start = raw.index("run_locked() {\n")
+    end = raw.index("\n}\n\neffect_was_not_started() {", start) + 2
+    function = raw[start:end]
+    fixture = (
+        "set -u\n"
+        + "PHASE=PLIST_REPLACED\n"
+        + 'TMPROOT="' + str(tmp_path) + '"\n'
+        + 'STORE=inert\nGENERATION=inert\nEXPECT_CURRENT=inert\n'
+        + 'PUBLISHER=inert\nINSTALL_FENCE=inert\nHOLD_DURING_LOCK=\n'
+        + 'prove_install_holder(){ [ "$PHASE" = "PLIST_REPLACED" ] || exit 91; }\n'
+        + 'lose_install_holder(){ '
+          '[ "$STOP_LOCKED" -eq 1 ] && [ "$PHASE" = "BOOTSTRAP_STARTED" ] '
+          '|| exit 92; printf "PRE_EFFECT_REFUSAL\\n"; exit 78; }\n'
+        + 'py(){ if [ "$1" = "locked-effect" ]; then return 79; '
+          'fi; return 0; }\n'
+        + function + "\n"
+        + 'run_locked bootstrap /bin/false\n'
+        + 'printf "UNEXPECTED_BOOTSTRAP_SUCCESS\\n"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", fixture],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 78, result.stderr
+    assert result.stdout.splitlines() == ["PRE_EFFECT_REFUSAL"]
+
+
+
 def test_absent_label_holder_death_at_bootstrap_admission_restores_preimage(workspace):
     # Existing hermetic launcher helper only; no fake launchctl argv/stub edits,
     # external service, original collector or native release effect.
