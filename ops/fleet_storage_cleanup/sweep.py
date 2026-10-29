@@ -616,6 +616,25 @@ def _claim_sweep_lock(path: Path) -> int | None:
             return None
         if not qualified():
             raise OSError(errno.EPERM, 'lock path changed')
+        # An installed legacy sweeper writes a bare PID without taking flock.
+        # Acquiring this inode cannot exclude that still-active old process.
+        # Preserve the old marker: only the publisher can qualify a quiescent
+        # old epoch before permitting a new persistent-flock epoch.
+        prior_size = os.fstat(fd).st_size
+        if prior_size > 512:
+            raise OSError(errno.EPERM, 'unqualified legacy lock marker')
+        if prior_size:
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                prior = json.loads(os.read(fd, prior_size))
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise OSError(errno.EPERM, 'unqualified legacy lock marker') from exc
+            if (type(prior) is not dict or type(prior.get('pid')) is not int
+                    or prior['pid'] <= 0 or type(prior.get('time')) not in (int, float)
+                    or not 0 < prior['time'] < float('inf')
+                    or type(prior.get('nonce')) is not str
+                    or re.fullmatch(r'[0-9a-f]{64}', prior['nonce']) is None):
+                raise OSError(errno.EPERM, 'unqualified legacy lock marker')
         marker = json.dumps({'pid': os.getpid(), 'time': time.time(),
                              'nonce': secrets.token_hex(32)}).encode('ascii')
         os.ftruncate(fd, 0)

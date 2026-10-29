@@ -690,6 +690,49 @@ class FleetStorageVolumeTests(unittest.TestCase):
             finally:
                 self.sweep.os.close(child_fd)
 
+    def test_b8_legacy_pid_lock_refuses_without_rewriting_unfenced_marker(self):
+        # Disposable preimage only. A former sweeper writes bare PID text with
+        # NO kernel flock, so a new flock is NOT evidence of exclusive custody.
+        with tempfile.TemporaryDirectory() as directory:
+            lock = pathlib.Path(directory) / "sweep.lock"
+            legacy = f"{self.sweep.os.getpid()}\\n".encode("ascii")
+            lock.write_bytes(legacy)
+            with self.assertRaises(OSError) as failure:
+                self.sweep._claim_sweep_lock(lock)
+            self.assertEqual(failure.exception.errno, self.sweep.errno.EPERM)
+            self.assertEqual(lock.read_bytes(), legacy,
+                             "refusal must preserve legacy publisher evidence")
+            with mock.patch.object(self.sweep, 'STATE', pathlib.Path(directory)), \
+                 mock.patch.object(self.sweep, 'LOCK', lock), \
+                 mock.patch.dict(self.sweep.os.environ, {'MM_SWEEP_NOLOCK': '0'}), \
+                 mock.patch.object(self.sweep, 'guarded',
+                                   side_effect=AssertionError('cleanup helper started')), \
+                 contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(self.sweep.main(), 78)
+            self.assertEqual(json.loads(output.getvalue())['lock'], 'UNVERIFIED')
+            self.assertEqual(lock.read_bytes(), legacy)
+
+            # Only the test's simulated completed old epoch removes its marker;
+            # source cannot grant itself that production migration authority.
+            lock.unlink()
+            fd = self.sweep._claim_sweep_lock(lock)
+            self.assertIsNotNone(fd)
+            try:
+                inode = self.sweep.os.fstat(fd).st_ino
+                self.assertIsNone(self.sweep._claim_sweep_lock(lock))
+                current = lock.read_bytes()
+                self.assertIn(b'"nonce"', current)
+            finally:
+                self.sweep.os.close(fd)
+            fd = self.sweep._claim_sweep_lock(lock)
+            self.assertIsNotNone(fd)
+            self.assertEqual(self.sweep.os.fstat(fd).st_ino, inode)
+            self.sweep.os.close(fd)
+            # A new qualified current owner rotates its nonce on the SAME
+            # persistent inode; it must never preserve the old lease secret.
+            self.assertNotEqual(lock.read_bytes(), current)
+            self.assertIn(b'"nonce"', lock.read_bytes())
+
     def test_atomic_original_sweep_lock_serializes_two_contenders(self):
         # Disposable lock only. Never calls the sweeper, SSH, launchd or cleanup.
         with tempfile.TemporaryDirectory() as temp:
