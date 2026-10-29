@@ -1128,6 +1128,62 @@ def test_selector_move_before_plist_replace_restores_original_service(workspace)
     assert_not_executed(ctx)
 
 
+
+def test_absent_label_selector_move_before_bootstrap_restores_preimage_and_receipts(workspace):
+    # New negative-path coverage reuses the existing accepted hermetic stub;
+    # no launchctl argv/stub implementation change or real host effect.
+    ctx = prepare(workspace)
+    original = b"ORIGINAL-ABSENT-LABEL-PLIST\\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    hold = workspace / "hold-bootstrap"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert ctx["plist"].read_bytes() != original
+        _move_selector(ctx, workspace)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert ctx["plist"].read_bytes() == original
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "BOOTSTRAP_ADMIT"
+        assert "selector moved before bootstrap" in receipt["reason"]
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_fresh_absent_plist_pre_bootstrap_error_writes_receipt_without_backup(workspace):
+    ctx = prepare(workspace)
+    assert not ctx["plist"].exists() and not ctx["backup"].exists()
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    result = run(ctx, fault="pre-bootstrap-print")
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert not ctx["plist"].exists()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "PRE_BOOTSTRAP_PRINT"
+    assert "launchctl state uncertain" in receipt["reason"]
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+
 def test_selector_move_before_bootstrap_restores_original_service(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)

@@ -1121,6 +1121,9 @@ write_receipt() {
   local outcome=$1 phase=$2
   shift 2
   [ -n "${BACKUP_DIR:-}" ] || return 1
+  # Fresh installs have no old plist to back up, yet uncertain effects
+  # must still leave a durable receipt in the publisher's receipt store.
+  py ensure-receipt-dir "$BACKUP_DIR" || return 1
   py write-receipt "$BACKUP_DIR" "$GENERATION" "$outcome" "$phase" "$*"
 }
 
@@ -1381,6 +1384,14 @@ recover_or_stop() {
   local rc
   release_admission
   if [ "$BOOTED" -ne 1 ]; then
+    # Before an admitted bootstrap starts, there was no pre-existing service
+    # to recover. Restore the displaced plist and record a durable hold;
+    # never bootstrap the old service or reverse a peer's moved selector.
+    if [ "$PHASE" = "BOOTSTRAP_STARTED" ] && effect_was_not_started; then
+      restore_plist || true
+      write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+      die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+    fi
     die 78 "admission refused: $reason"
   fi
   # A known-absent label can take the original plist back. Any other read
