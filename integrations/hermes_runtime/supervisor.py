@@ -151,8 +151,21 @@ class ServiceRuntime:
         from integrations.hermes_harness.native_byok import render_disarmed_native_byok
         env = self._env()
         if native.is_file() and native.read_bytes() == render_disarmed_native_byok(self.profile).encode("utf-8"):
+            # load_secrets historically defaults dashboard Basic-Auth password
+            # to the gateway token. The model child receives that password;
+            # refusing this alias prevents disclosure under a *different*
+            # environment name. The operator must provision two real,
+            # independently revocable credentials, not rely on the fallback.
+            if self.secrets.dashboard_password == self.secrets.token:
+                raise RuntimeRefusal("NATIVE_GATEWAY_PASSWORD_ALIAS_REFUSED")
             from integrations.hermes_harness.native_model_credential import primary_model_env
-            env.update(primary_model_env(self.profile, self.secrets.values))
+            model_keys = primary_model_env(self.profile, self.secrets.values)
+            if any(
+                value in {self.secrets.token, self.secrets.dashboard_password}
+                for value in model_keys.values()
+            ):
+                raise RuntimeRefusal("NATIVE_MODEL_KEY_REUSE_REFUSED")
+            env.update(model_keys)
         return env
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
