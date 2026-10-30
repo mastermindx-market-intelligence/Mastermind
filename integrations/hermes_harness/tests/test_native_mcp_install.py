@@ -111,6 +111,8 @@ class NativeStewardConfigTests(unittest.TestCase):
             )
             self.assertEqual(payload["status"], "INSTALLED")
             self.assertEqual(payload["native_steward_mcp"], "CONFIGURED_DISABLED")
+            self.assertEqual(payload["native_model_profile"], "CONFIGURED_KEY_NAMES_ONLY")
+            self.assertIs(payload["provider_called"], False)
             self.assertIs(payload["extensions_registered"], False)
             from integrations.hermes_runtime.profile import load_profile
             real_profile = load_profile(state / "current" / "profile.yaml")
@@ -123,6 +125,12 @@ class NativeStewardConfigTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(native.stat().st_mode), 0o600)
             parsed = _load_unique_yaml(native.read_bytes())
             self.assertIs(parsed["mcp_servers"]["mastermind_steward"]["enabled"], False)
+            self.assertEqual(parsed["model"]["provider"], "byteplus-modelark")
+            self.assertEqual(parsed["model"]["default"], "glm-5-3-flash-260828")
+            self.assertEqual(parsed["model"]["key_env"], "BYTEPLUS_MODELARK_API_KEY")
+            self.assertNotIn("auxiliary", parsed)
+            self.assertNotIn("fallback_model", parsed)
+            self.assertIs(parsed["providers"]["cursor-pool"]["enabled"], False)
             self.assertEqual(
                 parsed["mcp_servers"]["mastermind_steward"]["tools"]["include"],
                 list(ALLOWED_TOOLS),

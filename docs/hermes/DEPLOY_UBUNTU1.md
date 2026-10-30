@@ -150,6 +150,27 @@ Model order in those overlays:
 - `mmmeta`: Z.AI GLM-5.3, then Cursor
 - vision: MiniMax-M3, then Cursor
 
+**Native BYOK configuration (source stage; not an active provider):**
+`hermesctl install` now materializes the reviewed WP2 **primary text-model**
+into the actual native `profiles/<role>/config.yaml`, rather than only writing
+a disconnected `provider-overlay.yaml` for inspection. Secretary selects the
+commercial ModelArk `byteplus-modelark` GLM-5.3-Flash model; Meta-CEO selects
+the named `zai-glm` GLM-5.3 model. The exact approved provider registry uses
+`key_env` references without embedding credentials. The pinned donor supports
+the `providers:` named-custom shape
+(`website/docs/integrations/providers.md` at
+`NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`).
+
+This does **not** connect a provider, read or forward user credentials,
+permit an actual model request, or change Executive authority. The fresh
+Hermes supervisor's credential forwarding and a production-authenticated
+inference still require separate receiving-owner proof. No Hermes automatic
+fallback is installed: Cursor remains disabled and provider/model retries
+remain with the existing provider/capacity owner. The `auxiliary.vision`
+stanza is intentionally excluded from this native output until mini1
+computer-use authority is accepted. The existing separate vision-overlay
+file is not a running vision route.
+
 Hermes built-in toolsets `delegation` and `skills` stay disabled.
 **The installed runnable profile now admits only the native `clarify` toolset.**
 Six Steward reads remain declared in a **disabled** MCP server. `mmx_delegate`

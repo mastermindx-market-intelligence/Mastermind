@@ -172,10 +172,14 @@ class ServiceRuntime:
         from integrations.hermes_harness.native_mcp import render_disarmed_native_config
         from integrations.hermes_steward.client import ALLOWED_TOOLS
 
-        if raw != render_disarmed_native_config(self.profile).encode("utf-8"):
-            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
         if self.profile.extension_allowlist:
             raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
+        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+        if raw not in {
+            render_disarmed_native_config(self.profile).encode("utf-8"),
+            render_disarmed_native_byok(self.profile).encode("utf-8"),
+        }:
+            raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
         return {"mastermind_steward": tuple(ALLOWED_TOOLS)}
 
     def _check_registry(self) -> None:
