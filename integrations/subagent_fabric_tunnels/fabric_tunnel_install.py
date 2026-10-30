@@ -48,6 +48,7 @@ from fabric_tunnel_common import (
     evidence_line,
     parse_plist_bytes,
     plist_relpath,
+    require_parent_safe,
     serialize_plist,
     sha256_bytes,
     subprocess_runner,
@@ -89,13 +90,20 @@ class _SeatPlan:
     """A fully derived, not-yet-applied policy-trio mutation for one seat.
 
     Deriving ALL plans before ANY write means a derivation refusal can never
-    leave part of the batch mutated (B5)."""
+    leave part of the batch mutated (B5). ``expected_pre_sha256`` /
+    ``expected_pre_mode`` are the EXACT qualified predecessor from the
+    manifest; ``_execute_plan`` re-asserts them immediately before the
+    mutation so a concurrent external writer that landed after the batch
+    preflight can never be overwritten (single mutation owner via CAS on the
+    qualified bytes — no second lifecycle or lock plane)."""
     label: str
     changes: dict[str, Any]
     post_raw: bytes
     pre_mode: int
     seat_uid: int
     plist_path: Path
+    expected_pre_sha256: str
+    expected_pre_mode: int
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +226,15 @@ def install_seats(
         working[label] = assert_current_bytes_match_manifest(home, manifest, label)
         if int(entry["uid"]) != seat_uid:
             raise PolicyRefused(f"{label}_uid_mismatch")
+        # Bind directory identity across the upcoming writes: the LEXICAL
+        # ancestor chain of the plist must still be symlink-free at install
+        # time, not just at qualification time.
+        try:
+            require_parent_safe(
+                home / entry["plist_relpath"], seat_uid, code=f"{label}_install_parent_unsafe"
+            )
+        except IdentityRejected as rejected:
+            raise PolicyRefused(str(rejected)) from rejected
 
     # Derivation phase: build every plan before the first write.
     labels = sorted(TUNNEL_LABELS)
@@ -313,6 +330,8 @@ def _plan_one(
         pre_mode=pre_mode,
         seat_uid=seat_uid,
         plist_path=plist_path,
+        expected_pre_sha256=str(entry["plist_sha256"]),
+        expected_pre_mode=int(entry.get("plist_mode", pre_mode)) & 0o7777,
     )
 
 
@@ -325,9 +344,34 @@ def _execute_plan(
     reload_jobs: bool,
 ) -> InstallResult:
     """Back up, write, and reload one derived plan, self-rolling back on
-    reload failure. Never derives policy: that happened in :func:`_plan_one`."""
+    reload failure. Never derives policy: that happened in :func:`_plan_one`.
+
+    CAS custody re-bind (the batch preflight is NOT trusted across time):
+    immediately before the mutation the on-disk bytes AND mode must still be
+    the EXACT qualified predecessor pinned in the manifest. A concurrent
+    external writer that landed after preflight makes this seat refuse — the
+    intervening bytes are preserved untouched, no launchd action is taken,
+    and the caller aborts/rolls back the rest of the batch. This CAS is the
+    single mutation-owner enforcement; no second lifecycle or lock plane is
+    introduced."""
     label = plan.label
-    pre_raw = plan.plist_path.read_bytes()
+    try:
+        current_raw = plan.plist_path.read_bytes()
+        current_mode = plan.plist_path.stat().st_mode & 0o7777
+    except OSError as exc:
+        return InstallResult(
+            label=label, status="failed", changes=dict(plan.changes),
+            alerts=[Alert("install_pre_mutation_read_failed", label, str(exc), acted=True)],
+        )
+    if (
+        sha256_bytes(current_raw) != plan.expected_pre_sha256
+        or current_mode != plan.expected_pre_mode
+    ):
+        return InstallResult(
+            label=label, status="failed", changes=dict(plan.changes),
+            alerts=[Alert("install_pre_mutation_drift_refused", label, "concurrent writer after preflight", acted=True)],
+        )
+    pre_raw = current_raw
     sidecar = _write_backup(home, label, pre_raw, plan.post_raw, plan.pre_mode, now)
     try:
         atomic_write_bytes(plan.plist_path, plan.post_raw, plan.pre_mode)

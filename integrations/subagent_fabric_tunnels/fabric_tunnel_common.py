@@ -283,15 +283,23 @@ def require_owner_writable_safe(path: Path, uid: int, *, code: str) -> None:
 
 
 def require_parent_safe(path: Path, uid: int, *, code: str) -> None:
-    """Every ancestor of ``path`` must exist, be a real directory (no symlink
-    escape), and must not be group-writable or world-writable-without-sticky.
+    """Every LEXICAL ancestor of ``path`` must exist, be a real directory (no
+    symlink escape), and must not be group-writable or world-writable-without-
+    sticky.
+
+    Ancestors are lstat-walked on the lexical (normalized, un-resolved) path
+    BEFORE any symlink resolution: a symlinked intermediate component (e.g. a
+    swapped ``~/Library``) is rejected even when its target is a perfectly
+    normal directory, because resolution would silently remove the inspected
+    component from the path. The final component itself is not inspected here;
+    its own symlink/regular-file discipline belongs to the caller.
 
     A sticky world-writable directory (mode 1777, e.g. the temp root) keeps
     other users from renaming or replacing entries inside it, so it is
     accepted; an unprotected world-writable ancestor is a hijack vector and
     rejects. Owner expectations are enforced on the launchd-owned files
     themselves, not on system ancestors like ``/Users``."""
-    current = Path(path).resolve()
+    current = Path(os.path.abspath(path))
     for component in reversed(current.parents):
         try:
             st = component.lstat()

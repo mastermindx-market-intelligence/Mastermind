@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -541,6 +542,80 @@ class SecretRedactionTests(unittest.TestCase):
 
     def test_short_non_secret_values_pass_through(self):
         self.assertEqual(ftc.redact_value("state", "running"), "running")
+
+
+class IntermediateAncestorSymlinkTests(unittest.TestCase):
+    """Blocker 4: a symlinked INTERMEDIATE ancestor (~/Library) must reject
+    identity acceptance even when its resolved target is a perfectly normal
+    directory with credible LaunchAgents. Ancestors are lstat-walked
+    LEXICALLY before any resolution, so resolution can never remove the
+    swapped component from the inspected path."""
+
+    def _swap_library_symlink(self, fixture) -> str:
+        """Replace home/Library with a symlink to the (real, credible)
+        Library directory. Returns the symlink path."""
+        real_library = os.path.join(fixture.home, "Library")
+        swapped = os.path.join(fixture.home, "Library_real")
+        os.rename(real_library, swapped)
+        os.symlink(swapped, real_library)
+        return real_library
+
+    def test_require_parent_safe_rejects_symlinked_intermediate(self):
+        with FixtureHome() as fixture:
+            library = self._swap_library_symlink(fixture)
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                ftc.require_parent_safe(
+                    Path(library) / "LaunchAgents" / "x", UID, code="probe_parent_unsafe"
+                )
+            self.assertIn("symlinked ancestor", str(caught.exception))
+            self.assertIn("Library", str(caught.exception))
+
+    def test_require_parent_safe_accepts_normal_chain(self):
+        with FixtureHome() as fixture:
+            ftc.require_parent_safe(
+                Path(fixture.home) / "Library" / "LaunchAgents" / "x",
+                UID,
+                code="probe_parent_unsafe",
+            )
+
+    def test_symlinked_library_rejects_identity_even_with_credible_launchagents(self):
+        with FixtureHome() as fixture:
+            # The LaunchAgents content is fully credible BEFORE the swap:
+            # every seat verifies cleanly.
+            for label in sorted(ftc.TUNNEL_LABELS):
+                fti.verify_seat(Path(fixture.home), label, UID)
+            library = self._swap_library_symlink(fixture)
+            # After the swap the ancestor chain is refused: no acceptance,
+            # even though the resolved target is the very same normal
+            # directory that just passed.
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                fti.verify_seat(Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID)
+            self.assertIn("launchagents_parent_unsafe", str(caught.exception))
+            self.assertIn("symlinked ancestor", str(caught.exception))
+            self.assertTrue(os.path.islink(library))
+
+    def test_qualify_fails_closed_and_writes_no_manifest(self):
+        with FixtureHome() as fixture:
+            self._swap_library_symlink(fixture)
+            with self.assertRaises((ftc.IdentityRejected, ftc.PolicyRefused)) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=None, operator_confirmed=True, now=NOW
+                )
+            self.assertIn("symlinked ancestor", str(caught.exception))
+            self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))))
+
+    def test_qualified_home_rejected_after_later_library_swap(self):
+        # Qualify while the chain is real, then swap ~/Library: install-time
+        # verification must refuse instead of resolving through the symlink.
+        with FixtureHome() as fixture:
+            fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=None, operator_confirmed=True, now=NOW
+            )
+            self.assertTrue(os.path.exists(fti.manifest_path(Path(fixture.home))))
+            self._swap_library_symlink(fixture)
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                fti.verify_seat(Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID)
+            self.assertIn("symlinked ancestor", str(caught.exception))
 
 
 if __name__ == "__main__":

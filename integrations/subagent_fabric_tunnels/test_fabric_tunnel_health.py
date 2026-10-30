@@ -20,6 +20,7 @@ import tempfile
 import time
 import unittest
 import unittest.mock
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -43,10 +44,14 @@ class FakeRunner:
         *,
         kick_fail: set[str] | None = None,
         fail_bootstrap: set[str] | None = None,
+        print_fail: dict[str, tuple[int, str, str]] | None = None,
     ):
         self.pids = dict(pids)
         self.kick_fail = set(kick_fail or set())
         self.fail_bootstrap = set(fail_bootstrap or set())
+        # label -> (rc, stdout, stderr) override simulating a launchctl print
+        # failure that is NOT the known unloaded-job diagnostic.
+        self.print_fail = dict(print_fail or {})
         self.kicks: list[tuple[str, bool]] = []
         self.calls: list[list[str]] = []
 
@@ -56,9 +61,17 @@ class FakeRunner:
         self.calls.append(argv)
         if argv[:2] == [ftc.LAUNCHCTL, "print"]:
             label = argv[-1].rpartition("/")[2]
+            if label in self.print_fail:
+                rc, out, err = self.print_fail[label]
+                return ftc.RunResult(tuple(argv), rc, out, err)
             pid = self.pids.get(label)
             output = "" if pid is None else f"state = running\n\tpid = {pid}\n"
-            return ftc.RunResult(tuple(argv), 0 if pid is not None else 3, output, "")
+            stderr = (
+                ""
+                if pid is not None
+                else f'Could not find service "{label}" in gui for user: {os.getuid()}'
+            )
+            return ftc.RunResult(tuple(argv), 0 if pid is not None else 3, output, stderr)
         if argv[:2] == [ftc.LAUNCHCTL, "kickstart"]:
             label = argv[-1].rpartition("/")[2]
             forced = "-k" in argv
@@ -1080,6 +1093,539 @@ class ReportSafetyTests(unittest.TestCase):
             self.assertNotIn("TUNNEL_TOKEN", blob)
             self.assertNotIn("fixture-secret-value-not-real", blob)
             self.assertNotIn("ProgramArguments", blob)
+
+
+class MissingPidEscalationTests(unittest.TestCase):
+    """Blocker 1: the persisted 3-kick escalation binds the MISSING-PID route
+    too. A repeatedly dead seat must never earn a fourth kick after its
+    cooldown elapses without a fresh-heartbeat witness; state persists in the
+    ledger across passes."""
+
+    def classify(self, **over):
+        kwargs = dict(
+            qualified=True,
+            pid=None,
+            heartbeat_age=10.0,
+            heartbeat_path_recorded=True,
+            heartbeat_attested=True,
+            last_kick_at=None,
+            consecutive_kicks=0,
+            fresh_heartbeat_witnessed_since_kick=False,
+            now=NOW,
+        )
+        kwargs.update(over)
+        return fth.classify_seat(**kwargs)
+
+    def test_three_kicks_then_elapsed_cooldown_is_escalated_not_fourth_kick(self):
+        state, may_kick = self.classify(
+            consecutive_kicks=3,
+            last_kick_at=NOW - ftc.KICKSTART_COOLDOWN_SECONDS - 1,
+        )
+        self.assertEqual(state, fth.ST_ESCALATED)
+        self.assertFalse(may_kick)
+
+    def test_three_kicks_within_cooldown_still_no_fourth_kick(self):
+        state, may_kick = self.classify(consecutive_kicks=3, last_kick_at=NOW - 60)
+        self.assertEqual(state, fth.ST_ESCALATED)
+        self.assertFalse(may_kick)
+
+    def test_two_kicks_after_cooldown_still_recovers(self):
+        state, may_kick = self.classify(
+            consecutive_kicks=2,
+            last_kick_at=NOW - ftc.KICKSTART_COOLDOWN_SECONDS - 1,
+        )
+        self.assertEqual(state, fth.ST_MISSING_PID)
+        self.assertTrue(may_kick)
+
+    def test_witnessed_fresh_heartbeat_releases_missing_pid_route(self):
+        state, may_kick = self.classify(
+            consecutive_kicks=3,
+            last_kick_at=NOW - ftc.KICKSTART_COOLDOWN_SECONDS - 1,
+            fresh_heartbeat_witnessed_since_kick=True,
+        )
+        self.assertEqual(state, fth.ST_MISSING_PID)
+        self.assertTrue(may_kick)
+
+    def test_escalation_persists_across_passes_until_healthy_witness(self):
+        with FixtureHome() as fixture:
+            no_pids = {label: None for label in ftc.TUNNEL_LABELS}
+            kicks_seen = 0
+            t = NOW + 10
+            for _ in range(4):
+                report = fth.run_pass(fixture.home, FakeRunner(no_pids), now=t)
+                t += ftc.KICKSTART_COOLDOWN_SECONDS + 30
+                kicked = sum(
+                    1 for seat in report.seats.values() if seat["kickstarted"]
+                )
+                kicks_seen += kicked
+            # Exactly three per-seat kicks ever; the fourth pass escalates.
+            self.assertEqual(kicks_seen, 3 * len(ftc.TUNNEL_LABELS))
+            last = fth.run_pass(fixture.home, FakeRunner(no_pids), now=t)
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(last.seats[label]["state"], fth.ST_ESCALATED)
+                self.assertEqual(last.seats[label]["kickstarted"], False)
+            # A fresh heartbeat + running PID witnesses recovery: one healthy
+            # pass resets the persisted counter...
+            runner = FakeRunner(all_pids())
+            healthy_t = t + 10
+            for label in ftc.TUNNEL_LABELS:
+                fixture.touch_heartbeat(label, healthy_t - 5)
+            healthy = fth.run_pass(fixture.home, runner, now=healthy_t)
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(healthy.seats[label]["state"], fth.ST_HEALTHY)
+            # ...after which the missing-PID route may kick again.
+            later_t = healthy_t + ftc.KICKSTART_COOLDOWN_SECONDS + 30
+            resumed = fth.run_pass(fixture.home, FakeRunner(no_pids), now=later_t)
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(resumed.seats[label]["state"], fth.ST_MISSING_PID)
+                self.assertTrue(resumed.seats[label]["kickstarted"])
+            # Witness + resume are visible in the persisted ledger.
+            with open(ftc.kick_ledger_path(fixture.home), encoding="utf-8") as handle:
+                ledger = json.load(handle)
+            entry = ledger["seats"][sorted(ftc.TUNNEL_LABELS)[0]]
+            self.assertEqual(entry["consecutive_kicks"], 1)
+
+
+class KickLedgerSafetyTests(unittest.TestCase):
+    """Blocker 2: an existing-but-untrusted ledger is NEVER reset to empty.
+    Absent first use initializes; corrupt/unreadable/symlinked/unsafe state
+    refuses recovery for the pass and preserves the on-disk history."""
+
+    def _ledger_bytes(self, fixture) -> bytes:
+        with open(ftc.kick_ledger_path(fixture.home), "rb") as handle:
+            return handle.read()
+
+    def _write_ledger(self, fixture, raw: bytes, mode: int = 0o600) -> None:
+        path = ftc.kick_ledger_path(fixture.home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as handle:
+            handle.write(raw)
+        os.chmod(path, mode)
+
+    def test_absent_ledger_initializes_as_first_use(self):
+        with FixtureHome() as fixture:
+            self.assertFalse(ftc.kick_ledger_path(fixture.home).exists())
+            report = fth.run_pass(fixture.home, FakeRunner(all_pids()), now=NOW + 30)
+            self.assertEqual(
+                [a.code for a in report.alerts if "ledger" in a.code], []
+            )
+            self.assertTrue(ftc.kick_ledger_path(fixture.home).exists())
+            mode = stat.S_IMODE(os.stat(ftc.kick_ledger_path(fixture.home)).st_mode)
+            self.assertEqual(mode, 0o600)
+
+    def test_corrupt_json_refuses_and_preserves_history(self):
+        with FixtureHome() as fixture:
+            corrupt = b'{"schema": "mastermind.subagent-fabric-tunnels.kick-ledger.v1", "seats": {'
+            self._write_ledger(fixture, corrupt)
+            report = fth.run_pass(fixture.home, FakeRunner(all_pids()), now=NOW + 30)
+            codes = [a.code for a in report.alerts]
+            self.assertIn("kick_ledger_refused_recovery_alert_only", codes)
+            # No recovery was performed for any seat.
+            self.assertEqual([s["kickstarted"] for s in report.seats.values()], [False] * 5)
+            # On-disk history byte-identical (never reset).
+            self.assertEqual(self._ledger_bytes(fixture), corrupt)
+
+    def test_schema_mismatch_refuses(self):
+        with FixtureHome() as fixture:
+            raw = json.dumps({"schema": "other-schema", "seats": {}}).encode()
+            self._write_ledger(fixture, raw)
+            report = fth.run_pass(fixture.home, FakeRunner(all_pids()), now=NOW + 30)
+            self.assertIn("kick_ledger_refused_recovery_alert_only", [a.code for a in report.alerts])
+            self.assertEqual(self._ledger_bytes(fixture), raw)
+
+    def test_symlinked_ledger_refuses(self):
+        with FixtureHome() as fixture:
+            target = os.path.join(fixture.home, "outside-ledger.json")
+            with open(target, "wb") as handle:
+                handle.write(b'{"schema": "mastermind.subagent-fabric-tunnels.kick-ledger.v1", "seats": {}}')
+            path = ftc.kick_ledger_path(fixture.home)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(target, path)
+            report = fth.run_pass(fixture.home, FakeRunner(all_pids()), now=NOW + 30)
+            self.assertIn("kick_ledger_refused_recovery_alert_only", [a.code for a in report.alerts])
+            self.assertTrue(os.path.islink(path))
+
+    @unittest.skipIf(os.getuid() == 0, "unreadable-file simulation requires a non-root tester")
+    def test_unreadable_ledger_refuses(self):
+        with FixtureHome() as fixture:
+            self._write_ledger(fixture, b'{"schema": "mastermind.subagent-fabric-tunnels.kick-ledger.v1", "seats": {}}', mode=0o000)
+            report = fth.run_pass(fixture.home, FakeRunner(all_pids()), now=NOW + 30)
+            self.assertIn("kick_ledger_refused_recovery_alert_only", [a.code for a in report.alerts])
+
+    def test_unsafe_permissions_refuse(self):
+        with FixtureHome() as fixture:
+            raw = b'{"schema": "mastermind.subagent-fabric-tunnels.kick-ledger.v1", "seats": {}}'
+            self._write_ledger(fixture, raw, mode=0o666)
+            report = fth.run_pass(fixture.home, FakeRunner(all_pids()), now=NOW + 30)
+            self.assertIn("kick_ledger_refused_recovery_alert_only", [a.code for a in report.alerts])
+            # The unsafe file itself is left exactly as found.
+            self.assertEqual(self._ledger_bytes(fixture), raw)
+
+    def test_invalid_seat_entry_refuses(self):
+        with FixtureHome() as fixture:
+            raw = json.dumps(
+                {
+                    "schema": ftc.KICK_LEDGER_SCHEMA,
+                    "seats": {sorted(ftc.TUNNEL_LABELS)[0]: {"consecutive_kicks": "three"}},
+                }
+            ).encode()
+            self._write_ledger(fixture, raw)
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fth.load_kick_ledger(fixture.home)
+            self.assertIn("kick_ledger_entry_invalid", str(caught.exception))
+
+    def test_refused_ledger_pass_performs_zero_effect_calls(self):
+        with FixtureHome() as fixture:
+            self._write_ledger(fixture, b"not json at all")
+            runner = FakeRunner({label: None for label in ftc.TUNNEL_LABELS})
+            report = fth.run_pass(fixture.home, runner, now=NOW + 30)
+            verbs = [argv[1] for argv in runner.calls if argv[:1] == [ftc.LAUNCHCTL]]
+            self.assertNotIn("kickstart", verbs)
+            for seat in report.seats.values():
+                self.assertEqual(seat["kickstarted"], False)
+
+    def test_load_kick_ledger_absent_returns_fresh(self):
+        with FixtureHome() as fixture:
+            ledger = fth.load_kick_ledger(fixture.home)
+            self.assertEqual(ledger["schema"], ftc.KICK_LEDGER_SCHEMA)
+            self.assertEqual(ledger["seats"], {})
+
+
+class LaunchdUncertaintyTests(unittest.TestCase):
+    """Blocker 3: an unexpected launchctl print failure is NEVER a missing
+    PID. Only the specific known unloaded-job diagnostic qualifies; every
+    other error is alert-only with zero effect calls."""
+
+    def test_print_says_unloaded_requires_specific_diagnostic(self):
+        loaded = ftc.RunResult(("/bin/launchctl", "print"), 0, "state = running\n\tpid = 5\n", "")
+        self.assertFalse(fth.print_says_unloaded(loaded))
+        unloaded = ftc.RunResult(
+            ("/bin/launchctl", "print"), 3, "", 'Could not find service "x" in gui'
+        )
+        self.assertTrue(fth.print_says_unloaded(unloaded))
+        unexpected = ftc.RunResult(("/bin/launchctl", "print"), 137, "", "Transport connect failed")
+        self.assertFalse(fth.print_says_unloaded(unexpected))
+        ambiguous_empty = ftc.RunResult(("/bin/launchctl", "print"), 1, "", "")
+        self.assertFalse(fth.print_says_unloaded(ambiguous_empty))
+
+    def test_unexpected_print_error_returns_unknown_sentinel(self):
+        runner = FakeRunner(
+            {},
+            print_fail={sorted(ftc.TUNNEL_LABELS)[0]: (137, "", "Transport connect failed")},
+        )
+        result = fth.read_job_pid(runner, os.getuid(), sorted(ftc.TUNNEL_LABELS)[0])
+        self.assertIs(result, fth.PID_STATE_UNKNOWN)
+
+    def test_rc0_without_pid_line_is_qualified_missing(self):
+        runner = FakeRunner({sorted(ftc.TUNNEL_LABELS)[0]: None})
+        result = fth.read_job_pid(runner, os.getuid(), sorted(ftc.TUNNEL_LABELS)[0])
+        self.assertIsNone(result)
+
+    def test_unexpected_print_error_is_alert_only_with_zero_effects(self):
+        failing = sorted(ftc.TUNNEL_LABELS)[0]
+        with FixtureHome() as fixture:
+            runner = FakeRunner(
+                all_pids(),
+                print_fail={failing: (137, "", "Transport connect failed")},
+            )
+            report = fth.run_pass(fixture.home, runner, now=NOW + 30)
+            self.assertEqual(report.seats[failing]["state"], fth.ST_LAUNCHD_UNCERTAIN)
+            self.assertEqual(report.seats[failing]["kickstarted"], False)
+            self.assertEqual(report.seats[failing]["pid"], None)
+            # Exactly the five print calls happened: zero effect calls.
+            verbs = [argv[1] for argv in runner.calls if argv[:1] == [ftc.LAUNCHCTL]]
+            self.assertEqual(verbs.count("print"), 5)
+            self.assertNotIn("kickstart", verbs)
+            self.assertNotIn("bootout", verbs)
+            self.assertNotIn("bootstrap", verbs)
+            codes = [a.code for a in report.alerts]
+            self.assertIn(fth.ST_LAUNCHD_UNCERTAIN, codes)
+
+
+class WatchdogCliTests(unittest.TestCase):
+    """Blocker 5: the sanctioned watchdog install/verify entrypoints are real
+    CLI subcommands, not only an importable function. Clean-host invocation,
+    readback, and fail-closed behavior are proven hermetically."""
+
+    def _run_cli(self, argv):
+        import contextlib
+        import io
+
+        stdout_err = io.StringIO()
+        with contextlib.redirect_stdout(stdout_err), contextlib.redirect_stderr(stdout_err):
+            code = fth.main(argv)
+        return code, stdout_err.getvalue()
+
+    def test_watchdog_verify_fails_closed_on_clean_host(self):
+        import contextlib
+        import io
+
+        with FixtureHome() as fixture:
+            code, output = self._run_cli(["watchdog-verify", "--home", fixture.home])
+            self.assertEqual(code, 4)
+            self.assertIn("watchdog_plist_unavailable", output)
+
+    def test_watchdog_install_requires_confirmation(self):
+        with FixtureHome() as fixture:
+            code, output = self._run_cli(["watchdog-install", "--home", fixture.home])
+            self.assertEqual(code, 3)
+            self.assertIn("watchdog_install_requires_explicit_confirmation", output)
+
+    def test_watchdog_install_then_verify_readback(self):
+        with FixtureHome() as fixture:
+            runner = FakeRunner(all_pids())
+            with unittest.mock.patch.object(fth, "subprocess_runner", runner):
+                code, output = self._run_cli(
+                    ["watchdog-install", "--home", fixture.home, "--confirm", "--now", str(NOW)]
+                )
+            self.assertEqual(code, 0, output)
+            self.assertIn("installed=True", output)
+            code, output = self._run_cli(["watchdog-verify", "--home", fixture.home])
+            self.assertEqual(code, 0, output)
+            self.assertIn("installed=True", output)
+
+    def test_watchdog_verify_fails_closed_after_tamper(self):
+        with FixtureHome() as fixture:
+            runner = FakeRunner(all_pids())
+            with unittest.mock.patch.object(fth, "subprocess_runner", runner):
+                self.assertEqual(
+                    fth.main(["watchdog-install", "--home", fixture.home, "--confirm", "--now", str(NOW)]), 0
+                )
+            plist_path = os.path.join(
+                fixture.home, "Library", "LaunchAgents", f"{ftc.WATCHDOG_LABEL}.plist"
+            )
+            with open(plist_path, "rb") as handle:
+                doc = plistlib.load(handle)
+            doc["KeepAlive"] = True  # a periodic job must never loop
+            with open(plist_path, "wb") as handle:
+                plistlib.dump(doc, handle, fmt=plistlib.FMT_XML)
+            code, output = self._run_cli(["watchdog-verify", "--home", fixture.home])
+            self.assertEqual(code, 4)
+            self.assertIn("keep_alive_present", output)
+
+
+class _DriftBeforeRollbackRunner:
+    """Callable wrapper around a FakeRunner simulating an EXTERNAL writer
+    that lands after the install's writes are verified and just before the
+    rollback runs: the first watchdog bootstrap attempt triggers the drift."""
+
+    def __init__(self, inner, drift_path: str, payload: bytes):
+        self.inner = inner
+        self.drift_path = drift_path
+        self.payload = payload
+        self.armed = True
+
+    def __call__(self, argv, timeout=10.0):
+        result = self.inner(argv, timeout)
+        argv_list = list(argv)
+        if (
+            self.armed
+            and argv_list[:2] == [ftc.LAUNCHCTL, "bootstrap"]
+            and ftc.WATCHDOG_LABEL in argv_list[-1]
+        ):
+            with open(self.drift_path, "wb") as handle:
+                handle.write(self.payload)
+            os.chmod(self.drift_path, 0o600)
+            self.armed = False
+        return result
+
+    @property
+    def calls(self):
+        return self.inner.calls
+
+
+class WatchdogRollbackCompletionTests(unittest.TestCase):
+    """Blocker 7: rollback covers EVERY fault, uses ONLY this attempt's
+    backups, and CAS-refuses external drift instead of clobbering it."""
+
+    SEED_BODY = b"# seed generation\n"
+    EXTERNAL_BODY = b"# external intervening writer bytes\n"
+    def _watchdog_dir(self, fixture):
+        return os.path.join(
+            fixture.home, "Library", "Application Support",
+            "mastermind-subagent-fabric-tunnels", "watchdog",
+        )
+
+    def _module_path(self, fixture, name):
+        return os.path.join(self._watchdog_dir(fixture), name)
+
+    def _read(self, path) -> bytes:
+        with open(path, "rb") as handle:
+            return handle.read()
+
+    def _sidecar_names(self, fixture, name) -> list[str]:
+        target_dir = os.path.join(
+            fixture.home, "Library", "Application Support",
+            "mastermind-subagent-fabric-tunnels", "backups",
+            ftc.WATCHDOG_LABEL, name.replace("/", "_"),
+        )
+        if not os.path.isdir(target_dir):
+            return []
+        return sorted(n for n in os.listdir(target_dir) if n.endswith(".json"))
+
+    def _seed_all_stale(self, fixture) -> None:
+        os.makedirs(self._watchdog_dir(fixture), exist_ok=True)
+        for name in fth._WATCHDOG_MODULE_FILES:
+            path = self._module_path(fixture, name)
+            with open(path, "wb") as handle:
+                handle.write(self.SEED_BODY)
+            os.chmod(path, 0o600)
+        plist_path = os.path.join(
+            fixture.home, "Library", "LaunchAgents", f"{ftc.WATCHDOG_LABEL}.plist"
+        )
+        with open(plist_path, "wb") as handle:
+            plistlib.dump(
+                {"Label": ftc.WATCHDOG_LABEL, "ProgramArguments": ["/usr/bin/old-python", "pass"]},
+                handle,
+                fmt=plistlib.FMT_XML,
+            )
+        os.chmod(plist_path, 0o644)
+
+    def test_write_fault_on_second_changed_module_rolls_back_all_changed(self):
+        with FixtureHome() as fixture:
+            self._seed_all_stale(fixture)
+            real_write = fth.atomic_write_bytes
+
+            def failing_write(path, raw, mode):
+                path_str = str(path)
+                if path_str.endswith("fabric_tunnel_identity.py") and f"{os.sep}backups{os.sep}" not in path_str:
+                    raise OSError(28, "injected no-space fault")
+                return real_write(path, raw, mode)
+
+            runner = FakeRunner(all_pids())
+            with unittest.mock.patch.object(fth, "atomic_write_bytes", failing_write):
+                with self.assertRaises(ftc.ActionRefused) as caught:
+                    fth.install_watchdog_agent(fixture.home, runner, confirm=True, now=NOW)
+            self.assertIn("write_fault_rolled_back", str(caught.exception))
+            # First (changed) module restored to its exact seed preimage.
+            self.assertEqual(
+                self._read(self._module_path(fixture, "fabric_tunnel_common.py")),
+                self.SEED_BODY,
+            )
+            # Second module never mutated (fault before rename).
+            self.assertEqual(
+                self._read(self._module_path(fixture, "fabric_tunnel_identity.py")),
+                self.SEED_BODY,
+            )
+            # launchd was never touched: the fault fired before reload.
+            self.assertEqual(runner.calls, [])
+
+    def test_mixed_unchanged_and_changed_upgrade_uses_this_attempt_backups(self):
+        with FixtureHome() as fixture:
+            # Attempt 1 from clean: everything written at source generation.
+            fth.install_watchdog_agent(fixture.home, FakeRunner(all_pids()), confirm=True, now=NOW)
+            module_dir = Path(__file__).resolve().parent
+            source_bytes = {
+                name: self._read(os.path.join(module_dir, name))
+                for name in fth._WATCHDOG_MODULE_FILES
+            }
+            # An external "earlier generation" writer downgrades exactly two
+            # modules; the other targets stay byte-identical to the source.
+            downgraded = ("fabric_tunnel_common.py", "fabric_tunnel_identity.py")
+            for name in downgraded:
+                path = self._module_path(fixture, name)
+                with open(path, "wb") as handle:
+                    handle.write(self.SEED_BODY)
+                os.chmod(path, 0o600)
+            sidecars_after_first = {name: self._sidecar_names(fixture, name) for name in fth._WATCHDOG_MODULE_FILES}
+            with open(os.path.join(
+                fixture.home, "Library", "LaunchAgents", f"{ftc.WATCHDOG_LABEL}.plist"
+            ), "rb") as handle:
+                plist_after_first = handle.read()
+
+            # Attempt 2: ONLY the two downgraded modules change; inject a
+            # write fault on the second of them.
+            real_write = fth.atomic_write_bytes
+            fault_seen = {"hit": False}
+
+            def failing_write(path, raw, mode):
+                path_str = str(path)
+                if (
+                    path_str.endswith("fabric_tunnel_identity.py")
+                    and f"{os.sep}backups{os.sep}" not in path_str
+                    and self._read(path) == self.SEED_BODY
+                ):
+                    fault_seen["hit"] = True
+                    raise OSError(28, "injected no-space fault")
+                return real_write(path, raw, mode)
+
+            with unittest.mock.patch.object(fth, "atomic_write_bytes", failing_write):
+                with self.assertRaises(ftc.ActionRefused):
+                    fth.install_watchdog_agent(fixture.home, FakeRunner(all_pids()), confirm=True, now=NOW + 5)
+            self.assertTrue(fault_seen["hit"])
+            # First changed module restored to THIS attempt's exact preimage
+            # (the downgraded bytes), not to absence, not to stale state.
+            self.assertEqual(
+                self._read(self._module_path(fixture, "fabric_tunnel_common.py")),
+                self.SEED_BODY,
+            )
+            # Untouched targets keep their source bytes — the stale
+            # absent-preimage sidecars from attempt 1 were never applied.
+            for name in ("fabric_tunnel_install.py", "fabric_tunnel_health.py"):
+                self.assertEqual(self._read(self._module_path(fixture, name)), source_bytes[name])
+            # The plist was untouched by attempt 2: exactly the attempt-1
+            # installed generation survives.
+            plist_path = os.path.join(
+                fixture.home, "Library", "LaunchAgents", f"{ftc.WATCHDOG_LABEL}.plist"
+            )
+            with open(plist_path, "rb") as handle:
+                doc = plistlib.load(handle)
+            self.assertEqual(doc["Label"], ftc.WATCHDOG_LABEL)
+            self.assertEqual(self._read(plist_path), plist_after_first)
+            # No new sidecar was created for any UNTOUCHED target.
+            for name in ("fabric_tunnel_install.py", "fabric_tunnel_health.py"):
+                self.assertEqual(
+                    self._sidecar_names(fixture, name), sidecars_after_first[name]
+                )
+
+    def test_external_drift_before_rollback_is_preserved_not_clobbered(self):
+        with FixtureHome() as fixture:
+            self._seed_all_stale(fixture)
+            drifted_module = "fabric_tunnel_common.py"
+            drifted_path = self._module_path(fixture, drifted_module)
+            runner = _DriftBeforeRollbackRunner(
+                FakeRunner(all_pids(), fail_bootstrap={ftc.WATCHDOG_LABEL}),
+                drifted_path,
+                self.EXTERNAL_BODY,
+            )
+            with self.assertRaises(ftc.ActionRefused) as caught:
+                fth.install_watchdog_agent(fixture.home, runner, confirm=True, now=NOW)
+            message = str(caught.exception)
+            self.assertIn("rolled_back", message)
+            self.assertIn("watchdog_rollback_cas_refused_external_drift", message)
+            # The intervening external bytes WIN on the drifted target.
+            self.assertEqual(self._read(drifted_path), self.EXTERNAL_BODY)
+            # Every other changed target was restored exactly.
+            for name in fth._WATCHDOG_MODULE_FILES:
+                if name == drifted_module:
+                    continue
+                self.assertEqual(self._read(self._module_path(fixture, name)), self.SEED_BODY, name)
+            plist_path = os.path.join(
+                fixture.home, "Library", "LaunchAgents", f"{ftc.WATCHDOG_LABEL}.plist"
+            )
+            with open(plist_path, "rb") as handle:
+                doc = plistlib.load(handle)
+            self.assertEqual(doc["ProgramArguments"][0], "/usr/bin/old-python")
+
+    def test_absent_preimage_unlink_is_cas_guarded(self):
+        with FixtureHome() as fixture:
+            drifted = self._module_path(fixture, "fabric_tunnel_common.py")
+            runner = _DriftBeforeRollbackRunner(
+                FakeRunner(all_pids(), fail_bootstrap={ftc.WATCHDOG_LABEL}),
+                drifted,
+                self.EXTERNAL_BODY,
+            )
+            with self.assertRaises(ftc.ActionRefused) as caught:
+                fth.install_watchdog_agent(fixture.home, runner, confirm=True, now=NOW)
+            self.assertIn("watchdog_rollback_cas_refused_external_drift", str(caught.exception))
+            # Absent-preimage restore refused to unlink the drifted target:
+            # the intervening bytes survive.
+            self.assertEqual(self._read(drifted), self.EXTERNAL_BODY)
+            # Targets without drift are restored to absence.
+            self.assertFalse(os.path.exists(self._module_path(fixture, "fabric_tunnel_identity.py")))
+            self.assertFalse(os.path.exists(os.path.join(
+                fixture.home, "Library", "LaunchAgents", f"{ftc.WATCHDOG_LABEL}.plist"
+            )))
 
 
 if __name__ == "__main__":

@@ -634,5 +634,104 @@ class VerifyReadbackTests(unittest.TestCase):
             self.assertIn("non-policy-keys-changed", flagged[0])
 
 
+class PreMutationCustodyTests(unittest.TestCase):
+    """Blocker 6: the exact qualified predecessor is re-asserted IMMEDIATELY
+    before each mutation. A concurrent external writer that lands after the
+    batch preflight is never overwritten: the seat refuses, the intervening
+    bytes stay intact, and no launchd action occurs."""
+
+    def _drift_during_last_preflight(self, fixture, mutate):
+        """Wrap the batch preflight so an external writer lands on seat c1
+        right after the LAST seat's preflight read (c4) — i.e. after every
+        preflight hash-check has completed for c1."""
+        original = ins.assert_current_bytes_match_manifest
+        labels = sorted(ftc.TUNNEL_LABELS)
+        last_label = labels[-1]
+
+        def racing(home, manifest, label):
+            observed = original(home, manifest, label)
+            if label == last_label:
+                mutate()
+            return observed
+
+        return unittest.mock.patch.object(
+            ins, "assert_current_bytes_match_manifest", racing
+        )
+
+    def test_byte_drift_after_preflight_refused_and_intervening_bytes_kept(self):
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            c1 = sorted(ftc.TUNNEL_LABELS)[0]
+            written = {}
+
+            def external_writer():
+                working = dict(fixture.originals[c1])
+                working["ExitTimeOut"] = 30  # concurrent external edit
+                fixture.write_plist(c1, working)
+                written["bytes"] = fixture.read_plist_bytes_raw(c1)
+
+            runner = FakeRunner()
+            with self._drift_during_last_preflight(fixture, external_writer):
+                results = ins.install_seats(
+                    fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid
+                )
+            statuses = [r.status for r in results]
+            self.assertEqual(statuses[0], "failed")
+            self.assertEqual(statuses[1:], ["not_attempted"] * 4)
+            codes = [a.code for a in results[0].alerts]
+            self.assertIn("install_pre_mutation_drift_refused", codes)
+            # Zero launchd calls: nothing was mutated, nothing reloaded.
+            self.assertEqual(runner.calls, [])
+            # The intervening external bytes are EXACTLY preserved.
+            self.assertEqual(fixture.read_plist_bytes_raw(c1), written["bytes"])
+            live = fixture.read_plist_dict(c1)
+            self.assertEqual(live.get("ExitTimeOut"), 30)
+            # No backup was created for the refused seat in this run.
+            self.assertEqual(runner.verbs(), [])
+
+    def test_mode_drift_after_preflight_refused_bytes_kept(self):
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            c1 = sorted(ftc.TUNNEL_LABELS)[0]
+            with open(os.path.join(fixture.home, "Library", "LaunchAgents", f"{c1}.plist"), "rb") as handle:
+                intervening = handle.read()
+
+            def external_chmod():
+                os.chmod(os.path.join(fixture.home, "Library", "LaunchAgents", f"{c1}.plist"), 0o600)
+
+            runner = FakeRunner()
+            with self._drift_during_last_preflight(fixture, external_chmod):
+                results = ins.install_seats(
+                    fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid
+                )
+            self.assertEqual(results[0].status, "failed")
+            self.assertIn(
+                "install_pre_mutation_drift_refused", [a.code for a in results[0].alerts]
+            )
+            self.assertEqual(runner.calls, [])
+            self.assertEqual(fixture.read_plist_bytes_raw(c1), intervening)
+
+    def test_library_symlink_after_qualification_refuses_install(self):
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            real_library = os.path.join(fixture.home, "Library")
+            swapped = os.path.join(fixture.home, "Library_real")
+            os.rename(real_library, swapped)
+            os.symlink(swapped, real_library)
+            before = {
+                label: fixture.read_plist_bytes_raw(label) for label in sorted(ftc.TUNNEL_LABELS)
+            }
+            runner = FakeRunner()
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                ins.install_seats(
+                    fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid
+                )
+            self.assertIn("install_parent_unsafe", str(caught.exception))
+            self.assertIn("symlinked ancestor", str(caught.exception))
+            self.assertEqual(runner.calls, [])
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(fixture.read_plist_bytes_raw(label), before[label])
+
+
 if __name__ == "__main__":
     unittest.main()

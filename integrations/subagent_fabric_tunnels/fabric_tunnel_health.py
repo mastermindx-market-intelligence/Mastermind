@@ -74,9 +74,11 @@ from fabric_tunnel_common import (
     last_pass_path,
     launchctl_kickstart_argv,
     launchctl_print_argv,
+    parse_plist_bytes,
     parse_print_pid,
     plist_relpath,
     private_state_root,
+    require_parent_safe,
     require_regular_file,
     sha256_bytes,
     state_dir,
@@ -103,6 +105,8 @@ ST_UNQUALIFIED = "unqualified"
 ST_COOLDOWN = "kickstart_suppressed_cooldown"
 ST_ESCALATED = "kickstart_escalated_alert"
 ST_IDENTITY_SUSPECT = "identity_suspect_alert_only"
+ST_LAUNCHD_UNCERTAIN = "launchd_state_uncertain_alert_only"
+ST_LEDGER_REFUSED = "kick_ledger_refused_alert_only"
 
 GEN_CONSISTENT = "store_consistent"
 GEN_DRIFT = "selected_generation_drift"
@@ -136,17 +140,31 @@ def classify_seat(
     ``may_kickstart`` is True only for the two qualified recovery states and
     only when the persisted cooldown and escalation ledger allow it.
 
+    The persisted escalation limit binds BOTH recovery routes identically
+    (missing-PID and stale-heartbeat): after ``KICKSTART_ESCALATION_LIMIT``
+    consecutive kicks without a witnessed fresh heartbeat, the seat is
+    ESCALATED — alert-only — even once the cooldown has elapsed, and no
+    fourth kick may occur until a fresh heartbeat is witnessed (the seat
+    classified ``healthy``), which resets the persisted counter. Without
+    this gate the missing-PID route could kick every cooldown forever.
+
     ``heartbeat_attested`` is the B6 first-party proof switch: it must be
     True (operator-qualified ``heartbeat_kind`` + proof note in the manifest)
     before a stale heartbeat may force-restart a live job. Without it, the
     mtime of an arbitrary file cannot prove the tunnel client is wedged, so
     the outcome is alert-only. Missing-PID recovery does not depend on the
     heartbeat file — launchd itself proves that state — so it stays
-    recoverable either way.
+    recoverable either way (still under the same escalation gate).
     """
     if not qualified or not heartbeat_path_recorded:
         return ST_UNQUALIFIED, False
+    escalated = (
+        consecutive_kicks >= KICKSTART_ESCALATION_LIMIT
+        and not fresh_heartbeat_witnessed_since_kick
+    )
     if pid is None:
+        if escalated:
+            return ST_ESCALATED, False
         if _cooldown_blocks(last_kick_at, now):
             return ST_COOLDOWN, False
         return ST_MISSING_PID, True
@@ -155,7 +173,7 @@ def classify_seat(
     if heartbeat_age > STALE_HEARTBEAT_SECONDS:
         if not heartbeat_attested:
             return ST_STALE_HEARTBEAT_UNPROVEN, False
-        if consecutive_kicks >= KICKSTART_ESCALATION_LIMIT and not fresh_heartbeat_witnessed_since_kick:
+        if escalated:
             return ST_ESCALATED, False
         if _cooldown_blocks(last_kick_at, now):
             return ST_COOLDOWN, False
@@ -228,11 +246,56 @@ def classify_generation(
 # ---------------------------------------------------------------------------
 
 
-def read_job_pid(runner: Any, uid: int, label: str) -> int | None:
+class _PIDStateUnknown:
+    """Singleton sentinel returned by :func:`read_job_pid` when launchd state
+    is UNCERTAIN. This is NOT a missing PID: the print failed for a reason
+    other than the specific known unloaded-job diagnostic (permission,
+    transport, or domain ambiguity), so no recovery may be planned. Any
+    recovery decision keyed on ``pid is None`` stays unreachable for this
+    value because identity (``is``) checks against the sentinel come first."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        return "PID_STATE_UNKNOWN"
+
+
+PID_STATE_UNKNOWN = _PIDStateUnknown()
+
+# launchctl's SPECIFIC diagnostic for a job that is not loaded in the queried
+# domain. Only this phrase (with a nonzero print rc) qualifies a print failure
+# as a real missing/unloaded job; every other nonzero rc is ambiguous and
+# must be alert-only, never a kickstart.
+_LAUNCHCTL_UNLOADED_DIAGNOSTIC = "Could not find service"
+
+
+def print_says_unloaded(result: Any) -> bool:
+    """True only when a failed ``launchctl print`` carries the SPECIFIC known
+    unloaded-job diagnostic. A bare nonzero rc is never sufficient."""
+    if result.returncode == 0:
+        return False
+    haystack = "\n".join((result.stderr or "", result.stdout or ""))
+    return _LAUNCHCTL_UNLOADED_DIAGNOSTIC in haystack
+
+
+def read_job_pid(runner: Any, uid: int, label: str) -> int | None | _PIDStateUnknown:
+    """Read one job's PID from launchd, failing closed on ambiguity.
+
+    - rc 0: the job IS loaded; the ``launchctl print`` output is the
+      qualified state document — a missing ``pid =`` line there is a real
+      missing PID (loaded but not running).
+    - nonzero rc WITH the specific ``Could not find service`` diagnostic:
+      the known unloaded-job answer -> missing PID.
+    - ANY other nonzero rc (permission, transport, domain ambiguity): the
+      launchd state is UNKNOWN -> the :data:`PID_STATE_UNKNOWN` sentinel;
+      callers must treat it as alert-only, never as absent, and never
+      kickstart on it."""
     result = runner(launchctl_print_argv(uid, label))
-    if result.returncode != 0:
-        return None  # job not loaded / domain missing -> missing PID
-    return parse_print_pid(result.stdout)
+    if result.returncode == 0:
+        return parse_print_pid(result.stdout)
+    if print_says_unloaded(result):
+        return None  # specific qualified unloaded-job diagnostic
+    return PID_STATE_UNKNOWN
 
 
 def read_heartbeat_age(recorded_path: str, now: float) -> float | None:
@@ -333,19 +396,65 @@ def read_telemetry_age(telemetry_dir: str, relative_files: Any, now: float) -> f
 # ---------------------------------------------------------------------------
 
 
+def fresh_kick_ledger() -> dict[str, Any]:
+    """The empty first-use ledger. ONLY for a genuinely absent ledger file —
+    never as a fallback for a ledger that exists but cannot be trusted."""
+    return {"schema": KICK_LEDGER_SCHEMA, "seats": {}}
+
+
 def load_kick_ledger(home: Path) -> dict[str, Any]:
+    """Load the persisted cooldown/escalation ledger, FAILING CLOSED.
+
+    Distinguishing absent first-use from untrusted existing state is a
+    safety contract: cooldown and escalation history is what bounds
+    kickstarts, so a corrupt, unreadable, symlinked, non-regular, or
+    permission-unsafe EXISTING ledger is never silently reset to empty
+    (that would erase escalation and re-enable unbounded restarts). Every
+    uncertain state raises :class:`PolicyRefused` with a stable code; the
+    pass that hits one goes alert-only for ALL recovery instead of
+    guessing. Only a genuinely absent file (first use) initializes."""
     path = kick_ledger_path(home)
     try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return fresh_kick_ledger()  # absent -> genuine first use
+    except OSError as exc:
+        raise PolicyRefused(f"kick_ledger_unreadable ({exc.strerror})") from exc
+    if stat.S_ISLNK(st.st_mode):
+        raise PolicyRefused("kick_ledger_symlinked")
+    if not stat.S_ISREG(st.st_mode):
+        raise PolicyRefused("kick_ledger_not_regular")
+    if st.st_mode & 0o022:
+        raise PolicyRefused(f"kick_ledger_unsafe_permissions {oct(st.st_mode & 0o777)}")
+    try:
         raw = path.read_text(encoding="utf-8")
-    except OSError:
-        return {"schema": KICK_LEDGER_SCHEMA, "seats": {}}
+    except FileNotFoundError:
+        return fresh_kick_ledger()  # removed between lstat and read: first use
+    except OSError as exc:
+        raise PolicyRefused(f"kick_ledger_unreadable ({exc.strerror})") from exc
     try:
         ledger = json.loads(raw)
-    except ValueError:
-        return {"schema": KICK_LEDGER_SCHEMA, "seats": {}}
+    except ValueError as exc:
+        raise PolicyRefused("kick_ledger_corrupt (invalid JSON)") from exc
     if not isinstance(ledger, dict) or ledger.get("schema") != KICK_LEDGER_SCHEMA:
-        return {"schema": KICK_LEDGER_SCHEMA, "seats": {}}
-    ledger.setdefault("seats", {})
+        raise PolicyRefused("kick_ledger_schema_unknown")
+    seats = ledger.get("seats")
+    if not isinstance(seats, dict):
+        raise PolicyRefused("kick_ledger_seats_shape_invalid")
+    for label, entry in seats.items():
+        if not isinstance(label, str) or not isinstance(entry, dict):
+            raise PolicyRefused(f"kick_ledger_entry_invalid: {label!r}")
+        last_kick_at = entry.get("last_kick_at")
+        if last_kick_at is not None and (
+            isinstance(last_kick_at, bool) or not isinstance(last_kick_at, (int, float))
+        ):
+            raise PolicyRefused(f"kick_ledger_entry_invalid: {label}: last_kick_at")
+        kicks = entry.get("consecutive_kicks", 0)
+        if isinstance(kicks, bool) or not isinstance(kicks, int) or kicks < 0:
+            raise PolicyRefused(f"kick_ledger_entry_invalid: {label}: consecutive_kicks")
+        witnessed = entry.get("fresh_heartbeat_witnessed_since_kick", False)
+        if not isinstance(witnessed, bool):
+            raise PolicyRefused(f"kick_ledger_entry_invalid: {label}: witness flag")
     return ledger
 
 
@@ -454,7 +563,15 @@ def run_pass(
     if rogue:
         report.alerts.append(Alert("rogue_family_labels_present", "host", ",".join(rogue)))
 
-    ledger = load_kick_ledger(home)
+    # Cooldown/escalation ledger. An untrusted EXISTING ledger fails closed:
+    # the whole pass goes alert-only (recovery cannot be bounded without the
+    # persisted history) and the ledger is NOT rewritten, so corrupt or
+    # tampered state can never be silently reset to empty.
+    try:
+        ledger = load_kick_ledger(home)
+    except PolicyRefused as refused:
+        report.alerts.append(Alert("kick_ledger_refused_recovery_alert_only", "host", str(refused)))
+        ledger = None
     seats: dict[str, Any] = {}
     for label in sorted(TUNNEL_LABELS):
         entry = manifest["seats"][label]
@@ -467,23 +584,32 @@ def run_pass(
         pid = read_job_pid(runner, seat_uid, label) if not rogue else None
         if label in suspect_labels:
             state, may_kick = ST_IDENTITY_SUSPECT, False
+        elif pid is PID_STATE_UNKNOWN:
+            # launchd state could not be QUALIFIED (unexpected print error):
+            # never treated as a missing PID, never recovered, alert only.
+            state, may_kick = ST_LAUNCHD_UNCERTAIN, False
+        elif ledger is None:
+            # Untrusted ledger: classification still reports, but no
+            # recovery — kick history cannot bound the kickstart.
+            state, may_kick = ST_LEDGER_REFUSED, False
         else:
+            seat_entry = ledger["seats"].get(label) or {}
             state, may_kick = classify_seat(
                 qualified=bool(heartbeat_path) and not rogue,
                 pid=pid,
                 heartbeat_age=heartbeat_age,
                 heartbeat_path_recorded=bool(heartbeat_path),
                 heartbeat_attested=heartbeat_attested,
-                last_kick_at=(ledger["seats"].get(label) or {}).get("last_kick_at"),
-                consecutive_kicks=int((ledger["seats"].get(label) or {}).get("consecutive_kicks") or 0),
+                last_kick_at=seat_entry.get("last_kick_at"),
+                consecutive_kicks=int(seat_entry.get("consecutive_kicks") or 0),
                 fresh_heartbeat_witnessed_since_kick=bool(
-                    (ledger["seats"].get(label) or {}).get("fresh_heartbeat_witnessed_since_kick")
+                    seat_entry.get("fresh_heartbeat_witnessed_since_kick")
                 ),
                 now=now,
             )
         acted = False
         kick_forced = False
-        if may_kick and recover and not rogue:
+        if may_kick and recover and not rogue and ledger is not None:
             try:
                 kick_argv = launchctl_kickstart_argv(seat_uid, label, force=(state == ST_STALE_HEARTBEAT))
                 result = runner(kick_argv)
@@ -497,10 +623,10 @@ def run_pass(
                     )
             except ActionRefused as refused:
                 report.alerts.append(Alert("kickstart_refused", label, str(refused), acted=True))
-        if state == ST_HEALTHY:
+        if state == ST_HEALTHY and ledger is not None:
             _witness_recovery(ledger, label)
         seats[label] = {
-            "pid": pid,
+            "pid": None if isinstance(pid, _PIDStateUnknown) else pid,
             "heartbeat_age_seconds": None if heartbeat_age is None else int(heartbeat_age),
             "state": state,
             "heartbeat_attested": heartbeat_attested,
@@ -510,7 +636,8 @@ def run_pass(
         report.alerts.extend(
             alert for alert in _seat_alerts(state, label) if alert.code not in {a.code for a in report.alerts if a.label == label}
         )
-    save_kick_ledger(home, ledger)
+    if ledger is not None:
+        save_kick_ledger(home, ledger)
     report.seats = seats
     _finish(report, home, now)
     return report
@@ -521,6 +648,25 @@ def _seat_alerts(state: str, label: str) -> list[Alert]:
         return [Alert(ST_HEARTBEAT_MISSING, label)]
     if state == ST_ESCALATED:
         return [Alert(ST_ESCALATED, label, "repeated kicks without a fresh heartbeat")]
+    if state == ST_LAUNCHD_UNCERTAIN:
+        return [
+            Alert(
+                ST_LAUNCHD_UNCERTAIN,
+                label,
+                "launchctl print failed without the specific unloaded-job diagnostic; "
+                "state is NOT proven missing — alert only, no recovery this pass",
+            )
+        ]
+    if state == ST_LEDGER_REFUSED:
+        return [
+            Alert(
+                ST_LEDGER_REFUSED,
+                label,
+                "cooldown/escalation ledger is corrupt, unreadable, symlinked, or unsafe; "
+                "existing history is preserved and NO recovery is performed until a human "
+                "resolves the ledger (never auto-reset)",
+            )
+        ]
     if state == ST_STALE_HEARTBEAT_UNPROVEN:
         return [
             Alert(
@@ -600,21 +746,6 @@ def _backup_watchdog_target(
     return sidecar
 
 
-def _load_watchdog_backup(home: Path, name: str) -> tuple[Path, dict[str, Any]] | None:
-    directory = _watchdog_backup_dir(home, name)
-    sidecars = sorted(directory.glob("*.json"))
-    if not sidecars:
-        return None
-    newest = sidecars[-1]
-    try:
-        payload = json.loads(newest.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        raise PolicyRefused(f"watchdog_backup_sidecar_unreadable ({exc.__class__.__name__})") from exc
-    if payload.get("schema") != WATCHDOG_BACKUP_SCHEMA:
-        raise PolicyRefused("watchdog_backup_schema_unknown")
-    return newest, payload
-
-
 def _watchdog_target_path(home: Path, name: str) -> Path:
     """Absolute path of one watchdog target by its qualified target name.
 
@@ -625,30 +756,76 @@ def _watchdog_target_path(home: Path, name: str) -> Path:
     return watchdog_dir(home) / name
 
 
-def _rollback_watchdog_install(home: Path, runner: Any, *, uid: int) -> list[Alert]:
-    """Restore every watchdog target to its exact pre-install state — bytes
-    and mode when the target existed, absence when it did not (CAS: digest
-    verified against the sidecar) — then leave launchd consistent with the
-    RESTORED disk (bootout always; bootstrap only a restored plist)."""
+def _rollback_watchdog_install(
+    home: Path,
+    runner: Any,
+    *,
+    uid: int,
+    attempt_backups: Mapping[str, Path],
+    mismatch_names: frozenset[str] = frozenset(),
+    plist_mutated: bool = False,
+) -> list[Alert]:
+    """Restore EXACTLY the targets changed by the CURRENT attempt — bytes and
+    mode when the target existed, absence when it did not — using THIS
+    attempt's sidecars, never the newest sidecar of some earlier generation.
+
+    Every restore is CAS-guarded against the recorded post digest of this
+    attempt before any bytes are touched:
+    - current == this attempt's post digest  -> restore preimage (or unlink);
+    - current == the preimage already (write faulted before rename) ->
+      nothing to do, target left untouched;
+    - anything else is drift after our write -> for targets this attempt's
+      own readback never verified (``mismatch_names`` — our known-wrong
+      write is the certain last writer) the preimage is restored; for every
+      other target the drift is treated as EXTERNAL, the intervening bytes
+      are preserved, and a stable alert names the refusal.
+
+    launchd is only reloaded (bootout; bootstrap only a restored pre-existing
+    plist) when this attempt actually mutated the PLIST on disk, so a fault
+    during an earlier module write never starts or stops any job, and the
+    loaded job is never left inconsistent with untouched disk. Targets with
+    no backup from this attempt (byte-identical, never touched) are left
+    completely alone."""
     from fabric_tunnel_install import _bootout_if_loaded, _bootstrap
 
     alerts: list[Alert] = []
     plist_name = plist_relpath(WATCHDOG_LABEL)
-    pre_existed_by_name: dict[str, bool | None] = {}
-    for name in (*_WATCHDOG_MODULE_FILES, plist_name):
+    plist_pre_existed: bool | None = None
+    for name, sidecar in attempt_backups.items():
         target = _watchdog_target_path(home, name)
-        loaded = _load_watchdog_backup(home, name)
-        if loaded is None:
-            alerts.append(Alert("watchdog_rollback_no_backup", name, acted=True))
-            pre_existed_by_name[name] = None
+        try:
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            alerts.append(Alert("watchdog_rollback_sidecar_unreadable", name, str(exc.__class__.__name__), acted=True))
             continue
-        sidecar, payload = loaded
-        pre_existed_by_name[name] = bool(payload.get("pre_existed"))
-        if not pre_existed_by_name[name]:
-            try:
-                target.unlink()
-            except OSError:
-                alerts.append(Alert("watchdog_rollback_unlink_failed", name, acted=True))
+        if payload.get("schema") != WATCHDOG_BACKUP_SCHEMA:
+            alerts.append(Alert("watchdog_rollback_schema_unknown", name, acted=True))
+            continue
+        post_digest = payload.get("post_sha256")
+        pre_existed = bool(payload.get("pre_existed"))
+        if name == plist_name:
+            plist_pre_existed = pre_existed
+        try:
+            current_raw = target.read_bytes()
+        except FileNotFoundError:
+            current_raw = None  # write faulted before rename, or already absent
+        except OSError as exc:
+            alerts.append(Alert("watchdog_rollback_target_unreadable", name, str(exc.strerror), acted=True))
+            continue
+        drifted = current_raw is not None and sha256_bytes(current_raw) != post_digest
+        if drifted and name not in mismatch_names:
+            if pre_existed and sha256_bytes(current_raw) == payload.get("pre_sha256"):
+                continue  # never actually mutated: preimage already in place
+            # External writer moved the target after our verified write:
+            # intervening bytes win; rollback refuses to clobber them.
+            alerts.append(Alert("watchdog_rollback_cas_refused_external_drift", name, acted=True))
+            continue
+        if not pre_existed:
+            if current_raw is not None:
+                try:
+                    target.unlink()
+                except OSError as exc:
+                    alerts.append(Alert("watchdog_rollback_unlink_failed", name, str(exc.strerror), acted=True))
             continue
         blob = sidecar.parent / (sidecar.stem + (Path(name).suffix or ".bin"))
         try:
@@ -660,15 +837,19 @@ def _rollback_watchdog_install(home: Path, runner: Any, *, uid: int) -> list[Ale
             alerts.append(Alert("watchdog_rollback_backup_digest_mismatch", name, acted=True))
             continue
         mode = int(payload.get("mode") or (0o644 if name.endswith(".plist") else 0o600))
-        atomic_write_bytes(target, pre_raw, mode)
-        if target.read_bytes() != pre_raw:
-            alerts.append(Alert("watchdog_rollback_readback_mismatch", name, acted=True))
-    try:
-        _bootout_if_loaded(runner, uid, WATCHDOG_LABEL)
-        if pre_existed_by_name.get(plist_name):
-            _bootstrap(runner, uid, _watchdog_target_path(home, plist_name))
-    except ActionRefused as exc:
-        alerts.append(Alert("watchdog_rollback_reload_failed", WATCHDOG_LABEL, str(exc), acted=True))
+        try:
+            atomic_write_bytes(target, pre_raw, mode)
+            if target.read_bytes() != pre_raw:
+                alerts.append(Alert("watchdog_rollback_readback_mismatch", name, acted=True))
+        except OSError as exc:
+            alerts.append(Alert("watchdog_rollback_restore_failed", name, str(exc.strerror), acted=True))
+    if plist_mutated and plist_name in attempt_backups:
+        try:
+            _bootout_if_loaded(runner, uid, WATCHDOG_LABEL)
+            if plist_pre_existed:
+                _bootstrap(runner, uid, _watchdog_target_path(home, plist_name))
+        except ActionRefused as exc:
+            alerts.append(Alert("watchdog_rollback_reload_failed", WATCHDOG_LABEL, str(exc), acted=True))
     return alerts
 
 
@@ -688,15 +869,21 @@ def install_watchdog_agent(
     references our own watchdog label and the five-seat allowlist; the
     Desktop Commander carrier is not referenced by any generated argv.
 
-    Upgrade/overwrite safety (B3): every existing target (the four copied
-    modules and the watchdog plist) is captured as an exact private preimage
-    backup BEFORE any edit; a target that is already byte-identical is left
-    untouched (idempotent readback, no backup churn); a symlinked or
-    unsafe target refuses instead of being overwritten; every write is
-    verified by read-back digest; and ANY post-write or launchd failure rolls
-    ALL targets back to their exact preimage (or absence) and reloads the
-    restored plist, then raises. Requires a fresh manifest: watchdog install
-    is an install-time mutation and keeps the strict freshness contract."""
+    Upgrade/overwrite safety (B3, tightened): every target about to CHANGE
+    (the four copied modules and the watchdog plist) is captured as an exact
+    private preimage backup BEFORE any edit, tracked as THIS attempt's
+    backup; a target that is already byte-identical is left untouched
+    (idempotent readback, no backup churn, and rollback never resurrects a
+    stale earlier generation into it); a symlinked or unsafe target refuses
+    instead of being overwritten; the LEXICAL ancestor chains of both write
+    roots are re-bound symlink-free at install time; every write is verified
+    by read-back digest; and ANY fault — post-write mismatch, write or chmod
+    exception, or launchd failure — rolls ALL targets changed by this
+    attempt back to their exact preimage (or absence) under CAS against this
+    attempt's post digests (external drift after our write is preserved, not
+    clobbered), reloads launchd only when the plist itself changed, then
+    raises. Requires a fresh manifest: watchdog install is an install-time
+    mutation and keeps the strict freshness contract."""
     if not confirm:
         raise PolicyRefused("watchdog_install_requires_explicit_confirmation")
     load_manifest(home, now=now)  # strict: install-time authorization is fresh
@@ -711,6 +898,14 @@ def install_watchdog_agent(
     target_dir = watchdog_dir(home)
     target_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(target_dir, 0o700)
+    # Bind directory identity across the writes: both lexical ancestor
+    # chains (LaunchAgents plist and private watchdog module dir) must be
+    # symlink-free NOW, not merely at qualification time.
+    try:
+        require_parent_safe(home / plist_relpath(WATCHDOG_LABEL), os.getuid(), code="watchdog_plist_parent_unsafe")
+        require_parent_safe(target_dir / "x", os.getuid(), code="watchdog_dir_parent_unsafe")
+    except IdentityRejected as rejected:
+        raise PolicyRefused(str(rejected)) from rejected
     module_raws: dict[str, bytes] = {}
     for name in _WATCHDOG_MODULE_FILES:
         source = module_dir / name
@@ -762,29 +957,57 @@ def install_watchdog_agent(
             preimages[name] = (None, None)
 
     # Chairman rule: back up any file before editing. Only targets about to
-    # CHANGE get a backup; identical targets are skipped entirely.
+    # CHANGE get a backup; identical targets are skipped entirely. The
+    # sidecar of EACH backup is remembered as THIS attempt's rollback source
+    # — rollback must never fall back to a stale earlier generation's
+    # sidecar for a target this attempt never touched.
+    attempt_backups: dict[str, Path] = {}
     for name, _dest, raw, _mode in targets:
         if preimages[name][0] == raw:
             continue
-        _backup_watchdog_target(home, name, preimages[name][0], preimages[name][1], raw, now)
+        attempt_backups[name] = _backup_watchdog_target(
+            home, name, preimages[name][0], preimages[name][1], raw, now
+        )
 
-    # Apply only changed targets, atomically, with read-back CAS.
-    for name, dest, raw, mode in targets:
-        if preimages[name][0] == raw:
-            continue
-        atomic_write_bytes(dest, raw, mode)
-        os.chmod(dest, mode)
-        if dest.read_bytes() != raw:
-            alerts = _rollback_watchdog_install(home, runner, uid=os.getuid())
-            raise ActionRefused(
-                f"watchdog_install_post_write_mismatch_rolled_back alerts={[a.code for a in alerts]}"
-            )
+    uid = os.getuid()
+    mismatched: list[str] = []
+    plist_mutated = False
+    try:
+        # Apply only changed targets, atomically, with read-back CAS. ANY
+        # fault here — a write/chmod exception, or a read-back mismatch —
+        # rolls back every target this attempt changed before raising.
+        for name, dest, raw, mode in targets:
+            if preimages[name][0] == raw:
+                continue
+            atomic_write_bytes(dest, raw, mode)
+            if name == plist_relpath(WATCHDOG_LABEL):
+                plist_mutated = True  # the rename landed: launchd was not yet touched
+            os.chmod(dest, mode)
+            if dest.read_bytes() != raw:
+                mismatched.append(name)
+                raise ActionRefused(f"post_write_mismatch name={name}")
+    except ActionRefused as exc:
+        alerts = _rollback_watchdog_install(
+            home, runner, uid=uid, attempt_backups=attempt_backups,
+            mismatch_names=frozenset(mismatched), plist_mutated=plist_mutated,
+        )
+        raise ActionRefused(
+            f"watchdog_install_post_write_mismatch_rolled_back alerts={[a.code for a in alerts]} cause={exc}"
+        ) from exc
+    except OSError as exc:
+        alerts = _rollback_watchdog_install(
+            home, runner, uid=uid, attempt_backups=attempt_backups,
+            mismatch_names=frozenset(mismatched), plist_mutated=plist_mutated,
+        )
+        raise ActionRefused(
+            f"watchdog_install_write_fault_rolled_back alerts={[a.code for a in alerts]} cause={exc}"
+        ) from exc
 
     try:
-        _bootout_if_loaded(runner, os.getuid(), WATCHDOG_LABEL)
-        _bootstrap(runner, os.getuid(), plist_path)
+        _bootout_if_loaded(runner, uid, WATCHDOG_LABEL)
+        _bootstrap(runner, uid, plist_path)
     except ActionRefused as exc:
-        alerts = _rollback_watchdog_install(home, runner, uid=os.getuid())
+        alerts = _rollback_watchdog_install(home, runner, uid=uid, attempt_backups=attempt_backups)
         raise ActionRefused(
             f"watchdog_install_bootstrap_failed_rolled_back alerts={[a.code for a in alerts]} cause={exc}"
         ) from exc
@@ -792,8 +1015,78 @@ def install_watchdog_agent(
 
 
 # ---------------------------------------------------------------------------
-# CLI. Subcommands: pass (health loop), and a read-only print of the last
-# pass report. No secrets are ever printed; reports contain no argv bodies.
+# Watchdog readback. The operator-facing counterpart of install: a read-only
+# verification that the installed watchdog is exactly the shape this
+# integration owns. Fail closed: any absence or mismatch raises, never
+# degrades to a warning.
+# ---------------------------------------------------------------------------
+
+
+def verify_watchdog_install(home: Path) -> list[str]:
+    """Read-only readback of the installed watchdog agent (no launchd calls).
+
+    Verifies, on the live filesystem: the watchdog plist exists as a regular
+    non-symlink file, parses, carries THIS integration's label and the
+    bounded periodic shape (RunAtLoad, StartInterval, ThrottleInterval>=10,
+    NO KeepAlive), references the private watchdog module and a ``pass``
+    invocation, and that all four private module copies exist as regular
+    0600 files. Any absence or mismatch raises :class:`PolicyRefused` with a
+    stable code. stdout-safe: evidence lines carry digests and modes, never
+    argv bodies or environment values."""
+    home = Path(home)
+    plist_path = home / plist_relpath(WATCHDOG_LABEL)
+    require_regular_file(plist_path, code="watchdog_plist_unavailable")
+    plist_doc = parse_plist_bytes(plist_path.read_bytes(), code="watchdog_plist_invalid")
+    problems: list[str] = []
+    if plist_doc.get("Label") != WATCHDOG_LABEL:
+        problems.append("label_mismatch")
+    if plist_doc.get("RunAtLoad") is not True:
+        problems.append("run_at_load_not_true")
+    if "KeepAlive" in plist_doc:
+        problems.append("keep_alive_present_periodic_job_must_not_loop")
+    if plist_doc.get("StartInterval") != WATCHDOG_START_INTERVAL_SECONDS:
+        problems.append("start_interval_mismatch")
+    throttle = plist_doc.get("ThrottleInterval")
+    if not isinstance(throttle, int) or isinstance(throttle, bool) or throttle < 10:
+        problems.append("throttle_below_10")
+    argv = plist_doc.get("ProgramArguments")
+    if not isinstance(argv, list) or len(argv) < 4:
+        problems.append("argv_shape_invalid")
+    elif not all(isinstance(element, str) for element in argv):
+        problems.append("argv_element_invalid")
+    else:
+        if not any(element.endswith("fabric_tunnel_health.py") for element in argv):
+            problems.append("argv_not_our_module")
+        if "pass" not in argv:
+            problems.append("argv_not_bounded_pass")
+    if problems:
+        raise PolicyRefused(f"watchdog_plist_not_ours ({','.join(problems)})")
+    module_dir = watchdog_dir(home)
+    for name in _WATCHDOG_MODULE_FILES:
+        module_path = module_dir / name
+        require_regular_file(module_path, code=f"watchdog_module_unavailable: {name}")
+        mode = stat.S_IMODE(module_path.lstat().st_mode)
+        if mode != 0o600:
+            raise PolicyRefused(f"watchdog_module_mode_unsafe: {name} {oct(mode)}")
+    return [
+        evidence_line(
+            WATCHDOG_LABEL,
+            {
+                "installed": True,
+                "plist_sha256": sha256_bytes(plist_path.read_bytes())[:16],
+                "plist_mode": oct(stat.S_IMODE(plist_path.lstat().st_mode)),
+                "modules_present": len(_WATCHDOG_MODULE_FILES),
+                "start_interval": plist_doc.get("StartInterval"),
+            },
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# CLI. Subcommands: pass (health loop), last-pass (read-only report print),
+# watchdog-install / watchdog-verify (the sanctioned operator entrypoints for
+# the watchdog LaunchAgent). No secrets are ever printed; reports contain no
+# argv bodies.
 # ---------------------------------------------------------------------------
 
 
@@ -807,6 +1100,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     pass_cmd.add_argument("--observe-only", action="store_true")
     last_cmd = sub.add_parser("last-pass")
     last_cmd.add_argument("--home", default=os.path.expanduser("~"))
+    install_cmd = sub.add_parser("watchdog-install")
+    install_cmd.add_argument("--home", default=os.path.expanduser("~"))
+    install_cmd.add_argument("--confirm", action="store_true")
+    install_cmd.add_argument("--now", type=float, default=None)
+    verify_cmd = sub.add_parser("watchdog-verify")
+    verify_cmd.add_argument("--home", default=os.path.expanduser("~"))
     args = parser.parse_args(argv)
     home = Path(args.home).expanduser()
     home = Path(home)
@@ -817,6 +1116,23 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
             print("last-pass unavailable")
             return 4
         print(json.dumps(doc, indent=2, sort_keys=True))
+        return 0
+    if args.command == "watchdog-verify":
+        try:
+            for line in verify_watchdog_install(home):
+                print(line)
+        except (PolicyRefused, IdentityRejected) as refused:
+            print(f"REFUSED {refused.__class__.__name__}: {refused}", file=os.sys.stderr)
+            return 4
+        return 0
+    if args.command == "watchdog-install":
+        try:
+            now = args.now if args.now is not None else time.time()
+            plist_path = install_watchdog_agent(home, subprocess_runner, confirm=args.confirm, now=now)
+        except (PolicyRefused, ActionRefused, IdentityRejected) as refused:
+            print(f"REFUSED {refused.__class__.__name__}: {refused}", file=os.sys.stderr)
+            return 3
+        print(evidence_line("watchdog-install", {"plist": plist_path, "installed": True}))
         return 0
     now = time.time()
     report = run_pass(home, subprocess_runner, now=now, recover=not args.observe_only)
@@ -832,6 +1148,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         ST_HEARTBEAT_MISSING,
         ST_STALE_HEARTBEAT_UNPROVEN,
         ST_IDENTITY_SUSPECT,
+        ST_LAUNCHD_UNCERTAIN,
+        ST_LEDGER_REFUSED,
         "manifest_stale_revalidated",
         "seat_identity_tampered_alert_only",
         "seat_identity_rejected",

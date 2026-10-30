@@ -35,7 +35,7 @@ additional queue or process watcher exists in this integration.
 ```bash
 # from a repo checkout at the branch commit
 python3 -m unittest discover -s integrations/subagent_fabric_tunnels \
-    -p 'test_fabric_tunnel_*.py'            # 130 tests
+    -p 'test_fabric_tunnel_*.py'            # focused hermetic suite
 python3 -m unittest discover -s tests \
     -p 'test_subagent_fabric_tunnels_source.py'   # CI gate, 4 tests
 python3 -m compileall -q integrations/subagent_fabric_tunnels
@@ -132,6 +132,18 @@ unattempted seats reported `not_attempted`. Only a fully installed or fully
 already-compliant batch exits 0; partial states are never silent and never
 survive a failed run.
 
+Mutation custody ( tightened): the batch preflight hash-check is re-asserted
+IMMEDIATELY before each seat's mutation — the on-disk bytes AND mode must
+still be the EXACT qualified predecessor pinned in the manifest. A concurrent
+external writer that lands after preflight makes that seat refuse
+(`install_pre_mutation_drift_refused`); the intervening bytes are preserved
+untouched, no launchd action is taken, and the rest of the batch aborts.
+This CAS on the qualified bytes is the single mutation-owner enforcement; no
+second lifecycle or lock plane exists. The LEXICAL ancestor chain of every
+plist is also re-bound symlink-free at install time
+(`*_install_parent_unsafe`), so a `~/Library` swap between qualification and
+install refuses instead of resolving through the symlink.
+
 Readback after install:
 
 ```bash
@@ -145,21 +157,44 @@ python3 integrations/subagent_fabric_tunnels/fabric_tunnel_health.py pass --home
 python3 integrations/subagent_fabric_tunnels/fabric_tunnel_health.py last-pass --home ~
 ```
 
-Installed form: `install_watchdog_agent` copies the four modules privately and
-installs the watchdog LaunchAgent — `StartInterval=60`, `RunAtLoad=true`,
+Installed form: the watchdog is installed and verified through the explicit
+operator CLI (not only an importable function):
+
+```bash
+python3 integrations/subagent_fabric_tunnels/fabric_tunnel_health.py \
+    --home ~ watchdog-install --confirm
+python3 integrations/subagent_fabric_tunnels/fabric_tunnel_health.py \
+    --home ~ watchdog-verify
+```
+
+`watchdog-install --confirm` copies the four modules privately and installs
+the watchdog LaunchAgent — `StartInterval=60`, `RunAtLoad=true`,
 `ThrottleInterval=10`, **no KeepAlive** (a periodic job must not be
 resurrected into a tight loop), python3 resolved from the host at install
-time. Each fire is ONE pass; there is no daemon and no retry plane.
+time. Each fire is ONE pass; there is no daemon and no retry plane. It
+refuses without `--confirm`, without a fresh manifest, or on any unsafe
+target; `watchdog-verify` is read-only, performs no launchd call, and fails
+closed (exit 4) on any absence, mismatch, or tamper
+(`watchdog_plist_unavailable`, `watchdog_plist_not_ours`,
+`watchdog_module_mode_unsafe`).
 
-Watchdog install safety (B3): every existing target (the four copied modules
-and the watchdog plist) is captured as an exact private preimage backup
-BEFORE any edit; already byte-identical targets are left untouched
-(idempotent re-runs write nothing and create no backup churn); symlinked or
-unsafe targets REFUSE instead of being overwritten; every write is verified
-by read-back digest; and any post-write mismatch or launchd failure rolls ALL
-targets back to their exact preimage (or restores ABSENCE for targets that
-did not exist), reloads the restored plist, and raises. Watchdog install is
-an install-time mutation and keeps the strict fresh-manifest requirement.
+Watchdog install safety (B3, tightened): every target about to CHANGE (the
+four copied modules and the watchdog plist) is captured as an exact private
+preimage backup BEFORE any edit, and that backup is recorded as THIS
+attempt's rollback source; already byte-identical targets are left untouched
+(idempotent re-runs write nothing, create no backup churn, and rollback never
+resurrects a stale earlier generation into them); symlinked or unsafe
+targets REFUSE instead of being overwritten; the LEXICAL ancestor chains of
+both write roots are re-bound symlink-free at install time; every write is
+verified by read-back digest; and ANY fault — post-write mismatch, write or
+chmod exception, or launchd failure — rolls ALL targets changed by this
+attempt back to their exact preimage (or restores ABSENCE) under CAS against
+this attempt's post digests. External drift after our write is preserved,
+never clobbered (`watchdog_rollback_cas_refused_external_drift`). launchd is
+reloaded only when the plist itself was actually mutated by the attempt, so
+a fault during an earlier module write never starts or stops any job.
+Watchdog install remains an install-time mutation and keeps the strict
+fresh-manifest requirement.
 
 ### Manifest age vs. durable recovery (B1)
 
@@ -198,12 +233,15 @@ Classification (distinguished exactly as the plan requires):
 | Signal | Outcome |
 | --- | --- |
 | No PID on a qualified job | `missing_pid` → plain `launchctl kickstart gui/<uid>/<label>` |
+| No PID, 3 persisted consecutive kicks without a witnessed fresh heartbeat | `kickstart_escalated_alert`, NO fourth kick even after cooldown, until a healthy pass witnesses a fresh heartbeat |
 | PID present, heartbeat older than 300 s, first-party attested | `stale_heartbeat` → `launchctl kickstart -k` |
 | PID present, heartbeat older than 300 s, NOT attested | `stale_heartbeat_unproven_alert_only`, NO action, exact required proof in the alert |
 | PID present, heartbeat fresh | `healthy`, no action |
 | Heartbeat file missing/unreadable | `heartbeat_missing` alert, NO action |
 | Heartbeat path never qualified | `heartbeat_path_unqualified`, NO action |
 | Heartbeat recorded but never attested first-party | `heartbeat_first_party_unproven` alert (per pass, until qualified) |
+| `launchctl print` nonzero WITHOUT the specific `Could not find service` diagnostic | `launchd_state_uncertain_alert_only`, NO action, zero effect calls (never mistaken for a missing PID) |
+| Kick ledger corrupt / unreadable / symlinked / unsafe-permissioned / malformed | `kick_ledger_refused_alert_only` (+ `kick_ledger_refused_recovery_alert_only`): NO recovery for the whole pass; on-disk history preserved, never auto-reset |
 | Live seat identity ≠ pinned manifest (only past the day boundary) | `seat_identity_tampered_alert_only`, NO action for that seat; other seats recover |
 | Manifest past 86400 s on a health pass | `manifest_stale_revalidated` alert; live revalidation, recovery continues |
 | `CURRENT.json` selection ≠ qualified pinned generation | `selected_generation_drift` alert; repin REFUSED, CURRENT.json never rewritten |
@@ -212,7 +250,6 @@ Classification (distinguished exactly as the plan requires):
 | Qualified telemetry set: oldest required file older than the threshold | `host_pull_telemetry_stale` alert |
 | Any qualified telemetry file missing/symlinked/invalid, or file set unqualified | `host_pull_telemetry_unqualified` alert (never a partial freshness proof) |
 | Kickstart already performed within cooldown (1800 s) | `kickstart_suppressed_cooldown` |
-| 3 consecutive kickstarts without a witnessed fresh heartbeat | `kickstart_escalated_alert`, alert-only until one fresh heartbeat is seen |
 
 Host-pull telemetry is read from a bounded CLOSED set of operator-qualified
 explicit files (`host_pull_telemetry_files` under `host_pull_telemetry_dir`,
@@ -222,7 +259,12 @@ written file under the same root can never mask stale telemetry, and there
 is no recursive scan to make the minute watchdog unbounded (B2).
 
 The kick ledger is private (0600), persists across passes, and is what makes
-recovery bounded. Host-pull generation alerts never block a qualified seat's
+recovery bounded. It also fails CLOSED: a GENUINELY ABSENT ledger initializes
+as first use, but an existing ledger that is corrupt, unreadable, symlinked,
+non-regular, group/world-writable, or shape-invalid REFUSES the whole pass's
+recovery (`kick_ledger_refused_recovery_alert_only`) and is never rewritten —
+cooldown/escalation history can never be silently erased to re-enable
+unbounded restarts. Host-pull generation alerts never block a qualified seat's
 own crash recovery: a dead tunnel client is recoverable even while the host
 carrier needs human attention.
 
