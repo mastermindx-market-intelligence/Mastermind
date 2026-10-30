@@ -230,12 +230,13 @@ on_signal() {
       exit "$code"
       ;;
     PLIST_REPLACED)
-      # The signal itself makes launchd timing uncertain. Restore the plist
-      # bytes and report a stopped receipt. Do not bootstrap.
-      restore_plist || true
+      # The rendered plist was installed but bootstrap has not begun.
+      # A peer may have edited/replaced the destination since our install.
+      # An unconditional restore/remove would destroy that peer's bytes.
+      # Keep the observed plist, CURRENT and marker for reconciliation;
+      # issue no additional launchctl or plist write on this signal.
       write_receipt EFFECT_UNKNOWN "signal-$PHASE" "signal during $PHASE" || true
-      release_install_holder
-      exit 78
+      die 78 "EFFECT_UNKNOWN service stopped pending repair: signal during $PHASE"
       ;;
     *)
       # Bootout, pid wait, or bootstrap already started. Another launchctl

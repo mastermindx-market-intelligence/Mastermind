@@ -919,11 +919,15 @@ def test_term_before_mutation_and_during_wait_and_before_bootstrap(workspace):
         if proc.poll() is not None:
             raise AssertionError(proc.stderr.read())
         time.sleep(0.05)
-    assert ctx["plist"].read_bytes() != original
+    rendered = ctx["plist"].read_bytes()
+    assert rendered != original
     proc.send_signal(signal.SIGTERM)
     _, err = proc.communicate(timeout=5)
     assert proc.returncode == 78, err
-    assert ctx["plist"].read_bytes() == original
+    assert "EFFECT_UNKNOWN" in err
+    assert ctx["plist"].read_bytes() == rendered
+    assert receipt_body(ctx)["outcome"] == "EFFECT_UNKNOWN"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert "bootstrap " not in launch_log(ctx)
     assert_not_executed(ctx)
 
@@ -2606,3 +2610,69 @@ def test_install_failure_without_selector_still_refuses_unverified_plist(workspa
     assert "bootout " not in launch_log(ctx)
     assert "bootstrap " not in launch_log(ctx)
     assert_not_executed(ctx)
+
+
+@pytest.mark.parametrize(("original", "action"), [
+    (b"ORIGINAL-BEFORE-SIGNAL\n", "edit"),
+    (b"ORIGINAL-BEFORE-SIGNAL\n", "delete"),
+    (None, "delete-and-create"),
+])
+def test_signal_after_plist_replace_preserves_peer_effects(
+    workspace, original, action,
+):
+    """No peer edit/deletion/recreation can be clobbered by the signal handler."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 66\n")
+    if original is not None:
+        ctx["plist"].write_bytes(original)
+        ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "hold-signal-post-install"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name,
+                  advance_from=selector.name, hold_before_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        installed = ctx["plist"].read_bytes()
+        assert original is None or installed != original
+        assert _selection(ctx)["generation"] == target.name
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        peer = b"PEER-WRITTEN-AFTER-OUR-INSTALL\n"
+        if action == "delete":
+            ctx["plist"].unlink()
+        elif action == "delete-and-create":
+            ctx["plist"].unlink()
+            ctx["plist"].write_bytes(peer)
+            ctx["plist"].chmod(0o600)
+        else:
+            ctx["plist"].write_bytes(peer)
+        proc.send_signal(signal.SIGTERM)
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "signal during PLIST_REPLACED" in err
+        assert ctx["plist"].exists() == (action != "delete")
+        if action != "delete":
+            assert ctx["plist"].read_bytes() == peer
+        final = _selection(ctx)
+        assert final["generation"] == target.name
+        assert final["previous"] == selector.name
+        assert final["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "signal-PLIST_REPLACED"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
