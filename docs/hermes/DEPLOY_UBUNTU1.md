@@ -161,10 +161,20 @@ the `providers:` named-custom shape
 (`website/docs/integrations/providers.md` at
 `NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`).
 
-This does **not** connect a provider, read or forward user credentials,
-permit an actual model request, or change Executive authority. The fresh
-Hermes supervisor's credential forwarding and a production-authenticated
-inference still require separate receiving-owner proof. No Hermes automatic
+The fresh Hermes supervisor now has a **source-implemented**, role-scoped
+credential path: the existing WP2 credential reader accepts only the reviewed
+primary role's key from the existing 0600 secret file (or the existing
+mode-0600 file-pointer contract) and exposes that key **only** to the native
+model-serving child, not the CLI tool-registry preflight. Missing/unsafe
+credentials fail closed. It does not copy another role's provider key,
+gateway credential, Slack bot token, or ambient parent environment.
+
+This has passed offline tests with synthetic fixture values only. No real
+provider credential was read, no model request executed, and no receiving
+owner has accepted authenticated inference or metering. The model's source
+configuration and restricted child-env transport are **BUILT_NOT_PROVEN**,
+not a ready service or automatic right to spend tokens. Executive admission
+and app computer-use rights are unaffected. No Hermes automatic
 fallback is installed: Cursor remains disabled and provider/model retries
 remain with the existing provider/capacity owner. The `auxiliary.vision`
 stanza is intentionally excluded from this native output until mini1

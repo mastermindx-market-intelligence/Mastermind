@@ -136,7 +136,24 @@ class ServiceRuntime:
         return (200 if status == "ok" else 503), payload
 
     def _env(self) -> dict[str, str]:
+        # CLI/tool census receives no model provider credential.
         return child_env(self.secrets, home=self.profile.hermes_home, extra=self.extra_child_env)
+
+    def _model_child_env(self) -> dict[str, str]:
+        """Forward only the reviewed primary credential to a pinned BYOK child.
+
+        The receiving native config must be exact, owner-private, and have
+        its Steward MCP disabled before any key is retrieved or forwarded.
+        Legacy WP1 and plain disabled-MCP profiles receive no model key.
+        """
+        self._expected_disabled_mcp()
+        native = self.profile.hermes_home / "profiles" / self.profile.role / "config.yaml"
+        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+        env = self._env()
+        if native.is_file() and native.read_bytes() == render_disarmed_native_byok(self.profile).encode("utf-8"):
+            from integrations.hermes_harness.native_model_credential import primary_model_env
+            env.update(primary_model_env(self.profile, self.secrets.values))
+        return env
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
         """Require exact on-disk native config before trusting any CLI summary.
@@ -229,9 +246,15 @@ class ServiceRuntime:
                 self.refusal_code = exc.code
                 self.failed = True
                 return
+            try:
+                model_child_env = self._model_child_env()
+            except RuntimeRefusal as exc:
+                self.refusal_code = exc.code
+                self.failed = True
+                return
             proc = subprocess.Popen(
                 argv,
-                env=self._env(),
+                env=model_child_env,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
