@@ -120,8 +120,10 @@ class CurrentGenerationClosure(unittest.TestCase):
                          (rollout/'native-source-inventory.json').read_bytes())
         manifest=json.loads(raw)
         self.assertEqual(len(manifest),95)
+        # New diagnostic release changes exactly the two reviewed native members;
+        # the checked-in full closure pin must move with their verified bytes.
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         '6e4ec147a3f2d941ab835ea74d86ae7a5367d10dd092d1d47304d54739378c2e')
+                         '234501d7af7255712a4bf24e37044f7f2ac698d89e51fbe2975a4e823fd0a1fe')
         controller=(built/'native-code-stage/ext/remote_sub.sh').read_bytes()
         self.assertEqual(controller,(harness.ROOT/'candidate/remote_sub.sh').read_bytes())
         self.assertEqual(hashlib.sha256(controller).hexdigest(),manifest['ext/remote_sub.sh'])

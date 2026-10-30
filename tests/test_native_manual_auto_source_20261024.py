@@ -5,13 +5,16 @@ selection is accessed. Source is recreated in a disposable isolated review stage
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
+import zlib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +54,26 @@ def _restore_historical_picker(current: bytes) -> bytes:
     return current
 
 
+def _historical_fabric_task_source() -> bytes:
+    """Restore the original F1 patch preimage only in a disposable test stage.
+
+    The current publisher must keep its new diagnostic candidate. This closed
+    fixture is the same protected-master preimage already used by the archived
+    8bc->d044 native-upgrade test; no live runtime fallback is introduced.
+    """
+    fixture = ROOT / "tests/fixtures/fabric-glm-preterminal-bb85-20261030.json"
+    record = json.loads(fixture.read_bytes())
+    assert record.get("schema") == "mastermind.native_historical_preterminal_fixture.v1"
+    assert record.get("original_commit") == "bb85b429f2ffffd38408080ce4df7d6378c34100"
+    assert set(record.get("files", {})) == {"fabric_task.py", "provider_outcome.py"}
+    item = record["files"]["fabric_task.py"]
+    assert set(item) == {"bytes", "sha256", "zlib_base64"}
+    raw = zlib.decompress(base64.b64decode(item["zlib_base64"], validate=True))
+    assert len(raw) == item["bytes"]
+    assert hashlib.sha256(raw).hexdigest() == item["sha256"] == SOURCE["ext/fabric_task.py"][1]
+    return raw
+
+
 def sha(path: Path) -> str:
     assert path.is_file() and not path.is_symlink()
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -71,6 +94,15 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
         if relative == "ext/pick.py":
             historical = _restore_historical_picker(source.read_bytes())
             (stage / relative).write_bytes(historical)
+        elif relative == "ext/fabric_task.py":
+            # Explicitly verify the new current-release source before replacing
+            # it with the old sealed preimage for the *historical* F1 patch test.
+            current_sha = sha(source)
+            manifest = json.loads((built / "native-manifest.json").read_bytes())
+            assert current_sha == manifest[relative] == (
+                "eba9ebdcfa9897e82c609abdf49c6e03d404ca492d1c19207b3c9aa53742bbed"
+            )
+            (stage / relative).write_bytes(_historical_fabric_task_source())
         else:
             assert sha(source) == original_sha
             shutil.copy2(source, stage / relative)
