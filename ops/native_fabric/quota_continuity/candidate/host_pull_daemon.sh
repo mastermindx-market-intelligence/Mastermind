@@ -1437,13 +1437,13 @@ recover_or_stop() {
     write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
     die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
   fi
-  case "$LC_CLASS" in
-    loaded-running|loaded-idle) ;;
-    *)
-      write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-      die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-      ;;
-  esac
+  # A loaded label is NOT proof of the original collector. Require the saved
+  # preimage arguments, exact restored plist digest, and a live recovered PID
+  # before any selector rollback or RECOVERED receipt.
+  if ! recovered_original_service; then
+    write_receipt EFFECT_UNKNOWN "$phase" "restored collector identity unproven: $reason" || true
+    die 78 "EFFECT_UNKNOWN recovered collector identity unproven: $reason"
+  fi
   # The service preimage is proven. Only then is the selector CAS reversed.
   if ! rollback_advanced_selector; then
     write_receipt EFFECT_UNKNOWN "$phase" "selector rollback failed" || true
@@ -1552,6 +1552,25 @@ snapshot_service() {
   else
     PRE_PLIST_SHA=absent
   fi
+}
+
+# A rollback is RECOVERED only if the *original* collector is again running.
+# Launchd loaded status alone can describe a different generation or stale job.
+# Snapshot is taken before the first mutation; the restored PID may be new.
+recovered_original_service() {
+  local actual_sha
+  case "${PRE_CLASS:-}" in loaded-running|loaded-idle) ;; *) return 1 ;; esac
+  [ -n "${PRE_ARGV:-}" ] || return 1
+  [ -n "${PRE_PLIST_SHA:-}" ] || return 1
+  [ "$PRE_PLIST_SHA" != "unreadable" ] && [ "$PRE_PLIST_SHA" != "absent" ] || return 1
+  [ "${LC_CLASS:-}" = "loaded-running" ] || return 1
+  [ "${LC_ARGV:-}" = "$PRE_ARGV" ] || return 1
+  actual_sha=$(py file-sha "$DEST_PLIST") || return 1
+  [ "$actual_sha" = "$PRE_PLIST_SHA" ] || return 1
+  [ -n "${LC_PID:-}" ] || return 1
+  ps_state "$LC_PID"
+  [ "$PS_RESULT" = "alive" ] || return 1
+  return 0
 }
 
 service_still_snapshot() {
@@ -1694,7 +1713,10 @@ advance_selector() {
   if [ "$SELECT_GENERATION" != "$GENERATION" ] || [ "$SELECT_PREVIOUS" != "$ADVANCE_FROM" ]; then
     settle_failed_select "selector advance output"
   fi
-  clear_select_fence || die 78 "select fence"
+  # CURRENT may already name the target; a failed fence unlink/fsync cannot
+  # be treated as a clean refusal. Preserve both transaction and selector
+  # uncertainty without replaying CAS or touching launchd.
+  clear_select_fence || keep_select_unknown "select fence cleanup after committed advance"
   SELECT_FENCE=0
   EXPECT_CURRENT=$GENERATION
   SELECTED_ADVANCE=1
@@ -1941,6 +1963,9 @@ case "$COMMAND" in
     RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH" "$QUALIFICATION_MODE") \
       || die 78 "render failed"
     launchctl_print || die 78 "launchctl state uncertain"
+    # Capture the old identity before a marker, selector CAS or launchd effect.
+    # advance_selector may refresh this while the old service is still intact.
+    snapshot_service
     NEED_BOOTOUT=0
     case "$LC_CLASS" in
       loaded-running)
@@ -2113,10 +2138,9 @@ case "$COMMAND" in
       if ! launchctl_print; then
         stop_uncertain BOOTSTRAP "recovered bootstrap unproven"
       fi
-      case "$LC_CLASS" in
-        loaded-running|loaded-idle) ;;
-        *) stop_uncertain BOOTSTRAP "recovered bootstrap unproven" ;;
-      esac
+      if ! recovered_original_service; then
+        stop_uncertain BOOTSTRAP "recovered collector identity unproven"
+      fi
       if ! rollback_advanced_selector; then
         stop_uncertain BOOTSTRAP "selector rollback failed"
       fi
@@ -2124,11 +2148,14 @@ case "$COMMAND" in
       die 78 "recovered original service: bootstrap failed"
     fi
     PHASE=BOOTSTRAPPED
-    launchctl_print || die 78 "launchctl state uncertain"
-    [ "$LC_CLASS" = "loaded-running" ] || die 78 "launchctl state uncertain"
+    # A zero bootstrap rc is an effect, not proof of a verified live collector.
+    # In this phase die() must keep the owned marker; stop_uncertain adds a
+    # durable EFFECT_UNKNOWN receipt and never issues another launchd command.
+    launchctl_print || stop_uncertain POST_BOOTSTRAP_VERIFY "launchctl state uncertain"
+    [ "$LC_CLASS" = "loaded-running" ] || stop_uncertain POST_BOOTSTRAP_VERIFY "launchctl state uncertain"
     ps_state "$LC_PID"
-    [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
-    argv_matches || die 78 "bootstrap did not pin the verified collector"
+    [ "$PS_RESULT" = "alive" ] || stop_uncertain POST_BOOTSTRAP_VERIFY "process state uncertain"
+    argv_matches || stop_uncertain POST_BOOTSTRAP_VERIFY "bootstrap did not pin the verified collector"
     finish_install_success
     ;;
   *)

@@ -392,10 +392,27 @@ def test_bash_syntax_and_no_pidfile_race():
     assert "launchd/com.mastermind.host-pull.plist.template" not in text
 
 
-def test_stopped_publication_pins_only_verified_generation(workspace):
+@pytest.mark.parametrize("trailing_slash", [False, True])
+@pytest.mark.parametrize("preflight_repair", [False, True])
+def test_stopped_publication_pins_only_verified_generation(
+    workspace, trailing_slash, preflight_repair,
+):
     ctx = prepare(workspace)
+    ctx["env"]["TMPDIR"] = str(workspace) + ("/" if trailing_slash else "")
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    if preflight_repair:
+        # Full installer: mode refusal happens after its transaction marker
+        # is armed. Clean pre-effect failure must permit a corrected retry.
+        ctx["plist"].write_bytes(b"PRE-EFFECT-PLIST\n")
+        ctx["plist"].chmod(0o644)
+        refused = run(ctx)
+        assert refused.returncode == 78, refused.stderr
+        assert "backup failed" in refused.stderr
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        ctx["plist"].chmod(0o600)
     result = run(ctx)
     assert result.returncode == 0, result.stderr
     plist = plistlib.loads(ctx["plist"].read_bytes())
@@ -546,6 +563,38 @@ def test_bootstrap_failure_restores_plist_and_is_not_green(workspace):
     backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
+    assert_not_executed(ctx)
+
+
+def test_running_service_missing_preimage_refuses_before_mutation(workspace):
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").write_text("")
+    before = json.loads((ctx["store"] / "CURRENT.json").read_text())
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "running service has no plist preimage" in result.stderr
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert json.loads((ctx["store"] / "CURRENT.json").read_text()) == before
+    assert_not_executed(ctx)
+
+
+def test_post_bootstrap_unverified_argv_records_effect_unknown(workspace):
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    # Existing fixture advertises a different collector without any argv edit.
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert "bootstrap did not pin the verified collector" in result.stderr
+    assert launch_log(ctx).count("bootstrap ") == 1
+    assert "bootout " not in launch_log(ctx)
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "POST_BOOTSTRAP_VERIFY"
     assert_not_executed(ctx)
 
 
@@ -1370,7 +1419,7 @@ def test_fresh_absent_plist_pre_bootstrap_error_writes_receipt_without_backup(wo
     assert "bootstrap " not in launch_log(ctx)
     assert_not_executed(ctx)
 
-def test_selector_move_before_bootstrap_restores_original_service(workspace):
+def test_selector_move_before_bootstrap_preserves_unknown_mismatched_service(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
     hold = workspace / "hold-bootstrap"
@@ -1387,14 +1436,16 @@ def test_selector_move_before_bootstrap_restores_original_service(workspace):
     _out, err = proc.communicate(timeout=10)
     assert proc.returncode == 78, err
     assert "selector moved" in err
-    assert "recovered original service" in err
+    assert "EFFECT_UNKNOWN" in err
+    assert "recovered original service" not in err
     assert ctx["plist"].read_bytes() == original
     assert launch_log(ctx).count("bootstrap ") == 1
     assert launch_log(ctx).count("bootout ") == 1
     receipt = receipt_body(ctx)
-    assert receipt["outcome"] == "RECOVERED"
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
     current = json.loads((ctx["store"] / "CURRENT.json").read_text())
     assert current["generation"] == other.name
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
@@ -1916,7 +1967,7 @@ def test_advance_refuses_while_publication_lock_is_held(workspace):
     assert_not_executed(ctx)
 
 
-def test_advance_rolls_selector_back_when_bootstrap_fails(workspace):
+def test_advance_preserves_selector_when_rollback_argv_mismatches(workspace):
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 12\n")
     selector = ctx["release"]
     before = _selection(ctx)
@@ -1940,19 +1991,22 @@ def test_advance_rolls_selector_back_when_bootstrap_fails(workspace):
     (ctx["stub"] / "pause-pid").unlink()
     _out, err = proc.communicate(timeout=10)
     assert proc.returncode == 78, err
-    assert "recovered original service" in err
+    assert "EFFECT_UNKNOWN" in err
+    assert "recovered original service" not in err
     assert ctx["plist"].read_bytes() == original
     final = _selection(ctx)
-    assert final["generation"] == selector.name
-    assert final["previous"] == target.name
-    assert final["sequence"] == before["sequence"] + 2
+    assert final["generation"] == target.name
+    assert final["previous"] == selector.name
+    assert final["sequence"] == before["sequence"] + 1
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
     assert log.count("bootstrap ") == 2
     assert log.index("bootout ") < log.index("bootstrap ")
     receipt = receipt_body(ctx)
-    assert receipt["outcome"] == "RECOVERED"
-    assert receipt["service"] == "restored"
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert receipt["phase"] == "BOOTSTRAP"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
@@ -2182,3 +2236,43 @@ def test_signal_between_select_cas_and_ack_reconciles_current(workspace, mode, t
     assert not (ctx["store"] / ".select-pending").exists()
     assert list(ctx["backup"].glob("*.receipt")) == []
     assert_not_executed(ctx)
+
+
+def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path):
+    # Execute the exact advance_selector source under inert, no-launcher
+    # functions. The publisher already acknowledged CURRENT=target; the
+    # fence cleanup fails. No fake-launchctl argv, selector, or host mutation.
+    raw = DAEMON.read_text()
+    start = raw.index("advance_selector() {\n")
+    end = raw.index("\n}\n\n# CAS back", start) + 2
+    function = raw[start:end]
+    script = (
+        "set -u\n"
+        + 'ADVANCE_FROM=prior\nGENERATION=target\nEXPECT_CURRENT=prior\n'
+        + 'SELECTED_ADVANCE=0\nSELECT_FENCE=0\nMARKER_OWNED=1\n'
+        + 'STORE=inert\nPUBLISHER=inert\nINSTALL_FENCE=inert\n'
+        + 'TMPROOT="' + str(tmp_path) + '"\nPYTHON=/bin/echo\n'
+        + 'prove_install_holder(){ :; }\n'
+        + 'snapshot_service(){ :; }\n'
+        + 'arm_select_fence(){ SELECT_FENCE=1; }\n'
+        + 'confirm_selection_json(){ :; }\n'
+        + 'read_selector_generation(){ SELECT_GENERATION="$GENERATION"; SELECT_PREVIOUS="$ADVANCE_FROM"; }\n'
+        + 'clear_select_fence(){ return 78; }\n'
+        + 'write_receipt(){ printf "RECEIPT:%s:%s\n" "$1" "$2"; }\n'
+        + 'note_install_blocked(){ return 1; }\n'
+        + 'die(){ printf "REFUSED:%s\n" "$*"; '
+          'printf "STATE:%s:%s:%s\n" "$SELECTED_ADVANCE" "$SELECT_FENCE" "$MARKER_OWNED"; exit "$1"; }\n'
+        + 'keep_select_unknown(){ '
+          'write_receipt EFFECT_UNKNOWN SELECT_UNKNOWN "$1" || true; '
+          'die 78 "EFFECT_UNKNOWN service stopped pending repair: $1"; }\n'
+        + function + "\nadvance_selector\n"
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", script],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 78, result.stderr
+    assert "RECEIPT:EFFECT_UNKNOWN:SELECT_UNKNOWN" in result.stdout
+    assert "STATE:0:1:1" in result.stdout
+    assert "EFFECT_UNKNOWN" in result.stdout

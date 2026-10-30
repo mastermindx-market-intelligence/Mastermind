@@ -45,7 +45,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # comment records that review and invents no fresh approval.
 # Executor/donor/preimage pins stay exact.
 EXPECTED_NATIVE_FILES = 100
-NATIVE_MANIFEST_SHA = "5539c0a3fc0bb6b6ce5b22f250e1dba9898e3cfeedf4ea0633970df818856eaa"
+NATIVE_MANIFEST_SHA = "942d0827318999e30f343fa659dfa12744a0a6e1f8a1dc47b4c4a7959b6a9a19"
 
 
 def _sha(raw):
