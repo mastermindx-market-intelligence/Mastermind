@@ -1696,6 +1696,19 @@ advance_selector() {
   [ "$SELECTED_ADVANCE" -eq 0 ] || die 78 "selector already advanced"
   [ "$SELECT_FENCE" -eq 0 ] || die 78 "select fence already armed"
   prove_install_holder
+  # The already-running target service can pair CURRENT without reaching the
+  # normal backup/marker-arm path. A successful CAS followed by an ambiguous
+  # select-fence unlink/fsync still needs a durable transaction marker.
+  # Arm it here if this is the idempotent fast path; the ordinary path owns one.
+  if [ "${MARKER_OWNED:-0}" -eq 0 ]; then
+    py install-transaction-arm "$STORE" "$GENERATION" "$$" "$INSTALL_FENCE" \
+      || lose_install_holder
+    MARKER_OWNED=1
+    # The service was already the TARGET: if a signal follows the selector
+    # CAS, rolling CURRENT back as BACKED_UP would mispair launchd again.
+    # PAIRING takes the signal handler's EFFECT_UNKNOWN/no-mutation path.
+    PHASE=PAIRING
+  fi
   snapshot_service
   arm_select_fence
   verr=$(mktemp "$TMPROOT/host-pull-select.XXXXXX")

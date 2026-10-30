@@ -2238,7 +2238,8 @@ def test_signal_between_select_cas_and_ack_reconciles_current(workspace, mode, t
     assert_not_executed(ctx)
 
 
-def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path):
+@pytest.mark.parametrize("initial_marker", [0, 1])
+def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path, initial_marker):
     # Execute the exact advance_selector source under inert, no-launcher
     # functions. The publisher already acknowledged CURRENT=target; the
     # fence cleanup fails. No fake-launchctl argv, selector, or host mutation.
@@ -2249,10 +2250,12 @@ def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path):
     script = (
         "set -u\n"
         + 'ADVANCE_FROM=prior\nGENERATION=target\nEXPECT_CURRENT=prior\n'
-        + 'SELECTED_ADVANCE=0\nSELECT_FENCE=0\nMARKER_OWNED=1\n'
+        + 'SELECTED_ADVANCE=0\nSELECT_FENCE=0\nMARKER_OWNED=' + str(initial_marker) + '\n'
+        + 'PHASE=' + ('BACKED_UP' if initial_marker else 'VERIFIED') + '\n'
         + 'STORE=inert\nPUBLISHER=inert\nINSTALL_FENCE=inert\n'
         + 'TMPROOT="' + str(tmp_path) + '"\nPYTHON=/bin/echo\n'
         + 'prove_install_holder(){ :; }\n'
+        + 'py(){ [ "$1" = "install-transaction-arm" ] || return 88; printf "ARMED\\n"; }\n'
         + 'snapshot_service(){ :; }\n'
         + 'arm_select_fence(){ SELECT_FENCE=1; }\n'
         + 'confirm_selection_json(){ :; }\n'
@@ -2261,7 +2264,7 @@ def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path):
         + 'write_receipt(){ printf "RECEIPT:%s:%s\n" "$1" "$2"; }\n'
         + 'note_install_blocked(){ return 1; }\n'
         + 'die(){ printf "REFUSED:%s\n" "$*"; '
-          'printf "STATE:%s:%s:%s\n" "$SELECTED_ADVANCE" "$SELECT_FENCE" "$MARKER_OWNED"; exit "$1"; }\n'
+          'printf "STATE:%s:%s:%s:%s\n" "$SELECTED_ADVANCE" "$SELECT_FENCE" "$MARKER_OWNED" "$PHASE"; exit "$1"; }\n'
         + 'keep_select_unknown(){ '
           'write_receipt EFFECT_UNKNOWN SELECT_UNKNOWN "$1" || true; '
           'die 78 "EFFECT_UNKNOWN service stopped pending repair: $1"; }\n'
@@ -2274,5 +2277,7 @@ def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path):
     )
     assert result.returncode == 78, result.stderr
     assert "RECEIPT:EFFECT_UNKNOWN:SELECT_UNKNOWN" in result.stdout
-    assert "STATE:0:1:1" in result.stdout
+    assert ("STATE:0:1:1:PAIRING" if initial_marker == 0
+            else "STATE:0:1:1:BACKED_UP") in result.stdout
+    assert ("ARMED" in result.stdout) == (initial_marker == 0)
     assert "EFFECT_UNKNOWN" in result.stdout
