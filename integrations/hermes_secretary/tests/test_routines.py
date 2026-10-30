@@ -87,18 +87,15 @@ class RoutineCatalog(unittest.TestCase):
         with self.assertRaises(CatalogError):
             load_catalog(ROOT / "tests" / "fixtures" / "ping_scan.json")
 
-    def test_wake_mints_only_a_canonical_dialogue_ref(self):
+    def test_wake_refuses_even_a_well_formed_untyped_source_ref(self):
         source_ref = "agent_dialogue_attention:" + ("ab" * 32)
-        minted = try_mint_dialogue_wake(source_ref, emitted_at="2026-10-25T14:00:00Z")
-        again = try_mint_dialogue_wake(source_ref, emitted_at="2026-10-25T14:00:00Z")
-        self.assertEqual(minted["status"], "MINTED")
-        self.assertEqual(minted["schedule_backend"], "hermes_cron")
-        self.assertEqual(minted["obligation"]["declared_target_seat"], "ceo")
-        self.assertEqual(minted["obligation"]["obligation_id"], again["obligation"]["obligation_id"])
-        self.assertNotIn("prompt", minted["obligation"])
-        refused = try_mint_dialogue_wake("C0BSBM78V1N/1761410001.000100")
-        self.assertEqual(refused["status"], "WAKE_SOURCE_NOT_ADMITTED")
-        self.assertNotIn("obligation", refused)
+        for candidate in (source_ref, "C0BSBM78V1N/1761410001.000100", None, {}):
+            with self.subTest(candidate=candidate):
+                refused = try_mint_dialogue_wake(
+                    candidate, emitted_at="2026-10-25T14:00:00Z",
+                )
+                self.assertEqual(refused["status"], "WAKE_SOURCE_NOT_ADMITTED")
+                self.assertNotIn("obligation", refused)
 
     def test_cancun_fire_times_match_source_wall_clocks(self):
         before = datetime(2026, 10, 25, tzinfo=timezone.utc)
