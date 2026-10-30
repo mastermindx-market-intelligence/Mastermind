@@ -16,6 +16,60 @@ Source-only, isolated under research/rs_leader_pullback_2026_10_30/. No producti
 
 No verified existing Agent OS workstream mapping for this particular commission; no WS key invented. Organizational linking and handoff writer unavailable: PLAN_NOT_ORG_LINKED. This GitHub task tree is a research source artifact, not an Executive Job or approved organizational wave. Related non-owning research: Mastermind PR #1338 (SOXX 30m/3h *exit* work; empirical results inconclusive). Avoid touching its path or fabric child.
 
+## Continuation receipt — direct Sol ownership, 2026-10-30
+
+Current live Chairman intent resumes this original project with Sol as accountable
+delivery principal; the earlier historical session/role label is not a live owner.
+Protected Mastermind source still pinned at
+`bb85b429f2ffffd38408080ce4df7d6378c34100`.
+No new Executive Job or claim of org-linked workstream acceptance is made.
+
+- Fabric original worker A `rs1888-matched-evaluation-20261030-a` (root
+  `rs1888-research-20261030`) and worker B
+  `rs1888-macro-mtf-oscillator-20261030-b` both ended `TERMINAL rc=1`:
+  `[claude-code:unrecognized_model] {"model":"glm-5.3-flash","query_source":"sdk"}`,
+  then `PROVIDER_TERMINAL kind=turn_limit`. Exact retained result SHA
+  `084b69c65d04b8e3e7b2bd76a7d682f8512f6b49fcc216e41337da06021b7c6b`
+  for each, neither accepted, both `retry_allowed=false`. Their prior
+  controller reservations did not complete implementation; do not replay or
+  disguise a new provider/model route as recovery of the same denied action.
+- Scientific prereg independent review C `rs1888-prereg-independent-review-20261030-c`
+  was `REQUEST_REFUSED_BEFORE_LAUNCH`; no review accepted and no same-action
+  reroute.
+- This current session performed distinct authorized **direct source work** on
+  the same original Mastermind #1888 branch, after confirming no worker changed
+  its original head: new `paired_eval.py` and 30 pure synthetic tests,
+  `engine.py` owner-schedule consistency checks and 13 regression tests,
+  updated README. Original 29 tests retained, **72 local tests pass** via
+  `python -m pytest -q research/rs_leader_pullback_2026_10_30/tests`;
+  source compilation passed. Exact code/test blobs were read back from GitHub,
+  including `paired_eval.py` SHA `672d104114f2f7b2abd13d8bc2e015373533f8c6`,
+  `tests/test_paired_eval.py` `b759be53e5d2776697a30ea9513c5e4443753114`,
+  `engine.py` `6983026755eb015be51dd63389096f4b89b7f7a8`,
+  `tests/test_engine.py` `2c245ec012663e1a56490e0749dd22a98690a6c5`.
+  Hosted CI of the current edited head is separate and not asserted green.
+- Existing Macro `WS:LIVE-ENTRY-RADAR` is the scientific/source owner, not a
+  missing contractor; Macro DRAFT PR #10216 holds a distinct source-only
+  2H/3H RSI-MACD/price-MACD prereg. Existing Terminal #879 provides a
+  research-only 30m pivot visualization, already production-proven in its
+  narrow display scope. Do not duplicate collector, calendar, lifecycle,
+  user UI, signal/rank, broker or published alerts. The exact user Pine
+  indicator is still unidentified.
+- Platform-denied private Macro Parquet introspection remains held on its
+  original action; no other tool/worker may replay that denied access.
+  A supplied calendar receipt and synthetic price history are not source
+  admission. No real PIT intraday cohort, statistically valid strategy return,
+  exact Pine parity, quote execution or predictive authority is proven.
+
+**Next accepted-scope steps:** get exact edited-head hosted CI and independent
+non-author source/method review; reconcile real Macro canonical minute
+reader/calendar inputs before producing eligible 2H/3H observations; run a
+pre-registered PIT common-denominator study with holdout and prospective
+shadow returns only when the source owner supplies admissible historical
+vintages. Keep #1888 draft/unmerged before review and source qualification.
+This project remains `BUILT_NOT_PROVEN` for the source prototype, not a
+completed usable market signal.
+
 ## Research hypotheses and advance/death rules
 
 - H0: a price pivot provides no net incremental outcome improvement over matched eligible RS-leader entries.
