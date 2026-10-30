@@ -3031,15 +3031,15 @@ def test_advance_from_pairs_only_after_strict_disk_plist_identity(workspace, act
     service is used. These cases cover the formerly missing --advance-from
     pairing path, not merely the already-selected idempotent path.
     """
-    ctx = prepare(workspace, body=b"#!/bin/bash\\nexit 71\\n")
-    (ctx["stub"] / "print-style").write_text("notfound\\n")
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 71\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     installed = run(ctx)
     assert installed.returncode == 0, installed.stderr
     original = ctx["release"]
     before = _selection(ctx)
 
-    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\\nexit 72\\n")
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 72\n")
     target_pin = target / "ext" / "host_pull.sh"
     old_pin = str(ctx["pin"]).encode()
     rendered = ctx["plist"].read_bytes()
