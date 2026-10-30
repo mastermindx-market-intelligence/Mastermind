@@ -93,6 +93,7 @@ HAD_PLIST=0
 BACKUP=""
 DEST_PLIST=""
 RENDERED=""
+RENDERED_SHA=""
 BOOTSTRAP_NEW=0
 BOOTSTRAP_ROLLBACK=0
 BOOTED=0
@@ -160,6 +161,14 @@ die() {
 
 finish_install_success() {
   prove_install_holder
+  # Bootstrap success proves only the running job. Before declaring the
+  # transaction complete, re-prove the exact on-disk reviewed plist identity.
+  # A changed, absent, symlinked, wrong-owner or wrong-mode plist must retain
+  # CURRENT and marker with an explicit EFFECT_UNKNOWN; no restore/rebootstrap.
+  if [ "${PHASE:-}" = "BOOTSTRAPPED" ]; then
+    [ -n "${RENDERED_SHA:-}" ] && py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA" \
+      || stop_uncertain POST_BOOTSTRAP_VERIFY "installed plist identity unproven"
+  fi
   if [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
     py install-transaction-complete "$STORE" || die 78 "install transaction marker"
     MARKER_OWNED=0
@@ -940,6 +949,55 @@ elif cmd == "file-sha":
     if (not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid()):
         fail("plist owner")
     sys.stdout.write(hashlib.sha256(open(path, "rb").read()).hexdigest() + "\n")
+
+elif cmd == "verify-installed-plist":
+    # Read the final on-disk plist through an O_NOFOLLOW descriptor. A path
+    # check alone is TOCTOU and may describe the wrong inode. Check the fd,
+    # path identity before/after, owner, mode, bounded size and rendered SHA.
+    dest, expected_sha = sys.argv[2:4]
+    require_safe(dest, "installed plist")
+    if HEX.fullmatch(expected_sha) is None:
+        fail("installed plist expected digest")
+    try:
+        before_path = lstat_nofollow(dest)
+        if (not stat.S_ISREG(before_path.st_mode)
+                or before_path.st_uid != os.geteuid()
+                or stat.S_IMODE(before_path.st_mode) != 0o600
+                or before_path.st_size > 1048576):
+            fail("installed plist identity")
+        fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            before_fd = os.fstat(fd)
+            if (not stat.S_ISREG(before_fd.st_mode)
+                    or before_fd.st_uid != os.geteuid()
+                    or stat.S_IMODE(before_fd.st_mode) != 0o600
+                    or before_fd.st_dev != before_path.st_dev
+                    or before_fd.st_ino != before_path.st_ino
+                    or before_fd.st_size > 1048576):
+                fail("installed plist fd identity")
+            raw = bytearray()
+            while len(raw) <= 1048576:
+                chunk = os.read(fd, min(65536, 1048577 - len(raw)))
+                if not chunk:
+                    break
+                raw.extend(chunk)
+            after_fd = os.fstat(fd)
+            after_path = lstat_nofollow(dest)
+            stable = (before_fd.st_dev == after_fd.st_dev == after_path.st_dev
+                      and before_fd.st_ino == after_fd.st_ino == after_path.st_ino
+                      and before_fd.st_size == after_fd.st_size == after_path.st_size
+                      and before_fd.st_mtime_ns == after_fd.st_mtime_ns
+                      and before_fd.st_ctime_ns == after_fd.st_ctime_ns
+                      and stat.S_ISREG(after_path.st_mode)
+                      and after_path.st_uid == os.geteuid()
+                      and stat.S_IMODE(after_path.st_mode) == 0o600)
+            if (not stable or len(raw) > 1048576
+                    or hashlib.sha256(raw).hexdigest() != expected_sha):
+                fail("installed plist drift")
+        finally:
+            os.close(fd)
+    except OSError:
+        fail("installed plist unreadable")
 
 elif cmd == "write-select-fence":
     store, prior, generation = sys.argv[2:5]
@@ -1770,6 +1828,7 @@ FIXTURE_ROOT=""
 TEMPLATE=""
 HOLD_MUTATION=""
 HOLD_BOOTSTRAP=""
+HOLD_AFTER_BOOTSTRAP=""
 HOLD_BOOTOUT=""
 HOLD_PLIST=""
 HOLD_INSTALL_FAILURE=""
@@ -1811,6 +1870,7 @@ while [ "$#" -gt 0 ]; do
     --hold-before-plist) HOLD_PLIST=${2:-}; shift 2 ;;
     --hold-after-install-failure) HOLD_INSTALL_FAILURE=${2:-}; shift 2 ;;
     --hold-before-bootstrap) HOLD_BOOTSTRAP=${2:-}; shift 2 ;;
+    --hold-after-bootstrap) HOLD_AFTER_BOOTSTRAP=${2:-}; shift 2 ;;
     --hold-during-lock) HOLD_DURING_LOCK=${2:-}; shift 2 ;;
     --hold-before-arm) HOLD_ARM=${2:-}; shift 2 ;;
     --lock-descendant) LOCK_DESCENDANT=${2:-}; shift 2 ;;
@@ -1846,7 +1906,7 @@ if [ "$HERMETIC" -eq 1 ]; then
   esac
 else
   [ -z "$FIXTURE_ROOT" ] || die 78 "fixture root is hermetic-only"
-  [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
+  [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_AFTER_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
     && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_INSTALL_FAILURE" ] \
     && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$HOLD_ARM" ] \
     && [ -z "$LOCK_DESCENDANT" ] && [ -z "$HOLDER_REPORT" ] \
@@ -1903,6 +1963,9 @@ case "$COMMAND" in
     py paths-ready "$LOCK" "$LOG_PATH" || die 78 "lock or log path"
     RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH") \
       || die 78 "render failed"
+    # Pin the reviewed render before the staging file is removed. A running
+    # launchctl argv is not proof that the plist on disk still binds this pin.
+    RENDERED_SHA=$(py file-sha "$RENDERED") || die 78 "rendered plist seal failed"
     launchctl_print || die 78 "launchctl state uncertain"
     # Capture the old identity before a marker, selector CAS or launchd effect.
     # advance_selector may refresh this while the old service is still intact.
@@ -2084,6 +2147,8 @@ case "$COMMAND" in
       stop_uncertain BOOTSTRAP "bootstrap failed"
     fi
     PHASE=BOOTSTRAPPED
+    # Inert fixture seam after a completed bootstrap, before final verification.
+    hold_if_requested "$HOLD_AFTER_BOOTSTRAP"
     # A zero bootstrap rc is an effect, not proof of a verified live collector.
     # In this phase die() must keep the owned marker; stop_uncertain adds a
     # durable EFFECT_UNKNOWN receipt and never issues another launchd command.

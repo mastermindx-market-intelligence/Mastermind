@@ -121,7 +121,7 @@ class CurrentGenerationClosure(unittest.TestCase):
         manifest=json.loads(raw)
         self.assertEqual(len(manifest),97)
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         '5c68de99dc9b34096ee0826555cd6f7713babb04dad4f0a5fb4ab2a700024baa')
+                         '6bb971570d03a4364d1677e2f85dca25de4e34bd148ebd763088def8a873180c')
         controller=(built/'native-code-stage/ext/remote_sub.sh').read_bytes()
         self.assertEqual(controller,(harness.ROOT/'candidate/remote_sub.sh').read_bytes())
         self.assertEqual(hashlib.sha256(controller).hexdigest(),manifest['ext/remote_sub.sh'])

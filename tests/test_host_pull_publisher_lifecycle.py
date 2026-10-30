@@ -2891,3 +2891,88 @@ def test_bootstrap_failure_does_not_restore_peer_plist(workspace, action):
         if proc.poll() is None:
             proc.kill()
             proc.communicate(timeout=5)
+
+
+
+@pytest.mark.parametrize("action", [
+    "intact", "edit", "delete", "wrong-mode", "symlink",
+])
+def test_postbootstrap_success_reproves_admitted_plist(workspace, action):
+    """Running PID/argv alone must not release the marker for a changed disk plist."""
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    original_selector = _selection(ctx)
+    hold = workspace / "hold-after-bootstrap-verify"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_after_bootstrap=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        installed = ctx["plist"].read_bytes()
+        assert installed
+        assert "bootstrap " in launch_log(ctx)
+        assert (ctx["stub"] / "print-mode").read_text().strip() == "running"
+        assert (ctx["stub"] / "argv").read_text() == expected_argv(ctx["lock"], ctx["pin"])
+        assert (ctx["stub"] / "ps-alive").exists()
+        peer = b"PEER-POST-BOOTSTRAP-PLIST\n"
+        peer_file = workspace / "thirdparty-plist"
+        if action == "edit":
+            ctx["plist"].write_bytes(peer)
+        elif action == "delete":
+            ctx["plist"].unlink()
+        elif action == "wrong-mode":
+            ctx["plist"].chmod(0o644)
+        elif action == "symlink":
+            peer_file.write_bytes(peer)
+            ctx["plist"].unlink()
+            ctx["plist"].symlink_to(peer_file)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=15)
+        assert _selection(ctx) == original_selector
+        log = launch_log(ctx)
+        assert "bootout " not in log
+        assert log.count("bootstrap ") == 1
+        assert_not_executed(ctx)
+        if action == "intact":
+            assert proc.returncode == 0, err
+            assert not (ctx["store"] / ".install-transaction.marker").exists()
+            assert ctx["plist"].read_bytes() == installed
+            assert list(ctx["backup"].glob("*.receipt")) == []
+        else:
+            assert proc.returncode == 78, err
+            assert "EFFECT_UNKNOWN" in err
+            assert "installed plist identity unproven" in err
+            receipt = receipt_body(ctx)
+            assert receipt["outcome"] == "EFFECT_UNKNOWN"
+            assert receipt["phase"] == "POST_BOOTSTRAP_VERIFY"
+            assert (ctx["store"] / ".install-transaction.marker").exists()
+            if action == "edit":
+                assert ctx["plist"].read_bytes() == peer
+            elif action == "delete":
+                assert not ctx["plist"].exists()
+            elif action == "wrong-mode":
+                assert ctx["plist"].read_bytes() == installed
+                assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
+            elif action == "symlink":
+                assert ctx["plist"].is_symlink()
+                assert ctx["plist"].read_bytes() == peer
+                assert peer_file.read_bytes() == peer
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_postbootstrap_plist_seal_guard_is_production_noninteractive(workspace):
+    """A fixture pause after bootstrap is rejected outside hermetic mode."""
+    candidate = DAEMON.read_text()
+    assert 'elif cmd == "verify-installed-plist":' in candidate
+    assert 'py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA"' in candidate
+    assert 'HOLD_AFTER_BOOTSTRAP=""' in candidate
+    assert '[ -z "$HOLD_AFTER_BOOTSTRAP" ]' in candidate
+    assert '--hold-after-bootstrap) HOLD_AFTER_BOOTSTRAP=' in candidate
