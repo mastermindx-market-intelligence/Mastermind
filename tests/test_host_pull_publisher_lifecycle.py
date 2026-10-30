@@ -2243,7 +2243,7 @@ def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path):
     # fence cleanup fails. No fake-launchctl argv, selector, or host mutation.
     raw = DAEMON.read_text()
     start = raw.index("advance_selector() {\n")
-    end = raw.index("\n}\n\n# One CAS back", start) + 2
+    end = raw.index("\n}\n\n# CAS back", start) + 2
     function = raw[start:end]
     script = (
         "set -u\n"
