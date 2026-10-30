@@ -6,15 +6,54 @@ The integration target is the **complete DeepSeek application**, not just React 
 
 ## Local full-app pilot (M2)
 
-Clone the exact pin to the sibling donor checkout. Use upstream pnpm 11.28.5 (not the system pnpm 9):
+**Current local proof, October 29, 2026:** the original
+`/Volumes/Mastermind/agent-workspaces/dsh-donor-20261022` checkout was unavailable
+because that external volume is not mounted. An isolated donor checkout on
+M2 internal storage at `$HOME/agent-workspaces/dsh-donor-pinned-20261029`
+was verified at `deepseek-ai/deepseek-harness@687f282e8625c6b8d11ff58211a90524be2e4317`
+with a clean source tree. With pinned pnpm 11.28.5, the donor's
+**dependency-aware** `build:artifacts` passed all seven stages and produced
+325 client artifacts. An isolated, loopback-only donor Web pilot returned
+unauthenticated HTTP **401** and authenticated HTML-shell HTTP **200**
+(using a one-time local generated token), then stopped with the port closed.
+This is **not** a connected company chat or an accepted Mastermind deployment.
+
+Build in a disposable donor checkout at that exact pin (never on the
+existing #1717 source branch). Avoid relying on the missing external mount.
+Do not modify global npm configuration: on the observed M2, the global npm
+cache itself points to the missing mount. A per-command cache was used:
 
 ```sh
-cd /Volumes/Mastermind/agent-workspaces/dsh-donor-20261022
-npx pnpm@11.28.5 install --frozen-lockfile
-npx pnpm@11.28.5 run build
+export DSH_SOURCE="$HOME/agent-workspaces/dsh-donor-pinned-20261029"
+cd "$DSH_SOURCE"
+export NPM_CONFIG_CACHE="$HOME/Library/Caches/mastermind-dsh-20261029/npm"
+CI=true npm exec --yes --package=pnpm@11.28.5 -- pnpm install --frozen-lockfile --ignore-scripts
+CI=true npm exec --yes --package=pnpm@11.28.5 -- pnpm run build:artifacts
 ```
 
-Launch using `integrations/deepseek_harness/run_local.sh`. It starts the donor's full web app on the default local port 3080 with a separate private DSH_HOME. No Mastermind company credential, public origin, provider account, Worker or Job admission is supplied by this launcher.
+The **developer-only** launcher now requires explicit `DSH_SOURCE` and
+refuses unpinned/unbuilt donors, public host flags, symlinked state and use
+of the donor checkout as the model's workspace. It starts the full DSH
+Web app only on `127.0.0.1`, from an isolated `HOME` / `DSH_HOME` /
+empty workspace, with **no inherited provider, account or computer-use
+environment credentials**. `DSH_PORT=0` lets the OS choose a free local
+port. Before the launch, use the no-effect preflight:
+
+```sh
+export DSH_SOURCE="$HOME/agent-workspaces/dsh-donor-pinned-20261029"
+export DSH_HOME="$HOME/agent-workspaces/dsh-preview-20261029"
+sh integrations/deepseek_harness/run_local.sh --check-only
+sh integrations/deepseek_harness/run_local.sh
+```
+
+The launcher prints an ephemeral local login URL; treat the token as a
+secret and do not paste it into issues, logs or chats. `DSH_HOME` is a
+private pilot root; user HOME, state, and default workspace live under its
+`home/`, `state/`, and `workspace/` children, respectively. No arbitrary
+CLI flags may be forwarded, so public binding and user data directory
+selection are unavailable from this launch carrier. This launcher creates
+**no** Hermes service, Executive Job, Fabric Attempt, Steward scope,
+provider call, Mac computer actuation, or Slack cutover.
 
 ## Runtime convergence — keep the donor app
 
