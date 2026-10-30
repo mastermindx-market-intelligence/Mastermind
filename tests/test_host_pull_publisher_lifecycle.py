@@ -1133,25 +1133,51 @@ def test_selector_move_before_plist_replace_restores_original_service(workspace)
 
 
 @pytest.mark.parametrize(
-    ("phase", "restore_expected"),
-    [("PLIST_REPLACED", True), ("BOOTSTRAP_STARTED", True),
-     ("BOOTSTRAPPED", False)],
+    ("phase", "pre_effect_proven", "effect_started", "restore_expected"),
+    [
+        ("PLIST_REPLACED", False, False, True),
+        ("BOOTSTRAP_STARTED", True, False, True),
+        ("BOOTSTRAP_STARTED", False, False, False),
+        ("BOOTSTRAP_STARTED", True, True, False),
+        ("BOOTSTRAP_STARTED", False, True, False),
+        ("BOOTSTRAPPED", False, True, False),
+    ],
 )
 def test_holder_loss_source_restores_only_pre_effect_plist(
-    tmp_path, phase, restore_expected,
+    tmp_path, phase, pre_effect_proven, effect_started, restore_expected,
 ):
-    # Literal source function under an inert Bash environment; no launcher
-    # fixtures, fake launchctl argv, host services, installer or file effects.
+    # Execute literal installed-source functions only. No real launchctl,
+    # fake-launchctl argv fixture, host service, or native selection.
     raw = DAEMON.read_text()
     start = raw.index("lose_install_holder() {\n")
     end = raw.index("\n}\n\nprove_install_holder() {", start) + 2
     function = raw[start:end]
+    proof_start = raw.index("effect_was_not_started() {\n")
+    proof_end = raw.index("\n}\n\nselector_moved_before_effect() {", proof_start) + 2
+    proof_function = raw[proof_start:proof_end]
+
+    locked = tmp_path / "current-locked-effect"
+    locked.mkdir()
+    if effect_started:
+        (locked / "started").write_bytes(b"effect-began\n")
+    plist = tmp_path / "installed.plist"
+    plist.write_bytes(b"CURRENT_PLIST\n")
+    selector = tmp_path / "CURRENT.json"
+    selector.write_bytes(b"SELECTOR_STAYS\n")
+    transaction = tmp_path / "transaction-marker"
+    transaction.write_bytes(b"UNCERTAIN_TX_STAYS\n")
     fixture = (
         "set -u\n"
         + "PHASE=" + phase + "\n"
-        + 'restore_plist(){ printf "RESTORED\\n"; }\n'
-        + 'note_install_blocked(){ printf "RECEIPT\\n"; }\n'
+        + "STOP_LOCKED=" + ("1" if pre_effect_proven else "0") + "\n"
+        + 'LOCKED_DIR="' + str(locked) + '"\n'
+        + 'TEST_PLIST="' + str(plist) + '"\n'
+        + 'restore_plist(){ printf "RESTORED\\n"; '
+          'printf "ORIGINAL_PLIST\\n" > "$TEST_PLIST"; }\n'
+        + 'note_install_blocked(){ printf "RECEIPT:EFFECT_UNKNOWN:%s\\n" "$1"; }\n'
+        + 'bootstrap_once(){ printf "UNSAFE_REBOOTSTRAP\\n"; }\n'
         + 'die(){ printf "REFUSED\\n"; exit "$1"; }\n'
+        + proof_function + "\n"
         + function + "\nlose_install_holder\n"
     )
     result = subprocess.run(
@@ -1160,10 +1186,17 @@ def test_holder_loss_source_restores_only_pre_effect_plist(
         capture_output=True, text=True,
     )
     assert result.returncode == 78, result.stderr
-    assert result.stdout.splitlines() == (
-        ["RESTORED", "RECEIPT", "REFUSED"] if restore_expected
-        else ["RECEIPT", "REFUSED"]
+    expected = (["RESTORED"] if restore_expected else []) + [
+        "RECEIPT:EFFECT_UNKNOWN:INSTALL_HOLDER_LOST", "REFUSED",
+    ]
+    assert result.stdout.splitlines() == expected
+    assert plist.read_bytes() == (
+        b"ORIGINAL_PLIST\n" if restore_expected else b"CURRENT_PLIST\n"
     )
+    assert selector.read_bytes() == b"SELECTOR_STAYS\n"
+    assert transaction.read_bytes() == b"UNCERTAIN_TX_STAYS\n"
+    assert (locked / "started").exists() == effect_started
+
 
 
 def test_bootstrap_effect_return_79_after_started_is_not_holder_loss(tmp_path):
@@ -1194,6 +1227,40 @@ def test_bootstrap_effect_return_79_after_started_is_not_holder_loss(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["EXIT=79 STOP=0"]
+
+
+def test_bootstrap_effect_return_79_before_started_refuses_with_pre_effect_proof(tmp_path):
+    # Run the literal run_locked function. A pre-admission holder loss must
+    # retain the pre-effect PLIST_REPLACED phase; rc79 with no started marker
+    # must then furnish positive STOP_LOCKED proof before loss handling.
+    raw = DAEMON.read_text()
+    start = raw.index("run_locked() {\n")
+    end = raw.index("\n}\n\neffect_was_not_started() {", start) + 2
+    function = raw[start:end]
+    fixture = (
+        "set -u\n"
+        + "PHASE=PLIST_REPLACED\n"
+        + 'TMPROOT="' + str(tmp_path) + '"\n'
+        + 'STORE=inert\nGENERATION=inert\nEXPECT_CURRENT=inert\n'
+        + 'PUBLISHER=inert\nINSTALL_FENCE=inert\nHOLD_DURING_LOCK=\n'
+        + 'prove_install_holder(){ [ "$PHASE" = "PLIST_REPLACED" ] || exit 91; }\n'
+        + 'lose_install_holder(){ '
+          '[ "$STOP_LOCKED" -eq 1 ] && [ "$PHASE" = "BOOTSTRAP_STARTED" ] '
+          '|| exit 92; printf "PRE_EFFECT_REFUSAL\\n"; exit 78; }\n'
+        + 'py(){ if [ "$1" = "locked-effect" ]; then return 79; '
+          'fi; return 0; }\n'
+        + function + "\n"
+        + 'run_locked bootstrap /bin/false\n'
+        + 'printf "UNEXPECTED_BOOTSTRAP_SUCCESS\\n"\n'
+    )
+    result = subprocess.run(
+        ["/bin/bash", "--noprofile", "--norc", "-c", fixture],
+        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 78, result.stderr
+    assert result.stdout.splitlines() == ["PRE_EFFECT_REFUSAL"]
+
 
 
 def test_absent_label_holder_death_at_bootstrap_admission_restores_preimage(workspace):

@@ -1143,7 +1143,17 @@ lose_install_holder() {
   # and rc79 is a holder loss only if the per-effect started file is absent.
   # Never restore on an effect that may have begun.
   case "$PHASE" in
-    PLIST_REPLACED|BOOTSTRAP_STARTED) restore_plist || true ;;
+    PLIST_REPLACED) restore_plist || true ;;
+    BOOTSTRAP_STARTED)
+      # Restore only on a proven current-effect pre-start refusal. A holder
+      # lost after bootstrap may have begun must leave plist bytes untouched.
+      if effect_was_not_started \
+          && [ -n "${LOCKED_DIR:-}" ] \
+          && [ ! -e "$LOCKED_DIR/started" ] \
+          && [ ! -L "$LOCKED_DIR/started" ]; then
+        restore_plist || true
+      fi
+      ;;
   esac
   note_install_blocked INSTALL_HOLDER_LOST "install transaction holder lost" || true
   die 78 "install transaction holder lost"
@@ -1447,7 +1457,12 @@ run_locked() {
   local kind=$1
   shift
   local pause rc
+  # Leave the pre-bootstrap phase in place until holder admission succeeds.
+  # A refusal here is provably pre-effect and may restore the original plist.
   prove_install_holder
+  if [ "$kind" = "bootstrap" ] && [ "${PHASE:-START}" = "PLIST_REPLACED" ]; then
+    PHASE=BOOTSTRAP_STARTED
+  fi
   LOCKED_DIR=$(mktemp -d "$TMPROOT/host-pull-lock.XXXXXX") || return 78
   LOCKED_DETAIL=""
   STOP_LOCKED=0
@@ -1459,6 +1474,9 @@ run_locked() {
   # An effect command may itself exit 79 AFTER mark_started. Only a
   # missing started marker proves the pre-effect transaction-fence refusal.
   if [ "$rc" -eq 79 ] && [ ! -f "$LOCKED_DIR/started" ]; then
+    # The locked child refused before mark_started: expose positive pre-effect
+    # evidence before the holder-loss handler decides whether to restore.
+    STOP_LOCKED=1
     lose_install_holder
   fi
   LOCKED_DETAIL=$(cat "$LOCKED_DIR/err" 2>/dev/null || true)
@@ -1496,7 +1514,7 @@ bootstrap_once() {
   if [ "$kind" = "new" ]; then
     [ "$BOOTSTRAP_NEW" -eq 0 ] || die 78 "second bootstrap refused"
     BOOTSTRAP_NEW=1
-    PHASE=BOOTSTRAP_STARTED
+    # run_locked sets BOOTSTRAP_STARTED only after proving the install holder.
   else
     [ "$BOOTSTRAP_ROLLBACK" -eq 0 ] || die 78 "second rollback bootstrap refused"
     BOOTSTRAP_ROLLBACK=1
