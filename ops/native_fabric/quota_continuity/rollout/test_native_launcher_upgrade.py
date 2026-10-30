@@ -79,6 +79,32 @@ class PairedLauncherUpgrade(unittest.TestCase):
             if current_manifest != (Path(builder.__file__).parent / 'native-manifest.json').read_bytes():
                 raise AssertionError('current builder differs from protected manifest')
             cls.manifest = json.loads(current_manifest)
+            # The current builder was checked against its own exact manifest.
+            # This is a historical 8bc -> d044 test: freeze the two subsequent
+            # GLM diagnostic source changes at the pre-change protected commit,
+            # only within this disposable stage. Otherwise a valid future
+            # candidate edit breaks this unrelated historical transition test.
+            import base64, zlib
+            fixture_path = (Path(__file__).resolve().parents[4] /
+                            'tests/fixtures/fabric-glm-preterminal-bb85-20261030.json')
+            frozen = json.loads(fixture_path.read_bytes())
+            expected_preterminal = {
+                'fabric_task.py': '3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b',
+                'provider_outcome.py': 'aae20d61a9b17dfc7fc5ca1c7507dcf4eca5972f83eaf923379b6e758ab8dd7e',
+            }
+            if (frozen.get('schema') != 'mastermind.native_historical_preterminal_fixture.v1'
+                    or frozen.get('original_commit') != 'bb85b429f2ffffd38408080ce4df7d6378c34100'
+                    or set(frozen.get('files', {})) != set(expected_preterminal)):
+                raise AssertionError('historical GLM fixture identity differs')
+            for name, digest in expected_preterminal.items():
+                item = frozen['files'][name]
+                raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+                if (set(item) != {'bytes', 'sha256', 'zlib_base64'}
+                        or item['bytes'] != len(raw) or item['sha256'] != digest
+                        or g.digest(raw) != digest):
+                    raise AssertionError('historical GLM fixture digest differs: ' + name)
+                (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
+                cls.manifest['ext/' + name] = digest
             # This suite tests the historical 8bc -> d044 paired transition,
             # not a later ordinary generation selection through d044. Recreate
             # only its exact two-line controller preimage in this disposable

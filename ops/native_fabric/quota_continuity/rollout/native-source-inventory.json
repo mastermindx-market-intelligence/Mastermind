@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 80826,
+      "bytes": 83762,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b",
+      "sha256": "eba9ebdcfa9897e82c609abdf49c6e03d404ca492d1c19207b3c9aa53742bbed",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -498,9 +498,9 @@
       "source": "source/pool_status.py"
     },
     "ext/provider_outcome.py": {
-      "bytes": 25120,
+      "bytes": 25872,
       "installed_preimage_sha256": null,
-      "sha256": "aae20d61a9b17dfc7fc5ca1c7507dcf4eca5972f83eaf923379b6e758ab8dd7e",
+      "sha256": "aca03aafe90e6b10fd39dcc8c4df31109d1b93dcd7258d89314dece2ef6917e5",
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {
