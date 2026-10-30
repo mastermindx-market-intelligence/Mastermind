@@ -238,6 +238,20 @@ printed. Unauthenticated health is `401`.
 
 ## 24 hour shadow
 
+**Canonical Wake/continuity boundary:** The Hermes Secretary's
+`wake_bridge` now accepts only a typed `AgentDialogueAttention` object
+projected through the **existing**
+`integrations.slack_agent_dialogue.turn_wake_adapter`. A Slack message field
+named `canonical_source_ref`, a plausible 64-hex digest, a bot assertion,
+a timer tick, or a chat text instruction cannot originate a Wake obligation.
+The typed adapter preserves original root-job, source-workstream and target
+seat, refusing target-seat mismatch. Even a `MINTED` result is **only an
+in-memory shadow annotation**: current-source verification, canonical Wake
+ledger persistence, transport dispatch, ACK, original-parent worker result
+consumption and clearing a task remain with their existing Executive,
+Agent Dialogue, Wake and Agent OS owners. No Hermes-owned task queue,
+memory database, scheduler or new watcher has been created.
+
 Do not install the Hermes cron catalog. `install_into_hermes_home()` refuses,
 and every job in `integrations/hermes_secretary/routines/jobs.json` stays
 `enabled: false`. The merged catalog sets `m2studio-browser-tab-sweep` to
