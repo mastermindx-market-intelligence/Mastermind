@@ -462,6 +462,13 @@ def claude_main(args: list[str]) -> int:
     if rc == 0 and fields["kind"] != "success":
         rc = 1
     fields["command_rc"] = rc
+    # The structured CLI terminal subtype, not an SDK stderr notice, owns the
+    # outcome. Emit it *before* the result text: third-party models can print
+    # [claude-code:unrecognized_model] while still executing normally. The
+    # original raw diagnostics remain available for independent inspection.
+    if fields["kind"] != "success":
+        print("PROVIDER_TERMINAL kind=" + fields["kind"] + " rc=" + str(rc),
+              file=sys.stderr, flush=True)
     sys.stdout.write(display)
     sys.stdout.flush()
     target = os.environ.get("POOL_OUTCOME_FILE")
@@ -478,8 +485,6 @@ def claude_main(args: list[str]) -> int:
             write_new(Path(target), value)
         except (OSError, ValueError):
             print("PROVIDER_OUTCOME_UNAVAILABLE", file=sys.stderr)
-    if fields["kind"] != "success":
-        print("PROVIDER_TERMINAL kind=" + fields["kind"] + " rc=" + str(rc), file=sys.stderr)
     # Preserve incumbent best-effort local usage ledger. The controller's
     # strict terminal ledger remains authoritative; no acceptance is inferred.
     try:

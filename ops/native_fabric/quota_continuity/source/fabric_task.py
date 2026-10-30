@@ -461,9 +461,68 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         if observation is not None:
             status["controller_observation"] = observation
     status.update(_acceptance_projection(rid, status, original_log))
+    status.update(_terminal_provider_projection(rid, status, original_log))
     if state == "ACTIVE_OR_WAITING":
         status.update(_active_lineage_projection(rid, original_log))
     return status
+
+
+def _terminal_provider_projection(rid: str, status: dict[str, Any], controller_log: bytes) -> dict[str, Any]:
+    """Project the existing original turn-limit proof, never authorize replay.
+
+    A Claude SDK catalog notice is not proof of provider model rejection.  The
+    local original process and provider receipts, already owned by the controller,
+    carry the authoritative CLI subtype.  Missing or drifting evidence stays
+    unclassified; no model string or captured prose is interpreted as authority.
+    """
+    if (status.get("state") != "TERMINAL" or type(status.get("rc")) is not int
+            or status["rc"] == 0 or status.get("signal") != "other"):
+        return {}
+    marker = f"PROVIDER_OUTCOME_RECORDED file={rid}.provider.json".encode()
+    if marker not in controller_log:
+        return {}
+    base = HERE / "state" / "remote_sub"
+    provider_path = base / f"{rid}.provider.json"
+    process_path = base / f"{rid}.process.jsonl"
+    try:
+        def original_bytes(path: Path, limit: int) -> bytes:
+            before = path.lstat()
+            if (before.st_uid != os.getuid() or before.st_nlink != 1
+                    or before.st_mode & 0o022):
+                raise FabricTaskError("unsafe provider receipt")
+            raw = _bounded_regular(path, limit)
+            after = path.lstat()
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                    before.st_ctime_ns) != (after.st_dev, after.st_ino,
+                                            after.st_size, after.st_mtime_ns,
+                                            after.st_ctime_ns):
+                raise FabricTaskError("provider receipt changed")
+            return raw
+
+        provider = json.loads(original_bytes(provider_path, 16_384))
+        process_lines = original_bytes(process_path, 16_384).splitlines()
+        if len(process_lines) != 1:
+            return {}
+        process = json.loads(process_lines[0])
+        from provider_outcome import validate_receipt
+        validate_receipt(provider, process, rid)
+        if (provider.get("command_rc") != status["rc"]
+                or provider.get("kind") != "turn_limit"
+                or provider.get("cli_subtype") != "error_max_turns"
+                or provider.get("cli_terminal_reason") != "max_turns"):
+            return {}
+        log_path, _ = _paths(rid)
+        if _bounded_regular(log_path, MAX_LOG_BYTES) != controller_log:
+            return {}
+        return {"terminal_provider_diagnostic": {
+            "kind": "turn_limit",
+            "cli_subtype": "error_max_turns",
+            "source": "validated_original_provider_process_receipt",
+            "replay_authorized": False,
+        }}
+    except (OSError, ValueError, TypeError, KeyError, ImportError,
+            FabricTaskError, RecursionError, AttributeError):
+        return {}
 
 
 def read_result(run_id: str, *, max_bytes: int = DEFAULT_RESULT_BYTES) -> bytes:
