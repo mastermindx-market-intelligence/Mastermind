@@ -103,7 +103,7 @@ See the dedicated [Equity Edge giveaway ring](equityedge_affiliate_giveaway_ring
 - Some outer-ring creators demonstrably advertise **multiple competing** prop firms (e.g., @skyshark0 → AlphaCapitalUK, @De_CaptainChart → NYSMarkets and THEFUNDEDWAY, @THE_SNR_SNIPER → Hola Prime/Blue Guardian, @New_owner1 → EraFunded/AquaFunded). This is evidence against assuming every promoter is controlled by one company.
 - Several creator links are more than co-mentioned tags: **@deartrader__ reposts and replies to Emrik and Playmaker promotions**; **@mirngaprime reposts @Aeroonfx**; and **@EquitySpace1 reposts official Equity Edge announcements**. Still, rates of reciprocal comments/retweets are not quantified without complete X post IDs/timestamps.
 - [Firm's giveaway/BOGO rules](https://equityedge.io/general/giveaway-accounts-bogo-offers): promotional account sizes are simulated trading capacity and accounts close after the first payout; do not characterize $50K giveaway as $50K cash.
-- Sources and machine-readable **163 directed relationship edges** now in [typed network graph](interaccount_edges_first_pass.json). Graph edges include one per distinct **required-follow relationship** in selected contest posts, not each actual user follow/repost/like.
+- Sources and machine-readable **181 directed relationship edges** now in [typed network graph](interaccount_edges_first_pass.json). Graph edges include one per distinct **required-follow relationship** in selected contest posts, not each actual user follow/repost/like.
 
 ## TrendSpider founder and owned product channel
 
@@ -116,3 +116,14 @@ See the dedicated [Equity Edge giveaway ring](equityedge_affiliate_giveaway_ring
 1. **@EquitySpace1:** Who commissions campaigns, and does a first-party brand channel explicitly acknowledge its control? Its currently available promotional history is strongly aligned with Equity Edge but insufficient for ownership.
 2. **OpenMarket historical research migration:** Can the numeric X account ID or official company document confirm whether historical @ThanefieldRes became @openmarket_raw on the same account? Directly announced affiliation is already sufficient to rank it as a related publisher.
 3. **Actual interaction density:** Obtain permitted X 30-day post export and timestamps for selected core and outer-ring accounts. Compute per-pair repost/reply/quote counts and reciprocal proportions and compare to account-level baseline. Do not infer a rate from archived feed snippets.
+
+
+## Graph audit and measured versus inferred edges
+
+The extended [machine-readable edge graph](interaccount_edges_first_pass.json) currently contains **181 typed relationship edges, 98 account/company/product label nodes, and 77 cited public source URLs**, distributed into five connected components of sizes **61** (Equity Edge), **22** (OpenMarket/Thanefield/Percept), **7** (Unusual Whales/tastytrade), **5** (Jake near-handle lookalikes), and **3** (TrendSpider/SignalStack). Seven public account/company alias edges were added so otherwise split subgraphs correctly represent the same named business, without implying shared administration. This is a relational evidence map, **not** a time-normalized centrality score or a census of distinct real-world people.
+
+The required-follow giveaway instructions dominate the graph's raw edge count: each Hub-A originator contributes 3 public contest recipient relationships, and each Hub-B originator 2. Additional categories include explicit business and affiliate connections, profile-declared roles, public reply/repost observations, and a paid brokerage marketing agreement. The two-count distinction is essential before calling an account "highly connected" versus "frequently engaged with."
+
+New cross-brand creator connections are explicit in [@AfaaqFx indexed posts](https://ww.twstalker.com/AfaaqFx) and [@DaCryptoSheikh indexed posts](https://w.twstalker.com/DaCryptoSheikh): Equity Edge contests, AquaFunded, FundedNext/OrionFunded or FundingTraders referrals; each account operates in **multiple company marketing circles**, making a single-brand owned-account claim unsupported. Related 2026 X mirrors are snapshots with inconsistent relative dates and no validated post-event denominator.
+
+See [the interactive network](account_network_interactive.html) to switch between **campaign directives** and **observed repost/reply** links. It permits visual inspection of topology but cannot generate missing timestamps, authenticate X numeric user IDs or prove common ownership.
