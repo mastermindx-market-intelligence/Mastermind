@@ -210,10 +210,14 @@ def pytest_argv(
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Keep the measured protected-master hot-module pins. The capacity-host and
-    # walkforward swap is retired: the observed queue profile shows it overloads
-    # shard 1 with cold setup. Unlisted modules retain SHA-256 placement, and
-    # every test still runs exactly once.
+    # Preserve protected-master pins. A prior capacity-host -> shard 1 swap
+    # overloaded that shard and remains retired. Hosted CI 40996811766 on
+    # 973d717 measured test_capacity_host_artifacts at 973 seconds on shard 0
+    # (45-minute timeout) while shard 2 finished in ~21 minutes. Relocate only
+    # this measured module to shard 2: no exclusion, job-count change, test skip,
+    # altered 45-minute limit or change to the required fan-in test context.
+    # Other unlisted modules retain deterministic SHA-256 placement.
+    "tests/test_capacity_host_artifacts.py": 2,
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
     # The protected one-runner CI gate measured these further slow modules.
