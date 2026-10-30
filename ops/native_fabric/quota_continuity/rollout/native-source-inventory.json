@@ -270,9 +270,9 @@
       "source": "candidate/host_pull_backend.py"
     },
     "ext/host_pull_daemon.sh": {
-      "bytes": 82661,
+      "bytes": 83382,
       "installed_preimage_sha256": null,
-      "sha256": "1f88d6e7705c9d5fc5cb57d35a54c76e92a298efc075ca149d66842c5c8acb6a",
+      "sha256": "2e9668bd53e78b5c0f6ab57bf86888630c0c9ab27a6db90b030499eda58811a0",
       "source": "candidate/host_pull_daemon.sh"
     },
     "ext/host_pull_launchd.plist.template": {
