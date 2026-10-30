@@ -29,7 +29,11 @@ concurrency:
 jobs:
   shadow-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The full discovery-first test gate was serial and exceeded the original
+    # 45-minute budget on 2026-10-29; retain the three exact-cover
+    # shards but run one child at a time inside RWE on a two-vCPU runner.
+    # Native suite deadlines and failure propagation are unchanged.
+    timeout-minutes: 150
 
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +73,17 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
+      # Preserve the real Vitest dependency required by the identical
+      # focused tests in main CI. Do not stub or skip consumer tests.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
+
       - name: Mint linux lock (bootstrap only)
         if: hashFiles('requirements/gate-linux-x86_64-py312.lock') == ''
         run: |
@@ -93,7 +108,9 @@ jobs:
         run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
 
       - name: Run repository test gate inside the realized environment
-        run: python scripts/rwe_env.py gate --env /tmp/rwe-env
+        # Same full module cover and three-way placement as main ci_pytest;
+        # the RWE receipt still records the exact gate command and exit.
+        run: python scripts/rwe_env.py gate --env /tmp/rwe-env --jobs 3
 
       - name: Upload receipt
         if: always()

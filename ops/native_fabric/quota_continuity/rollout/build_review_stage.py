@@ -38,7 +38,8 @@ ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota
                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py",
                       "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
                       "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
-                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py"})
+                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py",
+                      "host_pull_daemon.sh", "host_pull_launchd.plist.template"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
 # still have to match the installed preimage before the secure overlay is used.
@@ -67,7 +68,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # caller UTC narrowing. Qualify their accepted Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
-    'pick.py': '4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df',
+    'pick.py': '4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b',
     'remote_sub.sh': '09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7',
     'remote_sub_helpers.py': '0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556',
 }

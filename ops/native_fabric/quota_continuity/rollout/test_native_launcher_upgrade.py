@@ -99,9 +99,82 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 raise AssertionError('historical fixture controller preimage differs')
             controller.write_bytes(original)
             cls.manifest['ext/remote_sub.sh'] = original_sha
-            # Restore the *historical* fabric_task bytes as well; this suite
-            # qualifies the original 8bc -> d044 pair, not the current CLI.
+            # Reconstruct the reviewed historical 95-file epoch using only
+            # exact inverse hunks in THIS disposable fixture. Never repin the
+            # original upgrade installer, preimages or installed selection.
+            def undo_manual_patch(value, member, expected):
+                patch_file = (Path(__file__).resolve().parents[2] /
+                              'patches/native_generation_manual_preview_20261022.patch')
+                patch_raw = patch_file.read_bytes()
+                if g.digest(patch_raw) != '6b1dade16fe58b732064d66e0645396dd6dd02fc255c3befbf0d03e105b23e6b':
+                    raise AssertionError('reviewed manual patch source drift')
+                section = b'diff --git a/' + member.encode() + b' b/' + member.encode() + b'\n'
+                if patch_raw.count(section) != 1:
+                    raise AssertionError('reviewed inverse member missing')
+                lines = patch_raw.split(section, 1)[1].split(b'\ndiff --git ', 1)[0].splitlines(keepends=True)
+                groups, block = [], None
+                for line in lines:
+                    if line.startswith(b'@@ '):
+                        block = []
+                        groups.append(block)
+                    elif block is not None and line[:1] in (b' ', b'+', b'-'):
+                        block.append(line)
+                if not groups:
+                    raise AssertionError('reviewed inverse has no hunks')
+                for group in reversed(groups):
+                    applied = b''.join(line[1:] for line in group if line[:1] in (b' ', b'+'))
+                    previous = b''.join(line[1:] for line in group if line[:1] in (b' ', b'-'))
+                    if value.count(applied) != 1:
+                        raise AssertionError('reviewed inverse hunk not unique')
+                    value = value.replace(applied, previous, 1)
+                if g.digest(value) != expected:
+                    raise AssertionError('reviewed historical inverse hash differs: ' + member)
+                return value
+
+            # B10: source now composes F1 strict manual model + independent
+            # judgment #1797. Undo BOTH independent changes before restoring
+            # the original 95-member frozen launcher epoch.
+            pick = cls.built / 'native-code-stage/ext/pick.py'
+            reviewed_pick = pick.read_bytes()
+            if g.digest(reviewed_pick) != '4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b':
+                raise AssertionError('combined manual/judgment pick differs')
+            judgment_hunks = (
+                (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
+                 b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
+                (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
+                 b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
+                 b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
+                 b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
+            )
+            for current_hunk, old_hunk in judgment_hunks:
+                if reviewed_pick.count(current_hunk) != 1:
+                    raise AssertionError('reviewed judgment inverse mismatch')
+                reviewed_pick = reviewed_pick.replace(current_hunk, old_hunk, 1)
+            if g.digest(reviewed_pick) != '9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174':
+                raise AssertionError('manual-only picker inverse differs')
+            old_pick = undo_manual_patch(reviewed_pick, 'ext/pick.py',
+                                         'a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee')
+            pick.write_bytes(old_pick)
+            cls.manifest['ext/pick.py'] = g.digest(old_pick)
+
+            pool = cls.built / 'native-code-stage/pool'
+            new_pool = pool.read_bytes()
+            if g.digest(new_pool) != '12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679':
+                raise AssertionError('manual new-pool digest mismatch')
+            old_pool = undo_manual_patch(new_pool, 'pool',
+                                         '4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059')
+            pool.write_bytes(old_pool)
+            cls.manifest['pool'] = g.digest(old_pool)
+
+            # Restore historical fabric_task BEFORE its preexisting qualification-
+            # host inverse, retaining the independent paired-upgrade test.
             task = cls.built / 'native-code-stage/ext/fabric_task.py'
+            newest_task = task.read_bytes()
+            if g.digest(newest_task) != '48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7':
+                raise AssertionError('approved AUTO task digest mismatch')
+            task.write_bytes(undo_manual_patch(newest_task, 'ext/fabric_task.py',
+                          '3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b'))
+            # Preserve the old preimage restoration, no historical pin rewrite.
             current_task = task.read_bytes()
             current_line = (
                 b'    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), '
@@ -135,28 +208,11 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     raise AssertionError('historical collector preimage differs')
                 (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
                 cls.manifest['ext/' + name] = digest
-            # The historical 8bc -> d044 launcher fixture also predates the
-            # two-hunk #1797 reviewer-judgment picker. Restore its exact old
-            # bytes ONLY inside this disposable stage, never in source/runtime.
-            pick = cls.built / 'native-code-stage/ext/pick.py'
-            selected_pick = pick.read_bytes()
-            rollback_hunks = (
-                (b'"operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",',
-                 b'"operator", "reviewer", "adjudicate", "decompose", "audit", "repair",'),
-                (b'    # Independent review/audit remain judgment even when legacy execute_classes includes them.\n'
-                 b'    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.\n'
-                 b'    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):\n',
-                 b'    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:\n'),
-            )
-            for current_hunk, historical_hunk in rollback_hunks:
-                if selected_pick.count(current_hunk) != 1:
-                    raise AssertionError('historical picker fixture postimage differs')
-                selected_pick = selected_pick.replace(current_hunk, historical_hunk)
-            historical_pick_sha = 'a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee'
-            if g.digest(selected_pick) != historical_pick_sha:
-                raise AssertionError('historical picker inverse differs')
-            pick.write_bytes(selected_pick)
-            cls.manifest['ext/pick.py'] = historical_pick_sha
+            # The host-pull daemon and plist are later than this paired upgrade.
+            # The disposable target keeps the reviewed 95-member closure.
+            for relative in ('ext/host_pull_daemon.sh', 'ext/host_pull_launchd.plist.template'):
+                cls.manifest.pop(relative)
+                (cls.built / 'native-code-stage' / relative).unlink()
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
@@ -210,7 +266,15 @@ class PairedLauncherUpgrade(unittest.TestCase):
         manifest = {name: g.digest(raw) for name, raw in payloads.items()}
         self.initial = g.publish(source, self.ext, manifest)
         self.store = self.ext.parent / g.STORE_NAME
-        raw = Path(g.__file__).read_bytes().replace(
+        admission = (
+            b"    # One vetted flat plist. Not a suffix rule and not a directory walk.\n"
+            b"    if relative == \"ext/host_pull_launchd.plist.template\":\n"
+            b"        return\n")
+        live = Path(g.__file__).read_bytes()
+        self.assertEqual(live.count(admission), 1)
+        pinned = live.replace(admission, b"")
+        self.assertEqual(g.digest(pinned), installer.UPGRADE_TO)
+        raw = pinned.replace(
             b'or parts[1] in {"yes", "host_pull_probe.template",\n'
             b'                        "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json"})',
             b'or parts[1] in {"yes", "host_pull_probe.template"})')
@@ -227,6 +291,17 @@ class PairedLauncherUpgrade(unittest.TestCase):
         # Actual installed selection may have advanced since first installation.
         self.previous = g.select(self.store, self.initial.name, self.initial.name)
         self.target = g.publish(self.built / 'native-code-stage', self.ext, self.manifest)
+        # prepare_upgrade requires the launcher bytes to be exactly UPGRADE_TO.
+        # Reads of this repo file return those pinned bytes. Writes stay on this module.
+        live_path = Path(g.__file__).resolve()
+        original_regular = g.regular_bytes
+        def regular_bytes(path, *args, **kwargs):
+            if Path(path).resolve() == live_path:
+                return pinned
+            return original_regular(path, *args, **kwargs)
+        self.bytes_patch = mock.patch.object(g, 'regular_bytes', regular_bytes)
+        self.bytes_patch.start()
+        self.addCleanup(self.bytes_patch.stop)
         self.bundle = self.root / 'upgrade'
         self.plan = installer.prepare_upgrade(self.original, self.target.name, self.bundle)
         self.old_plan = (self.original / 'PLAN.json').read_bytes()

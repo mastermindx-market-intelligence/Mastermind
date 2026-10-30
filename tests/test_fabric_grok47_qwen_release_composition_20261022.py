@@ -68,7 +68,7 @@ def test_grok47_merged_source_digest_is_pinned():
     assert set(builder.GROK47_MERGED_SOURCE_DIGESTS) == set(NAMES)
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
-    assert len(manifest) == len(inventory["files"]) == 95
+    assert len(manifest) == len(inventory["files"]) == 97
     for name in NAMES:
         path = GROK / name
         assert path.is_file() and not path.is_symlink()
@@ -99,7 +99,7 @@ def test_rebuild_staged_manifest_is_exact(tmp_path):
     for name in ("native-manifest.json", "native-source-inventory.json"):
         assert (stage / name).read_bytes() == (NATIVE / "rollout" / name).read_bytes()
     hashes = json.loads((stage / "native-manifest.json").read_text())
-    assert len(hashes) == 95
+    assert len(hashes) == 97
     for path, digest_value in hashes.items():
         assert digest((stage / "native-code-stage" / path).read_bytes()) == digest_value
 
@@ -155,7 +155,7 @@ def test_published_paid_model_and_grok_controls_composed(tmp_path):
     assert result.returncode == 0, result.stderr
     manifest = json.loads((stage / "native-manifest.json").read_text())
     inventory = json.loads((stage / "native-source-inventory.json").read_text())
-    assert len(manifest) == len(inventory["files"]) == 95
+    assert len(manifest) == len(inventory["files"]) == 97
     assert "qualified_pure_yaml" in inventory
     ext = stage / "native-code-stage/ext"
     for name in ("remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py"):

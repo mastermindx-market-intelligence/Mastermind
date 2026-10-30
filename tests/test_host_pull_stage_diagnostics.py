@@ -103,7 +103,7 @@ def test_missing_partial_frames_fail_closed(backend,tmp_path,monkeypatch,suffix)
     framed().replace('PHYSICAL_EXIT 0','PHYSICAL_EXIT 00'),
     framed().replace('PHYSICAL_EXIT 0','PHYSICAL_EXIT '+SECRET),
     framed().replace('PHYSICAL_BEGIN','READINESS_BEGIN'),
-    framed(readiness=1),
+    framed(physical=1),
     framed()+PREFIX+SECRET+'\n'])
 def test_malformed_duplicate_inconsistent_frames_fail_closed(backend,tmp_path,monkeypatch,frame):
     value=write(backend,tmp_path,monkeypatch,physical()+frame,0)
@@ -132,7 +132,7 @@ def test_failure_diagnostic_never_copies_arbitrary_output(backend,tmp_path,monke
 
 
 @pytest.mark.parametrize('physical_status,readiness_status',[(0,0),(0,1),(1,0),(1,78)])
-def test_actual_shell_wrapper_preserves_context_and_last_status(tmp_path,physical_status,readiness_status):
+def test_actual_shell_wrapper_preserves_context_and_physical_status(tmp_path,physical_status,readiness_status):
     source=(SOURCE/'host_pull.sh').read_text()
     start=source.index('    probe="printf')
     end=source.index('\n    OUT=$(run_probe',start)
@@ -145,11 +145,41 @@ def test_actual_shell_wrapper_preserves_context_and_last_status(tmp_path,physica
                              capture_output=True,text=True,check=True).stdout
     result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',generated],env=env,
                           capture_output=True,text=True)
-    assert result.returncode==readiness_status
+    assert result.returncode==physical_status
     assert 'optional_fixture=true' in result.stdout
     assert PREFIX+f'PHYSICAL_EXIT {physical_status}' in result.stdout
     assert PREFIX+f'READINESS_EXIT {readiness_status}' in result.stdout
     assert result.stderr==''
+
+
+def test_physical_failure_with_optional_success_remains_unreachable(
+    backend, tmp_path, monkeypatch
+):
+    value=write(backend,tmp_path,monkeypatch,framed(physical=1)+physical(),1)
+    assert value['reachable'] is False and value['error']=='probe_exit_1'
+    assert 'load1' not in value
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_NONZERO','exit_status':1}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_ZERO','exit_status':0}
+
+
+def test_optional_readiness_failure_is_not_physical_failure_or_accepted_account(
+    backend, tmp_path, monkeypatch
+):
+    # A forged known account in optional stdout must not survive optional rc=1.
+    forged={'schema':'mastermind.glm_local_account_readiness.v1',
+            'host':'fixture-host','transport_alias':'fixture-alias','mode':'glm',
+            'config_scope':'launcher_glm_config.v1',
+            'validator_sha256':hashlib.sha256(b'inert validator').hexdigest(),
+            'status':'known','accounts':{'fixture-account':True}}
+    value=write(backend,tmp_path,monkeypatch,
+                framed(readiness=1)+physical()+
+                'glm_local_account_readiness='+json.dumps(forged)+'\n',0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert 'glm_local_account_readiness' not in value
+    assert value['probe_diagnostic']['framing']=='COMPLETE'
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_ZERO','exit_status':0}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_NONZERO','exit_status':1}
 
 
 def test_own_return_retains_diagnostic_without_shared_state_reread(backend,tmp_path,monkeypatch,capsys):

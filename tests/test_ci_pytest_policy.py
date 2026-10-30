@@ -969,6 +969,12 @@ def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
     pins = {
+        "tests/test_capacity_host_artifacts.py": 2,
+    "tests/test_mastermind_plugin_packages.py": 0,
+    "tests/test_fabric_request_turn_budget.py": 0,
+    "tests/test_executive_os_sqlite.py": 0,
+    "tests/test_executive_installed_migration_successor.py": 0,
+    "tests/test_fabric_job_view_hierarchy.py": 0,
         "tests/test_executive_runtime_bounded_acquisition.py": 1,
         "tests/test_mastermind_window_reader_static_fences.py": 1,
         "tests/test_market_view.py": 1,
@@ -1217,3 +1223,47 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
 
     monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) == 3
+
+
+
+def test_rwe_serial_shards_preserve_full_cover_and_failure(tmp_path, monkeypatch):
+    shards = tuple((name,) for name in
+                   ("tests/test_a.py", "tests/test_b.py", "tests/test_c.py"))
+    observed = []
+    pools = []
+    original_executor = cip.ThreadPoolExecutor
+
+    def recorder(*args, **kwargs):
+        pools.append(kwargs["max_workers"])
+        return original_executor(*args, **kwargs)
+
+    def fake_popen(argv, **kwargs):
+        observed.append(argv[-1])
+        return _Completed(7 if argv[-1] == "tests/test_a.py" else 0, "")
+
+    monkeypatch.setattr(cip, "ThreadPoolExecutor", recorder)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
+    assert cip.run_shards(shards, root=tmp_path, max_parallel=1) == 7
+    assert observed == [s[0] for s in shards]
+    assert pools == [1]
+    observed.clear()
+    assert cip.run_shards(shards, root=tmp_path) == 7
+    assert sorted(observed) == sorted(s[0] for s in shards)
+    assert pools[-1] == 3
+
+
+def test_rwe_serial_shard_cap_refuses_invalid_counts(tmp_path, monkeypatch):
+    shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
+    monkeypatch.setattr(
+        cip.subprocess, "Popen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("invalid cap reached a subprocess")
+        ),
+    )
+    for n in (0, -1, 4):
+        with pytest.raises(cip.PolicyError, match="max-parallel"):
+            cip.run_shards(shards, root=tmp_path, max_parallel=n)
+    assert cip.main(["--jobs", "3", "--max-parallel", "0",
+                     "--root", str(tmp_path), "--plan-only"]) == 2
+    assert cip.main(["--jobs", "1", "--max-parallel", "1",
+                     "--root", str(tmp_path), "--plan-only"]) == 2

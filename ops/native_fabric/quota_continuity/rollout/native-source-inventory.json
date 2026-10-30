@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 80826,
+      "bytes": 85543,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b",
+      "sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -258,16 +258,28 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 11854,
+      "bytes": 12150,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "d15cdb7c9a9bbf0adc9626d3269371eeec00afed5b60b8a83e20f70c448d9d3e",
+      "sha256": "ed43522f51bd95256be30fac980b0e833a6f486917ffc0e9e64078ad7e6f9d9a",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
-      "bytes": 40186,
+      "bytes": 40295,
       "installed_preimage_sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
-      "sha256": "742f0bf4f90d1ad4bd10851e3acec6564b9172d2c8185b013b58946071955659",
+      "sha256": "b9a64824ae942e4b7d2f1331a609e2e859e641c8dd5a77069f4bc0ed6f4262b8",
       "source": "candidate/host_pull_backend.py"
+    },
+    "ext/host_pull_daemon.sh": {
+      "bytes": 85913,
+      "installed_preimage_sha256": null,
+      "sha256": "ae1a082f70c5d4c279eaf80f4a476d3b53b810ef4bda6ceb61b61a9dcf08f1ae",
+      "source": "candidate/host_pull_daemon.sh"
+    },
+    "ext/host_pull_launchd.plist.template": {
+      "bytes": 1385,
+      "installed_preimage_sha256": null,
+      "sha256": "31a7108382df97357e8173b6edd7a5612178a042ecbc165591d89e9152846d9f",
+      "source": "candidate/host_pull_launchd.plist.template"
     },
     "ext/host_pull_probe.template": {
       "bytes": 10919,
@@ -474,9 +486,9 @@
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
-      "bytes": 117518,
+      "bytes": 118474,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df",
+      "sha256": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
@@ -588,18 +600,20 @@
       "source": "source/yes"
     },
     "pool": {
-      "bytes": 2856,
+      "bytes": 3215,
       "installed_preimage_sha256": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
-      "sha256": "4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059",
+      "sha256": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 95,
+  "native_code_files": 97,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
     "current_source_observation.py",
     "fabric_continuation.py",
+    "host_pull_daemon.sh",
+    "host_pull_launchd.plist.template",
     "linux_process_identity.py",
     "native_plain_packet_check.py",
     "native_plain_packet_reconcile.py",

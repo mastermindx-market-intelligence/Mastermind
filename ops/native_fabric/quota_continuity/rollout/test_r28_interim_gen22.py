@@ -1,6 +1,7 @@
 """Hermetic source/adversarial tests for the picker-only interim. No M2 effect."""
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -19,10 +20,23 @@ class R28InterimGen22Test(unittest.TestCase):
         self.assertNotIn("ext/host_pull_launchd.plist.template",manifest)
 
     def test_provenance_links_genuine_protected_git_source(self):
-        raw=(interim.REPO / interim.SRC).read_bytes()
-        self.assertEqual(hashlib.sha256(raw).hexdigest(),interim.R28)
+        # Historical R28 evidence always comes from the immutable reviewed
+        # Git commit, not whichever candidate picker a later PR has fused.
+        protected=subprocess.check_output(
+            ["git","-C",str(interim.REPO),"show",interim.PIN+":"+interim.SRC],
+            timeout=15)
+        self.assertEqual(hashlib.sha256(protected).hexdigest(),interim.R28)
         for _,new in interim.HUNKS:
-            self.assertEqual(raw.count(new),1)
+            self.assertEqual(protected.count(new),1)
+        current=(interim.REPO / interim.SRC).read_bytes()
+        if current!=protected:
+            # The later original F1+R28 integration has a separate reviewed
+            # fused picker identity. Old gen22 staging MUST refuse that drift.
+            self.assertEqual(hashlib.sha256(current).hexdigest(),interim.FUSED)
+            with self.assertRaisesRegex(ValueError,"PROTECTED_MERGED_SOURCE_DRIFT"):
+                interim.reviewed_source()
+        else:
+            self.assertEqual(interim.reviewed_source(),protected)
 
     def test_exact_target_descriptor(self):
         proposed=interim.contract()

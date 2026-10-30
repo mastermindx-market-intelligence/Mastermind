@@ -22,7 +22,7 @@
   "ext/fabric_operator_stop.py": "d3024c7bf0aadc64ad29577a9e8e0829462744704170fa399dcffe37d5b01e77",
   "ext/fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
   "ext/fabric_stop_return.py": "58456d8a6ce3e94dcff79bdabd70282ea05c5a86ecce88f7a12009976fa2313c",
-  "ext/fabric_task.py": "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b",
+  "ext/fabric_task.py": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
   "ext/glm_bound_claude.py": "7eece47bce1fa3e5701cd7d152b95e2674da7bc2d9e1b9669320fe9811e4d363",
   "ext/glm_codex_exec.sh": "fbb6558d4963e0dc7c1aea00a3171757f1e167eba61d276bd02ae6fe2baf7743",
   "ext/glm_host_account_probe.py": "2dbbdf5c7585b45c34269d8d19a8eb68c3919423b91164a024d8a558b42d3325",
@@ -38,8 +38,10 @@
   "ext/go_remote_run.py": "ca36b8867225d64d18606d13a56929e13aa086b8993d5e540f52d5594ad93d87",
   "ext/go_remote_transport.py": "a72be62874223a1526cfb0764835423f03d5a9f3d0078c51661bcf1946113ed0",
   "ext/host_pick.py": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
-  "ext/host_pull.sh": "d15cdb7c9a9bbf0adc9626d3269371eeec00afed5b60b8a83e20f70c448d9d3e",
-  "ext/host_pull_backend.py": "742f0bf4f90d1ad4bd10851e3acec6564b9172d2c8185b013b58946071955659",
+  "ext/host_pull.sh": "ed43522f51bd95256be30fac980b0e833a6f486917ffc0e9e64078ad7e6f9d9a",
+  "ext/host_pull_backend.py": "b9a64824ae942e4b7d2f1331a609e2e859e641c8dd5a77069f4bc0ed6f4262b8",
+  "ext/host_pull_daemon.sh": "ae1a082f70c5d4c279eaf80f4a476d3b53b810ef4bda6ceb61b61a9dcf08f1ae",
+  "ext/host_pull_launchd.plist.template": "31a7108382df97357e8173b6edd7a5612178a042ecbc165591d89e9152846d9f",
   "ext/host_pull_probe.template": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
   "ext/lane_runtime.py": "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329",
   "ext/lease_broker.py": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
@@ -74,7 +76,7 @@
   "ext/paid_pyyaml_6_0_3.zip": "1d6b5f7c42bc620557966d5cc6ca1933a7a12670658a7604676f0aebc26a3131",
   "ext/paid_pyyaml_provenance.json": "7883d48401f41d9470660bfd6114e6199002da8e142c1e7d196d9da4e4e17f64",
   "ext/paid_yaml_runtime.py": "ea16d60373ccb50a93d85ed3f1557aad765174b7ddef81fb65622648b0c02f07",
-  "ext/pick.py": "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df",
+  "ext/pick.py": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
   "ext/placement_view.py": "315519caa4644f9b6a431153556c5ce2080f921ce9ec4b0ddbff172517e3feb3",
   "ext/pool_ledger.py": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
   "ext/pool_status.py": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",
@@ -93,5 +95,5 @@
   "ext/sub.sh": "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
   "ext/support_bundle.py": "4c1741eb2593aefb73e9c0b5a5348f631ab0c7bd0953794a3a799cc40e68759c",
   "ext/yes": "b4f5e5353392e8ff4adc4158e1064243d0d7241333e9a891e05c1866b421813a",
-  "pool": "4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059"
+  "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679"
 }

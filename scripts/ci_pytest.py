@@ -210,10 +210,24 @@ def pytest_argv(
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Keep the measured protected-master hot-module pins. The capacity-host and
-    # walkforward swap is retired: the observed queue profile shows it overloads
-    # shard 1 with cold setup. Unlisted modules retain SHA-256 placement, and
-    # every test still runs exactly once.
+    # Preserve protected-master pins. A prior capacity-host -> shard 1 swap
+    # overloaded that shard and remains retired. Hosted CI 40996811766 on
+    # 973d717 measured test_capacity_host_artifacts at 973 seconds on shard 0
+    # (45-minute timeout) while shard 2 finished in ~21 minutes. Relocate only
+    # this measured module to shard 2: no exclusion, job-count change, test skip,
+    # altered 45-minute limit or change to the required fan-in test context.
+    # Other unlisted modules retain deterministic SHA-256 placement.
+    "tests/test_capacity_host_artifacts.py": 2,
+    # Hosted CI 41005250907 at 65afcc09: shards 0/1 passed in ~28/39m;
+    # shard 2 hit its 45m limit after 923s of capacity-host tests and before
+    # completing the last module. Move five measured 59-90s shard-2 modules
+    # to the lighter shard 0. Preserve every test, the 3-job exact partition,
+    # the fail-closed required test gate, and the original 45m timeout.
+    "tests/test_mastermind_plugin_packages.py": 0,
+    "tests/test_fabric_request_turn_budget.py": 0,
+    "tests/test_executive_os_sqlite.py": 0,
+    "tests/test_executive_installed_migration_successor.py": 0,
+    "tests/test_fabric_job_view_hierarchy.py": 0,
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
     # The protected one-runner CI gate measured these further slow modules.
@@ -296,6 +310,7 @@ def run_shards(
     *,
     root: Path,
     python: str | None = None,
+    max_parallel: int | None = None,
 ) -> int:
     """Run every shard and return the lowest-indexed nonzero exit code, else 0.
 
@@ -309,6 +324,12 @@ def run_shards(
     These records are diagnostics only; every process exit still governs.
     """
 
+    # Three disjoint test partitions stay complete when the resource-limited
+    # RWE runner runs only one child process at a time. Main CI defaults
+    # to its original concurrency.
+    parallel = len(shards) if max_parallel is None else max_parallel
+    if not 1 <= parallel <= len(shards):
+        raise PolicyError("max-parallel must be within the shard count")
     output_lock = threading.Lock()
 
     def _run(index: int) -> tuple[int, int, str, float]:
@@ -335,7 +356,7 @@ def run_shards(
         return index, returncode, "".join(captured), elapsed
 
     codes: dict[int, int] = {}
-    with ThreadPoolExecutor(max_workers=len(shards)) as pool:
+    with ThreadPoolExecutor(max_workers=parallel) as pool:
         futures = [pool.submit(_run, index) for index in range(len(shards))]
         for future in as_completed(futures):
             index, returncode, output, elapsed = future.result()
@@ -600,11 +621,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "either way, and any shard failing fails the gate."
         ),
     )
+    parser.add_argument(
+        "--max-parallel", type=int, default=None,
+        help="limit running shard processes without changing the --jobs cover",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else repo_root()
     try:
         if args.jobs < 1:
             raise PolicyError("jobs must be at least 1")
+        if args.max_parallel is not None and (
+            args.jobs < 2 or not 1 <= args.max_parallel <= args.jobs
+        ):
+            raise PolicyError("max-parallel requires multiple shards and valid count")
         gate = resolve_gate(root)
         # jobs=1 keeps the historical single-process argv exactly, so the
         # default gate invocation is unchanged by this feature.
@@ -620,7 +649,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.plan_only:
         return 0
     if shards is not None:
-        return run_shards(shards, root=root)
+        return run_shards(shards, root=root, max_parallel=args.max_parallel)
     completed = subprocess.run(
         pytest_argv(gate["included"]),
         cwd=root,
