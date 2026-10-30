@@ -28,9 +28,14 @@ human can see it in ~/.local/state/mastermind/storage-cleanup/ALERT.
 """
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import os
+import re
+import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -170,8 +175,11 @@ def floor_for_host() -> float | None:
     default when the host has no config file, because that is what the guard does.
     """
     try:
-        v = float(json.loads(FLOOR_CONF.read_text())['internal_floor_gib'])
-        return v if v > 0 else None
+        configured = json.loads(FLOOR_CONF.read_text())['internal_floor_gib']
+        if isinstance(configured, bool):
+            return GUARD_DEFAULT_FLOOR_GIB
+        v = float(configured)
+        return v if 0.0 < v < float('inf') else GUARD_DEFAULT_FLOOR_GIB
     except FileNotFoundError:
         return GUARD_DEFAULT_FLOOR_GIB
     except Exception:
@@ -201,6 +209,33 @@ def guarded(out: dict, key: str, argv: list, timeout: int, env=None, limit: int 
     if r.returncode:
         out[key + '_err'] = r.stderr[-400:]
     return r
+
+
+
+def hold_unqualified_apply(out: dict, key: str) -> None:
+    """Refuse an unqualified external producer BEFORE its --apply side effect.
+
+    The existing fleet_sparsify.py and fleet_repack.py are not source-enrolled
+    with the complete B10 receipt contract. A post-effect ledger cannot undo
+    an uncertain effect. Until immutable producer source, complete receipt
+    semantics and installed preimage are independently qualified, there is
+    deliberately no executable admission path for either helper.
+    """
+    if key not in ('fleet_sparse', 'repack'):
+        raise ValueError('unexpected producer admission key')
+    out[key] = 'PRE_EFFECT_HOLD: producer source and completion schema unqualified'
+    out[key + '_rc'] = 78
+    out[key + '_effect_state'] = 'NOT_APPLIED'
+
+
+
+def sparse_scan_allowed(free_gib: float, floor_gib: float | None) -> bool:
+    """Preserve incumbent above-floor headroom before costly sparse censuses.
+
+    This does NOT weaken the sparse-conversion gate near or below the
+    absolute storage floor. Only skips scans when reserve >= 60 GiB.
+    """
+    return not (floor_gib and free_gib >= floor_gib + 60.0)
 
 
 
@@ -269,7 +304,245 @@ def _external_volume_snapshots() -> list[dict]:
     return notes
 
 
+def _qualified_archive_peer(raw: str | None, peer: str,
+                            expected_dest: str | None) -> dict | None:
+    """One fail-closed receipt contract for archive inventory, cooldown and finish."""
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else None
+    except (ValueError, TypeError):
+        return None
+    if not (isinstance(report, dict)
+            and report.get('status') == 'REPORT_ONLY_SOURCE_PRESERVED'
+            and type(report.get('eligible_source_less_trees')) is int
+            and report['eligible_source_less_trees'] >= 0
+            and type(report.get('eligible_gib')) in (int, float)
+            and 0 <= report['eligible_gib'] < float('inf')
+            and type(report.get('remote_deletions')) is int
+            and report['remote_deletions'] == 0
+            and isinstance(expected_dest, str)
+            and expected_dest.startswith('/')
+            and '..' not in Path(expected_dest).parts
+            and report.get('host') == peer
+            and report.get('dest') == expected_dest):
+        return None
+    return report
+
+
+def _archive_cooldown_ready(pulled: dict, dest: str) -> bool:
+    """Only two independently verified successful peer inventories earn a cooldown."""
+    return all(
+        type(pulled.get(peer + '_rc')) is int
+        and pulled[peer + '_rc'] == 0
+        and _qualified_archive_peer(pulled.get(peer), peer, dest) is not None
+        for peer in ('mb', 'm1')
+    )
+
+
+def _stale_pack_inventory_complete(raw: str) -> bool:
+    """A zero-exit reaper may still fail to enumerate a protected scratch subtree."""
+    try:
+        report = json.loads(raw)
+    except (ValueError, TypeError):
+        return False
+    census = report.get('scratch_discovery') if isinstance(report, dict) else None
+    return (isinstance(census, dict)
+            and census.get('complete') is True
+            and isinstance(census.get('errors'), list)
+            and not census['errors']
+            and report.get('applied') is True
+            and type(report.get('removed')) is int
+            and report['removed'] >= 0
+            and type(report.get('freed_bytes')) is int
+            and report['freed_bytes'] >= 0)
+
+
+def _finite_nonnegative(value) -> bool:
+    return type(value) in (int, float) and 0 <= value < float('inf')
+
+
+def _helper_receipt_qualified(key: str, raw: str) -> bool:
+    """Validate helper completion, not just an exit-zero or text-shaped success.
+
+    Existing fleet_sparse/repack producers omit complete-attempt evidence.
+    Their zero-exit legacy receipts must remain HELD until the incumbent
+    producer contract is independently source-qualified and installed.
+    """
+    try:
+        report = json.loads(raw) if isinstance(raw, str) else None
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(report, dict):
+        return False
+
+    def count(name):
+        return type(report.get(name)) is int and report[name] >= 0
+
+    if key == 'generated_cache_trim':
+        selected, verified, held = (report.get(name) for name in ('selected', 'verified', 'held'))
+        return (report.get('mode') == 'APPLY'
+                and isinstance(selected, list) and isinstance(verified, list)
+                and isinstance(held, dict)
+                and count('scanned') and count('held_count') and count('recovered_bytes')
+                and report['held_count'] >= len(held)
+                and 'refused' not in report and 'bounded' not in report
+                and all(isinstance(item, dict)
+                        and isinstance(item.get('name'), str) and item['name']
+                        and isinstance(item.get('head'), str) and item['head']
+                        and isinstance(item.get('caches'), list)
+                        for item in selected)
+                and all(isinstance(name, str) and name for name in verified)
+                and set(verified).issubset({item['name'] for item in selected})
+                and all(item['name'] in verified or item['name'] in held
+                        for item in selected))
+    if key == 'fleet_sparse':
+        return (count('sparsified') and count('skipped')
+                and count('conversion_failures') and report['conversion_failures'] == 0
+                and _finite_nonnegative(report.get('freed_gib'))
+                and report.get('discovery_complete') is True
+                and report.get('scan_failures') == []
+                and report.get('applied') is True)
+    if key == 'repack':
+        scope = report.get('discovery_scope')
+        return (count('repacked') and count('attempts_failed')
+                and report['attempts_failed'] == 0
+                and _finite_nonnegative(report.get('total_freed_gib'))
+                and _finite_nonnegative(report.get('free_after'))
+                and report.get('discovery_complete') is True
+                and report.get('scan_failures') == []
+                and isinstance(scope, dict)
+                and all(type(scope.get(name)) is int and scope[name] >= 0
+                        for name in ('durable_clones_checked', 'object_stores_identified')))
+    if key == 'chain_archive':
+        dst, manifest = report.get('dst'), report.get('manifest')
+        return (report.get('applied') is True and count('candidates')
+                and count('archived') and report['archived'] == report['candidates']
+                and count('errors') and report['errors'] == 0
+                and count('bytes') and _finite_nonnegative(report.get('archived_gib'))
+                and _finite_nonnegative(report.get('time'))
+                and isinstance(report.get('src'), str)
+                and report['src'].startswith('/')
+                and isinstance(dst, str) and dst.startswith('/')
+                and '..' not in Path(dst).parts
+                and isinstance(manifest, str)
+                and manifest.startswith(dst.rstrip('/') + '/_manifests/archive-')
+                and manifest.endswith('.json'))
+    return False
+
+
 def finish(out: dict) -> int:
+    # A completed top-level pass is not a clean sweep when a bounded helper
+    # refused or only partially scanned. Preserve its original return code
+    # and make the same launchd heartbeat report an explicit degraded result.
+    # StartInterval continues recurring even when this invocation exits 1.
+    # Every recorded helper return code must be an actual integer. String,
+    # boolean, float and missing rc values cannot establish a clean pass.
+    # The real subprocess guard always emits int; this prevents corrupted or
+    # future alternate producer receipts from restoring false-green behavior.
+    incomplete = sorted(key[:-3] for key, rc in out.items()
+                        if key.endswith('_rc') and (type(rc) is not int or rc != 0))
+    if out.get('grants') == 'ok':
+        # A grant-qualified full sweep always calls these six helpers. Their
+        # complete absence is not evidence of success, even on a calm host.
+        mandatory = ('hung', 'stale_packs', 'temp_gc',
+                     'temp_gc_generic', 'reap', 'scratch_reap')
+        for key in mandatory:
+            if key + '_rc' not in out:
+                incomplete.append(f'{key}.rc_missing')
+    # A helper's exit 0 without its expected --json receipt is not proof of a
+    # completed inventory. Never translate absent stdout into a clean sweep.
+    receipt_required = {'hung', 'stale_packs', 'temp_gc',
+                        'temp_gc_generic', 'reap', 'sparse'}
+    for key in sorted(receipt_required):
+        if out.get(key + '_rc') == 0 and (
+                not isinstance(out.get(key), str) or not out[key].strip()):
+            incomplete.append(f'{key}.receipt_unverified')
+    # Optional cleanup passes also require exact, interpretable completion ledgers.
+    # Legacy success-shaped stdout or missing discovery proof is NOT green.
+    for key in ('generated_cache_trim', 'fleet_sparse', 'repack', 'chain_archive'):
+        if out.get(key + '_rc') == 0 and not _helper_receipt_qualified(key, out.get(key)):
+            incomplete.append(f'{key}.receipt_unverified')
+    # Incumbent stale_pack_reaper.py may exit zero after a failed find(1) in
+    # /private/tmp. That JSON's scratch_discovery.complete=false is binding.
+    if (out.get('stale_packs_rc') == 0
+            and isinstance(out.get('stale_packs'), str)
+            and out['stale_packs'].strip()
+            and not _stale_pack_inventory_complete(out['stale_packs'])):
+        incomplete.append('stale_packs.inventory_unverified')
+    # The incumbent scratch_reap.py prints a final JSON ledger even when it
+    # has zero eligible trees. Exit 0 with empty/truncated output, an unrelated
+    # diagnostic line, or a partial scan cannot prove a completed sweep.
+    if out.get('scratch_reap_rc') == 0:
+        raw = out.get('scratch_reap')
+        try:
+            scratch = json.loads(raw) if isinstance(raw, str) else None
+        except (TypeError, ValueError):
+            scratch = None
+        counters = ('removed', 'bundled', 'skipped', 'swept_overcap_bundles')
+        valid = (
+            isinstance(scratch, dict)
+            and type(scratch.get('partial')) is bool
+            and all(type(scratch.get(key)) is int and scratch[key] >= 0
+                    for key in counters)
+            and type(scratch.get('freed_gib')) in (int, float)
+            and 0 <= scratch['freed_gib'] < float('inf')
+            and type(scratch.get('elapsed_s')) in (int, float)
+            and 0 <= scratch['elapsed_s'] < float('inf')
+            and type(scratch.get('deadline_s')) in (int, float)
+            and 0 < scratch['deadline_s'] < float('inf')
+        )
+        if not valid:
+            incomplete.append('scratch_reap.receipt_unverified')
+        elif scratch['partial']:
+            incomplete.append('scratch_reap.partial')
+    # The archive pass invokes two remote substeps under a nested receipt.
+    # A failed or refused peer must not disappear beneath a green top-level
+    # heartbeat merely because its *_rc is not a direct member of out.
+    # Each archive peer's success exit must carry an interpretable receipt.
+    # This is report-only, never authority to remove remote worktrees.
+    if 'fleet_archive' in out:
+        archive = out['fleet_archive']
+        if not isinstance(archive, dict):
+            incomplete.append('fleet_archive.receipt_unverified')
+        else:
+            expected_dest = out.get('fleet_archive_expected_dest')
+            for peer in ('mb', 'm1'):
+                rc = archive.get(peer + '_rc')
+                if type(rc) is not int:
+                    incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
+                elif rc != 0:
+                    incomplete.append(f'fleet_archive.{peer}')
+                elif _qualified_archive_peer(archive.get(peer), peer, expected_dest) is None:
+                    incomplete.append(f'fleet_archive.{peer}_receipt_unverified')
+    # The launchd parent can lack filesystem grants and delegate to its
+    # existing forced-command loopback child. A string/partial/old child
+    # response, or no child at all, is NOT a completed sweep: do not print a
+    # green top-level receipt merely because hung-process triage succeeded.
+    if 'grants' in out and out['grants'] != 'ok':
+        child = out.get('loopback')
+        # The localhost forced command must attest to a complete *current*
+        # sweep, not merely supply a convenient success-shaped summary.
+        mandatory = ('hung', 'stale_packs', 'temp_gc',
+                     'temp_gc_generic', 'reap', 'scratch_reap')
+        child_qualified = (
+            isinstance(child, dict)
+            and child.get('grants') == 'ok'
+            and child.get('degraded') is False
+            and type(child.get('free_gib_after')) in (int, float)
+            and 0 <= child['free_gib_after'] < float('inf')
+            and child.get('mode') in ('calm', 'caution', 'pressure')
+            and child.get('incomplete_substeps') == []
+            and not child.get('skipped')
+            and type(out.get('time')) in (int, float)
+            and type(child.get('time')) in (int, float)
+            and out['time'] <= child['time'] <= time.time() + 5
+            and all(type(child.get(key + '_rc')) is int
+                    and child[key + '_rc'] == 0 for key in mandatory)
+        )
+        if not child_qualified:
+            incomplete.append('grant_requiring_passes')
+    incomplete.sort()
+    out['incomplete_substeps'] = incomplete
+    out['degraded'] = bool(incomplete)
     out['free_gib_after'] = round(shutil.disk_usage('/').free / GIB, 1)
     out['external_volumes'] = _external_volume_snapshots()
     with (STATE / 'sweep-log.jsonl').open('a') as f:
@@ -280,13 +553,13 @@ def finish(out: dict) -> int:
     elif alert.exists():
         alert.unlink()
     print(json.dumps(out))
-    return 0
+    return 1 if incomplete else 0
 
 
 LOOPBACK_KEY = Path.home() / '.ssh/id_mm_loopback'
 
 
-def via_loopback(timeout: int = 2400) -> dict | str | None:
+def via_loopback(timeout: int = 2400, parent_nonce: str | None = None) -> dict | str | None:
     """Re-enter this same sweep through ssh to 127.0.0.1, which HAS the grants.
 
     A launchd job holds no Documents/removable-volume grant; a Remote-Login
@@ -305,13 +578,19 @@ def via_loopback(timeout: int = 2400) -> dict | str | None:
     """
     if os.environ.get('MM_SWEEP_LOOPBACK') == '1' or not LOOPBACK_KEY.exists():
         return None
+    if not isinstance(parent_nonce, str) or not re.fullmatch(r'[0-9a-f]{64}', parent_nonce):
+        return 'loopback refused: missing canonical parent nonce'
     try:
         p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
                             '-o', 'StrictHostKeyChecking=accept-new', '-i', str(LOOPBACK_KEY),
-                            'localhost', 'sweep'],  # the command is ignored: authorized_keys forces it
+                            'localhost', f'sweep {parent_nonce}'],  # authorized_keys forces it
                            capture_output=True, text=True, timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as exc:
         return f'loopback failed: {exc!r}'[:300]
+    # The forced-command transport's process exit is independently binding.
+    # A success-shaped final JSON line cannot absolve a nonzero ssh/child exit.
+    if p.returncode != 0:
+        return f'loopback transport rc={p.returncode}'
     last = (p.stdout.strip().splitlines() or [''])[-1]
     try:
         return json.loads(last)
@@ -319,36 +598,162 @@ def via_loopback(timeout: int = 2400) -> dict | str | None:
         return f'rc={p.returncode} {(p.stderr.strip() or last)[:300]}'
 
 
-def main() -> int:
-    STATE.mkdir(parents=True, exist_ok=True)
-    # The loopback child runs INSIDE the parent's lock (see via_loopback), so it must
-    # not block on it -- but two children must still never overlap, hence its own file.
-    nolock = os.environ.get('MM_SWEEP_NOLOCK') == '1'
-    lock_path = (STATE / 'sweep-loopback.lock') if nolock else LOCK
-    # single-instance guard (a previous sweep may still be converting). The lock
-    # names its owner pid: a lock whose pid is gone is stale (a `launchctl bootout`
-    # mid-sweep left one behind on 2026-09-14 and would have idled the agent for 6 h).
-    if lock_path.exists() and time.time() - lock_path.stat().st_mtime < 6 * 3600:
-        owner = None
-        try:
-            owner = int(json.loads(lock_path.read_text()).get('pid'))
-        except (ValueError, TypeError, AttributeError, OSError):
-            owner = None
-        alive = False
-        if owner:
-            try:
-                os.kill(owner, 0)
-                alive = True
-            except ProcessLookupError:
-                alive = False
-            except PermissionError:
-                alive = True
-        if alive:
-            print(json.dumps({'skipped': 'previous sweep still running', 'pid': owner, 'lock_age_s': int(time.time() - lock_path.stat().st_mtime)}))
-            return 0
-        print(json.dumps({'stale_lock_removed': True, 'pid': owner}), file=sys.stderr)
-    lock_path.write_text(json.dumps({'pid': os.getpid(), 'time': time.time()}))
+def _claim_sweep_lock(path: Path) -> int | None:
+    """Atomically claim the existing lock inode; None means a live contender.
+
+    Kernel flock, not PID liveness, is the unique sweeper authority. The marker
+    stays on disk after process exit: unlinking it could create a second inode
+    while an earlier owner still holds its kernel lock.
+    """
+    nofollow = getattr(os, 'O_NOFOLLOW', None)
+    if nofollow is None:
+        raise OSError(errno.ENOTSUP, 'no-follow lock unavailable')
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | nofollow, 0o600)
+    claimed = False
     try:
+        def qualified() -> bool:
+            held = os.fstat(fd)
+            named = os.lstat(path)
+            return (stat.S_ISREG(held.st_mode)
+                    and held.st_uid == os.getuid()
+                    and held.st_nlink == 1
+                    and not (held.st_mode & 0o022)
+                    and (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino))
+
+        if not qualified():
+            raise OSError(errno.EPERM, 'unqualified incumbent lock')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return None
+        if not qualified():
+            raise OSError(errno.EPERM, 'lock path changed')
+        # An installed legacy sweeper writes a bare PID without taking flock.
+        # Acquiring this inode cannot exclude that still-active old process.
+        # Preserve the old marker: only the publisher can qualify a quiescent
+        # old epoch before permitting a new persistent-flock epoch.
+        prior_size = os.fstat(fd).st_size
+        if prior_size > 512:
+            raise OSError(errno.EPERM, 'unqualified legacy lock marker')
+        if prior_size:
+            os.lseek(fd, 0, os.SEEK_SET)
+            try:
+                prior = json.loads(os.read(fd, prior_size))
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise OSError(errno.EPERM, 'unqualified legacy lock marker') from exc
+            if (type(prior) is not dict or type(prior.get('pid')) is not int
+                    or prior['pid'] <= 0 or type(prior.get('time')) not in (int, float)
+                    or not 0 < prior['time'] < float('inf')
+                    or type(prior.get('nonce')) is not str
+                    or re.fullmatch(r'[0-9a-f]{64}', prior['nonce']) is None):
+                raise OSError(errno.EPERM, 'unqualified legacy lock marker')
+        marker = json.dumps({'pid': os.getpid(), 'time': time.time(),
+                             'nonce': secrets.token_hex(32)}).encode('ascii')
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        if os.write(fd, marker) != len(marker):
+            raise OSError(errno.EIO, 'incomplete lock marker')
+        os.fsync(fd)
+        if not qualified():
+            raise OSError(errno.EPERM, 'lock path changed after mark')
+        claimed = True
+        return fd
+    finally:
+        if not claimed:
+            os.close(fd)
+
+
+def _read_lock_nonce(fd: int) -> str:
+    """Read the one-time source-owned marker from our claimed canonical flock."""
+    os.lseek(fd, 0, os.SEEK_SET)
+    marker = json.loads(os.read(fd, 1024))
+    nonce = marker.get('nonce') if isinstance(marker, dict) else None
+    if not isinstance(nonce, str) or not re.fullmatch(r'[0-9a-f]{64}', nonce):
+        raise OSError(errno.EINVAL, 'canonical lock nonce unavailable')
+    return nonce
+
+
+def _bound_loopback_parent() -> bool:
+    """A forced-SSH child needs the live original parent lock and nonce.
+
+    The secondary lock serializes actual helpers: the parent owns it during
+    normal passes and releases it solely for an attested forced-command child.
+    If the parent dies, the child's held secondary lock fences new parents.
+    """
+    if os.environ.get('MM_SWEEP_LOOPBACK') != '1':
+        return False
+    match = re.fullmatch(r'sweep ([0-9a-f]{64})',
+                         os.environ.get('SSH_ORIGINAL_COMMAND', ''))
+    nofollow = getattr(os, 'O_NOFOLLOW', None)
+    if match is None or nofollow is None:
+        return False
+    try:
+        fd = os.open(LOCK, os.O_RDWR | os.O_CLOEXEC | nofollow)
+    except OSError:
+        return False
+    try:
+        held, named = os.fstat(fd), os.lstat(LOCK)
+        if (not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid()
+                or held.st_nlink != 1 or (held.st_mode & 0o022)
+                or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)):
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            pass  # another live process MUST hold the canonical lock
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+        os.lseek(fd, 0, os.SEEK_SET)
+        marker = json.loads(os.read(fd, 1024))
+        if not isinstance(marker, dict) or marker.get('nonce') != match.group(1):
+            return False
+        pid, started = marker.get('pid'), marker.get('time')
+        if (type(pid) is not int or pid <= 0 or pid == os.getpid()
+                or type(started) not in (int, float)
+                or not (0 <= time.time() - started <= 600)):
+            return False
+        os.kill(pid, 0)  # supplemental to flock; PID alone never authorizes
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+    finally:
+        os.close(fd)
+
+
+def main() -> int:
+    # Refuse an unbound NOLOCK child BEFORE any executable cleanup helper.
+    nolock = os.environ.get('MM_SWEEP_NOLOCK') == '1'
+    if nolock and not _bound_loopback_parent():
+        print(json.dumps({'degraded': True, 'lock': 'UNBOUND_CHILD'}))
+        return 78
+    STATE.mkdir(parents=True, exist_ok=True)
+    # Normal sweeps own BOTH inodes; the authenticated child owns the shared
+    # helper exclusion inode while its parent retains the canonical inode.
+    lock_path = (STATE / 'sweep-loopback.lock') if nolock else LOCK
+    try:
+        lock_fd = _claim_sweep_lock(lock_path)
+    except OSError:
+        print(json.dumps({'degraded': True, 'lock': 'UNVERIFIED'}))
+        return 78
+    if lock_fd is None:
+        print(json.dumps({'degraded': True, 'lock': 'BUSY'}))
+        return 75
+    exclusion_fd = None
+    try:
+        if nolock:
+            if not _bound_loopback_parent():
+                print(json.dumps({'degraded': True, 'lock': 'UNBOUND_CHILD'}))
+                return 78
+        else:
+            try:
+                exclusion_fd = _claim_sweep_lock(STATE / 'sweep-loopback.lock')
+            except OSError:
+                print(json.dumps({'degraded': True, 'lock': 'UNVERIFIED'}))
+                return 78
+            if exclusion_fd is None:
+                print(json.dumps({'degraded': True, 'lock': 'BUSY'}))
+                return 75
         usage = shutil.disk_usage('/')
         free, total = usage.free, usage.total
         receipts = ssd_receipts('temp-worktree-gc')
@@ -372,7 +777,19 @@ def main() -> int:
         floor_gib = floor_for_host()
         if floor_gib and free / GIB < floor_gib and mode == 'calm':
             mode, gc_age, sparse_idle = 'caution', 90, 24.0
+        # Installed M1/M2 source defers the 5,400 s full-worktree census when
+        # 60 GiB headroom remains above the immutable storage floor. Preserve
+        # this incumbent behavior while adding source-level receipt hardening.
+        if sparse_idle is not None and not sparse_scan_allowed(free / GIB, floor_gib):
+            sparse_idle = None
+            sparse_deferred = True
+        else:
+            sparse_deferred = False
         out = {'time': time.time(), 'free_gib_before': round(free / GIB, 1), 'mode': mode}
+        if sparse_deferred:
+            out['sparse_deferred'] = {'reason': 'above_floor_plus_60_gib',
+                                      'target_gib': floor_gib + 60.0,
+                                      'free_gib': round(free / GIB, 3)}
         if floor_gib:
             out['floor_gib'] = floor_gib
         # pass 0: git/gh transports stuck on the network for hours (ps + kill only, so
@@ -388,7 +805,12 @@ def main() -> int:
             # Last resort before giving up: log into this same machine, where the
             # grants do exist. The child does the real work and writes its own
             # sweep-log line; this one records that it delegated.
-            lb = via_loopback()
+            # Relinquish only the helper-exclusion lock to the forced child.
+            # Retain the canonical parent lock until the delegated pass returns.
+            if exclusion_fd is not None:
+                os.close(exclusion_fd)
+                exclusion_fd = None
+            lb = via_loopback(parent_nonce=_read_lock_nonce(lock_fd)) if not nolock else None
             if lb is not None:
                 out['loopback'] = lb
                 return finish(out)
@@ -443,11 +865,10 @@ def main() -> int:
             # full 7 GiB lane trees faster than that, so a sweep on a MacBook at
             # 19.8 GiB free reclaimed exactly 0 while 52.8 GiB sat eligible but "too
             # young" (2026-09-20). Under pressure, trust the strong gates: ~30 min.
-            fsp_age = {'pressure': 0.02, 'caution': 0.25}.get(mode, round(sparse_idle / 24.0, 3))
-            fenv = dict(os.environ, MIN_AGE=str(fsp_age), MAX='60')
-            guarded(out, 'fleet_sparse', [sys.executable, str(HERE / 'fleet_sparsify.py'),
-                                          str(Path.home()), '/private/tmp', '--apply'],
-                    5400, fenv)
+            # B10: the installed sparse producer lacks complete discovery and
+            # conversion-attempt receipts. Never launch its --apply mode and
+            # only THEN discover that its completion ledger was unqualified.
+            hold_unqualified_apply(out, 'fleet_sparse')
 
         # pass 4b2: bound /private/tmp. Nothing ever reaped it, and it is the single
         # biggest generator on the compute hosts — 77 GiB on m1 and 73 GiB on the
@@ -473,12 +894,10 @@ def main() -> int:
         # ceiling could have idled the sweeper for four cycles. A timeout kill is safe --
         # the driver's failure path cleans the partial pack it leaves behind.
         if mode != 'calm':
-            renv = dict(os.environ, MAX='1', MIN_PACKS='6', MIN_GIB='4',
-                        DEADLINE_S='3300',
-                        MIN_FREE_GIB=str(int(max(20, 0.05 * total / GIB))))
-            guarded(out, 'repack', [sys.executable, str(HERE / 'fleet_repack.py'),
-                                    str(Path.home()), '/private/tmp', '--apply'],
-                    3600, renv)
+            # B10: the incumbent repack producer has no reviewed complete
+            # attempts_failed contract. Preserve all existing Git/worktree
+            # ownership and objects rather than executing an unqualified apply.
+            hold_unqualified_apply(out, 'repack')
 
         # pass 4d (Studio only): pull the OTHER hosts' unarchivable trees onto an
         # external volume here. The MacBook has no external drive of its own and no key
@@ -493,6 +912,7 @@ def main() -> int:
             # UUID-verified SSD. Keep the pre-pool WD layout unchanged.
             archive_dest = (arch_vol / 'fleet-archive' if arch_vol == Path('/Volumes/WD 5TB')
                             else arch_vol / 'Offloaded' / 'fleet-archive')
+            out['fleet_archive_expected_dest'] = str(archive_dest)
             pulled = {}
             for peer in ('mb', 'm1'):
                 # Report candidate source-less trees without deleting remote data.
@@ -505,35 +925,31 @@ def main() -> int:
             out['fleet_archive_hold'] = 'remote deletion disabled until archive content proof is verified'
             candidates = {}
             for peer in ('mb', 'm1'):
-                try:
-                    item = json.loads(pulled.get(peer, '{}'))
-                    if pulled.get(peer + '_rc') == 0 and item.get('status') == 'REPORT_ONLY_SOURCE_PRESERVED':
-                        candidates[peer] = {
-                            'eligible_source_less_trees': item['eligible_source_less_trees'],
-                            'eligible_gib': item['eligible_gib'],
-                            'remote_deletions': item['remote_deletions'],
-                            'dest': item['dest'],
-                        }
-                except (TypeError, ValueError, KeyError):
-                    continue
+                item = _qualified_archive_peer(pulled.get(peer), peer, str(archive_dest))
+                if pulled.get(peer + '_rc') == 0 and item is not None:
+                    candidates[peer] = {
+                        'eligible_source_less_trees': item['eligible_source_less_trees'],
+                        'eligible_gib': item['eligible_gib'],
+                        'remote_deletions': item['remote_deletions'],
+                        'dest': item['dest'],
+                    }
             out['fleet_archive_candidates'] = candidates
-            # Only burn the 6-hour cooldown when a pass can actually run.
-            # rc 2 indicates a storage identity, floor, or write-permission
-            # refusal. Stamping such a refusal would delay recovery; preserve
-            # the actual per-host reasons and retry on the next normal sweep.
-            if not all(pulled.get(peer + '_rc') == 2 for peer in ('mb', 'm1')):
+            # A timeout, nonzero exit, invalid receipt or partial peer does not
+            # consume six hours of recovery eligibility. Never stamp one good peer.
+            if _archive_cooldown_ready(pulled, str(archive_dest)):
                 arch_stamp.write_text(str(time.time()))
             else:
-                # rc=2 covers mount identity, floor and permission refusals,
-                # not only TCC. Report the actual preflight result instead of
-                # incorrectly saying every refusal is a write-grant problem.
                 reasons = []
                 for peer in ('mb', 'm1'):
+                    if peer in candidates:
+                        continue
                     try:
                         receipt = json.loads(pulled.get(peer, '{}'))
-                        reasons.append(f"{peer}: {str(receipt.get('reason', 'preflight refused'))[:140]}")
+                        reason = (str(receipt.get('reason', 'unverified receipt'))[:140]
+                                  if isinstance(receipt, dict) else 'unverified receipt')
                     except (TypeError, ValueError):
-                        reasons.append(f'{peer}: preflight refused')
+                        reason = 'unverified receipt'
+                    reasons.append(f"{peer}: rc={pulled.get(peer + '_rc', 'missing')} {reason}")
                 out['fleet_archive_blocked'] = '; '.join(reasons)[:360]
         elif arch_vol is None:
             out['fleet_archive_blocked'] = 'no verified external pool member'
@@ -550,14 +966,15 @@ def main() -> int:
             # frames cross the cutoff at a date boundary, so one look a day is the
             # design. rc != 0 (RTH window, writer lock held, volume unwritable) does
             # NOT stamp, so a refusal is retried on the next sweep.
-            if r5 is not None and r5.returncode == 0:
+            if (r5 is not None and r5.returncode == 0
+                    and _helper_receipt_qualified('chain_archive', out.get('chain_archive'))):
                 stamp.write_text(str(time.time()))
         return finish(out)
     finally:
-        try:
-            lock_path.unlink()
-        except OSError:
-            pass
+        # Crash-release both kernel locks; never unlink a stable inode.
+        if exclusion_fd is not None:
+            os.close(exclusion_fd)
+        os.close(lock_fd)
 
 
 if __name__ == '__main__':
