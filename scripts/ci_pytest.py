@@ -218,6 +218,16 @@ _MEASURED_THREE_JOB_PLACEMENT = {
     # altered 45-minute limit or change to the required fan-in test context.
     # Other unlisted modules retain deterministic SHA-256 placement.
     "tests/test_capacity_host_artifacts.py": 2,
+    # Hosted CI 41005250907 at 65afcc09: shards 0/1 passed in ~28/39m;
+    # shard 2 hit its 45m limit after 923s of capacity-host tests and before
+    # completing the last module. Move five measured 59-90s shard-2 modules
+    # to the lighter shard 0. Preserve every test, the 3-job exact partition,
+    # the fail-closed required test gate, and the original 45m timeout.
+    "tests/test_mastermind_plugin_packages.py": 0,
+    "tests/test_fabric_request_turn_budget.py": 0,
+    "tests/test_executive_os_sqlite.py": 0,
+    "tests/test_executive_installed_migration_successor.py": 0,
+    "tests/test_fabric_job_view_hierarchy.py": 0,
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
     # The protected one-runner CI gate measured these further slow modules.
