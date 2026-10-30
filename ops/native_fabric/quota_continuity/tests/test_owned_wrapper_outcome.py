@@ -173,6 +173,32 @@ class OwnedWrapperOutcome(unittest.TestCase):
                 self.assertFalse(outcome['initial_rejection'])
                 self.assertFalse(quota_circuit.pool_blocked(self.broker, provider))
 
+    def test_actual_glm_turn_ceiling_binds_process_receipt_without_quota_cooldown(self):
+        self.reply = (200, {'type': 'message'}, {})
+        self.script(self.bin / 'claude', f'#!{sys.executable}\n' + """
+import json, os
+from pathlib import Path
+Path(os.environ['FIXTURE_CLI_STARTED']).write_text('started')
+print(json.dumps({'type': 'system', 'subtype': 'init'}))
+print(json.dumps({'type': 'result', 'subtype': 'error_max_turns',
+                  'terminal_reason': 'max_turns', 'is_error': True,
+                  'num_turns': 40,
+                  'result': '[claude-code:unrecognized_model] '
+                            '{"model":"glm-5.3-flash","query_source":"sdk"}'}))
+raise SystemExit(1)
+""")
+        result, outcome, marker = self.execute('glm')
+        self.assertEqual(result.returncode, 1, result.stderr.decode())
+        self.assertTrue(marker.exists())
+        self.assertTrue(result.stdout.startswith(
+            b'PROVIDER_TERMINAL kind=turn_limit rc=1\n'), result.stdout)
+        self.assertIn(b'[claude-code:unrecognized_model]', result.stdout)
+        self.assertEqual(outcome['kind'], 'turn_limit')
+        self.assertEqual(outcome['cli_subtype'], 'error_max_turns')
+        self.assertEqual(outcome['cli_terminal_reason'], 'max_turns')
+        self.assertFalse(outcome['initial_rejection'])
+        self.assertFalse(quota_circuit.pool_blocked(self.broker, 'glm'))
+
 
 if __name__ == '__main__':
     unittest.main()
