@@ -18,7 +18,7 @@ import subprocess
 import sys
 import tempfile
 
-GENERATION = "ac9acf0daf5a438934f3862afa02039734aa100812d4e040eda5966388817c3b"
+GENERATION = "854dd5456c005f6385daecb6e93658025d59f94e496dd5f9374d7896d06eed87"
 INPUT_SHA256 = "4a37990f0a132bf96f8fbd658452b29472716ba4b544ca73272a2c542c5eee43"
 OUTPUT_SHA256 = "7700a7975f3585dc985fb37a949448449373ec825d9223648a126bf238a77c2d"
 PATCH_SHA256 = "e6ab0c6237648eeb639ef7ac4f10fd67c194aa77589f38f76af7918971521ff8"
@@ -108,7 +108,7 @@ def qualify(generation: Path) -> dict[str, object]:
         if "Ran 8 tests" not in result or not re.search(r"\nOK\s*$", result):
             raise ValueError("AUTO candidate test count/receipt mismatch")
         preview = exec_checked([sys.executable, str(PREVIEW_FIXTURE)], cwd=stage, env=env)
-        if "Ran 12 tests" not in preview or not re.search(r"\nOK\s*$", preview):
+        if "Ran 14 tests" not in preview or not re.search(r"\nOK\s*$", preview):
             raise ValueError("original strict native preview regression incomplete")
         checked_file(generation / "ext/fabric_task.py", INPUT_SHA256, sealed=True)
     selected = False
@@ -126,7 +126,7 @@ def qualify(generation: Path) -> dict[str, object]:
         "candidate_sha256": OUTPUT_SHA256,
         "patch_sha256": PATCH_SHA256,
         "fixture_sha256": FIXTURE_SHA256,
-        "tests_passed": 20,
+        "tests_passed": 22,
         "original_generation_unchanged": True,
         "current_selected_at_end": selected,
         "live_install_performed": False,
