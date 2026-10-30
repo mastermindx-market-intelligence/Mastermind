@@ -130,6 +130,7 @@ describe("selected-session host lifecycle", () => {
     const host = mount(f); await host.ready;
     expect(readSessionOwnerContext(host.binding)?.principalScope).toBe(SCOPE);
     expect(host.binding.port.currentTargetRef()).toBeNull();
+    expect(host.binding.port.currentObservation?.()).toBeNull();
     expect(host.binding.makeSessionMessageIntent(REF, "Continue", "done")).toBeNull();
   });
   it("refreshes on EVERY pushed selection transition, including same-value and A→B→A", async () => {
@@ -147,6 +148,7 @@ describe("selected-session host lifecycle", () => {
     expect(f.contextCalls()).toBe(3);
     expect(f.contextSelections[2]).toEqual({ workRef: "WS:OTHER", rootJobId: ROOT });
     expect(host.binding.port.context()).toBeNull();
+    expect(host.binding.port.currentObservation?.()).toBeNull();
     await host.refresh({ workRef: WS, rootJobId: ROOT });
     expect(f.contextCalls()).toBe(4);
     const generations = new Set([
@@ -155,6 +157,12 @@ describe("selected-session host lifecycle", () => {
     ]);
     expect(generations.size).toBe(2);
     expect(host.binding.port.currentTargetRef()).toBe(REF);
+    expect(host.binding.port.currentObservation?.()).toEqual({
+      targetRef: REF,
+      selection: { workRef: WS, rootJobId: ROOT },
+      principalScope: SCOPE,
+      generation: host.binding.port.context()?.generation,
+    });
   });
 
   it("clears a null push and sends nothing while the transport is unavailable", async () => {
