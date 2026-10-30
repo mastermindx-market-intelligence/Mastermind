@@ -38,6 +38,19 @@ The more decisive industry finding is that financial X distribution has at least
 
 An October 28 indexed @SPXVIX post says it tested OpenMarket options tools and presents an account-specific referral URL (ref=SPXVIX). This supports tracked creator distribution. An @openmarket_xyz timeline refers openly to @openmarket_raw, which describes a previous identity as Thanefield Research. Treat this as **disclosed multiple branded channels**, not covert account control. In the absence of a public affiliate contract for this precise referral, do not invent payout, ROI, or sponsorship terms.
 
+## Initial individual-account sample — four observed roles
+
+These are **selected, non-exhaustive examples** from public/archived posts, not a statistically sampled cohort or an account-control investigation.
+
+| Public account | Observed marketing behavior | Bounded assessment | Source |
+| --- | --- | --- | --- |
+| @SPXVIX | Oct 28 options tutorial promotes OpenMarket with ref=SPXVIX tracking token | **Referral-bearing creator**; payment amount and contract unknown; no evidence of synthetic users | [Indexed X timeline](https://teapawt.org/SPXVIX) |
+| @openmarket_raw | OpenMarket's main account publicly endorses this account; second account explicitly identifies OpenMarket and says it was formerly Thanefield Research | **Disclosed secondary branded channel**; not covert based on retrieved content | [Indexed official and secondary X timeline](https://ww1.twstalker.com/openmarket_xyz) |
+| @backquant | Describes porting invite-only scripts into OpenMarket's indicator marketplace, offering priced tools; main OpenMarket account reposted this contribution | **Product ecosystem contributor** rather than proven sponsored bot; creator payments unverified beyond advertised marketplace offerings | [Indexed OpenMarket company timeline](https://ww1.twstalker.com/openmarket_xyz) |
+| @OverlookedAlpha / 3-Minute Breakdowns | Descriptions of public market-analysis videos expose a Koyfin link containing affiliate/overlooked-alpha and via=3mb, accompanied by generic disclosure that descriptions contain affiliate links | **Content creator with an openly declared affiliate link**, not a demonstrated Sybil operation. Observations drawn from third-party video-description mirrors, not audited X posts | [Video-description archive](https://videonest.co/3mb); [independent transcript mirror](https://www.kazuha.ai/sources/3-minute-breakdowns/posts/state-of-the-stock-market-february-2026-3-minute-analysis) |
+
+**Comparison with earlier suspicious clusters:** The above cases have an identifiable explanation for promotion (official branding, a marked tracking URL, creator marketplace or public disclosure). In contrast, the original stock-group cases had repeated cross-account templated endorsements and reused recruitment endpoints. The contrast is evidence of **different observed mechanisms**, not a conclusion about actual ownership, intent or illegality.
+
 ## Distinguish six apparent-engagement mechanisms
 
 1. **Owned media (disclosed):** Brand, newsroom, product, CEO or analyst accounts that clearly identify their relationship. Normal multi-account distribution when content is distinct and truthful.
