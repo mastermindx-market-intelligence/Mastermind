@@ -4,7 +4,7 @@
 
 ## Why this folder exists
 
-This collection preserves an earlier public-source investigation into apparent scripted stock recommendations, profile impersonation, rotating landing pages and recruitment into private financial groups. It also launches a separate comparative study of **legitimate** creator/affiliate/UGC distribution, official brand-owned accounts, and deceptive synthetic-user campaigns, without assuming all are the same.
+This collection preserves an earlier public-source investigation into apparent scripted stock recommendations, profile impersonation, rotating landing pages and recruitment into private financial groups. It also launches a separate comparative study of **legitimate** creator/affiliate/UGC distribution, official brand-owned accounts, and deceptive synthetic-user campaigns, without assuming all are the same. **Scope update:** Bots are NOT required; an independent, pseudonymous or unbranded account can enter the graph on direct observable recurring interactions or promotion, and brand affiliation must be tested independently of ownership.
 
 The user requested preservation in GitHub if the original investigation no longer produced decisive operator attribution, followed by a broader financial-X competitor audit. That pivot has occurred. No account was modified, contacted, blocked or reported by this work.
 
@@ -13,7 +13,18 @@ The user requested preservation in GitHub if the original investigation no longe
 1. [Industry distribution comparison](industry_distribution_comparison.md) — current comparative findings and future measurement protocol.
 2. [Original case handoff](original_case_handoff.md) — earlier source observations, contextual caveats and unresolved links.
 3. [Case addendum](case_addendum.md) — additional site assets, posts and public destination evidence.
-4. [Structured evidence ledger](network_evidence_redacted.json) — 64 earlier observations referencing 55 public URLs, with publication warnings and direct WhatsApp contact link withheld.
+4. [Affiliated account and interaction-network first pass](interaccount_networks_first_pass.md) — OpenMarket–Thanefield–Percept, Unusual Whales–WhaleWatch–tastytrade, TrendSpider–SignalStack, and two Equity Edge affiliate hubs.
+5. [Equity Edge affiliate/giveaway network](equityedge_affiliate_giveaway_ring.md) — 22 selected distinct giveaway posters requiring founder/affiliate-head follow and 13 requiring generic @EquitySpace1, with one known author overlap. Distinct accounts are NOT 34 proven people and mirror snapshots do not measure rate.
+6. [Directed entity-edge JSON](interaccount_edges_first_pass.json) — 163 typed graph edges among 92 account/company/product nodes referencing 73 indexed sources; counts include required-follow ties, not individual user-follow events, with control unknown.
+7. [Structured historical evidence ledger](network_evidence_redacted.json) — 64 earlier observations referencing 55 public URLs, with publication warnings and direct WhatsApp contact link withheld.
+
+## Strongest new patterns
+
+**OpenMarket:** publicly related @openmarket_raw research publisher, @ThanefieldCap portfolio evidence and recurring reposts, @percept_labs shared charting/product amplification, plus independent creators @SPXVIX, @ToneVays, @backquant and @Luckshuryy. Relations have different causal mechanisms; no common login claim.
+
+**Equity Edge:** founder @berkayglife and self-declared affiliate-program head @Danieltrades recur as mandatory follows in 22 selected creator-origin posts; generic @EquitySpace1 is a separate major hub with 13 other creator-origin posts. Some outer-ring accounts promote competitors as well. The **firm's own page advertises 30% affiliate commission** and restrictions on free giveaway trading accounts; 22+13 records represent selected post originators, not total promotional traffic.
+
+**Unusual Whales:** named co-host/media personalities and direct compensation disclosure for a tastytrade marketing agreement. **TrendSpider:** founder personal account and an openly linked SignalStack product account. These provide controls for a legitimate managed account web.
 
 ## Verification and limits
 
@@ -26,7 +37,7 @@ The user requested preservation in GitHub if the original investigation no longe
 
 ## Next useful bounded work
 
-A representative 30-day comparative sample of public posts from official and independent creators across Moomoo, TradingView, Webull, OpenMarket, Koyfin, TrendSpider, Seeking Alpha and Stocktwits; compare disclosed incentives with copy-paste/redirect behavior using the protocol in the industry document. An X-permitted data route or authenticated voluntary export will be needed before claiming exhaustive engagement prevalence, commercial ROI or account coordination metrics.
+First obtain a permitted, properly timestamped 30-day X interaction export for **the already mapped dense hubs**, especially @EquitySpace1 and @Danieltrades, then OpenMarket/Thanefield/Percept and Unusual Whales co-hosts. Calculate pairwise repost/reply/quote counts with total-post denominators, participation reciprocity, original-post deduplication and common referral destinations. Separately audit creator independence (multi-provider affiliation) versus plausible company-managed publishing. After that, compare the other financial platforms in the industry document. No claim of exhaustive coverage from current mirror snapshots. An X-permitted data route or authenticated voluntary export will be needed before claiming exhaustive engagement prevalence, commercial ROI or account coordination metrics.
 
 ## Version and custody
 
