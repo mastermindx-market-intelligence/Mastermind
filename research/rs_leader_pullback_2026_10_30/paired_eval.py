@@ -23,9 +23,15 @@ OPP_COLUMNS = frozenset({
 })
 OUT_COLUMNS = frozenset({
     "opportunity_id", "policy", "status", "net_r", "outcome_end_utc",
-    "outcome_known_at_utc",
+    "outcome_known_at_utc", "common_policy_clock_utc",
+    "common_episode_end_utc", "common_risk_unit_sha256", "common_cost_model_sha256",
 })
 SPLITS = ("DEVELOPMENT", "CALIBRATION", "HOLDOUT")
+
+
+def _sha(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(
+        c in "0123456789abcdef" for c in value)
 
 
 @dataclass(frozen=True)
@@ -132,6 +138,10 @@ def _prepared_opportunities(frame: pd.DataFrame) -> pd.DataFrame:
     if (et_day != a.session_date).any():
         raise ValueError("decision/session ET date mismatch")
     a = a.sort_values(["decision_utc", "opportunity_id"]).reset_index(drop=True)
+    # A calendar block cannot straddle two chronological partitions: every
+    # issuer's opportunity on the same session must be assigned together.
+    if (a.groupby("session_date")["split"].nunique() > 1).any():
+        raise ValueError("same calendar session divided across chronological splits")
     # Chronological partitions must be monotonic. No row-level random split.
     rank = a.split.map({name: i for i, name in enumerate(SPLITS)})
     if (rank.diff().fillna(0) < 0).any():
@@ -151,10 +161,25 @@ def _prepared_outcomes(frame: pd.DataFrame, ids: set[str], policies: set[str],
     if not a.status.isin(STATUSES).all():
         raise ValueError("unrecognized outcome state")
     resolved = []
+    paired_protocol: dict[str, tuple[Any, ...]] = {}
     for row in a.itertuples(index=False):
+        if (not _sha(row.common_risk_unit_sha256) or
+                not _sha(row.common_cost_model_sha256)):
+            raise ValueError("frozen common risk/cost digests required")
+        clock = _clock(row.common_policy_clock_utc)
+        terminal = _clock(row.common_episode_end_utc)
+        if clock != decisions[row.opportunity_id] or terminal <= clock:
+            raise ValueError("common policy decision or episode terminal clock invalid")
+        pair_contract = (clock, terminal, row.common_risk_unit_sha256,
+                         row.common_cost_model_sha256)
+        prior_contract = paired_protocol.setdefault(row.opportunity_id, pair_contract)
+        if prior_contract != pair_contract:
+            raise ValueError("candidate/reference policy clocks, horizon, cost and risk must match")
         net = _amount(row.net_r)
         end = None if pd.isna(row.outcome_end_utc) else _clock(row.outcome_end_utc)
         known = None if pd.isna(row.outcome_known_at_utc) else _clock(row.outcome_known_at_utc)
+        if end is not None and end > terminal:
+            raise ValueError("reported outcome extends beyond the common episode horizon")
         if row.status == "RESOLVED":
             if net is None or end is None or known is None:
                 raise ValueError("resolved outcome requires return and label clocks")
