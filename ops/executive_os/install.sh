@@ -1798,6 +1798,7 @@ else:
 # host value. Arming remains the existing controller's separate transaction.
 for key, default in {
     "ceo_submit_armed": False,
+    "coo_foreground_only": False,
     "exact_worker_claim_target": {"mode": "disabled"},
 }.items():
     if key in _CONFIG_OPTIONAL:
