@@ -40,7 +40,7 @@
   "ext/host_pick.py": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
   "ext/host_pull.sh": "ed43522f51bd95256be30fac980b0e833a6f486917ffc0e9e64078ad7e6f9d9a",
   "ext/host_pull_backend.py": "b9a64824ae942e4b7d2f1331a609e2e859e641c8dd5a77069f4bc0ed6f4262b8",
-  "ext/host_pull_daemon.sh": "fdbfe9f39a185f096c5260f1dafdfdcd626e8524d776e1d58ad8abc73e0b8b78",
+  "ext/host_pull_daemon.sh": "48c199c7bae093f13d0c3345f11574b3291755351d78bd38bd052022ecada317",
   "ext/host_pull_launchd.plist.template": "31a7108382df97357e8173b6edd7a5612178a042ecbc165591d89e9152846d9f",
   "ext/host_pull_probe.template": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
   "ext/lane_runtime.py": "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329",

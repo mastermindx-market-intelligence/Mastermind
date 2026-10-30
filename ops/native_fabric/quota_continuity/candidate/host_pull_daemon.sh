@@ -1840,6 +1840,7 @@ HOLD_MUTATION=""
 HOLD_BOOTSTRAP=""
 HOLD_BOOTOUT=""
 HOLD_PLIST=""
+HOLD_INSTALL_FAILURE=""
 HOLD_DURING_LOCK=""
 HOLD_ARM=""
 LOCK_DESCENDANT=""
@@ -1876,6 +1877,7 @@ while [ "$#" -gt 0 ]; do
     --hold-before-mutation) HOLD_MUTATION=${2:-}; shift 2 ;;
     --hold-before-bootout) HOLD_BOOTOUT=${2:-}; shift 2 ;;
     --hold-before-plist) HOLD_PLIST=${2:-}; shift 2 ;;
+    --hold-after-install-failure) HOLD_INSTALL_FAILURE=${2:-}; shift 2 ;;
     --hold-before-bootstrap) HOLD_BOOTSTRAP=${2:-}; shift 2 ;;
     --hold-during-lock) HOLD_DURING_LOCK=${2:-}; shift 2 ;;
     --hold-before-arm) HOLD_ARM=${2:-}; shift 2 ;;
@@ -1913,7 +1915,8 @@ if [ "$HERMETIC" -eq 1 ]; then
 else
   [ -z "$FIXTURE_ROOT" ] || die 78 "fixture root is hermetic-only"
   [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
-    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$HOLD_ARM" ] \
+    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_INSTALL_FAILURE" ] \
+    && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$HOLD_ARM" ] \
     && [ -z "$LOCK_DESCENDANT" ] && [ -z "$HOLDER_REPORT" ] \
     && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] && [ -z "$TEMPLATE" ] \
     || die 78 "test hooks are hermetic-only"
@@ -2089,6 +2092,8 @@ case "$COMMAND" in
     run_locked install "$RENDERED" "$DEST_PLIST" "$install_fault"
     install_rc=$?
     if [ "$install_rc" -ne 0 ]; then
+      # Hermetic-only pause after the failed effect, before rollback.
+      hold_if_requested "$HOLD_INSTALL_FAILURE"
       if selector_moved_before_effect; then
         if [ "$BOOTED" -eq 1 ]; then
           recover_or_stop PLIST_ADMIT "selector moved before plist replace"
@@ -2104,12 +2109,15 @@ case "$COMMAND" in
       if [ "$BOOTED" -eq 1 ]; then
         recover_or_stop INSTALL "plist install failed"
       fi
-      restore_plist || stop_uncertain INSTALL "rollback restore failed"
-      # Before bootout, an install refusal can still race another service
-      # change. Even for a previously absent label, prove that exact absent
-      # class and saved plist preimage before undoing the committed CAS.
-      if [ "${SELECTED_ADVANCE:-0}" -eq 1 ] && ! service_still_snapshot; then
-        stop_uncertain INSTALL "original service identity unproven after failed plist install"
+      # No bootout has occurred. The failed install may have replaced the
+      # plist, or a peer may have changed it independently. Do NOT restore
+      # here: unconditional atomic-restore can overwrite the peer and
+      # conceal its drift in the subsequent preimage check.
+      # If saved class/PID/argv/plist/liveness are still proven, the old
+      # bytes are already intact and need no write. Otherwise preserve
+      # observed bytes, CURRENT and marker and report EFFECT_UNKNOWN.
+      if ! service_still_snapshot; then
+        stop_uncertain INSTALL "original service/plist identity unproven after failed plist install"
       fi
       if ! rollback_advanced_selector; then
         write_receipt EFFECT_UNKNOWN INSTALL "selector rollback failed" || true

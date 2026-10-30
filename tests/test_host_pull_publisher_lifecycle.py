@@ -2474,3 +2474,135 @@ def test_absent_prebootout_install_failure_requires_saved_service_state(
         if proc.poll() is None:
             proc.kill()
             proc.communicate(timeout=5)
+
+
+
+@pytest.mark.parametrize(("initial", "peer"), [
+    (b"PRE-PEER-PLIST\n", b"PEER-REPLACED-PLIST\n"),
+    (b"PRE-PEER-PLIST\n", None),
+    (None, b"PEER-CREATED-PLIST\n"),
+])
+def test_install_before_replace_never_restores_over_peer_plist(workspace, initial, peer):
+    """Pre-replace failure preserves concurrent peer creation/edit/deletion."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 64\n")
+    if initial is not None:
+        ctx["plist"].write_bytes(initial)
+        ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "hold-preinstall-peer-change"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name,
+                  advance_from=selector.name, hold_before_plist=hold,
+                  fault="install-before-replace"),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        if peer is None:
+            ctx["plist"].unlink()
+        else:
+            ctx["plist"].write_bytes(peer)
+            ctx["plist"].chmod(0o600)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=15)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "original service/plist identity unproven" in err
+        assert ctx["plist"].exists() == (peer is not None)
+        if peer is not None:
+            assert ctx["plist"].read_bytes() == peer
+        final = _selection(ctx)
+        assert final["generation"] == target.name
+        assert final["previous"] == selector.name
+        assert final["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "INSTALL"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("post_failure_peer", [False, True])
+def test_install_after_replace_failure_retains_own_or_peer_bytes_and_unknown(
+    workspace, post_failure_peer,
+):
+    """Postreplace failure cannot overwrite later peer bytes during recovery."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 65\n")
+    original = b"ORIGINAL-BEFORE-REPLACE\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "hold-after-failed-install"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, generation=target.name, expect=selector.name,
+                  advance_from=selector.name, hold_after_install_failure=hold,
+                  fault="install-after-replace"),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        installed = ctx["plist"].read_bytes()
+        assert installed != original
+        assert plistlib.loads(installed)["ProgramArguments"][-1] == str(
+            target / "ext" / "host_pull.sh"
+        )
+        peer = b"PEER-AFTER-FAILED-REPLACE\n"
+        if post_failure_peer:
+            ctx["plist"].write_bytes(peer)
+        hold.unlink()
+        _out, err = proc.communicate(timeout=15)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "original service/plist identity unproven" in err
+        assert ctx["plist"].read_bytes() == (peer if post_failure_peer else installed)
+        final = _selection(ctx)
+        assert final["generation"] == target.name
+        assert final["previous"] == selector.name
+        assert final["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "INSTALL"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+def test_install_failure_without_selector_still_refuses_unverified_plist(workspace):
+    """No selector CAS does not excuse an unproven post-install plist effect."""
+    ctx = prepare(workspace)
+    original = b"NO-SELECTOR-OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    selected_before = _selection(ctx)
+    result = run(ctx, fault="install-after-replace")
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert ctx["plist"].read_bytes() != original
+    assert _selection(ctx) == selected_before
+    assert receipt_body(ctx)["outcome"] == "EFFECT_UNKNOWN"
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
