@@ -44,7 +44,41 @@ def _strict_bool(values: pd.Series) -> pd.Series:
     if translated.isna().any():
         raise ValueError("boolean column must be true/false/1/0")
     return translated.astype(bool)
-def validate_bars(raw: pd.DataFrame, rules: Rules) -> pd.DataFrame:
+def validate_bars(raw: pd.DataFrame, rules: Rules, *,
+                  session_schedule: dict[date, tuple[Any, Any]] | None = None,
+                  require_complete_sessions: bool = False) -> pd.DataFrame:
+    """Validate observed bars against an optional *supplied* exchange calendar.
+
+    Calendar entries map exchange dates to UTC-aware session-open/close instants.
+    This checks consistency only; it does NOT authenticate the calendar owner.
+    Partial live observations remain readable but are clearly marked partial.
+    Full-history research must explicitly request strict complete-session checks.
+    """
+    if require_complete_sessions and session_schedule is None:
+        raise ValueError("complete historical sessions require owner calendar input")
+    schedule: dict[date, tuple[pd.Timestamp, pd.Timestamp]] | None = None
+    if session_schedule is not None:
+        if not isinstance(session_schedule, dict) or not session_schedule:
+            raise ValueError("nonempty owner session calendar required")
+        schedule = {}
+        for day, bounds in session_schedule.items():
+            if type(day) is not date or not isinstance(bounds, (tuple, list)) or len(bounds) != 2:
+                raise ValueError("calendar requires exchange date and open/close pair")
+            try:
+                opening, closing = (pd.Timestamp(x) for x in bounds)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("invalid owner calendar instant") from exc
+            if any(x.tzinfo is None or x.utcoffset() is None for x in (opening, closing)):
+                raise ValueError("owner calendar requires aware UTC instants")
+            opening, closing = opening.tz_convert("UTC"), closing.tz_convert("UTC")
+            ny_open, ny_close = opening.tz_convert(NY), closing.tz_convert(NY)
+            if (ny_open.date() != day or ny_close.date() != day or
+                    (ny_open.hour, ny_open.minute, ny_open.second) != (9, 30, 0) or
+                    (ny_close.hour, ny_close.minute, ny_close.second) > (16, 0, 0) or
+                    closing <= opening or (closing - opening).total_seconds() % 60 != 0):
+                raise ValueError("inconsistent owner exchange session clock")
+            schedule[day] = (opening, closing)
+
     required = {"timestamp_utc", "symbol", "open", "high", "low", "close", "volume"}
     if required - set(raw.columns):
         raise ValueError(f"missing bar columns: {sorted(required - set(raw.columns))}")
@@ -75,10 +109,37 @@ def validate_bars(raw: pd.DataFrame, rules: Rules) -> pd.DataFrame:
     b = b.sort_values(["symbol", "timestamp_utc"]).reset_index(drop=True)
     if b.duplicated(["symbol", "timestamp_utc"]).any():
         raise ValueError("duplicate bar")
-    for _, g in b.groupby(["symbol", "session_date"], sort=False):
+    b["session_coverage_state"] = "NO_OWNER_SCHEDULE"
+    b["terminal_stub_minutes"] = pd.NA
+    for (symbol, day), g in b.groupby(["symbol", "session_date"], sort=False):
         minute = (g["local_end"].dt.hour * 60 + g["local_end"].dt.minute - 570)
         if len(minute) > 1 and not (minute.diff().iloc[1:] == rules.timeframe_minutes).all():
             raise ValueError("missing within-session RTH bar; fail closed")
+        if schedule is None:
+            continue
+        if day not in schedule:
+            raise ValueError("observed session absent from supplied owner calendar")
+        opening, closing = schedule[day]
+        duration = int((closing - opening).total_seconds() // 60)
+        n_full, stub = divmod(duration, rules.timeframe_minutes)
+        expected = [opening + pd.Timedelta(minutes=(i + 1) * rules.timeframe_minutes)
+                    for i in range(n_full)]
+        actual = list(g["timestamp_utc"])
+        if any(ts not in expected for ts in actual):
+            raise ValueError("bar outside full owner-calendar interval or early close")
+        complete = actual == expected
+        if require_complete_sessions and not complete:
+            raise ValueError("missing opening/trailing bar in historical owner session")
+        b.loc[g.index, "session_coverage_state"] = (
+            "FULL_SUPPORTED_BARS" if complete else "PARTIAL_OBSERVATION")
+        b.loc[g.index, "terminal_stub_minutes"] = stub
+    if require_complete_sessions and schedule is not None:
+        required_dates = sorted(schedule)
+        for symbol, g in b.groupby("symbol", sort=False):
+            first, last = min(g.session_date), max(g.session_date)
+            must_have = {d for d in required_dates if first <= d <= last}
+            if must_have - set(g.session_date):
+                raise ValueError("entire expected owner-calendar session missing for symbol")
     return b
 def leader_panel(daily: pd.DataFrame, memberships: pd.DataFrame, rules: Rules) -> dict[date, dict[str, Any]]:
     dcols = {"date", "symbol", "close", "volume"}
@@ -220,8 +281,11 @@ def _fill_trade(b: pd.DataFrame, entry_i: int, base_entry: float, stop: float,
                       net_return=float(received / gross_entry - 1),
                       net_r=float((received - gross_entry) / risk))
     return record
-def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rules) -> dict[str, Any]:
-    b = validate_bars(bars, rules)
+def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rules, *,
+             session_schedule: dict[date, tuple[Any, Any]] | None = None,
+             require_complete_sessions: bool = False) -> dict[str, Any]:
+    b = validate_bars(bars, rules, session_schedule=session_schedule,
+                      require_complete_sessions=require_complete_sessions)
     days = sorted(leaders)
     result = {k: [] for k in ("pivot", "macd_rsi_proxy", "hybrid")}
     diagnostics = {k: {"candidate_count": 0, "skipped_no_leader": 0,
@@ -288,6 +352,9 @@ def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rul
                     next_available = max(ent + 1, ex_idx)
     return {"schema": "rs_pullback_event_study.v1", "rules": asdict(rules),
             "performance_is_empirically_validated": False,
+            "session_calendar_status": ("OWNER_SUPPLIED_CONSISTENCY_ONLY" if session_schedule
+                                        is not None else "NOT_OWNER_ATTESTED"),
+            "historical_coverage_strict": bool(require_complete_sessions),
             "analysis_type": "event_study_not_funded_portfolio",
             "osc_source": ("supplied_precomputed_columns" if
                            {"osc_fast", "osc_slow", "osc_oversold"}.issubset(b.columns)
