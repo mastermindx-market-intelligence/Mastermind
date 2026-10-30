@@ -2458,7 +2458,7 @@ def test_absent_prebootout_install_failure_requires_saved_service_state(
             assert last["sequence"] == before["sequence"] + 2
         else:
             assert "EFFECT_UNKNOWN" in err
-            assert "original service identity unproven" in err
+            assert "original service/plist identity unproven" in err
             assert last["generation"] == target.name
             assert last["previous"] == selector.name
             assert last["sequence"] == before["sequence"] + 1
