@@ -38,8 +38,10 @@ wrong-project, malformed, old-host and signed-out states remain UNBOUND. The
 resulting `sessionRef` is the **existing** Executive `fabric_attempt:` target
 reference, **not** a newly minted DSH chat/session ID or an admission token.
 The owner scope/generation is a local presentation discriminator only.
-The current App rereads owner Mission facts after this context changes; it
-never re-labels an old snapshot with a newer session identity.
+The current App reacquires owner Mission and Programs facts after this
+context changes; it never re-labels an old snapshot with a newer session
+identity. The Office presentation remounts on source identity changes so an
+old local preview cannot masquerade as the newly bound conversation.
 
 Native DSH developer seats from #1876, Grok Bot/OpenClaw and Hermes have not
 yet supplied a qualified Executive same-session correlation. They must remain

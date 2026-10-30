@@ -24,7 +24,8 @@ export function qualifyExecutiveOfficeSession(
   selected: MissionSelection | null,
   binding: MountedExecutiveSessionBinding | null,
 ): OfficeSessionContext {
-  if (!signedIn || !binding || !normalizeSelection(selected)) return UNBOUND;
+  const wanted = normalizeSelection(selected);
+  if (!signedIn || !binding || !wanted) return UNBOUND;
   try {
     // Older host mounts do not advertise an owner-qualified atomic
     // observation. Absence is UNBOUND, not a license to guess from a title.
@@ -36,8 +37,8 @@ export function qualifyExecutiveOfficeSession(
         Object.keys(observation).sort().join("|") !==
           "generation|principalScope|selection|targetRef") return UNBOUND;
     const match = normalizeSelection(observation.selection);
-    if (!match || match.workRef !== selected!.workRef ||
-        match.rootJobId !== selected!.rootJobId) return UNBOUND;
+    if (!match || match.workRef !== wanted.workRef ||
+        match.rootJobId !== wanted.rootJobId) return UNBOUND;
     if (typeof observation.targetRef !== "string" ||
         !SESSION_TARGET_REF.test(observation.targetRef) ||
         binding.port.currentTargetRef() !== observation.targetRef) return UNBOUND;

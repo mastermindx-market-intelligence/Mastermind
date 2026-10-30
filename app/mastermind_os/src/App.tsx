@@ -2036,6 +2036,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     authState?.acquisition,
     selection?.workRef,
     selection?.rootJobId,
+    officeSession.sessionRef,
+    officeSession.bindingGeneration,
   ]);
   useEffect(() => {
     let attached = true;
@@ -3248,7 +3250,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     content = (
       <>
         <MetaCeoOffice
-          key={JSON.stringify([authRevision, selection])}
+          key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
           locale={locale}
           projection={office.projection}
           draft={office.draft}
