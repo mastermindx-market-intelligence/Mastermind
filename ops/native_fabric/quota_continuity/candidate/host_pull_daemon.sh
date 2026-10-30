@@ -1979,8 +1979,14 @@ case "$COMMAND" in
         ps_state "$LC_PID"
         [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
         if argv_matches && py same-file "$RENDERED" "$DEST_PLIST"; then
-          # Launchd already runs the target collector. Pair the selector
-          # without a second bootout. A refused CAS leaves both sides as found.
+          # Launchd already runs the target collector. A byte-equal plist
+          # alone is not trusted: same-file follows symlinks and cannot prove
+          # owner/mode/inode. Prove the reviewed destination BEFORE any CURRENT
+          # selector CAS; the later success check also catches subsequent drift.
+          if [ -z "${RENDERED_SHA:-}" ] || ! py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA"; then
+            stop_uncertain ALREADY_RUNNING_VERIFY "installed plist identity unproven before selector advance"
+          fi
+          # Pair the selector without a second bootout only after this proof.
           if [ -n "$ADVANCE_FROM" ]; then
             advance_selector
           fi
