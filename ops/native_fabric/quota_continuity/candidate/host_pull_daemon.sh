@@ -165,10 +165,13 @@ finish_install_success() {
   # transaction complete, re-prove the exact on-disk reviewed plist identity.
   # A changed, absent, symlinked, wrong-owner or wrong-mode plist must retain
   # CURRENT and marker with an explicit EFFECT_UNKNOWN; no restore/rebootstrap.
-  if [ "${PHASE:-}" = "BOOTSTRAPPED" ]; then
-    [ -n "${RENDERED_SHA:-}" ] && py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA" \
-      || stop_uncertain POST_BOOTSTRAP_VERIFY "installed plist identity unproven"
-  fi
+  local proof_phase=POST_BOOTSTRAP_VERIFY
+  # The already-running target is a success path too. A byte-equal symlink or
+  # wrong-mode plist can pass same-file while remaining mutable/untrusted on
+  # the next launch. Recheck every success before marker release or exit.
+  [ "${PHASE:-}" = "BOOTSTRAPPED" ] || proof_phase=ALREADY_RUNNING_VERIFY
+  [ -n "${RENDERED_SHA:-}" ] && py verify-installed-plist "$DEST_PLIST" "$RENDERED_SHA" \
+    || stop_uncertain "$proof_phase" "installed plist identity unproven"
   if [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
     py install-transaction-complete "$STORE" || die 78 "install transaction marker"
     MARKER_OWNED=0

@@ -2976,3 +2976,48 @@ def test_postbootstrap_plist_seal_guard_is_production_noninteractive(workspace):
     assert 'HOLD_AFTER_BOOTSTRAP=""' in candidate
     assert '[ -z "$HOLD_AFTER_BOOTSTRAP" ]' in candidate
     assert '--hold-after-bootstrap) HOLD_AFTER_BOOTSTRAP=' in candidate
+
+
+
+@pytest.mark.parametrize("action", ["intact", "wrong-mode", "symlink"])
+def test_already_running_target_must_prove_disk_plist_identity(workspace, action):
+    """Fast-path byte equality must not accept mutable symlink or mode drift."""
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    initial = run(ctx)
+    assert initial.returncode == 0, initial.stderr
+    installed = ctx["plist"].read_bytes()
+    before = _selection(ctx)
+    (ctx["stub"] / "launchctl.log").write_text("")
+    peer_file = workspace / "identical-peer-plist"
+    if action == "wrong-mode":
+        ctx["plist"].chmod(0o644)
+    elif action == "symlink":
+        peer_file.write_bytes(installed)
+        ctx["plist"].unlink()
+        ctx["plist"].symlink_to(peer_file)
+    second = run(ctx)
+    assert _selection(ctx) == before
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+    if action == "intact":
+        assert second.returncode == 0, second.stderr
+        assert ctx["plist"].read_bytes() == installed
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert list(ctx["backup"].glob("*.receipt")) == []
+    else:
+        assert second.returncode == 78, second.stderr
+        assert "EFFECT_UNKNOWN" in second.stderr
+        assert "installed plist identity unproven" in second.stderr
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "ALREADY_RUNNING_VERIFY"
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert ctx["plist"].read_bytes() == installed
+        if action == "wrong-mode":
+            assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
+        else:
+            assert ctx["plist"].is_symlink()
+            assert peer_file.read_bytes() == installed
