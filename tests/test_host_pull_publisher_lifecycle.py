@@ -3021,3 +3021,71 @@ def test_already_running_target_must_prove_disk_plist_identity(workspace, action
         else:
             assert ctx["plist"].is_symlink()
             assert peer_file.read_bytes() == installed
+
+
+@pytest.mark.parametrize("action", ["intact", "wrong-mode", "symlink"])
+def test_advance_from_pairs_only_after_strict_disk_plist_identity(workspace, action):
+    """A matching live target cannot CAS CURRENT until disk plist is trusted.
+
+    All paths are isolated fixture stores; no real launchd, selector or host
+    service is used. These cases cover the formerly missing --advance-from
+    pairing path, not merely the already-selected idempotent path.
+    """
+    ctx = prepare(workspace, body=b"#!/bin/bash\\nexit 71\\n")
+    (ctx["stub"] / "print-style").write_text("notfound\\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    installed = run(ctx)
+    assert installed.returncode == 0, installed.stderr
+    original = ctx["release"]
+    before = _selection(ctx)
+
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\\nexit 72\\n")
+    target_pin = target / "ext" / "host_pull.sh"
+    old_pin = str(ctx["pin"]).encode()
+    rendered = ctx["plist"].read_bytes()
+    assert rendered.count(old_pin) == 1
+    admitted_target = rendered.replace(old_pin, str(target_pin).encode())
+    ctx["plist"].write_bytes(admitted_target)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], target_pin))
+    (ctx["stub"] / "launchctl.log").write_text("")
+
+    peer_file = workspace / "advance-from-identical-peer-plist"
+    if action == "wrong-mode":
+        ctx["plist"].chmod(0o644)
+    elif action == "symlink":
+        peer_file.write_bytes(admitted_target)
+        ctx["plist"].unlink()
+        ctx["plist"].symlink_to(peer_file)
+
+    result = run(ctx, generation=target.name, expect=original.name,
+                 advance_from=original.name)
+    final = _selection(ctx)
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert_not_executed(ctx)
+    assert ctx["plist"].read_bytes() == admitted_target
+
+    if action == "intact":
+        assert result.returncode == 0, result.stderr
+        assert final["generation"] == target.name
+        assert final["previous"] == original.name
+        assert final["sequence"] == before["sequence"] + 1
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert list(ctx["backup"].glob("*.receipt")) == []
+    else:
+        assert result.returncode == 78, result.stderr
+        assert "EFFECT_UNKNOWN" in result.stderr
+        assert "installed plist identity unproven before selector advance" in result.stderr
+        # The crucial regression: even with same bytes and matching launchctl
+        # argv, a symlink or wrong-mode destination must not move CURRENT.
+        assert final == before
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "ALREADY_RUNNING_VERIFY"
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        if action == "wrong-mode":
+            assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
+        else:
+            assert ctx["plist"].is_symlink()
+            assert peer_file.read_bytes() == admitted_target
