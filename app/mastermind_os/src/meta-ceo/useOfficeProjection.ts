@@ -11,14 +11,21 @@ const empty = (): OfficeInput => ({ mission: null, programs: null, result: null,
 
 /** Presentation state only. The existing App effects own all fixed acquisitions,
  * request lifetimes and auth invalidation; this hook never performs a read. */
-export function useOfficeProjection(authGeneration: number, selection: MissionSelection | null) {
+export function useOfficeProjection(
+  authGeneration: number,
+  selection: MissionSelection | null,
+  boundSession: { sessionRef: string | null; bindingGeneration: string | null } = {
+    sessionRef: null, bindingGeneration: null,
+  },
+) {
   const [input, setInput] = useState<OfficeInput>(empty);
   const latest = useRef(input);
   const pairEpoch = useRef(0);
   const [drafts, setDrafts] = useState(() => emptyDrafts(authGeneration));
   const context: ProjectionContext = { authGeneration, selection,
-    // The Office reads do not establish a managed conversation identity.
-    sessionRef: null, bindingGeneration: null,
+    // A verified Executive native session may qualify this read context.
+    // No DSH/Grok/Hermes session ID is inferred from a title or channel.
+    sessionRef: boundSession.sessionRef, bindingGeneration: boundSession.bindingGeneration,
     revisions: { mission: input.mission?.source.revision ?? null, programs: input.programs?.source.revision ?? null,
       result: input.result?.source.revision ?? null, conversation: input.conversation?.source.revision ?? null } };
   const current = useRef(context);

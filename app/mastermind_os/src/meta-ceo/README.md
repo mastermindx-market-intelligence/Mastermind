@@ -26,6 +26,30 @@ their section coverage and missingness. Result details require the exact indexed
 five-key tuple and runtime observation; window association reuses the existing
 `observedMissionAssociation` function. No join is inferred from titles or timing.
 
+### Existing Executive native session association
+
+The Office source/draft context now accepts a strictly *read-only* projection
+from the already mounted Executive session host. That owner must supply the
+atomic `currentObservation()` of one verified RESOLVED and SEND-addressable
+Fabric Attempt target, exact `workRef/rootJobId`, principal and generation.
+`qualifyExecutiveOfficeSession` rechecks that target against the existing
+`currentTargetRef()` and the authenticated owner context; unknown, stale,
+wrong-project, malformed, old-host and signed-out states remain UNBOUND. The
+resulting `sessionRef` is the **existing** Executive `fabric_attempt:` target
+reference, **not** a newly minted DSH chat/session ID or an admission token.
+The owner scope/generation is a local presentation discriminator only.
+The current App reacquires owner Mission and Programs facts after this
+context changes; it never re-labels an old snapshot with a newer session
+identity. The Office presentation remounts on source identity changes so an
+old local preview cannot masquerade as the newly bound conversation.
+
+Native DSH developer seats from #1876, Grok Bot/OpenClaw and Hermes have not
+yet supplied a qualified Executive same-session correlation. They must remain
+UNBOUND in this Office until the original authenticated session owner extends
+its contract; titles, bot messages, raw Slack timestamps and model text are
+insufficient. The Office does not gain a send, wake, model, MCP, scheduler or
+worker-return path from this source change.
+
 Delivery, pickup, START, effect, transport return, review and acceptance remain
 independent. A completed result is not a transport return or acceptance. Work
 remains unadapted in this projection; the legacy Work route and its released source
