@@ -73,3 +73,38 @@ Next: X-authorized 30-day post export for creator/leader set, stable user IDs an
 ## First-party business and timing note
 
 [Equity Edge terms last updated 2026-10-06](https://equityedge.io/terms-and-conditions) say the products are simulated trading evaluation programs and specify company registration. The firm has an affiliate section and explicitly offers giveaway accounts. This report does not verify website performance figures or payout guarantees.
+
+
+## Second co-occurrence hub: @EquitySpace1 — another campaign ring
+
+A separate [@EquitySpace1 profile snapshot](https://ngntipkolamrenang.twstalker.com/EquitySpace1) uses the generic display name **Prop Trader** and the bio "Everything about Props" (not official branded Equity Edge or an explicit CEO title). Its visible history includes at least **five distinct giveaway or milestone announcements** involving @EquityEdgeUK, multiple reposts of the company's product and payout posts, and an instance asking followers to follow co-founder @berkayglife. This is *sustained sponsorship-like promotion*, but login ownership, financial payments and registered business association remain unknown. The same source snapshot is an indexed mirror: original tweet and repost-event timestamps are incomplete.
+
+### Hub-B distinct creator posts
+
+The following **13 distinct handle originators** each have an indexed giveaway post requiring follows of **both** @EquityEdgeUK and @EquitySpace1. These are separate from Hub A's 22-creator catalog; **@skyshark0 appears in both** hub families. Do not add sample counts without de-duplicating overlapping authors and original post IDs.
+
+| # | Originating account | Cross-brand/interaction signal | Evidence |
+| ---: | --- | --- | --- |
+| 1 | @THE_SNR_SNIPER | Oct 7, Oct 20 and Oct 25 original posts; profile lists competing HolaPrime and BlueGuardian partners | [Archive](https://teapawt.org/THE_SNR_SNIPER) |
+| 2 | @_SHUGABA | Oct 8 repost-based giveaway; also promotes separate Shark Funded | [Archive](https://teapawt.org/_SHUGABA) |
+| 3 | @babujin_fx | Oct 7 giveaway and separate Hola Prime, Goat Funded recommendations | [Archive](https://teapawt.org/babujin_fx) |
+| 4 | @gaffapips | Quoted giveaway with brand and @EquitySpace1 | [Archive](https://w.twstalker.com/gatoroscillator) |
+| 5 | @NAJIBABDUL02 | Giveaway post quoted by independent participant | [Archive](https://www.sotwe.com/DerekSenabulya) |
+| 6 | @juniorSpeedouFX | Separate giveaway post quoted alongside NAJIBABDUL02 | [Archive](https://www.sotwe.com/DerekSenabulya) |
+| 7 | @New_owner1 | Standalone giveaway plus independent EraFunded and AquaFunded offers | [Archive](https://w.twstalker.com/New_owner1) |
+| 8 | @Hunter_Fx1 | Milestone giveaway; profile advertises separate BlueGuardian affiliation | [Archive](https://mobile.twstalker.com/Hunter_Fx1) |
+| 9 | @JadonsiiMichaab | Milestone giveaway; profile advertises BlueGuardian partner code | [Archive](https://www.twstalker.com/JadonsiiMichaab) |
+| 10 | @AfaaqFx | Milestone giveaway with further creator @HaseebFx_ | [Archive](https://twstalker.com/_Silverthree) |
+| 11 | @MX5R_ | Brand milestone contest quoted by outside account | [Archive](https://twstalker.com/Serdeek001) |
+| 12 | @Mecizoofx | Another original author giveaway reposted by THE_SNR_SNIPER | [Archive](https://mobile.twstalker.com/THE_SNR_SNIPER) |
+| 13 | @skyshark0 | Separate giveaway posted by original creator with co-required follow @EquitySpace1 | [Archive](https://ngntipkolamrenang.twstalker.com/EquitySpace1) |
+
+**Centrality pattern:** @EquitySpace1 is not merely a random participant; it is an explicitly required follow in independent-looking giveaways where the firm is the other required follow, and it reposts the brand extensively across milestone cycles. It is therefore a **potentially managed publication / campaign hub**. There is no authoritative first-party Equity Edge statement that it owns the @EquitySpace1 account, so no such ownership claim is made.
+
+**Cross-hub bridge:** @skyshark0 has appeared in the original leader/founder Hub A and the EquitySpace hub B, and @EquitySpace1 has itself mentioned founder @berkayglife. The two hubs therefore form **one observable promotion ecosystem** rather than disjoint graphs. But graph connectedness still does not prove the same owner for every creator.
+
+**Independence counterexamples:** @THE_SNR_SNIPER and @JadonsiiMichaab promote BlueGuardian, @babujin_fx promotes Hola Prime and Goat Funded, @New_owner1 promotes EraFunded and AquaFunded, and @_SHUGABA promotes Shark Funded. These extra-company commercial relationships make **external multi-brand affiliate** a defensible explanation for several outer-ring handles.
+
+**Additional controls needed for ownership attribution:** platform acknowledgment of @EquitySpace1, firm-owned website backlinks or campaign contracts, authenticated account administration, historical account handle transitions and distinctive landing-page/admin reuse. Company-branded repost concentration alone is medium evidence of an affiliate-controlled hub, not high evidence of a company-owned account.
+
+**Not a cash giveaway:** Equity Edge's own [giveaway policy](https://equityedge.io/general/giveaway-accounts-bogo-offers) states that these are simulated trading accounts that stop after a first payout and need a paid replacement to continue. "3x10K" therefore refers to account size, not US$30,000 cash prizes.
