@@ -56,7 +56,15 @@ phase: give it a complete **predeclared** opportunity cohort (including nonfires
 and two owner-evaluated policy outcome rows per opportunity. The comparison is
 between candidate `pivot`, `macd_rsi_proxy` or `hybrid` and
 `leader_reference` at the **same opportunity ID / decision time**. Each
-opportunity specifies symbol, unique episode, ET session date, strictly
+policy's outcome row additionally **must** include `common_policy_clock_utc`
+(equal to that opportunity's decision), `common_episode_end_utc`,
+`common_risk_unit_sha256` and `common_cost_model_sha256`. The
+two policies must have equal common decision/horizon/risk/cost inputs.
+Their **actual exit times** may differ but may not exceed the common
+episode terminal; differing risk units or cost-model digests are refused,
+not treated as comparable net returns. These digests are supplied
+consistency identifiers and do not authenticate a real quote/broker fill.
+Each opportunity specifies symbol, unique episode, ET session date, strictly
 timezone-qualified decision / bar / previous-daily-leader / regime known-at
 clocks, previous leader session, input digest, eligibility, signal and
 chronological split. Each policy outcome supplies `RESOLVED`, `NO_ENTRY`,
@@ -82,8 +90,9 @@ The module returns common-denominator/coverage and matched incremental R by
 development, calibration and holdout block, with 20-session date-block
 bootstrap intervals only when enough paired date clusters exist. It rejects
 future features, unsupported outcome clocks, non-entry-as-zero input fields,
-random/interleaved splits, overlapping development labels near holdout, and
-postdated holdout registration. Non-entry contributes a deliberate zero only
+random/interleaved splits, split assignments within the same calendar
+session, overlapping development labels near holdout, and postdated
+holdout registration. Non-entry contributes a deliberate zero only
 when the policy explicitly says `NO_ENTRY`; censored and unavailable outcomes
 remain null. Report labels `source_admission=NOT_ATTESTED_BY_THIS_EVALUATOR`
 and `empirical_strategy_edge_verdict=NOT_ESTABLISHED` are intentional even
@@ -93,7 +102,8 @@ The owner must establish source entitlement, PIT issuer/epoch, consistent
 execution costs, and actual forward issuance before any edge claim.
 
 Tests: `python -m pytest -q research/rs_leader_pullback_2026_10_30/tests`
-(the local source candidate at this update passed 72 synthetic conformance tests).
+(the latest local source candidate passed **77 synthetic conformance tests**,
+plus five successful unittest subtests; this is not CI or empirical proof).
 
 ## Required historical research before signal promotion
 
