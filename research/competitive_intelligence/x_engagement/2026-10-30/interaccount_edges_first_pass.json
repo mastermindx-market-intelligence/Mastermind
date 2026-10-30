@@ -1,0 +1,460 @@
+{
+  "schema": "research.account_edges.v1",
+  "as_of": "2026-10-30",
+  "scope": "selected public-source graph; not comprehensive current or historical account event census",
+  "sources": {
+    "OCAP": "https://mobile.twstalker.com/ThanefieldCap",
+    "OFS": "https://thanefield.capital/portfolio/",
+    "OM": "https://ww1.twstalker.com/openmarket_xyz",
+    "OMALT": "https://es.twstalker.com/openmarket_xyz",
+    "OR": "https://ww1.twstalker.com/openmarket_raw",
+    "P": "https://twstalker.com/percept_labs",
+    "ENGINEER": "https://russellkong.com/",
+    "GOOGLE": "https://play.google.com/store/apps/details?id=xyz.openmarket.app",
+    "SPXVIX": "https://teapawt.org/SPXVIX",
+    "TONE": "https://www.twstalker.com/ToneVays",
+    "UW": "https://www.sotwe.com/unusual_whales",
+    "N": "https://twstalker.com/NicholasFNS",
+    "A": "https://www.sotwe.com/AnthonySandford?lang=en",
+    "J": "https://www.sotwe.com/Jake__Wujastyk",
+    "J1": "https://www.twstalker.com/Jake__Wujatsky",
+    "J2": "https://www.twstalker.com/Jaike__Wujastk",
+    "J3": "https://d46rckpsl2ks7laj5lfg.twstalker.com/Jake___W",
+    "J4": "https://ww.twstalker.com/00Jake_Wujastyk"
+  },
+  "edge_count": 35,
+  "edges": [
+    {
+      "from": "@ThanefieldCap",
+      "to": "@ThanefieldRes",
+      "type": "identifies_research_channel",
+      "evidence": "Bio names handle as Market Research",
+      "source_ids": [
+        "OCAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Claimed research arm",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "Thanefield Capital",
+      "to": "OpenMarket / Kiyotaka",
+      "type": "portfolio_listing",
+      "evidence": "First-party portfolio listing image Kiyotaka_260px.svg",
+      "source_ids": [
+        "OFS"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Portfolio/business affiliation; stake unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ThanefieldCap",
+      "to": "@openmarket_xyz",
+      "type": "reposts",
+      "evidence": "At least 11 distinct Kiyotaka/OpenMarket post origins visible across multi-year archive, not equal to exact retweet events in a fixed 30-day span",
+      "source_ids": [
+        "OCAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Strong repeat amplification",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ThanefieldRes",
+      "to": "@openmarket_raw",
+      "type": "claimed_rebranding",
+      "evidence": "New Raw profile says Thanefield Research is now OpenMarket Raw",
+      "source_ids": [
+        "OM"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Publishing identity transition claimed; numeric user ID unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_xyz",
+      "to": "@openmarket_raw",
+      "type": "brand_endorsement",
+      "evidence": "Official channel explicitly grants access/endorses Raw",
+      "source_ids": [
+        "OM"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Company-aligned secondary publication",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_raw",
+      "to": "@openmarket_xyz",
+      "type": "reposts",
+      "evidence": "Many distinct main brand product posts retweeted",
+      "source_ids": [
+        "OR"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Strong account affinity; no measured all-post denominator",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_xyz",
+      "to": "@openmarket_raw",
+      "type": "reposts",
+      "evidence": "Brand reposts Raw order-flow market analysis",
+      "source_ids": [
+        "OMALT"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Reciprocity beyond branding",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@percept_labs",
+      "to": "@openmarket_xyz",
+      "type": "reposts",
+      "evidence": "At least 6 distinct reposted product posts on visible Percept archive",
+      "source_ids": [
+        "P"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Sustained cross-promotion",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_xyz",
+      "to": "@percept_labs",
+      "type": "reposts_and_direct_referral",
+      "evidence": "Brand reposted Percept TitanCharts and encouraged developers to contact its charting team",
+      "source_ids": [
+        "OMALT",
+        "OCAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Reciprocal product relationship",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "Trontal Group engineering",
+      "to": "OpenMarket / Kiyotaka",
+      "type": "first_person_project_work",
+      "evidence": "Engineer says he worked on Kiyotaka project while at Trontal",
+      "source_ids": [
+        "ENGINEER"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Shared development environment, not equity attribution",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "Trontal Group engineering",
+      "to": "Percept",
+      "type": "first_person_project_work",
+      "evidence": "Same engineer says he works on charting at Percept while at Trontal",
+      "source_ids": [
+        "ENGINEER"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Shared product-engineering environment",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "Thalamus Technologies, Inc.",
+      "to": "OpenMarket app",
+      "type": "app_publisher",
+      "evidence": "Google Play names legal developer company",
+      "source_ids": [
+        "GOOGLE"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Public platform developer listing",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ThanefieldCap",
+      "to": "@thalamus_xyz",
+      "type": "reposts",
+      "evidence": "One visible repost of Thalamus product announcement",
+      "source_ids": [
+        "OCAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Social/product orbit; same operator unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ThanefieldCap",
+      "to": "@tread_fi",
+      "type": "disclosed_investment",
+      "evidence": "Fund announced prior investment and cross-promoted product",
+      "source_ids": [
+        "OCAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Portfolio company, not controlled social account",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ThanefieldCap",
+      "to": "@SynopticCom",
+      "type": "reposts",
+      "evidence": "Promotes Synoptic and lists project on official portfolio",
+      "source_ids": [
+        "OCAP",
+        "OFS"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Portfolio orbit",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_xyz",
+      "to": "@Luckshuryy",
+      "type": "reposts_and_endorsement",
+      "evidence": "Promoted creator footprint guide",
+      "source_ids": [
+        "OM"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Creator outreach/organic content",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_raw",
+      "to": "@Luckshuryy",
+      "type": "quote_promotion",
+      "evidence": "Called creator free layouts a good starting place",
+      "source_ids": [
+        "OR"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Creator ecosystem",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_xyz",
+      "to": "@backquant",
+      "type": "reposts",
+      "evidence": "Amplified creator advertising paid indicator marketplace scripts",
+      "source_ids": [
+        "OM"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Creator/marketplace link",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_xyz",
+      "to": "@Trader_Leumas",
+      "type": "reposts",
+      "evidence": "Amplified TPO testimonial from user",
+      "source_ids": [
+        "OM"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "User-generated content; payment unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@SPXVIX",
+      "to": "OpenMarket",
+      "type": "referral_link",
+      "evidence": "Public options tutorial has ?ref=SPXVIX URL",
+      "source_ids": [
+        "SPXVIX"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Tracked referral, commission unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ToneVays",
+      "to": "OpenMarket",
+      "type": "referral_link",
+      "evidence": "Publishes OpenMarket referral",
+      "source_ids": [
+        "TONE"
+      ],
+      "observation_confidence": "medium",
+      "interpretation": "Likely independent multi-provider creator",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ToneVays",
+      "to": "GoCharting",
+      "type": "referral_link",
+      "evidence": "Publishes competitor platform affiliate",
+      "source_ids": [
+        "TONE"
+      ],
+      "observation_confidence": "medium",
+      "interpretation": "Independent multiprovider counterexample",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ToneVays",
+      "to": "TradingView",
+      "type": "reported_affiliate_history",
+      "evidence": "Says has received TradingView affiliate revenue historically",
+      "source_ids": [
+        "TONE"
+      ],
+      "observation_confidence": "medium",
+      "interpretation": "Cross-provider counterexample",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@unusual_whales",
+      "to": "@WhaleWatch_UW",
+      "type": "owned_show_promotion",
+      "evidence": "Brand promotes program and clips",
+      "source_ids": [
+        "UW"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Official company show",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@WhaleWatch_UW",
+      "to": "@NicholasFNS",
+      "type": "host_content",
+      "evidence": "Show clips reference Nicholas",
+      "source_ids": [
+        "N",
+        "UW"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Declared host",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@NicholasFNS",
+      "to": "@WhaleWatch_UW",
+      "type": "profile_affiliation",
+      "evidence": "Calls himself media host, reposts show",
+      "source_ids": [
+        "N"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Declared employment-like affiliation; actual contract unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@WhaleWatch_UW",
+      "to": "@AnthonySandford",
+      "type": "host_content",
+      "evidence": "Show highlights Anthony's trades",
+      "source_ids": [
+        "A",
+        "N"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Declared cohost",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@AnthonySandford",
+      "to": "Unusual Whales",
+      "type": "tracked_referral",
+      "evidence": "Shows own account discount code asandfordx",
+      "source_ids": [
+        "A"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Affiliated creator with separate Stock Hub",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@NicholasFNS",
+      "to": "@AnthonySandford",
+      "type": "replies_and_cross_mentiones",
+      "evidence": "Repeated trading discussion and show promotion",
+      "source_ids": [
+        "N",
+        "A"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Professional interaction",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@NicholasFNS",
+      "to": "@Ryan__Rigg",
+      "type": "reposts",
+      "evidence": "Reposts trading opinions of Ryan",
+      "source_ids": [
+        "N"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Outer social ring; no business affiliation proof",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "tastytrade",
+      "to": "Unusual Whales",
+      "type": "marketing_contract",
+      "evidence": "Official disclosure says tastytrade pays UW to recommend brokerage",
+      "source_ids": [
+        "UW"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Disclosed paid marketing; independent firms",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Jake__Wujatsky",
+      "to": "@Jake__Wujastyk",
+      "type": "reposts",
+      "evidence": "Many reposts of established trader with similar legacy profile bio",
+      "source_ids": [
+        "J1",
+        "J"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Unverified lookalike, no owner attribution",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Jaike__Wujastk",
+      "to": "@Jake__Wujastyk",
+      "type": "reposts",
+      "evidence": "Many reposts of established trader with near-match name",
+      "source_ids": [
+        "J2",
+        "J"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Unverified lookalike, no owner attribution",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Jake___W",
+      "to": "@Jake__Wujastyk",
+      "type": "reposts",
+      "evidence": "Reposts and near-copy bio",
+      "source_ids": [
+        "J3",
+        "J"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Unverified lookalike",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@00Jake_Wujastyk",
+      "to": "@Jake__Wujastyk",
+      "type": "reposts",
+      "evidence": "Repeated archive reposts and near-match handle",
+      "source_ids": [
+        "J4",
+        "J"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Unverified lookalike",
+      "shared_controller": "unverified"
+    }
+  ],
+  "quantification_warning": "6 and 11 are distinct post-origin lower bounds observed in specific indexed snapshots, not all retweet events in 30 days. Other edges are presence/qualitative. All account control attributions remain unverified.",
+  "privacy": "No private messages or private contact identifiers.",
+  "verification_rule": "For each edge separate observed interaction, commercial/organizational affiliation, and control hypothesis."
+}
