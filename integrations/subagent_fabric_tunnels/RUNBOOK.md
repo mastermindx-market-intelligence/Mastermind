@@ -74,6 +74,12 @@ guessed:
 {
   "seats": {
     "com.mastermind.subagent-fabric-tunnel.c1": {
+      "heartbeat_mode": "first_party_cli_control_plane_poll",
+      "heartbeat_profile_file": "/absolute/path/to/that-seats-profile.json",
+      "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+      "heartbeat_proof_note": "how the operator proved the profile's health.url_file + control_plane_poll value is the first-party last-seen signal"
+    },
+    "com.mastermind.subagent-fabric-tunnel.c2-business": {
       "heartbeat_path": "/absolute/path/to/that-seats-heartbeat",
       "heartbeat_kind": "tunnel-client-control-plane-last-seen",
       "heartbeat_proof_note": "how the operator proved this file is the first-party last-seen signal"
@@ -100,11 +106,53 @@ repair digests. `heartbeat_kind` requires `heartbeat_proof_note`: without an
 operator first-party attestation, a heartbeat file's mtime is never treated
 as the tunnel-client/control-plane last-seen signal (B6).
 
+#### Heartbeat modes (strictly typed; modes are exclusive per seat)
+
+`heartbeat_mode` selects the last-seen evidence source and must be one of
+exactly two spellings — anything else refuses (`facts_heartbeat_mode_unknown`):
+
+- `file_mtime_attested` — the legacy mode, also the meaning of an ABSENT mode
+  on a safe legacy manifest. Requires `heartbeat_path`; the file must exist as
+  a regular non-symlink file at qualification. Per pass the file's mtime is
+  the last-seen signal, and staleness can force a restart only because of the
+  operator attestation above.
+- `first_party_cli_control_plane_poll` — the stronger first-party proof.
+  Requires `heartbeat_profile_file` (the seat's own per-seat client profile,
+  a JSON file) and refuses `heartbeat_path`. Qualification, before anything
+  is written:
+  - the seat's installed identity is verified as always (argv, executable
+    path, executable digest) — the probe later runs ONLY that pinned
+    executable, never a path from facts;
+  - the profile is verified: bounded size, seat-owned, not group/world
+    writable, symlink-free lexical ancestors, no foreign seat identity in the
+    path, valid JSON with a `health.url_file` entry;
+  - the derived URL locator (`health.url_file`) is verified the same way
+    (bounded, seat-owned, safe modes, symlink-free ancestors, no traversal,
+    no foreign seat identity) and recorded in the PRIVATE manifest as
+    `heartbeat_url_locator`. It is DERIVED, never an accepted operator fact —
+    a manifest cannot be steered to an unvetted URL file through facts;
+  - cross-seat isolation: two seats may never share a profile file or a URL
+    locator;
+  - ONE read-only live probe per seat must return the known-good shape:
+    `<pinned executable> health --url-file <pinned locator>
+    --require-control-plane-poll --json` → rc 0, `result=ok`,
+    `healthz.ok=true`, `readyz.ok=true`,
+    `control_plane_poll.ok=true` with a numeric Unix-seconds value. A probe
+    that times out, errors, or fails schema validation refuses the whole
+    qualification (`facts_cli_poll_probe_failed`) — an evidence source that
+    never worked is never recorded.
+  Mixing the modes on one seat refuses; a hand-edited manifest that mixes
+  them is alerted (`heartbeat_mode_ambiguous`) and never classified.
+
 Refusals that must be resolved by a human before anything else:
 `foreign identity 'chatgpt1'`, `argv_tuple_duplicated`,
 `executable_identity_duplicated`, `rogue_family_labels_present`,
 `*_drift_since_qualification`, `label_mismatch`, `*_plist_owner_unsafe`,
-`facts_*`. Qualification fails closed: any refusal means nothing is written.
+`facts_*` (including `facts_heartbeat_mode_unknown`,
+`facts_poll_profile_duplicated`, `facts_poll_locator_duplicated`,
+`facts_cli_poll_probe_failed` / `facts_cli_poll_probe_refused`).
+Qualification fails closed: any refusal means nothing is written — and for
+CLI-poll seats, no probe ever ran against a manifest that was refused.
 
 ### 2. Install (the only plist mutation this integration performs)
 
@@ -228,17 +276,66 @@ Missing-PID recovery is unaffected — that state is proven by launchd itself.
 The user-visible error this replaces ("Tunnel-client has not been seen for
 300 seconds") is never inferred from an arbitrary file's age.
 
+#### First-party CLI control-plane-poll evidence (per pass)
+
+For a seat qualified with `first_party_cli_control_plane_poll`, every pass
+re-proves the evidence source BEFORE the client is invoked, then derives the
+last-seen from a REAL control-plane poll instead of any file mtime:
+
+1. The manifest-pinned executable must still be a regular non-symlink file
+   digesting to the pinned value (`cli_poll_executable_drift` /
+   `cli_poll_executable_digest_changed` otherwise). An arbitrary or drifted
+   binary is never executed.
+2. The qualified profile is re-parsed and its `health.url_file` must STILL
+   equal the pinned locator, with both files re-proven bounded, seat-owned,
+   safe-moded, and symlink-free (`cli_poll_profile_unsafe` /
+   `cli_poll_profile_locator_changed` otherwise).
+3. The EXACT read-only argv `<pinned executable> health --url-file <pinned
+   locator> --require-control-plane-poll --json` runs through a bounded
+   runner: no shell, stdin detached, hard per-seat deadline of 5 s, and both
+   stdout and stderr hard-capped at 16 KiB — past either cap the child is
+   killed and the partial output is discarded (`cli_poll_output_oversized`).
+4. Only the known-good rc0/ok/ok/ok shape with a finite positive
+   Unix-seconds `control_plane_poll.value` is evidence; the last-seen age is
+   `now - value`. A value ahead of local time within a 300 s skew clamps to a
+   fresh age of zero (fresh evidence authorizes nothing); anything further
+   ahead refuses (`cli_poll_value_in_future`), as do non-positive values,
+   booleans/strings/NaN, malformed JSON, any `ok` that is not the boolean
+   `true`, and nonzero rc / timeout.
+5. Every refusal is `control_plane_poll_unproven_alert_only` for that seat:
+   fail closed, NO action, NO guessed direction, and no URL, profile path,
+   locator, or payload content is ever printed (the stable refusal code is
+   in the private pass report).
+6. Replay guard: a stale verdict whose (last-seen value, stdout digest) is
+   byte-identical to the provenance recorded at the seat's LAST
+   evidence-authorized kick (`last_kick_poll_value` /
+   `last_kick_poll_digest` in the kick ledger) is
+   `control_plane_poll_replayed_alert_only` — consumed evidence may not
+   authorize another kick or witness freshness. Advanced evidence kicks
+   again under the same 1800 s cooldown and 3-kick escalation ladder, with
+   no fourth kick, exactly like the file-mtime mode.
+7. A missing PID still recovers through the launchd-proven route and NO poll
+   is executed for that seat; `launchctl print` ambiguity stays alert-only.
+
+The poll is evidence gathering inside the existing bounded pass: no new
+scheduler, process watcher, data store, or control plane is introduced, and
+the same cooldown/escalation ledger bounds it.
+
 Classification (distinguished exactly as the plan requires):
 
 | Signal | Outcome |
 | --- | --- |
-| No PID on a qualified job | `missing_pid` → plain `launchctl kickstart gui/<uid>/<label>` |
+| No PID on a qualified job | `missing_pid` → plain `launchctl kickstart gui/<uid>/<label>` (either heartbeat mode; no poll is executed) |
 | No PID, 3 persisted consecutive kicks without a witnessed fresh heartbeat | `kickstart_escalated_alert`, NO fourth kick even after cooldown, until a healthy pass witnesses a fresh heartbeat |
-| PID present, heartbeat older than 300 s, first-party attested | `stale_heartbeat` → `launchctl kickstart -k` |
-| PID present, heartbeat older than 300 s, NOT attested | `stale_heartbeat_unproven_alert_only`, NO action, exact required proof in the alert |
-| PID present, heartbeat fresh | `healthy`, no action |
-| Heartbeat file missing/unreadable | `heartbeat_missing` alert, NO action |
+| PID present, last-seen older than 300 s, first-party attested (file mtime or CLI poll) | `stale_heartbeat` → `launchctl kickstart -k` |
+| PID present, last-seen older than 300 s, NOT attested | `stale_heartbeat_unproven_alert_only`, NO action, exact required proof in the alert |
+| PID present, last-seen fresh | `healthy`, no action |
+| CLI poll refused/ambiguous/oversized/timeout/nonzero rc/malformed/future/nonpositive | `control_plane_poll_unproven_alert_only`, NO action, stable refusal code in the private report |
+| CLI poll byte-identical to the last kick's recorded provenance | `control_plane_poll_replayed_alert_only`, NO action and NO freshness witness |
+| Heartbeat file missing/unreadable (file mode) | `heartbeat_missing` alert, NO action |
 | Heartbeat path never qualified | `heartbeat_path_unqualified`, NO action |
+| CLI-poll profile never qualified | `heartbeat_poll_profile_unqualified`, NO action |
+| Manifest mixes heartbeat modes on one seat | `heartbeat_mode_ambiguous`, never classified |
 | Heartbeat recorded but never attested first-party | `heartbeat_first_party_unproven` alert (per pass, until qualified) |
 | `launchctl print` nonzero WITHOUT the specific `Could not find service` diagnostic | `launchd_state_uncertain_alert_only`, NO action, zero effect calls (never mistaken for a missing PID) |
 | Kick ledger corrupt / unreadable / symlinked / unsafe-permissioned / malformed | `kick_ledger_refused_alert_only` (+ `kick_ledger_refused_recovery_alert_only`): NO recovery for the whole pass; on-disk history preserved, never auto-reset |
@@ -264,7 +361,11 @@ as first use, but an existing ledger that is corrupt, unreadable, symlinked,
 non-regular, group/world-writable, or shape-invalid REFUSES the whole pass's
 recovery (`kick_ledger_refused_recovery_alert_only`) and is never rewritten —
 cooldown/escalation history can never be silently erased to re-enable
-unbounded restarts. Host-pull generation alerts never block a qualified seat's
+unbounded restarts. For CLI-poll seats each evidence-authorized kick also
+records payload provenance (`last_kick_poll_value`, `last_kick_poll_digest`)
+so byte-identical consumed evidence can never authorize the next kick; these
+fields are validated on load and absent for file-mtime kicks and legacy
+ledgers. Host-pull generation alerts never block a qualified seat's
 own crash recovery: a dead tunnel client is recoverable even while the host
 carrier needs human attention.
 
@@ -325,7 +426,9 @@ result as an alert code, never silently. Backups live under
 - Not a pre-login service: recovery exists only inside a live logged-in GUI
   session (see "Login/session semantics").
 - Not a heartbeat truth-source by itself: an unattested file mtime is never
-  claimed as first-party tunnel-client/control-plane last-seen.
+  claimed as first-party tunnel-client/control-plane last-seen, and the
+  CLI-poll mode only reports what the seat's own qualified binary proved in
+  a re-verified, bounded, read-only probe this pass.
 - Not merged/approved: one Draft PR from the branch may exist, but review is
   a separate independent non-authoring Fabric pass (FTR-5) and merge/approve
   stays out of this mission.

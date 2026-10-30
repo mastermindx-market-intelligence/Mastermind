@@ -37,11 +37,33 @@ attestation bound (B1) and the heartbeat's first-party proof requirement (B6):
   ``stale_heartbeat_unproven_alert_only`` stating the exact required host
   proof. (Missing-PID recovery is unaffected: it is proven by launchd
   itself, not by any heartbeat file.)
+
+First-party CLI control-plane-poll mode (strictly typed): a seat qualified
+with ``heartbeat_mode=first_party_cli_control_plane_poll`` gets its real
+last-seen from the seat's OWN qualified tunnel-client binary — each pass
+re-proves the pinned executable digest and the qualified profile/locator
+paths, then invokes the EXACT read-only argv
+``<pinned executable> health --url-file <pinned locator>
+--require-control-plane-poll --json`` through the injectable bounded runner
+(no shell, per-seat deadline, both output streams hard-capped). Only the
+known-good rc0/ok/ok/ok shape with a finite positive Unix-seconds
+``control_plane_poll.value`` is evidence; age is ``now - value``. Any other
+payload — malformed, missing, oversized, false-flagged, non-positive,
+future-beyond-skew, nonzero rc, timeout, drifted executable, changed
+locator — is ``control_plane_poll_unproven_alert_only``: fail closed, never
+a kick, and no URL, profile path, locator, or payload content is ever
+printed. A stale verdict whose (value, stdout digest) is byte-identical to
+the provenance recorded at the seat's last evidence-authorized kick is
+REPLAYED consumed evidence: ``control_plane_poll_replayed_alert_only``, no
+kick and no freshness witness. Recovery bounds (1800 s cooldown, 3-kick
+escalation, no fourth kick) are identical to the file-mtime mode.
 """
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import shutil
 import stat
 import time
@@ -49,8 +71,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from fabric_tunnel_common import (
+    CLI_POLL_TIMEOUT_SECONDS,
     DEFAULT_STALE_TELEMETRY_SECONDS,
     FORBIDDEN_LABELS,
+    HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+    HEARTBEAT_MODE_FILE_MTIME,
     KICKSTART_COOLDOWN_SECONDS,
     KICKSTART_ESCALATION_LIMIT,
     KICK_LEDGER_SCHEMA,
@@ -69,6 +94,8 @@ from fabric_tunnel_common import (
     PolicyRefused,
     atomic_write_bytes,
     backups_dir,
+    build_control_plane_poll_argv,
+    control_plane_poll_runner,
     evidence_line,
     kick_ledger_path,
     last_pass_path,
@@ -83,6 +110,7 @@ from fabric_tunnel_common import (
     sha256_bytes,
     state_dir,
     subprocess_runner,
+    validate_control_plane_poll_payload,
     watchdog_dir,
 )
 from fabric_tunnel_identity import (
@@ -92,6 +120,7 @@ from fabric_tunnel_identity import (
     scan_family,
     telemetry_relative_path_reject_reason,
     unqualified_health_alerts,
+    verified_poll_profile_locator,
 )
 
 # Health states, one per distinguishable outcome the plan names.
@@ -101,6 +130,8 @@ ST_STALE_HEARTBEAT = "stale_heartbeat"
 ST_STALE_HEARTBEAT_UNPROVEN = "stale_heartbeat_unproven_alert_only"
 ST_HEARTBEAT_UNQUALIFIED = "heartbeat_unqualified"
 ST_HEARTBEAT_MISSING = "heartbeat_missing"
+ST_CLI_POLL_UNPROVEN = "control_plane_poll_unproven_alert_only"
+ST_POLL_EVIDENCE_REPLAYED = "control_plane_poll_replayed_alert_only"
 ST_UNQUALIFIED = "unqualified"
 ST_COOLDOWN = "kickstart_suppressed_cooldown"
 ST_ESCALATED = "kickstart_escalated_alert"
@@ -134,6 +165,9 @@ def classify_seat(
     consecutive_kicks: int,
     fresh_heartbeat_witnessed_since_kick: bool,
     now: float,
+    heartbeat_mode: str = HEARTBEAT_MODE_FILE_MTIME,
+    poll_refused_code: str | None = None,
+    poll_replayed: bool = False,
 ) -> tuple[str, bool]:
     """Return (state, may_kickstart).
 
@@ -155,6 +189,16 @@ def classify_seat(
     the outcome is alert-only. Missing-PID recovery does not depend on the
     heartbeat file — launchd itself proves that state — so it stays
     recoverable either way (still under the same escalation gate).
+
+    ``heartbeat_path_recorded`` is the qualified-evidence gate for EITHER
+    mode: the file-mtime mode records a heartbeat path, the
+    ``first_party_cli_control_plane_poll`` mode records the profile and its
+    derived URL locator. For the CLI-poll mode, ``poll_refused_code`` (any
+    per-pass evidence refusal) and ``poll_replayed`` (identical evidence to
+    the last kick's recorded provenance) both fail closed to alert-only
+    states BEFORE any staleness decision: replayed consumed evidence never
+    authorizes a kick and never witnesses freshness, and an unproven poll is
+    never guessed into either direction.
     """
     if not qualified or not heartbeat_path_recorded:
         return ST_UNQUALIFIED, False
@@ -168,6 +212,14 @@ def classify_seat(
         if _cooldown_blocks(last_kick_at, now):
             return ST_COOLDOWN, False
         return ST_MISSING_PID, True
+    if heartbeat_mode == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL:
+        # CLI-poll evidence must be PROVEN this pass: any ambiguity or
+        # replayed consumed evidence fails closed before any staleness
+        # decision, never guessed into either direction.
+        if poll_refused_code is not None:
+            return ST_CLI_POLL_UNPROVEN, False
+        if poll_replayed:
+            return ST_POLL_EVIDENCE_REPLAYED, False
     if heartbeat_age is None:
         return ST_HEARTBEAT_MISSING, False
     if heartbeat_age > STALE_HEARTBEAT_SECONDS:
@@ -307,6 +359,78 @@ def read_heartbeat_age(recorded_path: str, now: float) -> float | None:
     if not stat.S_ISREG(st.st_mode):
         return None  # symlink or special file is not a trustworthy heartbeat
     return max(0.0, now - st.st_mtime)
+
+
+# Stable 64-hex shape for ledger-recorded poll provenance digests.
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def cli_poll_evidence(
+    label: str,
+    entry: Mapping[str, Any],
+    seat_uid: int,
+    poll_runner: Any,
+    *,
+    now: float,
+) -> tuple[float | None, str | None, float | None, str | None]:
+    """One bounded first-party CLI control-plane poll for one seat.
+
+    Returns ``(age_seconds, refusal_code, accepted_value, stdout_digest)``.
+    ``age_seconds`` is non-None ONLY for a fully accepted payload; every
+    other outcome carries a stable ``refusal_code`` and authorizes nothing.
+
+    Per-pass re-proof before the child is ever executed (all fail closed):
+    - the executable is the manifest-PINNED path and still digests to the
+      pinned value — an arbitrary or drifted binary is never invoked;
+    - the profile re-derivation (``verified_poll_profile_locator``) re-proves
+      bounded size, seat ownership, safe modes, symlink-free lexical
+      ancestors, and that the parsed ``health.url_file`` STILL equals the
+      pinned locator — a swapped profile or locator refuses instead of
+      steering the probe;
+    - the probe itself is the EXACT read-only argv through the injectable
+      bounded runner: no shell, per-seat deadline, capped output streams.
+
+    Refusal codes carry no URL, profile path, locator, or payload content.
+    """
+    executable = entry.get("executable")
+    profile = entry.get("heartbeat_profile_file")
+    locator = entry.get("heartbeat_url_locator")
+    if not executable or not profile or not locator:
+        return None, "heartbeat_poll_evidence_unqualified", None, None
+    executable_path = Path(str(executable))
+    try:
+        require_regular_file(executable_path, code="cli_poll_executable")
+        exec_digest = sha256_bytes(executable_path.read_bytes())
+    except (IdentityRejected, OSError):
+        return None, "cli_poll_executable_drift", None, None
+    if exec_digest != entry.get("executable_sha256"):
+        return None, "cli_poll_executable_digest_changed", None, None
+    try:
+        derived = verified_poll_profile_locator(label, str(profile), seat_uid)
+    except (PolicyRefused, IdentityRejected):
+        return None, "cli_poll_profile_unsafe", None, None
+    if derived != locator:
+        return None, "cli_poll_profile_locator_changed", None, None
+    try:
+        argv = build_control_plane_poll_argv(str(executable), str(locator))
+    except ActionRefused:
+        return None, "cli_poll_argv_refused", None, None
+    try:
+        result = poll_runner(argv, CLI_POLL_TIMEOUT_SECONDS)
+    except (ActionRefused, OSError):
+        return None, "cli_poll_spawn_refused", None, None
+    verdict = validate_control_plane_poll_payload(
+        result.stdout,
+        result.stderr,
+        result.returncode,
+        now=now,
+        timed_out=result.timed_out,
+        truncated=result.truncated,
+    )
+    if not verdict.ok:
+        return None, verdict.reason, None, None
+    digest = sha256_bytes(result.stdout.encode("utf-8"))
+    return verdict.age_seconds, None, verdict.value, digest
 
 
 def read_selected_generation(native_store_path: str) -> str | None:
@@ -455,6 +579,21 @@ def load_kick_ledger(home: Path) -> dict[str, Any]:
         witnessed = entry.get("fresh_heartbeat_witnessed_since_kick", False)
         if not isinstance(witnessed, bool):
             raise PolicyRefused(f"kick_ledger_entry_invalid: {label}: witness flag")
+        # First-party CLI-poll provenance recorded at the last evidence-
+        # authorized kick (absent for file-mtime kicks and legacy ledgers).
+        kick_poll_value = entry.get("last_kick_poll_value")
+        if kick_poll_value is not None and (
+            isinstance(kick_poll_value, bool)
+            or not isinstance(kick_poll_value, (int, float))
+            or not math.isfinite(kick_poll_value)
+            or kick_poll_value <= 0
+        ):
+            raise PolicyRefused(f"kick_ledger_entry_invalid: {label}: last_kick_poll_value")
+        kick_poll_digest = entry.get("last_kick_poll_digest")
+        if kick_poll_digest is not None and (
+            not isinstance(kick_poll_digest, str) or not _HEX64_RE.match(kick_poll_digest)
+        ):
+            raise PolicyRefused(f"kick_ledger_entry_invalid: {label}: last_kick_poll_digest")
     return ledger
 
 
@@ -465,15 +604,32 @@ def save_kick_ledger(home: Path, ledger: Mapping[str, Any]) -> None:
     os.chmod(path, 0o600)
 
 
-def _record_kick(ledger: dict[str, Any], label: str, now: float) -> None:
+def _record_kick(
+    ledger: dict[str, Any],
+    label: str,
+    now: float,
+    *,
+    poll_value: float | None = None,
+    poll_digest: str | None = None,
+) -> None:
+    """Record one kick. For a first-party CLI-poll kick the payload
+    provenance (accepted last-seen value + stdout digest) is recorded so the
+    NEXT stale verdict on byte-identical evidence is classified as replayed
+    consumed evidence instead of authorizing again. File-mtime kicks record
+    no provenance and keep the exact legacy entry shape."""
     seats = ledger["seats"]
     entry = seats.get(label) or {}
     prior = entry.get("consecutive_kicks") or 0
-    seats[label] = {
+    recorded: dict[str, Any] = {
         "last_kick_at": now,
         "consecutive_kicks": prior + 1,
         "fresh_heartbeat_witnessed_since_kick": False,
     }
+    if poll_value is not None:
+        recorded["last_kick_poll_value"] = float(poll_value)
+    if poll_digest is not None:
+        recorded["last_kick_poll_digest"] = str(poll_digest)
+    seats[label] = recorded
 
 
 def _witness_recovery(ledger: dict[str, Any], label: str) -> None:
@@ -494,15 +650,23 @@ def run_pass(
     *,
     now: float,
     recover: bool = True,
+    poll_runner: Any = None,
 ) -> PassReport:
     """Single bounded health pass over exactly the five qualified labels.
 
     The pass tolerates a manifest past its one-day attestation bound (B1):
     trust is then re-derived from live host state per seat, and any seat
     whose live identity no longer matches the pinned manifest is ALERT ONLY
-    for this pass. Mutation paths never receive this leniency."""
+    for this pass. Mutation paths never receive this leniency.
+
+    ``poll_runner`` is the injectable first-party CLI control-plane-poll
+    seam (default: the real bounded runner); it is invoked ONLY for seats
+    whose manifest qualifies the strictly typed CLI-poll heartbeat mode, and
+    only when a launchd-proven PID is present — a missing PID recovers
+    through the launchd-proven route without any poll."""
     home = Path(home)
     report = PassReport(started_at=now)
+    poll_runner = poll_runner if poll_runner is not None else control_plane_poll_runner
     try:
         manifest = load_manifest(home, now=now, allow_stale_revalidation=True)
     except (PolicyRefused, IdentityRejected) as refused:
@@ -576,12 +740,48 @@ def run_pass(
     for label in sorted(TUNNEL_LABELS):
         entry = manifest["seats"][label]
         seat_uid = int(entry["uid"])
-        heartbeat_path = entry.get("heartbeat_path")
+        heartbeat_mode = entry.get("heartbeat_mode") or HEARTBEAT_MODE_FILE_MTIME
+        cli_poll = heartbeat_mode == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL
         heartbeat_attested = bool(entry.get("heartbeat_kind"))
-        heartbeat_age = read_heartbeat_age(heartbeat_path, now) if heartbeat_path else None
+        # Qualified-evidence gate for EITHER mode (see classify_seat): a file
+        # path for the legacy mode, the profile + derived locator for the
+        # strictly typed CLI-poll mode.
+        evidence_recorded = (
+            bool(entry.get("heartbeat_profile_file")) and bool(entry.get("heartbeat_url_locator"))
+        ) if cli_poll else bool(entry.get("heartbeat_path"))
+        heartbeat_age: float | None = None
+        poll_refused_code: str | None = None
+        poll_replayed = False
+        accepted_poll_value: float | None = None
+        accepted_poll_digest: str | None = None
         # A rogue family member suspends per-seat recovery for this pass:
         # identity of the family itself is in question, so no kickstarts.
         pid = read_job_pid(runner, seat_uid, label) if not rogue else None
+        pid_proven_present = (
+            pid is not None
+            and not isinstance(pid, _PIDStateUnknown)
+            and label not in suspect_labels
+            and ledger is not None
+            and not rogue
+        )
+        if cli_poll and pid_proven_present:
+            # Read-only first-party probe (pinned executable + pinned
+            # locator only). Executed ONLY with a launchd-proven PID, a
+            # trusted ledger, and a non-suspect seat.
+            heartbeat_age, poll_refused_code, accepted_poll_value, accepted_poll_digest = cli_poll_evidence(
+                label, entry, seat_uid, poll_runner, now=now
+            )
+            if poll_refused_code is None:
+                # Replay check against the provenance recorded at the last
+                # evidence-authorized kick: byte-identical consumed evidence
+                # may not authorize another kick or witness freshness.
+                prior_kick_entry = ledger["seats"].get(label) or {}
+                poll_replayed = (
+                    prior_kick_entry.get("last_kick_poll_value") == accepted_poll_value
+                    and prior_kick_entry.get("last_kick_poll_digest") == accepted_poll_digest
+                )
+        elif not cli_poll and entry.get("heartbeat_path"):
+            heartbeat_age = read_heartbeat_age(entry["heartbeat_path"], now)
         if label in suspect_labels:
             state, may_kick = ST_IDENTITY_SUSPECT, False
         elif pid is PID_STATE_UNKNOWN:
@@ -595,10 +795,10 @@ def run_pass(
         else:
             seat_entry = ledger["seats"].get(label) or {}
             state, may_kick = classify_seat(
-                qualified=bool(heartbeat_path) and not rogue,
+                qualified=evidence_recorded and not rogue,
                 pid=pid,
                 heartbeat_age=heartbeat_age,
-                heartbeat_path_recorded=bool(heartbeat_path),
+                heartbeat_path_recorded=evidence_recorded,
                 heartbeat_attested=heartbeat_attested,
                 last_kick_at=seat_entry.get("last_kick_at"),
                 consecutive_kicks=int(seat_entry.get("consecutive_kicks") or 0),
@@ -606,6 +806,9 @@ def run_pass(
                     seat_entry.get("fresh_heartbeat_witnessed_since_kick")
                 ),
                 now=now,
+                heartbeat_mode=heartbeat_mode,
+                poll_refused_code=poll_refused_code,
+                poll_replayed=poll_replayed,
             )
         acted = False
         kick_forced = False
@@ -616,7 +819,13 @@ def run_pass(
                 if result.returncode == 0:
                     acted = True
                     kick_forced = state == ST_STALE_HEARTBEAT
-                    _record_kick(ledger, label, now)
+                    _record_kick(
+                        ledger,
+                        label,
+                        now,
+                        poll_value=accepted_poll_value if cli_poll else None,
+                        poll_digest=accepted_poll_digest if cli_poll else None,
+                    )
                 else:
                     report.alerts.append(
                         Alert("kickstart_failed", label, f"rc={result.returncode}", acted=True)
@@ -624,15 +833,23 @@ def run_pass(
             except ActionRefused as refused:
                 report.alerts.append(Alert("kickstart_refused", label, str(refused), acted=True))
         if state == ST_HEALTHY and ledger is not None:
+            # A replayed payload never reaches ST_HEALTHY, so consumed
+            # evidence can never reset the escalation ladder here.
             _witness_recovery(ledger, label)
         seats[label] = {
             "pid": None if isinstance(pid, _PIDStateUnknown) else pid,
             "heartbeat_age_seconds": None if heartbeat_age is None else int(heartbeat_age),
             "state": state,
+            "heartbeat_mode": heartbeat_mode,
             "heartbeat_attested": heartbeat_attested,
             "kickstarted": acted,
             "kickstarted_forced": kick_forced,
         }
+        if cli_poll:
+            # Stable refusal code and replay flag only — never a URL,
+            # profile path, locator, or any payload content.
+            seats[label]["poll_refused_code"] = poll_refused_code or ""
+            seats[label]["poll_evidence_replayed"] = poll_replayed
         report.alerts.extend(
             alert for alert in _seat_alerts(state, label) if alert.code not in {a.code for a in report.alerts if a.label == label}
         )
@@ -646,6 +863,24 @@ def run_pass(
 def _seat_alerts(state: str, label: str) -> list[Alert]:
     if state == ST_HEARTBEAT_MISSING:
         return [Alert(ST_HEARTBEAT_MISSING, label)]
+    if state == ST_CLI_POLL_UNPROVEN:
+        return [
+            Alert(
+                ST_CLI_POLL_UNPROVEN,
+                label,
+                "first-party control-plane poll evidence was refused or ambiguous this pass "
+                "(stable per-seat refusal code in the pass report); NO action, fail closed",
+            )
+        ]
+    if state == ST_POLL_EVIDENCE_REPLAYED:
+        return [
+            Alert(
+                ST_POLL_EVIDENCE_REPLAYED,
+                label,
+                "byte-identical poll evidence to the last kick's recorded provenance; "
+                "consumed evidence may not authorize another kick or witness freshness",
+            )
+        ]
     if state == ST_ESCALATED:
         return [Alert(ST_ESCALATED, label, "repeated kicks without a fresh heartbeat")]
     if state == ST_LAUNCHD_UNCERTAIN:
@@ -1148,6 +1383,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         REPAIR_MISSING,
         ST_ESCALATED,
         ST_HEARTBEAT_MISSING,
+        ST_CLI_POLL_UNPROVEN,
+        ST_POLL_EVIDENCE_REPLAYED,
         ST_STALE_HEARTBEAT_UNPROVEN,
         ST_IDENTITY_SUSPECT,
         ST_LAUNCHD_UNCERTAIN,

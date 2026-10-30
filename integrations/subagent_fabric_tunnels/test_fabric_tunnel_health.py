@@ -1628,5 +1628,432 @@ class WatchdogRollbackCompletionTests(unittest.TestCase):
             )))
 
 
+# ---------------------------------------------------------------------------
+# First-party CLI control-plane-poll mode (strictly typed FTR-3 heartbeat).
+# ---------------------------------------------------------------------------
+
+SECRET_URL = "https://control-plane.example.invalid/lastseen"
+
+
+def ok_poll_payload(value: float) -> str:
+    return json.dumps({
+        "result": "ok",
+        "healthz": {"ok": True},
+        "readyz": {"ok": True},
+        "control_plane_poll": {"ok": True, "value": value},
+    })
+
+
+class FakePollRunner:
+    """Injectable control-plane-poll seam keyed by seat label (derived from
+    the fixture executable basename). Records every argv; executes nothing."""
+
+    def __init__(self, payloads: dict[str, str] | None = None, default_value: float | None = None):
+        self.payloads = dict(payloads or {})
+        self.default_value = NOW - 8 if default_value is None else default_value
+        self.calls: list[tuple[str, tuple[str, ...], float]] = []
+
+    def __call__(self, argv, timeout=5.0):
+        seat = os.path.basename(argv[0]).replace("tunnel-", "")
+        label = ftc.TUNNEL_LABEL_PREFIX + seat
+        self.calls.append((label, tuple(argv), float(timeout)))
+        stdout = self.payloads.get(label, ok_poll_payload(self.default_value))
+        return ftc.RunResult(tuple(argv), 0, stdout, "")
+
+    def labels_polled(self) -> set[str]:
+        return {label for label, _argv, _timeout in self.calls}
+
+
+class FixtureHomeCli(FixtureHome):
+    """FixtureHome qualified for the strictly typed CLI-poll heartbeat mode
+    on all five seats: strictly distinct bounded profiles and locators, one
+    live probe per seat at qualification (injected fake)."""
+
+    def __init__(self):
+        self.poll = FakePollRunner()
+        self.profile_paths: dict[str, str] = {}
+        self.locator_paths: dict[str, str] = {}
+        super().__init__()
+
+    def _ensure_poll_evidence_files(self) -> None:
+        for label in sorted(ftc.TUNNEL_LABELS):
+            if label in self.profile_paths:
+                continue
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            seat_dir = os.path.join(self.home, "clients", seat)
+            os.makedirs(seat_dir, mode=0o755, exist_ok=True)
+            locator = os.path.join(seat_dir, f"{seat}-control-plane.url")
+            with open(locator, "wb") as handle:
+                handle.write((SECRET_URL + "\n").encode())
+            os.chmod(locator, 0o600)
+            profile = os.path.join(seat_dir, "profile.json")
+            with open(profile, "wb") as handle:
+                handle.write(json.dumps({"seat": seat, "health": {"url_file": locator}}).encode())
+            os.chmod(profile, 0o600)
+            self.profile_paths[label] = profile
+            self.locator_paths[label] = locator
+
+    def write_profile(self, label: str, doc: dict) -> None:
+        with open(self.profile_paths[label], "wb") as handle:
+            handle.write(json.dumps(doc).encode())
+        os.chmod(self.profile_paths[label], 0o600)
+
+    def set_poll_payload(self, label: str, stdout: str) -> None:
+        self.poll.payloads[label] = stdout
+
+    def qualify(self):
+        self._ensure_poll_evidence_files()
+        facts = {
+            "seats": {
+                label: {
+                    "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+                    "heartbeat_profile_file": self.profile_paths[label],
+                    "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+                    "heartbeat_proof_note": "fixture: per-seat profile health.url_file and a live control_plane_poll probe",
+                }
+                for label in sorted(ftc.TUNNEL_LABELS)
+            },
+            "host": {
+                "native_store_path": self.native_store,
+                "host_pull_telemetry_dir": self.telemetry_dir,
+                "host_pull_telemetry_files": list(self.telemetry_files),
+                "pinned_generation": GEN_PINNED,
+                "stale_telemetry_seconds": 900,
+                "repair": {
+                    "source_commit": "fixture-merged-source",
+                    "files": {REPAIR_FILE: self.repair_digest},
+                },
+            },
+        }
+        fti.qualify_install(
+            self.home, uid=UID, facts=facts, operator_confirmed=True, now=NOW,
+            poll_runner=lambda argv, timeout=5.0: ftc.RunResult(tuple(argv), 0, ok_poll_payload(NOW - 8), ""),
+        )
+
+    def swap_seat_to_file_mode(self, label: str) -> None:
+        """Rewrite one seat's manifest entry back to the legacy file-mtime
+        shape (same heartbeat file the base fixture created)."""
+        path = fti.manifest_path(self.home)
+        with open(path, encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        entry = manifest["seats"][label]
+        for field in ("heartbeat_mode", "heartbeat_profile_file", "heartbeat_url_locator"):
+            entry.pop(field, None)
+        entry["heartbeat_path"] = self.heartbeat_paths[label]
+        entry["heartbeat_kind"] = "tunnel-client-control-plane-last-seen"
+        entry["heartbeat_proof_note"] = "fixture: file mtime correlated by operator"
+        fti.write_manifest(self.home, manifest)
+
+
+class CliPollClassifyTests(unittest.TestCase):
+    """Pure classification: age boundaries, refusal dominance, replay gate."""
+
+    def _classify(self, **overrides):
+        kwargs = {
+            "qualified": True,
+            "pid": 4242,
+            "heartbeat_age": 8.0,
+            "heartbeat_path_recorded": True,
+            "heartbeat_attested": True,
+            "last_kick_at": None,
+            "consecutive_kicks": 0,
+            "fresh_heartbeat_witnessed_since_kick": False,
+            "now": NOW,
+            "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+        }
+        kwargs.update(overrides)
+        return fth.classify_seat(**kwargs)
+
+    def test_healthy_poll_ages_zero_299_and_300(self):
+        for age in (0.0, 299.0, 300.0):
+            state, may_kick = self._classify(heartbeat_age=age)
+            self.assertEqual((state, may_kick), (fth.ST_HEALTHY, False), age)
+
+    def test_stale_poll_age_301_authorizes_forced_kick(self):
+        state, may_kick = self._classify(heartbeat_age=301.0)
+        self.assertEqual((state, may_kick), (fth.ST_STALE_HEARTBEAT, True))
+
+    def test_refused_poll_dominates_staleness(self):
+        state, may_kick = self._classify(heartbeat_age=None, poll_refused_code="cli_poll_nonzero_rc")
+        self.assertEqual((state, may_kick), (fth.ST_CLI_POLL_UNPROVEN, False))
+        state, may_kick = self._classify(heartbeat_age=90000.0, poll_refused_code="cli_poll_timeout")
+        self.assertEqual((state, may_kick), (fth.ST_CLI_POLL_UNPROVEN, False))
+
+    def test_replayed_evidence_never_kicks_or_witnesses_even_when_fresh(self):
+        for age in (8.0, 301.0, 90000.0):
+            state, may_kick = self._classify(heartbeat_age=age, poll_replayed=True)
+            self.assertEqual((state, may_kick), (fth.ST_POLL_EVIDENCE_REPLAYED, False), age)
+
+    def test_file_mode_ignores_poll_flags(self):
+        state, may_kick = fth.classify_seat(
+            qualified=True,
+            pid=4242,
+            heartbeat_age=900.0,
+            heartbeat_path_recorded=True,
+            heartbeat_attested=True,
+            last_kick_at=None,
+            consecutive_kicks=0,
+            fresh_heartbeat_witnessed_since_kick=False,
+            now=NOW,
+            poll_refused_code="cli_poll_nonzero_rc",
+            poll_replayed=True,
+        )
+        self.assertEqual((state, may_kick), (fth.ST_STALE_HEARTBEAT, True))
+
+
+class CliPollPassTests(unittest.TestCase):
+    """End-to-end bounded pass with the first-party CLI-poll evidence."""
+
+    def _pass(self, fixture, runner, now, **kwargs):
+        """One pass with the fixture's injectable poll runner bound."""
+        return fth.run_pass(fixture.home, runner, now=now, poll_runner=fixture.poll, **kwargs)
+
+    def test_healthy_pass_polls_all_five_like_m2_and_kicks_nothing(self):
+        with FixtureHomeCli() as fixture:
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW + 30)
+            self.assertEqual(runner.kicks, [])
+            self.assertEqual(fixture.poll.labels_polled(), set(ftc.TUNNEL_LABELS))
+            self.assertEqual(len(fixture.poll.calls), 5)
+            manifest = json.loads(fti.manifest_path(fixture.home).read_text(encoding="utf-8"))
+            for label, seat in report.seats.items():
+                self.assertEqual(seat["state"], fth.ST_HEALTHY, label)
+                self.assertEqual(seat["heartbeat_mode"], ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL)
+                self.assertEqual(seat["poll_refused_code"], "")
+                self.assertFalse(seat["poll_evidence_replayed"])
+                self.assertEqual(seat["heartbeat_age_seconds"], 38, label)  # NOW-8 at now=NOW+30
+            for label, argv, timeout in fixture.poll.calls:
+                entry = manifest["seats"][label]
+                self.assertEqual(timeout, ftc.CLI_POLL_TIMEOUT_SECONDS)
+                self.assertEqual(list(argv), [
+                    entry["executable"], "health", "--url-file", fixture.locator_paths[label],
+                    "--require-control-plane-poll", "--json",
+                ])
+
+    def test_boundary_ages_across_five_seats(self):
+        with FixtureHomeCli() as fixture:
+            fixture.set_poll_payload(ftc.TUNNEL_LABEL_PREFIX + "c1", ok_poll_payload(NOW))            # age 0
+            fixture.set_poll_payload(ftc.TUNNEL_LABEL_PREFIX + "c2-business", ok_poll_payload(NOW - 299))
+            fixture.set_poll_payload(ftc.TUNNEL_LABEL_PREFIX + "c2-personal", ok_poll_payload(NOW - 300))
+            fixture.set_poll_payload(ftc.TUNNEL_LABEL_PREFIX + "c3", ok_poll_payload(NOW - 301))      # stale
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW)
+            states = {label: seat["state"] for label, seat in report.seats.items()}
+            c3 = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            self.assertEqual(states[c3], fth.ST_STALE_HEARTBEAT)
+            for label in set(states) - {c3}:
+                self.assertEqual(states[label], fth.ST_HEALTHY, label)
+            self.assertEqual([(label, forced) for label, forced in runner.kicks], [(c3, True)])
+
+    def test_profile_locator_drift_is_fail_closed_without_poll_or_kick(self):
+        with FixtureHomeCli() as fixture:
+            c3 = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            moved = os.path.join(fixture.home, "clients", "c3", "moved.url")
+            with open(moved, "wb") as handle:
+                handle.write((SECRET_URL + "\n").encode())
+            os.chmod(moved, 0o600)
+            fixture.write_profile(c3, {"health": {"url_file": moved}})
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW + 30)
+            self.assertEqual(report.seats[c3]["state"], fth.ST_CLI_POLL_UNPROVEN)
+            self.assertEqual(report.seats[c3]["poll_refused_code"], "cli_poll_profile_locator_changed")
+            self.assertNotIn(c3, fixture.poll.labels_polled())  # never executed
+            self.assertNotIn(c3, [label for label, _f in runner.kicks])
+            self.assertIn(fth.ST_CLI_POLL_UNPROVEN, [a.code for a in report.alerts])
+
+    def test_executable_digest_drift_is_fail_closed_without_poll(self):
+        with FixtureHomeCli() as fixture:
+            c3 = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            executable = os.path.join(fixture.home, "clients", "tunnel-c3")
+            with open(executable, "ab") as handle:
+                handle.write(b"# drifted\n")
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW + 30)
+            self.assertEqual(report.seats[c3]["state"], fth.ST_CLI_POLL_UNPROVEN)
+            self.assertEqual(report.seats[c3]["poll_refused_code"], "cli_poll_executable_digest_changed")
+            self.assertNotIn(c3, fixture.poll.labels_polled())
+
+    def test_missing_locator_falls_back_to_unqualified_not_a_guess(self):
+        with FixtureHomeCli() as fixture:
+            c4 = ftc.TUNNEL_LABEL_PREFIX + "c4"
+            path = fti.manifest_path(fixture.home)
+            with open(path, encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            del manifest["seats"][c4]["heartbeat_url_locator"]
+            fti.write_manifest(fixture.home, manifest)
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW + 30)
+            self.assertEqual(report.seats[c4]["state"], fth.ST_UNQUALIFIED)
+            self.assertNotIn(c4, fixture.poll.labels_polled())
+            self.assertEqual(runner.kicks, [])
+
+    def test_missing_pid_recovers_via_launchd_route_without_any_poll(self):
+        with FixtureHomeCli() as fixture:
+            c1 = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            pids = all_pids()
+            pids[c1] = None
+            runner = FakeRunner(pids)
+            report = self._pass(fixture, runner, NOW + 30)
+            self.assertEqual(report.seats[c1]["state"], fth.ST_MISSING_PID)
+            self.assertTrue(report.seats[c1]["kickstarted"])
+            self.assertNotIn(c1, fixture.poll.labels_polled())
+            ledger = fth.load_kick_ledger(fixture.home)
+            entry = ledger["seats"][c1]
+            self.assertEqual(entry["consecutive_kicks"], 1)
+            self.assertNotIn("last_kick_poll_value", entry)  # legacy kick shape
+            self.assertNotIn("last_kick_poll_digest", entry)
+
+    def test_launchd_state_unknown_is_alert_only_without_poll(self):
+        with FixtureHomeCli() as fixture:
+            c1 = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            runner = FakeRunner(all_pids(), print_fail={c1: (4, "", "transport error")})
+            report = self._pass(fixture, runner, NOW + 30)
+            self.assertEqual(report.seats[c1]["state"], fth.ST_LAUNCHD_UNCERTAIN)
+            self.assertNotIn(c1, fixture.poll.labels_polled())
+            self.assertEqual(runner.kicks, [])
+
+    def test_stale_kick_records_provenance_then_replay_blocks_second_kick(self):
+        with FixtureHomeCli() as fixture:
+            c2b = ftc.TUNNEL_LABEL_PREFIX + "c2-business"
+            stale_stdout = ok_poll_payload(NOW - 301)
+            fixture.set_poll_payload(c2b, stale_stdout)
+            runner = FakeRunner(all_pids())
+            first = self._pass(fixture, runner, NOW)
+            self.assertEqual(first.seats[c2b]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertTrue(first.seats[c2b]["kickstarted"])
+            ledger = fth.load_kick_ledger(fixture.home)
+            entry = ledger["seats"][c2b]
+            self.assertEqual(entry["last_kick_poll_value"], NOW - 301)
+            self.assertEqual(entry["last_kick_poll_digest"], hashlib.sha256(stale_stdout.encode()).hexdigest())
+            # Keep the OTHER seats' evidence fresh as the clock advances, so
+            # only c2-business is under test.
+            fixture.poll.default_value = NOW + ftc.KICKSTART_COOLDOWN_SECONDS + 1 - 8
+            # Same consumed evidence after the cooldown: replayed, NO kick.
+            second = self._pass(fixture, runner, NOW + ftc.KICKSTART_COOLDOWN_SECONDS + 1)
+            self.assertEqual(second.seats[c2b]["state"], fth.ST_POLL_EVIDENCE_REPLAYED)
+            self.assertEqual(len(runner.kicks), 1)
+            ledger = fth.load_kick_ledger(fixture.home)
+            self.assertEqual(ledger["seats"][c2b]["consecutive_kicks"], 1)
+            self.assertFalse(ledger["seats"][c2b]["fresh_heartbeat_witnessed_since_kick"])
+            # The client's last-seen ADVANCES (new payload bytes): kick again.
+            fixture.set_poll_payload(c2b, ok_poll_payload(NOW + ftc.KICKSTART_COOLDOWN_SECONDS - 301))
+            third = self._pass(fixture, runner, NOW + ftc.KICKSTART_COOLDOWN_SECONDS + 2)
+            self.assertEqual(third.seats[c2b]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertEqual(len(runner.kicks), 2)
+
+    def test_escalation_limit_and_no_fourth_kick_with_advancing_payloads(self):
+        with FixtureHomeCli() as fixture:
+            c4 = ftc.TUNNEL_LABEL_PREFIX + "c4"
+            ledger = fth.load_kick_ledger(fixture.home)
+            ledger["seats"][c4] = {
+                "last_kick_at": NOW - ftc.KICKSTART_COOLDOWN_SECONDS - 10,
+                "consecutive_kicks": 3,
+                "fresh_heartbeat_witnessed_since_kick": False,
+            }
+            fth.save_kick_ledger(fixture.home, ledger)
+            fixture.set_poll_payload(c4, ok_poll_payload(NOW - 900))
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW)
+            self.assertEqual(report.seats[c4]["state"], fth.ST_ESCALATED)
+            self.assertEqual(runner.kicks, [])
+            # One genuinely fresh poll later, recovery is released again.
+            fixture.set_poll_payload(c4, ok_poll_payload(NOW - 8))
+            report = self._pass(fixture, runner, NOW + 1)
+            self.assertEqual(report.seats[c4]["state"], fth.ST_HEALTHY)
+            ledger = fth.load_kick_ledger(fixture.home)
+            self.assertEqual(ledger["seats"][c4]["consecutive_kicks"], 0)
+            self.assertTrue(ledger["seats"][c4]["fresh_heartbeat_witnessed_since_kick"])
+
+    def test_cooldown_suppresses_second_stale_kick_for_advancing_evidence(self):
+        with FixtureHomeCli() as fixture:
+            c2p = ftc.TUNNEL_LABEL_PREFIX + "c2-personal"
+            fixture.set_poll_payload(c2p, ok_poll_payload(NOW - 301))
+            runner = FakeRunner(all_pids())
+            first = self._pass(fixture, runner, NOW)
+            self.assertTrue(first.seats[c2p]["kickstarted"])
+            # Advance the evidence (new payload bytes, still stale) WITHIN the
+            # cooldown: the persisted cooldown suppresses the second kick.
+            fixture.set_poll_payload(c2p, ok_poll_payload(NOW + 60 - 301))
+            second = self._pass(fixture, runner, NOW + 60)
+            self.assertEqual(second.seats[c2p]["state"], fth.ST_COOLDOWN)
+            self.assertEqual(len(runner.kicks), 1)
+
+    def test_mixed_modes_recover_independently_in_one_pass(self):
+        with FixtureHomeCli() as fixture:
+            c1 = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            c2b = ftc.TUNNEL_LABEL_PREFIX + "c2-business"
+            fixture.swap_seat_to_file_mode(c2b)
+            fixture.touch_heartbeat(c2b, NOW - 900)  # legacy file-mtime stale
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW)
+            self.assertEqual(report.seats[c1]["heartbeat_mode"], ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL)
+            self.assertEqual(report.seats[c1]["state"], fth.ST_HEALTHY)
+            self.assertEqual(report.seats[c2b]["heartbeat_mode"], ftc.HEARTBEAT_MODE_FILE_MTIME)
+            self.assertEqual(report.seats[c2b]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertEqual([label for label, _f in runner.kicks], [c2b])
+            self.assertNotIn(c2b, fixture.poll.labels_polled())
+
+    def test_reports_and_alerts_never_leak_url_profile_locator_or_payload(self):
+        with FixtureHomeCli() as fixture:
+            c1 = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            fixture.set_poll_payload(c1, ok_poll_payload(NOW - 301))
+            c3 = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            fixture.set_poll_payload(c3, "BOOM not json")
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW)
+            blob = json.dumps(report.as_dict())
+            self.assertNotIn(SECRET_URL, blob)
+            self.assertNotIn("control-plane.url", blob)
+            self.assertNotIn("profile.json", blob)
+            self.assertNotIn('"result"', blob)
+            self.assertNotIn('"healthz"', blob)
+            self.assertNotIn("BOOM", blob)
+
+    def test_observe_only_polls_but_never_kicks(self):
+        with FixtureHomeCli() as fixture:
+            c1 = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            fixture.set_poll_payload(c1, ok_poll_payload(NOW - 301))
+            runner = FakeRunner(all_pids())
+            report = self._pass(fixture, runner, NOW, recover=False)
+            self.assertEqual(report.seats[c1]["state"], fth.ST_STALE_HEARTBEAT)
+            self.assertEqual(runner.kicks, [])
+
+
+class CliPollLedgerTests(unittest.TestCase):
+    """Persisted ledger validates the new kick-provenance fields fail-closed."""
+
+    def _seed(self, fixture, entry_overrides: dict) -> None:
+        ledger = fth.load_kick_ledger(fixture.home)
+        ledger["seats"][ftc.TUNNEL_LABEL_PREFIX + "c1"] = {
+            "last_kick_at": NOW - 10,
+            "consecutive_kicks": 1,
+            "fresh_heartbeat_witnessed_since_kick": False,
+            **entry_overrides,
+        }
+        fth.save_kick_ledger(fixture.home, ledger)
+
+    def test_valid_provenance_loads(self):
+        with FixtureHomeCli() as fixture:
+            self._seed(fixture, {
+                "last_kick_poll_value": NOW - 400.0,
+                "last_kick_poll_digest": hashlib.sha256(b"payload").hexdigest(),
+            })
+            entry = fth.load_kick_ledger(fixture.home)["seats"][ftc.TUNNEL_LABEL_PREFIX + "c1"]
+            self.assertEqual(entry["last_kick_poll_value"], NOW - 400.0)
+
+    def test_nonfinite_or_nonpositive_or_typed_provenance_refused(self):
+        for bad in ("not-a-number", True, 0, -5.0, float("nan"), float("inf")):
+            with FixtureHomeCli() as fixture:
+                self._seed(fixture, {"last_kick_poll_value": bad})
+                with self.assertRaises(ftc.PolicyRefused):
+                    fth.load_kick_ledger(fixture.home)
+
+    def test_bad_digest_shape_refused(self):
+        with FixtureHomeCli() as fixture:
+            self._seed(fixture, {"last_kick_poll_digest": "zz-not-hex"})
+            with self.assertRaises(ftc.PolicyRefused):
+                fth.load_kick_ledger(fixture.home)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -33,12 +33,16 @@ in hermetic tests and in the installed watchdog copy without the repo.
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import os
 import plistlib
 import re
+import select
 import stat
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -107,6 +111,45 @@ MAX_TELEMETRY_FILES = 32
 # reads: a qualified telemetry/fact relative path never exceeds this length.
 MAX_TUNNEL_RELATIVE_PATH = 512
 
+# ---------------------------------------------------------------------------
+# First-party CLI control-plane-poll heartbeat (strictly typed FTR-3 mode).
+#
+# The FILE-mtime heartbeat mode above stays exactly as qualified; this mode is
+# the stronger first-party proof: per pass, the seat's OWN qualified
+# tunnel-client binary is invoked READ-ONLY as
+#   <qualified executable> health --url-file <qualified locator>
+#       --require-control-plane-poll --json
+# and the numeric ``control_plane_poll.value`` (Unix seconds of the client's
+# last successful control-plane poll) becomes the last-seen signal. Every
+# bound here is a fail-closed limit: nothing outside them may authorize a
+# kickstart, and no URL, profile, locator, or raw payload is ever printed.
+# ---------------------------------------------------------------------------
+
+HEARTBEAT_MODE_FILE_MTIME = "file_mtime_attested"
+HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL = "first_party_cli_control_plane_poll"
+# Closed mode set: any other spelling is refused at qualification, never
+# guessed into a behavior.
+TUNNEL_HEARTBEAT_MODES: frozenset[str] = frozenset({
+    HEARTBEAT_MODE_FILE_MTIME,
+    HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+})
+# Strict per-seat probe deadline. A hanging or wedged child can never stretch
+# the bounded pass; the probe is killed and the evidence refused.
+CLI_POLL_TIMEOUT_SECONDS = 5.0
+# stdout and stderr are EACH hard-capped: past either cap the child is killed
+# and the partial output is discarded (truncated evidence may not authorize
+# anything). Applied twice: the real runner enforces it while reading, and
+# payload validation re-asserts it so an injected/fake runner cannot sneak an
+# oversized payload through.
+CLI_POLL_MAX_OUTPUT_BYTES = 16384
+# The qualified profile and URL-locator files are bounded reads; a larger or
+# growing file is not a config file this integration may parse.
+CLI_POLL_MAX_PROFILE_BYTES = 16384
+# Clock-skew tolerance: a poll value slightly ahead of local time clamps to a
+# fresh age of zero (fresh evidence authorizes nothing), while a value further
+# ahead than this is future garbage and refuses the whole payload.
+CLI_POLL_FUTURE_SKEW_SECONDS = 300.0
+
 LAUNCHCTL = "/bin/launchctl"
 
 IDENTITY_MANIFEST_SCHEMA = "mastermind.subagent-fabric-tunnels.identity-manifest.v1"
@@ -160,6 +203,9 @@ class RunResult:
     stdout: str
     stderr: str
     timed_out: bool = False
+    # True when a bounded reader killed the child because an output stream
+    # exceeded its cap; the partial output is then discarded, never parsed.
+    truncated: bool = False
 
 
 def subprocess_runner(argv: Sequence[str], timeout: float = 10.0) -> RunResult:
@@ -178,6 +224,190 @@ def subprocess_runner(argv: Sequence[str], timeout: float = 10.0) -> RunResult:
         return RunResult(argv, proc.returncode, proc.stdout or "", proc.stderr or "")
     except subprocess.TimeoutExpired:
         return RunResult(argv, 124, "", "", timed_out=True)
+
+
+# ---------------------------------------------------------------------------
+# First-party CLI control-plane-poll seam. The payload validator is pure and
+# shared by qualification (one probe at qualify time) and every health pass;
+# the real runner below is the only process-spawning implementation and is
+# injectable in hermetic tests exactly like the launchctl runner.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ControlPlanePollVerdict:
+    """Typed outcome of :func:`validate_control_plane_poll_payload`.
+
+    ``ok`` is True only for the exact known-good shape; ``reason`` is a
+    stable refusal code (never payload content, never a URL or profile
+    value); ``value`` is the accepted absolute Unix-seconds last-seen and
+    ``age_seconds`` the derived ``now - value`` (a value within the future
+    skew clamps to a fresh zero, because fresh evidence authorizes nothing).
+    """
+
+    ok: bool
+    reason: str = ""
+    value: float | None = None
+    age_seconds: float | None = None
+
+
+def validate_control_plane_poll_payload(
+    stdout: str,
+    stderr: str,
+    returncode: int,
+    *,
+    now: float,
+    timed_out: bool = False,
+    truncated: bool = False,
+) -> ControlPlanePollVerdict:
+    """Strictly validate one control-plane-poll payload, failing closed.
+
+    Only the exact known-good shape may pass: rc 0, bounded stdout+stderr,
+    JSON object with ``result == "ok"``, ``healthz.ok is True``,
+    ``readyz.ok is True``, and ``control_plane_poll.ok is True`` carrying a
+    finite positive numeric Unix-seconds ``value`` not further ahead of
+    ``now`` than the future skew. Malformed, missing, oversized, false-flag
+    (any ``ok`` that is not the boolean True), non-positive, or
+    future-beyond-skew payloads refuse with a stable code; refusals never
+    authorize a kickstart and never echo payload content.
+    """
+    refused = lambda code: ControlPlanePollVerdict(False, code)  # noqa: E731 - local guard
+    if timed_out:
+        return refused("cli_poll_timeout")
+    if truncated:
+        return refused("cli_poll_output_oversized")
+    if len(stdout.encode("utf-8", "replace")) > CLI_POLL_MAX_OUTPUT_BYTES:
+        return refused("cli_poll_output_oversized")
+    if len(stderr.encode("utf-8", "replace")) > CLI_POLL_MAX_OUTPUT_BYTES:
+        return refused("cli_poll_output_oversized")
+    if returncode != 0:
+        return refused("cli_poll_nonzero_rc")
+    try:
+        doc = json.loads(stdout)
+    except ValueError:
+        return refused("cli_poll_malformed_json")
+    if not isinstance(doc, dict):
+        return refused("cli_poll_malformed_json")
+    if doc.get("result") != "ok" or isinstance(doc.get("result"), bool):
+        return refused("cli_poll_result_not_ok")
+    healthz = doc.get("healthz")
+    if not isinstance(healthz, dict) or healthz.get("ok") is not True:
+        return refused("cli_poll_healthz_not_ok")
+    readyz = doc.get("readyz")
+    if not isinstance(readyz, dict) or readyz.get("ok") is not True:
+        return refused("cli_poll_readyz_not_ok")
+    poll = doc.get("control_plane_poll")
+    if not isinstance(poll, dict) or poll.get("ok") is not True:
+        return refused("cli_poll_not_ok")
+    value = poll.get("value")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return refused("cli_poll_invalid_value")
+    value = float(value)
+    if value <= 0:
+        return refused("cli_poll_nonpositive_value")
+    if value - now > CLI_POLL_FUTURE_SKEW_SECONDS:
+        return refused("cli_poll_value_in_future")
+    age = now - value
+    if age < 0:
+        age = 0.0  # within-skew future: fresh evidence, authorizes nothing
+    return ControlPlanePollVerdict(True, "", value, age)
+
+
+def build_control_plane_poll_argv(executable: str, url_locator: str) -> list[str]:
+    """The EXACT read-only probe argv, asserted before any caller may use it.
+
+    Nothing else is ever executed for the first-party CLI heartbeat: no
+    shell, no extra flags, no executable or locator other than the qualified
+    ones this integration pins in the private manifest."""
+    argv = [str(executable), "health", "--url-file", str(url_locator),
+            "--require-control-plane-poll", "--json"]
+    if argv[0] != executable or not os.path.isabs(argv[0]) or argv[0] == LAUNCHCTL:
+        raise ActionRefused("control_plane_poll_argv_requires_absolute_qualified_executable")
+    if argv[1:] != ["health", "--url-file", url_locator,
+                    "--require-control-plane-poll", "--json"]:
+        raise ActionRefused("control_plane_poll_argv_shape_invalid")
+    return argv
+
+
+def control_plane_poll_runner(argv: Sequence[str], timeout: float = CLI_POLL_TIMEOUT_SECONDS) -> RunResult:
+    """Bounded read-only runner for the qualified tunnel-client health probe.
+
+    argv-list only, no shell, ``stdin`` detached, hard deadline, and both
+    output streams hard-capped at ``CLI_POLL_MAX_OUTPUT_BYTES``: past either
+    cap the child is killed, the partial output is discarded, and the result
+    is marked truncated so validation can never accept an oversized payload.
+    This seam is separate from :func:`subprocess_runner` — it refuses to run
+    launchctl, which refuses to run anything else — so no caller can cross
+    the two without an explicit, reviewed choice."""
+    argv = tuple(argv)
+    if (
+        not argv
+        or not os.path.isabs(argv[0])
+        or argv[0] == LAUNCHCTL
+        or any(not isinstance(part, str) for part in argv)
+    ):
+        raise ActionRefused("control_plane_poll_runner_requires_absolute_non_launchctl_argv")
+    deadline = time.monotonic() + max(0.05, float(timeout))
+    try:
+        proc = subprocess.Popen(  # noqa: S603 - qualified binary, list argv, no shell
+            list(argv),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            close_fds=True,
+        )
+    except OSError:
+        return RunResult(argv, 127, "", "", timed_out=False, truncated=False)
+    out_fd = proc.stdout.fileno()
+    err_fd = proc.stderr.fileno()
+    caps: dict[int, bytearray] = {out_fd: bytearray(), err_fd: bytearray()}
+    open_fds = [out_fd, err_fd]
+    truncated = False
+    timed_out = False
+    while open_fds:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
+        readable, _, _ = select.select(open_fds, [], [], min(remaining, 0.2))
+        for fd in readable:
+            try:
+                chunk = os.read(fd, 4096)
+            except OSError:
+                chunk = b""
+            if not chunk:
+                open_fds.remove(fd)
+                continue
+            buffer = caps[fd]
+            room = (CLI_POLL_MAX_OUTPUT_BYTES + 1) - len(buffer)
+            if room > 0:
+                buffer.extend(chunk[:room])
+            if len(buffer) > CLI_POLL_MAX_OUTPUT_BYTES:
+                truncated = True
+        if truncated:
+            break
+    if timed_out or truncated:
+        proc.kill()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:  # pragma: no cover - kill is best-effort
+        pass
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            stream.close()
+        except OSError:
+            pass
+    if timed_out:
+        return RunResult(argv, proc.returncode if proc.returncode is not None else -9,
+                         "", "", timed_out=True, truncated=False)
+    if truncated:
+        return RunResult(argv, proc.returncode if proc.returncode is not None else -9,
+                         "", "", timed_out=False, truncated=True)
+    stdout = bytes(caps[out_fd]).decode("utf-8", "replace")
+    stderr = bytes(caps[err_fd]).decode("utf-8", "replace")
+    returncode = proc.returncode if proc.returncode is not None else -9
+    return RunResult(argv, returncode, stdout, stderr, timed_out=False, truncated=False)
 
 
 # ---------------------------------------------------------------------------

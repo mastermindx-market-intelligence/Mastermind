@@ -733,5 +733,112 @@ class PreMutationCustodyTests(unittest.TestCase):
                 self.assertEqual(fixture.read_plist_bytes_raw(label), before[label])
 
 
+# ---------------------------------------------------------------------------
+# First-party CLI control-plane-poll qualification through the REAL CLI and
+# the REAL bounded runner (the probe child is a hermetic python script).
+# ---------------------------------------------------------------------------
+
+# ``{value}`` is substituted UNQUOTED by the probe child so the payload
+# carries a numeric Unix-seconds value, exactly like the verified CLI.
+CLI_PROBE_OK_TEMPLATE = (
+    '{"result": "ok", "healthz": {"ok": true}, "readyz": {"ok": true},'
+    ' "control_plane_poll": {"ok": true, "value": {value}}}'
+)
+CLI_PROBE_SECRET_URL = "https://control-plane.example.invalid/lastseen"
+
+
+class CliPollQualifyCommandTests(unittest.TestCase):
+    """The qualify CLI proves the poll evidence source with one REAL probe
+    per seat before writing the manifest; failures refuse with exit 3."""
+
+    def _install_probe_children(self, fixture, template: str) -> None:
+        script = (
+            f"#!{sys.executable}\n"
+            "import os, sys\n"
+            "now = float(os.environ['FTR_FIXTURE_NOW'])\n"
+            f"sys.stdout.write({template!r}.replace('{{value}}', str(int(now - 8))))\n"
+        )
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            executable = os.path.join(fixture.home, "clients", f"tunnel-{seat}")
+            with open(executable, "w", encoding="utf-8") as handle:
+                handle.write(script)
+            os.chmod(executable, 0o755)
+
+    def _write_cli_facts(self, fixture) -> str:
+        facts = {"seats": {}, "host": {}}
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            seat_dir = os.path.join(fixture.home, "clients", seat)
+            os.makedirs(seat_dir, mode=0o755, exist_ok=True)
+            locator = os.path.join(seat_dir, f"{seat}-control-plane.url")
+            with open(locator, "wb") as handle:
+                handle.write((CLI_PROBE_SECRET_URL + "\n").encode())
+            os.chmod(locator, 0o600)
+            profile = os.path.join(seat_dir, "profile.json")
+            with open(profile, "wb") as handle:
+                handle.write(json.dumps({"seat": seat, "health": {"url_file": locator}}).encode())
+            os.chmod(profile, 0o600)
+            facts["seats"][label] = {
+                "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+                "heartbeat_profile_file": profile,
+                "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+                "heartbeat_proof_note": "fixture: profile health.url_file plus a live control_plane_poll probe",
+            }
+        path = os.path.join(fixture.home, "facts.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(facts, handle)
+        os.chmod(path, 0o600)
+        return path
+
+    def test_qualify_with_real_probe_children_writes_private_manifest(self):
+        with FixtureHome() as fixture:
+            self._install_probe_children(fixture, CLI_PROBE_OK_TEMPLATE)
+            facts_path = self._write_cli_facts(fixture)
+            with unittest.mock.patch.dict(os.environ, {"FTR_FIXTURE_NOW": str(NOW)}):
+                with contextlib.redirect_stdout(io.StringIO()) as captured:
+                    rc = ins.main([
+                        "--home", fixture.home, "qualify", "--confirm",
+                        "--facts-file", facts_path, "--now", str(NOW),
+                    ])
+            self.assertEqual(rc, 0)
+            manifest_file = fti.manifest_path(fixture.home)
+            self.assertTrue(os.path.isfile(manifest_file))
+            self.assertEqual(stat.S_IMODE(os.stat(manifest_file).st_mode), 0o600)
+            doc = json.loads(manifest_file.read_text(encoding="utf-8"))
+            stdout = captured.getvalue()
+            for label in sorted(ftc.TUNNEL_LABELS):
+                entry = doc["seats"][label]
+                self.assertEqual(entry["heartbeat_mode"], ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL)
+                self.assertIn("heartbeat_url_locator", entry)
+            self.assertIn("heartbeat_cli_poll_seats=5", stdout)
+            # Secret-safety through the real CLI stdout surface.
+            self.assertNotIn(CLI_PROBE_SECRET_URL, stdout)
+            self.assertNotIn("profile.json", stdout)
+            self.assertNotIn("control-plane.url", stdout)
+            self.assertIn("heartbeat_path='<first-party-cli-poll>'", stdout)
+
+    def test_qualify_refuses_when_real_child_payload_is_not_ok(self):
+        cases = {
+            "garbage": "BOOM not json",
+            "false_flag": json.dumps({
+                "result": "ok", "healthz": {"ok": True}, "readyz": {"ok": True},
+                "control_plane_poll": {"ok": False, "value": 1},
+            }),
+        }
+        for case_name, template in cases.items():
+            with FixtureHome() as fixture:
+                self._install_probe_children(fixture, template)
+                facts_path = self._write_cli_facts(fixture)
+                with unittest.mock.patch.dict(os.environ, {"FTR_FIXTURE_NOW": str(NOW)}):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        rc = ins.main([
+                            "--home", fixture.home, "qualify", "--confirm",
+                            "--facts-file", facts_path, "--now", str(NOW),
+                        ])
+                self.assertEqual(rc, 3, case_name)
+                self.assertFalse(os.path.exists(fti.manifest_path(fixture.home)), case_name)
+
+
 if __name__ == "__main__":
     unittest.main()

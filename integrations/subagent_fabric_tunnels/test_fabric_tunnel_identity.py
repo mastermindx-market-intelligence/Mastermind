@@ -618,5 +618,498 @@ class IntermediateAncestorSymlinkTests(unittest.TestCase):
             self.assertIn("symlinked ancestor", str(caught.exception))
 
 
+# ---------------------------------------------------------------------------
+# First-party CLI control-plane-poll heartbeat mode (strictly typed).
+# ---------------------------------------------------------------------------
+
+CLI_PROBE_OK = json.dumps({
+    "result": "ok",
+    "healthz": {"ok": True},
+    "readyz": {"ok": True},
+    "control_plane_poll": {"ok": True, "value": NOW - 8},
+})
+SECRET_URL = "https://control-plane.example.invalid/lastseen"
+
+
+class FakePollRunner:
+    """Injectable control-plane-poll seam: records argv/timeout, returns a
+    canned RunResult. Never executes anything."""
+
+    def __init__(self, result: ftc.RunResult | None = None) -> None:
+        self.result = result or ftc.RunResult(("probe",), 0, CLI_PROBE_OK, "")
+        self.calls: list[tuple[tuple[str, ...], float]] = []
+
+    def __call__(self, argv, timeout=5.0):
+        self.calls.append((tuple(argv), float(timeout)))
+        return self.result
+
+
+class CliPollFixtureHome(FixtureHome):
+    """FixtureHome plus one bounded seat-owned profile and URL locator per
+    seat, with strictly distinct profiles and locators across all five."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.profile_paths: dict[str, str] = {}
+        self.locator_paths: dict[str, str] = {}
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            seat_dir = os.path.join(self.home, "clients", seat)
+            os.makedirs(seat_dir, mode=0o755, exist_ok=True)
+            locator = os.path.join(seat_dir, f"{seat}-control-plane.url")
+            with open(locator, "wb") as handle:
+                handle.write((SECRET_URL + "\n").encode())
+            os.chmod(locator, 0o600)
+            profile = os.path.join(seat_dir, "profile.json")
+            with open(profile, "wb") as handle:
+                handle.write(json.dumps({"seat": seat, "health": {"url_file": locator}}).encode())
+            os.chmod(profile, 0o600)
+            self.profile_paths[label] = profile
+            self.locator_paths[label] = locator
+
+    def write_profile(self, label: str, doc: dict) -> None:
+        with open(self.profile_paths[label], "wb") as handle:
+            handle.write(json.dumps(doc).encode())
+        os.chmod(self.profile_paths[label], 0o600)
+
+    def cli_seat_facts(self, label: str) -> dict:
+        return {
+            "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+            "heartbeat_profile_file": self.profile_paths[label],
+            "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+            "heartbeat_proof_note": "fixture: per-seat profile health.url_file and a live control_plane_poll probe",
+        }
+
+    def cli_facts(self) -> dict:
+        return {
+            "seats": {label: self.cli_seat_facts(label) for label in sorted(ftc.TUNNEL_LABELS)},
+            "host": {},
+        }
+
+    def read_manifest(self) -> dict:
+        with open(fti.manifest_path(Path(self.home)), encoding="utf-8") as handle:
+            return json.load(handle)
+
+
+class CliPollPayloadSeamTests(unittest.TestCase):
+    """The payload validator and argv builder are strict, typed, closed."""
+
+    def _validate(self, stdout: str, rc: int = 0, stderr: str = "", **kwargs):
+        return ftc.validate_control_plane_poll_payload(stdout, stderr, rc, now=NOW, **kwargs)
+
+    def test_builder_is_the_exact_readonly_argv(self):
+        argv = ftc.build_control_plane_poll_argv("/bin/tunnel", "/bin/url-file")
+        self.assertEqual(argv, [
+            "/bin/tunnel", "health", "--url-file", "/bin/url-file",
+            "--require-control-plane-poll", "--json",
+        ])
+
+    def test_builder_refuses_relative_or_launchctl_executable(self):
+        with self.assertRaises(ftc.ActionRefused):
+            ftc.build_control_plane_poll_argv("relative/tunnel", "/bin/url-file")
+        with self.assertRaises(ftc.ActionRefused):
+            ftc.build_control_plane_poll_argv(ftc.LAUNCHCTL, "/bin/url-file")
+
+    def test_ok_payload_accepts_with_age(self):
+        verdict = self._validate(CLI_PROBE_OK)
+        self.assertTrue(verdict.ok)
+        self.assertEqual(verdict.value, NOW - 8)
+        self.assertAlmostEqual(verdict.age_seconds, 8.0)
+
+    def test_nonzero_rc_refused(self):
+        self.assertFalse(self._validate(CLI_PROBE_OK, rc=1).ok)
+
+    def test_empty_and_malformed_and_nonobject_refused(self):
+        for stdout in ("", "not json", "[]", "null", "42"):
+            verdict = self._validate(stdout)
+            self.assertFalse(verdict.ok)
+            self.assertEqual(verdict.reason, "cli_poll_malformed_json")
+
+    def test_false_or_missing_flags_refused(self):
+        cases = {
+            "cli_poll_result_not_ok": {"result": "error"},
+            "cli_poll_result_not_ok": {"result": True},
+            "cli_poll_healthz_not_ok": {"healthz": {"ok": False}},
+            "cli_poll_healthz_not_ok": {"healthz": {"ok": 1}},
+            "cli_poll_readyz_not_ok": {"readyz": {"ok": False}},
+            "cli_poll_not_ok": {"control_plane_poll": {"ok": False}},
+            "cli_poll_invalid_value": {"control_plane_poll": {"ok": True}},
+            "cli_poll_invalid_value": {"control_plane_poll": {"ok": True, "value": "now"}},
+            "cli_poll_invalid_value": {"control_plane_poll": {"ok": True, "value": True}},
+        }
+        for expected_reason, override in cases.items():
+            doc = json.loads(CLI_PROBE_OK)
+            doc.update(override)
+            verdict = self._validate(json.dumps(doc))
+            self.assertFalse(verdict.ok, override)
+            self.assertEqual(verdict.reason, expected_reason, override)
+
+    def test_nonpositive_and_unfinite_values_refused(self):
+        for value in (0, -5, float("nan"), float("inf"), float("-inf")):
+            doc = json.loads(CLI_PROBE_OK)
+            doc["control_plane_poll"]["value"] = value
+            verdict = self._validate(json.dumps(doc, allow_nan=True))
+            self.assertFalse(verdict.ok, value)
+            self.assertIn(verdict.reason, {"cli_poll_nonpositive_value", "cli_poll_invalid_value"})
+
+    def test_future_beyond_skew_refused_within_skew_clamps_fresh(self):
+        beyond = json.loads(CLI_PROBE_OK)
+        beyond["control_plane_poll"]["value"] = NOW + ftc.CLI_POLL_FUTURE_SKEW_SECONDS + 1
+        verdict = self._validate(json.dumps(beyond))
+        self.assertFalse(verdict.ok)
+        self.assertEqual(verdict.reason, "cli_poll_value_in_future")
+        within = json.loads(CLI_PROBE_OK)
+        within["control_plane_poll"]["value"] = NOW + 2
+        verdict = self._validate(json.dumps(within))
+        self.assertTrue(verdict.ok)
+        self.assertEqual(verdict.age_seconds, 0.0)  # fresh: authorizes nothing
+
+    def test_timeout_and_truncation_refused(self):
+        self.assertEqual(
+            self._validate(CLI_PROBE_OK, timed_out=True).reason, "cli_poll_timeout"
+        )
+        self.assertEqual(
+            self._validate(CLI_PROBE_OK, truncated=True).reason, "cli_poll_output_oversized"
+        )
+
+    def test_oversized_output_refused_even_from_injected_runner(self):
+        big = "x" * (ftc.CLI_POLL_MAX_OUTPUT_BYTES + 1)
+        self.assertEqual(self._validate(big).reason, "cli_poll_output_oversized")
+        self.assertEqual(
+            self._validate(CLI_PROBE_OK, stderr=big).reason, "cli_poll_output_oversized"
+        )
+
+
+class FirstPartyCliPollQualificationTests(unittest.TestCase):
+    """Qualification proves the poll evidence source before anything writes."""
+
+    def test_cli_mode_qualifies_with_derived_locator_and_live_probe(self):
+        with CliPollFixtureHome() as fixture:
+            poll = FakePollRunner()
+            lines = fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=True, now=NOW, poll_runner=poll,
+            )
+            manifest = fixture.read_manifest()
+            self.assertEqual(len(poll.calls), 5)
+            for label in sorted(ftc.TUNNEL_LABELS):
+                entry = manifest["seats"][label]
+                self.assertEqual(entry["heartbeat_mode"], ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL)
+                self.assertEqual(entry["heartbeat_profile_file"], fixture.profile_paths[label])
+                self.assertEqual(entry["heartbeat_url_locator"], fixture.locator_paths[label])
+                expected_argv = (
+                    entry["executable"], "health", "--url-file", fixture.locator_paths[label],
+                    "--require-control-plane-poll", "--json",
+                )
+                self.assertIn((expected_argv, ftc.CLI_POLL_TIMEOUT_SECONDS), poll.calls)
+            self.assertIn("heartbeat_cli_poll_seats=5", " ".join(lines))
+
+    def test_dry_run_probes_but_writes_nothing(self):
+        with CliPollFixtureHome() as fixture:
+            poll = FakePollRunner()
+            fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=False, now=NOW, dry_run=True, poll_runner=poll,
+            )
+            self.assertEqual(len(poll.calls), 5)
+            self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))))
+
+    def test_mixed_file_and_cli_modes_qualify_and_legacy_seats_keep_their_shape(self):
+        with CliPollFixtureHome() as fixture:
+            facts = fixture.cli_facts()
+            c1 = sorted(ftc.TUNNEL_LABELS)[0]
+            heartbeat = os.path.join(fixture.home, "heartbeats", "c1.heartbeat")
+            os.makedirs(os.path.dirname(heartbeat), exist_ok=True)
+            with open(heartbeat, "wb") as handle:
+                handle.write(b"1700000000")
+            os.utime(heartbeat, (NOW - 30, NOW - 30))
+            facts["seats"][c1] = {
+                "heartbeat_path": heartbeat,
+                "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+                "heartbeat_proof_note": "fixture: file mtime correlated by operator",
+            }
+            fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=facts,
+                operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+            )
+            manifest = fixture.read_manifest()
+            self.assertNotIn("heartbeat_mode", manifest["seats"][c1])  # safe legacy shape
+            self.assertNotIn("heartbeat_url_locator", manifest["seats"][c1])
+            for label in sorted(ftc.TUNNEL_LABELS)[1:]:
+                self.assertEqual(
+                    manifest["seats"][label]["heartbeat_mode"],
+                    ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+                )
+
+    def test_evidence_lines_never_print_profile_locator_or_url(self):
+        with CliPollFixtureHome() as fixture:
+            lines = fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+            )
+            blob = "\n".join(lines)
+            self.assertNotIn(SECRET_URL, blob)
+            self.assertNotIn("profile.json", blob)
+            self.assertNotIn("control-plane.url", blob)
+            self.assertIn("heartbeat_path='<first-party-cli-poll>'", blob)
+
+    def test_refused_facts_fail_closed_without_probe_or_write(self):
+        cases = {
+            "facts_heartbeat_mode_unknown": {"heartbeat_mode": "mtime_vibes"},
+            "facts_heartbeat_profile_file_requires_cli_poll_mode": {
+                "heartbeat_profile_file": "/tmp/x-profile.json",
+            },
+            "facts_heartbeat_path_required_for_file_mtime_mode": {
+                "heartbeat_mode": ftc.HEARTBEAT_MODE_FILE_MTIME,
+            },
+            "facts_heartbeat_path_only_for_file_mtime_mode": {
+                "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+                "heartbeat_path": "/tmp/x-heartbeat",
+                "heartbeat_profile_file": "/tmp/x-profile.json",
+                "heartbeat_kind": "kind",
+                "heartbeat_proof_note": "note",
+            },
+            "facts_heartbeat_kind_required": {
+                "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+                "heartbeat_profile_file": "/tmp/x-profile.json",
+                "heartbeat_proof_note": "note",
+            },
+            "facts_heartbeat_proof_note_required": {
+                "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+                "heartbeat_profile_file": "/tmp/x-profile.json",
+                "heartbeat_kind": "kind",
+            },
+        }
+        for expected, seat_fields in cases.items():
+            with CliPollFixtureHome() as fixture:
+                poll = FakePollRunner()
+                facts = fixture.cli_facts()
+                facts["seats"][sorted(ftc.TUNNEL_LABELS)[2]] = seat_fields
+                with self.assertRaises(ftc.PolicyRefused) as caught:
+                    fti.qualify_install(
+                        Path(fixture.home), uid=UID, facts=facts,
+                        operator_confirmed=True, now=NOW, poll_runner=poll,
+                    )
+                self.assertIn(expected, str(caught.exception), seat_fields)
+                self.assertEqual(poll.calls, [], seat_fields)
+                self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))))
+
+    def test_locator_is_never_an_accepted_fact(self):
+        with CliPollFixtureHome() as fixture:
+            facts = fixture.cli_facts()
+            facts["seats"][sorted(ftc.TUNNEL_LABELS)[0]]["heartbeat_url_locator"] = "/tmp/steered.url"
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=facts,
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("facts_unknown_seat_field", str(caught.exception))
+
+    def test_unsafe_profile_and_locator_shapes_refused(self):
+        oversized = ftc.CLI_POLL_MAX_PROFILE_BYTES + 1
+        bad_shapes = {
+            "profile_missing": (lambda f, l: os.remove(f.profile_paths[l]), "_poll_profile_unavailable"),
+            "profile_symlink": (
+                lambda f, l: (os.remove(f.profile_paths[l]), os.symlink(f.locator_paths[sorted(ftc.TUNNEL_LABELS)[1]], f.profile_paths[l])),
+                "_poll_profile_unavailable",
+            ),
+            "profile_group_writable": (lambda f, l: os.chmod(f.profile_paths[l], 0o664), "_poll_profile_owner_unsafe"),
+            "profile_oversized": (
+                lambda f, l: self._write_file(f.profile_paths[l], b"x" * oversized),
+                "_poll_profile_oversized",
+            ),
+            "profile_not_json": (lambda f, l: self._write_file(f.profile_paths[l], b"not json"), "_poll_profile_not_json"),
+            "profile_health_missing": (lambda f, l: f.write_profile(l, {"seat": "c1"}), "_poll_profile_health_missing"),
+            "locator_not_absolute": (lambda f, l: f.write_profile(l, {"health": {"url_file": "relative.url"}}), "_poll_locator_not_absolute"),
+            "locator_traversal": (lambda f, l: f.write_profile(l, {"health": {"url_file": "/tmp/../etc/passwd.url"}}), "poll_locator_traversal"),
+            "locator_foreign_identity": (
+                lambda f, l: f.write_profile(l, {"health": {"url_file": f.locator_paths[sorted(ftc.TUNNEL_LABELS)[1]]}}),
+                "_poll_locator_foreign_identity",
+            ),
+            "locator_missing": (lambda f, l: os.remove(f.locator_paths[l]), "_poll_locator_unavailable"),
+            "locator_symlink": (
+                lambda f, l: (os.remove(f.locator_paths[l]), os.symlink(f.profile_paths[sorted(ftc.TUNNEL_LABELS)[1]], f.locator_paths[l])),
+                "_poll_locator_unavailable",
+            ),
+            "locator_oversized": (
+                lambda f, l: self._write_file(f.locator_paths[l], b"u" * oversized),
+                "_poll_locator_oversized",
+            ),
+        }
+        for case_name, (mutate, expected) in bad_shapes.items():
+            with CliPollFixtureHome() as fixture:
+                label = sorted(ftc.TUNNEL_LABELS)[0]
+                mutate(fixture, label)
+                with self.assertRaises(ftc.PolicyRefused) as caught:
+                    fti.qualify_install(
+                        Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                        operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                    )
+                self.assertIn(expected, str(caught.exception), case_name)
+                self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))), case_name)
+
+    @staticmethod
+    def _write_file(path: str, body: bytes) -> None:
+        with open(path, "wb") as handle:
+            handle.write(body)
+        os.chmod(path, 0o600)
+
+    def test_profile_and_locator_may_never_reference_foreign_seats(self):
+        with CliPollFixtureHome() as fixture:
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            foreign_locator = fixture.locator_paths[sorted(ftc.TUNNEL_LABELS)[1]]
+            fixture.write_profile(label, {"health": {"url_file": foreign_locator}})
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("_poll_locator_foreign_identity", str(caught.exception))
+
+    def test_shared_neutral_profile_across_seats_refused_as_duplicate(self):
+        with CliPollFixtureHome() as fixture:
+            shared = os.path.join(fixture.home, "clients", "shared-neutral-profile.json")
+            with open(shared, "wb") as handle:
+                handle.write(json.dumps({"health": {"url_file": "/tmp/neutral.url"}}).encode())
+            os.chmod(shared, 0o600)
+            neutral_locator = "/tmp/neutral.url"
+            with open(neutral_locator, "wb") as handle:
+                handle.write(b"https://neutral.example.invalid\n")
+            os.chmod(neutral_locator, 0o600)
+            facts = fixture.cli_facts()
+            first, second = sorted(ftc.TUNNEL_LABELS)[:2]
+            facts["seats"][first]["heartbeat_profile_file"] = shared
+            facts["seats"][second]["heartbeat_profile_file"] = shared
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=facts,
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("facts_poll_profile_duplicated", str(caught.exception))
+
+    def test_duplicate_locator_across_seats_refused(self):
+        with CliPollFixtureHome() as fixture:
+            neutral = "/tmp/ftr-dup-locator.url"
+            self._write_file(neutral, b"https://duplicate.example.invalid\n")
+            first, second = sorted(ftc.TUNNEL_LABELS)[:2]
+            fixture.write_profile(first, {"health": {"url_file": neutral}})
+            fixture.write_profile(second, {"health": {"url_file": neutral}})
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("facts_poll_locator_duplicated", str(caught.exception))
+
+    def test_failed_probe_refuses_qualification_and_writes_nothing(self):
+        cases = {
+            "cli_poll_nonzero_rc": ftc.RunResult(("probe",), 1, CLI_PROBE_OK, "boom"),
+            "cli_poll_malformed_json": ftc.RunResult(("probe",), 0, "not json", ""),
+            "cli_poll_timeout": ftc.RunResult(("probe",), -9, "", "", timed_out=True),
+            "cli_poll_output_oversized": ftc.RunResult(("probe",), 0, "", "", truncated=True),
+            "cli_poll_value_in_future": ftc.RunResult(
+                ("probe",), 0,
+                json.dumps({
+                    "result": "ok", "healthz": {"ok": True}, "readyz": {"ok": True},
+                    "control_plane_poll": {"ok": True, "value": NOW + 4000},
+                }),
+                "",
+            ),
+        }
+        for expected_reason, result in cases.items():
+            with CliPollFixtureHome() as fixture:
+                with self.assertRaises(ftc.PolicyRefused) as caught:
+                    fti.qualify_install(
+                        Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                        operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(result),
+                    )
+                self.assertIn("facts_cli_poll_probe_failed", str(caught.exception))
+                self.assertIn(expected_reason, str(caught.exception), expected_reason)
+                self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))), expected_reason)
+
+    def test_revalidate_flags_symlinked_profile_or_locator_as_tampered(self):
+        with CliPollFixtureHome() as fixture:
+            fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+            )
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            os.remove(fixture.profile_paths[label])
+            os.symlink(fixture.locator_paths[sorted(ftc.TUNNEL_LABELS)[1]], fixture.profile_paths[label])
+            manifest = fixture.read_manifest()
+            alerts, suspects = fti.revalidate_stale_identity(Path(fixture.home), manifest)
+            codes = " ".join(alert.detail for alert in alerts if alert.label == label)
+            self.assertIn("heartbeat_profile_not_regular", codes)
+            self.assertIn(label, suspects)
+
+    def test_unqualified_health_alerts_for_cli_seats(self):
+        heartbeat_codes = {
+            "heartbeat_path_unqualified",
+            "heartbeat_first_party_unproven",
+            "heartbeat_poll_profile_unqualified",
+            "heartbeat_mode_ambiguous",
+        }
+        with CliPollFixtureHome() as fixture:
+            fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+            )
+            manifest = fixture.read_manifest()
+            codes = {alert.code for alert in fti.unqualified_health_alerts(Path(fixture.home), manifest)}
+            self.assertEqual(codes & heartbeat_codes, set())
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            del manifest["seats"][label]["heartbeat_profile_file"]
+            codes = {alert.code for alert in fti.unqualified_health_alerts(Path(fixture.home), manifest)}
+            self.assertIn("heartbeat_poll_profile_unqualified", codes)
+            del manifest["seats"][label]["heartbeat_kind"]
+            manifest["seats"][label]["heartbeat_path"] = "/tmp/stray"
+            codes = {alert.code for alert in fti.unqualified_health_alerts(Path(fixture.home), manifest)}
+            self.assertIn("heartbeat_mode_ambiguous", codes)
+
+
+class BoundedPollRunnerTests(unittest.TestCase):
+    """The real bounded runner: hard deadline, hard output caps, no shell."""
+
+    def test_ok_child_payload_captured_and_validated(self):
+        script = (
+            "import json;print(json.dumps({'result':'ok','healthz':{'ok':True},"
+            "'readyz':{'ok':True},'control_plane_poll':{'ok':True,'value':%d}}))" % int(NOW - 8)
+        )
+        result = ftc.control_plane_poll_runner([sys.executable, "-c", script], timeout=10.0)
+        self.assertFalse(result.timed_out)
+        self.assertFalse(result.truncated)
+        self.assertEqual(result.returncode, 0)
+        verdict = ftc.validate_control_plane_poll_payload(
+            result.stdout, result.stderr, result.returncode, now=NOW,
+        )
+        self.assertTrue(verdict.ok)
+        self.assertGreaterEqual(verdict.age_seconds, 7.0)
+
+    def test_oversized_child_is_killed_and_evidence_discarded(self):
+        script = "import sys;sys.stdout.write('x' * 40000);sys.stdout.flush()"
+        result = ftc.control_plane_poll_runner([sys.executable, "-c", script], timeout=10.0)
+        self.assertTrue(result.truncated)
+        self.assertEqual(result.stdout, "")
+        verdict = ftc.validate_control_plane_poll_payload(
+            result.stdout, result.stderr, result.returncode, now=NOW, truncated=result.truncated,
+        )
+        self.assertFalse(verdict.ok)
+
+    def test_hanging_child_hits_the_hard_deadline(self):
+        result = ftc.control_plane_poll_runner([sys.executable, "-c", "import time;time.sleep(30)"], timeout=0.5)
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.stdout, "")
+
+    def test_missing_binary_is_rc127_not_an_exception(self):
+        result = ftc.control_plane_poll_runner(["/nonexistent-ftr-binary"], timeout=5.0)
+        self.assertEqual(result.returncode, 127)
+
+    def test_runner_refuses_launchctl_and_relative_argv(self):
+        with self.assertRaises(ftc.ActionRefused):
+            ftc.control_plane_poll_runner([ftc.LAUNCHCTL, "print", "gui/0/x"])
+        with self.assertRaises(ftc.ActionRefused):
+            ftc.control_plane_poll_runner(["relative/tunnel", "health"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from fabric_tunnel_common import (
+    CLI_POLL_MAX_PROFILE_BYTES,
+    CLI_POLL_TIMEOUT_SECONDS,
+    HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+    HEARTBEAT_MODE_FILE_MTIME,
     IDENTITY_MANIFEST_SCHEMA,
     KEEP_ALIVE,
     MANIFEST_MAX_AGE_SECONDS,
@@ -40,14 +44,18 @@ from fabric_tunnel_common import (
     RUN_AT_LOAD,
     TELEMETRY_FILE_SUFFIXES,
     THROTTLE_INTERVAL_MIN,
+    TUNNEL_HEARTBEAT_MODES,
     TUNNEL_LABELS,
     TUNNEL_LABEL_PREFIX,
     OWNED_LABELS,
     WATCHDOG_LABEL,
     Alert,
+    ActionRefused,
     IdentityRejected,
     PolicyRefused,
     backups_dir,
+    build_control_plane_poll_argv,
+    control_plane_poll_runner,
     evidence_line,
     executable_path_reject_reason,
     launchagents_dir,
@@ -60,6 +68,7 @@ from fabric_tunnel_common import (
     require_regular_file,
     serialize_plist,
     sha256_bytes,
+    validate_control_plane_poll_payload,
 )
 
 # argv[0] must be absolute; launchd requires it for user agents and it is the
@@ -74,7 +83,22 @@ _ARGV_MAX = 64
 # attestation: without an operator-declared kind plus a proof note, a
 # heartbeat file's mtime is NOT treated as the tunnel-client/control-plane
 # last-seen signal, and a stale heartbeat is alert-only (no forced restart).
-_SEAT_OPTIONAL_FIELDS = ("heartbeat_path", "heartbeat_kind", "heartbeat_proof_note")
+#
+# ``heartbeat_mode`` selects the strictly typed evidence source:
+# ``file_mtime_attested`` (the legacy file-mtime mode, also the meaning of an
+# ABSENT mode on a safe legacy manifest) requires ``heartbeat_path``;
+# ``first_party_cli_control_plane_poll`` requires ``heartbeat_profile_file``
+# and derives ``heartbeat_url_locator`` (the profile's ``health.url_file``)
+# at qualification. The locator is DERIVED, never an accepted operator fact,
+# so a manifest cannot be steered to an unvetted URL file through facts.
+_SEAT_OPTIONAL_FIELDS = (
+    "heartbeat_path",
+    "heartbeat_kind",
+    "heartbeat_proof_note",
+    "heartbeat_mode",
+    "heartbeat_profile_file",
+    "heartbeat_url_locator",
+)
 _HOST_OPTIONAL_FIELDS = (
     "native_store_path",
     "host_pull_telemetry_dir",
@@ -85,8 +109,15 @@ _HOST_OPTIONAL_FIELDS = (
 )
 
 # Closed operator facts schema accepted by ``qualify_install`` (B4). Anything
-# not listed here is refused, never guessed.
-_SEAT_FACT_FIELDS = ("heartbeat_path", "heartbeat_kind", "heartbeat_proof_note")
+# not listed here is refused, never guessed. ``heartbeat_url_locator`` is
+# deliberately NOT a fact: it is derived from the qualified profile.
+_SEAT_FACT_FIELDS = (
+    "heartbeat_path",
+    "heartbeat_kind",
+    "heartbeat_proof_note",
+    "heartbeat_mode",
+    "heartbeat_profile_file",
+)
 _HOST_FACT_FIELDS = (
     "native_store_path",
     "host_pull_telemetry_dir",
@@ -448,6 +479,25 @@ def revalidate_stale_identity(
         if identity.executable_sha256 != entry.get("executable_sha256"):
             problems.append("executable_digest_changed")
         heartbeat_path = entry.get("heartbeat_path")
+        if entry.get("heartbeat_mode") == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL:
+            # Qualified CLI-poll revalidation after the day boundary: a
+            # MISSING profile/locator is a normal health state (the per-pass
+            # classification refuses the evidence, alert-only), but a path
+            # that now exists as a symlink or special file is a
+            # qualification break.
+            for field_name, problem in (
+                ("heartbeat_profile_file", "heartbeat_profile_not_regular"),
+                ("heartbeat_url_locator", "heartbeat_locator_not_regular"),
+            ):
+                recorded = entry.get(field_name)
+                if not recorded:
+                    continue
+                try:
+                    st = Path(recorded).lstat()
+                except OSError:
+                    st = None
+                if st is not None and (stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode)):
+                    problems.append(problem)
         if heartbeat_path:
             # Qualified heartbeat revalidation after the day boundary: a
             # MISSING file is a normal health state (per-pass classification
@@ -540,6 +590,40 @@ def _validated_facts(
         heartbeat = entry.get("heartbeat_path")
         kind = entry.get("heartbeat_kind")
         note = entry.get("heartbeat_proof_note")
+        mode = entry.get("heartbeat_mode")
+        profile = entry.get("heartbeat_profile_file")
+        if mode is not None:
+            # Strictly typed: an unknown mode spelling is refused, never
+            # guessed into a behavior.
+            if not isinstance(mode, str) or mode not in TUNNEL_HEARTBEAT_MODES:
+                raise PolicyRefused(f"facts_heartbeat_mode_unknown: {key}")
+            validated["heartbeat_mode"] = mode
+        cli_mode = mode == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL
+        if profile is not None and not cli_mode:
+            raise PolicyRefused(f"facts_heartbeat_profile_file_requires_cli_poll_mode: {key}")
+        if cli_mode:
+            # Modes are exclusive: the CLI poll mode never takes a heartbeat
+            # FILE path, and its profile locator is DERIVED at qualification,
+            # never accepted as an operator fact.
+            if heartbeat is not None:
+                raise PolicyRefused(f"facts_heartbeat_path_only_for_file_mtime_mode: {key}")
+            if (
+                not isinstance(profile, str)
+                or not profile.startswith("/")
+                or len(profile) > MAX_TUNNEL_RELATIVE_PATH
+            ):
+                raise PolicyRefused(f"facts_heartbeat_profile_file_not_absolute: {key}")
+            # The B6 first-party attestation (kind + proof note) is required
+            # for the CLI poll mode exactly as for the file mode.
+            if not isinstance(kind, str) or not kind.strip():
+                raise PolicyRefused(f"facts_heartbeat_kind_required: {key}")
+            if not isinstance(note, str) or not note.strip():
+                raise PolicyRefused(f"facts_heartbeat_proof_note_required: {key}")
+            validated["heartbeat_profile_file"] = profile
+            validated["heartbeat_kind"] = kind.strip()
+            validated["heartbeat_proof_note"] = note.strip()
+        elif mode == HEARTBEAT_MODE_FILE_MTIME and heartbeat is None:
+            raise PolicyRefused(f"facts_heartbeat_path_required_for_file_mtime_mode: {key}")
         if heartbeat is not None:
             if not isinstance(heartbeat, str) or not heartbeat.startswith("/"):
                 raise PolicyRefused(f"facts_heartbeat_path_not_absolute: {key}")
@@ -557,7 +641,9 @@ def _validated_facts(
             validated["heartbeat_path"] = heartbeat
             validated["heartbeat_kind"] = kind.strip()
             validated["heartbeat_proof_note"] = note.strip()
-        elif kind is not None or note is not None:
+        elif not cli_mode and (kind is not None or note is not None):
+            # Legacy shape: kind/note without a heartbeat path. (The CLI-poll
+            # mode requires kind+note itself, above.)
             raise PolicyRefused(f"facts_heartbeat_path_required_with_kind: {key}")
         if validated:
             seat_options[key] = validated
@@ -660,6 +746,77 @@ def _require_distinct_executable_identities(list_of_identities: list[SeatIdentit
         seen[key] = identity.label
 
 
+def _require_bounded_safe_private_file(path: Path, uid: int, *, code: str) -> None:
+    """Shared qualification/health guard for the qualified poll profile and
+    its derived URL locator: regular non-symlink file, owned by the seat
+    user, not group/world-writable, every lexical ancestor symlink-free and
+    unwritable-by-others, and a bounded size (a growing file is not a config
+    file this integration may parse). Structural IdentityRejected refusals
+    surface as PolicyRefused so facts-level verification fails closed with
+    the same stable codes either way."""
+    try:
+        require_regular_file(path, code=f"{code}_unavailable")
+        require_owner_writable_safe(path, uid, code=f"{code}_owner_unsafe")
+        require_parent_safe(path, uid, code=f"{code}_parent_unsafe")
+        st = path.lstat()
+    except IdentityRejected as rejected:
+        raise PolicyRefused(str(rejected)) from rejected
+    if st.st_size > CLI_POLL_MAX_PROFILE_BYTES:
+        raise PolicyRefused(f"{code}_oversized")
+
+
+def _reject_traversal_components(text: str, label: str, *, code: str) -> None:
+    if any(part in ("", "..") for part in text.split("/")[1:]):
+        raise PolicyRefused(f"{label}_{code}_traversal")
+
+
+def verified_poll_profile_locator(label: str, profile_text: str, uid: int) -> str:
+    """Qualification-time proof of the first-party CLI poll evidence source.
+
+    Reads the operator-declared per-seat profile (JSON) and returns the
+    DERIVED ``health.url_file`` locator path. Every step fails closed with a
+    stable code and nothing but the locator path is returned or recorded:
+    - the profile path must not carry another seat's identity (cross-seat
+      adoption guard, same rule as executables);
+    - the profile must be a bounded, seat-owned, safely-moded regular file
+      with a symlink-free lexical ancestor chain;
+    - its parsed ``health.url_file`` must be an absolute bounded path without
+      traversal components, free of foreign seat identity, and itself a
+      bounded, seat-owned, safely-moded regular file.
+
+    NEVER invoked on a path from untrusted facts at health time: the health
+    pass re-derives the locator from the pinned profile only to CHECK it
+    still equals the pinned value."""
+    foreign = executable_path_reject_reason(label, profile_text)
+    if foreign:
+        raise PolicyRefused(f"{label}_poll_profile_foreign_identity: {foreign}")
+    _reject_traversal_components(profile_text, label, code="poll_profile")
+    profile_path = Path(profile_text)
+    _require_bounded_safe_private_file(profile_path, uid, code=f"{label}_poll_profile")
+    try:
+        raw = profile_path.read_bytes()
+    except OSError as exc:
+        raise PolicyRefused(f"{label}_poll_profile_unreadable ({exc.strerror})") from exc
+    try:
+        doc = json.loads(raw)
+    except ValueError as exc:
+        raise PolicyRefused(f"{label}_poll_profile_not_json") from exc
+    if not isinstance(doc, dict):
+        raise PolicyRefused(f"{label}_poll_profile_shape_invalid")
+    health = doc.get("health")
+    if not isinstance(health, dict):
+        raise PolicyRefused(f"{label}_poll_profile_health_missing")
+    locator = health.get("url_file")
+    if not isinstance(locator, str) or not locator.startswith("/") or len(locator) > MAX_TUNNEL_RELATIVE_PATH:
+        raise PolicyRefused(f"{label}_poll_locator_not_absolute")
+    foreign = executable_path_reject_reason(label, locator)
+    if foreign:
+        raise PolicyRefused(f"{label}_poll_locator_foreign_identity: {foreign}")
+    _reject_traversal_components(locator, label, code="poll_locator")
+    _require_bounded_safe_private_file(Path(locator), uid, code=f"{label}_poll_locator")
+    return locator
+
+
 def qualify_install(
     home: Path,
     *,
@@ -668,6 +825,7 @@ def qualify_install(
     operator_confirmed: bool,
     now: float,
     dry_run: bool = False,
+    poll_runner: Any = None,
 ) -> list[str]:
     """The single sanctioned operator qualification entrypoint (B4).
 
@@ -681,6 +839,17 @@ def qualify_install(
     writing anything, which makes a first install from an empty manifest
     demonstrably feasible. Any refusal raises before ANY write, so an
     incomplete qualification fails closed.
+
+    Seats declared ``first_party_cli_control_plane_poll`` are additionally
+    PROVEN at qualification time, before anything is written: the seat's own
+    verified executable and profile are checked (bounded, seat-owned, safe
+    modes, symlink-free ancestors, cross-seat isolation), the profile's
+    ``health.url_file`` locator is derived and verified, and ONE read-only
+    probe — the exact health argv with the seat's pinned executable — must
+    return the known-good control-plane-poll shape (``poll_runner`` is the
+    injectable seam; the default is the real bounded runner). A probe that
+    times out, errors, or fails schema validation refuses the whole
+    qualification: an evidence source that never worked is never recorded.
     """
     if not dry_run and not operator_confirmed:
         # A dry run writes nothing, so it needs no operator confirmation;
@@ -693,6 +862,50 @@ def qualify_install(
         raise PolicyRefused(f"rogue_family_labels_present: {','.join(rogue)}")
     identities = verify_all_seats(home, uid)
     _require_distinct_executable_identities(identities)
+    identity_by_label = {identity.label: identity for identity in identities}
+
+    # First-party CLI control-plane-poll seats: derive + prove the evidence
+    # source before anything else, so an unverifiable mode refuses loudly.
+    cli_seats = sorted(
+        key for key, options in seat_options.items()
+        if options.get("heartbeat_mode") == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL
+    )
+    seen_profiles: dict[str, str] = {}
+    seen_locators: dict[str, str] = {}
+    for key in cli_seats:
+        entry = seat_options[key]
+        seat_uid = int(identity_by_label[key].uid)
+        locator = verified_poll_profile_locator(
+            key, entry["heartbeat_profile_file"], seat_uid
+        )
+        # Cross-seat isolation: two seats may never share a profile file or a
+        # URL locator, or one swap would steer both seats' evidence.
+        holder = seen_profiles.get(entry["heartbeat_profile_file"])
+        if holder is not None:
+            raise PolicyRefused(f"facts_poll_profile_duplicated:{key}:{holder}")
+        seen_profiles[entry["heartbeat_profile_file"]] = key
+        holder = seen_locators.get(locator)
+        if holder is not None:
+            raise PolicyRefused(f"facts_poll_locator_duplicated:{key}:{holder}")
+        seen_locators[locator] = key
+        probe_argv = build_control_plane_poll_argv(identity_by_label[key].executable, locator)
+        runner = poll_runner if poll_runner is not None else control_plane_poll_runner
+        try:
+            result = runner(probe_argv, CLI_POLL_TIMEOUT_SECONDS)
+        except (ActionRefused, OSError) as exc:
+            raise PolicyRefused(f"facts_cli_poll_probe_refused: {key}") from exc
+        verdict = validate_control_plane_poll_payload(
+            result.stdout,
+            result.stderr,
+            result.returncode,
+            now=now,
+            timed_out=result.timed_out,
+            truncated=result.truncated,
+        )
+        if not verdict.ok:
+            raise PolicyRefused(f"facts_cli_poll_probe_failed: {key}:{verdict.reason}")
+        entry["heartbeat_url_locator"] = locator
+
     observed: dict[str, dict[str, Any]] = {}
     for identity in identities:
         raw = (home / identity.plist_rel).read_bytes()
@@ -717,6 +930,7 @@ def qualify_install(
                 "heartbeat_seats_attested": sum(
                     1 for options in seat_options.values() if options.get("heartbeat_kind")
                 ),
+                "heartbeat_cli_poll_seats": len(cli_seats),
                 "telemetry_files_qualified": len(host_options.get("host_pull_telemetry_files", [])),
             },
         )
@@ -754,6 +968,13 @@ def manifest_public_evidence(manifest: Mapping[str, Any]) -> list[str]:
     ]
     for label in sorted(manifest.get("seats", {})):
         entry = manifest["seats"][label]
+        cli_poll = entry.get("heartbeat_mode") == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL
+        # Secret-safety: the CLI-poll profile and URL-locator paths are never
+        # printed — the locator names the file that holds the control-plane
+        # URL — so a cli seat shows a fixed placeholder instead of any path.
+        heartbeat_display = (
+            "<first-party-cli-poll>" if cli_poll else entry.get("heartbeat_path", "<unset>")
+        )
         lines.append(
             evidence_line(
                 label,
@@ -762,7 +983,8 @@ def manifest_public_evidence(manifest: Mapping[str, Any]) -> list[str]:
                     "argv_len": len(entry["program_arguments"]),
                     "executable": entry["executable"],
                     "executable_sha256": entry["executable_sha256"][:16],
-                    "heartbeat_path": entry.get("heartbeat_path", "<unset>"),
+                    "heartbeat_mode": "cli_poll" if cli_poll else "file",
+                    "heartbeat_path": heartbeat_display,
                 },
             )
         )
@@ -780,7 +1002,23 @@ def unqualified_health_alerts(home: Path, manifest: Mapping[str, Any]) -> list[A
     alerts: list[Alert] = []
     for label in sorted(TUNNEL_LABELS):
         entry = manifest["seats"][label]
-        if not entry.get("heartbeat_path"):
+        mode = entry.get("heartbeat_mode")
+        cli_poll = mode == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL
+        if cli_poll or (mode is None and entry.get("heartbeat_profile_file")):
+            if mode is None or entry.get("heartbeat_path"):
+                # Strictly typed modes: a manifest that mixes the file-mtime
+                # evidence with the CLI-poll profile is ambiguous and is
+                # never classified — alert-only until requalified.
+                alerts.append(Alert("heartbeat_mode_ambiguous", label))
+                continue
+            if not entry.get("heartbeat_profile_file"):
+                alerts.append(Alert("heartbeat_poll_profile_unqualified", label))
+            elif not entry.get("heartbeat_kind"):
+                alerts.append(Alert("heartbeat_first_party_unproven", label))
+            continue
+        if mode is not None and mode != HEARTBEAT_MODE_FILE_MTIME:
+            alerts.append(Alert("heartbeat_mode_ambiguous", label))
+        elif not entry.get("heartbeat_path"):
             alerts.append(Alert("heartbeat_path_unqualified", label))
         elif not entry.get("heartbeat_kind"):
             # A recorded heartbeat path without an operator first-party
