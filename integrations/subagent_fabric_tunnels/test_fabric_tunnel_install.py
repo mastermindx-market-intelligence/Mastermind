@@ -11,7 +11,9 @@ Run:
         -p 'test_fabric_tunnel_install.py'
 """
 
+import contextlib
 import copy
+import io
 import json
 import os
 import plistlib
@@ -19,6 +21,7 @@ import stat
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -273,24 +276,109 @@ class BackupRollbackTests(unittest.TestCase):
             )
             self.assertTrue(str(sidecar_path).startswith(backups_root))
 
-    def test_bootstrap_failure_rolls_back_and_rebootstraps_original(self):
+    def test_bootstrap_failure_on_seat_2_of_5_rolls_back_whole_batch(self):
+        # B5 contract: the batch is transactional. A failure on seat 2/5 rolls
+        # the earlier successful seat back through its validated preimage CAS
+        # and leaves unattempted seats untouched. No partial state survives.
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            failing = ftc.TUNNEL_LABEL_PREFIX + "c2-business"  # seat 2/5 in label order
+            first = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            runner = FakeRunner(fail_bootstrap={failing})
+            results = ins.install_seats(fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid)
+            by_label = {r.label: r for r in results}
+            self.assertEqual(by_label[failing].status, "rolled_back")
+            self.assertEqual(by_label[first].status, "batch_rolled_back")
+            for label in (
+                ftc.TUNNEL_LABEL_PREFIX + "c2-personal",
+                ftc.TUNNEL_LABEL_PREFIX + "c3",
+                ftc.TUNNEL_LABEL_PREFIX + "c4",
+            ):
+                self.assertEqual(by_label[label].status, "not_attempted")
+                self.assertIs(fixture.read_plist_dict(label)["RunAtLoad"], False)  # untouched
+            # The entire batch ended at the qualified preimage.
+            for label in ftc.TUNNEL_LABELS:
+                self.assertEqual(fixture.read_plist_dict(label), fixture.originals[label])
+            # The batch-rolled-back seat was re-bootstrapped from its RESTORED
+            # file, and because that seat was still LOADED with the new plist,
+            # the rollback MUST bootout before bootstrapping (a bare bootstrap
+            # of an already-bootstrapped job fails on real launchd).
+            first_calls = [
+                argv[1]
+                for argv in runner.calls
+                if argv[:2] == [ftc.LAUNCHCTL, "bootout"] and first in argv[-1]
+            ]
+            bootstraps = [argv for argv in runner.calls if argv[:2] == [ftc.LAUNCHCTL, "bootstrap"]]
+            first_bootstraps = [argv for argv in bootstraps if first in argv[-1]]
+            self.assertEqual(len(first_calls), 2)  # install reload + batch rollback
+            self.assertEqual(len(first_bootstraps), 2)  # install reload + batch rollback
+            with open(first_bootstraps[-1][-1], "rb") as handle:
+                self.assertEqual(plistlib.load(handle), fixture.originals[first])
+            alert_codes = [a.code for r in results for a in r.alerts]
+            self.assertIn("batch_rolled_back", alert_codes)
+            self.assertIn("install_failed_rolled_back", alert_codes)
+
+    def test_bootstrap_failure_on_last_seat_rolls_back_all_earlier(self):
         with FixtureHome() as fixture:
             fixture.qualify()
             failing = ftc.TUNNEL_LABEL_PREFIX + "c4"
             runner = FakeRunner(fail_bootstrap={failing})
             results = ins.install_seats(fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid)
-            result = next(r for r in results if r.label == failing)
-            self.assertEqual(result.status, "rolled_back")
-            live = fixture.read_plist_dict(failing)
-            self.assertEqual(live, fixture.originals[failing])  # original bytes restored
-            # The final bootstrap for the failed seat was of the RESTORED file.
-            bootstraps = [argv for argv in runner.calls if argv[:2] == [ftc.LAUNCHCTL, "bootstrap"]]
-            last_bootstrap_target = [argv[-1] for argv in bootstraps if failing in argv[-1]][-1]
-            with open(last_bootstrap_target, "rb") as handle:
-                self.assertEqual(plistlib.load(handle), fixture.originals[failing])
-            # Other seats completed normally.
-            others = [r for r in results if r.label != failing]
-            self.assertEqual([r.status for r in others], ["installed"] * 4)
+            by_label = {r.label: r for r in results}
+            self.assertEqual(by_label[failing].status, "rolled_back")
+            for label in (
+                ftc.TUNNEL_LABEL_PREFIX + "c1",
+                ftc.TUNNEL_LABEL_PREFIX + "c2-business",
+                ftc.TUNNEL_LABEL_PREFIX + "c2-personal",
+                ftc.TUNNEL_LABEL_PREFIX + "c3",
+            ):
+                self.assertEqual(by_label[label].status, "batch_rolled_back")
+            for label in ftc.TUNNEL_LABELS:
+                self.assertEqual(fixture.read_plist_dict(label), fixture.originals[label])
+
+    def test_write_failure_aborts_batch_and_rolls_back_earlier_seats(self):
+        # Negative post-write discriminator: an OSError mid-batch must abort
+        # the run and restore already-installed seats, never leave partials.
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            victim = ftc.TUNNEL_LABEL_PREFIX + "c2-business"
+            real_write = ins.atomic_write_bytes
+            failed = {"done": False}
+
+            def flaky_write(path, raw, mode):
+                if not failed["done"] and str(path).endswith("c2-business.plist") and "backups" not in str(path):
+                    failed["done"] = True
+                    raise OSError("fixture write failure")
+                return real_write(path, raw, mode)
+
+            with unittest.mock.patch.object(ins, "atomic_write_bytes", flaky_write):
+                results = ins.install_seats(
+                    fixture.home, FakeRunner(), confirm=True, now=NOW + 60, uid=fixture.uid
+                )
+            by_label = {r.label: r for r in results}
+            self.assertEqual(by_label[victim].status, "failed")
+            self.assertEqual(by_label[ftc.TUNNEL_LABEL_PREFIX + "c1"].status, "batch_rolled_back")
+            for label in ftc.TUNNEL_LABELS:
+                self.assertEqual(fixture.read_plist_dict(label), fixture.originals[label])
+
+    def test_rollback_requires_fresh_manifest(self):
+        # B1 install-time freshness: rollback is a mutation path and keeps
+        # the strict manifest age contract even with a backup present.
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            runner = FakeRunner()
+            ins.install_seats(fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid)
+            path = fti.manifest_path(fixture.home)
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            doc["recorded_at"] -= ftc.MANIFEST_MAX_AGE_SECONDS + 3600
+            fti.write_manifest(fixture.home, doc)
+            overday = NOW + 60 + ftc.MANIFEST_MAX_AGE_SECONDS + 3600
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                ins.rollback_seat(
+                    fixture.home, runner, ftc.TUNNEL_LABEL_PREFIX + "c1",
+                    confirm=True, now=overday,
+                )
+            self.assertIn("manifest_stale", str(caught.exception))
 
     def test_explicit_rollback_restores_preimage(self):
         with FixtureHome() as fixture:
@@ -336,6 +424,187 @@ class BackupRollbackTests(unittest.TestCase):
                     confirm=True,
                     now=NOW,
                 )
+
+
+class QualifyCommandTests(unittest.TestCase):
+    """B4: the single sanctioned operator qualification entrypoint.
+
+    Negative discriminators: each refusal test fails if qualification were
+    possible with incomplete facts, duplicate executable identity, an open
+    facts schema, or any invented (non-operator-provided) fact."""
+
+    HEARTBEAT = os.path.join(tempfile.gettempdir(), "ftr-qualify-heartbeat-unused")
+
+    def _write_facts(self, fixture, facts: dict, *, name: str = "facts.json", mode: int = 0o600) -> str:
+        path = os.path.join(fixture.home, name)
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(facts, handle)
+        os.chmod(path, mode)
+        return path
+
+    def _valid_facts(self, fixture) -> dict:
+        heartbeat_dir = os.path.join(fixture.home, "heartbeats")
+        os.makedirs(heartbeat_dir, exist_ok=True)
+        facts = {"seats": {}, "host": {}}
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            heartbeat = os.path.join(heartbeat_dir, f"{seat}.heartbeat")
+            with open(heartbeat, "wb") as handle:
+                handle.write(b"1700000000")
+            os.utime(heartbeat, (NOW - 30, NOW - 30))
+            facts["seats"][label] = {
+                "heartbeat_path": heartbeat,
+                "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+                "heartbeat_proof_note": "fixture: mtime correlated with control-plane last-seen by operator",
+            }
+        telemetry_dir = os.path.join(fixture.home, "host-pull-state")
+        os.makedirs(telemetry_dir, exist_ok=True)
+        telemetry_files = []
+        for name in ("lane-a.json", "lane-b.json"):
+            path = os.path.join(telemetry_dir, name)
+            with open(path, "wb") as handle:
+                handle.write(b"{}")
+            telemetry_files.append(name)
+        facts["host"] = {
+            "native_store_path": os.path.join(fixture.home, "native-store"),
+            "host_pull_telemetry_dir": telemetry_dir,
+            "host_pull_telemetry_files": telemetry_files,
+            "pinned_generation": "a" * 64,
+            "stale_telemetry_seconds": 900,
+            "repair": {"files": {"ext/remote_sub_exec.py": "b" * 64}, "source_commit": "fixture"},
+        }
+        os.makedirs(os.path.join(fixture.home, "native-store"), exist_ok=True)
+        return facts
+
+    def test_qualify_writes_private_manifest_and_enables_install(self):
+        with FixtureHome() as fixture:
+            facts_path = self._write_facts(fixture, self._valid_facts(fixture))
+            lines = ins.main([
+                "--home", fixture.home, "qualify", "--confirm",
+                "--facts-file", facts_path, "--now", str(NOW),
+            ])
+            del lines
+            manifest_file = fti.manifest_path(fixture.home)
+            self.assertTrue(os.path.isfile(manifest_file))
+            self.assertEqual(stat.S_IMODE(os.stat(manifest_file).st_mode), 0o600)
+            doc = json.loads(manifest_file.read_text(encoding="utf-8"))
+            c1 = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            self.assertEqual(doc["seats"][c1]["heartbeat_kind"], "tunnel-client-control-plane-last-seen")
+            # A qualified manifest unlocks install and verify end to end.
+            runner = FakeRunner()
+            results = ins.install_seats(fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid)
+            self.assertEqual([r.status for r in results], ["installed"] * 5)
+            for line in ins.verify_install(fixture.home, now=NOW + 120):
+                self.assertIn("compliant=True", line)
+
+    def test_qualify_dry_run_writes_nothing_from_empty_manifest(self):
+        # First-install feasibility is demonstrable without any write.
+        with FixtureHome() as fixture:
+            facts_path = self._write_facts(fixture, self._valid_facts(fixture))
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                rc = ins.main([
+                    "--home", fixture.home, "qualify", "--dry-run",
+                    "--facts-file", facts_path, "--now", str(NOW),
+                ])
+            self.assertEqual(rc, 0)
+            self.assertFalse(os.path.exists(fti.manifest_path(fixture.home)))
+            self.assertIn("dry_run=True", captured.getvalue())
+
+    def test_qualify_requires_confirmation(self):
+        with FixtureHome() as fixture:
+            facts_path = self._write_facts(fixture, self._valid_facts(fixture))
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = ins.main([
+                    "--home", fixture.home, "qualify", "--facts-file", facts_path, "--now", str(NOW),
+                ])
+            self.assertEqual(rc, 3)
+            self.assertFalse(os.path.exists(fti.manifest_path(fixture.home)))
+
+    def test_qualify_refuses_duplicate_executable_identity(self):
+        with FixtureHome() as fixture:
+            shared = os.path.join(fixture.home, "clients", "tunnel-shared")
+            os.makedirs(os.path.dirname(shared), exist_ok=True)
+            with open(shared, "wb") as handle:
+                handle.write(b"#!/bin/sh\nexit 0\n")
+            os.chmod(shared, 0o755)
+            first = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            second = ftc.TUNNEL_LABEL_PREFIX + "c4"
+            fixture.write_plist(first, {
+                "Label": first, "ProgramArguments": [shared, "--seat", "c3"],
+                "RunAtLoad": False, "KeepAlive": True, "ThrottleInterval": 10,
+            })
+            fixture.write_plist(second, {
+                "Label": second, "ProgramArguments": [shared, "--seat", "c4"],
+                "RunAtLoad": False, "KeepAlive": True, "ThrottleInterval": 10,
+            })
+            facts_path = self._write_facts(fixture, self._valid_facts(fixture))
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = ins.main([
+                    "--home", fixture.home, "qualify", "--confirm",
+                    "--facts-file", facts_path, "--now", str(NOW),
+                ])
+            self.assertEqual(rc, 3)
+            self.assertFalse(os.path.exists(fti.manifest_path(fixture.home)))
+
+    def test_qualify_fail_closed_on_invalid_facts(self):
+        cases = {
+            "bad_pinned_generation": {"host": {"pinned_generation": "not-hex"}},
+            "missing_telemetry_files": {"host": {"host_pull_telemetry_dir": "/nonexistent-dir-ftr"}},
+            "unknown_host_field": {"host": {"mystery_field": 1}},
+            "unknown_seat": {"seats": {ftc.TUNNEL_LABEL_PREFIX + "chatgpt1": {"heartbeat_path": "/x"}}},
+            "kind_without_path": {"seats": {ftc.TUNNEL_LABEL_PREFIX + "c1": {"heartbeat_kind": "k"}}},
+        }
+        for case_name, override in cases.items():
+            with FixtureHome() as fixture:
+                facts = self._valid_facts(fixture)
+                facts.update(override)
+                facts_path = self._write_facts(fixture, facts, name=f"facts-{case_name}.json")
+                with contextlib.redirect_stderr(io.StringIO()):
+                    rc = ins.main([
+                        "--home", fixture.home, "qualify", "--confirm",
+                        "--facts-file", facts_path, "--now", str(NOW),
+                    ])
+                self.assertEqual(rc, 3, case_name)
+                self.assertFalse(os.path.exists(fti.manifest_path(fixture.home)), case_name)
+
+    def test_qualify_refuses_missing_heartbeat_file(self):
+        with FixtureHome() as fixture:
+            facts = self._valid_facts(fixture)
+            os.remove(facts["seats"][ftc.TUNNEL_LABEL_PREFIX + "c1"]["heartbeat_path"])
+            facts_path = self._write_facts(fixture, facts)
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = ins.main([
+                    "--home", fixture.home, "qualify", "--confirm",
+                    "--facts-file", facts_path, "--now", str(NOW),
+                ])
+            self.assertEqual(rc, 3)
+            self.assertFalse(os.path.exists(fti.manifest_path(fixture.home)))
+
+    def test_qualify_refuses_group_writable_facts_file(self):
+        with FixtureHome() as fixture:
+            facts_path = self._write_facts(fixture, self._valid_facts(fixture), mode=0o664)
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = ins.main([
+                    "--home", fixture.home, "qualify", "--confirm",
+                    "--facts-file", facts_path, "--now", str(NOW),
+                ])
+            self.assertEqual(rc, 3)
+
+    def test_qualify_stdout_is_secret_safe(self):
+        with FixtureHome() as fixture:
+            facts_path = self._write_facts(fixture, self._valid_facts(fixture))
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                rc = ins.main([
+                    "--home", fixture.home, "qualify", "--confirm",
+                    "--facts-file", facts_path, "--now", str(NOW),
+                ])
+            self.assertEqual(rc, 0)
+            out = captured.getvalue()
+            self.assertNotIn("ProgramArguments", out.replace("argv_len", ""))
+            self.assertNotIn("observed_plist", out)
+            # argv bodies and env values never reach stdout.
+            self.assertNotIn("--seat", out)
+            self.assertNotIn("fixture-secret-value-not-real", out)
 
 
 class VerifyReadbackTests(unittest.TestCase):

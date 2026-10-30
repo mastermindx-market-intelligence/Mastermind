@@ -11,6 +11,7 @@ Run:
         -p 'test_fabric_tunnel_identity.py'
 """
 
+import contextlib
 import json
 import os
 import plistlib
@@ -395,6 +396,136 @@ class ManifestTests(unittest.TestCase):
             self.assertIn("stdin_argmax_repair_unqualified", codes)
             self.assertIn("host_pull_telemetry_unqualified", codes)
             self.assertIn("native_store_path_unqualified", codes)
+
+
+class StaleRevalidationTests(unittest.TestCase):
+    """B1 primitives: staleness detection and live identity revalidation."""
+
+    @contextlib.contextmanager
+    def _qualified_fixture(self):
+        with FixtureHome() as fixture:
+            path = __import__("pathlib").Path(fixture.home)
+            identities = fti.verify_all_seats(path, UID)
+            observed = {
+                i.label: ftc.parse_plist_bytes(fixture.read_plist(i.label), code=i.label)
+                for i in identities
+            }
+            manifest = fti.build_manifest(
+                path, UID, identities, observed, operator_confirmed=True, now=NOW
+            )
+            fti.write_manifest(path, manifest)
+            yield fixture, path, fti.load_manifest(path, now=NOW)
+
+    def test_manifest_is_stale_boundary(self):
+        with self._qualified_fixture() as (fixture, path, manifest):
+            self.assertFalse(fti.manifest_is_stale(manifest, NOW + ftc.MANIFEST_MAX_AGE_SECONDS))
+            self.assertTrue(fti.manifest_is_stale(manifest, NOW + ftc.MANIFEST_MAX_AGE_SECONDS + 1))
+            self.assertTrue(fti.manifest_is_stale({"recorded_at": "garbage"}, NOW))
+
+    def test_future_recorded_at_refused(self):
+        with self._qualified_fixture() as (fixture, path, manifest):
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.load_manifest(path, now=NOW - 3600)
+            self.assertIn("manifest_recorded_at_in_future", str(caught.exception))
+
+    def test_revalidate_clean_manifest_has_no_suspects(self):
+        with self._qualified_fixture() as (fixture, path, manifest):
+            alerts, suspects = fti.revalidate_stale_identity(path, manifest)
+            self.assertEqual(alerts, [])
+            self.assertEqual(suspects, frozenset())
+
+    def test_revalidate_flags_argv_tamper_as_suspect(self):
+        with self._qualified_fixture() as (fixture, path, manifest):
+            label = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            working = base_plist(label)
+            working["ProgramArguments"] = [
+                manifest["seats"][label]["program_arguments"][0],
+                "--tampered",
+            ]
+            fixture.write_plist(label, working)
+            alerts, suspects = fti.revalidate_stale_identity(path, manifest)
+            self.assertEqual(suspects, frozenset({label}))
+            self.assertIn("seat_identity_tampered_alert_only", [a.code for a in alerts])
+            detail = next(a for a in alerts if a.label == label).detail
+            self.assertIn("argv_changed", detail)
+            self.assertNotIn("--tampered", detail)  # argv bodies never surface
+
+    def test_revalidate_flags_executable_digest_tamper(self):
+        with self._qualified_fixture() as (fixture, path, manifest):
+            label = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            executable = os.path.join(fixture.home, "clients", "tunnel-c3")
+            with open(executable, "ab") as handle:
+                handle.write(b"\n# tampered body\n")
+            alerts, suspects = fti.revalidate_stale_identity(path, manifest)
+            self.assertIn(label, suspects)
+            self.assertIn("executable_digest_changed", next(a for a in alerts if a.label == label).detail)
+
+    def test_revalidate_missing_heartbeat_file_is_not_suspect(self):
+        # A missing heartbeat FILE is a normal health state, not tampering.
+        with self._qualified_fixture() as (fixture, path, manifest):
+            heartbeat = os.path.join(fixture.home, "heartbeats", "c1.heartbeat")
+            os.makedirs(os.path.dirname(heartbeat), exist_ok=True)
+            with open(heartbeat, "wb") as handle:
+                handle.write(b"1")
+            manifest2 = fti.build_manifest(
+                path,
+                UID,
+                fti.verify_all_seats(path, UID),
+                {i.label: ftc.parse_plist_bytes(fixture.read_plist(i.label), code=i.label) for i in fti.verify_all_seats(path, UID)},
+                operator_confirmed=True,
+                now=NOW,
+                seat_options={ftc.TUNNEL_LABEL_PREFIX + "c1": {"heartbeat_path": heartbeat}},
+            )
+            os.remove(heartbeat)
+            alerts, suspects = fti.revalidate_stale_identity(path, manifest2)
+            self.assertEqual(suspects, frozenset())
+            self.assertEqual(alerts, [])
+
+    def test_revalidate_symlinked_heartbeat_is_suspect(self):
+        with self._qualified_fixture() as (fixture, path, manifest):
+            heartbeat = os.path.join(fixture.home, "heartbeats", "c4.heartbeat")
+            os.makedirs(os.path.dirname(heartbeat), exist_ok=True)
+            with open(heartbeat, "wb") as handle:
+                handle.write(b"1")
+            manifest2 = fti.build_manifest(
+                path,
+                UID,
+                fti.verify_all_seats(path, UID),
+                {i.label: ftc.parse_plist_bytes(fixture.read_plist(i.label), code=i.label) for i in fti.verify_all_seats(path, UID)},
+                operator_confirmed=True,
+                now=NOW,
+                seat_options={ftc.TUNNEL_LABEL_PREFIX + "c4": {"heartbeat_path": heartbeat}},
+            )
+            os.remove(heartbeat)
+            os.symlink("/tmp/ftr-not-a-heartbeat", heartbeat)
+            alerts, suspects = fti.revalidate_stale_identity(path, manifest2)
+            self.assertEqual(suspects, frozenset({ftc.TUNNEL_LABEL_PREFIX + "c4"}))
+            self.assertIn("heartbeat_path_not_regular", next(a for a in alerts).detail)
+
+    def test_load_manifest_stale_allowed_only_with_revalidation_flag(self):
+        with self._qualified_fixture() as (fixture, path, _manifest):
+            stale_now = NOW + ftc.MANIFEST_MAX_AGE_SECONDS + 1
+            with self.assertRaises(ftc.PolicyRefused):
+                fti.load_manifest(path, now=stale_now)
+            allowed = fti.load_manifest(path, now=stale_now, allow_stale_revalidation=True)
+            self.assertTrue(fti.manifest_is_stale(allowed, stale_now))
+
+
+class TelemetryPathValidationTests(unittest.TestCase):
+    def test_valid_relative_json_accepted(self):
+        self.assertIsNone(fti.telemetry_relative_path_reject_reason("hosts/lane-a.json"))
+        self.assertIsNone(fti.telemetry_relative_path_reject_reason("lane.json"))
+
+    def test_traversal_and_absolute_rejected(self):
+        self.assertIsNotNone(fti.telemetry_relative_path_reject_reason("../escape.json"))
+        self.assertIsNotNone(fti.telemetry_relative_path_reject_reason("/abs/path.json"))
+        self.assertIsNotNone(fti.telemetry_relative_path_reject_reason("a/../../b.json"))
+        self.assertIsNotNone(fti.telemetry_relative_path_reject_reason("back\\slash.json"))
+
+    def test_wrong_suffix_and_empty_rejected(self):
+        self.assertIsNotNone(fti.telemetry_relative_path_reject_reason("lane.txt"))
+        self.assertIsNotNone(fti.telemetry_relative_path_reject_reason(""))
+        self.assertIsNotNone(fti.telemetry_relative_path_reject_reason("lane"))
 
 
 class SecretRedactionTests(unittest.TestCase):

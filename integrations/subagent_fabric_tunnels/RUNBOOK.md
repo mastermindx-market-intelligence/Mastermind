@@ -35,7 +35,7 @@ additional queue or process watcher exists in this integration.
 ```bash
 # from a repo checkout at the branch commit
 python3 -m unittest discover -s integrations/subagent_fabric_tunnels \
-    -p 'test_fabric_tunnel_*.py'            # 83 tests
+    -p 'test_fabric_tunnel_*.py'            # 130 tests
 python3 -m unittest discover -s tests \
     -p 'test_subagent_fabric_tunnels_source.py'   # CI gate, 4 tests
 python3 -m compileall -q integrations/subagent_fabric_tunnels
@@ -43,30 +43,70 @@ python3 -m compileall -q integrations/subagent_fabric_tunnels
 
 ## Host procedure (requires separately authorized host gates — FTR-6/7)
 
-### 1. Qualify (read-only; explicit operator step)
+### 1. Qualify (the single sanctioned qualification entrypoint)
+
+`verify` is NOT qualification: it reads back a manifest that does not exist
+on a fresh host. The real entrypoint is the `qualify` subcommand, which
+derives all five installed identities from the ACTUAL plists, enforces
+distinct argv AND distinct executable identity, validates a CLOSED
+operator-facts schema, and writes the private 0600 manifest:
 
 ```bash
-python3 integrations/subagent_fabric_tunnels/fabric_tunnel_install.py --home ~ verify --now $(date +%s)
+# 1a. First-install dry run from an EMPTY manifest — reads only, writes nothing,
+#     proves the install path is feasible before anything is authorized:
+python3 integrations/subagent_fabric_tunnels/fabric_tunnel_install.py --home ~ \
+    qualify --dry-run --facts-file ~/ftr-facts.json
+
+# 1b. Actual qualification (explicit operator confirmation):
+python3 integrations/subagent_fabric_tunnels/fabric_tunnel_install.py --home ~ \
+    qualify --confirm --facts-file ~/ftr-facts.json
+
+# 1c. Readback after install (requires the manifest; never a substitute for 1b):
+python3 integrations/subagent_fabric_tunnels/fabric_tunnel_install.py --home ~ verify
 ```
 
-Qualification is built in-source (`fabric_tunnel_identity.build_manifest`) and
-must be run by an operator AFTER first-party host readback: it records the
-five installed plist identities (byte digests, argv tuples, resolved
-executable digests) plus OPTIONAL host facts — each seat's first-party
-tunnel-client heartbeat path, the `native-code-releases` store path, the
-host-pull pinned generation, and the approved stdin/ARG_MAX repair file
-digests from the merged upstream source. Nothing here invents any of those
-values; every absent fact becomes an explicit `*_unqualified` alert and
-health recovery stays blocked for what was never qualified. The manifest is
-written PRIVATE (0600) under
-`~/Library/Application Support/mastermind-subagent-fabric-tunnels/state/`
-and is never committed, printed whole, or logged.
+The facts file is an operator-written JSON document (0600, never committed,
+group/world-WRITABLE modes are refused); qualification validates it against a
+closed schema and refuses unknown fields — nothing is invented, hardcoded, or
+guessed:
+
+```json
+{
+  "seats": {
+    "com.mastermind.subagent-fabric-tunnel.c1": {
+      "heartbeat_path": "/absolute/path/to/that-seats-heartbeat",
+      "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+      "heartbeat_proof_note": "how the operator proved this file is the first-party last-seen signal"
+    }
+  },
+  "host": {
+    "native_store_path": "/absolute/native-code-releases/path",
+    "host_pull_telemetry_dir": "/absolute/telemetry/root",
+    "host_pull_telemetry_files": ["lane-a.json", "lane-b.json"],
+    "pinned_generation": "<64 lowercase hex>",
+    "stale_telemetry_seconds": 900,
+    "repair": {"files": {"ext/remote_sub_exec.py": "<64 lowercase hex>"}}
+  }
+}
+```
+
+Every fact is optional; every ABSENT fact becomes an explicit
+`*_unqualified` health alert instead of a guessed default. Facts that ARE
+provided are validated hard: absolute paths, existing regular non-symlink
+files (including each heartbeat at qualification time — a client that has
+never written its heartbeat cannot be qualified yet), ≤32 telemetry files
+with relative POSIX paths and a `.json` suffix, 64-hex pinned generation and
+repair digests. `heartbeat_kind` requires `heartbeat_proof_note`: without an
+operator first-party attestation, a heartbeat file's mtime is never treated
+as the tunnel-client/control-plane last-seen signal (B6).
 
 Refusals that must be resolved by a human before anything else:
-`foreign identity 'chatgpt1'`, `argv_tuple_duplicated`, `rogue_family_labels_present`,
-`*_drift_since_qualification`, `label_mismatch`, `*_plist_owner_unsafe`.
+`foreign identity 'chatgpt1'`, `argv_tuple_duplicated`,
+`executable_identity_duplicated`, `rogue_family_labels_present`,
+`*_drift_since_qualification`, `label_mismatch`, `*_plist_owner_unsafe`,
+`facts_*`. Qualification fails closed: any refusal means nothing is written.
 
-### 2. Install (the only mutation this integration performs)
+### 2. Install (the only plist mutation this integration performs)
 
 ```bash
 python3 integrations/subagent_fabric_tunnels/fabric_tunnel_install.py \
@@ -84,6 +124,13 @@ if even that fails the seat hard-alerts (`install_failed_rollback_also_failed`).
 Idempotent: an already-compliant seat is reported `already_compliant` with no
 write and no reload. Every action target is asserted against the immutable
 allowlist before any argv is built.
+
+The batch is TRANSACTIONAL (B5): every mutation is fully derived before the
+first write, and a failure on any seat rolls every previously installed seat
+back through its validated preimage CAS (status `batch_rolled_back`), leaving
+unattempted seats reported `not_attempted`. Only a fully installed or fully
+already-compliant batch exits 0; partial states are never silent and never
+survive a failed run.
 
 Readback after install:
 
@@ -104,26 +151,92 @@ installs the watchdog LaunchAgent — `StartInterval=60`, `RunAtLoad=true`,
 resurrected into a tight loop), python3 resolved from the host at install
 time. Each fire is ONE pass; there is no daemon and no retry plane.
 
+Watchdog install safety (B3): every existing target (the four copied modules
+and the watchdog plist) is captured as an exact private preimage backup
+BEFORE any edit; already byte-identical targets are left untouched
+(idempotent re-runs write nothing and create no backup churn); symlinked or
+unsafe targets REFUSE instead of being overwritten; every write is verified
+by read-back digest; and any post-write mismatch or launchd failure rolls ALL
+targets back to their exact preimage (or restores ABSENCE for targets that
+did not exist), reloads the restored plist, and raises. Watchdog install is
+an install-time mutation and keeps the strict fresh-manifest requirement.
+
+### Manifest age vs. durable recovery (B1)
+
+The manifest carries a one-day (86400 s) operator attestation bound. It
+bounds TRUST of the attestation, not the life of the recovery:
+
+- All MUTATION paths (install, rollback, verify, watchdog install) still
+  refuse a manifest past the bound: `manifest_stale_requalify_required`.
+  Install-time authorization and the preimage CAS are unchanged.
+- The read-only health pass continues past the boundary: each pass re-proves
+  every seat's installed identity, program digest/argv, and qualified
+  heartbeat path from LIVE host state (`revalidate_stale_identity`) and
+  raises a persistent `manifest_stale_revalidated` alert so the operator
+  requalifies. A seat whose live identity no longer matches the pinned
+  manifest is ALERT ONLY (`seat_identity_tampered_alert_only`; stable reason
+  codes `argv_changed` / `executable_path_changed` / `executable_digest_changed`
+  / `heartbeat_path_not_regular`) until a human requalifies — tampering never
+  earns a kickstart and never disables the other seats' recovery. Nothing in
+  this integration touches login, security, reboot, or launchd domain
+  configuration.
+
+### Heartbeat first-party proof (B6)
+
+A heartbeat FILE's mtime is only a recovery signal when the operator
+qualified that seat with `heartbeat_kind` + `heartbeat_proof_note`. Without
+that attestation, a stale heartbeat is
+`stale_heartbeat_unproven_alert_only` (ALERT ONLY, no forced restart) and
+states the exact required host proof: an operator-correlated
+tunnel-client/control-plane last-seen attestation recorded at qualification.
+Missing-PID recovery is unaffected — that state is proven by launchd itself.
+The user-visible error this replaces ("Tunnel-client has not been seen for
+300 seconds") is never inferred from an arbitrary file's age.
+
 Classification (distinguished exactly as the plan requires):
 
 | Signal | Outcome |
 | --- | --- |
 | No PID on a qualified job | `missing_pid` → plain `launchctl kickstart gui/<uid>/<label>` |
-| PID present, heartbeat older than 300 s | `stale_heartbeat` → `launchctl kickstart -k` |
+| PID present, heartbeat older than 300 s, first-party attested | `stale_heartbeat` → `launchctl kickstart -k` |
+| PID present, heartbeat older than 300 s, NOT attested | `stale_heartbeat_unproven_alert_only`, NO action, exact required proof in the alert |
 | PID present, heartbeat fresh | `healthy`, no action |
 | Heartbeat file missing/unreadable | `heartbeat_missing` alert, NO action |
 | Heartbeat path never qualified | `heartbeat_path_unqualified`, NO action |
+| Heartbeat recorded but never attested first-party | `heartbeat_first_party_unproven` alert (per pass, until qualified) |
+| Live seat identity ≠ pinned manifest (only past the day boundary) | `seat_identity_tampered_alert_only`, NO action for that seat; other seats recover |
+| Manifest past 86400 s on a health pass | `manifest_stale_revalidated` alert; live revalidation, recovery continues |
 | `CURRENT.json` selection ≠ qualified pinned generation | `selected_generation_drift` alert; repin REFUSED, CURRENT.json never rewritten |
 | Selected generation missing | `selected_generation_missing` alert |
 | Installed generation repair digest ≠ qualified stdin/ARG_MAX repair digest | `stdin_argmax_repair_missing` alert, never an auto selection/publish |
-| Host-pull telemetry older than the qualified threshold | `host_pull_telemetry_stale` alert |
+| Qualified telemetry set: oldest required file older than the threshold | `host_pull_telemetry_stale` alert |
+| Any qualified telemetry file missing/symlinked/invalid, or file set unqualified | `host_pull_telemetry_unqualified` alert (never a partial freshness proof) |
 | Kickstart already performed within cooldown (1800 s) | `kickstart_suppressed_cooldown` |
 | 3 consecutive kickstarts without a witnessed fresh heartbeat | `kickstart_escalated_alert`, alert-only until one fresh heartbeat is seen |
+
+Host-pull telemetry is read from a bounded CLOSED set of operator-qualified
+explicit files (`host_pull_telemetry_files` under `host_pull_telemetry_dir`,
+≤32 entries, `.json` suffix, relative POSIX paths, regular non-symlink
+files). The OLDEST required file drives freshness: an unrelated freshly
+written file under the same root can never mask stale telemetry, and there
+is no recursive scan to make the minute watchdog unbounded (B2).
 
 The kick ledger is private (0600), persists across passes, and is what makes
 recovery bounded. Host-pull generation alerts never block a qualified seat's
 own crash recovery: a dead tunnel client is recoverable even while the host
 carrier needs human attention.
+
+### Login/session semantics (documented, never changed)
+
+These jobs are USER LaunchAgents: launchd loads them only when the user's
+GUI/console session is established (login, or a re-login after reboot). They
+do NOT run at power-on before login, and neither do the watchdog's passes.
+After reboot WITHOUT a logged-in console session, no tunnel client, no
+watchdog pass, and therefore no automatic recovery exists until someone logs
+in; any "recovers after reboot" claim additionally requires a proven
+logged-in session owner. This integration documents that fact and does not
+and may not change login items, launchd domain configuration, security, or
+session behavior to pre-login startup.
 
 ### Deliberate stop semantics
 
@@ -167,6 +280,10 @@ result as an alert code, never silently. Backups live under
 - Not installed anywhere, and no proof of host health.
 - Not a CURRENT.json selector, publisher, or generation chooser.
 - Not a Desktop Commander carrier observer or modifier.
+- Not a pre-login service: recovery exists only inside a live logged-in GUI
+  session (see "Login/session semantics").
+- Not a heartbeat truth-source by itself: an unattested file mtime is never
+  claimed as first-party tunnel-client/control-plane last-seen.
 - Not merged/approved: one Draft PR from the branch may exist, but review is
   a separate independent non-authoring Fabric pass (FTR-5) and merge/approve
   stays out of this mission.

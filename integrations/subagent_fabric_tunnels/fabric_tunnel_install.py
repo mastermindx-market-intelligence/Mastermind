@@ -14,6 +14,11 @@ the operator-qualified private manifest:
    restored file, and emit an alert. A seat is never left mutated without its
    job loaded unless even the rollback failed, which is a hard alert.
 
+The batch is transactional (B5): mutations are fully derived before the
+first write, and a failure on any seat rolls every previously installed seat
+back through its validated preimage CAS, so no earlier seat stays altered
+because a later one failed.
+
 Deliberate stop semantics live here too: because KeepAlive is unconditional,
 a plain SIGTERM (or any exit, including exit 0) is followed by a launchd
 restart. The ONLY sanctioned deliberate stop is
@@ -61,7 +66,8 @@ _BOOTSTRAP_NOT_LOADED_CODES = {37, 36, 5}  # ESRCH/ENOENT-style "not loaded" var
 @dataclass
 class InstallResult:
     label: str
-    status: str  # "installed" | "already_compliant" | "rolled_back" | "failed"
+    status: str  # "installed" | "already_compliant" | "rolled_back" | "failed" |
+    # "batch_rolled_back" | "batch_rollback_failed" | "not_attempted"
     changes: dict[str, Any] = field(default_factory=dict)
     backup_sidecar: str = ""
     alerts: list[Alert] = field(default_factory=list)
@@ -76,6 +82,20 @@ class InstallResult:
                 "alerts": [alert.code for alert in self.alerts],
             },
         )
+
+
+@dataclass(frozen=True)
+class _SeatPlan:
+    """A fully derived, not-yet-applied policy-trio mutation for one seat.
+
+    Deriving ALL plans before ANY write means a derivation refusal can never
+    leave part of the batch mutated (B5)."""
+    label: str
+    changes: dict[str, Any]
+    post_raw: bytes
+    pre_mode: int
+    seat_uid: int
+    plist_path: Path
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +190,13 @@ def install_seats(
     Refuses (no mutation at all) when: no ``--confirm``, manifest missing or
     stale, any rogue family label exists, ANY seat drifted since
     qualification, or any seat fails identity re-verification.
+
+    The batch is TRANSACTIONAL (B5): every mutation is fully derived before
+    anything is written; if a later seat fails, every previously installed
+    seat is rolled back through its validated preimage CAS and re-bootstrapped,
+    and unattempted seats are reported ``not_attempted``. The operation only
+    reports success when the batch ends entirely installed or entirely
+    already-compliant; partial states are never silent.
     """
     if not confirm:
         raise PolicyRefused("install_requires_explicit_confirmation")
@@ -192,32 +219,81 @@ def install_seats(
         if int(entry["uid"]) != seat_uid:
             raise PolicyRefused(f"{label}_uid_mismatch")
 
-    results: list[InstallResult] = []
-    for label in sorted(TUNNEL_LABELS):
-        results.append(
-            _install_one(home, runner, manifest, working[label], label, now=now, reload_jobs=reload_jobs)
-        )
-    return results
+    # Derivation phase: build every plan before the first write.
+    labels = sorted(TUNNEL_LABELS)
+    plans: list[_SeatPlan | None] = []
+    for label in labels:
+        plans.append(_plan_one(manifest, working[label], label, home=home))
+
+    results: dict[str, InstallResult] = {}
+    completed: list[tuple[_SeatPlan, str]] = []
+    batch_failed = False
+    for label, plan in zip(labels, plans):
+        if plan is None:
+            results[label] = InstallResult(label=label, status="already_compliant")
+            continue
+        if batch_failed:
+            results[label] = InstallResult(label=label, status="not_attempted")
+            continue
+        result = _execute_plan(home, runner, plan, now=now, reload_jobs=reload_jobs)
+        results[label] = result
+        if result.status == "installed":
+            completed.append((plan, result.backup_sidecar))
+        else:
+            batch_failed = True
+
+    if batch_failed and completed:
+        # Roll every previously successful seat back to its exact qualified
+        # preimage (validated against this run's post digest) so no earlier
+        # seat stays altered because a later one failed. Completed seats are
+        # LOADED with the new plist, so the restore must use the
+        # bootout-then-bootstrap path (reload_only) — a bare bootstrap of an
+        # already-bootstrapped job would fail with EEXIST on real launchd.
+        for plan, _sidecar in completed:
+            alert = _rollback_preimage(
+                home,
+                runner,
+                plan.label,
+                expected_post=sha256_bytes(plan.post_raw),
+                now=now,
+                reload_only=reload_jobs,
+                reload=reload_jobs,
+            )
+            if alert is None:
+                results[plan.label] = InstallResult(
+                    label=plan.label,
+                    status="batch_rolled_back",
+                    changes=dict(plan.changes),
+                    alerts=[Alert("batch_rolled_back", plan.label, "later seat failed; restored qualified preimage", acted=True)],
+                )
+            else:
+                results[plan.label] = InstallResult(
+                    label=plan.label,
+                    status="batch_rollback_failed",
+                    changes=dict(plan.changes),
+                    alerts=[Alert("batch_rollback_failed", plan.label, alert.code, acted=True)],
+                )
+    return [results[label] for label in labels]
 
 
-def _install_one(
-    home: Path,
-    runner: Any,
+def _plan_one(
     manifest: Mapping[str, Any],
     observed: dict[str, Any],
     label: str,
     *,
-    now: float,
-    reload_jobs: bool,
-) -> InstallResult:
+    home: Path,
+) -> _SeatPlan | None:
+    """Derive one seat's policy-trio mutation without touching disk.
+
+    Returns None when the seat is already compliant. Raises PolicyRefused for
+    any mutation that cannot be proven policy-trio-only BEFORE any write."""
     entry = manifest["seats"][label]
     seat_uid = int(entry["uid"])
     plist_path = home / entry["plist_relpath"]
     changes = policy_changes(observed)
     if not changes:
-        return InstallResult(label=label, status="already_compliant")
+        return None
 
-    pre_raw = plist_path.read_bytes()
     pre_mode = plist_path.stat().st_mode & 0o7777
     target = dict(observed)
     target.update(changes)
@@ -230,34 +306,64 @@ def _install_one(
         raise PolicyRefused(f"{label}_mutation_not_policy_only")
     if any(k not in ("RunAtLoad", "KeepAlive", "ThrottleInterval") for k in changes):
         raise PolicyRefused(f"{label}_mutation_outside_policy_trio")
+    return _SeatPlan(
+        label=label,
+        changes=changes,
+        post_raw=post_raw,
+        pre_mode=pre_mode,
+        seat_uid=seat_uid,
+        plist_path=plist_path,
+    )
 
-    sidecar = _write_backup(home, label, pre_raw, post_raw, pre_mode, now)
-    atomic_write_bytes(plist_path, post_raw, pre_mode)
+
+def _execute_plan(
+    home: Path,
+    runner: Any,
+    plan: _SeatPlan,
+    *,
+    now: float,
+    reload_jobs: bool,
+) -> InstallResult:
+    """Back up, write, and reload one derived plan, self-rolling back on
+    reload failure. Never derives policy: that happened in :func:`_plan_one`."""
+    label = plan.label
+    pre_raw = plan.plist_path.read_bytes()
+    sidecar = _write_backup(home, label, pre_raw, plan.post_raw, plan.pre_mode, now)
+    try:
+        atomic_write_bytes(plan.plist_path, plan.post_raw, plan.pre_mode)
+    except OSError as exc:
+        # The atomic write leaves the original in place on failure; the batch
+        # still aborts and earlier seats are rolled back by the caller.
+        return InstallResult(
+            label=label, status="failed", changes=dict(plan.changes),
+            backup_sidecar=str(sidecar),
+            alerts=[Alert("install_write_failed", label, str(exc), acted=True)],
+        )
 
     if not reload_jobs:
-        return InstallResult(label=label, status="installed", changes=changes, backup_sidecar=str(sidecar))
+        return InstallResult(label=label, status="installed", changes=dict(plan.changes), backup_sidecar=str(sidecar))
 
     try:
-        _bootout_if_loaded(runner, seat_uid, label)
-        _bootstrap(runner, seat_uid, plist_path)
+        _bootout_if_loaded(runner, plan.seat_uid, label)
+        _bootstrap(runner, plan.seat_uid, plan.plist_path)
     except ActionRefused as exc:
         # Roll the preimage back and re-bootstrap the ORIGINAL plist so the
         # seat is never left mutated with its job unloaded.
         rollback_alert = _rollback_preimage(
-            home, runner, label, expected_post=sha256_bytes(post_raw), now=now
+            home, runner, label, expected_post=sha256_bytes(plan.post_raw), now=now
         )
         if rollback_alert is not None:
             return InstallResult(
-                label=label, status="failed", changes=changes,
+                label=label, status="failed", changes=dict(plan.changes),
                 backup_sidecar=str(sidecar),
                 alerts=[Alert("install_failed_rollback_also_failed", label, str(exc), acted=True)],
             )
         return InstallResult(
-            label=label, status="rolled_back", changes=changes,
+            label=label, status="rolled_back", changes=dict(plan.changes),
             backup_sidecar=str(sidecar),
             alerts=[Alert("install_failed_rolled_back", label, str(exc), acted=True)],
         )
-    return InstallResult(label=label, status="installed", changes=changes, backup_sidecar=str(sidecar))
+    return InstallResult(label=label, status="installed", changes=dict(plan.changes), backup_sidecar=str(sidecar))
 
 
 def verify_install(home: Path, *, now: float) -> list[str]:
@@ -351,9 +457,12 @@ def _rollback_preimage(
     expected_post: str | None,
     now: float,
     reload_only: bool = False,
+    reload: bool = True,
 ) -> Alert | None:
     """Internal rollback used by install failure paths: restore newest
-    preimage (CAS against ``expected_post`` when provided) and bootstrap it."""
+    preimage (CAS against ``expected_post`` when provided) and, when
+    ``reload`` is set, bootstrap it. ``reload=False`` is for ``reload_jobs=``
+    False installs, where launchd was never touched."""
     loaded = _load_backup(home, label)
     if loaded is None:
         return Alert("rollback_no_backup", label, acted=True)
@@ -371,6 +480,8 @@ def _rollback_preimage(
     if sha256_bytes(pre_raw) != payload.get("pre_sha256"):
         return Alert("rollback_backup_digest_mismatch", label, acted=True)
     atomic_write_bytes(plist_path, pre_raw, int(payload.get("mode", 0o644)))
+    if not reload:
+        return None
     if reload_only:
         try:
             _bootout_if_loaded(runner, seat_uid, label)
@@ -385,12 +496,46 @@ def _rollback_preimage(
     return None
 
 
+# ---------------------------------------------------------------------------
+# Operator facts file (B4). The closed schema is validated by
+# fabric_tunnel_identity._validated_facts; this loader only enforces the file
+# itself is a safe, private, regular JSON document.
+# ---------------------------------------------------------------------------
+
+
+def load_operator_facts(path_text: str | None) -> dict[str, Any]:
+    """Load the operator-written qualification facts file, fail closed.
+
+    The file must be a regular non-symlink JSON object, not group/world
+    WRITABLE (it records private host paths), and is parsed only — never
+    executed, never printed. An absent ``--facts-file`` means identity-only
+    qualification; every omitted optional fact then surfaces as the matching
+    ``*_unqualified`` health alert instead of a guessed default."""
+    from fabric_tunnel_common import require_regular_file
+
+    if not path_text:
+        return {}
+    path = Path(path_text).expanduser()
+    require_regular_file(path, code="facts_file_unavailable")
+    if path.stat().st_mode & 0o022:
+        raise PolicyRefused("facts_file_writable_by_group_or_others")
+    try:
+        facts = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise PolicyRefused(f"facts_file_unreadable ({exc.__class__.__name__})") from exc
+    if not isinstance(facts, dict):
+        raise PolicyRefused("facts_file_shape_invalid")
+    return facts
+
+
 # CLI surface used by the runbook and the installed watchdog. Kept tiny:
 # every subcommand is explicit, prints secret-safe evidence, and exits
-# non-zero on any refusal so operators cannot miss one.
+# non-zero on any refusal so operators cannot miss one. ``qualify`` is the
+# single sanctioned qualification entrypoint (B4); the runbook's first-install
+# procedure is qualify --dry-run, qualify --confirm, install --confirm, verify.
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     import argparse
-    from fabric_tunnel_identity import manifest_public_evidence
+    from fabric_tunnel_identity import qualify_install
 
     parser = argparse.ArgumentParser(description="Subagent Fabric tunnel launchd policy (FTR-2)")
     parser.add_argument("--home", default=os.path.expanduser("~"))
@@ -400,6 +545,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         cmd.add_argument("--confirm", action="store_true")
         cmd.add_argument("--label", default=None)
         cmd.add_argument("--now", type=float, default=None)
+    qualify_cmd = sub.add_parser("qualify")
+    qualify_cmd.add_argument("--confirm", action="store_true")
+    qualify_cmd.add_argument("--facts-file", default=None)
+    qualify_cmd.add_argument("--dry-run", action="store_true")
+    qualify_cmd.add_argument("--now", type=float, default=None)
     args = parser.parse_args(argv)
     home = Path(args.home).expanduser()
     runner = subprocess_runner
@@ -407,6 +557,18 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     try:
         if args.command == "verify":
             for line in verify_install(home, now=now):
+                print(line)
+            return 0
+        if args.command == "qualify":
+            facts = load_operator_facts(args.facts_file)
+            for line in qualify_install(
+                home,
+                uid=os.getuid(),
+                facts=facts,
+                operator_confirmed=args.confirm,
+                now=now,
+                dry_run=args.dry_run,
+            ):
                 print(line)
             return 0
         if args.command == "install":
@@ -420,7 +582,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
             alert = rollback_seat(home, runner, args.label, confirm=args.confirm, now=now)
             print(alert.as_dict() if alert else f"{args.label} status=rolled_back")
             return 0 if alert is None else 4
-    except (PolicyRefused, ActionRefused) as refused:
+    except (PolicyRefused, ActionRefused, IdentityRejected) as refused:
         print(f"REFUSED {refused.__class__.__name__}: {refused}", file=os.sys.stderr)
         return 3
     parser.error("unreachable")

@@ -10,12 +10,21 @@ the current plist bytes are exactly the qualified bytes.
 
 Nothing in this module invents a tunnel identity, credential, command
 argument, or terminal binding. It only observes, pins, and re-verifies.
+
+The single operator-facing qualification entrypoint is :func:`qualify_install`
+(dry-run capable, closed facts schema, private 0600 manifest). After the
+manifest's one-day attestation bound passes, :func:`revalidate_stale_identity`
+lets a READ-ONLY health pass continue by re-proving each seat's installed
+identity, program digest/argv, and qualified heartbeat from live host state —
+mutation paths keep requiring a fresh manifest.
 """
 from __future__ import annotations
 
 import json
 import os
 import posixpath
+import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -25,8 +34,10 @@ from fabric_tunnel_common import (
     KEEP_ALIVE,
     MANIFEST_MAX_AGE_SECONDS,
     MASTER_SHA,
+    MAX_TELEMETRY_FILES,
     PLAN_COMMIT,
     RUN_AT_LOAD,
+    TELEMETRY_FILE_SUFFIXES,
     THROTTLE_INTERVAL_MIN,
     TUNNEL_LABELS,
     TUNNEL_LABEL_PREFIX,
@@ -57,14 +68,35 @@ _ARGV_MAX = 64
 # Heartbeat and host-fact fields recorded per seat / per host at
 # qualification. They are OPTIONAL: absence is an unqualified-health alert,
 # never a guessed default path.
-_SEAT_OPTIONAL_FIELDS = ("heartbeat_path",)
+#
+# ``heartbeat_kind`` / ``heartbeat_proof_note`` are the B6 first-party
+# attestation: without an operator-declared kind plus a proof note, a
+# heartbeat file's mtime is NOT treated as the tunnel-client/control-plane
+# last-seen signal, and a stale heartbeat is alert-only (no forced restart).
+_SEAT_OPTIONAL_FIELDS = ("heartbeat_path", "heartbeat_kind", "heartbeat_proof_note")
 _HOST_OPTIONAL_FIELDS = (
     "native_store_path",
     "host_pull_telemetry_dir",
+    "host_pull_telemetry_files",
     "pinned_generation",
     "stale_telemetry_seconds",
     "repair",
 )
+
+# Closed operator facts schema accepted by ``qualify_install`` (B4). Anything
+# not listed here is refused, never guessed.
+_SEAT_FACT_FIELDS = ("heartbeat_path", "heartbeat_kind", "heartbeat_proof_note")
+_HOST_FACT_FIELDS = (
+    "native_store_path",
+    "host_pull_telemetry_dir",
+    "host_pull_telemetry_files",
+    "pinned_generation",
+    "stale_telemetry_seconds",
+    "repair",
+)
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+# Clock-skew tolerance for a recorded_at that lands slightly in the future.
+_RECORDED_AT_FUTURE_TOLERANCE_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -318,7 +350,23 @@ def write_manifest(home: Path, manifest: Mapping[str, Any]) -> Path:
     return target
 
 
-def load_manifest(home: Path, *, now: float) -> dict[str, Any]:
+def load_manifest(
+    home: Path,
+    *,
+    now: float,
+    allow_stale_revalidation: bool = False,
+) -> dict[str, Any]:
+    """Load and structurally verify the private qualification manifest.
+
+    Install-time freshness is preserved by default: a manifest older than
+    ``MANIFEST_MAX_AGE_SECONDS`` is refused for every MUTATION path
+    (install / rollback / verify / watchdog install). Read-only health passes
+    may pass ``allow_stale_revalidation=True`` — the day boundary then no
+    longer disables recovery outright, but the caller MUST pair it with
+    :func:`revalidate_stale_identity` so trust is re-derived from live host
+    state every pass instead of from the aging attestation. The manifest is
+    still never trusted blindly at any age.
+    """
     home = Path(home)
     path = manifest_path(home)
     require_regular_file(path, code="manifest_unavailable")
@@ -336,12 +384,345 @@ def load_manifest(home: Path, *, now: float) -> dict[str, Any]:
         raise PolicyRefused("manifest_master_sha_mismatch")
     if not manifest.get("operator_confirmed"):
         raise PolicyRefused("manifest_not_operator_confirmed")
-    if now - float(manifest.get("recorded_at", 0)) > MANIFEST_MAX_AGE_SECONDS:
+    try:
+        recorded_at = float(manifest.get("recorded_at", 0))
+    except (TypeError, ValueError) as exc:
+        raise PolicyRefused("manifest_recorded_at_invalid") from exc
+    if recorded_at - now > _RECORDED_AT_FUTURE_TOLERANCE_SECONDS:
+        raise PolicyRefused("manifest_recorded_at_in_future")
+    if now - recorded_at > MANIFEST_MAX_AGE_SECONDS and not allow_stale_revalidation:
         raise PolicyRefused("manifest_stale_requalify_required")
     seats = manifest.get("seats")
     if not isinstance(seats, dict) or set(seats) != set(TUNNEL_LABELS):
         raise PolicyRefused("manifest_seat_set_mismatch")
     return manifest
+
+
+def manifest_is_stale(manifest: Mapping[str, Any], now: float) -> bool:
+    """True when the operator attestation has passed the install-time bound.
+
+    Staleness never blocks a revalidating health pass by itself; it only
+    switches the pass onto live revalidation and keeps a persistent
+    ``manifest_stale_revalidated`` alert raised so the operator requalifies.
+    """
+    try:
+        recorded_at = float(manifest.get("recorded_at", 0))
+    except (TypeError, ValueError):
+        return True
+    return (now - recorded_at) > MANIFEST_MAX_AGE_SECONDS
+
+
+def revalidate_stale_identity(
+    home: Path,
+    manifest: Mapping[str, Any],
+) -> tuple[list[Alert], frozenset[str]]:
+    """Live per-seat revalidation used after the attestation day boundary.
+
+    Deterministic, host-derived, and never a renewal of the stale manifest:
+    each seat's installed plist identity, program argv, resolved executable
+    path, executable digest, and qualified heartbeat path are re-proven
+    against the pinned manifest values from the LIVE filesystem. A seat whose
+    live identity no longer matches is returned in ``suspect_labels`` and
+    must receive ALERT ONLY recovery treatment (no kickstart) until a human
+    requalifies. Detail strings carry stable reason codes only — never argv
+    bodies or env contents.
+    """
+    home = Path(home)
+    alerts: list[Alert] = []
+    suspects: set[str] = set()
+    for label in sorted(TUNNEL_LABELS):
+        entry = manifest["seats"][label]
+        uid = int(entry["uid"])
+        try:
+            identity = verify_seat(home, label, uid)
+        except IdentityRejected as rejected:
+            alerts.append(Alert("seat_identity_rejected", label, str(rejected)))
+            suspects.add(label)
+            continue
+        problems: list[str] = []
+        if list(identity.program_arguments) != list(entry.get("program_arguments", [])):
+            problems.append("argv_changed")
+        if identity.executable != entry.get("executable"):
+            problems.append("executable_path_changed")
+        if identity.executable_sha256 != entry.get("executable_sha256"):
+            problems.append("executable_digest_changed")
+        heartbeat_path = entry.get("heartbeat_path")
+        if heartbeat_path:
+            # Qualified heartbeat revalidation after the day boundary: a
+            # MISSING file is a normal health state (per-pass classification
+            # raises heartbeat_missing, alert-only), but a path that now
+            # exists as a symlink or special file is a qualification break.
+            try:
+                st = Path(heartbeat_path).lstat()
+            except OSError:
+                st = None
+            if st is not None and (stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode)):
+                problems.append("heartbeat_path_not_regular")
+        if problems:
+            alerts.append(Alert("seat_identity_tampered_alert_only", label, ",".join(problems)))
+            suspects.add(label)
+    return alerts, frozenset(suspects)
+
+
+def telemetry_relative_path_reject_reason(rel: str) -> str | None:
+    """Closed-shape validation for a qualified telemetry relative path.
+
+    Deterministic and shared by qualification (refuses) and health reads
+    (rejects the whole reading): relative POSIX path, no empty/`.`/`..`
+    components, bounded length, and a qualified suffix.
+    """
+    if not isinstance(rel, str) or not rel or len(rel) > 512:
+        return "shape"
+    if rel.startswith("/") or "\\" in rel:
+        return "not_relative_posix"
+    parts = rel.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "traversal"
+    if Path(rel).suffix not in TELEMETRY_FILE_SUFFIXES:
+        return "suffix"
+    return None
+
+
+def _relative_path_reject_reason(rel: Any) -> str | None:
+    """Relative-path shape check for qualified facts (no suffix constraint)."""
+    if not isinstance(rel, str) or not rel or len(rel) > 512:
+        return "shape"
+    if rel.startswith("/") or "\\" in rel:
+        return "not_relative_posix"
+    parts = rel.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return "traversal"
+    return None
+
+
+def _resolved_inside_root(root: Path, candidate: Path) -> bool:
+    try:
+        resolved = candidate.resolve()
+        root_resolved = root.resolve()
+    except OSError:
+        return False
+    return resolved != root_resolved and root_resolved in resolved.parents
+
+
+def _validated_facts(
+    facts: Mapping[str, Any] | None,
+) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
+    """Validate the operator facts mapping for :func:`qualify_install`.
+
+    The schema is CLOSED: unknown fields, unknown seats, non-absolute paths,
+    missing/symlinked/special files, malformed digests, and unbounded file
+    sets are refused with stable codes. Nothing is invented: every recorded
+    fact was explicitly supplied by the operator for this host.
+    """
+    if facts is None:
+        return {}, {}
+    if not isinstance(facts, Mapping):
+        raise PolicyRefused("facts_shape_invalid")
+    unknown_top = sorted(set(facts) - {"seats", "host"})
+    if unknown_top:
+        raise PolicyRefused(f"facts_unknown_field: {','.join(unknown_top)}")
+    raw_seats = facts.get("seats") or {}
+    raw_host = facts.get("host") or {}
+    if not isinstance(raw_seats, dict) or not isinstance(raw_host, dict):
+        raise PolicyRefused("facts_shape_invalid")
+
+    seat_options: dict[str, dict[str, str]] = {}
+    for key, entry in raw_seats.items():
+        if key not in TUNNEL_LABELS:
+            raise PolicyRefused(f"facts_unknown_seat: {key}")
+        if not isinstance(entry, dict):
+            raise PolicyRefused(f"facts_seat_shape_invalid: {key}")
+        unknown = sorted(set(entry) - set(_SEAT_FACT_FIELDS))
+        if unknown:
+            raise PolicyRefused(f"facts_unknown_seat_field: {key}:{','.join(unknown)}")
+        validated: dict[str, str] = {}
+        heartbeat = entry.get("heartbeat_path")
+        kind = entry.get("heartbeat_kind")
+        note = entry.get("heartbeat_proof_note")
+        if heartbeat is not None:
+            if not isinstance(heartbeat, str) or not heartbeat.startswith("/"):
+                raise PolicyRefused(f"facts_heartbeat_path_not_absolute: {key}")
+            if not isinstance(kind, str) or not kind.strip():
+                raise PolicyRefused(f"facts_heartbeat_kind_required: {key}")
+            if not isinstance(note, str) or not note.strip():
+                raise PolicyRefused(f"facts_heartbeat_proof_note_required: {key}")
+            path = Path(heartbeat)
+            try:
+                st = path.lstat()
+            except OSError as exc:
+                raise PolicyRefused(f"facts_heartbeat_path_unavailable: {key}") from exc
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+                raise PolicyRefused(f"facts_heartbeat_path_not_regular: {key}")
+            validated["heartbeat_path"] = heartbeat
+            validated["heartbeat_kind"] = kind.strip()
+            validated["heartbeat_proof_note"] = note.strip()
+        elif kind is not None or note is not None:
+            raise PolicyRefused(f"facts_heartbeat_path_required_with_kind: {key}")
+        if validated:
+            seat_options[key] = validated
+
+    host_options: dict[str, Any] = {}
+    unknown_host = sorted(set(raw_host) - set(_HOST_FACT_FIELDS))
+    if unknown_host:
+        raise PolicyRefused(f"facts_unknown_host_field: {','.join(unknown_host)}")
+    store = raw_host.get("native_store_path")
+    if store is not None:
+        if not isinstance(store, str) or not store.startswith("/") or not Path(store).is_dir():
+            raise PolicyRefused("facts_native_store_path_unavailable")
+        host_options["native_store_path"] = store
+    telemetry_dir = raw_host.get("host_pull_telemetry_dir")
+    telemetry_files = raw_host.get("host_pull_telemetry_files")
+    if telemetry_dir is not None or telemetry_files is not None:
+        if not isinstance(telemetry_dir, str) or not telemetry_dir.startswith("/") or not Path(telemetry_dir).is_dir():
+            raise PolicyRefused("facts_telemetry_dir_unavailable")
+        if (
+            not isinstance(telemetry_files, list)
+            or not telemetry_files
+            or not all(isinstance(item, str) for item in telemetry_files)
+        ):
+            raise PolicyRefused("facts_telemetry_files_required")
+        if len(telemetry_files) > MAX_TELEMETRY_FILES:
+            raise PolicyRefused("facts_telemetry_files_too_many")
+        seen: set[str] = set()
+        root = Path(telemetry_dir)
+        for rel in telemetry_files:
+            reason = telemetry_relative_path_reject_reason(rel)
+            if reason:
+                raise PolicyRefused(f"facts_telemetry_file_invalid: {reason}")
+            if rel in seen:
+                raise PolicyRefused(f"facts_telemetry_file_duplicated: {rel}")
+            seen.add(rel)
+            candidate = root / rel
+            try:
+                st = candidate.lstat()
+            except OSError as exc:
+                raise PolicyRefused(f"facts_telemetry_file_missing: {rel}") from exc
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+                raise PolicyRefused(f"facts_telemetry_file_not_regular: {rel}")
+            if not _resolved_inside_root(root, candidate):
+                raise PolicyRefused(f"facts_telemetry_file_escapes_root: {rel}")
+        host_options["host_pull_telemetry_dir"] = telemetry_dir
+        host_options["host_pull_telemetry_files"] = list(telemetry_files)
+    pinned = raw_host.get("pinned_generation")
+    if pinned is not None:
+        if not isinstance(pinned, str) or not _HEX64_RE.match(pinned):
+            raise PolicyRefused("facts_pinned_generation_invalid")
+        host_options["pinned_generation"] = pinned
+    stale_seconds = raw_host.get("stale_telemetry_seconds")
+    if stale_seconds is not None:
+        if (
+            isinstance(stale_seconds, bool)
+            or not isinstance(stale_seconds, int)
+            or not (60 <= stale_seconds <= 7 * 86400)
+        ):
+            raise PolicyRefused("facts_stale_telemetry_seconds_invalid")
+        host_options["stale_telemetry_seconds"] = stale_seconds
+    repair = raw_host.get("repair")
+    if repair is not None:
+        if not isinstance(repair, dict):
+            raise PolicyRefused("facts_repair_shape_invalid")
+        unknown_repair = sorted(set(repair) - {"files", "source_commit"})
+        if unknown_repair:
+            raise PolicyRefused(f"facts_repair_unknown_field: {','.join(unknown_repair)}")
+        files = repair.get("files")
+        if not isinstance(files, dict) or not files:
+            raise PolicyRefused("facts_repair_files_required")
+        if len(files) > MAX_TELEMETRY_FILES:
+            raise PolicyRefused("facts_repair_files_too_many")
+        for rel, digest in files.items():
+            reason = _relative_path_reject_reason(rel)
+            if reason:
+                raise PolicyRefused(f"facts_repair_file_invalid: {reason}")
+            if not isinstance(digest, str) or not _HEX64_RE.match(digest):
+                raise PolicyRefused(f"facts_repair_digest_invalid: {rel}")
+        source_commit = repair.get("source_commit")
+        if source_commit is not None and (not isinstance(source_commit, str) or len(source_commit) > 64):
+            raise PolicyRefused("facts_repair_source_commit_invalid")
+        host_options["repair"] = {
+            "files": dict(files),
+            **({"source_commit": source_commit} if source_commit else {}),
+        }
+    return seat_options, host_options
+
+
+def _require_distinct_executable_identities(list_of_identities: list[SeatIdentity]) -> None:
+    """Qualification-time distinctness guard: two seats pointing at the SAME
+    executable path with the SAME digest is one identity wearing two labels —
+    the cross-seat adoption hazard. Distinct argv is already enforced by
+    :func:`verify_all_seats`; this closes the executable-identity half."""
+    seen: dict[tuple[str, str], str] = {}
+    for identity in list_of_identities:
+        key = (identity.executable, identity.executable_sha256)
+        holder = seen.get(key)
+        if holder is not None:
+            raise PolicyRefused(f"executable_identity_duplicated:{identity.label}:{holder}")
+        seen[key] = identity.label
+
+
+def qualify_install(
+    home: Path,
+    *,
+    uid: int,
+    facts: Mapping[str, Any] | None,
+    operator_confirmed: bool,
+    now: float,
+    dry_run: bool = False,
+) -> list[str]:
+    """The single sanctioned operator qualification entrypoint (B4).
+
+    Reads the five ACTUAL installed plists via :func:`verify_all_seats`,
+    enforces distinct argv AND executable identity, validates the closed
+    operator facts schema (heartbeat attestation, native store, telemetry
+    closed file set, pinned generation, repair digests — all explicit, never
+    hardcoded or invented), assembles the manifest via
+    :func:`build_manifest`, and persists it PRIVATE (0600). ``dry_run``
+    performs every check and returns the secret-safe evidence without
+    writing anything, which makes a first install from an empty manifest
+    demonstrably feasible. Any refusal raises before ANY write, so an
+    incomplete qualification fails closed.
+    """
+    if not dry_run and not operator_confirmed:
+        # A dry run writes nothing, so it needs no operator confirmation;
+        # any qualification that WRITES the manifest always does.
+        raise PolicyRefused("qualify_requires_explicit_operator_confirmation")
+    home = Path(home)
+    seat_options, host_options = _validated_facts(facts)
+    rogue = scan_family(home)
+    if rogue:
+        raise PolicyRefused(f"rogue_family_labels_present: {','.join(rogue)}")
+    identities = verify_all_seats(home, uid)
+    _require_distinct_executable_identities(identities)
+    observed: dict[str, dict[str, Any]] = {}
+    for identity in identities:
+        raw = (home / identity.plist_rel).read_bytes()
+        observed[identity.label] = parse_plist_bytes(raw, code=identity.label + "_qualify_read")
+    manifest = build_manifest(
+        home,
+        uid,
+        identities,
+        observed,
+        operator_confirmed=True,
+        now=now,
+        seat_options=seat_options,
+        host_options=host_options,
+    )
+    lines = list(manifest_public_evidence(manifest))
+    lines.append(
+        evidence_line(
+            "qualify",
+            {
+                "dry_run": bool(dry_run),
+                "manifest_written": bool(not dry_run),
+                "heartbeat_seats_attested": sum(
+                    1 for options in seat_options.values() if options.get("heartbeat_kind")
+                ),
+                "telemetry_files_qualified": len(host_options.get("host_pull_telemetry_files", [])),
+            },
+        )
+    )
+    if not dry_run:
+        write_manifest(home, manifest)
+    return lines
 
 
 def assert_current_bytes_match_manifest(home: Path, manifest: Mapping[str, Any], label: str) -> dict[str, Any]:
@@ -400,11 +781,20 @@ def unqualified_health_alerts(home: Path, manifest: Mapping[str, Any]) -> list[A
         entry = manifest["seats"][label]
         if not entry.get("heartbeat_path"):
             alerts.append(Alert("heartbeat_path_unqualified", label))
+        elif not entry.get("heartbeat_kind"):
+            # A recorded heartbeat path without an operator first-party
+            # attestation (B6): its mtime must never be treated as the
+            # control-plane last-seen signal. Alert-only; forced restart on
+            # staleness stays disabled for that seat.
+            alerts.append(Alert("heartbeat_first_party_unproven", label))
     host = manifest
     if not host.get("native_store_path"):
         alerts.append(Alert("native_store_path_unqualified", "host"))
     if not host.get("host_pull_telemetry_dir"):
         alerts.append(Alert("host_pull_telemetry_unqualified", "host"))
+    telemetry_files = host.get("host_pull_telemetry_files")
+    if not isinstance(telemetry_files, list) or not telemetry_files:
+        alerts.append(Alert("host_pull_telemetry_files_unqualified", "host"))
     if not host.get("pinned_generation"):
         alerts.append(Alert("pinned_generation_unqualified", "host"))
     repair = host.get("repair")

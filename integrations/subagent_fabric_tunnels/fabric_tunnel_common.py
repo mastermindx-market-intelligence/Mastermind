@@ -96,6 +96,14 @@ KICKSTART_ESCALATION_LIMIT = 3
 WATCHDOG_START_INTERVAL_SECONDS = 60
 MANIFEST_MAX_AGE_SECONDS = 86400
 
+# Host-pull telemetry qualification. Health reads a bounded, CLOSED set of
+# operator-qualified explicit telemetry files (relative to the qualified
+# telemetry root) and evaluates the OLDEST of them, so an unrelated fresh
+# file under the same root can never mask stale telemetry and a large
+# directory can never make the minute watchdog unbounded.
+TELEMETRY_FILE_SUFFIXES = (".json",)
+MAX_TELEMETRY_FILES = 32
+
 LAUNCHCTL = "/bin/launchctl"
 
 IDENTITY_MANIFEST_SCHEMA = "mastermind.subagent-fabric-tunnels.identity-manifest.v1"
