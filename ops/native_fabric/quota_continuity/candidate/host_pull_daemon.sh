@@ -168,16 +168,6 @@ finish_install_success() {
   exit 0
 }
 
-restore_plist() {
-  [ -n "$DEST_PLIST" ] || return 1
-  if [ "$HAD_PLIST" -eq 1 ]; then
-    [ -n "$BACKUP" ] && [ -f "$BACKUP" ] || return 1
-    py atomic-restore "$BACKUP" "$DEST_PLIST" || return 1
-  else
-    py atomic-remove "$DEST_PLIST" || return 1
-  fi
-}
-
 on_signal() {
   local code=$1
   trap - TERM HUP INT
@@ -1144,24 +1134,12 @@ note_install_blocked() {
 
 # The private fence flock is the lifetime proof. Process-liveness alone is not.
 lose_install_holder() {
-  # Proven pre-effect only: prove_install_holder refuses before effect launch,
-  # and rc79 is a holder loss only if the per-effect started file is absent.
-  # Never restore on an effect that may have begun.
-  case "$PHASE" in
-    PLIST_REPLACED) restore_plist || true ;;
-    BOOTSTRAP_STARTED)
-      # Restore only on a proven current-effect pre-start refusal. A holder
-      # lost after bootstrap may have begun must leave plist bytes untouched.
-      if effect_was_not_started \
-          && [ -n "${LOCKED_DIR:-}" ] \
-          && [ ! -e "$LOCKED_DIR/started" ] \
-          && [ ! -L "$LOCKED_DIR/started" ]; then
-        restore_plist || true
-      fi
-      ;;
-  esac
+  # Losing the private effect-fence does not prove continued ownership of
+  # the destination plist. Never restore/remove peer bytes even when the
+  # locked-effect started marker is absent. Leave CURRENT and marker held.
   note_install_blocked INSTALL_HOLDER_LOST "install transaction holder lost" || true
-  die 78 "install transaction holder lost"
+  die 78 "EFFECT_UNKNOWN service stopped pending repair: install transaction holder lost"
+
 }
 
 prove_install_holder() {
@@ -1390,9 +1368,8 @@ stop_uncertain() {
   shift
   local reason="$*"
   release_admission
-  if [ "$PHASE" = "PLIST_REPLACED" ]; then
-    restore_plist || true
-  fi
+  # A phase flag cannot prove exclusive ownership of a later plist.
+  # Preserve the observed destination for operator reconciliation.
   write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
   die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
 }
@@ -1401,61 +1378,15 @@ recover_or_stop() {
   local phase=$1
   shift
   local reason="$*"
-  local rc
   release_admission
-  if [ "$BOOTED" -ne 1 ]; then
-    # Before an admitted bootstrap starts, there was no pre-existing service
-    # to recover. Restore the displaced plist and record a durable hold;
-    # never bootstrap the old service or reverse a peer's moved selector.
-    if [ "$PHASE" = "BOOTSTRAP_STARTED" ] && effect_was_not_started; then
-      restore_plist || true
-      write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-      die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-    fi
-    die 78 "admission refused: $reason"
-  fi
-  # A known-absent label can take the original plist back. Any other read
-  # is uncertain: restore bytes when we already replaced them, and do not
-  # bootstrap.
-  if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-    if [ "$PHASE" = "PLIST_REPLACED" ]; then
-      restore_plist || true
-    fi
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  fi
-  restore_plist || {
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  }
-  if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  fi
-  bootstrap_once rollback
-  rc=$?
-  if [ "$rc" -ne 0 ]; then
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN rollback bootstrap failed: $reason"
-  fi
-  if ! launchctl_print; then
-    write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
-  fi
-  # A loaded label is NOT proof of the original collector. Require the saved
-  # preimage arguments, exact restored plist digest, and a live recovered PID
-  # before any selector rollback or RECOVERED receipt.
-  if ! recovered_original_service; then
-    write_receipt EFFECT_UNKNOWN "$phase" "restored collector identity unproven: $reason" || true
-    die 78 "EFFECT_UNKNOWN recovered collector identity unproven: $reason"
-  fi
-  # The service preimage is proven. Only then is the selector CAS reversed.
-  if ! rollback_advanced_selector; then
-    write_receipt EFFECT_UNKNOWN "$phase" "selector rollback failed" || true
-    die 78 "EFFECT_UNKNOWN service stopped pending repair: selector rollback failed"
-  fi
-  write_receipt RECOVERED "$phase" "$reason" || die 78 "receipt failed"
-  die 78 "recovered original service: $reason"
+  # After bootout or candidate installation, a later peer may own DEST_PLIST.
+  # Checking the SHA followed by an unconditional rename/remove is TOCTOU;
+  # no host-wide compare-and-restore authority is proven. No second launchctl
+  # effect, plist write, or selector rollback on this uncertain path.
+  # Leave captured original backup, CURRENT and marker for reconciliation.
+  write_receipt EFFECT_UNKNOWN "$phase" "$reason" || true
+  die 78 "EFFECT_UNKNOWN service stopped pending repair: $reason"
+
 }
 
 run_locked() {
@@ -2148,29 +2079,9 @@ case "$COMMAND" in
       recover_or_stop BOOTSTRAP_ADMIT "admission holder died before bootstrap"
     fi
     if [ "$new_rc" -ne 0 ]; then
-      if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-        stop_uncertain BOOTSTRAP "bootstrap failed"
-      fi
-      restore_plist || stop_uncertain BOOTSTRAP "rollback restore failed"
-      if ! launchctl_print || [ "$LC_CLASS" != "absent" ]; then
-        stop_uncertain BOOTSTRAP "bootstrap failed"
-      fi
-      bootstrap_once rollback
-      roll_rc=$?
-      if [ "$roll_rc" -ne 0 ]; then
-        stop_uncertain BOOTSTRAP "rollback bootstrap failed"
-      fi
-      if ! launchctl_print; then
-        stop_uncertain BOOTSTRAP "recovered bootstrap unproven"
-      fi
-      if ! recovered_original_service; then
-        stop_uncertain BOOTSTRAP "recovered collector identity unproven"
-      fi
-      if ! rollback_advanced_selector; then
-        stop_uncertain BOOTSTRAP "selector rollback failed"
-      fi
-      write_receipt RECOVERED BOOTSTRAP "bootstrap failed" || die 78 "receipt failed"
-      die 78 "recovered original service: bootstrap failed"
+      # Failed bootstrap is not exclusive ownership of the installed plist.
+      # Do not overwrite a peer or issue an unverified rollback bootstrap.
+      stop_uncertain BOOTSTRAP "bootstrap failed"
     fi
     PHASE=BOOTSTRAPPED
     # A zero bootstrap rc is an effect, not proof of a verified live collector.
