@@ -556,7 +556,15 @@ def test_bootstrap_failure_restores_plist_and_is_not_green(workspace):
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     result = run(ctx)
     assert result.returncode == 78, result.stderr
-    assert "bootstrap failed" in result.stderr
+    # A label absent before installation cannot be certified as the recovered
+    # *original* collector merely because rollback bootstrap returned zero.
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert "recovered collector identity unproven" in result.stderr
+    assert "recovered original service:" not in result.stderr
+    assert (ctx["store"] / ".install-transaction.marker").is_file()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "BOOTSTRAP"
     assert ctx["plist"].read_bytes() == original
     assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
     assert launch_log(ctx).count("bootstrap ") == 2
