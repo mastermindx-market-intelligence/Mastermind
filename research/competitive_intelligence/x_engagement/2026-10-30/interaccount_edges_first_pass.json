@@ -20,9 +20,50 @@
     "J1": "https://www.twstalker.com/Jake__Wujatsky",
     "J2": "https://www.twstalker.com/Jaike__Wujastk",
     "J3": "https://d46rckpsl2ks7laj5lfg.twstalker.com/Jake___W",
-    "J4": "https://ww.twstalker.com/00Jake_Wujastyk"
+    "J4": "https://ww.twstalker.com/00Jake_Wujastyk",
+    "EDGE_HOME": "https://equityedge.io/general/giveaway-accounts-bogo-offers",
+    "EDGE_AFFILIATE": "https://equityedge.io/affiliate",
+    "BERKAY": "https://www6.twstalker.com/berkayglife",
+    "DANIEL_ROLE": "https://www6.twstalker.com/plug1112192587",
+    "DANIEL_PROMO": "https://twstalker.com/Mikizz32",
+    "TREND_POLICY": "https://trendspider.com/blog/trendspiders-policy-on-social-media-chart-posting-and-chart-requests/",
+    "TREND_ABOUT": "https://trendspider.com/about/",
+    "DANUSHMAN": "https://x.noodl3.net/danushman",
+    "SIGNAL": "https://w.twstalker.com/SignalStack",
+    "SIGNAL_ABOUT": "https://signalstack.com/about/",
+    "WHOFIDE": "https://teapawt.org/everythingfxx",
+    "WHOTWO": "https://www6.twstalker.com/tradewithola",
+    "WHOEFE": "https://d46rckpsl2ks7laj5lfg.twstalker.com/deartrader__",
+    "WHOLOGAN": "https://teapawt.org/thatloganguyy",
+    "WHODAVID": "https://ww1.twstalker.com/TRADEWITH_DAVID",
+    "WHODECAP": "https://www.instalker.org/KingTundefx",
+    "WHOHAKEEM": "https://www.twstalker.com/skyshark0",
+    "WHOTREASH": "https://teapawt.org/treashybb",
+    "WHOMIRNGA": "https://teapawt.org/mirngaprime",
+    "EQ_ORIGIN_1": "https://d46rckpsl2ks7laj5lfg.twstalker.com/deartrader__",
+    "EQ_ORIGIN_2": "https://d46rckpsl2ks7laj5lfg.twstalker.com/deartrader__",
+    "EQ_ORIGIN_3": "https://www.twstalker.com/skyshark0",
+    "EQ_ORIGIN_4": "https://x.twstalker.com/i_am_scoper",
+    "EQ_ORIGIN_5": "https://doublecrosswebzine.twstalker.com/dboiwit_a_dream",
+    "EQ_ORIGIN_6": "https://x.twstalker.com/i_am_scoper",
+    "EQ_ORIGIN_7": "https://www.instalker.org/KingTundefx",
+    "EQ_ORIGIN_8": "https://www.sotwe.com/DisconAcademy",
+    "EQ_ORIGIN_9": "https://teapawt.org/treashybb",
+    "EQ_ORIGIN_10": "https://teapawt.org/mirngaprime",
+    "EQ_ORIGIN_11": "https://teapawt.org/jeniselia",
+    "EQ_ORIGIN_12": "https://teapawt.org/thatloganguyy",
+    "EQ_ORIGIN_13": "https://mobile.twstalker.com/12th_St_",
+    "EQ_ORIGIN_14": "https://teapawt.org/faridaharuna",
+    "EQ_ORIGIN_15": "https://ww1.twstalker.com/shepherd__fx",
+    "EQ_ORIGIN_16": "https://doublecrosswebzine.twstalker.com/dboiwit_a_dream",
+    "EQ_ORIGIN_17": "https://doublecrosswebzine.twstalker.com/dboiwit_a_dream",
+    "EQ_ORIGIN_18": "https://ww.twstalker.com/umarmuhamad2220",
+    "EQ_ORIGIN_19": "https://doublecrosswebzine.twstalker.com/dboiwit_a_dream",
+    "EQ_ORIGIN_20": "https://ww.twstalker.com/umarmuhamad2220",
+    "EQ_ORIGIN_21": "https://www.sotwe.com/BassyRoyce",
+    "EQ_ORIGIN_22": "https://ngntipkolamrenang.twstalker.com/deartrader__"
   },
-  "edge_count": 35,
+  "edge_count": 125,
   "edges": [
     {
       "from": "@ThanefieldCap",
@@ -452,9 +493,1106 @@
       "observation_confidence": "high",
       "interpretation": "Unverified lookalike",
       "shared_controller": "unverified"
+    },
+    {
+      "from": "@Emrik__",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_1"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Emrik__",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_1"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Emrik__",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_1"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@theplaymakerxx",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_2"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@theplaymakerxx",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_2"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@theplaymakerxx",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_2"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@skyshark0",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_3"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@skyshark0",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_3"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@skyshark0",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_3"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@MoStylzz",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_4"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@MoStylzz",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_4"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@MoStylzz",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_4"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@titusforex",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_5"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@titusforex",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_5"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@titusforex",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_5"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@GeoffreyNwankpa",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_6"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@GeoffreyNwankpa",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_6"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@GeoffreyNwankpa",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_6"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@De_CaptainChart",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_7"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@De_CaptainChart",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_7"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@De_CaptainChart",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_7"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@only1princepaul",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_8"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@only1princepaul",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_8"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@only1princepaul",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_8"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@treashybb",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_9"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@treashybb",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_9"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@treashybb",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_9"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Aeroonfx",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_10"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Aeroonfx",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_10"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Aeroonfx",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_10"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TeeXau",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_11"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TeeXau",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_11"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TeeXau",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_11"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@thatloganguyy",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_12"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@thatloganguyy",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_12"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@thatloganguyy",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_12"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@12th_St_",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_13"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@12th_St_",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_13"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@12th_St_",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_13"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@pip_prof01",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_14"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@pip_prof01",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_14"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@pip_prof01",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_14"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@traderjamesfx",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_15"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@traderjamesfx",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_15"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@traderjamesfx",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_15"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@emmynicefx",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_16"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@emmynicefx",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_16"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@emmynicefx",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_16"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@starkhubz",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_17"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@starkhubz",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_17"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@starkhubz",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_17"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Web3Bish0p",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_18"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Web3Bish0p",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_18"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Web3Bish0p",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_18"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@kingstonpips",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_19"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@kingstonpips",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_19"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@kingstonpips",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_19"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TRADEWITH_DAVID",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_20"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TRADEWITH_DAVID",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_20"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TRADEWITH_DAVID",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_20"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Therea1caram3l",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_21"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Therea1caram3l",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_21"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Therea1caram3l",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_21"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@jeffstarkfx",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_22"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@jeffstarkfx",
+      "to": "@Danieltrades",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_22"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@jeffstarkfx",
+      "to": "@berkayglife",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "A selected indexed giveaway post authored by this named handle requires following this target, plus the other recurring hub accounts",
+      "source_ids": [
+        "EQ_ORIGIN_22"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Audience-transfer contest condition. Account-control and payor unknown.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@berkayglife",
+      "to": "Equity Edge",
+      "type": "SELF_DECLARED_FOUNDER",
+      "evidence": "Bio says Co-Founder @EquityEdgeUK",
+      "source_ids": [
+        "BERKAY"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Founder relationship reported by account",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@berkayglife",
+      "to": "@Danieltrades",
+      "type": "REPOST",
+      "evidence": "Co-founder retweets Daniel's announcement of becoming Head of Affiliate Africa",
+      "source_ids": [
+        "BERKAY"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Strong company endorsement of affiliate coordinator",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Danieltrades",
+      "to": "Equity Edge",
+      "type": "SELF_DECLARED_AFFILIATE_LEAD",
+      "evidence": "Public bio Head of Affiliate @EquityEdgeUK; DANIEL50; own posts call firm our platform",
+      "source_ids": [
+        "DANIEL_ROLE",
+        "DANIEL_PROMO"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Program insider role is self-declared with founder repost support",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "Equity Edge",
+      "to": "affiliate partners",
+      "type": "PUBLIC_AFFILIATE_PROGRAM",
+      "evidence": "First party advertises 30% commission",
+      "source_ids": [
+        "EDGE_AFFILIATE"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Program economics not individualized",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "Equity Edge",
+      "to": "giveaway participants",
+      "type": "PUBLIC_GIVEAWAY_TERMS",
+      "evidence": "Firm says giveaway accounts close after first payout, then new challenge required",
+      "source_ids": [
+        "EDGE_HOME"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Simulated account incentives not cash giveaway",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@deartrader__",
+      "to": "Equity Edge",
+      "type": "DISCLOSED_PARTNER",
+      "evidence": "Partner bio and EFE50 discount code",
+      "source_ids": [
+        "WHOEFE"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Affiliate contract terms unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@deartrader__",
+      "to": "@Emrik__",
+      "type": "REPOST_AND_REPLY",
+      "evidence": "Retweets Emrik's giveaway and replies about more contests",
+      "source_ids": [
+        "WHOEFE"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Creator-to-creator amplification",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@deartrader__",
+      "to": "@theplaymakerxx",
+      "type": "REPOST_AND_REPLY",
+      "evidence": "Retweets and replies to Playmaker contest",
+      "source_ids": [
+        "WHOEFE"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Reciprocal cross-promotion",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@tradewithola",
+      "to": "Equity Edge",
+      "type": "DISCLOSED_PARTNER",
+      "evidence": "Partner bio and TWO referral code",
+      "source_ids": [
+        "WHOTWO"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Distinct creator promotion",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@tradewithola",
+      "to": "@JessetrustGodg",
+      "type": "REPOST_AND_REPLY",
+      "evidence": "Reposts actual purchaser claim and replies to user",
+      "source_ids": [
+        "WHOTWO"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Creator amplifies buyer testimonial; payment unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@everythingfxx",
+      "to": "Equity Edge",
+      "type": "PAID_PARTNERSHIP_TAG",
+      "evidence": "October 24 post contains Paid partnership label and code FIDE",
+      "source_ids": [
+        "WHOFIDE"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Direct commercial promotion acknowledged; distinct account ownership unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@thatloganguyy",
+      "to": "Equity Edge",
+      "type": "DISCLOSED_PARTNER",
+      "evidence": "Bio says Partner @EquityEdgeUK; code LOGAN50",
+      "source_ids": [
+        "WHOLOGAN"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Likely independent creator, not proven",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TRADEWITH_DAVID",
+      "to": "Equity Edge",
+      "type": "AFFILIATE_CODE",
+      "evidence": "Post advertises DAVID50 discount code",
+      "source_ids": [
+        "WHODAVID"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Referral economics plausible but unverified",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@skyshark0",
+      "to": "@AlphaCapitalUK",
+      "type": "PARTNERSHIP_DECLARATION",
+      "evidence": "Public partnership announcement, HAKEEM50",
+      "source_ids": [
+        "WHOHAKEEM"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Evidence for multiprovider creator rather than exclusive Equity Edge control",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@De_CaptainChart",
+      "to": "@NYSMarkets",
+      "type": "PARTNERSHIP_DECLARATION",
+      "evidence": "Collaboration announced; code DECAPTAIN",
+      "source_ids": [
+        "WHODECAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Competing firm promotion by same creator",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@De_CaptainChart",
+      "to": "@THEFUNDEDWAY",
+      "type": "OTHER_PROP_GIVEAWAY",
+      "evidence": "Posts giveaway for other prop firm",
+      "source_ids": [
+        "WHODECAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Multiprovider promotion",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@treashybb",
+      "to": "Equity Edge",
+      "type": "AFFILIATE_CODE",
+      "evidence": "Oct promo code MIRA50 and signup URL",
+      "source_ids": [
+        "WHOTREASH"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Direct commercial referral",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@mirngaprime",
+      "to": "@Aeroonfx",
+      "type": "REPOST",
+      "evidence": "Aeroonfx giveaway amplified by @mirngaprime",
+      "source_ids": [
+        "WHOMIRNGA"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Original/reposter distinct handles",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@Danieltrades",
+      "to": "Equity Edge",
+      "type": "SELF_REPORTED_PAYOUT",
+      "evidence": "Multiple public posts claim payout and offer 10% to community",
+      "source_ids": [
+        "DANIEL_PROMO"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Account claims not independent payout verification",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@danushman",
+      "to": "@TrendSpider",
+      "type": "FOUNDER_SELF_IDENTIFIER",
+      "evidence": "Bio says founder/CEO, posts and quotes company updates",
+      "source_ids": [
+        "DANUSHMAN",
+        "TREND_ABOUT"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Founder personal publishing account",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@danushman",
+      "to": "@SignalStack",
+      "type": "FOUNDER_SELF_IDENTIFIER",
+      "evidence": "Bio says founder/CEO of SignalStack and TrendSpider",
+      "source_ids": [
+        "DANUSHMAN"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Business group, not necessarily login sharing",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@SignalStack",
+      "to": "@TrendSpider",
+      "type": "OWNED_PRODUCT_ACCOUNT",
+      "evidence": "SignalStack profile says a TrendSpider company; own about page confirms",
+      "source_ids": [
+        "SIGNAL",
+        "SIGNAL_ABOUT"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit brand ownership",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@SignalStack",
+      "to": "@TrendSpider",
+      "type": "REPOST",
+      "evidence": "SignalStack timeline reposts TrendSpider product launch",
+      "source_ids": [
+        "SIGNAL"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Brand cross-amplification",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@TrendSpider",
+      "to": "@danushman",
+      "type": "OFFICIAL_ACKNOWLEDGMENT",
+      "evidence": "TrendSpider public transparency policy explicitly identifies Dan founder's personal account",
+      "source_ids": [
+        "TREND_POLICY"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Disclosed personal-company distinction",
+      "shared_controller": "unverified"
     }
   ],
-  "quantification_warning": "6 and 11 are distinct post-origin lower bounds observed in specific indexed snapshots, not all retweet events in 30 days. Other edges are presence/qualitative. All account control attributions remain unverified.",
+  "quantification_warning": "The first-pass graph combines qualitative repost/affiliation edges and 22 selected originator giveaways each represented as 3 required-follow relationships. This is NOT total social event counts, unique real-world individuals, or a measured 30-day census. Earlier 6 and 11 repost figures are distinct underlying posts in limited mirror snapshots, not all original retweet-event timestamps.",
   "privacy": "No private messages or private contact identifiers.",
-  "verification_rule": "For each edge separate observed interaction, commercial/organizational affiliation, and control hypothesis."
+  "verification_rule": "For each edge separate observed interaction, commercial/organizational affiliation, and control hypothesis.",
+  "extended_sample_notes": {
+    "additional_giveaway_originators": 22,
+    "core_trio": [
+      "@EquityEdgeUK",
+      "@Danieltrades",
+      "@berkayglife"
+    ],
+    "unit": "one selected indexed origin giveaway per distinct handle; 3 required-follow edges per origin post; not complete event frequency",
+    "visible_creator_repost_relationships": "Direct reposts and replies among EFE, Emrik, Playmaker, Aeroonfx/mirngaprime, and other creators demonstrate affinity; quantitative rates unavailable.",
+    "new_clusters": [
+      "Equity Edge affiliate giveaway hub",
+      "TrendSpider/SignalStack disclosed company network"
+    ]
+  }
 }
