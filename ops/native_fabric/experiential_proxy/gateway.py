@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import fcntl
 import hashlib
 import hmac
+import ipaddress
 from http import HTTPStatus
 import os
 from pathlib import Path
@@ -68,7 +69,7 @@ class Settings:
         keys = tuple(v for i in range(1, 5) if (v := os.environ.get(f"EXPLABS_KEY_{i}", "").strip()))
         return cls(
             api_keys=keys,
-            proxy_token=os.environ.get("FABRIC_PROXY_TOKEN", ""),
+            proxy_token=os.environ.get("FABRIC_PROXY_TOKEN", "").strip(),
             state_dir=Path(os.environ.get("FABRIC_GATEWAY_STATE_DIR", ".state")).expanduser(),
             safe_rpm=int(os.environ.get("SAFE_RPM_PER_KEY", "1000")),
             safe_rpm_shared=(int(v) if (v := os.environ.get("SAFE_RPM_SHARED", "").strip()) else None),
@@ -331,10 +332,18 @@ def create_app(
     async def lifespan(app: FastAPI):
         cfg = settings or Settings.from_env()
         admissions = SlidingWindowAdmissions(cfg)
+        # The limiter may admit this many simultaneous upstream streams.
+        # HTTPX defaults to only 100 total connections: a smaller transport
+        # pool charges durable RPM and can produce a spurious PoolTimeout/502.
+        max_connections = cfg.max_inflight_per_key * len(cfg.api_keys)
         upstream = httpx.AsyncClient(
             transport=transport,
             timeout=httpx.Timeout(connect=10, write=30, read=300, pool=30),
             follow_redirects=False,
+            limits=httpx.Limits(
+                max_connections=max_connections,
+                max_keepalive_connections=min(20, max_connections),
+            ),
         )
         app.state.settings = cfg
         app.state.admissions = admissions
@@ -347,13 +356,26 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
+    def loopback_peer(request: Request) -> bool:
+        # Defense-in-depth against an accidental --host 0.0.0.0. The production
+        # Uvicorn bind MUST still be 127.0.0.1; SSH tunnels arrive as loopback.
+        if request.client is None:
+            return False
+        try:
+            return ipaddress.ip_address(request.client.host).is_loopback
+        except ValueError:
+            return False
+
     @app.get("/healthz")
     async def healthz(request: Request) -> Response:
-        # Unauthenticated, non-sensitive: safe for loopback liveness probes.
-        return JSONResponse({"ok": True, "key_slots": len(request.app.state.settings.api_keys)})
+        if not loopback_peer(request):
+            return JSONResponse({"error": {"message": "loopback access only"}}, status_code=HTTPStatus.FORBIDDEN)
+        return JSONResponse({"ok": True})
 
     @app.get("/statusz")
     async def statusz(request: Request) -> Response:
+        if not loopback_peer(request):
+            return JSONResponse({"error": {"message": "loopback access only"}}, status_code=HTTPStatus.FORBIDDEN)
         cfg: Settings = request.app.state.settings
         scheme, _, candidate = request.headers.get("authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not hmac.compare_digest(candidate, cfg.proxy_token):
@@ -362,6 +384,8 @@ def create_app(
 
     @app.api_route("/v1/{endpoint:path}", methods=["POST", "GET"])
     async def proxy(endpoint: str, request: Request) -> Response:
+        if not loopback_peer(request):
+            return JSONResponse({"error": {"message": "loopback access only"}}, status_code=HTTPStatus.FORBIDDEN)
         cfg: Settings = request.app.state.settings
         auth = request.headers.get("authorization", "")
         scheme, _, candidate = auth.partition(" ")
@@ -472,15 +496,24 @@ def create_app(
             # httpx.aread() decodes compressed bodies; never pass the old encoding header.
             response_headers.pop("content-encoding", None)
             try:
-                data = await upstream_response.aread()
+                # Even provider error pages are untrusted. Limit decoded body
+                # memory; never buffer arbitrary upstream 429/5xx responses.
+                data = bytearray()
+                async for chunk in upstream_response.aiter_bytes():
+                    if len(data) + len(chunk) > cfg.max_body_bytes:
+                        return JSONResponse(
+                            {"error": {"message": "upstream error response too large"}},
+                            status_code=HTTPStatus.BAD_GATEWAY,
+                        )
+                    data.extend(chunk)
             except httpx.RequestError:
-                return JSONResponse({"error": {"message": "upstream response read failure"}}, status_code=502)
+                return JSONResponse({"error": {"message": "upstream response read failure"}}, status_code=HTTPStatus.BAD_GATEWAY)
             finally:
                 await upstream_response.aclose()
                 await request.app.state.admissions.release(slot)
             # Provider 429 can also mean org-level quotas, credit holds, or safety review.
             # Never use a different key to evade those provider restrictions.
-            return Response(content=data, status_code=upstream_response.status_code, headers=response_headers)
+            return Response(content=bytes(data), status_code=upstream_response.status_code, headers=response_headers)
 
         async def stream_bytes():
             async for part in upstream_response.aiter_raw():

@@ -161,7 +161,7 @@ async def test_auth_and_allowlist_and_no_direct_upstream_contact(tmp_path):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
             assert (await session.post("/v1/chat/completions", json={})).status_code == 401
             assert (await session.post("/v1/admin", headers={"Authorization": f"Bearer {TOKEN}"}, json={})).status_code == 404
-            assert (await session.get("/healthz")).json() == {"ok": True, "key_slots": 2}
+            assert (await session.get("/healthz")).json() == {"ok": True}
     assert requests == []
 
 
@@ -535,3 +535,109 @@ async def test_pending_byte_budget_rejects_oversized_queued_body(tmp_path):
     assert limiter.pending == 0
     assert (await limiter.snapshot())["pending_bytes"] == 0
     limiter.close()
+
+
+@run_async_test
+async def test_httpx_pool_matches_durable_admission_capacity(tmp_path):
+    """No HTTPX default 100-connection bottleneck below the limiter's slots."""
+    cfg = settings(tmp_path, api_keys=("upstream-A", "upstream-B"),
+                   max_inflight_per_key=128)
+    app = create_app(cfg)
+    async with app.router.lifespan_context(app):
+        pool = app.state.upstream._transport._pool
+        assert pool._max_connections == 256
+        assert pool._max_keepalive_connections <= pool._max_connections
+
+
+@run_async_test
+async def test_nonloopback_peer_cannot_read_health_status_or_spend(tmp_path):
+    upstream_calls = []
+    app = create_app(settings(tmp_path), transport=httpx.MockTransport(
+        lambda req: upstream_calls.append(req) or streamed_json({"ok": True})
+    ))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, client=("198.51.100.2", 443)),
+            base_url="http://proxy",
+        ) as session:
+            for url in ("/healthz", "/statusz", "/v1/models"):
+                result = await session.get(url, headers={"Authorization": f"Bearer {TOKEN}"})
+                assert result.status_code == 403
+    assert upstream_calls == []
+
+
+@run_async_test
+async def test_oversized_provider_error_body_is_bounded_and_releases_slot(tmp_path):
+    cfg = settings(tmp_path, api_keys=("upstream-A",), max_body_bytes=64)
+    app = create_app(cfg, transport=httpx.MockTransport(
+        lambda req: httpx.Response(429, headers={"content-type": "application/json"},
+                                   stream=httpx.ByteStream(b"x" * 1024))
+    ))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://proxy"
+        ) as session:
+            response = await session.get("/v1/models", headers={"Authorization": f"Bearer {TOKEN}"})
+            assert response.status_code == 502
+            assert response.json()["error"]["message"] == "upstream error response too large"
+        assert app.state.admissions._inflight == [0]
+
+
+def test_worker_sdk_binds_idempotency_to_one_logical_request(monkeypatch):
+    pytest.importorskip("openai")
+    from ops.native_fabric.experiential_proxy.worker_client import new_client
+    monkeypatch.setenv("FABRIC_PROXY_TOKEN", TOKEN)
+    monkeypatch.setenv("FABRIC_REQUEST_ID", "one-logical-call")
+    with new_client() as sdk:
+        assert sdk.default_headers["Idempotency-Key"] == "one-logical-call"
+    with new_client(request_id="a-different-logical-call") as sdk:
+        assert sdk.default_headers["Idempotency-Key"] == "a-different-logical-call"
+
+@run_async_test
+async def test_real_httpx_socket_pool_allows_all_admitted_connections(tmp_path, monkeypatch):
+    """The real HTTPX connection pool must not starve locally admitted streams."""
+    from ops.native_fabric.experiential_proxy import gateway as gateway_module
+    arrived = 0
+    both_arrived = asyncio.Event()
+
+    async def fake_provider(reader, writer):
+        nonlocal arrived
+        try:
+            await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=3)
+            arrived += 1
+            if arrived == 2:
+                both_arrived.set()
+            # A pool size of one deadlocks here and fails this regression.
+            await asyncio.wait_for(both_arrived.wait(), timeout=3)
+            payload = b'{"object":"list","data":[]}'
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                + b"Content-Length: " + str(len(payload)).encode()
+                + b"\r\nConnection: close\r\n\r\n" + payload
+            )
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    upstream = await asyncio.start_server(fake_provider, host="127.0.0.1", port=0)
+    async with upstream:
+        port = upstream.sockets[0].getsockname()[1]
+        # Explicitly target the ephemeral local fixture; zero vendor calls.
+        monkeypatch.setattr(gateway_module, "UPSTREAM", f"http://127.0.0.1:{port}/v1")
+        cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=2,
+                       max_inflight_per_key=2, window_s=0.3, max_queue_wait_s=3)
+        app = create_app(cfg)
+        async with app.router.lifespan_context(app):
+            assert app.state.upstream._transport._pool._max_connections == 2
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://proxy"
+            ) as session:
+                async def send():
+                    return await session.get("/v1/models", headers={"Authorization": f"Bearer {TOKEN}"})
+                responses = await asyncio.gather(send(), send())
+                assert [r.status_code for r in responses] == [200, 200]
+                assert [r.json() for r in responses] == [
+                    {"object": "list", "data": []}, {"object": "list", "data": []}
+                ]
+        assert arrived == 2
