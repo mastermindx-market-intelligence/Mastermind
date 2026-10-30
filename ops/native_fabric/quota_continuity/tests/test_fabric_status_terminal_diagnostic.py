@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "source"), str(ROOT / "candidate")]
+sys.path[:0] = [str(ROOT / "candidate"), str(ROOT / "source")]
 import fabric_task
 import provider_outcome
 
