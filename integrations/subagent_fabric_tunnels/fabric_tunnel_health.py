@@ -939,10 +939,11 @@ def install_watchdog_agent(
 
     plist_path = home / plist_relpath(WATCHDOG_LABEL)
     plist_raw = _ser(plist)
+    plist_install_file_mode = 0o644
     targets: list[tuple[str, Path, bytes, int]] = [
         (name, target_dir / name, module_raws[name], 0o600)
         for name in _WATCHDOG_MODULE_FILES
-    ] + [(plist_relpath(WATCHDOG_LABEL), plist_path, plist_raw, 0o644)]
+    ] + [(plist_relpath(WATCHDOG_LABEL), plist_path, plist_raw, plist_install_file_mode)]
 
     # Capture exact preimages BEFORE any write; refuse unsafe targets.
     preimages: dict[str, tuple[bytes | None, int | None]] = {}
