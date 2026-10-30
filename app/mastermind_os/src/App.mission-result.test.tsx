@@ -590,6 +590,33 @@ describe("App compound Mission/Result consumption", () => {
     await expectOfficeHalvesEmpty(user);
   });
 
+  it.each(["host replacement", "silent host-generation drift"] as const)(
+    "settles a still-owned read after %s without an auth event",
+    async (kind) => {
+      const e = setup("queue");
+      const producer = await e.ready();
+      render(<App />);
+      const user = await openProject();
+      await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+      await waitFor(() => expect(e.queue).toHaveLength(1));
+      const host = window.MastermindMissionHost!;
+      if (kind === "host replacement") {
+        window.MastermindMissionHost = { ...host };
+      } else {
+        const originalGeneration = host.invalidationGeneration!;
+        host.invalidationGeneration = () => originalGeneration() + 1;
+      }
+      await act(async () => {
+        e.queue[0].resolve(new Response(producer.bytes, { headers: { "content-type": "application/json" } }));
+        await flush();
+      });
+      expect(await screen.findByText("READ_CANCELLED")).toBeTruthy();
+      expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
+      expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+      await expectOfficeHalvesEmpty(user);
+    },
+  );
+
   it("settles a still-owned cancellation when the raw client method is replaced", async () => {
     const e = setup("queue");
     const producer = await e.ready();
@@ -620,7 +647,7 @@ describe("App compound Mission/Result consumption", () => {
     await expectOfficeHalvesEmpty(user);
   });
 
-  it("keeps a newer pending pair when an older callback is superseded", async () => {
+  it("rejects a crossed newer typed pair without letting an older callback clear its ticket", async () => {
     const e = setup("queue");
     const producer = await e.ready();
     render(<App />);
@@ -642,13 +669,39 @@ describe("App compound Mission/Result consumption", () => {
     expect(screen.getByText("Reading the exact selected tuple…")).toBeTruthy();
     expect(screen.queryByText("READ_CANCELLED")).toBeNull();
     await act(async () => {
+      // JOB-002 was requested; this typed host returns the JOB-004 producer.
+      // No crossed five-field tuple may publish to App or either Office half.
       releaseSecond(producer.decoded);
       await flush();
     });
-    expect(await screen.findByText("bounded typed fixture result")).toBeTruthy();
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
     expect(screen.queryByText("Reading the exact selected tuple…")).toBeNull();
     expect(e.calls("/workspace/result/current")).toHaveLength(0);
+    await expectOfficeHalvesEmpty(user);
   });
+
+  it.each(["workRef", "rootJobId", "jobId", "attemptId", "resultEnvelopeDigest"] as const)(
+    "refuses a crossed typed compound selection field: %s",
+    async (field) => {
+      const e = setup("bytes");
+      const producer = await e.ready();
+      window.MastermindMissionHost!.readMissionResult = async () => ({
+        ...producer.decoded,
+        selection: {
+          ...producer.decoded.selection,
+          [field]: `${producer.decoded.selection[field]}-CROSSED`,
+        },
+      });
+      render(<App />);
+      const user = await openProject();
+      await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+      expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+      expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+      expect(e.calls("/workspace/result/current")).toHaveLength(0);
+      await expectOfficeHalvesEmpty(user);
+    },
+  );
 });
 
 async function renderExplicit(kind: ExplicitKind, directory: string) {
