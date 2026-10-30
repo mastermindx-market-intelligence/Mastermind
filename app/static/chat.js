@@ -327,12 +327,20 @@
   }
 
   // --- paper sheet ------------------------------------------------------------
+  // A read belongs to one explicit opening, even when the same paper is reopened.
+  var paperReadGeneration = 0;
+  function closePaper() {
+    paperReadGeneration++;
+    sheet.classList.remove("open");
+  }
   function openPaper(id) {
     if (!id) return;
+    var generation = ++paperReadGeneration;
     var t = sheet.querySelector(".sh-t"), sc = sheet.querySelector(".sh-scores"), bd = sheet.querySelector(".sh-body");
     t.textContent = "…"; sc.innerHTML = ""; bd.innerHTML = "<div style='color:var(--muted)'>" + (zh() ? "加载研究报告…" : "Loading the research paper…") + "</div>";
     sheet.classList.add("open");
     fetch("/chat/paper?id=" + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (p) {
+      if (generation !== paperReadGeneration) return;
       if (!p || p.error) { bd.innerHTML = "<div style='color:var(--down,#e06d6d)'>" + (zh() ? "找不到该报告。" : "Paper not found.") + "</div>"; t.textContent = ""; return; }
       t.textContent = (p.ticker || "") + " — " + (zh() ? "研究报告" : "Research Report");
       var ok = !!p.confirmed;
@@ -348,9 +356,9 @@
       }
       html += fmt(p.report_md || p.summary || "");
       bd.innerHTML = html; bd.scrollTop = 0;
-    }).catch(function () { bd.innerHTML = "<div style='color:var(--down,#e06d6d)'>" + (zh() ? "加载失败。" : "Failed to load.") + "</div>"; });
+    }).catch(function () { if (generation !== paperReadGeneration) return; bd.innerHTML = "<div style='color:var(--down,#e06d6d)'>" + (zh() ? "加载失败。" : "Failed to load.") + "</div>"; });
   }
-  sheet.querySelector("#bc-sheet-x").onclick = function () { sheet.classList.remove("open"); };
+  sheet.querySelector("#bc-sheet-x").onclick = closePaper;
 
   // --- greeting + rehydrate ---------------------------------------------------
   function greet() {
@@ -480,12 +488,12 @@
     if (!body.children.length) rehydrate();
     setTimeout(function () { input.focus(); }, 120);
   }
-  function close() { document.body.classList.remove("bc-open"); sheet.classList.remove("open"); }
+  function close() { document.body.classList.remove("bc-open"); closePaper(); }
   launch.onclick = open;
   panel.querySelector("#bc-min").onclick = close;
   panel.querySelector("#bc-new").onclick = function () {
     convId = null; try { localStorage.removeItem(CONV_KEY); } catch (e) {}
-    sheet.classList.remove("open"); greet();
+    closePaper(); greet();
   };
   }   // end mount()
 
