@@ -77,7 +77,7 @@
     "EQ_SPACE_ORIGIN_12": "https://mobile.twstalker.com/THE_SNR_SNIPER",
     "EQ_SPACE_ORIGIN_13": "https://ngntipkolamrenang.twstalker.com/EquitySpace1"
   },
-  "edge_count": 163,
+  "edge_count": 170,
   "edges": [
     {
       "from": "@ThanefieldCap",
@@ -2046,6 +2046,92 @@
       "observation_confidence": "high",
       "interpretation": "Creator-to-creator cross-repost",
       "shared_controller": "unverified"
+    },
+    {
+      "from": "@openmarket_xyz",
+      "to": "OpenMarket",
+      "type": "PUBLIC_ACCOUNT_BRAND_ALIAS",
+      "evidence": "Official OpenMarket company account represents OpenMarket brand",
+      "source_ids": [
+        "OM"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "OpenMarket",
+      "to": "OpenMarket / Kiyotaka",
+      "type": "PUBLIC_REBRAND",
+      "evidence": "Official OpenMarket account confirms former name Kiyotaka in its own archived posts",
+      "source_ids": [
+        "OM",
+        "OCAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "OpenMarket",
+      "to": "OpenMarket app",
+      "type": "PUBLIC_COMPANY_APP",
+      "evidence": "Google Play app listing names OpenMarket",
+      "source_ids": [
+        "GOOGLE"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@ThanefieldCap",
+      "to": "Thanefield Capital",
+      "type": "PUBLIC_ACCOUNT_BRAND_ALIAS",
+      "evidence": "Public account biography names Thanefield Capital",
+      "source_ids": [
+        "OCAP"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@percept_labs",
+      "to": "Percept",
+      "type": "PUBLIC_ACCOUNT_BRAND_ALIAS",
+      "evidence": "Public account self description identifies Percept charting product",
+      "source_ids": [
+        "P"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@unusual_whales",
+      "to": "Unusual Whales",
+      "type": "PUBLIC_ACCOUNT_BRAND_ALIAS",
+      "evidence": "Main company account represents Unusual Whales",
+      "source_ids": [
+        "UW"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@EquityEdgeUK",
+      "to": "Equity Edge",
+      "type": "PUBLIC_ACCOUNT_BRAND_ALIAS",
+      "evidence": "Company's official X handle and first party website refer to same Equity Edge brand",
+      "source_ids": [
+        "EDGE_HOME",
+        "EQ_ORIGIN_1"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
+      "shared_controller": "unverified"
     }
   ],
   "quantification_warning": "Source-specific lower bounds only. 22 Hub-A distinct original poster handles each with three required-follow edges; 13 Hub-B distinct original poster handles each with two required-follow edges, with at least one handle overlapping the hubs. These are synthetic graph representations of observed campaign rules, NOT all-post or 30-day interaction frequencies. Repost-event timestamps unavailable for many mirrors. Earlier 6 Percept and 11 Thanefield repost-posts span nonuniform archival snapshots.",
@@ -2072,6 +2158,8 @@
     "overlap": [
       "@skyshark0"
     ],
-    "hubB_warning": "13 originators selected from web-indexed posts; not a census, not events from same known UTC window, not proof of ownership. @EquitySpace1 brand-affinity strong but exact management unknown."
+    "hubB_warning": "13 originators selected from web-indexed posts; not a census, not events from same known UTC window, not proof of ownership. @EquitySpace1 brand-affinity strong but exact management unknown.",
+    "canonical_alias_edges": 7,
+    "canonical_alias_note": "These connect public corporate/product labels to their named accounts, NOT distinct acts of social engagement; no merging of Thalamus Technologies Inc with @thalamus_xyz absent specific source."
   }
 }
