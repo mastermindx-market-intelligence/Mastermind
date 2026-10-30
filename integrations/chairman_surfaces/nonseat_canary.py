@@ -204,7 +204,7 @@ _PROVISION_REQUIRED_KEYS_BASE = frozenset({
     "schema", "vendor", "profile_id", "origin_policy", "disposable_ack",
 })
 _MAX_PROVISION_BYTES = 64 * 1024
-CHAIRMAN_SEAT_REFS = frozenset({"chatgpt1", "chatgpt2", "chatgpt3"})
+CHAIRMAN_SEAT_REFS = frozenset({"chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4"})
 BINDINGS_CENSUS_MAX_AGE_SECONDS = 24 * 60 * 60
 _CURRENT_ENVIRONMENT_CENSUS_MAX_ROWS = 1000
 _CURRENT_ENVIRONMENT_SNAPSHOT_SEAL = object()
@@ -405,7 +405,7 @@ def _current_chairman_profile_census(
     ``surface_bindings`` remains a navigation cache, not a new authority
     plane.  For this one hazardous live preflight, however, absence or an
     incomplete/stale cache cannot prove non-collision.  We therefore require
-    the three named Personal-Pro seat references to have one consistent
+    the four named Chairman-owned seat references to have one consistent
     managed-environment identity and at least one observation inside the fixed
     safety window.  ``last_verified_at`` is deliberately not used: current
     ChatGPT opens are unsupported and therefore cannot advance it.  Duplicate
