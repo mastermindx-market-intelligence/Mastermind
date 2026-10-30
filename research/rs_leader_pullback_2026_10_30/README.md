@@ -36,6 +36,65 @@ If adjusted daily data and unadjusted intraday bars are mixed across a split or 
 
 Use `--timeframe 20`, `--timeframe 45`, `--timeframe 120` or `--timeframe 180` for independently built full bars. Do not simply relabel 30-minute bars as 2H. A source owner should qualify correct interval construction, partial sessions/half-days, missing observations and venue/quote accuracy before a statistical study. The script prints counts and descriptive metrics and writes complete event records and SHA256 of input files. Every output explicitly says `empirical_strategy_edge_verdict: NOT_ESTABLISHED` until an **independent** evaluation process confirms the result.
 
+## Owner-calendar qualification and paired policy comparisons
+
+`validate_bars(..., session_schedule=owner_calendar, require_complete_sessions=True)`
+now checks the **provided** official session open/close against every full supported
+bar, including the opening slot, final full slot, known early closes, intervening
+missing whole sessions and New York DST. The input calendar is a caller-supplied
+**consistency assertion, not authenticated source admission**; use the incumbent
+Macro calendar/provenance owner for any historical study. Without it, the default
+`session_coverage_state=NO_OWNER_SCHEDULE` and the event study is research-only.
+`terminal_stub_minutes` counts the untradeable remainder (normally 30 minutes
+for 120m and 180m regular-session charts), not a resized final candle. In partial
+current-session mode the returned `PARTIAL_OBSERVATION` must never be relabeled
+as a fully qualified historical sample. Existing `run.py` is a source-unqualified
+exploratory CLI and does **not** enable the strict calendar gate by itself.
+
+The new pure `paired_eval.py` supports the next, separately qualified research
+phase: give it a complete **predeclared** opportunity cohort (including nonfires)
+and two owner-evaluated policy outcome rows per opportunity. The comparison is
+between candidate `pivot`, `macd_rsi_proxy` or `hybrid` and
+`leader_reference` at the **same opportunity ID / decision time**. Each
+opportunity specifies symbol, unique episode, ET session date, strictly
+timezone-qualified decision / bar / previous-daily-leader / regime known-at
+clocks, previous leader session, input digest, eligibility, signal and
+chronological split. Each policy outcome supplies `RESOLVED`, `NO_ENTRY`,
+`CENSORED` or `UNAVAILABLE`, with resolved net risk-unit return and actual
+outcome/availability clocks. A missing paired policy or mismatched population
+is an error, never an implicit zero or an unpaired favorable survivor.
+
+```python
+import pandas as pd
+from paired_eval import PairedProtocol, evaluate_paired
+
+# Both dataframes must come from an independently qualified,
+# frozen Macro Data OS observation and execution-cost policy.
+report = evaluate_paired(
+    opportunities_df, outcomes_df,
+    PairedProtocol(candidate="pivot", baseline="leader_reference",
+                   registered_at_utc="2026-10-30T20:00:00Z",
+                   analysis_asof_utc="2026-12-15T21:00:00Z"),
+)
+```
+
+The module returns common-denominator/coverage and matched incremental R by
+development, calibration and holdout block, with 20-session date-block
+bootstrap intervals only when enough paired date clusters exist. It rejects
+future features, unsupported outcome clocks, non-entry-as-zero input fields,
+random/interleaved splits, overlapping development labels near holdout, and
+postdated holdout registration. Non-entry contributes a deliberate zero only
+when the policy explicitly says `NO_ENTRY`; censored and unavailable outcomes
+remain null. Report labels `source_admission=NOT_ATTESTED_BY_THIS_EVALUATOR`
+and `empirical_strategy_edge_verdict=NOT_ESTABLISHED` are intentional even
+when supplied synthetic numbers look favorable. Neither a declared registration
+timestamp nor a digest validates the provenance of a historical holdout.
+The owner must establish source entitlement, PIT issuer/epoch, consistent
+execution costs, and actual forward issuance before any edge claim.
+
+Tests: `python -m pytest -q research/rs_leader_pullback_2026_10_30/tests`
+(the local source candidate at this update passed 72 synthetic conformance tests).
+
 ## Required historical research before signal promotion
 
 - Use original PIT S&P 1500 membership, including leavers, or another explicitly justified universe; delisted ticker identity, prices and corporate actions must be qualified, not inferred from current names.
