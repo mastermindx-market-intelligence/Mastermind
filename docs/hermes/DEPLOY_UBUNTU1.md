@@ -150,6 +150,37 @@ Model order in those overlays:
 - `mmmeta`: Z.AI GLM-5.3, then Cursor
 - vision: MiniMax-M3, then Cursor
 
+**Native BYOK configuration (source stage; not an active provider):**
+`hermesctl install` now materializes the reviewed WP2 **primary text-model**
+into the actual native `profiles/<role>/config.yaml`, rather than only writing
+a disconnected `provider-overlay.yaml` for inspection. Secretary selects the
+commercial ModelArk `byteplus-modelark` GLM-5.3-Flash model; Meta-CEO selects
+the named `zai-glm` GLM-5.3 model. The exact approved provider registry uses
+`key_env` references without embedding credentials. The pinned donor supports
+the `providers:` named-custom shape
+(`website/docs/integrations/providers.md` at
+`NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`).
+
+The fresh Hermes supervisor now has a **source-implemented**, role-scoped
+credential path: the existing WP2 credential reader accepts only the reviewed
+primary role's key from the existing 0600 secret file (or the existing
+mode-0600 file-pointer contract) and exposes that key **only** to the native
+model-serving child, not the CLI tool-registry preflight. Missing/unsafe
+credentials fail closed. It does not copy another role's provider key,
+gateway credential, Slack bot token, or ambient parent environment.
+
+This has passed offline tests with synthetic fixture values only. No real
+provider credential was read, no model request executed, and no receiving
+owner has accepted authenticated inference or metering. The model's source
+configuration and restricted child-env transport are **BUILT_NOT_PROVEN**,
+not a ready service or automatic right to spend tokens. Executive admission
+and app computer-use rights are unaffected. No Hermes automatic
+fallback is installed: Cursor remains disabled and provider/model retries
+remain with the existing provider/capacity owner. The `auxiliary.vision`
+stanza is intentionally excluded from this native output until mini1
+computer-use authority is accepted. The existing separate vision-overlay
+file is not a running vision route.
+
 Hermes built-in toolsets `delegation` and `skills` stay disabled.
 **The installed runnable profile now admits only the native `clarify` toolset.**
 Six Steward reads remain declared in a **disabled** MCP server. `mmx_delegate`

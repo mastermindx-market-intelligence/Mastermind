@@ -61,6 +61,24 @@ class NativeSupervisorTests(unittest.TestCase):
         runtime._check_registry()
         self.assertEqual(runtime.profile.tool_allowlist, frozenset({"clarify"}))
 
+    def test_named_byok_model_config_is_accepted_but_mcp_stays_disabled(self) -> None:
+        from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+
+        self.native.write_text(
+            render_disarmed_native_byok(self.profile), encoding="utf-8"
+        )
+        self.assertEqual(
+            self._runtime()._expected_disabled_mcp(),
+            {"mastermind_steward": tuple(ALLOWED_TOOLS)},
+        )
+        changed = self.native.read_text().replace(
+            "key_env: BYTEPLUS_MODELARK_API_KEY", "key_env: UNAPPROVED_KEY"
+        )
+        self.native.write_text(changed, encoding="utf-8")
+        with self.assertRaises(RuntimeRefusal) as caught:
+            self._runtime()._expected_disabled_mcp()
+        self.assertEqual(caught.exception.code, "RUNTIME_NATIVE_CONFIG_DRIFT")
+
     def test_native_config_with_enabled_server_refuses_before_tool_execution(self) -> None:
         self.native.write_text(self.native.read_text().replace(
             "enabled: false", "enabled: true"), encoding="utf-8")
