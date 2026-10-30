@@ -836,7 +836,8 @@ def _rollback_watchdog_install(
         if sha256_bytes(pre_raw) != payload.get("pre_sha256"):
             alerts.append(Alert("watchdog_rollback_backup_digest_mismatch", name, acted=True))
             continue
-        mode = int(payload.get("mode") or (0o644 if name.endswith(".plist") else 0o600))
+        restored_file_mode = 0o644 if name.endswith(".plist") else 0o600
+        mode = int(payload.get("mode") or restored_file_mode)
         try:
             atomic_write_bytes(target, pre_raw, mode)
             if target.read_bytes() != pre_raw:

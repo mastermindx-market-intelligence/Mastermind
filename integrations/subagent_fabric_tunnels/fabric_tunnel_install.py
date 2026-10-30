@@ -62,6 +62,9 @@ from fabric_tunnel_identity import (
 
 Runner = Any  # Runner protocol from fabric_tunnel_common; tests inject fakes
 _BOOTSTRAP_NOT_LOADED_CODES = {37, 36, 5}  # ESRCH/ENOENT-style "not loaded" variants
+# Rollback default for a plist whose backup sidecar predates the recorded
+# mode: the qualified operator plist mode, matching install-time artifacts.
+PLIST_DEFAULT_FILE_MODE = 0o644
 
 
 @dataclass
@@ -483,7 +486,7 @@ def rollback_seat(
     pre_raw = (backups_dir(home) / label / (_backup_stem(sidecar) + ".plist")).read_bytes()
     if sha256_bytes(pre_raw) != payload.get("pre_sha256"):
         return Alert("rollback_backup_digest_mismatch", label)
-    pre_mode = int(payload.get("mode", 0o644))
+    pre_mode = int(payload.get("mode", PLIST_DEFAULT_FILE_MODE))
     atomic_write_bytes(plist_path, pre_raw, pre_mode)
     alert = _rollback_preimage(home, runner, label, expected_post=None, now=now, reload_only=True)
     return alert
@@ -523,7 +526,7 @@ def _rollback_preimage(
     pre_raw = (backups_dir(home) / label / (_backup_stem(sidecar) + ".plist")).read_bytes()
     if sha256_bytes(pre_raw) != payload.get("pre_sha256"):
         return Alert("rollback_backup_digest_mismatch", label, acted=True)
-    atomic_write_bytes(plist_path, pre_raw, int(payload.get("mode", 0o644)))
+    atomic_write_bytes(plist_path, pre_raw, int(payload.get("mode", PLIST_DEFAULT_FILE_MODE)))
     if not reload:
         return None
     if reload_only:

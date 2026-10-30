@@ -35,6 +35,7 @@ from fabric_tunnel_common import (
     MANIFEST_MAX_AGE_SECONDS,
     MASTER_SHA,
     MAX_TELEMETRY_FILES,
+    MAX_TUNNEL_RELATIVE_PATH,
     PLAN_COMMIT,
     RUN_AT_LOAD,
     TELEMETRY_FILE_SUFFIXES,
@@ -471,7 +472,7 @@ def telemetry_relative_path_reject_reason(rel: str) -> str | None:
     (rejects the whole reading): relative POSIX path, no empty/`.`/`..`
     components, bounded length, and a qualified suffix.
     """
-    if not isinstance(rel, str) or not rel or len(rel) > 512:
+    if not isinstance(rel, str) or not rel or len(rel) > MAX_TUNNEL_RELATIVE_PATH:
         return "shape"
     if rel.startswith("/") or "\\" in rel:
         return "not_relative_posix"
@@ -485,7 +486,7 @@ def telemetry_relative_path_reject_reason(rel: str) -> str | None:
 
 def _relative_path_reject_reason(rel: Any) -> str | None:
     """Relative-path shape check for qualified facts (no suffix constraint)."""
-    if not isinstance(rel, str) or not rel or len(rel) > 512:
+    if not isinstance(rel, str) or not rel or len(rel) > MAX_TUNNEL_RELATIVE_PATH:
         return "shape"
     if rel.startswith("/") or "\\" in rel:
         return "not_relative_posix"

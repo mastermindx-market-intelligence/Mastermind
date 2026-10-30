@@ -103,6 +103,9 @@ MANIFEST_MAX_AGE_SECONDS = 86400
 # directory can never make the minute watchdog unbounded.
 TELEMETRY_FILE_SUFFIXES = (".json",)
 MAX_TELEMETRY_FILES = 32
+# Bounded relative-path spelling length shared by qualification and health
+# reads: a qualified telemetry/fact relative path never exceeds this length.
+MAX_TUNNEL_RELATIVE_PATH = 512
 
 LAUNCHCTL = "/bin/launchctl"
 
@@ -279,7 +282,8 @@ def require_owner_writable_safe(path: Path, uid: int, *, code: str) -> None:
     if st.st_uid != uid:
         raise IdentityRejected(f"{code}: owner uid {st.st_uid} != seat uid {uid}")
     if st.st_mode & 0o022:
-        raise IdentityRejected(f"{code}: group/world-writable mode {oct(st.st_mode & 0o777)}")
+        offending_mode_text = oct(st.st_mode & 0o777)
+        raise IdentityRejected(f"{code}: group/world-writable mode {offending_mode_text}")
 
 
 def require_parent_safe(path: Path, uid: int, *, code: str) -> None:
