@@ -168,6 +168,15 @@ mode-0600 file-pointer contract) and exposes that key **only** to the native
 model-serving child, not the CLI tool-registry preflight. Missing/unsafe
 credentials fail closed. It does not copy another role's provider key,
 gateway credential, Slack bot token, or ambient parent environment.
+**Additional credential separation is mandatory before model-child launch:**
+the host operator must provision a *distinct*
+`HERMES_DASHBOARD_BASIC_AUTH_PASSWORD` rather than accepting the older
+`load_secrets` default that aliases it to `HERMES_GATEWAY_TOKEN`. The
+model provider key must also differ from both the dashboard password and
+gateway token. The BYOK child will refuse either alias; it never selects a
+replacement secret automatically. Actual values must be provisioned and
+rotated by the pre-existing credential owner, never recorded in GitHub or
+tool logs.
 
 This has passed offline tests with synthetic fixture values only. No real
 provider credential was read, no model request executed, and no receiving

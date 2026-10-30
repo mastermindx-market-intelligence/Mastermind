@@ -32,9 +32,13 @@ class NativeCredentialTests(unittest.TestCase):
         self.home = self.root / "hermes-home"
         self.home.mkdir(mode=0o700)
 
-    def _runtime(self, role="mmsecretary", extras=""):
+    def _runtime(self, role="mmsecretary", extras="", dashboard_password="distinct-dashboard-only-fixture-123456"):
+        dashboard_line = (
+            "" if dashboard_password is None
+            else "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + dashboard_password + "\n"
+        )
         self.secret.write_text(
-            "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + extras,
+            "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + dashboard_line + extras,
             encoding="utf-8",
         )
         self.secret.chmod(0o600)
@@ -64,6 +68,7 @@ class NativeCredentialTests(unittest.TestCase):
         self.assertNotIn("ZAI_API_KEY", native)
         self.assertNotIn("HERMES_GATEWAY_TOKEN", native)
         self.assertNotIn("HERMES_SLACK_BOT_TOKEN", native)
+        self.assertNotIn(TOKEN, native.values())
         self.assertNotIn(FAKE_ZAI, native.values())
         self.assertEqual(native["HERMES_SLACK_BOT_USER_ID"], "UPROJECTBOT001")
 
@@ -99,6 +104,25 @@ class NativeCredentialTests(unittest.TestCase):
         with self.assertRaises(RuntimeRefusal) as exc:
             rt._model_child_env()
         self.assertEqual(exc.exception.code, "RUNTIME_NATIVE_CONFIG_DRIFT")
+
+    def test_gateway_token_must_not_be_reused_as_dashboard_password(self) -> None:
+        rt = self._runtime(
+            extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n",
+            dashboard_password=None,
+        )
+        self.assertEqual(rt.secrets.dashboard_password, rt.secrets.token)
+        with self.assertRaises(RuntimeRefusal) as exc:
+            rt._model_child_env()
+        self.assertEqual(exc.exception.code, "NATIVE_GATEWAY_PASSWORD_ALIAS_REFUSED")
+
+    def test_model_key_must_not_be_reused_as_gateway_or_dashboard_key(self) -> None:
+        rt = self._runtime(
+            extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n",
+            dashboard_password=FAKE_BYTEPLUS,
+        )
+        with self.assertRaises(RuntimeRefusal) as exc:
+            rt._model_child_env()
+        self.assertEqual(exc.exception.code, "NATIVE_MODEL_KEY_REUSE_REFUSED")
 
     def test_uninstalled_shadow_profile_cannot_request_key(self) -> None:
         p = compose_profile("mmsecretary", state_dir=self.state, secrets_file=self.secret)
