@@ -252,5 +252,101 @@ class Oscillator(unittest.TestCase):
         self.assertNotIn("TradingView_MACD_RSI_exact", r["metrics"])
 
 
+class OwnerCalendarCoverage(unittest.TestCase):
+    """Owner calendar is supplied; this test never claims an admitted market source."""
+
+    @staticmethod
+    def schedule(day="2026-10-30", closing="16:00"):
+        open_et = pd.Timestamp(day + " 09:30", tz="America/New_York")
+        close_et = pd.Timestamp(day + " " + closing, tz="America/New_York")
+        return {date.fromisoformat(day): (open_et.tz_convert("UTC"), close_et.tz_convert("UTC"))}
+
+    def test_historical_complete_requires_owner_schedule(self):
+        with self.assertRaisesRegex(ValueError, "owner calendar"):
+            validate_bars(bar_rows(pattern()), Rules(), require_complete_sessions=True)
+
+    def test_first_opening_slot_missing_refuses_strict(self):
+        b = bar_rows(pattern()).iloc[1:]
+        with self.assertRaisesRegex(ValueError, "missing opening"):
+            validate_bars(b, Rules(), session_schedule=self.schedule(), require_complete_sessions=True)
+        kept = validate_bars(b, Rules(), session_schedule=self.schedule())
+        self.assertEqual(set(kept.session_coverage_state), {"PARTIAL_OBSERVATION"})
+
+    def test_final_truncated_session_refuses_strict(self):
+        b = bar_rows(pattern()[:2])
+        with self.assertRaisesRegex(ValueError, "trailing"):
+            validate_bars(b, Rules(), session_schedule=self.schedule(), require_complete_sessions=True)
+
+    def test_nyse_early_close_rejects_13_30_bar(self):
+        day = "2026-11-27"
+        b = bar_rows([(100, 101, 99, 100)] * 8, day=day)
+        with self.assertRaisesRegex(ValueError, "early close"):
+            validate_bars(b, Rules(), session_schedule=self.schedule(day, "13:00"))
+
+    def test_halfday_full_bar_count_has_explicit_stub(self):
+        day = "2026-11-27"
+        b = bar_rows([(100, 101, 99, 100)], day=day, frame=180)
+        out = validate_bars(b, Rules(timeframe_minutes=180),
+                            session_schedule=self.schedule(day, "13:00"),
+                            require_complete_sessions=True)
+        self.assertEqual(out.iloc[0].session_coverage_state, "FULL_SUPPORTED_BARS")
+        self.assertEqual(int(out.iloc[0].terminal_stub_minutes), 30)
+
+    def test_normal_2h_and_3h_full_bars_preserve_30m_stubs(self):
+        for frame, count in [(120, 3), (180, 2)]:
+            with self.subTest(frame=frame):
+                b = bar_rows([(100, 101, 99, 100)] * count, frame=frame)
+                out = validate_bars(b, Rules(timeframe_minutes=frame),
+                                    session_schedule=self.schedule(), require_complete_sessions=True)
+                self.assertEqual(set(out.session_coverage_state), {"FULL_SUPPORTED_BARS"})
+                self.assertEqual(set(out.terminal_stub_minutes), {30})
+
+    def test_30m_normal_session_requires_all_13_full_slots(self):
+        b = bar_rows([(100, 101, 99, 100)] * 13)
+        out = validate_bars(b, Rules(), session_schedule=self.schedule(),
+                            require_complete_sessions=True)
+        self.assertEqual(set(out.session_coverage_state), {"FULL_SUPPORTED_BARS"})
+        self.assertEqual(set(out.terminal_stub_minutes), {0})
+
+    def test_missing_whole_session_between_observations(self):
+        px = [(100, 101, 99, 100)] * 13
+        b = pd.concat([bar_rows(px, day="2026-10-30"),
+                       bar_rows(px, day="2026-11-03")], ignore_index=True)
+        schedule = self.schedule("2026-10-30")
+        schedule.update(self.schedule("2026-11-02"))
+        schedule.update(self.schedule("2026-11-03"))
+        with self.assertRaisesRegex(ValueError, "entire expected"):
+            validate_bars(b, Rules(), session_schedule=schedule, require_complete_sessions=True)
+
+    def test_dst_transition_uses_exchange_zone_not_utc_hour(self):
+        before, after = self.schedule("2026-10-30"), self.schedule("2026-11-02")
+        self.assertEqual(next(iter(before.values()))[0].hour, 13)
+        self.assertEqual(next(iter(after.values()))[0].hour, 14)
+        b = pd.concat([bar_rows([(100, 101, 99, 100)] * 13, day="2026-10-30"),
+                       bar_rows([(100, 101, 99, 100)] * 13, day="2026-11-02")])
+        s = {**before, **after}
+        self.assertEqual(len(validate_bars(b, Rules(), session_schedule=s,
+                                           require_complete_sessions=True)), 26)
+
+    def test_naive_owner_calendar_is_refused(self):
+        schedule = {DAY: ("2026-10-30T09:30:00", "2026-10-30T16:00:00")}
+        with self.assertRaisesRegex(ValueError, "aware UTC"):
+            validate_bars(bar_rows(pattern()), Rules(), session_schedule=schedule)
+
+    def test_unqualified_bars_report_no_owner_schedule(self):
+        b = validate_bars(bar_rows(pattern()), Rules())
+        self.assertEqual(set(b.session_coverage_state), {"NO_OWNER_SCHEDULE"})
+
+    def test_calendar_day_not_in_schedule_refused(self):
+        with self.assertRaisesRegex(ValueError, "absent from supplied"):
+            validate_bars(bar_rows(pattern()), Rules(), session_schedule=self.schedule("2026-11-02"))
+
+    def test_evaluate_explicit_source_status_not_a_market_verdict(self):
+        row = evaluate(bar_rows(pattern()), leaders(), Rules())
+        self.assertEqual(row["session_calendar_status"], "NOT_OWNER_ATTESTED")
+        self.assertFalse(row["historical_coverage_strict"])
+        self.assertFalse(row["performance_is_empirically_validated"])
+
+
 if __name__ == "__main__":
     unittest.main()
