@@ -91,3 +91,28 @@ P1: OpenMarket+Thanefield+Percept, then OpenMarket creator/affiliate outer ring;
 ## Boundaries
 
 This is a first-pass, sourced social/business *graph*, not proof of synthetic engagement or a complete census of current X interaction frequency. Some archived X timelines are from different crawl dates, and retweet event timestamps often are not exposed. Public operator identity, commercial terms, and shared login control remain unknown for many edges. No private communications, phone numbers, or personally sensitive account metadata included.
+
+
+## 2026-10-30 scope correction: two identifiable Equity Edge follow networks
+
+See the dedicated [Equity Edge giveaway ring](equityedge_affiliate_giveaway_ring.md) for **22 selected originating accounts** with campaign rules requiring the central trio **@EquityEdgeUK + @Danieltrades + @berkayglife** and **13 selected originating accounts** requiring **@EquityEdgeUK + @EquitySpace1**. These are samples of distinct handles in indexed X excerpts, **not complete 30-day interaction-event totals or distinct proven human owners**, and at least one creator (@skyshark0) participates in both hubs.
+
+- The first hub has a declared **company co-founder** (@berkayglife), **head of affiliate marketing** (@Danieltrades, self-declared, founder-reposted), and public firm affiliate terms advertising **30%** commission.
+- The second hub is notable because **@EquitySpace1 calls itself merely "Prop Trader"** while substantially concentrating visible content on Equity Edge reposts and giveaways. It is a plausible company-managed/sponsored publication **candidate**, but there is no first-party statement or technical record that the firm actually owns the account.
+- Promoters with codes **EFE50, TWO, DANIEL50, LOGAN50, DAVID50, MIRA50, TOPG10, FIDE** have observable commercial referral mechanisms. @everythingfxx has an October 24 **Paid partnership** label.
+- Some outer-ring creators demonstrably advertise **multiple competing** prop firms (e.g., @skyshark0 → AlphaCapitalUK, @De_CaptainChart → NYSMarkets and THEFUNDEDWAY, @THE_SNR_SNIPER → Hola Prime/Blue Guardian, @New_owner1 → EraFunded/AquaFunded). This is evidence against assuming every promoter is controlled by one company.
+- Several creator links are more than co-mentioned tags: **@deartrader__ reposts and replies to Emrik and Playmaker promotions**; **@mirngaprime reposts @Aeroonfx**; and **@EquitySpace1 reposts official Equity Edge announcements**. Still, rates of reciprocal comments/retweets are not quantified without complete X post IDs/timestamps.
+- [Firm's giveaway/BOGO rules](https://equityedge.io/general/giveaway-accounts-bogo-offers): promotional account sizes are simulated trading capacity and accounts close after the first payout; do not characterize $50K giveaway as $50K cash.
+- Sources and machine-readable **163 directed relationship edges** now in [typed network graph](interaccount_edges_first_pass.json). Graph edges include one per distinct **required-follow relationship** in selected contest posts, not each actual user follow/repost/like.
+
+## TrendSpider founder and owned product channel
+
+- [TrendSpider official social-media policy](https://trendspider.com/blog/trendspiders-policy-on-social-media-chart-posting-and-chart-requests/) specifically identifies personal founder account **@danushman** and sets separate conduct rules for corporate account @TrendSpider versus founder's trading posts; employees can post through corporate social accounts.
+- [SignalStack official about page](https://signalstack.com/about/) states it is brought by TrendSpider; [@SignalStack's indexed profile](https://w.twstalker.com/SignalStack) says "A @TrendSpider company" and contains brand reposts.
+- [TrendSpider company about page](https://trendspider.com/about/) identifies founder Daniel Ushman. His [public profile](https://x.noodl3.net/danushman) discusses multiple founder projects. This is a clear company/founder/product multi-account graph without grounds to label it a deceptive bot network.
+
+## Highest-value unresolved cases
+
+1. **@EquitySpace1:** Who commissions campaigns, and does a first-party brand channel explicitly acknowledge its control? Its currently available promotional history is strongly aligned with Equity Edge but insufficient for ownership.
+2. **OpenMarket historical research migration:** Can the numeric X account ID or official company document confirm whether historical @ThanefieldRes became @openmarket_raw on the same account? Directly announced affiliation is already sufficient to rank it as a related publisher.
+3. **Actual interaction density:** Obtain permitted X 30-day post export and timestamps for selected core and outer-ring accounts. Compute per-pair repost/reply/quote counts and reciprocal proportions and compare to account-level baseline. Do not infer a rate from archived feed snippets.
