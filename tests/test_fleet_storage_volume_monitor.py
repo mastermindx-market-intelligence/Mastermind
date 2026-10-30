@@ -794,5 +794,68 @@ class FleetStorageVolumeTests(unittest.TestCase):
             self.assertTrue(lock.exists())
 
 
+
+    def test_malformed_helper_return_codes_cannot_report_clean(self):
+        """Pure finish() contract: false-green is forbidden even for corrupt rc.
+
+        No real sweeper, package cache cleaner, SSH, launchctl or deletion path
+        runs. Disk and receipt paths are replaced by disposable fixtures.
+        """
+        complete_stale = json.dumps({
+            "applied": True, "removed": 0, "freed_bytes": 0,
+            "scratch_discovery": {"complete": True, "errors": []},
+        })
+        with tempfile.TemporaryDirectory() as temp:
+            with mock.patch.object(self.sweep, "STATE", pathlib.Path(temp)), (
+                mock.patch.object(self.sweep, "_external_volume_snapshots", return_value=[])
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ):
+                # Python True == 0 is false, but False == 0 and 0.0 == 0
+                # are true. None/"2" previously bypassed the rc scanner.
+                for raw in ("2", True, False, 0.0, 2.0, None):
+                    with self.subTest(raw=raw), contextlib.redirect_stdout(
+                        io.StringIO()
+                    ) as output:
+                        status = self.sweep.finish({
+                            "mode": "calm", "stale_packs_rc": raw,
+                            "stale_packs": complete_stale,
+                        })
+                    row = json.loads(output.getvalue())
+                    self.assertEqual(status, 1)
+                    self.assertTrue(row["degraded"])
+                    self.assertIn("stale_packs", row["incomplete_substeps"])
+                    self.assertEqual(row["stale_packs_rc"], raw)
+
+                # Int-valued 0 still proves a complete helper receipt.
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    status = self.sweep.finish({
+                        "mode": "calm", "stale_packs_rc": 0,
+                        "stale_packs": complete_stale,
+                    })
+                row = json.loads(output.getvalue())
+                self.assertEqual(status, 0)
+                self.assertEqual(row["incomplete_substeps"], [])
+
+    def test_granted_sweep_missing_mandatory_return_code_is_degraded(self):
+        """A granted pass missing even its helper status is not green."""
+        with tempfile.TemporaryDirectory() as temp, mock.patch.object(
+            self.sweep, "STATE", pathlib.Path(temp)
+        ), mock.patch.object(
+            self.sweep, "_external_volume_snapshots", return_value=[]
+        ), mock.patch.object(
+            self.sweep.shutil, "disk_usage",
+            return_value=mock.Mock(free=200 * 1024 ** 3)
+        ), contextlib.redirect_stdout(io.StringIO()) as output:
+            code = self.sweep.finish({"mode": "calm", "grants": "ok"})
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertTrue(receipt["degraded"])
+        for name in ("hung", "stale_packs", "temp_gc",
+                     "temp_gc_generic", "reap", "scratch_reap"):
+            self.assertIn(name + ".rc_missing", receipt["incomplete_substeps"])
+
+
 if __name__ == "__main__":
     unittest.main()
