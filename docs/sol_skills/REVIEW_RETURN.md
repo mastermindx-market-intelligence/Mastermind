@@ -117,8 +117,10 @@ Never route around an explicit safety/permission/qualification denial, a refused
 with `retry_allowed=false`, an active reviewer, or `EFFECT_UNKNOWN`; changing to Cursor is
 not permission to retry the *same refused operation* on a different provider. An already
 commissioned review must be reconciled on its original carrier before assigning a genuinely
-distinct, newly authorized review operation. Apply the same approved cost/confidentiality
-and external-code-access conditions as any third-party cloud reviewer.
+distinct, newly authorized review operation. A fresh operation name, GitHub comment or
+reviewer identity does not reconcile an original `EFFECT_UNKNOWN` review or waive its
+refusal. Apply the same approved cost/confidentiality and external-code-access conditions
+as any third-party cloud reviewer.
 
 The exact procedure and guarded `@cursor` packet are in
 `docs/CURSOR_CLOUD_INDEPENDENT_REVIEW.md`. Require **all** of these observations:

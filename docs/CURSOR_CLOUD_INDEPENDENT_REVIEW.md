@@ -8,13 +8,21 @@ Fabric acceptance, or production-endpoint deployment.
 ## When to use
 
 Use the existing GitHub PR comment `@cursor` entrypoint for **one new,
-bounded, authorized, read-only independent source review**, particularly when
-Fabric has a verified capacity/transport outage or no eligible placement.
-First identify and reconcile any original Fabric run, root, reviewer and
-carrier. If it is active, was started, has an unknown effect, or is prohibited
-from retry by an explicit safety/permission/qualification denial, **do not
-re-dispatch the same operation** through Cursor. A separate new review needs its
-own lawful commission and scope; a route change never waives a refusal.
+bounded, authorized, read-only independent source review** only when the selected
+Fabric avenue is demonstrably unavailable/unplaced/terminally failed, and the
+original review's effects are fully reconciled. First identify the original
+Fabric run, root, reviewer, PR/head/scope and carrier before considering Cursor.
+
+**No Cursor commission is authorized for the same PR/head/review scope** while
+an original Fabric Attempt is STARTED/RUNNING, has `EFFECT_UNKNOWN`, has
+unverified effects, or has not been reconciled. A new operation ID, distinct
+reviewer or new `@cursor` comment does not turn that unresolved review
+into an authorized separate scope. An explicit safety, permission or
+qualification denial (including `retry_allowed=false`) **cannot be bypassed**
+by switching to Cursor. Only a genuinely separate, independently authorized
+scope may be commissioned once all prior effects are terminally reconciled and
+no applicable denial or reviewer collision remains. Do not merely rename the
+same refused review to evade the original provider's disposition.
 
 Only use Cursor Cloud where the organization has authorized that GitHub/Cursor
 integration, private-repo access, confidentiality and usage/billing. Cursor

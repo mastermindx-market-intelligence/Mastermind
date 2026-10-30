@@ -47,8 +47,9 @@ Count a completed, independently adjudicated Cursor result as technical source
 review evidence only. If GitHub posts it through the PR author's account,
 formal **non-author approval is NOT proven**; obtain an actual distinct GitHub
 reviewer `APPROVED` on that head when required. Never use this avenue to
-circumvent an explicit permission/safety denial, `retry_allowed=false`, an
-unresolved original execution, or a Fabric-specific real-path acceptance requirement.
+circumvent an explicit permission/safety denial, `retry_allowed=false`,
+`EFFECT_UNKNOWN`, an unresolved original execution, or a Fabric-specific
+real-path acceptance requirement.
 
 ## Output
 
