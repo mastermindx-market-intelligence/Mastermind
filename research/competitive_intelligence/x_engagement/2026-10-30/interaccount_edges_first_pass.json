@@ -75,9 +75,13 @@
     "EQ_SPACE_ORIGIN_10": "https://twstalker.com/_Silverthree",
     "EQ_SPACE_ORIGIN_11": "https://twstalker.com/Serdeek001",
     "EQ_SPACE_ORIGIN_12": "https://mobile.twstalker.com/THE_SNR_SNIPER",
-    "EQ_SPACE_ORIGIN_13": "https://ngntipkolamrenang.twstalker.com/EquitySpace1"
+    "EQ_SPACE_ORIGIN_13": "https://ngntipkolamrenang.twstalker.com/EquitySpace1",
+    "AFAAQ_DIRECT": "https://ww.twstalker.com/AfaaqFx",
+    "ORION_AFAAQ": "https://twstalker.com/_Silverthree",
+    "CRYPTO_SHEIKH": "https://w.twstalker.com/DaCryptoSheikh",
+    "ABU_SKEPTIC": "https://www.sotwe.com/abu_engineer1"
   },
-  "edge_count": 170,
+  "edge_count": 181,
   "edges": [
     {
       "from": "@ThanefieldCap",
@@ -2132,6 +2136,138 @@
       "observation_confidence": "high",
       "interpretation": "Explicit public company/account name or historical identity link; not evidence of same credential owner.",
       "shared_controller": "unverified"
+    },
+    {
+      "from": "@AfaaqFx",
+      "to": "@AquaFunded",
+      "type": "SELF_DECLARED_AFFILIATE",
+      "evidence": "Profile claims Affiliate Partner, promotes AquaFunded with tracked afaaqfx link",
+      "source_ids": [
+        "AFAAQ_DIRECT"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Multi-company independent creator plausible",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@AfaaqFx",
+      "to": "@FundedNext",
+      "type": "AFFILIATE_LINK",
+      "evidence": "Promotion uses fundednext.com/?fpr=muhammad72 and profile mentions partner",
+      "source_ids": [
+        "AFAAQ_DIRECT"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Explicit tracked referral to competing platform",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@AfaaqFx",
+      "to": "@Orionfundedcom",
+      "type": "CROSS_BRAND_GIVEAWAY",
+      "evidence": "Giveaway asks follows @OrionAffiliates, @Orionfundedcom and @AfaaqFx",
+      "source_ids": [
+        "ORION_AFAAQ"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Third company incentive marketing",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@AfaaqFx",
+      "to": "@OrionAffiliates",
+      "type": "CROSS_BRAND_GIVEAWAY",
+      "evidence": "OrionFunded official affiliate handle and Afaaq co-required on one giveaway",
+      "source_ids": [
+        "ORION_AFAAQ"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Commercial promotional link, contract unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@AfaaqFx",
+      "to": "@EquityEdgeUK",
+      "type": "REFERRAL_LINK",
+      "evidence": "Winner announcement requests registration through AFAAQFX signup token",
+      "source_ids": [
+        "AFAAQ_DIRECT"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Referral/tracked campaign plus contest role",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@AfaaqFx",
+      "to": "@skyshark0",
+      "type": "PUBLIC_REPLY",
+      "evidence": "Congratulates creator on HolaPrime result in public indexed post",
+      "source_ids": [
+        "AFAAQ_DIRECT"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Direct creator-to-creator social interaction; sponsorship unknown",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@DaCryptoSheikh",
+      "to": "@EquityEdgeUK",
+      "type": "GIVEAWAY_PROMOTION",
+      "evidence": "Offers Equity Edge challenge contest and asks follows",
+      "source_ids": [
+        "CRYPTO_SHEIKH"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Independent campaign participation candidate; not in 22+13 originator audit counts",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@DaCryptoSheikh",
+      "to": "@EquitySpace1",
+      "type": "GIVEAWAY_PROMOTION",
+      "evidence": "Lists EquitySpace1 as required follow in contest",
+      "source_ids": [
+        "CRYPTO_SHEIKH"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Link to secondary Hub B",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@DaCryptoSheikh",
+      "to": "@AquaFunded",
+      "type": "SELF_DECLARED_AFFILIATE",
+      "evidence": "Profile lists partner AquaFunded and posts branded contests",
+      "source_ids": [
+        "CRYPTO_SHEIKH"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Multi-company creator",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@DaCryptoSheikh",
+      "to": "@fundingtraders",
+      "type": "REFERRAL_LINK",
+      "evidence": "Public FundingTraders giveaway uses company tracking URL",
+      "source_ids": [
+        "CRYPTO_SHEIKH"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Creator promotes third competing firm",
+      "shared_controller": "unverified"
+    },
+    {
+      "from": "@DaCryptoSheikh",
+      "to": "@RonTrd1",
+      "type": "GIVEAWAY_REQUIRED_FOLLOW",
+      "evidence": "AquaFunded giveaway lists RonTrd1 as additional follow",
+      "source_ids": [
+        "CRYPTO_SHEIKH"
+      ],
+      "observation_confidence": "high",
+      "interpretation": "Creator circle; unknown controller",
+      "shared_controller": "unverified"
     }
   ],
   "quantification_warning": "Source-specific lower bounds only. 22 Hub-A distinct original poster handles each with three required-follow edges; 13 Hub-B distinct original poster handles each with two required-follow edges, with at least one handle overlapping the hubs. These are synthetic graph representations of observed campaign rules, NOT all-post or 30-day interaction frequencies. Repost-event timestamps unavailable for many mirrors. Earlier 6 Percept and 11 Thanefield repost-posts span nonuniform archival snapshots.",
@@ -2160,6 +2296,14 @@
     ],
     "hubB_warning": "13 originators selected from web-indexed posts; not a census, not events from same known UTC window, not proof of ownership. @EquitySpace1 brand-affinity strong but exact management unknown.",
     "canonical_alias_edges": 7,
-    "canonical_alias_note": "These connect public corporate/product labels to their named accounts, NOT distinct acts of social engagement; no merging of Thalamus Technologies Inc with @thalamus_xyz absent specific source."
+    "canonical_alias_note": "These connect public corporate/product labels to their named accounts, NOT distinct acts of social engagement; no merging of Thalamus Technologies Inc with @thalamus_xyz absent specific source.",
+    "multi_company_bridges": {
+      "accounts": [
+        "@AfaaqFx",
+        "@DaCryptoSheikh"
+      ],
+      "evidence": "Observed X indexed posts linking Equity Edge campaigns with AquaFunded/FundedNext/OrionFunded/FundingTraders, plus direct @AfaaqFx -> @skyshark0 public reply",
+      "warning": "Different dates/campaigns; not proof of shared owner, common contract or all-post frequency; new accounts not retroactively included in selected 22+13 originator sample."
+    }
   }
 }
