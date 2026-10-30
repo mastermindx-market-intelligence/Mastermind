@@ -179,6 +179,9 @@ def test_public_acquire_platform_refusal_before_any_access(monkeypatch):
 
 
 def test_partial_fstat_failure_still_closes_opened_descriptor(monkeypatch):
+    from types import SimpleNamespace
+    # Isolate this wrapper's fake os: never poison pytest's process-global os.fstat.
+    monkeypatch.setattr(w,'os',SimpleNamespace(**vars(w.os)))
     closed=[]
     monkeypatch.setattr(w.os,'open',lambda *a,**k:91)
     monkeypatch.setattr(w.os,'fstat',lambda _:(_ for _ in ()).throw(OSError('inert failure')))
