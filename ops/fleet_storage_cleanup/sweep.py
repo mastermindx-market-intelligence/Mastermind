@@ -434,8 +434,20 @@ def finish(out: dict) -> int:
     # refused or only partially scanned. Preserve its original return code
     # and make the same launchd heartbeat report an explicit degraded result.
     # StartInterval continues recurring even when this invocation exits 1.
+    # Every recorded helper return code must be an actual integer. String,
+    # boolean, float and missing rc values cannot establish a clean pass.
+    # The real subprocess guard always emits int; this prevents corrupted or
+    # future alternate producer receipts from restoring false-green behavior.
     incomplete = sorted(key[:-3] for key, rc in out.items()
-                        if key.endswith('_rc') and type(rc) is int and rc != 0)
+                        if key.endswith('_rc') and (type(rc) is not int or rc != 0))
+    if out.get('grants') == 'ok':
+        # A grant-qualified full sweep always calls these six helpers. Their
+        # complete absence is not evidence of success, even on a calm host.
+        mandatory = ('hung', 'stale_packs', 'temp_gc',
+                     'temp_gc_generic', 'reap', 'scratch_reap')
+        for key in mandatory:
+            if key + '_rc' not in out:
+                incomplete.append(f'{key}.rc_missing')
     # A helper's exit 0 without its expected --json receipt is not proof of a
     # completed inventory. Never translate absent stdout into a clean sweep.
     receipt_required = {'hung', 'stale_packs', 'temp_gc',
