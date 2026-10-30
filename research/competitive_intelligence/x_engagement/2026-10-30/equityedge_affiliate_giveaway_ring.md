@@ -108,3 +108,19 @@ The following **13 distinct handle originators** each have an indexed giveaway p
 **Additional controls needed for ownership attribution:** platform acknowledgment of @EquitySpace1, firm-owned website backlinks or campaign contracts, authenticated account administration, historical account handle transitions and distinctive landing-page/admin reuse. Company-branded repost concentration alone is medium evidence of an affiliate-controlled hub, not high evidence of a company-owned account.
 
 **Not a cash giveaway:** Equity Edge's own [giveaway policy](https://equityedge.io/general/giveaway-accounts-bogo-offers) states that these are simulated trading accounts that stop after a first payout and need a paid replacement to continue. "3x10K" therefore refers to account size, not US$30,000 cash prizes.
+
+
+## Third link: cross-firm affiliate bridge via @AfaaqFx and @DaCryptoSheikh
+
+A [separately inspected @AfaaqFx timeline](https://ww.twstalker.com/AfaaqFx) shows the account describing itself as an **Affiliate Partner**, advertising AquaFunded with a tagged afaaqfx link and FundedNext with tagged fpr=muhammad72. The same timeline includes an Equity Edge giveaway requiring follow of @EquityEdgeUK, @berkayglife, @EquitySpace1, and @AfaaqFx, later claiming winners who are told to register with a separate Equity Edge AFAAQFX signup link. A [quoted OrionFunded giveaway](https://twstalker.com/_Silverthree) separately asks participants to follow @OrionAffiliates, @Orionfundedcom and @AfaaqFx. **What this demonstrates:** the same commercial X creator can bridge at least four brands; it does NOT support company ownership of the creator.
+
+A [@DaCryptoSheikh timeline](https://w.twstalker.com/DaCryptoSheikh) identifies an AquaFunded partnership; its posts include distinct account giveaways associated with @EquityEdgeUK/@EquitySpace1, AquaFunded and FundingTraders, with a FundingTraders referral link. This is a **second multi-company affinity bridge**. Co-occurrence of identical promotional rule language is plausible when the creator or advertiser reuses a standard giveaway template.
+
+The above are new observed accounts **not included in the original 22 + 13 independent originator counts**. Counts in this archive deliberately remain fixed to the selected audited inventory rather than expanding on unverified duplicates.
+
+**Important external observation:** A third-party [@abu_engineer1 archive](https://www.sotwe.com/abu_engineer1) posts accusations against an apparently unrelated account @Rex_0183/ERAFUNDED claiming fake giveaways, but no independent record verifies those accusations; they are **not adopted** as findings against Equity Edge or its documented promoters.
+
+### Actual interaction edges versus participation instructions
+
+The network contains at least three **different event classes**. Direct replies and reposts between creators, such as @AfaaqFx's response to @skyshark0's HolaPrime result and the cited @deartrader__ reposts of @Emrik__ / @theplaymakerxx, indicate social amplification. Contest **entry requirements** (follow three accounts, like, repost, comment) are calls-to-action, not proof every entrant performed the action. Affiliate **sign-up links** demonstrate campaign attribution infrastructure, not payout amounts or company ownership. Future quantitative network scoring must keep all three types distinct.
+
