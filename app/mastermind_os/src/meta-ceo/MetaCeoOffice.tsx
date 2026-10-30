@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from "./preview";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
@@ -26,6 +26,8 @@ export interface MetaCeoOfficeProps {
   projection: OfficeProjection;
   draft: OfficeDraft;
   onDraftChange: (text: string) => void;
+  /** Only the existing signed-in Executive owner may supply a continuation. */
+  nativeContinuation?: ReactNode;
   locale?: "en" | "zh-CN";
 }
 
@@ -35,6 +37,9 @@ const OFFICE_ZH = {
   "Keep the whole company moving with intention.": "让整个公司有方向地前进。",
   "A clear view of direction, movement and the next accountable action.": "看清方向、进展，以及下一步由谁负责。",
   "Read + preview only": "仅供阅读和预览",
+  "Owner-qualified session": "经负责人验证的会话",
+  "Continue the exact selected Executive session": "继续当前已验证的 Executive 会话",
+  "Native continuation uses the existing Executive owner. Sending confirms only the original operation receipt, not a worker result or acceptance.": "原有 Executive 负责人处理会话继续。发送回执只证明原操作已提交，不代表工作结果或验收。",
   "Current direction": "当前方向",
   "Source unavailable": "来源不可用",
   "The adopted direction has not been supplied by its owner.": "负责人尚未提供已采纳的方向。",
@@ -121,7 +126,9 @@ function SourceBadge({ source }: { source: SourceClaim }) {
   return <span className="office-state" data-state={source.state}>{source.state}</span>;
 }
 
-export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" }: MetaCeoOfficeProps) {
+export function MetaCeoOffice({
+  projection, draft, onDraftChange, nativeContinuation, locale = "en",
+}: MetaCeoOfficeProps) {
   const t = (en: keyof typeof OFFICE_ZH): string => locale === "zh-CN" ? OFFICE_ZH[en] : en;
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [preview, setPreview] = useState<DirectionPreview | null>(null);
@@ -161,13 +168,19 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
     if (sourcesButton.current?.isConnected) sourcesButton.current.focus();
   };
 
+  const nativeSessionQualified = nativeContinuation != null &&
+    projection.mission.source.state === "CURRENT" &&
+    projection.context.sessionRef !== null &&
+    projection.context.bindingGeneration !== null;
   return <section className="meta-ceo-office" aria-label={t("Meta-CEO office")}>
     <header className="office-heading">
       <div><p className="office-eyebrow">{t("One company. One office.")}</p>
         <h1>{t("Keep the whole company moving with intention.")}</h1>
         <p>{t("A clear view of direction, movement and the next accountable action.")}</p></div>
       <div className="office-heading-aside"><div className="office-art" aria-hidden="true" />
-        <span className="office-state" data-state="UNKNOWN">{t("Read + preview only")}</span></div>
+        <span className="office-state" data-state={nativeSessionQualified ? "CURRENT" : "UNKNOWN"}>
+          {t(nativeSessionQualified ? "Owner-qualified session" : "Read + preview only")}
+        </span></div>
     </header>
 
     <section className="office-direction" aria-label={t("Current direction")}>
@@ -178,6 +191,14 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
     {unknownEffect && <div className="office-effect-alert" role="alert">
       <strong>EFFECT_UNKNOWN</strong><p>{t("Reconcile the original operation. Resend, failover and target change remain held.")}</p>
     </div>}
+    {nativeSessionQualified && <section className="office-panel office-native-session"
+      aria-label={t("Continue the exact selected Executive session")}>
+      <h2>{t("Continue the exact selected Executive session")}</h2>
+      <p className="office-muted">
+        {t("Native continuation uses the existing Executive owner. Sending confirms only the original operation receipt, not a worker result or acceptance.")}
+      </p>
+      {nativeContinuation}
+    </section>}
 
     <details className="fi-disclosure">
       <summary>{locale === "zh-CN" ? "子代理 Fabric · 查看执行内部状态" : "Subagent Fabric · inspect execution"}</summary>

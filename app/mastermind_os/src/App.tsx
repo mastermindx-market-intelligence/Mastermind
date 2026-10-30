@@ -3255,6 +3255,13 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           projection={office.projection}
           draft={office.draft}
           onDraftChange={office.changeDraft}
+          nativeContinuation={
+            officeSession.sessionRef !== null &&
+            officeSession.sessionRef === sessionTargetKey &&
+            office.projection.mission.source.state === "CURRENT"
+              ? sessionContinuationPanel
+              : null
+          }
         />
         <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
       </>

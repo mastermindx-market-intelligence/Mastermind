@@ -47,8 +47,33 @@ Native DSH developer seats from #1876, Grok Bot/OpenClaw and Hermes have not
 yet supplied a qualified Executive same-session correlation. They must remain
 UNBOUND in this Office until the original authenticated session owner extends
 its contract; titles, bot messages, raw Slack timestamps and model text are
-insufficient. The Office does not gain a send, wake, model, MCP, scheduler or
-worker-return path from this source change.
+insufficient. The read-only owner association itself grants no new send, wake,
+model, MCP, scheduler or worker-return authority.
+
+### The Today continuation user path (source-only candidate)
+
+The existing `SelectedSessionContinuation` is now **reused**, not cloned,
+inside the Meta-CEO Today's Office whenever all of these already-qualified
+facts hold: a CURRENT original Executive Mission, one exact owner-authenticated
+native `fabric_attempt` target, the same target in the original mounted session
+control, and a non-null owner generation. The App alone supplies the existing
+continuation component and its existing `onContinue` / `onRecover` callbacks,
+which preserve the original operation-key reconciliation and no-Stop rule.
+
+The Office presents a distinct **owner-qualified session** area and continues
+to keep its direction intake as an inert preview; user-entered Office draft
+text is **never silently submitted** into the native continuation form. The
+component itself suppresses any injected continuation when Mission/current
+session correlation is missing or stale. The same native component remains
+available in its original Conversation route, but only the active navigation
+route mounts it; no second sender, store, queue, poller or session identity
+exists. A sent continuation receipt means its original operation was committed,
+**not** that a worker started, returned, passed review, or was accepted.
+
+This is a Mastermind OS source/UI bridge, not a live DSH streaming chat
+integration, new model provider, authenticated account acceptance or always-on
+resident-service proof. A real signed-in user journey and independently
+accepted current source are mandatory before claiming integration complete.
 
 Delivery, pickup, START, effect, transport return, review and acceptance remain
 independent. A completed result is not a transport return or acceptance. Work
