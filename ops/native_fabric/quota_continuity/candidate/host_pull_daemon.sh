@@ -216,9 +216,15 @@ on_signal() {
       # out, so a proven pre-effect signal rolls that CAS back. A failed
       # rollback is not claimed as a restored pair.
       if [ "${SELECTED_ADVANCE:-0}" -eq 1 ]; then
-        rollback_advanced_selector \
-          || write_receipt EFFECT_UNKNOWN "signal-$PHASE" "selector rollback failed" \
-          || true
+        # The selector CAS was acknowledged, but bootout has not started.
+        # Re-prove the saved launchd class/PID/argv/plist and process before
+        # reversing CURRENT. Unknown identity must retain the marker/CURRENT.
+        if ! service_still_snapshot; then
+          stop_uncertain "signal-$PHASE" "original service identity unproven before selector rollback"
+        fi
+        if ! rollback_advanced_selector; then
+          stop_uncertain "signal-$PHASE" "selector rollback failed"
+        fi
       fi
       release_install_holder
       exit "$code"
@@ -2047,8 +2053,12 @@ case "$COMMAND" in
         launchctl_print || stop_uncertain POST_BOOTOUT_PRINT "launchctl state uncertain"
         [ "$LC_CLASS" = "absent" ] || stop_uncertain POST_BOOTOUT_PRINT "service still loaded after bootout"
       elif [ "$boot_rc" -eq 76 ]; then
-        # The same pid is still loaded, so launchd did not move. Roll the
-        # selector back. If that CAS fails, the pair is unknown.
+        # The helper proved only that the same PID was observable. That is
+        # insufficient for NO_EFFECT: re-check full original launchd identity
+        # and the plist digest before any selector reversal or receipt.
+        if ! service_still_snapshot; then
+          stop_uncertain BOOTOUT_ROLLBACK "original service identity unproven after failed bootout"
+        fi
         if ! rollback_advanced_selector; then
           write_receipt EFFECT_UNKNOWN BOOTOUT_ROLLBACK \
             "selector rollback failed after bootout had no effect" \
@@ -2094,7 +2104,13 @@ case "$COMMAND" in
       if [ "$BOOTED" -eq 1 ]; then
         recover_or_stop INSTALL "plist install failed"
       fi
-      restore_plist || die 78 "rollback restore failed"
+      restore_plist || stop_uncertain INSTALL "rollback restore failed"
+      # Before bootout, an install refusal can still race another service
+      # change. Even for a previously absent label, prove that exact absent
+      # class and saved plist preimage before undoing the committed CAS.
+      if [ "${SELECTED_ADVANCE:-0}" -eq 1 ] && ! service_still_snapshot; then
+        stop_uncertain INSTALL "original service identity unproven after failed plist install"
+      fi
       if ! rollback_advanced_selector; then
         write_receipt EFFECT_UNKNOWN INSTALL "selector rollback failed" || true
         die 78 "EFFECT_UNKNOWN service stopped pending repair: selector rollback failed"

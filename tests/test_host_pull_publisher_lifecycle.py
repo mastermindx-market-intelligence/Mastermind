@@ -1492,7 +1492,7 @@ def test_bootout_nonzero_without_effect_is_no_effect(workspace):
     assert (ctx["stub"] / "ps-alive").exists()
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
-    assert log.count("print ") == 2
+    assert log.count("print ") == 3
     assert "bootstrap " not in log
     assert_not_executed(ctx)
 
@@ -2288,3 +2288,189 @@ def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path, init
             else "STATE:0:1:1:BACKED_UP") in result.stdout
     assert ("ARMED" in result.stdout) == (initial_marker == 0)
     assert "EFFECT_UNKNOWN" in result.stdout
+
+
+
+@pytest.mark.parametrize(("sig", "exit_code"), [
+    (signal.SIGTERM, 143), (signal.SIGHUP, 129), (signal.SIGINT, 130),
+])
+@pytest.mark.parametrize("drift", ["intact", "disappeared", "argv", "plist"])
+def test_signal_after_ack_before_bootout_reproves_original_identity(
+    workspace, sig, exit_code, drift,
+):
+    """After selector CAS/fence ack, signals may reverse only a proven old service."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    baseline = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 61\n")
+    original = arm_running(ctx, workspace)
+    hold = workspace / "post-select-pre-bootout"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(
+            ctx, generation=target.name, expect=selector.name,
+            advance_from=selector.name, hold_before_bootout=hold,
+        ),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        assert "bootout " not in launch_log(ctx)
+        if drift == "disappeared":
+            (ctx["stub"] / "print-mode").write_text("stopped\n")
+        elif drift == "argv":
+            (ctx["stub"] / "argv").write_text(
+                expected_argv(ctx["lock"], target / "ext" / "host_pull.sh")
+            )
+        elif drift == "plist":
+            ctx["plist"].write_bytes(b"PEER-PLIST-AFTER-CAS\n")
+        proc.send_signal(sig)
+        _out, err = proc.communicate(timeout=12)
+        last = _selection(ctx)
+        if drift == "intact":
+            assert proc.returncode == exit_code, err
+            assert last["generation"] == selector.name
+            assert last["sequence"] == baseline["sequence"] + 2
+            assert "EFFECT_UNKNOWN" not in err
+        else:
+            assert proc.returncode == 78, err
+            assert "EFFECT_UNKNOWN" in err
+            assert "original service identity unproven" in err
+            assert last["generation"] == target.name
+            assert last["previous"] == selector.name
+            assert last["sequence"] == baseline["sequence"] + 1
+            receipt = receipt_body(ctx)
+            assert receipt["outcome"] == "EFFECT_UNKNOWN"
+            assert receipt["phase"] == "signal-BACKED_UP"
+            assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert ctx["plist"].read_bytes() == (
+            b"PEER-PLIST-AFTER-CAS\n" if drift == "plist" else original
+        )
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("drift", ["argv", "plist"])
+def test_bootout_nonzero_same_pid_with_identity_drift_is_unknown(workspace, drift):
+    """Nonzero bootout + same live PID does not prove argv or plist continuity."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 62\n")
+    original = arm_running(ctx, workspace)
+    (ctx["stub"] / "bootout-rc").write_text("1\n")
+    hold = workspace / "post-select-bootout-drift"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(
+            ctx, generation=target.name, expect=selector.name,
+            advance_from=selector.name, hold_before_bootout=hold,
+        ),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        if drift == "argv":
+            (ctx["stub"] / "argv").write_text(
+                expected_argv(ctx["lock"], target / "ext" / "host_pull.sh")
+            )
+        else:
+            ctx["plist"].write_bytes(b"PEER-PLIST-BEFORE-BOOTOUT\n")
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        assert "EFFECT_UNKNOWN" in err
+        assert "original service identity unproven" in err
+        assert "bootout had no effect" not in err
+        last = _selection(ctx)
+        assert last["generation"] == target.name
+        assert last["previous"] == selector.name
+        assert last["sequence"] == before["sequence"] + 1
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "BOOTOUT_ROLLBACK"
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert ctx["plist"].read_bytes() == (
+            b"PEER-PLIST-BEFORE-BOOTOUT\n" if drift == "plist" else original
+        )
+        assert (ctx["stub"] / "pid").read_text().strip() == "4242"
+        assert (ctx["stub"] / "ps-alive").exists()
+        assert launch_log(ctx).count("bootout ") == 1
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+
+@pytest.mark.parametrize("drift", ["intact-absent", "became-loaded", "unreadable"])
+def test_absent_prebootout_install_failure_requires_saved_service_state(
+    workspace, drift,
+):
+    """An originally absent collector must stay absent through selector rollback."""
+    ctx = prepare(workspace)
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 63\n")
+    original = b"ABSENT-LABEL-ORIGINAL-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    hold = workspace / "absent-install-refusal"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(
+            ctx, generation=target.name, expect=selector.name,
+            advance_from=selector.name, hold_before_plist=hold,
+            fault="install-before-replace",
+        ),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        _release_hold(proc, hold)
+        assert _selection(ctx)["generation"] == target.name
+        assert "bootout " not in launch_log(ctx)
+        if drift == "became-loaded":
+            (ctx["stub"] / "print-mode").write_text("running\n")
+            (ctx["stub"] / "ps-alive").write_text("")
+            (ctx["stub"] / "argv").write_text("/bin/bash\n/peer/collector.sh\n")
+        elif drift == "unreadable":
+            (ctx["stub"] / "print-style").write_text("garbage\n")
+        hold.unlink()
+        _out, err = proc.communicate(timeout=12)
+        assert proc.returncode == 78, err
+        last = _selection(ctx)
+        assert ctx["plist"].read_bytes() == original
+        if drift == "intact-absent":
+            assert "plist install failed" in err
+            assert "EFFECT_UNKNOWN" not in err
+            assert last["generation"] == selector.name
+            assert last["sequence"] == before["sequence"] + 2
+        else:
+            assert "EFFECT_UNKNOWN" in err
+            assert "original service identity unproven" in err
+            assert last["generation"] == target.name
+            assert last["previous"] == selector.name
+            assert last["sequence"] == before["sequence"] + 1
+            receipt = receipt_body(ctx)
+            assert receipt["outcome"] == "EFFECT_UNKNOWN"
+            assert receipt["phase"] == "INSTALL"
+            assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert "bootout " not in launch_log(ctx)
+        assert "bootstrap " not in launch_log(ctx)
+        assert_not_executed(ctx)
+    finally:
+        hold.unlink(missing_ok=True)
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
