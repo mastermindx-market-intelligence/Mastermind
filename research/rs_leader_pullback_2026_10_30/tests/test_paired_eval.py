@@ -40,7 +40,11 @@ def inputs(n=2, candidate="pivot"):
                              "outcome_end_utc": (decision + pd.Timedelta(hours=1)).isoformat()
                              if status == "RESOLVED" else None,
                              "outcome_known_at_utc": (decision + pd.Timedelta(hours=1, minutes=1)).isoformat()
-                             if status == "RESOLVED" else None})
+                             if status == "RESOLVED" else None,
+                             "common_policy_clock_utc": decision.isoformat(),
+                             "common_episode_end_utc": (decision + pd.Timedelta(hours=2)).isoformat(),
+                             "common_risk_unit_sha256": "a" * 64,
+                             "common_cost_model_sha256": "b" * 64})
     return pd.DataFrame(opportunities), pd.DataFrame(outcomes)
 
 
@@ -86,6 +90,43 @@ class PairedTests(unittest.TestCase):
             "UNAVAILABLE", None, None, None]
         a = self.run_pair(p, o)
         self.assertEqual(a["splits"]["DEVELOPMENT"]["unpaired_or_censored"], 1)
+
+    def test_common_risk_basis_falsification_refused(self):
+        p, o = inputs()
+        o.loc[0, "common_risk_unit_sha256"] = "c" * 64
+        with self.assertRaisesRegex(ValueError, "risk must match"):
+            self.run_pair(p, o)
+
+    def test_common_cost_model_falsification_refused(self):
+        p, o = inputs()
+        o.loc[1, "common_cost_model_sha256"] = "c" * 64
+        with self.assertRaisesRegex(ValueError, "cost and risk must match"):
+            self.run_pair(p, o)
+
+    def test_asymmetric_outcome_horizon_refused(self):
+        p, o = inputs()
+        o.loc[0, "common_episode_end_utc"] = "2026-10-05T20:00:00Z"
+        with self.assertRaisesRegex(ValueError, "horizon, cost and risk must match"):
+            self.run_pair(p, o)
+
+    def test_outcome_after_common_horizon_refused(self):
+        p, o = inputs()
+        o.loc[0, "outcome_end_utc"] = "2026-10-05T18:00:01Z"
+        o.loc[0, "outcome_known_at_utc"] = "2026-10-05T18:00:02Z"
+        with self.assertRaisesRegex(ValueError, "beyond the common episode horizon"):
+            self.run_pair(p, o)
+
+    def test_different_calendar_splits_same_day_refused(self):
+        p, o = inputs()
+        p.loc[1, "session_date"] = p.loc[0, "session_date"]
+        p.loc[1, "decision_utc"] = p.loc[0, "decision_utc"]
+        p.loc[1, "bar_known_at_utc"] = p.loc[0, "bar_known_at_utc"]
+        p.loc[1, "leader_asof_session"] = p.loc[0, "leader_asof_session"]
+        p.loc[1, "leader_known_at_utc"] = p.loc[0, "leader_known_at_utc"]
+        p.loc[1, "regime_known_at_utc"] = p.loc[0, "regime_known_at_utc"]
+        p.loc[1, "split"] = "HOLDOUT"
+        with self.assertRaisesRegex(ValueError, "same calendar session"):
+            self.run_pair(p, o)
 
     def test_absent_control_row_is_error(self):
         p, o = inputs()
