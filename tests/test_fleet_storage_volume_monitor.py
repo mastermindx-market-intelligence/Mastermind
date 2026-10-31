@@ -856,6 +856,157 @@ class FleetStorageVolumeTests(unittest.TestCase):
                      "temp_gc_generic", "reap", "scratch_reap"):
             self.assertIn(name + ".rc_missing", receipt["incomplete_substeps"])
 
+    # -- B11: the unenrolled stale-pack reaper is never invoked apply-capable.
+
+    @staticmethod
+    def _tree_snapshot(root):
+        """Content-addressed snapshot of a directory tree, or None if absent."""
+        if not root.exists():
+            return None
+        rows = []
+        for path in sorted(root.rglob("*")):
+            try:
+                info = path.lstat()
+            except OSError:
+                continue
+            rows.append((str(path), info.st_size, info.st_mtime_ns, info.st_mode))
+        return rows
+
+    def test_stale_pack_invocation_is_never_apply_capable(self):
+        # Pure argv construction. No helper, host, file or process is touched.
+        argv = self.sweep.stale_pack_argv(
+            pathlib.Path("/nonexistent/stale_pack_reaper.py"))
+        self.assertNotIn("--apply", argv)
+        self.assertEqual(
+            [token for token in argv if self.sweep._is_apply_capable(token)], [])
+        self.assertIn("--json", argv)
+        self.assertEqual(argv[-2:], ["--min-age-minutes", "120"])
+        # The guard is fail closed: an apply-capable spelling is refused, not
+        # passed through to the unenrolled helper.
+        for token in ("--apply", "--apply-now", "--force-apply", "--mode=apply"):
+            with self.subTest(token=token):
+                self.assertTrue(self.sweep._is_apply_capable(token))
+                with self.assertRaises(ValueError):
+                    self.sweep._assert_not_apply_capable(
+                        ["python3", "/x/stale_pack_reaper.py", token])
+
+    def test_no_apply_capable_stale_pack_invocation_exists_in_the_module(self):
+        # AST proof over the whole module: no argv literal naming the
+        # unenrolled stale-pack helper also names an apply-capable token.
+        import ast
+        import inspect
+        tree = ast.parse(inspect.getsource(self.sweep))
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.List, ast.Tuple)):
+                continue
+            tokens = [element.value for element in node.elts
+                      if isinstance(element, ast.Constant)
+                      and isinstance(element.value, str)]
+            if any("stale_pack_reaper" in token for token in tokens):
+                offenders.extend(token for token in tokens
+                                 if self.sweep._is_apply_capable(token))
+        self.assertEqual(offenders, [])
+        # Exactly one stale-pack call site, and it is the guarded pass.
+        main_source = inspect.getsource(self.sweep.main)
+        self.assertIn("stale_pack_discovery_pass(out, 'stale_packs'", main_source)
+        self.assertNotIn("stale_pack_reaper.py", main_source)
+        # The unenrolled helper itself is not shipped by this source tree.
+        self.assertFalse(
+            (self.sweep.HERE / "stale_pack_reaper.py").exists())
+
+    def test_stale_pack_pass_holds_unapplied_on_the_eligible_mac_path(self):
+        # Execute only the sweep coordinator with every executable child mocked
+        # and the host presented as an eligible Mac. The captured argv is the
+        # proof: the stale-pack pass still runs (telemetry retained) but never
+        # carries apply capability, the receipt names the hold, and no native
+        # file is created, changed or removed.
+        native_state = pathlib.Path.home() / ".local/state/mastermind/storage-cleanup"
+        native_before = self._tree_snapshot(native_state)
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            captured = {}
+
+            def fake_guarded(out, key, argv, timeout, env=None, limit=600):
+                captured[key] = list(argv)
+                out[key + "_rc"] = 0
+                out[key] = '{"status":"ok"}'
+                return None
+
+            usage = mock.Mock(free=180 * self.sweep.GIB,
+                              total=460 * self.sweep.GIB)
+            with mock.patch.object(self.sweep, "STATE", state), (
+                mock.patch.object(self.sweep, "LOCK", state / "sweep.lock")
+            ), mock.patch.object(self.sweep, "ssd_receipts", return_value=[]), (
+                mock.patch.object(self.sweep, "grants", return_value="ok")
+            ), mock.patch.object(self.sweep, "guarded", side_effect=fake_guarded), (
+                mock.patch.object(self.sweep, "_pool_archive_mount", return_value=None)
+            ), mock.patch.object(self.sweep, "floor_for_host", return_value=200.0), (
+                mock.patch.object(self.sweep.shutil, "disk_usage", return_value=usage)
+            ), mock.patch.object(self.sweep, "_external_volume_snapshots", return_value=[]), (
+                mock.patch.object(self.sweep.Path, "home", return_value=state)
+            ), mock.patch.object(self.sweep.os, "uname",
+                                 return_value=mock.Mock(nodename="m2studio.local")), (
+                contextlib.redirect_stdout(io.StringIO())
+            ) as output:
+                status = self.sweep.main()
+            receipt = json.loads(output.getvalue())
+
+            argv = captured["stale_packs"]
+            self.assertNotIn("--apply", argv)
+            self.assertEqual(
+                [token for token in argv
+                 if self.sweep._is_apply_capable(token)], [])
+            self.assertTrue(argv[1].endswith("stale_pack_reaper.py"))
+            self.assertIn("--json", argv)
+            # The recurring pass still runs exactly once: telemetry retained,
+            # no duplicate reaper introduced.
+            self.assertEqual(
+                [key for key in captured if key == "stale_packs"].count("stale_packs"), 1)
+
+            self.assertEqual(receipt["stale_packs_hold"],
+                             "HELD_UNQUALIFIED_STALE_PACK_HELPER")
+            self.assertEqual(receipt["stale_packs_effect_state"], "NOT_APPLIED")
+            self.assertIn("stale_packs.held_unqualified_helper",
+                          receipt["incomplete_substeps"])
+            self.assertTrue(receipt["degraded"])
+            self.assertNotEqual(status, 0)
+
+            # The only writes are the sweep's own receipt in the disposable
+            # state directory; nothing native was touched.
+            created = sorted(path.name for path in state.iterdir())
+            self.assertIn("sweep-log.jsonl", created)
+            self.assertTrue(all(name.startswith("sweep") for name in created),
+                            created)
+        self.assertEqual(native_before, self._tree_snapshot(native_state),
+                         "no native storage-cleanup file was created or changed")
+
+    def test_stale_pack_hold_marker_degrades_the_sweep_receipt(self):
+        # Pure finish() classification: no helper, host or file is touched.
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            with mock.patch.object(self.sweep, "STATE", state), mock.patch.object(
+                self.sweep, "_external_volume_snapshots", return_value=[]
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                code = self.sweep.finish({
+                    "mode": "calm",
+                    "stale_packs_rc": 0,
+                    "stale_packs": '{"applied": false, "removed": 0}',
+                    "stale_packs_hold": "HELD_UNQUALIFIED_STALE_PACK_HELPER",
+                    "stale_packs_effect_state": "NOT_APPLIED",
+                })
+            receipt = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertTrue(receipt["degraded"])
+        self.assertIn("stale_packs.held_unqualified_helper",
+                      receipt["incomplete_substeps"])
+        self.assertEqual(receipt["stale_packs_effect_state"], "NOT_APPLIED")
+        self.assertEqual(receipt["stale_packs_hold"],
+                         "HELD_UNQUALIFIED_STALE_PACK_HELPER")
+
 
 if __name__ == "__main__":
     unittest.main()

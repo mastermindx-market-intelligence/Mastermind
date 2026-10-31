@@ -72,3 +72,43 @@ helper's nonempty stdout, nor prove an installed B7 source. It is source-only
 until nonauthor review, protected merge, original source/preimage qualification
 and real existing-service receipt readback. Hermetic regression:
 `python3 -m unittest discover -s tests -p test_fleet_storage_volume_monitor.py`.
+
+## B11 source-only hold: the stale-pack reaper is never invoked apply-capable
+
+The installed `stale_pack_reaper.py` is **not source-enrolled** in protected
+Mastermind (there is no `ops/fleet_storage_cleanup/stale_pack_reaper.py` in the
+protected source tree), and its `--apply` path is not owner/inode-bound: it
+stats a candidate, runs `lsof` against the *path*, and then unlinks that path
+without re-binding the unlink to the identity it checked, so a writer that
+replaces the pathname in between can make the unlink hit a different live file.
+It also enters the candidate loop before its own incomplete scratch find/scan is
+known, so an incomplete discovery is a late rc2 rather than a pre-effect
+abstention.
+
+This source change therefore removes apply capability from the candidate
+sweep:
+
+- The stale-pack pass runs as a **never-apply inventory** only. Its argv is
+  built in exactly one place (`stale_pack_argv`), and that builder refuses to
+  emit any apply-capable token, so a later edit that re-adds one fails closed
+  instead of shipping.
+- The **recurring telemetry is retained**: the pass still runs on every
+  scheduled sweep and still reports its discovery receipt. No duplicate reaper
+  and no second scheduler are introduced.
+- The receipt names the hold explicitly — `stale_packs_hold:
+  HELD_UNQUALIFIED_STALE_PACK_HELPER` and `stale_packs_effect_state:
+  NOT_APPLIED` — and `finish()` records `stale_packs.held_unqualified_helper`
+  in `incomplete_substeps`, so the sweep is **degraded, never green**, while
+  the hold is in force. There is no bypass: no flag, environment variable or
+  receipt path re-arms the apply mode.
+- All other helper flow, receipt and last-exit contracts are unchanged. The
+  helper's own exit code is still reported verbatim in `stale_packs_rc`; a
+  discovery receipt reports `applied=false` and therefore can never satisfy the
+  applied-receipt contract of the existing inventory check.
+
+This is source-only. It does not install, arm, schedule or authorize anything,
+does not prove an installed preimage, and does not qualify the helper for
+native release. Host installation still separately requires exact preimage
+hashes, a known backup, atomic replacement, source import verification and an
+M2-to-M1 peer observation. Hermetic regression:
+`python3 -m unittest discover -s tests -p test_fleet_storage_volume_monitor.py`.
