@@ -1051,3 +1051,150 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 4. Read 2b (D17) after G lands: one evaluator run, counts only.
 5. Judge the U8 lanes by artifact when they deliver, and record each verdict.
 6. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING. MERGED for Macro #10074 and Mastermind #1899 (`ed42f8605c71`, 10:23:46Z, D20), with no production proof beyond each land check. PROVEN_OUTCOME for the W15 census wave and the independent reviews. No W15 build has reached PRODUCTION_PROOF.
+
+#### r17 cycle 2026-10-31 13:2xZ (seat dd5239a9, Opus 5.5) — wave 15 continued: r16 landed after an independent lane caught an inverted A2 direction; #1246 merged behind the #1899 pin; the seat tested prereg §10 A2's premise and refuted it (the submissions-JSON clock is true UTC), so Macro #10295 (built on A2) is closed and §10 A5 (Macro #10302) withdraws A2 from 2026-11-16; U2 and U5 design lanes judged; clock-reader census V2 judged; every place the seat repeated A2 as fact is retracted by name
+
+**FACTS — merges and CI**
+- **Mastermind #1898 (ledger r16)** merged 2026-10-31T12:27:47Z as `7e7beb3fa92f` (head `c9d30d7d`). Lane O returned REQUEST_CHANGES: r16 stated A2's direction backwards and carried one stale line. Both were repaired at `c9d30d7d`, and lane P re-reviewed the changed lines only: APPROVE. The master push run on `7e7beb3f` (41201211608) concluded success. #1243 pointer: comment 6543457854.
+  - **Seat error, corrected.** The seat enabled auto-merge on #1898 before any independent review, against its own D20 practice. It disarmed it, and re-queued only after P's approval and a green required `test` check.
+- **Mastermind #1246** merged 11:14:52Z through the merge queue as `840377bc8bda` (17 files). Its diff against head `90b7b32f` is empty, and the merge-group runs 41192950949 and 41192950846 passed. The master push run on `840377bc8bda` (41196055143) concluded success, which closes r16's open read on master. The earlier master push runs on `ed42f860`, `dcd79fc4` and `0341a089` were cancelled by later pushes and prove nothing either way.
+
+**FACTS — the EDGAR acceptance clock: A2's premise is false**
+- **What A2 assumed.** The submissions-JSON `acceptanceDateTime` J reads later than true UTC by the New York offset. Its correction `U = J + utcoffset_ET(J)` (the offset is −4 h or −5 h) subtracts 4–5 h.
+- **What the seat observed.** Live SEC reads, non-universe filers, headers only. Each JSON value was compared with the filing's SGML `<ACCEPTANCE-DATETIME>` read as New York time:
+  - A2's own four cited filings (the r11 receipts at lines 592–595 of this file), read live on 2026-10-31: 4 of 4 agree.
+  - 9 filers, 5 form types (10-K, 10-Q, 13F-HR, 4, 8-K), 2015–2026, EST and EDT: 117 of 117. Two pre-2015 index-headers returned 404 and were excluded.
+  - A sample of the stored 8-K capture of 2026-10-04: 76 of 76.
+  - MSFT `0001193125-26-027198`, the instant of A2's EST pin, reads `2026-01-28T21:04:38Z` both stored and live (header `20260128160438`, 16:04:38 EST). A2 pinned `2026-01-29T02:04:38Z`, which is 5 h later.
+- **Vintage.** The store's 2026-07-05 capture held New York wall time labelled `Z` for 27 non-universe issuers, which reads EARLIER than true UTC, the opposite of A2. The 2026-10-04 capture replaced them with true UTC (33 of 33 sampled). No capture or live read has shown A2's direction. What produced A2's readings is not established.
+- **Rule-level effect.** Applied to a value that is already true UTC, A2's correction puts WP31's `t_rel` 4–5 h early. `C(e)`, the cost exit, the K window and the A0 filter can each land one session early. The label is unchanged. The knowledge record is `DSC:EDGAR-SUBMISSIONS-ACCEPTANCE-DATETIME-IS-TRUE-UTC` (Macro #10297).
+- **A2's DST behaviour** (minute sweep of the frozen evaluator arithmetic). It returns None for J in 2026-03-08 07:00–10:59Z and 2026-11-01 06:00–10:59Z. Under the offset-at-U model, 60 true instants (2026-03-08 06:00–06:59Z) resolve exactly +1 h and none resolve wrong at fall-back. Every one of these lies outside EDGAR filing hours (17 CFR 232.12(c): 06:00–22:00 ET on business days), so WP31 is unaffected. The prereg's "the hour around a daylight-saving change" understates the windows; any correction is a new §10 amendment.
+- **Prereg line 333**, inside A2's body, still says A0 history reads 4–5 h late. §10 is append-only, so that text stays, and A5 governs it from E (lane T2 note).
+- **#1243 report:** comment 6543409988 (12:33:29Z).
+
+**FACTS — §10 A5 (Macro #10302) and the withdrawn #10295**
+- **A5** reads J as given (true UTC) for J ≥ E = 2026-11-16T00:00:00Z. J < E keeps A2, so nothing already read changes. A5 is void if it merges at or after E. The switch is `A5_EFFECTIVE` at `scripts/c19_wp31_sources.py:93`, and the branch is at :282, reached from the production calls at :500 and :1237.
+- **Review chain.**
+  - Lane S was refused on ubuntu1 temperature (rc=75).
+  - Lane S2 (ubuntu0) returned APPROVE_WITH_NOTES at `0acca70e`. Its three notes (the cost exit is §5, the clock docstring, the E-boundary pins) were repaired at `1079448b`.
+  - Lanes S3 and T were refused on ubuntu1 temperature.
+  - Lane S4 (ubuntu0) re-reviewed the changed lines at `1079448b`: APPROVE, S3.1–S3.7 PASS. (The return's header and sentinel say "S3" because the packet was reused from the refused run.)
+  - Review record: comment 6543581504 (12:50:30Z). Labeled `merge-on-green`. The watcher read at 13:05Z: OPEN, pending 0, no red. Not merged.
+- **S4's two notes, accepted without change:**
+  - The unchanged sentence near `scripts/c19_wp31_sources.py:1237` calls the fail-closed path a row drop. The code actually returns `pit_unrecoverable` / `q_release_time_unresolved` (:1244-1247). This is docstring debt, and it rides the next §10 amendment that touches the file.
+  - The exactly-E test omits its sibling's `status == ELIGIBLE` check. That is immaterial.
+- **Macro #10295** (U2 phase 1: a shared `lib/edgar_clock.py` reproducing A2, collector docstring relabels and a 13F "KNOWN DEFECT" comment) was built on A2's premise. It was closed unmerged at 12:16:54Z with a retraction comment. Lane Q2's approval of it is superseded.
+
+**FACTS — clock-reader census V2** (`$P/out/V.txt`, Macro tree `51934abe0f75`). Coverage: the 39 assigned files were read. The search found 40 more: one display-only code file (`templates/market_memory_history.js:85`), 5 JSON/CSV artifacts (not opened) and 34 docs. The seat re-opened every flagged line at `51934abe` and ruled as follows:
+- **`collectors/edgar_13f.py:52-80` (flagged F1): no defect on current inputs.**
+  - Values ending `Z` take the aware branch and are converted to New York time before the 4 pm boundary.
+  - 14-digit numeric values are read as Eastern wall time, which is correct for the SGML form.
+  - Only a zone-less ISO string would be misread, and no in-repo writer produces one (:320 and :331 store the JSON value as-is).
+  - Its comment at :70-72 already says the submissions API emits UTC (`Z`). This reader treated the JSON as true UTC before A2, which corroborates A5.
+- **WP31 (`scripts/c19_wp31_sources.py:272-278`, `:491-497`, `:1229-1233`, flagged F1).** This is A2 as written, and A5 governs J ≥ E. The A0 leg (:897-899, :921-923, :980) and the A0 reader (:1506-1522) read raw values as UTC, which is correct under A5.
+- **The `fold=0` New York attach (flagged F2):** `collectors/sec_capital_structure.py:952-954`, `engine/institutional_census/sec_sources.py:472-474` and `scripts/research/dislocation_p0_a1_lib.py:572-574` and `:586-588`. This is moot. The repeated fall-back hour (Sunday 01:00–01:59 ET) is outside EDGAR filing hours. Note only.
+- **`engine/group_earnings.py:411-416` (flagged F3): disclosed.** A UTC date roll after 20:00 ET maps the filing to the next session, which is right for an after-hours print. The 14:30-UTC cut and its winter-intraday error are documented at :53-58 (`PREOPEN_CUT_UTC_MINUTES`, :158, :345).
+- **`research/prophet_us_audit/earnings_ignition_measurement.py:305-310` and `:336-348` (flagged F3): disclosed.** This research audit applies a fixed −4 h shift, which `_classify_window_true_et` quantifies. Note only.
+- **`engine/company_intelligence/pg_profile.py` `_admitted_fiscal_scope` (:2475-2502, flagged F3): a real edge, and it fails closed in the case the seat could construct.**
+  - `acceptance_clock` is a UTC instant (`_canonical_clock`, :2286-2293, :2319). The scope test compares quarter ends with its UTC date (`current_end < acceptance_clock.date()`, :2492).
+  - So a filing accepted between 20:00 and 22:00 EDT (19:00–22:00 EST) on a fiscal-quarter-end day admits the quarter that ended that day.
+  - A release naming the prior quarter then gets `document_period_verdict` = `"foreign"` (:1473-1500), and :2525 refuses with `document_period_not_admitted`.
+  - Only a release with no period signal at all (verdict None) would bind to the wrong quarter. `asof` (:2554) also takes the UTC date.
+  - An earnings release on the evening of the issuer's own fiscal-quarter end is unusual (unverified).
+  - Routed (OPEN). C19 does not edit company-intelligence code.
+- **V2 GAP 2:** `engine/institutional_census/sec_sources.py:1119` takes the Atom `<updated>` value as `accepted_at`. Whether `<updated>` equals the acceptance instant is UNKNOWN. Routed (OPEN).
+- **V2's other gaps stand as stated:** callers outside the 39 files were not chased; the naive branch at `catalyst_edgar_live.py:191` is untested; the 5 artifacts were not opened; store-form assumptions were not checked against stored bytes. None changes a WP31 rule.
+
+**FACTS — fleet and lanes**
+- **Four rc=75 temperature refusals on ubuntu1** (S, S3, T, U5) each came right after `pool hosts glm` reported the host ELIGIBLE. The picker reads cached telemetry, and admission re-reads the CPU sensor at launch (S3 saw load1 3.636). A refused run id is burned, and each was re-placed under a new id.
+- **Lane Q's full 13 GB Macro checkout on ubuntu2** tripped `host_disk_below_staging_reserve` (rc=75). Lane trees are now minted sparse (excluding `/data/`, `/site/`, `/mockups/` and `/verify_shots/`, about 1.1 GB).
+- **Hand-minted lane trees are quarantined.** The lane gets no Bash beyond simple `ls`/`grep` and no git, so every review packet carries its diff inline, and each lane's GAPS records the limit.
+- **Lane V** was refused before start (ECONOMIC_POLICY): `C1` is not a complexity token. V2 ran with `C1_ROUTINE_BOUNDED`.
+- **C19 lane trees at 13:2xZ:**
+  - ubuntu0, ubuntu1 and ubuntu3 hold none; the seat removed `c19-w15-v` on ubuntu0 after checking it was clean and no process named it.
+  - ubuntu2 still holds the two 10-17 `c19-w5s-*` trees. They are untouched, pending a decision.
+
+**W15 lanes, continued** (same directory; the U8 rows replace r16's RUNNING rows)
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| U8·U2 | U2 design packet (r16 row) | glm-5.3, ubuntu0, run `c19-w15-u2-design-20261031` | DELIVERED, DESIGN_READY (U2.txt:168). SUPERSEDED IN SUBSTANCE: its helper, its relabels and its phased plan rest on A2's premise (D23) |
+| U8·U5 | U5 design packet (r16 row) | glm-5.3, ubuntu2 (run `c19-w15-u5b-design-20261031`) after the ubuntu1 refusal | DELIVERED, DESIGN_READY (U5.txt:254). ACCEPTED AS A DESIGN INPUT with six corrections (D22) |
+| O | independent review of #1898 (r16) | glm-5.3, ubuntu2, 10:34Z (`c19-w15-o-review-r16-20261031`) | ACCEPT AS INDEPENDENT REVIEW, REQUEST_CHANGES (O.txt:50): A2's direction stated backwards, one stale line. Repaired at `c9d30d7d` |
+| P | changed-lines re-review of #1898 at `c9d30d7d` | glm-5.3, ubuntu2, 10:51Z (`c19-w15-p-rereview-r16-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (P.txt:72) |
+| Q | independent review of Macro #10295 | glm-5.3, ubuntu2, 11:14Z, full checkout | NOT STARTED: rc=75 `host_disk_below_staging_reserve` |
+| Q2 | the same review, sparse tree | glm-5.3, ubuntu2, 11:15Z (`c19-w15-q2-review-u2p1-20261031`) | APPROVE_WITH_NOTES (Q2.txt:78). SUPERSEDED: #10295 closed unmerged |
+| R | independent review of Macro #10297 (Agent OS records) | glm-5.3, ubuntu1, 11:24Z (`c19-w15-r-review-agentos10297-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (R.txt:48). R4 found a dropped routed item (the pre-2015 index-headers 404s), which was restored. A seat over-claim was reworded at `16781cde` |
+| S | independent review of Macro #10302 (A5) | glm-5.3, ubuntu1, 12:06Z | NOT STARTED: rc=75 temperature |
+| S2 | the same review | glm-5.3, ubuntu0, 12:07Z (`c19-w15-s2-review-a5-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES at `0acca70e` (S2.txt:43). Three notes repaired at `1079448b` |
+| S3 | changed-lines re-review of #10302 at `1079448b` | glm-5.3, ubuntu1 | NOT STARTED: rc=75 temperature |
+| T | re-review of #10297 at `16781cde` | glm-5.3, ubuntu1 | NOT STARTED: rc=75 temperature |
+| S4 | changed-lines re-review of #10302 at `1079448b` | glm-5.3, ubuntu0 (`c19-w15-s4-rereview-a5-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (S3.1–S3.7 PASS; two notes, no change) |
+| T2 | re-review of #10297 at `16781cde` | glm-5.3, ubuntu0 (`c19-w15-t2-rereview-agentos10297-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (T1–T9 PASS; four non-blocking notes, no change). Review record: comment 6543621247 |
+| V | census of every EDGAR acceptance-clock reader | glm-5.3-flash, ubuntu0 | NOT STARTED: ECONOMIC_POLICY, `C1` is not a complexity token |
+| V2 | the same census | glm-5.3-flash, ubuntu0, `C1_ROUTINE_BOUNDED`, 12:44Z to 13:05Z (`c19-w15-v2-census-clock-20261031`) | ACCEPT AS CENSUS, with the seat's rulings (FACTS, census V2). USAGE_RECEIPT_MISSING |
+
+**DECIDED**
+- **D21. A2's premise is refuted, and §10 A5 (Macro #10302) withdraws A2's correction for J ≥ 2026-11-16T00:00Z.**
+  - A5 is prospective. J < E keeps A2, so no completed read and no adopted amendment changes.
+  - The seat authored #10302, so it was labeled `merge-on-green` only after S4's accepted changed-lines review.
+  - The sweeper owns the merge. It must land before E, or A5 is void and a successor amendment with a later E is needed.
+  - Nothing in C19 builds a shared reader-side correction. The r11 "upstream clock gap" item is closed: current captures store true UTC under a true UTC label (FACTS, clock).
+- **D22. U5 is accepted as a design input for the CS-V2 owner, with six corrections:**
+  1. `:660-363` is a typo for `:360-363`.
+  2. F4 is located: Mastermind `research/product_intelligence_local_delivery_20261005/03_WORK_PACKAGES.md:65` (opt-in debt/share qualification, default-off financial publication, the W2/W4/W6 holds). This retracts U5's GAP 1 "F4 NOT_LOCATED".
+  3. `:113` "relaxes DEC-MI-BUILDOUT" is tagged (unverified).
+  4. C7 and `:65` "pinned contract": pins 1–4 hold in #10273's code, but #10273 is still open, so the pins are packet-sourced until it merges.
+  5. The CS-leg build stays blocked by the F4 hold, the C1 runner-listener fuse, W4/W6 (todo) and DEC-MI-BUILDOUT. C19 builds none of it.
+  6. Cite `DEC-CS-V2-EVIDENCE-IDENTITY-OCCURRENCE-BYTES`. U5 (`:91-92`, `:113`) and the seat's own packet (`U5.md:35`) cited the superseded `DEC-CS-V2-IDENTITY-DUAL-READ`. That is a seat packet error. This ledger and the Agent OS records do not cite it.
+- **D23. U2 is superseded in substance by A5.** Its design (a shared helper that applies A2, a phased store conversion, and removing the evaluator correction) assumes A2's premise. No part of it is built. V2's census replaces its reader inventory against true UTC.
+- **D24. V2's rulings stand as recorded in FACTS.** Two items are routed, and no C19 code changes.
+- **Retractions, by name (§7.5).** Each statement below treated A2's premise as fact. Each is withdrawn for current behaviour. A2 itself stays adopted for J < E (D21).
+  - Line 586: "The `acceptanceDateTime` clock was wrong (below)."
+  - Lines 591–596: "The submissions-JSON `acceptanceDateTime` J is NOT UTC. It is true UTC + |America/New_York offset| …", with its four receipts and the leak claim. Read live on 2026-10-31, all four filings agree with their SGML headers.
+  - Line 615: A2's correction, as a description of how the clock behaves. It stands as the adopted rule for J < E.
+  - Lines 623–626 (r11 OPEN): the "upstream clock gap" at `collectors/edgar_earnings_8k.py:12`, and "a collector fix must remove the evaluator's A2 correction in the same change".
+  - Line 751: the same gap, routed again.
+  - Line 916 (r16 lane A row): "…that value reads LATER than true UTC by the New York offset… correction `U = J + utcoffset_ET(J)`…". Lane A's census of readers stands; its premise does not.
+  - Line 1012 (r16 U2): "A docstring-only relabel now. A normalizer that converts stored values would move WP31 cutoffs, so it is a design item." No relabel is needed: the label is accurate.
+  - Outside this file:
+    - the seat's ruling to build U2 phase 1;
+    - #10295's body, its collector relabels and its 13F "KNOWN DEFECT" comment (never merged; retraction comment on #10295);
+    - `agentos/workstreams/WS-COMMISSION-19-DATA-INTELLIGENCE.md:109` (corrected in #10297).
+- **Retractions of the seat's own provisional U5 judgments.** Provisional corrections 2 (it compared the wrong file) and 3 ("C7 contradicts the join"), the seat's "F4 not located", and the "unverified" marker it put on `:577-581`.
+
+**UPGRADE PLAN**, deltas from r16:
+- U2 is replaced by D21 and D23. The only clock work left is routed (OPEN).
+- U5 is unchanged: the pins are in #10273, and wiring the leg waits for the F4 / CS-V2 W4+W6 release, now with U5's corrected design (D22) as an input.
+- U1, U3, U4, U6 and U7 are unchanged.
+
+**OPEN** (owner → next action)
+- **Macro #10302 (A5)**, sweeper → merge on concluded green before 2026-11-16T00:00Z. One watcher at `1079448b`. Seat → land-check, then a #1243 post.
+  - If it is still unmerged on 2026-11-13, the seat writes a successor amendment with a later E for fresh independent review. It does not merge it by hand.
+- **Macro #10297 (Agent OS records)**, sweeper → merge. One watcher at `16781cde`. This closes r16's Agent OS item.
+- **Macro #10284 (G), #10259, #10273 and #9569**, sweeper → merge on concluded green. #9569's head moved to `2bfcf449` in a sweeper base-sync at 12:55Z (labels `merge-on-green` and `merge-refresh-in-flight`). The PR's own diff is unchanged, so F2's review applies, and one watcher was re-armed at the new head.
+- **Read 2b**, seat → after #10284 lands: re-read the universe headers, then one evaluator run, counts only (D17).
+- **#10259 follow-ups**, seat → after #10259 lands: the #8125 note and the U6 production proof.
+- **Findings routed with this cycle** (owner → action):
+  - **Company-intelligence (pg_profile) owner:** `_admitted_fiscal_scope` and `asof` use the UTC date of the acceptance instant. Compare in America/New_York (FACTS, census V2). The realistic case fails closed; a period-silent release would not.
+  - **Institutional-census owner:** confirm that the Atom `<updated>` value at `sec_sources.py:1119` is the acceptance instant, or source `accepted_at` from the submissions JSON.
+  - **Fabric owner:** `pool hosts` ELIGIBLE does not predict thermal admission on ubuntu1. The picker uses cached telemetry, and admission re-reads the sensor (four refusals).
+  - **WP31 docstring debt:** the row-drop sentence near `c19_wp31_sources.py:1237`. It rides the next §10 amendment that touches the file.
+- **Unchanged from r16:**
+  - the r16 owner findings (fabric, host, CS, CI, test owners, RWE shadow, debt-maturity, composer/forensics);
+  - WP32 P3 free-tier 403;
+  - cold-compose 524 and `x-consumed-receipts`;
+  - P4–P7;
+  - the K1 Q2/Q3 residuals;
+  - WP18 UI;
+  - G10/G11;
+  - Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r17 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. One watcher each owns the waits on Macro #10302, #10297, #10284, #10259, #10273 and #9569. Land-check each merge against fresh main. #10302 must land before 2026-11-16T00:00Z.
+3. Read 2b after #10284 lands; the #8125 note and the U6 proof after #10259 lands.
+4. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING.
+   - MERGED: Mastermind #1898 (`7e7beb3f`) and #1246 (`840377bc8bda`), with master push CI green on both. Neither has production proof beyond its land check.
+   - PROVEN_OUTCOME: the clock refutation (live reads), the U2, U5 and V2 judgments, and the independent reviews.
+   - No W15 build has reached PRODUCTION_PROOF.
