@@ -1,6 +1,6 @@
 {
   "status": "PASS",
-  "observed_at_utc": "2026-10-31T06:26:27.636472+00:00",
+  "observed_at_utc": "2026-10-31T06:33:19.220708+00:00",
   "scope": "Static research-artifact structure and coverage only; not product, source-truth, security or independent review acceptance",
   "statistics": {
     "selected_prs": 70,
@@ -10,10 +10,10 @@
     "check_candidates": 6,
     "file_candidates": 14,
     "required_markdown_documents": 10,
-    "markdown_word_count": 21698,
-    "local_links_checked": 43,
-    "external_links_not_network_validated": 40,
-    "manifest_files": 20
+    "markdown_word_count": 21850,
+    "local_links_checked": 44,
+    "external_links_not_network_validated": 41,
+    "manifest_files": 21
   },
   "errors": [],
   "warnings": []

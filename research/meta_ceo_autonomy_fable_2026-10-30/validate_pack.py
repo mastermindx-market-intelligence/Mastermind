@@ -134,6 +134,7 @@ def validate(root: Path) -> tuple[dict, dict]:
             manifest[rel] = hashlib.sha256(p.read_bytes()).hexdigest()
         if p.suffix not in {'.md', '.json', '.csv'}:
             continue
+        require(b'\r\n' not in p.read_bytes(), f'CRLF line endings in publication text: {rel}')
         text = p.read_text(encoding='utf-8')
         for pattern in SECRET_PATTERNS:
             require(pattern.search(text) is None, f'Possible secret/private-key material: {rel}')
