@@ -185,7 +185,7 @@ class FixedDiagnostics:
                 path = Path(directory)
                 info = path.lstat()
                 if (path.is_absolute() and stat.S_ISDIR(info.st_mode)
-                        and stat.S_IMODE(info.st_mode) == 0o700 and info.st_uid == os.geteuid()
+                        and stat.S_IMODE(info.st_mode) == stat.S_IRWXU and info.st_uid == os.geteuid()
                         and not (path / 'ci-fixed-diagnostics.json').exists()
                         and not (path / 'ci-fixed-diagnostics.json').is_symlink()):
                     self.directory = path
