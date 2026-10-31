@@ -232,8 +232,6 @@ def test_freshness_survives_transport_compaction(tmp_path, monkeypatch):
     assert out["_transport_truncated"] is True
     assert out["freshness"]["source_asof"] == "2026-10-31T05:00:00+00:00"
     assert out["evidence_grade"] == "vendored_snapshot"
-    assert bot_mcp._json({"freshness": {"asof": "2026-10-31"}, "evidence_grade": "g",
-                          **{f"k{i}": {"v": "y" * 200} for i in range(400)}})
     tiny = json.loads(_text(bot_mcp._json({"freshness": {"asof": "2026-10-31"}, "evidence_grade": "g",
                                             **{f"k{i}": {"v": "y" * 200} for i in range(400)}})))
     assert tiny["freshness"] == {"asof": "2026-10-31"} and tiny["evidence_grade"] == "g"

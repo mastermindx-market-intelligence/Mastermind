@@ -330,7 +330,8 @@ def _news_row(t: str):
         return None
     # The snapshot's own clocks (news estate D2): a feed the producer RETAINED from a previous
     # build is still shown, but flagged — its headlines are older than the build date says.
-    source_asof = ndoc.get("source_asof") if isinstance(ndoc.get("source_asof"), str) else None
+    source_asof = ndoc.get("source_asof")
+    source_asof = source_asof if isinstance(source_asof, str) and source_asof else None  # "" = unstated
     retained_flag = ndoc.get("retained_from_previous_build")
     retained_flag = retained_flag if isinstance(retained_flag, bool) else None   # null = not stated
     retained = retained_flag is True

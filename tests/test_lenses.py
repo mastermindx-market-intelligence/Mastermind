@@ -370,6 +370,9 @@ def test_news_row_carries_source_asof_and_flags_retained(monkeypatch):
     fresh = lenses._news_row("XYZ")
     assert fresh["status"] == "context" and fresh["value"]["source_asof"] == "2026-10-31T05:00:00+00:00"
 
+    files["site/news/by_ticker.json"] = dict(news_doc, retained_from_previous_build=False, source_asof="")
+    assert lenses._news_row("XYZ")["value"]["source_asof"] is None     # "" is unstated, never a clock
+
     files["site/intelligence/by_ticker.json"] = {"as_of": "2026-10-31",
                                                  "tickers": {"XYZ": {"news": rec, "alt": None}}}
     uni = lenses._news_row("XYZ")
