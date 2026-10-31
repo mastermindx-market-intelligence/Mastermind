@@ -8,7 +8,7 @@ import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os import os_public_edge_transition as module
-from ops.executive_os.os_public_edge import GET_ROUTES, HOST, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import GET_ROUTES, HOST, POST_ROUTES, LEGACY_POST_ROUTES, asset_routes
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
     preparation_complete, restart_diagnostic, stage_transition,
@@ -81,6 +81,42 @@ def inner_of(config):
 
 def get_paths_of(config):
     return inner_of(config)[0]["match"][0]["path"]
+
+
+def post_paths_of(config):
+    return inner_of(config)[1]["match"][0]["path"]
+
+
+def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():
+    for old_posts in (LEGACY_POST_ROUTES, POST_ROUTES):
+        observed = fullconfig()
+        post_paths_of(observed)[:] = list(old_posts)
+        before = copy.deepcopy(observed)
+        planned, prepare, final = transition_values(observed)
+        assert observed == before  # no implicit host changes during planning
+        assert post_paths_of(prepare) == list(POST_ROUTES)
+        assert post_paths_of(final) == list(POST_ROUTES)
+        assert inner_of(prepare)[1]["handle"] == inner_of(observed)[1]["handle"]
+        assert inner_of(final)[1]["handle"] == inner_of(observed)[1]["handle"]
+        assert planned["post_routes"] == list(POST_ROUTES)
+        assert planned["bindings"]["prepare_fullconfig_sha256"] == module._sha256(prepare)
+        assert planned["bindings"]["final_fullconfig_sha256"] == module._sha256(final)
+        assert "/os/executive/session/send" not in post_paths_of(prepare)
+        assert get_paths_of(prepare) == sorted(set(GET_ROUTES) | set(asset_routes(OLD)) | set(asset_routes(NEW)))
+
+
+@pytest.mark.parametrize("bad", [
+    list(LEGACY_POST_ROUTES) + ["/os/executive/session/send"],
+    list(POST_ROUTES) + ["/os/executive/session/send"],
+    list(POST_ROUTES[:-1]),
+    list(POST_ROUTES) + [POST_ROUTES[0]],
+    ["/os/executive/session/context"],
+])
+def test_public_transition_refuses_unknown_broad_or_partial_post_routes(bad):
+    live = fullconfig()
+    post_paths_of(live)[:] = bad
+    with pytest.raises(ValueError):
+        transition_values(live)
 
 
 def transition_values(live=None):
