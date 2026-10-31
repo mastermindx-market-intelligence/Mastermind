@@ -211,3 +211,108 @@ def test_plan_only_does_not_run_any_test(
         ["--jobs", "3", "--index", "2", "--plan-only", "--root", str(tmp_path)]
     ) == 0
     assert "parallel_shard=3/3" in capsys.readouterr().out
+
+
+
+def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() -> None:
+    """Only the pytest step can be omitted after a verified merge-group run."""
+    import yaml
+
+    data = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    assert data["permissions"] == {"contents": "read"}
+    assert data["jobs"]["pytest_shards"]["permissions"] == {"contents": "read", "actions": "read"}
+    steps = data["jobs"]["pytest_shards"]["steps"]
+    proof_step = next(s for s in steps if s.get("id") == "previous_ci")
+    shard_step = next(s for s in steps if s.get("name") == "Run repository test shard")
+    assert steps.index(proof_step) < steps.index(shard_step)
+    assert proof_step == {
+        "name": "Verify exact prior merge-group CI",
+        "id": "previous_ci",
+        "env": {"GH_TOKEN": "${{ github.token }}"},
+        "run": "python -m scripts.ci_postmerge_proof",
+    }
+    assert shard_step == {
+        "name": "Run repository test shard",
+        "if": "${{ steps.previous_ci.outputs.reuse != 'true' }}",
+        "run": "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}",
+    }
+    assert "env" not in shard_step  # Do not expose the Actions token to pytest.
+    assert data["jobs"]["test"]["if"] == "${{ always() }}"
+    fan.validate_parallel_workflow(_WORKFLOW.read_text())
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("      actions: read", "      actions: write"),
+        ("      actions: read", ""),
+        ("id: previous_ci", "id: bypass"),
+        ("GH_TOKEN: ${{ github.token }}", "GH_TOKEN: hardcoded"),
+        ("python -m scripts.ci_postmerge_proof", "echo 'reuse=true' >> $GITHUB_OUTPUT"),
+        ("python -m scripts.ci_postmerge_proof", "echo bypass"),
+        (
+            "      - name: Verify exact prior merge-group CI\n        id: previous_ci",
+            "      - name: Verify exact prior merge-group CI\n        if: false\n        id: previous_ci",
+        ),
+        (
+            "if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
+            "if: true",
+        ),
+        (
+            "if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
+            "if: ${{ github.event_name == 'push' }}",
+        ),
+        (
+            "if: ${{ steps.previous_ci.outputs.reuse != 'true' }}",
+            "if: ${{ steps.previous_ci.outputs.reuse == 'true' }}",
+        ),
+        (
+            "      - name: Run repository test shard\n        if:",
+            "      - name: Run repository test shard\n        continue-on-error: true\n        if:",
+        ),
+    ],
+)
+def test_untrusted_proof_or_skip_mutations_are_refused(old: str, new: str):
+    baseline = _WORKFLOW.read_text()
+    assert old in baseline
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(baseline.replace(old, new, 1))
+
+
+@pytest.mark.parametrize("forged_id", ["previous_ci", "PREVIOUS_CI", "Previous_Ci"])
+def test_forged_duplicate_proof_step_id_is_refused(forged_id: str):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    steps.append({
+        "name": "Forged reuse output",
+        "id": forged_id,
+        "run": "echo 'reuse=true' >> \"$GITHUB_OUTPUT\"",
+    })
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("forged_id", ["previous_ci", "PREVIOUS_CI", "Previous_Ci"])
+def test_cross_job_duplicate_proof_step_id_is_refused(forged_id: str):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    workflow["jobs"]["test"]["steps"].append({
+        "name": "Forged cross-job proof", "id": forged_id, "run": "echo ignored",
+    })
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+def test_proof_after_pytest_is_refused():
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    proof_step = next(s for s in steps if s.get("id") == "previous_ci")
+    steps.remove(proof_step)
+    steps.append(proof_step)
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
