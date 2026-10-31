@@ -572,16 +572,29 @@ def test_native_initializer_extends_only_exact_preimage_members():
     assert hashlib.sha256(raw).hexdigest()==retained['native_manifest']['sha256']=='74c5bd3e38e54430c45cc8ccb8d109a3b50fe0abba171ba572cc7be9d35a6270'
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
-    current=json.loads((native/'rollout/native-manifest.json').read_bytes())
-    assert len(before)==95 and len(current)==98
+    current_raw=(native/'rollout/native-manifest.json').read_bytes()
+    assert hashlib.sha256(current_raw).hexdigest()=='66205e3fcbea978b195d147db932c2bf33c3e806d7d00f7666665863470c90eb'
+    current=json.loads(current_raw)
+    assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
-    assert set(current)-set(before)=={'ext/paid_initializer.py','ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py'}
-    # The only additional pre-existing member delta is protected #1797's
-    # exact review-routing picker; it is not an initializer transformation.
-    assert {p for p in before if before[p]!=current[p]}=={'ext/host_pull.sh','ext/paid_host_qualification.py','ext/pick.py'}
-    assert sum(before[p]==current[p] for p in before)==92
-    for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py','pick.py'):
-        assert current['ext/'+name]==hashlib.sha256((native/'candidate'/name).read_bytes()).hexdigest()
+    added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
+        'ext/paid_host_readiness.py','ext/paid_initializer.py',
+        'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
+        'ext/paid_provider_entry.py'}
+    # The accepted source union includes the protected review-routing picker,
+    # provider/readiness composition and fixed-template launcher transition.
+    # Preserve their finite changes without replacing the historical epoch.
+    changed={'ext/fabric_task.py','ext/glm_host_account_source.py',
+        'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
+        'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
+        'ext/paid_model_owner.py','ext/pick.py','ext/remote_sub.sh',
+        'ext/remote_sub_exec.py','ext/support_bundle.py','pool'}
+    assert set(current)-set(before)==added
+    assert {p for p in before if before[p]!=current[p]}==changed
+    assert sum(before[p]==current[p] for p in before)==82
+    for name in added|changed:
+        source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
+        assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
     source=(native/'rollout/native_install.py').read_text()
@@ -603,6 +616,51 @@ def test_completion_notice_has_own_line_with_real_ci_capture(tmp_path):
     assert len(notices)==1 and 'test_notice_fixture ASSERTIONS_COMPLETED' in notices[0]
 
 
+def _real_home_ancestry_acl(home):
+    """Read only Linux ACL *presence* in actual pin traversal order.
+
+    This fixture classifier never supplies an ACL-free view, modifies an
+    ancestor, or returns a path/value. The production initializer remains the
+    sole trust decision, including any earlier system image refusal.
+    """
+    import errno
+    ancestry=list(reversed((Path(home),*Path(home).parents)))
+    for index,node in enumerate(ancestry):
+        for key,kind in (('system.posix_acl_access','ACCESS'),
+                         ('system.posix_acl_default','DEFAULT')):
+            try:os.getxattr(node,key,follow_symlinks=False)
+            except OSError as error:
+                if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):
+                    raise
+            else:
+                return dict(node_role='HOME' if index==len(ancestry)-1 else 'HOME_ANCESTOR',
+                            acl_key=kind)
+    return None
+
+
+def test_real_home_acl_classifier_cannot_invent_clean_metadata(tmp_path,monkeypatch):
+    """Metadata-only classifier used to LABEL an ineligible CI principal.
+
+    Production initializer does not call this helper, and this test does not
+    alter real ACLs. It refuses anything other than actual ENODATA absence.
+    """
+    import errno
+    if not hasattr(os,'getxattr'):pytest.skip('Linux-only POSIX xattr primitive')
+    home=tmp_path/'inert-home';home.mkdir()
+    original=os.getxattr;reads=[]
+    def xattr(node,key,*args,**kwargs):
+        reads.append((str(node),key))
+        if str(node)==str(tmp_path) and key=='system.posix_acl_default':
+            return b'inert-default-acl'
+        raise OSError(errno.ENODATA,'no ACL in this modeled metadata fixture')
+    with monkeypatch.context() as model:
+        model.setattr(os,'getxattr',xattr)
+        assert _real_home_ancestry_acl(str(home))==dict(node_role='HOME_ANCESTOR',acl_key='DEFAULT')
+        assert any(key=='system.posix_acl_default' for _,key in reads)
+    # The source preflight must never install an ACL shim in the real child.
+    assert os.getxattr is original
+
+
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux private package/initializer/FD execution')
 def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,monkeypatch,request):
     """Real mechanics/owner validators; trusted platform metadata is simulated.
@@ -615,6 +673,12 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
     from tests import test_paid_host_qualification as qualifier
     account=pwd.getpwuid(os.getuid())
     if os.getuid()==0:pytest.skip('requires a non-Root fixture account')
+    # Reject the *test host* as an eligible positive fixture before starting
+    # any modeled observer or helper when a real account ancestor carries an
+    # ACL. The required isolated Linux CI step still runs the full positive.
+    # This is never used by the actual production initializer.
+    if _real_home_ancestry_acl(account.pw_dir) is not None:
+        pytest.skip('host HOME ancestry has ACL; required isolated positive Linux journey runs separately')
     lane=Path(account.pw_dir)/'lanes'
     try:lane.mkdir(mode=0o700)
     except FileExistsError:pytest.skip('requires an unused credentialless HOME/lanes fixture namespace')
@@ -764,6 +828,9 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             from tests.compiled_initializer_diagnostic import instrument_entry,require_execution_success
             argv[5]=instrument_entry(argv[5],preamble=owner.NO_SITE_PREAMBLE)
             assert len(argv[5].encode('utf-8'))+1<131072
+            # At this point ancestry was actually ACL-free on this account.
+            # Any nonzero compiled-child return is a hard failure; never call
+            # default-ACL refusal a positive proof or bypass no_acl.
             execution=subprocess.run(argv,env=dict(HOME=account.pw_dir,PATH='/usr/bin:/bin'),stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30)
             require_execution_success(execution,request)
@@ -850,8 +917,14 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     assert set(value['jobs'])=={'pytest_shards','test'}
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
+    positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
     full=[(i,x) for i,x in enumerate(steps) if x.get('name')=='Run repository test shard']
-    assert len(preflight)==len(full)==1 and preflight[0][0]<full[0][0]
+    assert len(preflight)==len(positive)==len(full)==1 and preflight[0][0]<positive[0][0]<full[0][0]
+    real=positive[0][1]
+    assert real['if']=='matrix.index == 2' and not real.get('continue-on-error',False)
+    assert all(value in real['run'] for value in ('--network=none','--cap-drop=ALL','--read-only',
+        '--tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700',
+        'tests/h1_ci_fixture/Dockerfile','tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire'))
     pre=preflight[0][1];assert pre['if']=='matrix.index == 2' and not pre.get('continue-on-error',False)
     assert shlex.split(pre['run'])==['python','-m','pytest','-q','--tb=short','-p','scripts.ci_pytest_timing',
         'tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup',
