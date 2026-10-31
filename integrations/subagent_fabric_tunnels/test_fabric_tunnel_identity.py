@@ -12,6 +12,7 @@ Run:
 """
 
 import contextlib
+import hashlib
 import json
 import os
 import plistlib
@@ -1735,6 +1736,99 @@ class BoundedPollRunnerTests(unittest.TestCase):
             ftc.control_plane_poll_runner([ftc.LAUNCHCTL, "print", "gui/0/x"])
         with self.assertRaises(ftc.ActionRefused):
             ftc.control_plane_poll_runner(["relative/tunnel", "health"])
+
+
+@contextlib.contextmanager
+def os_nofollow_flag_absent():
+    """Hermetically simulate a host WITHOUT os.O_NOFOLLOW by deleting the
+    module attribute for the duration of the block (restored in ``finally``).
+
+    The verified-identity opens must FAIL CLOSED in that shape, never fall
+    back to a symlink-following open (review LOW finding: the historical
+    ``getattr(os, "O_NOFOLLOW", 0)`` silent fallback)."""
+    had_flag = hasattr(os, "O_NOFOLLOW")
+    saved = getattr(os, "O_NOFOLLOW", None)
+    if had_flag:
+        del os.O_NOFOLLOW
+    try:
+        yield
+    finally:
+        if had_flag:
+            os.O_NOFOLLOW = saved
+
+
+class VerifiedIdentityNofollowFlagTests(unittest.TestCase):
+    """The verified-identity descriptor opens REQUIRE os.O_NOFOLLOW: a
+    platform without the flag is a fail-closed refusal with a stable
+    secret-free code, never a degraded open that could follow a symlink."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="ftr-nofollow-")
+        root = self._tmp.__enter__()
+        self.regular = os.path.join(root, "regular.bin")
+        with open(self.regular, "wb") as handle:
+            handle.write(b"#!/bin/sh\nexit 0\n")
+        os.chmod(self.regular, 0o755)
+        self.regular_dir = os.path.join(root, "regular-dir")
+        os.makedirs(self.regular_dir, mode=0o755)
+        self.linked_file = os.path.join(root, "linked.bin")
+        os.symlink(self.regular, self.linked_file)
+        self.linked_dir = os.path.join(root, "linked-dir")
+        os.symlink(self.regular_dir, self.linked_dir)
+
+    def tearDown(self):
+        self._tmp.__exit__(None, None, None)
+
+    def test_platform_has_nofollow_flag(self):
+        # Precondition on the REAL Darwin/Linux platforms this integration
+        # targets: the flag exists, so the required-flag gate is satisfied
+        # and the positive paths below exercise the true kernel behavior.
+        self.assertTrue(hasattr(os, "O_NOFOLLOW"))
+
+    def test_verified_file_identity_requires_flag_never_opens_without_it(self):
+        with os_nofollow_flag_absent():
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                ftc.verified_file_identity(Path(self.regular), UID, code="fixture_pin")
+            message = str(caught.exception)
+            self.assertIn("fixture_pin", message)  # stable code prefix
+            self.assertIn("O_NOFOLLOW", message)  # stable secret-free reason
+        # A symlinked path refuses identically (flag absence is checked
+        # before any open, so the symlink target is never read either).
+        with os_nofollow_flag_absent():
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                ftc.verified_file_identity(Path(self.linked_file), UID, code="fixture_pin")
+            self.assertIn("O_NOFOLLOW", str(caught.exception))
+
+    def test_verified_file_identity_normal_path_pins_one_observation(self):
+        identity = ftc.verified_file_identity(Path(self.regular), UID, code="fixture_pin")
+        self.assertEqual(identity.sha256, hashlib.sha256(b"#!/bin/sh\nexit 0\n").hexdigest())
+        self.assertEqual(stat.S_IMODE(identity.mode), 0o755)
+        self.assertEqual(identity.uid, UID)
+        st = os.stat(self.regular)
+        self.assertEqual((identity.dev, identity.ino), (st.st_dev, st.st_ino))
+        # Flag present: a symlink at the path itself still never opens.
+        with self.assertRaises(ftc.IdentityRejected):
+            ftc.verified_file_identity(Path(self.linked_file), UID, code="fixture_pin")
+
+    def test_verified_dir_identity_requires_flag_never_opens_without_it(self):
+        with os_nofollow_flag_absent():
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                ftc.verified_dir_identity(Path(self.regular_dir), UID, code="fixture_dir_pin")
+            message = str(caught.exception)
+            self.assertIn("fixture_dir_pin", message)
+            self.assertIn("O_NOFOLLOW", message)
+        with os_nofollow_flag_absent():
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                ftc.verified_dir_identity(Path(self.linked_dir), UID, code="fixture_dir_pin")
+            self.assertIn("O_NOFOLLOW", str(caught.exception))
+
+    def test_verified_dir_identity_normal_path_pins_and_refuses_symlink(self):
+        identity = ftc.verified_dir_identity(Path(self.regular_dir), UID, code="fixture_dir_pin")
+        st = os.stat(self.regular_dir)
+        self.assertEqual((identity.dev, identity.ino), (st.st_dev, st.st_ino))
+        self.assertEqual(identity.uid, UID)
+        with self.assertRaises(ftc.IdentityRejected):
+            ftc.verified_dir_identity(Path(self.linked_dir), UID, code="fixture_dir_pin")
 
 
 if __name__ == "__main__":

@@ -156,13 +156,33 @@ TELEMETRY_UNQUALIFIED = "host_pull_telemetry_unqualified"
 # ---------------------------------------------------------------------------
 
 
+def operator_heartbeat_attested(kind: Any, note: Any) -> bool:
+    """B6 attestation is POSITIVE operator-correlated evidence: BOTH the
+    manifest's ``heartbeat_kind`` AND its ``heartbeat_proof_note`` must be
+    present, string-typed, and non-blank. Kind-only, note-only, or a
+    blank/whitespace note is NOT attestation — a tampered private manifest
+    must never mint the proof switch that authorizes a stale forced kick
+    from a half-written fact. This mirrors the qualification-time closed
+    facts schema (``facts_heartbeat_kind_required`` /
+    ``facts_heartbeat_proof_note_required``), re-checked at classification
+    time so a hand-edited manifest cannot downgrade to kind-only.
+
+    Review finding: heartbeat attestation based only on ``heartbeat_kind``
+    (LOW, require both facts)."""
+    return (
+        isinstance(kind, str) and bool(kind.strip())
+        and isinstance(note, str) and bool(note.strip())
+    )
+
+
 def classify_seat(
     *,
     qualified: bool,
     pid: int | None,
     heartbeat_age: float | None,
     heartbeat_path_recorded: bool,
-    heartbeat_attested: bool = False,
+    heartbeat_kind: Any = "",
+    heartbeat_proof_note: Any = "",
     last_kick_at: float | None,
     consecutive_kicks: int,
     fresh_heartbeat_witnessed_since_kick: bool,
@@ -184,13 +204,15 @@ def classify_seat(
     classified ``healthy``), which resets the persisted counter. Without
     this gate the missing-PID route could kick every cooldown forever.
 
-    ``heartbeat_attested`` is the B6 first-party proof switch: it must be
-    True (operator-qualified ``heartbeat_kind`` + proof note in the manifest)
-    before a stale heartbeat may force-restart a live job. Without it, the
-    mtime of an arbitrary file cannot prove the tunnel client is wedged, so
-    the outcome is alert-only. Missing-PID recovery does not depend on the
-    heartbeat file — launchd itself proves that state — so it stays
-    recoverable either way (still under the same escalation gate).
+    ``heartbeat_attested`` is the B6 first-party proof switch: it is True
+    ONLY when BOTH the operator-qualified ``heartbeat_kind`` and its
+    ``heartbeat_proof_note`` are present and non-blank in the manifest facts
+    passed in (:func:`operator_heartbeat_attested`); kind-only or a blank
+    note is never attestation. Without full attestation, the mtime of an
+    arbitrary file cannot prove the tunnel client is wedged, so the outcome
+    is alert-only. Missing-PID recovery does not depend on the heartbeat
+    file — launchd itself proves that state — so it stays recoverable either
+    way (still under the same escalation gate).
 
     ``heartbeat_path_recorded`` is the qualified-evidence gate for EITHER
     mode: the file-mtime mode records a heartbeat path, the
@@ -204,6 +226,7 @@ def classify_seat(
     """
     if not qualified or not heartbeat_path_recorded:
         return ST_UNQUALIFIED, False
+    heartbeat_attested = operator_heartbeat_attested(heartbeat_kind, heartbeat_proof_note)
     escalated = (
         consecutive_kicks >= KICKSTART_ESCALATION_LIMIT
         and not fresh_heartbeat_witnessed_since_kick
@@ -374,6 +397,8 @@ def cli_poll_evidence(
     poll_runner: Any,
     *,
     now: float,
+    home: Path,
+    manifest: Mapping[str, Any],
 ) -> tuple[float | None, str | None, float | None, str | None]:
     """One bounded first-party CLI control-plane poll for one seat.
 
@@ -394,6 +419,21 @@ def cli_poll_evidence(
       inode+digest identity and the pinned domain-separated tunnel-id digest;
       a swapped, rewritten, re-linked, or re-tunnelled profile refuses
       instead of steering the probe;
+    - IMMEDIATELY before the spawn, the seat's ENTIRE pinned identity is
+      re-proved from the LIVE filesystem against the qualified manifest via
+      :func:`fabric_tunnel_identity.seat_identity_drift_problems` — the
+      installed plist argv, the executable path/digest and pinned
+      dev/ino/owner/mode, the pinned parent-directory identity, the pinned
+      Homebrew Cellar-allowance identity, and the full pinned
+      profile/locator/tunnel-id binding. This closes the gap where the
+      per-field checks above each proved one pin while the executable's
+      PARENT or Cellar ancestor had drifted (the poll path is exercised far
+      more often than a kickstart, so it must re-prove at the same
+      strength). Any drift, and any exception while re-proving, refuses
+      with a stable secret-free code and NO probe runs — a poll refused
+      here is an unproven poll, so no kick can be authorized from it.
+      This narrows but does NOT close the group-member path-rename race
+      between re-proof and spawn (the reviewer HIGH residual, HOLD_SECURITY).
     - the probe itself is the EXACT read-only argv through the injectable
       bounded runner: no shell, per-seat deadline, capped output streams.
 
@@ -457,6 +497,21 @@ def cli_poll_evidence(
         argv = build_control_plane_poll_argv(str(executable), str(locator))
     except ActionRefused:
         return None, "cli_poll_argv_refused", None, None
+    # Full-engine identity re-proof as the LAST observation before the ONLY
+    # path-based Popen in this function. The per-field checks above each
+    # compare one pinned value; this re-proves the whole pinned identity
+    # (plist argv, executable path/digest/dev/ino/uid/mode, parent and
+    # Cellar-allowance pins, profile/locator/tunnel-id binding) from the
+    # live filesystem, the same engine that guards every kickstart.
+    # Fail closed: drift refuses with a fixed secret-free code, and any
+    # exception during re-proof (I/O error, time-of-check failure) refuses
+    # identically — an exception is never guessed into "safe".
+    try:
+        drift = seat_identity_drift_problems(home, manifest, label)
+    except Exception:
+        return None, "cli_poll_identity_reproof_failed", None, None
+    if drift:
+        return None, "cli_poll_identity_drift", None, None
     try:
         result = poll_runner(argv, CLI_POLL_TIMEOUT_SECONDS)
     except (ActionRefused, OSError):
@@ -784,7 +839,14 @@ def run_pass(
         seat_uid = int(entry["uid"])
         heartbeat_mode = entry.get("heartbeat_mode") or HEARTBEAT_MODE_FILE_MTIME
         cli_poll = heartbeat_mode == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL
-        heartbeat_attested = bool(entry.get("heartbeat_kind"))
+        heartbeat_kind_fact = entry.get("heartbeat_kind")
+        heartbeat_proof_note_fact = entry.get("heartbeat_proof_note")
+        # B6 attestation requires BOTH positive operator facts — kind-only or
+        # a blank proof note (e.g. a tampered private manifest) is alert-only
+        # and can never authorize a stale forced kick.
+        heartbeat_attested = operator_heartbeat_attested(
+            heartbeat_kind_fact, heartbeat_proof_note_fact
+        )
         # Qualified-evidence gate for EITHER mode (see classify_seat): a file
         # path for the legacy mode, the profile + derived locator for the
         # strictly typed CLI-poll mode.
@@ -811,7 +873,7 @@ def run_pass(
             # locator only). Executed ONLY with a launchd-proven PID, a
             # trusted ledger, and a non-suspect seat.
             heartbeat_age, poll_refused_code, accepted_poll_value, accepted_poll_digest = cli_poll_evidence(
-                label, entry, seat_uid, poll_runner, now=now
+                label, entry, seat_uid, poll_runner, now=now, home=home, manifest=manifest
             )
             if poll_refused_code is None:
                 # Replay check against the provenance recorded at the last
@@ -841,7 +903,8 @@ def run_pass(
                 pid=pid,
                 heartbeat_age=heartbeat_age,
                 heartbeat_path_recorded=evidence_recorded,
-                heartbeat_attested=heartbeat_attested,
+                heartbeat_kind=heartbeat_kind_fact,
+                heartbeat_proof_note=heartbeat_proof_note_fact,
                 last_kick_at=seat_entry.get("last_kick_at"),
                 consecutive_kicks=int(seat_entry.get("consecutive_kicks") or 0),
                 fresh_heartbeat_witnessed_since_kick=bool(

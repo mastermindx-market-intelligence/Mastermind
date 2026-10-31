@@ -661,6 +661,25 @@ def require_executable_parent_safe(
     return ExecutableParentVerdict(cellar_ancestor=cellar_ancestor)
 
 
+def _require_nofollow_flag(code: str) -> int:
+    """Return ``os.O_NOFOLLOW``, refusing when the platform lacks it.
+
+    The historical ``getattr(os, "O_NOFOLLOW", 0)`` fallback silently
+    degraded to a symlink-FOLLOWING open on hosts without the flag, which
+    would let a symlink at ``path`` satisfy a "verified" identity read.
+    Every verified-identity descriptor open requires real kernel-level
+    symlink protection: a missing flag is a fail-closed refusal, never a
+    degraded open. Review finding: ``fabric_tunnel_common`` O_NOFOLLOW
+    silent fallback (LOW, fail closed)."""
+    flag = getattr(os, "O_NOFOLLOW", None)
+    if flag is None:
+        raise IdentityRejected(
+            f"{code}: os.O_NOFOLLOW unavailable on this host; "
+            "refusing an open without symlink protection"
+        )
+    return int(flag)
+
+
 @dataclass(frozen=True)
 class FileIdentity:
     """Pinned identity of one verified regular file, read from a single
@@ -697,7 +716,7 @@ def verified_file_identity(
     this result and re-compare dev/ino/uid/mode/digest before every effect.
     Refusal messages carry the stable ``code`` prefix and never file
     contents."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags = os.O_RDONLY | _require_nofollow_flag(code) | getattr(os, "O_CLOEXEC", 0)
     try:
         fd = os.open(path, flags)
     except OSError as exc:
@@ -765,7 +784,7 @@ def verified_dir_identity(
     effect, not merely after an age boundary."""
     flags = (
         os.O_RDONLY
-        | getattr(os, "O_NOFOLLOW", 0)
+        | _require_nofollow_flag(code)
         | getattr(os, "O_DIRECTORY", 0)
         | getattr(os, "O_CLOEXEC", 0)
     )

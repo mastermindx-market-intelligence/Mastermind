@@ -459,6 +459,53 @@ eliminated without host-side permission changes, which this integration is
 forbidden to make. The independent reviewer must adjudicate this residual
 explicitly rather than assume it away.
 
+### Post-review hardening (2026-10-30) — the HIGH residual is still HOLD_SECURITY
+
+The first independent non-author review returned HOLD_SECURITY with one
+HIGH deployment blocker and three bounded code findings. The three bounded
+findings are now fixed in source; the HIGH is NOT fixed and its HOLD
+remains authoritative for release:
+
+- **MEDIUM (fixed, residual reduced — not closed):** `cli_poll_evidence`
+  re-proved the executable file digest but never the pinned
+  parent/Cellar-directory identity before each frequent poll. It now runs
+  the FULL `seat_identity_drift_problems` engine (plist argv, executable
+  path/digest/`(dev, ino, uid, mode)`, pinned parent identity, pinned
+  Cellar-allowance identity, and the whole pinned
+  profile/locator/tunnel-id binding) as the LAST observation before the
+  spawn, fail-closed on any drift (`cli_poll_identity_drift`) and on any
+  re-proof exception (`cli_poll_identity_reproof_failed`) — a refused poll
+  probes nothing and authorizes no kick. This NARROWS the window but does
+  NOT close the group-member path rename between re-proof and spawn; the
+  HIGH blocker below still applies to every unattended credentialed
+  restart and CLI poll.
+- **LOW (fixed):** the verified-identity descriptor opens required
+  `os.O_NOFOLLOW` but silently degraded via
+  `getattr(os, "O_NOFOLLOW", 0)` on a host without the flag — i.e. a
+  symlink-FOLLOWING open. Both `verified_file_identity` and
+  `verified_dir_identity` now fail closed with a stable
+  `IdentityRejected` when the flag is absent; on the real Darwin/Linux
+  targets the flag exists and the open semantics are unchanged.
+- **LOW (fixed):** heartbeat attestation keyed on `heartbeat_kind` alone
+  let a tampered private manifest mint the forced-restart proof switch
+  from a half-written fact. `run_pass`/`classify_seat` now require BOTH a
+  non-blank operator-qualified `heartbeat_kind` AND a non-blank
+  `heartbeat_proof_note`; kind-only or a blank note is alert-only
+  (`stale_heartbeat_unproven_alert_only`) and can never permit a stale
+  forced kick. Poll/first-party evidence semantics, the 300 s threshold,
+  1800 s cooldown, 3-kick escalation limit, and the replayed-evidence
+  block are unchanged.
+- **HIGH (UNRESOLVED — deployment blocker, HOLD_SECURITY):** the real
+  installed Cellar ancestor is user-owned, group-writable mode 0775 with
+  other group members, so a group member can replace the executable path
+  in the TOCTOU window before `Popen`/launchd kickstart despite digest,
+  inode, and per-effect pins. Unattended credentialed restart/CLI-poll
+  operation stays blocked until the risk is accepted by an exact
+  authorized human OR an independently reviewed private-executable
+  relocation design preserves program behavior. No chmod/SIP/host
+  permission change is permitted from this integration, and no operator
+  setting may waive the unsafe group-write shape.
+
 ## Secret-safety contract
 
 - Job `EnvironmentVariables` are stored ONLY inside the private manifest and

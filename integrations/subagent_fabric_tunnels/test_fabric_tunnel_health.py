@@ -233,7 +233,8 @@ class SeatClassificationTests(unittest.TestCase):
             pid=411,
             heartbeat_age=10.0,
             heartbeat_path_recorded=True,
-            heartbeat_attested=True,
+            heartbeat_kind="tunnel-client-control-plane-last-seen",
+            heartbeat_proof_note="fixture: operator correlated kind and proof note",
             last_kick_at=None,
             consecutive_kicks=0,
             fresh_heartbeat_witnessed_since_kick=False,
@@ -262,17 +263,17 @@ class SeatClassificationTests(unittest.TestCase):
     def test_unproven_stale_heartbeat_is_alert_only(self):
         # B6 discriminator: without an operator first-party attestation, a
         # stale heartbeat file NEVER force-restarts a live job.
-        state, may_kick = self.classify(heartbeat_age=300.5, heartbeat_attested=False)
+        state, may_kick = self.classify(heartbeat_age=300.5, heartbeat_kind="", heartbeat_proof_note="")
         self.assertEqual(state, fth.ST_STALE_HEARTBEAT_UNPROVEN)
         self.assertFalse(may_kick)
-        state, may_kick = self.classify(heartbeat_age=90_000.0, heartbeat_attested=False)
+        state, may_kick = self.classify(heartbeat_age=90_000.0, heartbeat_kind="", heartbeat_proof_note="")
         self.assertEqual(state, fth.ST_STALE_HEARTBEAT_UNPROVEN)
         self.assertFalse(may_kick)
 
     def test_unproven_heartbeat_does_not_block_missing_pid_recovery(self):
         # Missing PID is proven by launchd itself, not by the heartbeat file,
         # so plain kickstart stays available without attestation.
-        state, may_kick = self.classify(pid=None, heartbeat_attested=False)
+        state, may_kick = self.classify(pid=None, heartbeat_kind="", heartbeat_proof_note="")
         self.assertEqual(state, fth.ST_MISSING_PID)
         self.assertTrue(may_kick)
 
@@ -1107,7 +1108,8 @@ class MissingPidEscalationTests(unittest.TestCase):
             pid=None,
             heartbeat_age=10.0,
             heartbeat_path_recorded=True,
-            heartbeat_attested=True,
+            heartbeat_kind="tunnel-client-control-plane-last-seen",
+            heartbeat_proof_note="fixture: operator correlated kind and proof note",
             last_kick_at=None,
             consecutive_kicks=0,
             fresh_heartbeat_witnessed_since_kick=False,
@@ -1754,7 +1756,8 @@ class CliPollClassifyTests(unittest.TestCase):
             "pid": 4242,
             "heartbeat_age": 8.0,
             "heartbeat_path_recorded": True,
-            "heartbeat_attested": True,
+            "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+            "heartbeat_proof_note": "fixture: operator correlated kind and proof note",
             "last_kick_at": None,
             "consecutive_kicks": 0,
             "fresh_heartbeat_witnessed_since_kick": False,
@@ -1790,7 +1793,8 @@ class CliPollClassifyTests(unittest.TestCase):
             pid=4242,
             heartbeat_age=900.0,
             heartbeat_path_recorded=True,
-            heartbeat_attested=True,
+            heartbeat_kind="tunnel-client-control-plane-last-seen",
+            heartbeat_proof_note="fixture: operator correlated kind and proof note",
             last_kick_at=None,
             consecutive_kicks=0,
             fresh_heartbeat_witnessed_since_kick=False,
@@ -2284,6 +2288,294 @@ class SharedExecutableHealthTests(unittest.TestCase):
             self.assertTrue(plist_path)
             for line in fth.verify_watchdog_install(fixture.home):
                 self.assertIn("installed=True", line)
+
+
+class CellarPollFixtureHome(FixtureHomeShared):
+    """FixtureHomeShared with the ONE shared binary installed inside a fake
+    canonical Homebrew Cellar ancestor (user-owned mode 0775) — the exact
+    canonical allowance shape the identity suite qualifies, so the pinned
+    ``cellar_ancestor`` identity exists to drift."""
+
+    def __init__(self):
+        super().__init__()
+        self.cellar_dir = os.path.join(self.home, "opt", "homebrew", "Cellar")
+        os.makedirs(os.path.dirname(self.cellar_dir), mode=0o755, exist_ok=True)
+        os.makedirs(self.cellar_dir, mode=0o775, exist_ok=True)
+        os.chmod(os.path.dirname(self.cellar_dir), 0o755)
+        os.chmod(self.cellar_dir, 0o775)
+        cellar_executable = os.path.join(
+            self.cellar_dir, "tunnel-client", "1.2.3", "bin", "tunnel-client-shared"
+        )
+        os.makedirs(os.path.dirname(cellar_executable), mode=0o755)
+        # ONE inode: move the shared binary into the Cellar layout.
+        os.replace(self.shared_executable, cellar_executable)
+        os.chmod(cellar_executable, 0o755)
+        self.shared_executable = cellar_executable
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            plist_path = os.path.join(self.home, "Library", "LaunchAgents", f"{label}.plist")
+            working = {
+                "Label": label,
+                "ProgramArguments": [
+                    cellar_executable, "--profile-file", self.profile_paths[label],
+                ],
+                "RunAtLoad": True,
+                "KeepAlive": True,
+                "ThrottleInterval": 10,
+            }
+            with open(plist_path, "wb") as handle:
+                plistlib.dump(working, handle, fmt=plistlib.FMT_XML)
+            os.chmod(plist_path, 0o644)
+
+
+class PollIdentityReproofTests(unittest.TestCase):
+    """Pre-spawn FULL-engine identity re-proof for every CLI poll (review
+    MEDIUM finding: the poll path re-checked the executable digest but not
+    the pinned parent/Cellar/profile-mode identity before each frequent
+    spawn). Every drift refuses with a stable secret-free code, runs NO
+    probe, and therefore authorizes no kick."""
+
+    def _recording_shared_poll(self, fixture):
+        """Wrap the locator-keyed shared poll runner with a call recorder."""
+        calls = []
+        base = fixture.shared_poll_runner()
+
+        def runner(argv, timeout=5.0):
+            calls.append(fixture._poll_seat_for_argv(argv))
+            return base(argv, timeout)
+
+        return runner, calls
+
+    def test_parent_replacement_with_stable_binary_refuses_before_spawn(self):
+        with FixtureHomeShared() as fixture:
+            fixture.qualify()
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            bin_dir = os.path.dirname(fixture.shared_executable)
+            binary_name = os.path.basename(fixture.shared_executable)
+            # Same binary INODE (rename preserves it), same bytes, same
+            # plist argv — NEW parent-directory inode. Every per-field
+            # executable pin (dev/ino/uid/mode/digest) still matches; only
+            # the pinned PARENT identity drifted.
+            os.rename(bin_dir, bin_dir + "-old")
+            os.makedirs(bin_dir, mode=0o755)
+            os.rename(os.path.join(bin_dir + "-old", binary_name), fixture.shared_executable)
+            os.rmdir(bin_dir + "-old")
+            os.chmod(bin_dir, 0o755)
+            runner, calls = self._recording_shared_poll(fixture)
+            runnerctl = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runnerctl, now=NOW + 30, poll_runner=runner
+            )
+            self.assertEqual(report.seats[label]["poll_refused_code"], "cli_poll_identity_drift")
+            self.assertEqual(calls, [])  # the probe NEVER executed
+            self.assertNotIn(label, [kick_label for kick_label, _f in runnerctl.kicks])
+
+    def test_cellar_ancestor_identity_drift_refuses_before_spawn(self):
+        with CellarPollFixtureHome() as fixture:
+            with unittest.mock.patch.object(
+                ftc, "CANONICAL_HOMEBREW_CELLAR", fixture.cellar_dir
+            ):
+                fixture.qualify()
+                manifest = fixture.read_manifest()
+                self.assertIn("cellar_ancestor", manifest["seats"][sorted(ftc.TUNNEL_LABELS)[0]])
+                # Replace ONLY the Cellar directory node (subtree below keeps
+                # its inodes, so no other pin drifts): same lexical path,
+                # same owner, same 0775 mode — NEW inode vs the pinned
+                # cellar_ancestor identity.
+                old = fixture.cellar_dir + "-old"
+                os.rename(fixture.cellar_dir, old)
+                os.makedirs(fixture.cellar_dir, mode=0o775)
+                os.rename(os.path.join(old, "tunnel-client"), os.path.join(fixture.cellar_dir, "tunnel-client"))
+                os.rmdir(old)
+                os.chmod(fixture.cellar_dir, 0o775)
+                label = sorted(ftc.TUNNEL_LABELS)[0]
+                runner, calls = self._recording_shared_poll(fixture)
+                runnerctl = FakeRunner(all_pids())
+                report = fth.run_pass(
+                    fixture.home, runnerctl, now=NOW + 30, poll_runner=runner
+                )
+                self.assertEqual(
+                    report.seats[label]["poll_refused_code"], "cli_poll_identity_drift"
+                )
+                self.assertEqual(calls, [])  # the probe NEVER executed
+                self.assertNotIn(label, [kick_label for kick_label, _f in runnerctl.kicks])
+
+    def test_profile_mode_drift_caught_only_by_full_reproof(self):
+        with FixtureHomeShared() as fixture:
+            fixture.qualify()
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            # 0600 -> 0400: still a SAFE private mode (the binding accepts
+            # it), same inode, same bytes — so EVERY per-field pin in the
+            # early checks matches and the poll would pass without the full
+            # engine. The pinned profile MODE is compared only by the
+            # pre-spawn re-proof.
+            os.chmod(fixture.profile_paths[label], 0o400)
+            runner, calls = self._recording_shared_poll(fixture)
+            runnerctl = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runnerctl, now=NOW + 30, poll_runner=runner
+            )
+            self.assertEqual(report.seats[label]["poll_refused_code"], "cli_poll_identity_drift")
+            self.assertNotIn(label, calls)  # the drifted seat's probe NEVER executed
+            # The healthy seats keep polling: one drifted seat cannot blind
+            # the rest of the pass.
+            self.assertEqual(
+                sorted(calls), sorted(set(ftc.TUNNEL_LABELS) - {label})
+            )
+
+    def test_reproof_exception_is_fail_closed_without_spawn(self):
+        with FixtureHomeCli() as fixture:
+            original = fth.seat_identity_drift_problems
+
+            def boom(*args, **kwargs):
+                raise RuntimeError("simulated time-of-check failure")
+
+            fth.seat_identity_drift_problems = boom
+            try:
+                runner = FakeRunner(all_pids())
+                report = fth.run_pass(
+                    fixture.home, runner, now=NOW + 30, poll_runner=fixture.poll
+                )
+            finally:
+                fth.seat_identity_drift_problems = original
+            # Any exception during re-proof refuses identically: a stable
+            # secret-free code, no probe, no kick — never guessed into safe.
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(
+                    report.seats[label]["poll_refused_code"],
+                    "cli_poll_identity_reproof_failed",
+                    label,
+                )
+            self.assertEqual(fixture.poll.labels_polled(), set())
+            self.assertEqual(runner.kicks, [])
+
+    def test_shared_five_seat_positive_passes_reproof_and_polls_all_five(self):
+        # The normal positive: five seats sharing ONE binary inode with full
+        # parent/profile pins all matching. The new gate must prove — not
+        # obstruct — the qualified shared-executable home.
+        with FixtureHomeShared() as fixture:
+            fixture.qualify()
+            runner, calls = self._recording_shared_poll(fixture)
+            runnerctl = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runnerctl, now=NOW + 30, poll_runner=runner
+            )
+            self.assertEqual(sorted(calls), sorted(ftc.TUNNEL_LABELS))  # five probes
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(report.seats[label]["state"], fth.ST_HEALTHY, label)
+                self.assertEqual(report.seats[label]["poll_refused_code"], "", label)
+                self.assertEqual(report.seats[label]["heartbeat_age_seconds"], 38, label)
+            self.assertEqual(runnerctl.kicks, [])
+
+
+class HeartbeatAttestationFactsTests(unittest.TestCase):
+    """B6 attestation is BOTH operator facts — a nonempty operator-qualified
+    ``heartbeat_kind`` AND a non-blank ``heartbeat_proof_note`` in the
+    manifest (review LOW finding: attestation keyed on the kind alone let a
+    tampered private manifest mint the forced-restart proof switch)."""
+
+    KIND = "tunnel-client-control-plane-last-seen"
+    NOTE = "fixture: operator correlated kind and proof note"
+
+    def _classify(self, kind, note):
+        return fth.classify_seat(
+            qualified=True,
+            pid=411,
+            heartbeat_age=900.0,
+            heartbeat_path_recorded=True,
+            heartbeat_kind=kind,
+            heartbeat_proof_note=note,
+            last_kick_at=None,
+            consecutive_kicks=0,
+            fresh_heartbeat_witnessed_since_kick=False,
+            now=NOW,
+        )
+
+    def test_both_positive_facts_authorize_stale_forced_kick(self):
+        state, may_kick = self._classify(self.KIND, self.NOTE)
+        self.assertEqual((state, may_kick), (fth.ST_STALE_HEARTBEAT, True))
+
+    def test_kind_only_or_blank_note_is_alert_only(self):
+        for note in ("", "   ", " \t\n", None, 7, True, {}, ["x"]):
+            state, may_kick = self._classify(self.KIND, note)
+            self.assertEqual(
+                (state, may_kick), (fth.ST_STALE_HEARTBEAT_UNPROVEN, False), repr(note)
+            )
+
+    def test_missing_or_blank_kind_is_alert_only(self):
+        for kind in ("", "   ", None, 7, True, {}):
+            state, may_kick = self._classify(kind, self.NOTE)
+            self.assertEqual(
+                (state, may_kick), (fth.ST_STALE_HEARTBEAT_UNPROVEN, False), repr(kind)
+            )
+
+    def test_attestation_helper_requires_nonblank_string_facts(self):
+        self.assertTrue(fth.operator_heartbeat_attested(self.KIND, self.NOTE))
+        self.assertFalse(fth.operator_heartbeat_attested(self.KIND, ""))
+        self.assertFalse(fth.operator_heartbeat_attested(self.KIND, " \t\n"))
+        self.assertFalse(fth.operator_heartbeat_attested("", self.NOTE))
+        self.assertFalse(fth.operator_heartbeat_attested(None, self.NOTE))
+        self.assertFalse(fth.operator_heartbeat_attested(7, self.NOTE))
+        self.assertFalse(fth.operator_heartbeat_attested(self.KIND, True))
+
+    def test_tampered_manifest_missing_proof_note_never_force_kicks(self):
+        # Tampered PRIVATE manifest: valid JSON, valid overall shape, the
+        # qualified kind LEFT IN PLACE, the proof note REMOVED. The stale
+        # forced-kick route must stay alert-only.
+        with FixtureHome() as fixture:
+            label = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            with open(fti.manifest_path(fixture.home), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            self.assertIn("heartbeat_proof_note", manifest["seats"][label])
+            del manifest["seats"][label]["heartbeat_proof_note"]
+            fti.write_manifest(fixture.home, manifest)
+            fixture.touch_heartbeat(label, NOW - 900)
+            runner = FakeRunner(all_pids())
+            report = fth.run_pass(fixture.home, runner, now=NOW)
+            self.assertEqual(report.seats[label]["state"], fth.ST_STALE_HEARTBEAT_UNPROVEN)
+            self.assertFalse(report.seats[label]["heartbeat_attested"])
+            self.assertEqual(runner.kicks, [])  # no forced restart, ever
+
+    def test_blank_proof_note_is_attestation_equal_to_missing(self):
+        # A blank note is not a note: same alert-only outcome as deletion.
+        with FixtureHome() as fixture:
+            label = ftc.TUNNEL_LABEL_PREFIX + "c4"
+            with open(fti.manifest_path(fixture.home), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            manifest["seats"][label]["heartbeat_proof_note"] = "   "
+            fti.write_manifest(fixture.home, manifest)
+            fixture.touch_heartbeat(label, NOW - 900)
+            runner = FakeRunner(all_pids())
+            report = fth.run_pass(fixture.home, runner, now=NOW)
+            self.assertEqual(report.seats[label]["state"], fth.ST_STALE_HEARTBEAT_UNPROVEN)
+            self.assertFalse(report.seats[label]["heartbeat_attested"])
+            self.assertEqual(runner.kicks, [])
+
+    def test_blank_note_cli_mode_stale_evidence_stays_alert_only(self):
+        # CLI-poll mode: the poll itself SUCCEEDS with stale-but-valid
+        # evidence; only the attestation gate (kind present, note blank)
+        # separates this seat from a forced kick. The positive contrast is
+        # CliPollPassTests.test_stale_kick_records_provenance_then_replay_
+        # blocks_second_kick (valid kind + note -> forced kick).
+        with FixtureHomeCli() as fixture:
+            label = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            with open(fti.manifest_path(fixture.home), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            manifest["seats"][label]["heartbeat_proof_note"] = ""
+            fti.write_manifest(fixture.home, manifest)
+            fixture.set_poll_payload(label, ok_poll_payload(NOW - 900))
+            runner = FakeRunner(all_pids())
+            report = fth.run_pass(
+                fixture.home, runner, now=NOW + 30, poll_runner=fixture.poll
+            )
+            seat = report.seats[label]
+            self.assertEqual(seat["state"], fth.ST_STALE_HEARTBEAT_UNPROVEN)
+            self.assertEqual(seat["poll_refused_code"], "")  # poll evidence accepted
+            self.assertFalse(seat["heartbeat_attested"])
+            self.assertNotIn(label, [kick_label for kick_label, _f in runner.kicks])
+            # A seat whose manifest kept BOTH facts still recovers normally.
+            other = ftc.TUNNEL_LABEL_PREFIX + "c4"
+            self.assertTrue(report.seats[other]["heartbeat_attested"])
 
 
 if __name__ == "__main__":
