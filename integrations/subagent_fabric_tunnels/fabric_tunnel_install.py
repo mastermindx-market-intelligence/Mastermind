@@ -58,6 +58,7 @@ from fabric_tunnel_identity import (
     load_manifest,
     policy_changes,
     scan_family,
+    seat_identity_drift_problems,
 )
 
 Runner = Any  # Runner protocol from fabric_tunnel_common; tests inject fakes
@@ -238,6 +239,14 @@ def install_seats(
             )
         except IdentityRejected as rejected:
             raise PolicyRefused(str(rejected)) from rejected
+        # Pre-effect identity re-proof (every install effect, not merely the
+        # attestation day boundary): the whole installed identity — argv,
+        # executable path/digest/inode/owner/mode, parent and Cellar-allowance
+        # pins, and any pinned poll-profile binding — must still match the
+        # qualified manifest before ANY mutation or launchd reload.
+        drift = seat_identity_drift_problems(home, manifest, label)
+        if drift:
+            raise PolicyRefused(f"{label}_install_identity_drift:{','.join(drift)}")
 
     # Derivation phase: build every plan before the first write.
     labels = sorted(TUNNEL_LABELS)
@@ -486,6 +495,14 @@ def rollback_seat(
     pre_raw = (backups_dir(home) / label / (_backup_stem(sidecar) + ".plist")).read_bytes()
     if sha256_bytes(pre_raw) != payload.get("pre_sha256"):
         return Alert("rollback_backup_digest_mismatch", label)
+    # Pre-effect identity re-proof (the CAS above already refused current
+    # bytes that drifted from THIS backup's post digest; this refuses any
+    # OTHER live drift — argv, executable path/digest/inode/owner/mode,
+    # parent and Cellar-allowance pins, pinned poll-profile binding — before
+    # the restore write and its launchd reload).
+    drift = seat_identity_drift_problems(home, manifest, label)
+    if drift:
+        return Alert("rollback_identity_drift_refused", label, ",".join(drift))
     pre_mode = int(payload.get("mode", PLIST_DEFAULT_FILE_MODE))
     atomic_write_bytes(plist_path, pre_raw, pre_mode)
     alert = _rollback_preimage(home, runner, label, expected_post=None, now=now, reload_only=True)

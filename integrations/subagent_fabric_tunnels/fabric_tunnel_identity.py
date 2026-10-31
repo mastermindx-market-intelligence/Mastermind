@@ -17,6 +17,22 @@ manifest's one-day attestation bound passes, :func:`revalidate_stale_identity`
 lets a READ-ONLY health pass continue by re-proving each seat's installed
 identity, program digest/argv, and qualified heartbeat from live host state —
 mutation paths keep requiring a fresh manifest.
+
+Shared-executable identity repair (2026-10-31): the five real seats
+legitimately share ONE user-owned binary under the canonical Homebrew Cellar
+prefix (user-owned mode 0775). A shared binary is therefore legal exactly
+when every sharing seat proves itself through a private poll profile — its
+installed argv names the profile with exactly one absolute ``--profile-file``
+option equal to the operator fact, the profile and its derived locator are
+unique per seat by path/inode/digest (never hardlinks), and the profile's
+``control_plane.tunnel_id`` is present, well-formed, and unique, pinned ONLY
+as a domain-separated digest. The executable, its parent directory, and the
+single narrowly anchored Cellar allowance directory are pinned by
+``(dev, ino, uid, mode)`` from nofollow descriptor observations, and
+:func:`seat_identity_drift_problems` re-proves them before EVERY kickstart
+and install effect — never merely after the attestation day boundary. The
+residual group-member rename/exec TOCTOU inside the group-writable Cellar is
+documented in RUNBOOK.md and is reduced, not eliminated.
 """
 from __future__ import annotations
 
@@ -69,6 +85,9 @@ from fabric_tunnel_common import (
     serialize_plist,
     sha256_bytes,
     validate_control_plane_poll_payload,
+    verified_dir_identity,
+    verified_file_identity,
+    require_executable_parent_safe,
 )
 
 # argv[0] must be absolute; launchd requires it for user agents and it is the
@@ -130,6 +149,32 @@ _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 # Clock-skew tolerance for a recorded_at that lands slightly in the future.
 _RECORDED_AT_FUTURE_TOLERANCE_SECONDS = 300
 
+# ---------------------------------------------------------------------------
+# Per-seat tunnel-id binding (identity repair, 2026-10-31).
+#
+# When several seats legitimately share ONE verified executable binary, the
+# per-seat identity invariant moves from the executable to the seat's private
+# profile and its operator-qualified control-plane tunnel id. The raw id is
+# NEVER stored, logged, or printed: only a DOMAIN-SEPARATED SHA-256 digest is
+# pinned, so the manifest cannot leak or be replayed as the id itself, and
+# digest uniqueness across seats proves the ids are distinct without knowing
+# them. The shape rule is deliberately conservative: a printable, bounded,
+# URL-shaped id (any ``/``, and therefore any ``scheme://...``) refuses, so a
+# credential-looking value can never be smuggled through as a tunnel id.
+# ---------------------------------------------------------------------------
+_TUNNEL_ID_HASH_DOMAIN = b"mastermind.subagent-fabric-tunnels.control-plane.tunnel-id.v1\x00"
+_TUNNEL_ID_MAX_LENGTH = 128
+_TUNNEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,%d}$" % (_TUNNEL_ID_MAX_LENGTH - 1))
+
+
+def tunnel_id_binding_hash(tunnel_id: str) -> str:
+    """Domain-separated SHA-256 of one control-plane tunnel id.
+
+    The raw id never enters the manifest, evidence, or logs; only this
+    digest does. Domain separation prevents digest-reuse confusion with any
+    other hash this integration computes."""
+    return sha256_bytes(_TUNNEL_ID_HASH_DOMAIN + tunnel_id.encode("utf-8"))
+
 
 @dataclass(frozen=True)
 class SeatIdentity:
@@ -141,6 +186,24 @@ class SeatIdentity:
     executable: str
     executable_sha256: str
     uid: int
+    # Pinned executable identity from ONE nofollow descriptor observation
+    # (dev/ino/owner/mode), the executable's immediate parent directory
+    # identity, and the Homebrew Cellar allowance directory when the
+    # executable-only ancestor exception consumed it. Zero defaults mean
+    # "not observed" and keep direct constructions of this dataclass valid.
+    executable_dev: int = 0
+    executable_ino: int = 0
+    executable_owner_uid: int = 0
+    executable_mode: int = 0
+    executable_parent_dev: int = 0
+    executable_parent_ino: int = 0
+    executable_parent_uid: int = 0
+    executable_parent_mode: int = 0
+    cellar_ancestor: str | None = None
+    cellar_dev: int = 0
+    cellar_ino: int = 0
+    cellar_uid: int = 0
+    cellar_mode: int = 0
 
     def public_fields(self) -> dict[str, Any]:
         """Secret-safe identity table fields (no argv body, no env)."""
@@ -204,7 +267,13 @@ def verify_seat(home: Path, label: str, uid: int, *, now: float | None = None) -
 
     exec_path = Path(executable)
     require_regular_file(exec_path, code=f"{label}_executable_unavailable")
-    require_parent_safe(exec_path, uid, code=f"{label}_executable_parent_unsafe")
+    # Executable-ONLY ancestor walk: strict everywhere except the single
+    # narrowly anchored canonical Homebrew Cellar allowance (see
+    # fabric_tunnel_common.require_executable_parent_safe). Every other path
+    # kind in this integration keeps the strict require_parent_safe walk.
+    parent_verdict = require_executable_parent_safe(
+        exec_path, uid, code=f"{label}_executable_parent_unsafe"
+    )
     try:
         exec_mode = exec_path.stat().st_mode
     except OSError as exc:
@@ -212,9 +281,25 @@ def verify_seat(home: Path, label: str, uid: int, *, now: float | None = None) -
     if exec_mode & 0o022:
         raise IdentityRejected(f"{label}_executable_group_world_writable")
     try:
-        exec_bytes = exec_path.read_bytes()
+        exec_path.read_bytes()
     except OSError as exc:
         raise IdentityRejected(f"{label}_executable_unreadable ({exc.strerror})") from exc
+    # Pin the executable from ONE nofollow descriptor observation so an
+    # in-place replacement between the checks above and the digest cannot
+    # split the recorded identity: dev/ino/owner/mode and the digest all
+    # describe the SAME inode read through the SAME descriptor.
+    exec_identity = verified_file_identity(exec_path, uid, code=f"{label}_executable_pin")
+    parent_identity = verified_dir_identity(
+        exec_path.parent, uid, code=f"{label}_executable_parent_pin"
+    )
+    cellar_identity = None
+    if parent_verdict.cellar_ancestor is not None:
+        cellar_identity = verified_dir_identity(
+            Path(parent_verdict.cellar_ancestor),
+            uid,
+            code=f"{label}_cellar_ancestor_pin",
+            require_owner_uid=True,
+        )
     # Self-referential and state-root escapes are rejected outright.
     state_root = str(private_state_root(home))
     resolved_exec = str(exec_path.resolve())
@@ -230,8 +315,21 @@ def verify_seat(home: Path, label: str, uid: int, *, now: float | None = None) -
         plist_mode=plist_path.stat().st_mode & 0o7777,
         program_arguments=tuple(argv),
         executable=resolved_exec,
-        executable_sha256=sha256_bytes(exec_bytes),
+        executable_sha256=exec_identity.sha256,
         uid=uid,
+        executable_dev=exec_identity.dev,
+        executable_ino=exec_identity.ino,
+        executable_owner_uid=exec_identity.uid,
+        executable_mode=exec_identity.mode,
+        executable_parent_dev=parent_identity.dev,
+        executable_parent_ino=parent_identity.ino,
+        executable_parent_uid=parent_identity.uid,
+        executable_parent_mode=parent_identity.mode,
+        cellar_ancestor=parent_verdict.cellar_ancestor,
+        cellar_dev=cellar_identity.dev if cellar_identity is not None else 0,
+        cellar_ino=cellar_identity.ino if cellar_identity is not None else 0,
+        cellar_uid=cellar_identity.uid if cellar_identity is not None else 0,
+        cellar_mode=cellar_identity.mode if cellar_identity is not None else 0,
     )
 
 
@@ -353,6 +451,33 @@ def build_manifest(
             value = (seat_options or {}).get(identity.label, {}).get(field_name)
             if value is not None:
                 entry[field_name] = str(value)
+        # Pinned executable + parent + Cellar-allowance identity (dev/ino
+        # tripwires, owner, mode): re-proven against the LIVE filesystem
+        # before every kickstart and install effect, not merely after the
+        # attestation day boundary.
+        entry["executable_dev"] = int(identity.executable_dev)
+        entry["executable_ino"] = int(identity.executable_ino)
+        entry["executable_owner_uid"] = int(identity.executable_owner_uid)
+        entry["executable_mode"] = int(identity.executable_mode)
+        entry["executable_parent_dev"] = int(identity.executable_parent_dev)
+        entry["executable_parent_ino"] = int(identity.executable_parent_ino)
+        entry["executable_parent_uid"] = int(identity.executable_parent_uid)
+        entry["executable_parent_mode"] = int(identity.executable_parent_mode)
+        if identity.cellar_ancestor is not None:
+            entry["cellar_ancestor"] = {
+                "path": identity.cellar_ancestor,
+                "dev": int(identity.cellar_dev),
+                "ino": int(identity.cellar_ino),
+                "uid": int(identity.cellar_uid),
+                "mode": int(identity.cellar_mode),
+            }
+        profile_binding = (seat_options or {}).get(identity.label, {}).get("poll_profile")
+        if isinstance(profile_binding, dict):
+            # Private per-seat poll-profile binding (path/dev/ino/uid/mode/
+            # digest + derived locator identity + domain-separated tunnel-id
+            # digest). The raw tunnel id and the profile JSON are never
+            # recorded, logged, or printed anywhere.
+            entry["poll_profile"] = dict(profile_binding)
         seats[identity.label] = entry
 
     manifest: dict[str, Any] = {
@@ -444,47 +569,168 @@ def manifest_is_stale(manifest: Mapping[str, Any], now: float) -> bool:
     return (now - recorded_at) > MANIFEST_MAX_AGE_SECONDS
 
 
-def revalidate_stale_identity(
+def seat_identity_drift_problems(
     home: Path,
     manifest: Mapping[str, Any],
-) -> tuple[list[Alert], frozenset[str]]:
-    """Live per-seat revalidation used after the attestation day boundary.
+    label: str,
+) -> list[str]:
+    """Strict live-vs-pinned per-seat identity re-proof.
 
-    Deterministic, host-derived, and never a renewal of the stale manifest:
-    each seat's installed plist identity, program argv, resolved executable
-    path, executable digest, and qualified heartbeat path are re-proven
-    against the pinned manifest values from the LIVE filesystem. A seat whose
-    live identity no longer matches is returned in ``suspect_labels`` and
-    must receive ALERT ONLY recovery treatment (no kickstart) until a human
-    requalifies. Detail strings carry stable reason codes only — never argv
-    bodies or env contents.
-    """
-    home = Path(home)
-    alerts: list[Alert] = []
-    suspects: set[str] = set()
-    for label in sorted(TUNNEL_LABELS):
-        entry = manifest["seats"][label]
-        uid = int(entry["uid"])
+    This is the engine used before EVERY kickstart and install effect (and
+    for stale-manifest passes) — not merely after the attestation day
+    boundary. It re-proves, from the LIVE filesystem against the qualified
+    manifest: whole argv, executable path and digest, the pinned executable
+    ``dev/ino/owner/mode``, the pinned parent-directory identity, the pinned
+    Homebrew Cellar-allowance identity, and — for seats with a pinned
+    poll-profile binding — the full profile/locator/tunnel-id binding (path,
+    inode, owner, mode, digest, derived locator, locator identity,
+    domain-separated tunnel-id digest). An in-place replacement or any parent
+    drift between attestation and effect refuses here.
+
+    Deliberately NOT here: the installed plist bytes against the qualified
+    preimage. A SUCCESSFUL install legitimately extends the plist with the
+    policy trio, so post-install plists differ from the qualified preimage by
+    design; that CAS belongs to the install preflight
+    (:func:`assert_current_bytes_match_manifest`) and to rollback's
+    backup-post digest CAS, which compare against the correct reference for
+    their own effect. This engine proves the identity that must survive the
+    install unchanged: the whole argv, the executable, and the pinned
+    filesystem identity around them.
+
+    Legacy manifest entries without the new pins skip exactly those pinned
+    comparisons (backward compatible) and keep the historical lstat shape
+    checks: a MISSING profile/locator/heartbeat file stays a normal health
+    state, while a path that now exists as a symlink or special file is a
+    qualification break.
+
+    Returns stable problem codes only — never argv bodies, profile JSON, or
+    raw tunnel ids. An empty list means the seat's identity is proven
+    current."""
+    entry = manifest["seats"][label]
+    uid = int(entry["uid"])
+    try:
+        identity = verify_seat(home, label, uid)
+    except IdentityRejected as rejected:
+        return [f"identity_rejected:{rejected}"]
+    problems: list[str] = []
+    if list(identity.program_arguments) != list(entry.get("program_arguments", [])):
+        problems.append("argv_changed")
+    if identity.executable != entry.get("executable"):
+        problems.append("executable_path_changed")
+    if identity.executable_sha256 != entry.get("executable_sha256"):
+        problems.append("executable_digest_changed")
+    if entry.get("executable_ino") is not None and (
+        identity.executable_dev,
+        identity.executable_ino,
+    ) != (int(entry.get("executable_dev") or 0), int(entry["executable_ino"])):
+        problems.append("executable_inode_changed")
+    if entry.get("executable_owner_uid") is not None and (
+        identity.executable_owner_uid != int(entry["executable_owner_uid"])
+    ):
+        problems.append("executable_owner_changed")
+    if entry.get("executable_mode") is not None and (
+        identity.executable_mode != int(entry["executable_mode"])
+    ):
+        problems.append("executable_mode_changed")
+    if entry.get("executable_parent_ino") is not None and (
+        identity.executable_parent_dev,
+        identity.executable_parent_ino,
+    ) != (
+        int(entry.get("executable_parent_dev") or 0),
+        int(entry["executable_parent_ino"]),
+    ):
+        problems.append("executable_parent_inode_changed")
+    if entry.get("executable_parent_uid") is not None and (
+        identity.executable_parent_uid != int(entry["executable_parent_uid"])
+    ):
+        problems.append("executable_parent_owner_changed")
+    if entry.get("executable_parent_mode") is not None and (
+        identity.executable_parent_mode != int(entry["executable_parent_mode"])
+    ):
+        problems.append("executable_parent_mode_changed")
+    pinned_cellar = entry.get("cellar_ancestor")
+    if isinstance(pinned_cellar, dict):
+        if identity.cellar_ancestor != pinned_cellar.get("path"):
+            problems.append("cellar_ancestor_changed")
+        elif (
+            identity.cellar_dev,
+            identity.cellar_ino,
+            identity.cellar_uid,
+            identity.cellar_mode,
+        ) != (
+            int(pinned_cellar.get("dev") or 0),
+            int(pinned_cellar.get("ino") or 0),
+            int(pinned_cellar.get("uid") or 0),
+            int(pinned_cellar.get("mode") or 0),
+        ):
+            problems.append("cellar_ancestor_identity_changed")
+    elif pinned_cellar is None and identity.cellar_ancestor is not None:
+        # The manifest predates the Cellar allowance: an allowance ancestor
+        # present NOW was not the qualified shape and was never pinned.
+        problems.append("cellar_ancestor_unpinned")
+    heartbeat_path = entry.get("heartbeat_path")
+    if heartbeat_path:
+        # A MISSING heartbeat file is a normal health state (per-pass
+        # classification raises heartbeat_missing, alert-only), but a path
+        # that now exists as a symlink or special file is a qualification
+        # break.
         try:
-            identity = verify_seat(home, label, uid)
-        except IdentityRejected as rejected:
-            alerts.append(Alert("seat_identity_rejected", label, str(rejected)))
-            suspects.add(label)
-            continue
-        problems: list[str] = []
-        if list(identity.program_arguments) != list(entry.get("program_arguments", [])):
-            problems.append("argv_changed")
-        if identity.executable != entry.get("executable"):
-            problems.append("executable_path_changed")
-        if identity.executable_sha256 != entry.get("executable_sha256"):
-            problems.append("executable_digest_changed")
-        heartbeat_path = entry.get("heartbeat_path")
-        if entry.get("heartbeat_mode") == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL:
-            # Qualified CLI-poll revalidation after the day boundary: a
-            # MISSING profile/locator is a normal health state (the per-pass
-            # classification refuses the evidence, alert-only), but a path
-            # that now exists as a symlink or special file is a
-            # qualification break.
+            st = Path(heartbeat_path).lstat()
+        except OSError:
+            st = None
+        if st is not None and (stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode)):
+            problems.append("heartbeat_path_not_regular")
+    profile_fact = entry.get("heartbeat_profile_file")
+    if entry.get("heartbeat_mode") == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL and profile_fact:
+        pinned_profile = entry.get("poll_profile")
+        if isinstance(pinned_profile, dict):
+            # Full binding re-proof for pinned seats: the profile must still
+            # be the pinned inode with the pinned digest, still derive the
+            # pinned locator with its pinned identity, and still hash to the
+            # pinned tunnel id. A vanished, swapped, rewritten, re-linked
+            # (hardlinked), or re-tunnelled profile refuses here.
+            required_tunnel = bool(pinned_profile.get("tunnel_id_hash"))
+            try:
+                binding = verified_poll_profile_binding(
+                    label,
+                    str(profile_fact),
+                    uid,
+                    require_tunnel_id=required_tunnel,
+                )
+            except (PolicyRefused, IdentityRejected) as rejected:
+                problems.append(f"poll_profile_binding_refused:{rejected}")
+            else:
+                if binding.profile_path != pinned_profile.get("path"):
+                    problems.append("poll_profile_path_changed")
+                if (binding.profile_dev, binding.profile_ino) != (
+                    int(pinned_profile.get("dev") or 0),
+                    int(pinned_profile.get("ino") or 0),
+                ):
+                    problems.append("poll_profile_inode_changed")
+                if binding.profile_uid != int(pinned_profile.get("uid") or 0):
+                    problems.append("poll_profile_owner_changed")
+                if binding.profile_mode != int(pinned_profile.get("mode") or 0):
+                    problems.append("poll_profile_mode_changed")
+                if binding.profile_sha256 != pinned_profile.get("sha256"):
+                    problems.append("poll_profile_digest_changed")
+                if binding.locator != entry.get("heartbeat_url_locator"):
+                    problems.append("poll_locator_changed")
+                if (binding.locator_dev, binding.locator_ino) != (
+                    int(pinned_profile.get("locator_dev") or 0),
+                    int(pinned_profile.get("locator_ino") or 0),
+                ):
+                    problems.append("poll_locator_inode_changed")
+                if binding.locator_sha256 != pinned_profile.get("locator_sha256"):
+                    problems.append("poll_locator_digest_changed")
+                if required_tunnel and (
+                    binding.tunnel_id_hash != pinned_profile.get("tunnel_id_hash")
+                ):
+                    problems.append("poll_tunnel_id_changed")
+        else:
+            # Legacy unpinned CLI seat: a MISSING profile/locator is a normal
+            # health state (the per-pass classification refuses the evidence,
+            # alert-only), but a path that now exists as a symlink or special
+            # file is a qualification break.
             for field_name, problem in (
                 ("heartbeat_profile_file", "heartbeat_profile_not_regular"),
                 ("heartbeat_url_locator", "heartbeat_locator_not_regular"),
@@ -498,17 +744,34 @@ def revalidate_stale_identity(
                     st = None
                 if st is not None and (stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode)):
                     problems.append(problem)
-        if heartbeat_path:
-            # Qualified heartbeat revalidation after the day boundary: a
-            # MISSING file is a normal health state (per-pass classification
-            # raises heartbeat_missing, alert-only), but a path that now
-            # exists as a symlink or special file is a qualification break.
-            try:
-                st = Path(heartbeat_path).lstat()
-            except OSError:
-                st = None
-            if st is not None and (stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode)):
-                problems.append("heartbeat_path_not_regular")
+    return problems
+
+
+def revalidate_stale_identity(
+    home: Path,
+    manifest: Mapping[str, Any],
+) -> tuple[list[Alert], frozenset[str]]:
+    """Live per-seat revalidation used after the attestation day boundary.
+
+    Deterministic, host-derived, and never a renewal of the stale manifest:
+    every check of :func:`seat_identity_drift_problems` runs per seat against
+    the pinned manifest values from the LIVE filesystem. A seat whose live
+    identity no longer matches is returned in ``suspect_labels`` and must
+    receive ALERT ONLY recovery treatment (no kickstart) until a human
+    requalifies. Detail strings carry stable reason codes only — never argv
+    bodies, profile JSON, or raw tunnel ids.
+    """
+    home = Path(home)
+    alerts: list[Alert] = []
+    suspects: set[str] = set()
+    prefix = "identity_rejected:"
+    for label in sorted(TUNNEL_LABELS):
+        problems = seat_identity_drift_problems(home, manifest, label)
+        rejected = [p for p in problems if p.startswith(prefix)]
+        if rejected:
+            alerts.append(Alert("seat_identity_rejected", label, rejected[0][len(prefix):]))
+            suspects.add(label)
+            continue
         if problems:
             alerts.append(Alert("seat_identity_tampered_alert_only", label, ",".join(problems)))
             suspects.add(label)
@@ -732,18 +995,124 @@ def _validated_facts(
     return seat_options, host_options
 
 
-def _require_distinct_executable_identities(list_of_identities: list[SeatIdentity]) -> None:
-    """Qualification-time distinctness guard: two seats pointing at the SAME
-    executable path with the SAME digest is one identity wearing two labels —
-    the cross-seat adoption hazard. Distinct argv is already enforced by
-    :func:`verify_all_seats`; this closes the executable-identity half."""
-    seen: dict[tuple[str, str], str] = {}
+_PROFILE_FILE_FLAG = "--profile-file"
+
+
+def installed_argv_profile_file(label: str, program_arguments: Any) -> str | None:
+    """Extract the EXACTLY ONE absolute ``--profile-file`` value from the
+    INSTALLED plist argv (never from operator facts).
+
+    Accepts both the ``--profile-file <value>`` and ``--profile-file=<value>``
+    spellings. Returns ``None`` when the flag is absent (a legacy seat whose
+    executable is its own identity). Refuses, with stable codes: a duplicated
+    flag in either spelling, a flag with no value, and a value that is not an
+    absolute path. The value text is never echoed into the refusal."""
+    items = list(program_arguments)
+    value: str | None = None
+    index = 1  # argv[0] is the executable itself
+    while index < len(items):
+        item = items[index]
+        if item == _PROFILE_FILE_FLAG:
+            if value is not None:
+                raise IdentityRejected(f"{label}_profile_file_flag_duplicated")
+            if index + 1 >= len(items):
+                raise IdentityRejected(f"{label}_profile_file_flag_missing_value")
+            value = items[index + 1]
+            index += 2
+            continue
+        if item.startswith(_PROFILE_FILE_FLAG + "="):
+            if value is not None:
+                raise IdentityRejected(f"{label}_profile_file_flag_duplicated")
+            value = item[len(_PROFILE_FILE_FLAG) + 1:]
+            index += 1
+            continue
+        index += 1
+    if value is not None and not (value.startswith("/") and len(value) > 1):
+        raise IdentityRejected(f"{label}_profile_file_flag_not_absolute")
+    return value
+
+
+@dataclass(frozen=True)
+class PollProfileBinding:
+    """Verified per-seat poll-profile binding, pinned from ONE nofollow
+    descriptor observation per file.
+
+    This is the identity invariant that replaces the old blanket rejection of
+    shared executables: when seats share one binary, each seat is proven
+    distinct through its own private profile — distinct path, distinct
+    ``(dev, ino)`` inode, distinct content digest, a distinct derived URL
+    locator, and a distinct domain-separated control-plane tunnel-id digest.
+    The raw tunnel id and the profile JSON are never recorded."""
+
+    profile_path: str
+    locator: str
+    profile_dev: int
+    profile_ino: int
+    profile_uid: int
+    profile_mode: int
+    profile_sha256: str
+    locator_dev: int
+    locator_ino: int
+    locator_uid: int
+    locator_mode: int
+    locator_sha256: str
+    tunnel_id_hash: str | None
+
+    def manifest_fields(self) -> dict[str, Any]:
+        """The exact private-manifest block for this binding."""
+        return {
+            "path": self.profile_path,
+            "dev": int(self.profile_dev),
+            "ino": int(self.profile_ino),
+            "uid": int(self.profile_uid),
+            "mode": int(self.profile_mode),
+            "sha256": self.profile_sha256,
+            "locator": self.locator,
+            "locator_dev": int(self.locator_dev),
+            "locator_ino": int(self.locator_ino),
+            "locator_uid": int(self.locator_uid),
+            "locator_mode": int(self.locator_mode),
+            "locator_sha256": self.locator_sha256,
+            "tunnel_id_hash": self.tunnel_id_hash,
+        }
+
+
+def _shared_executable_labels(list_of_identities: list[SeatIdentity]) -> frozenset[str]:
+    """Labels whose ``(executable path, executable digest)`` pair is shared
+    with at least one other seat — the group whose per-seat identity must be
+    proven through private profile bindings instead of distinct binaries."""
+    by_exec: dict[tuple[str, str], list[str]] = {}
     for identity in list_of_identities:
-        key = (identity.executable, identity.executable_sha256)
-        holder = seen.get(key)
-        if holder is not None:
-            raise PolicyRefused(f"executable_identity_duplicated:{identity.label}:{holder}")
-        seen[key] = identity.label
+        by_exec.setdefault((identity.executable, identity.executable_sha256), []).append(identity.label)
+    return frozenset(
+        label for labels in by_exec.values() if len(labels) > 1 for label in labels
+    )
+
+
+def _require_shared_executables_fully_bound(
+    list_of_identities: list[SeatIdentity],
+    bindings: Mapping[str, PollProfileBinding],
+) -> None:
+    """Qualification-time shared-executable rule.
+
+    REPLACES the old blanket rejection of any two seats sharing an executable
+    path+digest. The real five seats legitimately share ONE installed
+    tunnel-client binary, so sharing is legal exactly when every seat in the
+    shared group carries the full verified profile binding derived in
+    :func:`qualify_install` — a facts-declared ``--profile-file`` that the
+    INSTALLED argv names, proven as a private 0600 regular file (never a
+    hardlink) whose ``(dev, ino)`` inode, content digest, derived URL locator,
+    and present, well-formed, group-unique ``control_plane.tunnel_id`` digest
+    are distinct per seat. Distinct WHOLE argv tuples remain enforced by
+    :func:`verify_all_seats`; distinct executables stay fully supported with
+    no binding required."""
+    shared_labels = _shared_executable_labels(list_of_identities)
+    for label in sorted(shared_labels):
+        binding = bindings.get(label)
+        if binding is None:
+            raise PolicyRefused(f"executable_shared_requires_profile_binding:{label}")
+        if not binding.tunnel_id_hash:
+            raise PolicyRefused(f"executable_shared_requires_tunnel_id:{label}")
 
 
 def _require_bounded_safe_private_file(path: Path, uid: int, *, code: str) -> None:
@@ -770,23 +1139,39 @@ def _reject_traversal_components(text: str, label: str, *, code: str) -> None:
         raise PolicyRefused(f"{label}_{code}_traversal")
 
 
-def verified_poll_profile_locator(label: str, profile_text: str, uid: int) -> str:
-    """Qualification-time proof of the first-party CLI poll evidence source.
+def verified_poll_profile_binding(
+    label: str,
+    profile_text: str,
+    uid: int,
+    *,
+    require_tunnel_id: bool = False,
+) -> PollProfileBinding:
+    """Qualification-time proof of one seat's first-party CLI poll profile.
 
-    Reads the operator-declared per-seat profile (JSON) and returns the
-    DERIVED ``health.url_file`` locator path. Every step fails closed with a
-    stable code and nothing but the locator path is returned or recorded:
+    Extends the locator derivation with the FULL per-seat binding that makes
+    a shared executable legally provable: every step fails closed with a
+    stable code and nothing but the typed binding is returned or recorded.
+
     - the profile path must not carry another seat's identity (cross-seat
       adoption guard, same rule as executables);
     - the profile must be a bounded, seat-owned, safely-moded regular file
-      with a symlink-free lexical ancestor chain;
+      with a symlink-free lexical ancestor chain, never a HARDLINK (a second
+      name for the same inode could be swapped or mutated out of band), and
+      its ``(dev, ino, uid, mode, sha256)`` identity is pinned from ONE
+      nofollow descriptor observation;
     - its parsed ``health.url_file`` must be an absolute bounded path without
-      traversal components, free of foreign seat identity, and itself a
-      bounded, seat-owned, safely-moded regular file.
+      traversal components, free of foreign seat identity, itself a bounded,
+      seat-owned, safely-moded, non-hardlinked regular file, and pinned the
+      same way;
+    - ``control_plane.tunnel_id`` must be a present, non-empty, bounded,
+      URL-free string whenever ``require_tunnel_id`` is set (shared-executable
+      seats), and is returned ONLY as its domain-separated digest. A
+      profile that carries a malformed tunnel id refuses even when one was
+      not required.
 
     NEVER invoked on a path from untrusted facts at health time: the health
-    pass re-derives the locator from the pinned profile only to CHECK it
-    still equals the pinned value."""
+    pass re-derives the binding from the pinned profile only to CHECK it
+    still equals the pinned values."""
     foreign = executable_path_reject_reason(label, profile_text)
     if foreign:
         raise PolicyRefused(f"{label}_poll_profile_foreign_identity: {foreign}")
@@ -794,15 +1179,23 @@ def verified_poll_profile_locator(label: str, profile_text: str, uid: int) -> st
     profile_path = Path(profile_text)
     _require_bounded_safe_private_file(profile_path, uid, code=f"{label}_poll_profile")
     try:
-        raw = profile_path.read_bytes()
-    except OSError as exc:
-        raise PolicyRefused(f"{label}_poll_profile_unreadable ({exc.strerror})") from exc
+        profile_identity = verified_file_identity(
+            profile_path,
+            uid,
+            code=f"{label}_poll_profile",
+            max_bytes=CLI_POLL_MAX_PROFILE_BYTES,
+            require_owner_uid=True,
+            require_nlink_one=True,
+        )
+    except IdentityRejected as rejected:
+        raise PolicyRefused(str(rejected)) from rejected
     try:
-        doc = json.loads(raw)
+        doc = json.loads(profile_identity.data)
     except ValueError as exc:
         raise PolicyRefused(f"{label}_poll_profile_not_json") from exc
     if not isinstance(doc, dict):
         raise PolicyRefused(f"{label}_poll_profile_shape_invalid")
+    tunnel_id_hash = _verified_tunnel_id_hash(label, doc, require=require_tunnel_id)
     health = doc.get("health")
     if not isinstance(health, dict):
         raise PolicyRefused(f"{label}_poll_profile_health_missing")
@@ -813,8 +1206,69 @@ def verified_poll_profile_locator(label: str, profile_text: str, uid: int) -> st
     if foreign:
         raise PolicyRefused(f"{label}_poll_locator_foreign_identity: {foreign}")
     _reject_traversal_components(locator, label, code="poll_locator")
-    _require_bounded_safe_private_file(Path(locator), uid, code=f"{label}_poll_locator")
-    return locator
+    locator_path = Path(locator)
+    _require_bounded_safe_private_file(locator_path, uid, code=f"{label}_poll_locator")
+    try:
+        locator_identity = verified_file_identity(
+            locator_path,
+            uid,
+            code=f"{label}_poll_locator",
+            max_bytes=CLI_POLL_MAX_PROFILE_BYTES,
+            require_owner_uid=True,
+            require_nlink_one=True,
+        )
+    except IdentityRejected as rejected:
+        raise PolicyRefused(str(rejected)) from rejected
+    return PollProfileBinding(
+        profile_path=str(profile_path),
+        locator=locator,
+        profile_dev=profile_identity.dev,
+        profile_ino=profile_identity.ino,
+        profile_uid=profile_identity.uid,
+        profile_mode=profile_identity.mode,
+        profile_sha256=profile_identity.sha256,
+        locator_dev=locator_identity.dev,
+        locator_ino=locator_identity.ino,
+        locator_uid=locator_identity.uid,
+        locator_mode=locator_identity.mode,
+        locator_sha256=locator_identity.sha256,
+        tunnel_id_hash=tunnel_id_hash,
+    )
+
+
+def _verified_tunnel_id_hash(label: str, profile_doc: Mapping[str, Any], *, require: bool) -> str | None:
+    """Extract and digest ``control_plane.tunnel_id`` from a parsed profile.
+
+    The raw id is never returned, stored, logged, or printed — only its
+    domain-separated digest. Missing is refused only when ``require`` is set
+    (shared-executable seats); a PRESENT but empty, oversized, URL-shaped, or
+    otherwise malformed id always refuses."""
+    control = profile_doc.get("control_plane")
+    tunnel_id = control.get("tunnel_id") if isinstance(control, dict) else None
+    if tunnel_id is None:
+        if require:
+            raise PolicyRefused(f"{label}_poll_tunnel_id_missing")
+        return None
+    if (
+        isinstance(tunnel_id, bool)
+        or not isinstance(tunnel_id, str)
+        or not _TUNNEL_ID_RE.match(tunnel_id)
+    ):
+        raise PolicyRefused(f"{label}_poll_tunnel_id_malformed")
+    return tunnel_id_binding_hash(tunnel_id)
+
+
+def verified_poll_profile_locator(label: str, profile_text: str, uid: int) -> str:
+    """Qualification/health-time DERIVED ``health.url_file`` locator path.
+
+    Backward-compatible thin view of :func:`verified_poll_profile_binding`:
+    same proofs, same stable refusal codes, locator-only return. Seats whose
+    manifest pins the full binding are re-proved through the binding itself;
+    the tunnel id is validated (a malformed PRESENT id refuses) but not
+    required for legacy entries."""
+    return verified_poll_profile_binding(
+        label, profile_text, uid, require_tunnel_id=False
+    ).locator
 
 
 def qualify_install(
@@ -830,15 +1284,18 @@ def qualify_install(
     """The single sanctioned operator qualification entrypoint (B4).
 
     Reads the five ACTUAL installed plists via :func:`verify_all_seats`,
-    enforces distinct argv AND executable identity, validates the closed
-    operator facts schema (heartbeat attestation, native store, telemetry
-    closed file set, pinned generation, repair digests — all explicit, never
-    hardcoded or invented), assembles the manifest via
-    :func:`build_manifest`, and persists it PRIVATE (0600). ``dry_run``
-    performs every check and returns the secret-safe evidence without
-    writing anything, which makes a first install from an empty manifest
-    demonstrably feasible. Any refusal raises before ANY write, so an
-    incomplete qualification fails closed.
+    enforces distinct whole argv tuples and the shared-executable identity
+    rule (distinct binaries OR a fully proven private profile/tunnel-id
+    binding per shared seat — :func:`_require_shared_executables_fully_bound`),
+    validates the closed operator facts schema (heartbeat attestation,
+    native store, telemetry closed file set, pinned generation, repair
+    digests — all explicit, never hardcoded or invented), assembles the
+    manifest via :func:`build_manifest` with the pinned executable/parent/
+    Cellar-allowance and poll-profile identities, and persists it PRIVATE
+    (0600). ``dry_run`` performs every check and returns the secret-safe
+    evidence without writing anything, which makes a first install from an
+    empty manifest demonstrably feasible. Any refusal raises before ANY
+    write, so an incomplete qualification fails closed.
 
     Seats declared ``first_party_cli_control_plane_poll`` are additionally
     PROVEN at qualification time, before anything is written: the seat's own
@@ -861,8 +1318,8 @@ def qualify_install(
     if rogue:
         raise PolicyRefused(f"rogue_family_labels_present: {','.join(rogue)}")
     identities = verify_all_seats(home, uid)
-    _require_distinct_executable_identities(identities)
     identity_by_label = {identity.label: identity for identity in identities}
+    shared_exec_labels = _shared_executable_labels(identities)
 
     # First-party CLI control-plane-poll seats: derive + prove the evidence
     # source before anything else, so an unverifiable mode refuses loudly.
@@ -870,25 +1327,60 @@ def qualify_install(
         key for key, options in seat_options.items()
         if options.get("heartbeat_mode") == HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL
     )
+    bindings: dict[str, PollProfileBinding] = {}
     seen_profiles: dict[str, str] = {}
     seen_locators: dict[str, str] = {}
+    seen_profile_identities: dict[tuple[int, int, str], str] = {}
+    seen_locator_identities: dict[tuple[int, int, str], str] = {}
+    seen_tunnel_ids: dict[str, str] = {}
     for key in cli_seats:
         entry = seat_options[key]
         seat_uid = int(identity_by_label[key].uid)
-        locator = verified_poll_profile_locator(
-            key, entry["heartbeat_profile_file"], seat_uid
+        seat_needs_binding = key in shared_exec_labels
+        if seat_needs_binding:
+            # The INSTALLED argv must carry EXACTLY ONE absolute
+            # --profile-file option and it must equal the operator fact
+            # byte-for-byte: the fact is accepted only for the file the job
+            # itself names, so a swapped, steered, or relative profile can
+            # never qualify a shared-executable seat.
+            argv_profile = installed_argv_profile_file(
+                key, identity_by_label[key].program_arguments
+            )
+            if argv_profile != entry["heartbeat_profile_file"]:
+                raise PolicyRefused(f"facts_poll_profile_argv_mismatch:{key}")
+        binding = verified_poll_profile_binding(
+            key,
+            entry["heartbeat_profile_file"],
+            seat_uid,
+            require_tunnel_id=seat_needs_binding,
         )
         # Cross-seat isolation: two seats may never share a profile file or a
-        # URL locator, or one swap would steer both seats' evidence.
+        # URL locator — by path, by inode, by content digest, or by tunnel id
+        # — or one swap would steer both seats' evidence.
         holder = seen_profiles.get(entry["heartbeat_profile_file"])
         if holder is not None:
             raise PolicyRefused(f"facts_poll_profile_duplicated:{key}:{holder}")
         seen_profiles[entry["heartbeat_profile_file"]] = key
-        holder = seen_locators.get(locator)
+        holder = seen_locators.get(binding.locator)
         if holder is not None:
             raise PolicyRefused(f"facts_poll_locator_duplicated:{key}:{holder}")
-        seen_locators[locator] = key
-        probe_argv = build_control_plane_poll_argv(identity_by_label[key].executable, locator)
+        seen_locators[binding.locator] = key
+        profile_key = (binding.profile_dev, binding.profile_ino, binding.profile_sha256)
+        holder = seen_profile_identities.get(profile_key)
+        if holder is not None:
+            raise PolicyRefused(f"facts_poll_profile_identity_duplicated:{key}:{holder}")
+        seen_profile_identities[profile_key] = key
+        locator_key = (binding.locator_dev, binding.locator_ino, binding.locator_sha256)
+        holder = seen_locator_identities.get(locator_key)
+        if holder is not None:
+            raise PolicyRefused(f"facts_poll_locator_identity_duplicated:{key}:{holder}")
+        seen_locator_identities[locator_key] = key
+        if binding.tunnel_id_hash:
+            holder = seen_tunnel_ids.get(binding.tunnel_id_hash)
+            if holder is not None:
+                raise PolicyRefused(f"facts_poll_tunnel_id_duplicated:{key}:{holder}")
+            seen_tunnel_ids[binding.tunnel_id_hash] = key
+        probe_argv = build_control_plane_poll_argv(identity_by_label[key].executable, binding.locator)
         runner = poll_runner if poll_runner is not None else control_plane_poll_runner
         try:
             result = runner(probe_argv, CLI_POLL_TIMEOUT_SECONDS)
@@ -904,7 +1396,19 @@ def qualify_install(
         )
         if not verdict.ok:
             raise PolicyRefused(f"facts_cli_poll_probe_failed: {key}:{verdict.reason}")
-        entry["heartbeat_url_locator"] = locator
+        entry["heartbeat_url_locator"] = binding.locator
+        if seat_needs_binding:
+            # Only shared-executable seats pin the full binding: their
+            # per-seat identity IS the binding. Distinct-executable seats
+            # keep the exact legacy manifest shape (backward compatible).
+            entry["poll_profile"] = binding.manifest_fields()
+        bindings[key] = binding
+
+    # Shared-executable legality: the old blanket rejection of a shared
+    # binary is replaced by this positive proof — every seat in a shared
+    # group must carry the full binding above, with a present, well-formed,
+    # group-unique tunnel-id digest.
+    _require_shared_executables_fully_bound(identities, bindings)
 
     observed: dict[str, dict[str, Any]] = {}
     for identity in identities:
@@ -972,9 +1476,12 @@ def manifest_public_evidence(manifest: Mapping[str, Any]) -> list[str]:
         # Secret-safety: the CLI-poll profile and URL-locator paths are never
         # printed — the locator names the file that holds the control-plane
         # URL — so a cli seat shows a fixed placeholder instead of any path.
+        # The tunnel-id digest is likewise shown only as a short prefix: the
+        # raw id is never recorded anywhere to print.
         heartbeat_display = (
             "<first-party-cli-poll>" if cli_poll else entry.get("heartbeat_path", "<unset>")
         )
+        pinned_profile = entry.get("poll_profile")
         lines.append(
             evidence_line(
                 label,
@@ -985,6 +1492,9 @@ def manifest_public_evidence(manifest: Mapping[str, Any]) -> list[str]:
                     "executable_sha256": entry["executable_sha256"][:16],
                     "heartbeat_mode": "cli_poll" if cli_poll else "file",
                     "heartbeat_path": heartbeat_display,
+                    "profile_bound": bool(isinstance(pinned_profile, dict)),
+                    "tunnel_id_hash": ((pinned_profile or {}).get("tunnel_id_hash") or "")[:16],
+                    "cellar_allowed": bool(entry.get("cellar_ancestor")),
                 },
             )
         )

@@ -840,5 +840,80 @@ class CliPollQualifyCommandTests(unittest.TestCase):
                 self.assertFalse(os.path.exists(fti.manifest_path(fixture.home)), case_name)
 
 
+# ---------------------------------------------------------------------------
+# Pre-effect identity re-proof at install/rollback (identity repair,
+# 2026-10-31): the whole installed identity — argv, executable
+# path/digest/inode/owner/mode, parent and Cellar-allowance pins, pinned
+# poll-profile binding — is re-proven before EVERY mutation, not merely after
+# the attestation day boundary.
+# ---------------------------------------------------------------------------
+
+
+class PreEffectIdentityReproofTests(unittest.TestCase):
+    """Drift between attestation and effect refuses install and rollback."""
+
+    def test_install_refuses_when_executable_replaced_after_qualification(self):
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            label = ftc.TUNNEL_LABEL_PREFIX + "c1"
+            executable = os.path.join(fixture.home, "clients", "tunnel-c1")
+            replacement = os.path.join(fixture.home, "replacement-c1")
+            with open(replacement, "wb") as handle:
+                handle.write(b"#!/bin/sh\nexit 1\n")
+            os.chmod(replacement, 0o755)
+            os.replace(replacement, executable)  # new inode, new bytes
+            before = {
+                other: fixture.read_plist_bytes_raw(other)
+                for other in sorted(ftc.TUNNEL_LABELS)
+            }
+            runner = FakeRunner()
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                ins.install_seats(
+                    fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid
+                )
+            self.assertIn("install_identity_drift", str(caught.exception))
+            self.assertIn("executable_digest_changed", str(caught.exception))
+            # All-or-nothing: no seat mutated, no launchd action taken.
+            self.assertEqual(runner.calls, [])
+            for other in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(fixture.read_plist_bytes_raw(other), before[other])
+
+    def test_install_passes_when_identity_is_proven_current(self):
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            manifest = ins.load_manifest(fixture.home, now=NOW + 60)
+            from fabric_tunnel_identity import seat_identity_drift_problems
+
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(
+                    seat_identity_drift_problems(fixture.home, manifest, label), []
+                )
+            results = ins.install_seats(
+                fixture.home, FakeRunner(), confirm=True, now=NOW + 60, uid=fixture.uid
+            )
+            self.assertEqual([r.status for r in results], ["installed"] * 5)
+
+    def test_rollback_refuses_when_executable_replaced_after_install(self):
+        with FixtureHome() as fixture:
+            fixture.qualify()
+            runner = FakeRunner()
+            ins.install_seats(fixture.home, runner, confirm=True, now=NOW + 60, uid=fixture.uid)
+            label = ftc.TUNNEL_LABEL_PREFIX + "c3"
+            executable = os.path.join(fixture.home, "clients", "tunnel-c3")
+            replacement = os.path.join(fixture.home, "replacement-c3")
+            with open(replacement, "wb") as handle:
+                handle.write(b"#!/bin/sh\nexit 4\n")
+            os.chmod(replacement, 0o755)
+            os.replace(replacement, executable)
+            # The plist bytes still match the backup's post digest (the CAS
+            # passes), but the EXECUTIVE binary behind the job drifted: the
+            # pre-effect re-proof must refuse the restore + reload.
+            alert = ins.rollback_seat(fixture.home, runner, label, confirm=True, now=NOW + 120)
+            self.assertIsNotNone(alert)
+            self.assertEqual(alert.code, "rollback_identity_drift_refused")
+            self.assertIn("executable_digest_changed", alert.detail)
+            self.assertEqual(fixture.read_plist_dict(label)["ThrottleInterval"], 10)
+
+
 if __name__ == "__main__":
     unittest.main()

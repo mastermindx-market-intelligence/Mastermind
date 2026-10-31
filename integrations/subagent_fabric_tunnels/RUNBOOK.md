@@ -407,6 +407,58 @@ result as an alert code, never silently. Backups live under
 `~/Library/Application Support/mastermind-subagent-fabric-tunnels/backups/`
 (0700 dir, 0600 files) and must never be committed or pasted anywhere.
 
+## Shared-executable identity binding and the Cellar allowance (2026-10-31 repair)
+
+The five incumbent seats legitimately SHARE one user-owned, safe-mode
+`tunnel-client` binary (same path, same inode, same SHA-256) installed under
+the canonical Apple-Silicon Homebrew prefix, whose `Cellar` directory is
+user-owned mode 0775 by Homebrew's own layout. The original blanket
+"every seat needs its own binary" rejection is replaced by a stronger,
+positive per-seat proof that fails closed:
+
+- Each seat in a shared-executable group must carry a qualified poll profile
+  that its INSTALLED plist argv names with EXACTLY ONE absolute
+  `--profile-file` option, byte-equal to the operator fact. Missing,
+  duplicated, relative, foreign, or mismatched flags refuse before anything
+  is written.
+- Each bound profile is proven unique per seat by path, `(dev, ino)` inode,
+  and content SHA-256; it must be a seat-owned 0600-bounded regular file,
+  never a hardlink, with a strictly safe lexical ancestor chain; its derived
+  `health.url_file` locator is proven and pinned the same way, uniquely.
+- Each profile's `control_plane.tunnel_id` must be present, well-formed
+  (bounded, printable, URL-free), and UNIQUE across the five seats. The raw
+  id is never stored, logged, or printed — only a domain-separated SHA-256
+  digest (`tunnel_id_binding_hash`) is pinned in the private manifest.
+- Distinct executable binaries remain fully supported with no binding
+  required (legacy shape, byte-for-byte backward compatible manifests).
+
+The global `require_parent_safe` stays strict for every path this
+integration touches (plists, profiles, locators, telemetry, manifests,
+watchdog roots). The ONLY exception is a caller-local, executable-only walk
+(`require_executable_parent_safe`) that allows exactly ONE ancestor — the
+directory whose absolute lexical path equals the canonical Homebrew Cellar
+prefix — when it verifies as a real (non-symlink) directory, user-owned,
+mode EXACTLY 0775 (group-shared, never world-writable, no sticky/setid
+bits). At most one ancestor may use the allowance; every other ancestor of
+the executable keeps full strict checking. Hermetic tests inject a
+controlled fake prefix by patching the module constant; no runtime caller
+chooses a prefix. The executable, its parent directory, and the Cellar
+allowance directory are pinned by `(dev, ino, uid, mode)` from one nofollow
+descriptor observation each, and `seat_identity_drift_problems`
+re-proves them against the manifest BEFORE EVERY kickstart and install/rollback
+effect — not merely after the manifest's one-day attestation boundary.
+
+**Residual risk, stated honestly:** a group member of the Homebrew Cellar
+can still rename/replace entries inside the group-writable directory
+between verification and the subsequent launchd effect (a classic
+group-member rename/exec TOCTOU in the launchd path), and a sufficiently
+lucky delete-and-recreate that reuses an inode number can momentarily evade
+a `(dev, ino)` pin (content changes are still caught by the digest pins).
+This residual is REDUCED by the per-effect re-proofs above but is NOT
+eliminated without host-side permission changes, which this integration is
+forbidden to make. The independent reviewer must adjudicate this residual
+explicitly rather than assume it away.
+
 ## Secret-safety contract
 
 - Job `EnvironmentVariables` are stored ONLY inside the private manifest and
@@ -414,6 +466,8 @@ result as an alert code, never silently. Backups live under
 - Identity tables print label, digest prefixes, mode, argv LENGTH — never an
   argv body, never an env value, never a token.
 - Pass reports contain no argv bodies; the report file is 0600.
+- Control-plane tunnel ids are pinned ONLY as domain-separated SHA-256
+  digests; profile JSON, profile paths, and URL locators are never printed.
 - No credential, tunnel identity, or path is hardcoded in source; nothing in
   this repo's static text qualifies production (stale snapshots are not
   authority — the plan's own fence).

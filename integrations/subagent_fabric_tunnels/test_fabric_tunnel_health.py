@@ -2055,5 +2055,236 @@ class CliPollLedgerTests(unittest.TestCase):
                 fth.load_kick_ledger(fixture.home)
 
 
+# ---------------------------------------------------------------------------
+# Shared-executable identity binding (identity repair, 2026-10-31): pre-effect
+# re-proofs for the health pass and the strictly typed poll evidence on a
+# home whose five seats share ONE tunnel-client binary.
+# ---------------------------------------------------------------------------
+
+SHARED_TUNNEL_IDS = {
+    "c1": "tunnel-id-c1-alpha",
+    "c2-business": "tunnel-id-c2b-bravo",
+    "c2-personal": "tunnel-id-c2p-charlie",
+    "c3": "tunnel-id-c3-delta",
+    "c4": "tunnel-id-c4-echo",
+}
+
+
+class FixtureHomeShared(FixtureHomeCli):
+    """FixtureHomeCli rebuilt around ONE shared executable inode: each plist
+    carries its own absolute --profile-file option and each 0600 profile has
+    a DISTINCT control_plane.tunnel_id."""
+
+    def __init__(self):
+        self.shared_executable = None
+        super().__init__()
+        clients_dir = os.path.join(self.home, "clients")
+        bin_dir = os.path.join(clients_dir, "bin")
+        os.makedirs(bin_dir, mode=0o755, exist_ok=True)
+        self.shared_executable = os.path.join(bin_dir, "tunnel-client-shared")
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            with open(self.shared_executable, "wb") as handle:
+                handle.write(b"#!/bin/sh\nexit 0\n")
+            os.chmod(self.shared_executable, 0o755)
+            seat_dir = os.path.join(clients_dir, seat)
+            os.makedirs(seat_dir, mode=0o755, exist_ok=True)
+            locator = os.path.join(seat_dir, f"{seat}-control-plane.url")
+            with open(locator, "wb") as handle:
+                handle.write((SECRET_URL + "\n").encode())
+            os.chmod(locator, 0o600)
+            profile = os.path.join(seat_dir, "profile.json")
+            with open(profile, "wb") as handle:
+                handle.write(json.dumps({
+                    "seat": seat,
+                    "control_plane": {"tunnel_id": SHARED_TUNNEL_IDS[seat]},
+                    "health": {"url_file": locator},
+                }).encode())
+            os.chmod(profile, 0o600)
+            self.profile_paths[label] = profile
+            self.locator_paths[label] = locator
+            plist_path = os.path.join(self.home, "Library", "LaunchAgents", f"{label}.plist")
+            working = {
+                "Label": label,
+                "ProgramArguments": [
+                    self.shared_executable, "--profile-file", profile,
+                ],
+                "RunAtLoad": True,
+                "KeepAlive": True,
+                "ThrottleInterval": 10,
+            }
+            with open(plist_path, "wb") as handle:
+                plistlib.dump(working, handle, fmt=plistlib.FMT_XML)
+            os.chmod(plist_path, 0o644)
+        # The per-seat executables from the base fixture are unreferenced
+        # now; remove them so the shared inode is the only candidate.
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            os.remove(os.path.join(clients_dir, f"tunnel-{seat}"))
+
+    def read_manifest(self) -> dict:
+        with open(fti.manifest_path(self.home), encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def _poll_seat_for_argv(self, argv):
+        # The health FakePollRunner keys seats by the executable basename,
+        # which is now SHARED; key by the LOCATOR named in argv[3] instead
+        # (build_control_plane_poll_argv puts it after "--url-file").
+        locator_path = argv[3]
+        for label, candidate in self.locator_paths.items():
+            if candidate == locator_path:
+                return label
+        raise AssertionError("probe argv did not name a qualified locator")
+
+    def shared_poll_runner(self, payloads=None, default_value=None):
+        payloads = dict(payloads or {})
+        fallback = NOW - 8 if default_value is None else default_value
+
+        def runner(argv, timeout=5.0):
+            label = self._poll_seat_for_argv(argv)
+            stdout = payloads.get(label, ok_poll_payload(fallback))
+            return ftc.RunResult(tuple(argv), 0, stdout, "")
+
+        return runner
+
+    def replace_shared_binary(self, body: bytes) -> None:
+        replacement = os.path.join(self.home, "replacement-binary")
+        with open(replacement, "wb") as handle:
+            handle.write(body)
+        os.chmod(replacement, 0o755)
+        os.replace(replacement, self.shared_executable)
+
+    def rewrite_profile(self, label: str, seat: str, tunnel_id: str) -> None:
+        with open(self.profile_paths[label], "wb") as handle:
+            handle.write(json.dumps({
+                "seat": seat,
+                "control_plane": {"tunnel_id": tunnel_id},
+                "health": {"url_file": self.locator_paths[label]},
+            }).encode())
+        os.chmod(self.profile_paths[label], 0o600)
+
+    def replace_locator(self, label: str, body: str) -> None:
+        replacement = os.path.join(self.home, "replacement-locator.url")
+        with open(replacement, "wb") as handle:
+            handle.write(body.encode())
+        os.chmod(replacement, 0o600)
+        os.replace(replacement, self.locator_paths[label])
+
+
+class SharedExecutableHealthTests(unittest.TestCase):
+    """Per-effect identity re-proofs and strictly typed poll evidence on a
+    shared-binary home."""
+
+    def _qualify(self, fixture) -> dict:
+        fixture.qualify()
+        return fixture.read_manifest()
+
+    def test_shared_home_passes_healthy_without_kicks(self):
+        with FixtureHomeShared() as fixture:
+            self._qualify(fixture)
+            report = fth.run_pass(
+                fixture.home, FakeRunner(all_pids()), now=NOW + 30,
+                poll_runner=fixture.shared_poll_runner(),
+            )
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(report.seats[label]["state"], fth.ST_HEALTHY, label)
+            self.assertEqual(FakeRunner(all_pids()).kicks, [])
+            self.assertFalse(any(
+                alert.code.startswith("seat_identity") for alert in report.alerts
+            ))
+
+    def test_missing_pid_kick_suppressed_when_identity_drifts(self):
+        with FixtureHomeShared() as fixture:
+            self._qualify(fixture)
+            fixture.replace_shared_binary(b"#!/bin/sh\nexit 1\n")
+            runner = FakeRunner({label: None for label in ftc.TUNNEL_LABELS})
+            report = fth.run_pass(fixture.home, runner, now=NOW + 30)
+            self.assertEqual(runner.kicks, [])  # NO kickstart effect
+            suspect_states = [
+                report.seats[label]["state"]
+                for label in sorted(ftc.TUNNEL_LABELS)
+            ]
+            self.assertEqual(suspect_states, [fth.ST_IDENTITY_SUSPECT] * 5)
+            codes = {alert.code for alert in report.alerts}
+            self.assertIn("seat_identity_drift_alert_only", codes)
+            detail = next(
+                alert for alert in report.alerts
+                if alert.code == "seat_identity_drift_alert_only"
+            ).detail
+            self.assertIn("executable_digest_changed", detail)
+            self.assertIn("executable_inode_changed", detail)
+
+    def test_poll_evidence_refuses_replaced_binary_with_new_inode_same_bytes(self):
+        with FixtureHomeShared() as fixture:
+            self._qualify(fixture)
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            # Same BYTES, new inode: the digest alone cannot catch it; the
+            # pinned dev/ino pair does.
+            with open(fixture.shared_executable, "rb") as handle:
+                same_bytes = handle.read()
+            fixture.replace_shared_binary(same_bytes)
+            report = fth.run_pass(
+                fixture.home, FakeRunner(all_pids()), now=NOW + 30,
+                poll_runner=fixture.shared_poll_runner(),
+            )
+            self.assertEqual(
+                report.seats[label]["poll_refused_code"],
+                "cli_poll_executable_identity_changed",
+            )
+
+    def test_poll_evidence_refuses_rewritten_profile(self):
+        with FixtureHomeShared() as fixture:
+            self._qualify(fixture)
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            fixture.rewrite_profile(label, "c1", "tunnel-id-swapped")
+            report = fth.run_pass(
+                fixture.home, FakeRunner(all_pids()), now=NOW + 30,
+                poll_runner=fixture.shared_poll_runner(),
+            )
+            self.assertEqual(
+                report.seats[label]["poll_refused_code"],
+                "cli_poll_profile_identity_changed",
+            )
+            # The healthy seats keep polling: one drifted seat cannot blind
+            # the rest of the pass.
+            other = sorted(ftc.TUNNEL_LABELS)[1]
+            self.assertEqual(report.seats[other]["poll_refused_code"], "")
+
+    def test_poll_evidence_refuses_replaced_locator(self):
+        with FixtureHomeShared() as fixture:
+            self._qualify(fixture)
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            fixture.replace_locator(label, "https://elsewhere.example.invalid\n")
+            report = fth.run_pass(
+                fixture.home, FakeRunner(all_pids()), now=NOW + 30,
+                poll_runner=fixture.shared_poll_runner(),
+            )
+            self.assertEqual(
+                report.seats[label]["poll_refused_code"],
+                "cli_poll_locator_identity_changed",
+            )
+
+    def test_watchdog_install_refuses_when_seat_identity_drifted(self):
+        with FixtureHomeShared() as fixture:
+            self._qualify(fixture)
+            fixture.replace_shared_binary(b"#!/bin/sh\nexit 3\n")
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fth.install_watchdog_agent(
+                    fixture.home, FakeRunner(all_pids()), confirm=True, now=NOW + 30
+                )
+            self.assertIn("watchdog_install_identity_drift", str(caught.exception))
+            self.assertIn("executable_digest_changed", str(caught.exception))
+
+    def test_watchdog_install_succeeds_on_proven_shared_home(self):
+        with FixtureHomeShared() as fixture:
+            self._qualify(fixture)
+            plist_path = fth.install_watchdog_agent(
+                fixture.home, FakeRunner(all_pids()), confirm=True, now=NOW + 30
+            )
+            self.assertTrue(plist_path)
+            for line in fth.verify_watchdog_install(fixture.home):
+                self.assertIn("installed=True", line)
+
+
 if __name__ == "__main__":
     unittest.main()

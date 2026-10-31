@@ -1067,6 +1067,632 @@ class FirstPartyCliPollQualificationTests(unittest.TestCase):
             self.assertIn("heartbeat_mode_ambiguous", codes)
 
 
+# ---------------------------------------------------------------------------
+# Shared-executable identity binding + Homebrew Cellar allowance
+# (identity repair, 2026-10-31).
+#
+# The five REAL m2 seats legitimately share ONE user-owned tunnel-client
+# binary installed under the canonical Homebrew Cellar prefix (user-owned,
+# mode 0775 by Homebrew's layout). The old blanket rejection of a shared
+# executable is replaced by a positive per-seat proof: five distinct private
+# profiles (distinct path, inode, content digest), each named by EXACTLY ONE
+# absolute --profile-file option in the seat's INSTALLED argv, each deriving
+# a distinct URL locator, and each carrying a DISTINCT control_plane.tunnel_id
+# that is pinned only as a domain-separated digest.
+#
+# The Cellar allowance is injected in these tests by patching the module
+# constant to a controlled fake prefix — exactly what production code never
+# does; runtime callers always anchor to the canonical path.
+# ---------------------------------------------------------------------------
+
+CELLAR_SEAT_TUNNEL_IDS = {
+    "c1": "tunnel-id-c1-alpha",
+    "c2-business": "tunnel-id-c2b-bravo",
+    "c2-personal": "tunnel-id-c2p-charlie",
+    "c3": "tunnel-id-c3-delta",
+    "c4": "tunnel-id-c4-echo",
+}
+
+
+@contextlib.contextmanager
+def patched_cellar_prefix(cellar_dir: str):
+    """Test-only prefix injection: no runtime caller may choose a prefix."""
+    saved = ftc.CANONICAL_HOMEBREW_CELLAR
+    ftc.CANONICAL_HOMEBREW_CELLAR = cellar_dir
+    try:
+        yield cellar_dir
+    finally:
+        ftc.CANONICAL_HOMEBREW_CELLAR = saved
+
+
+class SharedExecutableFixtureHome(FixtureHome):
+    """Five seats sharing ONE executable inode, each plist carrying its own
+    absolute --profile-file option, five distinct 0600 profiles with distinct
+    control_plane.tunnel_id values, and five distinct URL locators."""
+
+    def __init__(self, *, argv_profile_flag: bool = True) -> None:
+        super().__init__()
+        self.argv_profile_flag = argv_profile_flag
+        self.shared_executable = os.path.join(self.home, "clients", "bin", "tunnel-client-shared")
+        self.profile_paths: dict[str, str] = {}
+        self.locator_paths: dict[str, str] = {}
+        self.tunnel_ids: dict[str, str] = {}
+        os.makedirs(os.path.dirname(self.shared_executable), mode=0o755, exist_ok=True)
+        for label in sorted(ftc.TUNNEL_LABELS):
+            seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+            # One shared binary: same inode for every seat, link count 1.
+            with open(self.shared_executable, "wb") as handle:
+                handle.write(b"#!/bin/sh\nexit 0\n")
+            os.chmod(self.shared_executable, 0o755)
+            seat_dir = os.path.join(self.home, "clients", seat)
+            os.makedirs(seat_dir, mode=0o755, exist_ok=True)
+            locator = os.path.join(seat_dir, f"{seat}-control-plane.url")
+            with open(locator, "wb") as handle:
+                handle.write((SECRET_URL + "\n").encode())
+            os.chmod(locator, 0o600)
+            tunnel_id = CELLAR_SEAT_TUNNEL_IDS[seat]
+            profile = os.path.join(seat_dir, "profile.json")
+            with open(profile, "wb") as handle:
+                handle.write(json.dumps({
+                    "seat": seat,
+                    "control_plane": {"tunnel_id": tunnel_id},
+                    "health": {"url_file": locator},
+                }).encode())
+            os.chmod(profile, 0o600)
+            self.profile_paths[label] = profile
+            self.locator_paths[label] = locator
+            self.tunnel_ids[label] = tunnel_id
+            working = base_plist(label, executable=self.shared_executable)
+            if self.argv_profile_flag:
+                working["ProgramArguments"] = [
+                    self.shared_executable, "--profile-file", profile,
+                ]
+            else:
+                # Distinct argv WITHOUT the profile flag (the flag-missing
+                # case): each seat keeps a unique marker argument.
+                working["ProgramArguments"] = [self.shared_executable, "--seat-tag", seat]
+            plist_path = os.path.join(self.home, "Library", "LaunchAgents", f"{label}.plist")
+            with open(plist_path, "wb") as handle:
+                plistlib.dump(working, handle, fmt=plistlib.FMT_XML)
+            os.chmod(plist_path, 0o644)
+
+    def write_profile(self, label: str, doc: dict) -> None:
+        with open(self.profile_paths[label], "wb") as handle:
+            handle.write(json.dumps(doc).encode())
+        os.chmod(self.profile_paths[label], 0o600)
+
+    def rewrite_argv(self, label: str, program_arguments: list) -> None:
+        working = base_plist(label, executable=program_arguments[0])
+        working["ProgramArguments"] = list(program_arguments)
+        plist_path = os.path.join(self.home, "Library", "LaunchAgents", f"{label}.plist")
+        with open(plist_path, "wb") as handle:
+            plistlib.dump(working, handle, fmt=plistlib.FMT_XML)
+        os.chmod(plist_path, 0o644)
+
+    def cli_seat_facts(self, label: str) -> dict:
+        return {
+            "heartbeat_mode": ftc.HEARTBEAT_MODE_CLI_CONTROL_PLANE_POLL,
+            "heartbeat_profile_file": self.profile_paths[label],
+            "heartbeat_kind": "tunnel-client-control-plane-last-seen",
+            "heartbeat_proof_note": "fixture: shared binary bound to a private profile and unique tunnel id",
+        }
+
+    def cli_facts(self, labels=None) -> dict:
+        chosen = sorted(labels) if labels is not None else sorted(ftc.TUNNEL_LABELS)
+        return {
+            "seats": {label: self.cli_seat_facts(label) for label in chosen},
+            "host": {},
+        }
+
+    def read_manifest(self) -> dict:
+        with open(fti.manifest_path(Path(self.home)), encoding="utf-8") as handle:
+            return json.load(handle)
+
+
+class CellarSharedFixtureHome(SharedExecutableFixtureHome):
+    """The shared binary installed INSIDE a fake canonical Homebrew Cellar:
+    user-owned mode 0775 Cellar directory, strict parents elsewhere."""
+
+    def __init__(self, *, argv_profile_flag: bool = True) -> None:
+        super().__init__(argv_profile_flag=argv_profile_flag)
+        self.cellar_dir = os.path.join(self.home, "opt", "homebrew", "Cellar")
+        os.makedirs(os.path.dirname(self.cellar_dir), mode=0o755, exist_ok=True)
+        os.makedirs(self.cellar_dir, mode=0o775, exist_ok=True)
+        os.chmod(os.path.dirname(self.cellar_dir), 0o755)
+        os.chmod(self.cellar_dir, 0o775)
+        cellar_executable = os.path.join(
+            self.cellar_dir, "tunnel-client", "1.2.3", "bin", "tunnel-client-shared"
+        )
+        os.makedirs(os.path.dirname(cellar_executable), mode=0o755, exist_ok=True)
+        # ONE inode: move the shared binary into the Cellar layout.
+        os.replace(self.shared_executable, cellar_executable)
+        os.chmod(cellar_executable, 0o755)
+        self.shared_executable = cellar_executable
+        for label in sorted(ftc.TUNNEL_LABELS):
+            self.rewrite_argv(
+                label, [cellar_executable, "--profile-file", self.profile_paths[label]]
+            )
+
+
+class SharedExecutableBindingTests(unittest.TestCase):
+    """The positive replacement: a shared binary qualifies ONLY through five
+    verified private profiles with unique tunnel ids."""
+
+    def test_shared_executable_with_five_bound_profiles_qualifies_dry_run(self):
+        with SharedExecutableFixtureHome() as fixture:
+            poll = FakePollRunner()
+            lines = fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=False, now=NOW, dry_run=True, poll_runner=poll,
+            )
+            self.assertEqual(len(poll.calls), 5)
+            self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))))
+            self.assertIn("heartbeat_cli_poll_seats=5", " ".join(lines))
+
+    def test_shared_executable_with_five_bound_profiles_qualifies_and_pins(self):
+        with SharedExecutableFixtureHome() as fixture:
+            poll = FakePollRunner()
+            fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=True, now=NOW, poll_runner=poll,
+            )
+            manifest_path = fti.manifest_path(Path(fixture.home))
+            manifest = fixture.read_manifest()
+            # Exact private-manifest discipline.
+            self.assertEqual(stat.S_IMODE(os.stat(manifest_path).st_mode), 0o600)
+            hashes = set()
+            shared_inodes = set()
+            for label in sorted(ftc.TUNNEL_LABELS):
+                entry = manifest["seats"][label]
+                binding = entry["poll_profile"]
+                self.assertEqual(binding["path"], fixture.profile_paths[label])
+                self.assertEqual(binding["locator"], fixture.locator_paths[label])
+                seat = label.rpartition(ftc.TUNNEL_LABEL_PREFIX)[2]
+                self.assertEqual(
+                    binding["tunnel_id_hash"],
+                    fti.tunnel_id_binding_hash(CELLAR_SEAT_TUNNEL_IDS[seat]),
+                )
+                hashes.add(binding["tunnel_id_hash"])
+                shared_inodes.add((entry["executable_dev"], entry["executable_ino"]))
+                self.assertEqual(entry["executable_owner_uid"], UID)
+                self.assertTrue(entry["executable_ino"] > 0)
+            self.assertEqual(len(hashes), 5)  # five DISTINCT tunnel-id digests
+            self.assertEqual(len(shared_inodes), 1)  # ONE shared binary inode
+            with open(manifest_path, "rb") as handle:
+                raw = handle.read()
+            for tunnel_id in CELLAR_SEAT_TUNNEL_IDS.values():
+                self.assertNotIn(tunnel_id.encode(), raw)  # never the raw id
+            # The fresh manifest proves current with zero drift problems.
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(
+                    fti.seat_identity_drift_problems(Path(fixture.home), manifest, label), []
+                )
+
+    def test_distinct_executables_still_qualify_without_bindings(self):
+        # Legacy shape: per-seat fake executables, no shared inode.
+        with FixtureHome() as fixture:
+            fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=None,
+                operator_confirmed=True, now=NOW,
+            )
+            with open(fti.manifest_path(Path(fixture.home)), encoding="utf-8") as handle:
+                manifest = json.load(handle)
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertNotIn("poll_profile", manifest["seats"][label])
+
+    def test_shared_executable_without_profile_binding_refused(self):
+        with SharedExecutableFixtureHome() as fixture:
+            # The shared seats declare NO facts at all: sharing without a
+            # private binding is still the adoption hazard, refused.
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=None,
+                    operator_confirmed=True, now=NOW,
+                )
+            self.assertIn("executable_shared_requires_profile_binding", str(caught.exception))
+            self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))))
+
+    def test_shared_executable_profile_missing_tunnel_id_refused(self):
+        with SharedExecutableFixtureHome() as fixture:
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            fixture.write_profile(label, {
+                "seat": "c1",
+                "health": {"url_file": fixture.locator_paths[label]},
+            })
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("_poll_tunnel_id_missing", str(caught.exception))
+
+    def test_malformed_tunnel_id_refused(self):
+        cases = ("", "https://control-plane.example.invalid/tunnel", "has space", "x" * 200)
+        for bad in cases:
+            with SharedExecutableFixtureHome() as fixture:
+                label = sorted(ftc.TUNNEL_LABELS)[0]
+                fixture.write_profile(label, {
+                    "seat": "c1",
+                    "control_plane": {"tunnel_id": bad},
+                    "health": {"url_file": fixture.locator_paths[label]},
+                })
+                with self.assertRaises(ftc.PolicyRefused) as caught:
+                    fti.qualify_install(
+                        Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                        operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                    )
+                self.assertIn("_poll_tunnel_id_malformed", str(caught.exception), repr(bad))
+                self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))))
+
+    def test_duplicate_tunnel_id_across_seats_refused(self):
+        with SharedExecutableFixtureHome() as fixture:
+            first, second = sorted(ftc.TUNNEL_LABELS)[:2]
+            shared_id = CELLAR_SEAT_TUNNEL_IDS["c1"]
+            fixture.write_profile(first, {
+                "seat": "c1",
+                "control_plane": {"tunnel_id": shared_id},
+                "health": {"url_file": fixture.locator_paths[first]},
+            })
+            fixture.write_profile(second, {
+                "seat": "c2-business",
+                "control_plane": {"tunnel_id": shared_id},
+                "health": {"url_file": fixture.locator_paths[second]},
+            })
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("facts_poll_tunnel_id_duplicated", str(caught.exception))
+
+    def test_hardlinked_profile_refused(self):
+        with SharedExecutableFixtureHome() as fixture:
+            second = sorted(ftc.TUNNEL_LABELS)[1]
+            os.remove(fixture.profile_paths[second])
+            os.link(fixture.profile_paths[sorted(ftc.TUNNEL_LABELS)[0]], fixture.profile_paths[second])
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("hardlink", str(caught.exception))
+            self.assertIn("_poll_profile", str(caught.exception))
+
+    def test_installed_argv_profile_file_rules(self):
+        label = ftc.TUNNEL_LABEL_PREFIX + "c1"
+        argv = ["/opt/client/tunnel", "--profile-file", "/tmp/only.json"]
+        self.assertEqual(fti.installed_argv_profile_file(label, argv), "/tmp/only.json")
+        self.assertEqual(
+            fti.installed_argv_profile_file(label, ["/opt/client/tunnel", "--profile-file=/tmp/eq.json"]),
+            "/tmp/eq.json",
+        )
+        self.assertIsNone(fti.installed_argv_profile_file(label, ["/opt/client/tunnel", "-v"]))
+        self.assertIsNone(fti.installed_argv_profile_file(label, ["/opt/client/tunnel"]))
+        for bad, expected in (
+            (
+                ["/opt/client/tunnel", "--profile-file", "/a.json", "--profile-file", "/b.json"],
+                "profile_file_flag_duplicated",
+            ),
+            (
+                ["/opt/client/tunnel", "--profile-file=/a.json", "--profile-file", "/b.json"],
+                "profile_file_flag_duplicated",
+            ),
+            (["/opt/client/tunnel", "--profile-file"], "profile_file_flag_missing_value"),
+            (["/opt/client/tunnel", "--profile-file", "relative.json"], "profile_file_flag_not_absolute"),
+        ):
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                fti.installed_argv_profile_file(label, bad)
+            self.assertIn(expected, str(caught.exception))
+
+    def test_installed_argv_flag_must_match_operator_fact(self):
+        with SharedExecutableFixtureHome() as fixture:
+            # Swap TWO seats' installed argv profiles (each tuple stays
+            # distinct, each seat's argv now names the OTHER seat's file):
+            # the fact/argv fence must refuse before any probe or write.
+            first, second = sorted(ftc.TUNNEL_LABELS)[:2]
+            fixture.rewrite_argv(
+                first, [fixture.shared_executable, "--profile-file", fixture.profile_paths[second]]
+            )
+            fixture.rewrite_argv(
+                second, [fixture.shared_executable, "--profile-file", fixture.profile_paths[first]]
+            )
+            poll = FakePollRunner()
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=poll,
+                )
+            self.assertIn("facts_poll_profile_argv_mismatch", str(caught.exception))
+            self.assertEqual(poll.calls, [])
+            self.assertFalse(os.path.exists(fti.manifest_path(Path(fixture.home))))
+
+    def test_missing_installed_profile_file_flag_refused_for_shared_seat(self):
+        with SharedExecutableFixtureHome(argv_profile_flag=False) as fixture:
+            poll = FakePollRunner()
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=poll,
+                )
+            self.assertIn("facts_poll_profile_argv_mismatch", str(caught.exception))
+            self.assertEqual(poll.calls, [])
+
+    def test_foreign_profile_fact_refused(self):
+        # A foreign seat's profile can never be paired with a shared seat:
+        # the installed argv names the seat's own file, so the fact/argv
+        # fence refuses first (and the argv-tuple distinctness guard refuses
+        # the swapped-argv variant outright).
+        with SharedExecutableFixtureHome() as fixture:
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            foreign_profile = fixture.profile_paths[sorted(ftc.TUNNEL_LABELS)[1]]
+            facts = fixture.cli_facts()
+            facts["seats"][label]["heartbeat_profile_file"] = foreign_profile
+            with self.assertRaises(ftc.PolicyRefused) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=facts,
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("facts_poll_profile_argv_mismatch", str(caught.exception))
+
+    def test_shared_seat_argv_flag_relative_value_refused(self):
+        with SharedExecutableFixtureHome() as fixture:
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            fixture.rewrite_argv(
+                label,
+                [fixture.shared_executable, "--profile-file", "relative/profile.json"],
+            )
+            with self.assertRaises(ftc.IdentityRejected) as caught:
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            self.assertIn("profile_file_flag_not_absolute", str(caught.exception))
+
+    def test_evidence_never_prints_shared_profile_locator_url_or_tunnel_id(self):
+        with SharedExecutableFixtureHome() as fixture:
+            lines = fti.qualify_install(
+                Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+            )
+            public = fti.manifest_public_evidence(fixture.read_manifest())
+            blob = "\n".join(lines + public)
+            self.assertNotIn(SECRET_URL, blob)
+            self.assertNotIn("profile.json", blob)
+            self.assertNotIn("control-plane.url", blob)
+            for tunnel_id in CELLAR_SEAT_TUNNEL_IDS.values():
+                self.assertNotIn(tunnel_id, blob)
+
+
+class CellarAllowanceTests(unittest.TestCase):
+    """The single executable-only Cellar exception: exact shape, exact mode,
+    one allowed ancestor, everything else strict."""
+
+    def test_cellar_shared_home_qualifies_and_pins_allowance(self):
+        with CellarSharedFixtureHome() as fixture:
+            with patched_cellar_prefix(fixture.cellar_dir):
+                fti.qualify_install(
+                    Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                    operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                )
+            manifest = fixture.read_manifest()
+            for label in sorted(ftc.TUNNEL_LABELS):
+                entry = manifest["seats"][label]
+                self.assertEqual(entry["cellar_ancestor"]["path"], fixture.cellar_dir)
+                self.assertEqual(entry["cellar_ancestor"]["mode"], 0o775)
+                self.assertEqual(entry["executable_owner_uid"], UID)
+                pinned = entry["poll_profile"]
+                self.assertEqual(pinned["path"], fixture.profile_paths[label])
+            with patched_cellar_prefix(fixture.cellar_dir):
+                identity = fti.verify_seat(
+                    Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID
+                )
+            self.assertEqual(identity.cellar_ancestor, fixture.cellar_dir)
+
+    def test_cellar_mode_deviation_refused(self):
+        for mode in (0o777, 0o770, 0o1755):
+            with CellarSharedFixtureHome() as fixture:
+                os.chmod(fixture.cellar_dir, mode)
+                with patched_cellar_prefix(fixture.cellar_dir):
+                    with self.assertRaises(ftc.IdentityRejected) as caught:
+                        fti.verify_seat(
+                            Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID
+                        )
+                    self.assertIn("cellar allowance dir mode", str(caught.exception), oct(mode))
+
+    def test_cellar_symlink_refused(self):
+        with CellarSharedFixtureHome() as fixture:
+            real = fixture.cellar_dir
+            swapped = os.path.join(fixture.home, "opt", "homebrew", "CellarReal")
+            os.rename(real, swapped)
+            os.symlink(swapped, real)
+            with patched_cellar_prefix(fixture.cellar_dir):
+                with self.assertRaises(ftc.IdentityRejected) as caught:
+                    fti.verify_seat(
+                        Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID
+                    )
+                self.assertIn("cellar allowance dir is a symlink", str(caught.exception))
+
+    def test_ordinary_group_writable_ancestor_still_refused(self):
+        with CellarSharedFixtureHome() as fixture:
+            # A group-writable ancestor that is NOT the Cellar anchor stays
+            # refused even while the allowance exists for Cellar itself.
+            os.chmod(os.path.dirname(fixture.cellar_dir), 0o775)
+            with patched_cellar_prefix(fixture.cellar_dir):
+                with self.assertRaises(ftc.IdentityRejected) as caught:
+                    fti.verify_seat(
+                        Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID
+                    )
+                self.assertIn("unprotected writable ancestor", str(caught.exception))
+
+    def test_second_group_writable_ancestor_inside_cellar_refused(self):
+        with CellarSharedFixtureHome() as fixture:
+            # The allowance covers exactly ONE ancestor; the pkg dir inside
+            # the Cellar is an ordinary directory and stays strict.
+            pkg_dir = os.path.join(fixture.cellar_dir, "tunnel-client")
+            os.chmod(pkg_dir, 0o775)
+            with patched_cellar_prefix(fixture.cellar_dir):
+                with self.assertRaises(ftc.IdentityRejected) as caught:
+                    fti.verify_seat(
+                        Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID
+                    )
+                self.assertIn("unprotected writable ancestor", str(caught.exception))
+
+    def test_symlinked_non_cellar_ancestor_refused(self):
+        with CellarSharedFixtureHome() as fixture:
+            # Swap the strict <pkg>/<ver> directory for a symlink to it.
+            ver_dir = os.path.join(fixture.cellar_dir, "tunnel-client", "1.2.3")
+            os.rename(ver_dir, ver_dir + ".real")
+            os.symlink(ver_dir + ".real", ver_dir)
+            with patched_cellar_prefix(fixture.cellar_dir):
+                with self.assertRaises(ftc.IdentityRejected) as caught:
+                    fti.verify_seat(
+                        Path(fixture.home), sorted(ftc.TUNNEL_LABELS)[0], UID
+                    )
+                self.assertIn("symlinked ancestor", str(caught.exception))
+
+    def test_profiles_and_locators_keep_strict_parent_rule(self):
+        # The Cellar allowance is EXECUTABLE-only: a group-writable ancestor
+        # of a PROFILE still refuses, even in the same fixture.
+        with CellarSharedFixtureHome() as fixture:
+            clients_dir = os.path.join(fixture.home, "clients")
+            os.chmod(clients_dir, 0o775)
+            with patched_cellar_prefix(fixture.cellar_dir):
+                with self.assertRaises(ftc.PolicyRefused) as caught:
+                    fti.qualify_install(
+                        Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+                        operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+                    )
+                self.assertIn("_poll_profile_parent_unsafe", str(caught.exception))
+
+
+class DriftBetweenAttestationAndEffectTests(unittest.TestCase):
+    """Pins are re-proven before every effect: an in-place replacement of the
+    binary, profile, or parent directory refuses."""
+
+    def _qualify_shared(self, fixture) -> dict:
+        fti.qualify_install(
+            Path(fixture.home), uid=UID, facts=fixture.cli_facts(),
+            operator_confirmed=True, now=NOW, poll_runner=FakePollRunner(),
+        )
+        return fixture.read_manifest()
+
+    def test_binary_content_replacement_detected_as_drift(self):
+        with SharedExecutableFixtureHome() as fixture:
+            manifest = self._qualify_shared(fixture)
+            for label in sorted(ftc.TUNNEL_LABELS):
+                self.assertEqual(
+                    fti.seat_identity_drift_problems(Path(fixture.home), manifest, label), []
+                )
+            replacement = os.path.join(fixture.home, "replacement-binary")
+            with open(replacement, "wb") as handle:
+                handle.write(b"#!/bin/sh\nexit 1\n")
+            os.chmod(replacement, 0o755)
+            os.replace(replacement, fixture.shared_executable)  # new inode + bytes
+            problems = fti.seat_identity_drift_problems(
+                Path(fixture.home), manifest, sorted(ftc.TUNNEL_LABELS)[0]
+            )
+            self.assertIn("executable_digest_changed", problems)
+            self.assertIn("executable_inode_changed", problems)
+
+    def test_profile_rewrite_detected_as_drift(self):
+        with SharedExecutableFixtureHome() as fixture:
+            manifest = self._qualify_shared(fixture)
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            fixture.write_profile(label, {
+                "seat": "c1",
+                "control_plane": {"tunnel_id": "tunnel-id-swapped"},
+                "health": {"url_file": fixture.locator_paths[label]},
+            })
+            problems = fti.seat_identity_drift_problems(Path(fixture.home), manifest, label)
+            self.assertIn("poll_profile_digest_changed", problems)
+            self.assertIn("poll_tunnel_id_changed", problems)
+
+    def test_profile_removal_refused_for_pinned_seat(self):
+        with SharedExecutableFixtureHome() as fixture:
+            manifest = self._qualify_shared(fixture)
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            os.remove(fixture.profile_paths[label])
+            problems = fti.seat_identity_drift_problems(Path(fixture.home), manifest, label)
+            self.assertTrue(
+                any(p.startswith("poll_profile_binding_refused") for p in problems)
+            )
+
+    def test_parent_directory_in_place_replacement_detected(self):
+        with SharedExecutableFixtureHome() as fixture:
+            manifest = self._qualify_shared(fixture)
+            bin_dir = os.path.dirname(fixture.shared_executable)
+            staging = bin_dir + ".staging"
+            # Recreate the exec's parent directory: same path, new inode.
+            os.rename(bin_dir, staging)
+            os.mkdir(bin_dir)
+            os.chmod(bin_dir, 0o755)
+            os.rename(os.path.join(staging, "tunnel-client-shared"), os.path.join(bin_dir, "tunnel-client-shared"))
+            os.chmod(os.path.join(bin_dir, "tunnel-client-shared"), 0o755)
+            os.rmdir(staging)
+            problems = fti.seat_identity_drift_problems(
+                Path(fixture.home), manifest, sorted(ftc.TUNNEL_LABELS)[0]
+            )
+            self.assertIn("executable_parent_inode_changed", problems)
+
+    def test_binary_slipped_behind_recreated_cellar_detected_as_drift(self):
+        with CellarSharedFixtureHome() as fixture:
+            with patched_cellar_prefix(fixture.cellar_dir):
+                manifest = self._qualify_shared(fixture)
+            # Recreate the Cellar directory and slip a DIFFERENT binary in
+            # behind it: the digest+inode pins refuse it even though the
+            # lexical path and dir mode are unchanged.
+            staging = fixture.cellar_dir + ".staging"
+            os.mkdir(staging)
+            for name in os.listdir(fixture.cellar_dir):
+                os.rename(os.path.join(fixture.cellar_dir, name), os.path.join(staging, name))
+            os.rmdir(fixture.cellar_dir)
+            os.mkdir(fixture.cellar_dir)
+            os.chmod(fixture.cellar_dir, 0o775)
+            for name in os.listdir(staging):
+                os.rename(os.path.join(staging, name), os.path.join(fixture.cellar_dir, name))
+            os.rmdir(staging)
+            replacement = os.path.join(fixture.home, "replacement-binary")
+            with open(replacement, "wb") as handle:
+                handle.write(b"#!/bin/sh\nexit 2\n")
+            os.chmod(replacement, 0o755)
+            os.replace(replacement, fixture.shared_executable)
+            with patched_cellar_prefix(fixture.cellar_dir):
+                problems = fti.seat_identity_drift_problems(
+                    Path(fixture.home), manifest, sorted(ftc.TUNNEL_LABELS)[0]
+                )
+            self.assertIn("executable_digest_changed", problems)
+            self.assertIn("executable_inode_changed", problems)
+
+    def test_cellar_shape_change_after_qualification_refused(self):
+        with CellarSharedFixtureHome() as fixture:
+            with patched_cellar_prefix(fixture.cellar_dir):
+                manifest = self._qualify_shared(fixture)
+            os.chmod(fixture.cellar_dir, 0o770)  # allowance shape broken
+            with patched_cellar_prefix(fixture.cellar_dir):
+                problems = fti.seat_identity_drift_problems(
+                    Path(fixture.home), manifest, sorted(ftc.TUNNEL_LABELS)[0]
+                )
+            self.assertTrue(
+                any(p.startswith("identity_rejected:") for p in problems), problems
+            )
+
+    def test_stale_manifest_revalidation_suspects_tampered_shared_seat(self):
+        with SharedExecutableFixtureHome() as fixture:
+            manifest = self._qualify_shared(fixture)
+            label = sorted(ftc.TUNNEL_LABELS)[0]
+            fixture.write_profile(label, {
+                "seat": "c1",
+                "control_plane": {"tunnel_id": "tunnel-id-stale-swap"},
+                "health": {"url_file": fixture.locator_paths[label]},
+            })
+            alerts, suspects = fti.revalidate_stale_identity(Path(fixture.home), manifest)
+            self.assertIn(label, suspects)
+            detail = next(a for a in alerts if a.label == label).detail
+            self.assertIn("poll_tunnel_id_changed", detail)
+            other = sorted(ftc.TUNNEL_LABELS)[1]
+            self.assertNotIn(other, suspects)
+
+
 class BoundedPollRunnerTests(unittest.TestCase):
     """The real bounded runner: hard deadline, hard output caps, no shell."""
 

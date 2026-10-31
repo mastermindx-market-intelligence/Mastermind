@@ -152,6 +152,36 @@ CLI_POLL_FUTURE_SKEW_SECONDS = 300.0
 
 LAUNCHCTL = "/bin/launchctl"
 
+# ---------------------------------------------------------------------------
+# Executable-ancestor Homebrew Cellar allowance (identity repair, 2026-10-31).
+#
+# The five incumbent seats legitimately SHARE one user-owned, safe-mode
+# tunnel-client binary installed under the canonical Apple-Silicon Homebrew
+# prefix, whose ``Cellar`` directory is user-owned mode 0775 by Homebrew's own
+# layout. Host-side permission changes (chmod/sudo/SIP) are forbidden, so the
+# ONLY relaxation this integration makes for that reality is a caller-local,
+# executable-only, narrowly anchored exception:
+#
+# - :func:`require_parent_safe` stays byte-for-byte strict GLOBALLY (plists,
+#   profiles, URL locators, telemetry, manifests, watchdog roots);
+# - :func:`require_executable_parent_safe` applies strict semantics to EVERY
+#   ancestor of an EXECUTABLE except exactly ONE: the directory whose absolute
+#   lexical path equals :data:`CANONICAL_HOMEBREW_CELLAR`, which must itself
+#   verify as a real (non-symlink) directory, owned by the seat user, with
+#   mode EXACTLY :data:`CELLAR_ALLOWED_MODE` (group-shared, never
+#   world-writable, no sticky/setgid/setuid bits);
+# - at most ONE ancestor may consume the allowance, and every other ancestor
+#   keeps full strict checking;
+# - the allowance directory's dev/ino/uid/mode are pinned at qualification and
+#   re-proven before every effect (see fabric_tunnel_identity).
+#
+# Hermetic tests may inject a controlled fake prefix by patching the module
+# constant; no runtime caller chooses a prefix — production callers pass no
+# prefix, so the anchor is always the exact canonical path below.
+CANONICAL_HOMEBREW_CELLAR = "/opt/homebrew/Cellar"
+# user-owned rwxrwxr-x: group-shared, NOT world-writable, no setid/sticky bits.
+CELLAR_ALLOWED_MODE = stat.S_IRWXU | stat.S_IRWXG | stat.S_IROTH | stat.S_IXOTH
+
 IDENTITY_MANIFEST_SCHEMA = "mastermind.subagent-fabric-tunnels.identity-manifest.v1"
 KICK_LEDGER_SCHEMA = "mastermind.subagent-fabric-tunnels.kick-ledger.v1"
 PASS_REPORT_SCHEMA = "mastermind.subagent-fabric-tunnels.pass-report.v1"
@@ -550,6 +580,210 @@ def require_parent_safe(path: Path, uid: int, *, code: str) -> None:
             continue  # protected convention directory (mode 1777)
         if world_writable or group_writable:
             raise IdentityRejected(f"{code}: unprotected writable ancestor {component}")
+
+
+def verify_cellar_allowance_dir(cellar_dir: Path, uid: int, *, code: str) -> None:
+    """Strict checks for the ONE allowed Cellar ancestor directory.
+
+    It must be a real directory (never a symlink), owned by the seat user,
+    and its permission bits must be EXACTLY ``CELLAR_ALLOWED_MODE``:
+    group-shared, never world-writable, no sticky/setgid/setuid bits. Any
+    other shape refuses; nothing here weakens the global parent guard."""
+    try:
+        st = cellar_dir.lstat()
+    except OSError as exc:
+        raise IdentityRejected(f"{code}: cellar allowance dir unreadable ({exc.strerror})") from exc
+    if stat.S_ISLNK(st.st_mode):
+        raise IdentityRejected(f"{code}: cellar allowance dir is a symlink")
+    if not stat.S_ISDIR(st.st_mode):
+        raise IdentityRejected(f"{code}: cellar allowance dir is not a directory")
+    if st.st_uid != uid:
+        raise IdentityRejected(f"{code}: cellar allowance dir not owned by seat user")
+    actual_mode = stat.S_IMODE(st.st_mode)
+    if actual_mode != CELLAR_ALLOWED_MODE:
+        raise IdentityRejected(
+            f"{code}: cellar allowance dir mode {oct(actual_mode)} != {oct(CELLAR_ALLOWED_MODE)}"
+        )
+
+
+@dataclass(frozen=True)
+class ExecutableParentVerdict:
+    """Result of the executable-only ancestor walk: which ancestor, if any,
+    consumed the single Cellar allowance, so the caller can pin its exact
+    directory identity and re-prove it before every effect."""
+
+    cellar_ancestor: str | None = None
+
+
+def require_executable_parent_safe(
+    path: Path,
+    uid: int,
+    *,
+    code: str,
+    cellar_dir: str | None = None,
+) -> ExecutableParentVerdict:
+    """``require_parent_safe`` semantics for an EXECUTABLE's lexical ancestor
+    chain, with exactly ONE narrowly anchored exception.
+
+    Every ancestor is walked exactly as :func:`require_parent_safe` walks
+    them (lexical, lstat, symlink-refusing, protected-world-writable and
+    group-write rules — the strict reference implementation above is kept
+    byte-for-byte unchanged). The single difference: an ancestor whose
+    absolute lexical path equals the allowance anchor may instead pass
+    :func:`verify_cellar_allowance_dir`'s exact shape checks; at most ONE
+    ancestor may consume the allowance, and every other ancestor stays fully
+    strict. The anchor is :data:`CANONICAL_HOMEBREW_CELLAR`; the ``cellar_dir``
+    parameter exists for hermetic tests to inject a controlled fake prefix
+    and is never passed by any runtime caller."""
+    anchor = os.path.abspath(cellar_dir) if cellar_dir is not None else CANONICAL_HOMEBREW_CELLAR
+    current = Path(os.path.abspath(path))
+    cellar_ancestor: str | None = None
+    for component in reversed(current.parents):
+        component_text = str(component)
+        if component_text == anchor:
+            if cellar_ancestor is not None:
+                raise IdentityRejected(f"{code}: multiple cellar allowance ancestors")
+            verify_cellar_allowance_dir(component, uid, code=code)
+            cellar_ancestor = component_text
+            continue
+        try:
+            st = component.lstat()
+        except OSError as exc:
+            raise IdentityRejected(f"{code}: unreadable ancestor ({exc.strerror})") from exc
+        if stat.S_ISLNK(st.st_mode):
+            raise IdentityRejected(f"{code}: symlinked ancestor {component}")
+        if not stat.S_ISDIR(st.st_mode):
+            raise IdentityRejected(f"{code}: non-directory ancestor {component}")
+        if (st.st_mode & stat.S_IWOTH) and (st.st_mode & stat.S_ISVTX):
+            continue  # protected convention directory (mode 1777)
+        if (st.st_mode & stat.S_IWOTH) or (st.st_mode & stat.S_IWGRP):
+            raise IdentityRejected(f"{code}: unprotected writable ancestor {component}")
+    return ExecutableParentVerdict(cellar_ancestor=cellar_ancestor)
+
+
+@dataclass(frozen=True)
+class FileIdentity:
+    """Pinned identity of one verified regular file, read from a single
+    nofollow descriptor so the metadata and the digested bytes are ONE inode
+    observation: ``(dev, ino)`` as a hard in-place-replacement tripwire,
+    owner uid, permission bits, link count, declared size, and the SHA-256
+    of the exact bytes read through that descriptor."""
+
+    dev: int
+    ino: int
+    uid: int
+    mode: int  # permission bits (stat.S_IMODE) as fstat reported them
+    nlink: int
+    size: int
+    sha256: str
+    data: bytes
+
+
+def verified_file_identity(
+    path: Path,
+    uid: int,
+    *,
+    code: str,
+    max_bytes: int | None = None,
+    require_owner_uid: bool = False,
+    require_nlink_one: bool = False,
+) -> FileIdentity:
+    """Open ``path`` with ``O_NOFOLLOW``, fstat the descriptor, and digest the
+    exact bytes read through it, failing closed.
+
+    A symlink at ``path`` never opens (ELOOP); a replacement between any
+    earlier lstat and this call cannot split the recorded identity, because
+    every pinned field comes from ONE descriptor observation. Consumers pin
+    this result and re-compare dev/ino/uid/mode/digest before every effect.
+    Refusal messages carry the stable ``code`` prefix and never file
+    contents."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise IdentityRejected(f"{code}: unreadable ({exc.strerror})") from exc
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise IdentityRejected(f"{code}: not a regular file")
+        if require_owner_uid and st.st_uid != uid:
+            raise IdentityRejected(f"{code}: owner uid {st.st_uid} != seat uid {uid}")
+        if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise IdentityRejected(
+                f"{code}: group/world-writable mode {oct(stat.S_IMODE(st.st_mode))}"
+            )
+        if require_nlink_one and st.st_nlink != 1:
+            raise IdentityRejected(f"{code}: hardlink (nlink={st.st_nlink}) is not a unique private file")
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1 if max_bytes is not None else -1
+        while remaining != 0:
+            chunk = os.read(fd, 65536 if remaining < 0 else min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if remaining > 0:
+                remaining -= len(chunk)
+        data = b"".join(chunks)
+        if max_bytes is not None and len(data) > max_bytes:
+            raise IdentityRejected(f"{code}_oversized")
+        return FileIdentity(
+            dev=st.st_dev,
+            ino=st.st_ino,
+            uid=st.st_uid,
+            mode=stat.S_IMODE(st.st_mode),
+            nlink=st.st_nlink,
+            size=st.st_size,
+            sha256=sha256_bytes(data),
+            data=data,
+        )
+    finally:
+        os.close(fd)
+
+
+@dataclass(frozen=True)
+class DirIdentity:
+    """Pinned identity of one verified directory from a nofollow descriptor:
+    the ``(dev, ino)`` in-place-replacement tripwire, owner uid, and
+    permission bits."""
+
+    dev: int
+    ino: int
+    uid: int
+    mode: int
+
+
+def verified_dir_identity(
+    path: Path,
+    uid: int,
+    *,
+    code: str,
+    require_owner_uid: bool = False,
+) -> DirIdentity:
+    """Open ``path`` with ``O_NOFOLLOW|O_DIRECTORY`` and fstat it, failing
+    closed. The pinned ``(dev, ino, uid, mode)`` lets consumers detect an
+    in-place directory replacement (same path, different inode) before any
+    effect, not merely after an age boundary."""
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise IdentityRejected(f"{code}: unreadable ({exc.strerror})") from exc
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISDIR(st.st_mode):
+            raise IdentityRejected(f"{code}: not a directory")
+        if require_owner_uid and st.st_uid != uid:
+            raise IdentityRejected(f"{code}: owner uid {st.st_uid} != seat uid {uid}")
+        return DirIdentity(
+            dev=st.st_dev, ino=st.st_ino, uid=st.st_uid, mode=stat.S_IMODE(st.st_mode)
+        )
+    finally:
+        os.close(fd)
 
 
 def executable_path_reject_reason(

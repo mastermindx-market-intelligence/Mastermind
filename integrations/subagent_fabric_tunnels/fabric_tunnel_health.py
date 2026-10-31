@@ -111,6 +111,7 @@ from fabric_tunnel_common import (
     state_dir,
     subprocess_runner,
     validate_control_plane_poll_payload,
+    verified_file_identity,
     watchdog_dir,
 )
 from fabric_tunnel_identity import (
@@ -118,9 +119,10 @@ from fabric_tunnel_identity import (
     manifest_is_stale,
     revalidate_stale_identity,
     scan_family,
+    seat_identity_drift_problems,
     telemetry_relative_path_reject_reason,
     unqualified_health_alerts,
-    verified_poll_profile_locator,
+    verified_poll_profile_binding,
 )
 
 # Health states, one per distinguishable outcome the plan names.
@@ -381,12 +383,17 @@ def cli_poll_evidence(
 
     Per-pass re-proof before the child is ever executed (all fail closed):
     - the executable is the manifest-PINNED path and still digests to the
-      pinned value — an arbitrary or drifted binary is never invoked;
-    - the profile re-derivation (``verified_poll_profile_locator``) re-proves
-      bounded size, seat ownership, safe modes, symlink-free lexical
-      ancestors, and that the parsed ``health.url_file`` STILL equals the
-      pinned locator — a swapped profile or locator refuses instead of
-      steering the probe;
+      pinned value, read from ONE nofollow descriptor so the digest and the
+      pinned dev/ino/owner/mode describe the SAME inode observation — an
+      arbitrary, drifted, or in-place-replaced binary is never invoked;
+    - the profile binding (``verified_poll_profile_binding``) re-proves
+      bounded size, seat ownership, safe modes, non-hardlinked uniqueness,
+      symlink-free lexical ancestors, the parsed ``health.url_file`` STILL
+      equaling the pinned locator, and — on seats whose manifest pins the
+      full binding (shared-executable seats) — the pinned profile/locator
+      inode+digest identity and the pinned domain-separated tunnel-id digest;
+      a swapped, rewritten, re-linked, or re-tunnelled profile refuses
+      instead of steering the probe;
     - the probe itself is the EXACT read-only argv through the injectable
       bounded runner: no shell, per-seat deadline, capped output streams.
 
@@ -400,17 +407,52 @@ def cli_poll_evidence(
     executable_path = Path(str(executable))
     try:
         require_regular_file(executable_path, code="cli_poll_executable")
-        exec_digest = sha256_bytes(executable_path.read_bytes())
+        exec_identity = verified_file_identity(
+            executable_path, seat_uid, code="cli_poll_executable"
+        )
     except (IdentityRejected, OSError):
         return None, "cli_poll_executable_drift", None, None
-    if exec_digest != entry.get("executable_sha256"):
+    if exec_identity.sha256 != entry.get("executable_sha256"):
         return None, "cli_poll_executable_digest_changed", None, None
+    if entry.get("executable_ino") is not None and (
+        exec_identity.dev,
+        exec_identity.ino,
+    ) != (int(entry.get("executable_dev") or 0), int(entry["executable_ino"])):
+        return None, "cli_poll_executable_identity_changed", None, None
+    if entry.get("executable_owner_uid") is not None and (
+        exec_identity.uid != int(entry["executable_owner_uid"])
+    ):
+        return None, "cli_poll_executable_identity_changed", None, None
+    if entry.get("executable_mode") is not None and (
+        exec_identity.mode != int(entry["executable_mode"])
+    ):
+        return None, "cli_poll_executable_identity_changed", None, None
+    pinned_profile = entry.get("poll_profile")
+    required_tunnel = bool(isinstance(pinned_profile, dict) and pinned_profile.get("tunnel_id_hash"))
     try:
-        derived = verified_poll_profile_locator(label, str(profile), seat_uid)
+        binding = verified_poll_profile_binding(
+            label, str(profile), seat_uid, require_tunnel_id=required_tunnel
+        )
     except (PolicyRefused, IdentityRejected):
         return None, "cli_poll_profile_unsafe", None, None
-    if derived != locator:
+    if binding.locator != locator:
         return None, "cli_poll_profile_locator_changed", None, None
+    if isinstance(pinned_profile, dict):
+        if (
+            binding.profile_path != pinned_profile.get("path")
+            or (binding.profile_dev, binding.profile_ino)
+            != (int(pinned_profile.get("dev") or 0), int(pinned_profile.get("ino") or 0))
+            or binding.profile_sha256 != pinned_profile.get("sha256")
+        ):
+            return None, "cli_poll_profile_identity_changed", None, None
+        if (
+            (binding.locator_dev, binding.locator_ino)
+            != (int(pinned_profile.get("locator_dev") or 0), int(pinned_profile.get("locator_ino") or 0))
+            or binding.locator_sha256 != pinned_profile.get("locator_sha256")
+        ):
+            return None, "cli_poll_locator_identity_changed", None, None
+        if required_tunnel and binding.tunnel_id_hash != pinned_profile.get("tunnel_id_hash"):
+            return None, "cli_poll_profile_tunnel_id_changed", None, None
     try:
         argv = build_control_plane_poll_argv(str(executable), str(locator))
     except ActionRefused:
@@ -813,6 +855,21 @@ def run_pass(
         acted = False
         kick_forced = False
         if may_kick and recover and not rogue and ledger is not None:
+            # Pre-effect identity re-proof: EVERY kickstart re-proves the
+            # seat's whole identity against the pinned manifest from the
+            # LIVE filesystem first — argv, executable path/digest and its
+            # pinned dev/ino/owner/mode, parent and Cellar-allowance pins,
+            # and any pinned poll-profile binding — never only after the
+            # attestation day boundary. A drifting seat is a suspect seat:
+            # alert only, no kick, until a human requalifies.
+            drift = seat_identity_drift_problems(home, manifest, label)
+            if drift:
+                state = ST_IDENTITY_SUSPECT
+                may_kick = False
+                report.alerts.append(
+                    Alert("seat_identity_drift_alert_only", label, ",".join(drift))
+                )
+        if may_kick and recover and not rogue and ledger is not None:
             try:
                 kick_argv = launchctl_kickstart_argv(seat_uid, label, force=(state == ST_STALE_HEARTBEAT))
                 result = runner(kick_argv)
@@ -1122,7 +1179,14 @@ def install_watchdog_agent(
     mutation and keeps the strict freshness contract."""
     if not confirm:
         raise PolicyRefused("watchdog_install_requires_explicit_confirmation")
-    load_manifest(home, now=now)  # strict: install-time authorization is fresh
+    manifest = load_manifest(home, now=now)  # strict: install-time authorization is fresh
+    # Pre-effect identity re-proof for all five qualified seats: the
+    # watchdog acts ON those seats, so an install effect may only land while
+    # every seat's live identity still matches the pinned manifest.
+    for label in sorted(TUNNEL_LABELS):
+        drift = seat_identity_drift_problems(home, manifest, label)
+        if drift:
+            raise PolicyRefused(f"{label}_watchdog_install_identity_drift:{','.join(drift)}")
     from fabric_tunnel_install import _bootout_if_loaded, _bootstrap
 
     interpreter = shutil.which("python3")
@@ -1389,6 +1453,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         ST_IDENTITY_SUSPECT,
         ST_LAUNCHD_UNCERTAIN,
         ST_LEDGER_REFUSED,
+        "seat_identity_drift_alert_only",
         "manifest_stale_revalidated",
         "seat_identity_tampered_alert_only",
         "seat_identity_rejected",
