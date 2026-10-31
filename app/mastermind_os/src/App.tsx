@@ -1365,6 +1365,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     >(null),
     [resultState, setResultState] = useState<ResultState>({ kind: "IDLE" }),
     resultRequest = useRef(0),
+    compoundTicket = useRef(0),
+    compoundRetention = useRef<{
+      mission: Missionv3Document;
+      selection: MissionSelection | null;
+      authRevision: number;
+    } | null>(null),
     missionRequest = useRef(0),
     programRequest = useRef(0),
     programSelection = useRef(selection),
@@ -1671,8 +1677,21 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   }, []);
   const currentResultContext = useRef(resultContext);
   currentResultContext.current = resultContext;
+  const liveSelection = useRef(selection);
+  const liveAuthRevision = useRef(authRevision);
+  liveSelection.current = selection;
+  liveAuthRevision.current = authRevision;
   const resultController = useRef<AbortController | null>(null);
+  const compoundRetained = compoundRetention.current;
+  const compoundContextHeld = !!compoundRetained
+    && compoundRetained.mission === missionV3
+    && compoundRetained.selection === selection
+    && compoundRetained.authRevision === authRevision;
   useEffect(() => {
+    // A compound commit updates missionV3 inside the same pair. That update
+    // must not abort or clear the Result it just accepted. Every other
+    // context change still fences the standalone Result ticket.
+    if (compoundContextHeld) return;
     resultRequest.current++;
     resultController.current?.abort();
     setResultState({ kind: "IDLE" });
@@ -1680,7 +1699,11 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       resultRequest.current++;
       resultController.current?.abort();
     };
-  }, [resultContext]);
+  }, [resultContext, compoundContextHeld]);
+  useEffect(() => () => {
+    compoundTicket.current += 1;
+    resultController.current?.abort();
+  }, []);
   const routeHeading = useRef<HTMLHeadingElement>(null),
     // Project tabs and data refreshes retain focus. Collection/detail and exact
     // project identity changes can remove the content action that held it.
@@ -1742,6 +1765,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         workRequest.current++;
         missionRequest.current++;
         resultRequest.current++;
+        compoundTicket.current += 1;
+        compoundRetention.current = null;
         resultController.current?.abort();
         setIndex({
           programs: [],
@@ -1773,11 +1798,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   useEffect(() => {
     // Selection change clears result detail. The bounded read for the new
     // tuple must be reissued; we never carry stale detail across a click.
+    if (compoundRetention.current?.selection === selection) return;
+    compoundTicket.current += 1;
+    compoundRetention.current = null;
+    resultController.current?.abort();
     setResultState({ kind: "IDLE" });
   }, [selection]);
   useEffect(() => {
     // New result_refs revision (root/work_ref pair changed under the hood)
     // also clears any in-flight detail even if the user kept their click.
+    // The compound pair's own Mission commit is the same observation and stays.
+    if (compoundRetention.current?.mission === missionV3) return;
     setResultState({ kind: "IDLE" });
   }, [missionV3]);
   useEffect(() => {
@@ -2092,6 +2123,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     let attached = true;
     const current = ++missionRequest.current,
       controller = new AbortController();
+    // An independent Mission refresh supersedes both the standalone Mission
+    // ticket and any compound pair. A late compound accept cannot republish.
+    compoundTicket.current += 1;
+    compoundRetention.current = null;
+    resultController.current?.abort();
+    office.supersedePair();
     const officeRead = office.beginMission();
     if (
       native &&
@@ -2993,6 +3030,134 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const pickResult = (sel: ResultSelection) => {
     const valid = normalizeResultSelection(sel);
     if (!valid) return;
+    const compoundRead = window.MastermindMissionHost?.readMissionResult;
+    if (compoundRead) {
+      resultController.current?.abort();
+      const ticket = ++compoundTicket.current;
+      missionRequest.current += 1;
+      resultRequest.current += 1;
+      const held = office.beginMissionResult();
+      const host = window.MastermindMissionHost;
+      const hostGeneration = host?.invalidationGeneration?.();
+      const selectionAtStart = liveSelection.current;
+      const authAtStart = liveAuthRevision.current;
+      setResultState({ kind: "PENDING", selection: valid });
+      const controller = new AbortController();
+      resultController.current = controller;
+      // A newer ticket, selection, or auth epoch owns the screen. Its
+      // callback must never clear the replacement ticket or Office pair.
+      const newerOwner = () => compoundTicket.current !== ticket
+        || liveSelection.current !== selectionAtStart
+        || liveAuthRevision.current !== authAtStart;
+      // Host identity/generation can drift without notifying the original
+      // subscription. That is still this ticket's cancellation, not a
+      // reason to strand its card in PENDING.
+      const hostChanged = () => window.MastermindMissionHost !== host
+        || host?.invalidationGeneration?.() !== hostGeneration;
+      const superseded = () => newerOwner() || hostChanged();
+      // The mounted typed method can be replaced without changing the raw
+      // client or the host object. Raw identity checks do not cover that.
+      const typedHeld = () => window.MastermindMissionHost?.readMissionResult === compoundRead;
+      const withholdOwned = (reason: string) => {
+        if (newerOwner()) return;
+        office.supersedePair();
+        compoundRetention.current = null;
+        setResultState({ kind: "UNAVAILABLE", selection: valid, reason });
+      };
+      Promise.resolve()
+        .then(() => {
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
+          if (controller.signal.aborted || !typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return undefined;
+          }
+          return compoundRead({ ...valid, signal: controller.signal });
+        })
+        .then((decoded) => {
+          if (decoded === undefined) return;
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          if (!typedHeld()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          // The host decoder already checks all five selection fields, but
+          // App must fail closed if a replaced typed host returns an otherwise
+          // well-formed pair belonging to a different selected Job/Attempt.
+          if (!decoded.selection
+            || decoded.selection.workRef !== valid.workRef
+            || decoded.selection.rootJobId !== valid.rootJobId
+            || decoded.selection.jobId !== valid.jobId
+            || decoded.selection.attemptId !== valid.attemptId
+            || decoded.selection.resultEnvelopeDigest !== valid.resultEnvelopeDigest) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
+            return;
+          }
+          if (decoded.availability !== "AVAILABLE" || !decoded.mission || !decoded.roleResult) {
+            withholdOwned(decoded.reasonCodes.join(", ") || "SOURCE_UNAVAILABLE");
+            return;
+          }
+          // The nested Result and its source observation each carry their own
+          // five-field selector. A substituted typed method could forge a
+          // matching compound selection around a sibling Job's actual Result.
+          const sameWireSelection = (
+            wire: ResultEnvelopeDigestShape["selection"] | null | undefined,
+          ) => !!wire
+            && wire.work_ref === valid.workRef
+            && wire.root_job_id === valid.rootJobId
+            && wire.job_id === valid.jobId
+            && wire.attempt_id === valid.attemptId
+            && wire.result_envelope_digest === valid.resultEnvelopeDigest;
+          const roleView = decoded.roleResult.result;
+          if (!sameWireSelection(decoded.roleResult.selection)
+            || !sameWireSelection(decoded.roleResult.source_observation?.selection)
+            || (roleView !== null && (!roleView?.selection
+              || roleView.selection.root_job_id !== valid.rootJobId
+              || roleView.selection.job_id !== valid.jobId
+              || roleView.selection.attempt_id !== valid.attemptId
+              || roleView.selection.result_envelope_digest !== valid.resultEnvelopeDigest))) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
+            return;
+          }
+          // No async boundary between these fences and the synchronous
+          // Office accept. Post-accept fences could leave a published pair.
+          const accepted = office.acceptMissionResult(
+            held, decoded.mission, decoded.roleResult, new Date().toISOString(),
+          );
+          if (accepted.kind !== "observed") {
+            withholdOwned(accepted.reason);
+            return;
+          }
+          compoundRetention.current = {
+            mission: decoded.mission,
+            selection: liveSelection.current,
+            authRevision: liveAuthRevision.current,
+          };
+          const { result_refs: _refs, ...body } = decoded.mission;
+          setMission({ ...body, schema: "mastermind.mission_workspace.v2" });
+          setMissionV3(decoded.mission);
+          setResultState({ kind: "READY", selection: valid, document: decoded.roleResult });
+        })
+        .catch((err: Error) => {
+          if (superseded()) {
+            withholdOwned("READ_CANCELLED");
+            return;
+          }
+          withholdOwned(
+            err?.message === "MISSION_RESULT_RESPONSE_INVALID"
+              ? "MISSION_RESULT_RESPONSE_INVALID"
+              : err?.message === "READ_CANCELLED"
+                ? "READ_CANCELLED"
+                : "RESULT_SOURCE_UNAVAILABLE",
+          );
+        });
+      return;
+    }
     if (!window.MastermindMissionHost?.readResult) {
       setResultState({
         kind: "UNAVAILABLE",
@@ -3400,82 +3565,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         {missionV3 && isDocv3(missionV3) ? (
           <ResultRefs
             d={missionV3}
-            onPick={(sel) => {
-              const valid = normalizeResultSelection(sel);
-              if (!valid) return;
-              if (!window.MastermindMissionHost?.readResult) {
-                setResultState({
-                  kind: "UNAVAILABLE",
-                  selection: valid,
-                  reason: "QUALIFIED_RESULT_READ_UNAVAILABLE",
-                });
-                return;
-              }
-              resultController.current?.abort();
-              const context = resultContext;
-              setResultState({ kind: "PENDING", selection: valid });
-              const current = ++resultRequest.current;
-              const controller = new AbortController();
-              resultController.current = controller;
-              let raceAborted = false;
-              Promise.resolve()
-                .then(() =>
-                  window.MastermindMissionHost!.readResult!({
-                    workRef: valid.workRef,
-                    rootJobId: valid.rootJobId,
-                    jobId: valid.jobId,
-                    attemptId: valid.attemptId,
-                    resultEnvelopeDigest: valid.resultEnvelopeDigest,
-                    signal: controller.signal,
-                  }),
-                )
-                .then((raw) => {
-                  if (
-                    resultRequest.current !== current ||
-                    raceAborted ||
-                    currentResultContext.current !== context ||
-                    controller.signal.aborted
-                  )
-                    return;
-                  // The host returns the decoded frozen envelope — including
-                  // the typed allowed 503 body as a validated UNAVAILABLE
-                  // envelope. No kind sniffing, no blind cast: the value is
-                  // re-validated against the exact selected tuple before it
-                  // is admitted for rendering.
-                  const decoded = decodeResultEnvelope(raw, valid);
-                  if (!decoded) {
-                    setResultState({
-                      kind: "UNAVAILABLE",
-                      selection: valid,
-                      reason: "RESULT_RESPONSE_INVALID",
-                    });
-                    return;
-                  }
-                  setResultState({
-                    kind: "READY",
-                    selection: valid,
-                    document: decoded,
-                  });
-                })
-                .catch((err: Error) => {
-                  if (
-                    resultRequest.current !== current ||
-                    raceAborted ||
-                    currentResultContext.current !== context ||
-                    controller.signal.aborted
-                  )
-                    return;
-                  if (err?.message === "READ_CANCELLED") {
-                    raceAborted = true;
-                    return;
-                  }
-                  setResultState({
-                    kind: "UNAVAILABLE",
-                    selection: valid,
-                    reason: "RESULT_SOURCE_UNAVAILABLE",
-                  });
-                });
-            }}
+            onPick={pickResult}
             selectedKey={
               resultState.kind === "READY" || resultState.kind === "PENDING"
                 ? `${resultState.selection.jobId}|${resultState.selection.attemptId}|${resultState.selection.resultEnvelopeDigest}`

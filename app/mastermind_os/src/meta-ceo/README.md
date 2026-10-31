@@ -82,11 +82,29 @@ session identity. Keep missing provenance UNKNOWN or UNAVAILABLE. Do not invent
 revisions, timestamps or session bindings to make the component show CURRENT.
 A Mission-only adapter can retain its decoded owner observation and exact
 selection, check the host invalidation epoch across acquisition, and label its
-local acquisition time explicitly. Full Result integration additionally needs
-an unmodified producer-compatible Mission v3 / Result pair or an authenticated
-host test; the mutated pairs in unit tests qualify mismatch logic only.
+local acquisition time explicitly. The compound Office path now publishes one
+authenticated Mission v3 document and one selected Workspace Result together.
+`projectOffice` remains the association authority. Acquisition stays in the App
+and the typed host; this hook does not read.
 
-`mission-adapter.ts` supplies that pure Mission presentation seam. Call
+The committed positive body remains the source-pinned HC-P6.T1 export
+(`actual-pair.json`, 10024 bytes, `content_fallback: not_captured`). The
+reviewed producer proof at `abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb` is imported
+as its own commit; that hash is not an ancestor of this branch. Fresh mounted
+positive and `CONTENT_OVER_BUDGET` bodies are produced in attempt-owned
+directories and consumed as whole HTTP bytes. A present, empty, missing, or
+mismatched explicit directory is refused and is not replaced with the committed
+file. Mutations of a committed AVAILABLE body stay labeled synthetic. Native
+clients have no compound command; without `readMissionResult` the legacy Result
+card remains and Office does not claim a pair. A failed compound read does not
+call the standalone Result route. The App captures the mounted typed method and
+checks that same function again before the queued call and before publication.
+A superseded callback stays silent. A cancellation that still owns the ticket,
+including `READ_CANCELLED` after raw-method replacement or acquisition expiry,
+settles unavailable and leaves both Office halves empty.
+
+`mission-adapter.ts` supplies that pure Mission presentation seam and the
+compound pair seam. Call
 `captureMissionOfficeRead` before the existing host read, using the host's actual
 `invalidationGeneration()` and the exact current selection. After the host read
 and existing decoder complete, call `completeMissionOfficeRead` with a fresh
@@ -104,8 +122,14 @@ as such. The revision is a tagged, ordered tuple of the decoded owner observatio
 including Control Room and runtime identity/generation/digests. Local acquisition
 time, title and UI counters do not contribute to revision identity. The source
 inspector labels that local time separately from an owner-reported clock.
-Programs, Result, Conversation and all unsupplied session/binding identity remain
-with their existing qualification gates; this adapter does not fill those gaps.
+Programs and Conversation keep their existing qualification gates. A compound
+accept advances the Mission and Result revisions together and leaves session,
+binding, effect and authority unset unless the incumbent owner supplied them.
+Local acquisition time is labelled `LOCAL_ACQUISITION`. An older compound
+completion cannot publish into or clear a newer pair. Replacing the mounted
+typed `readMissionResult` is a different fence from replacing the raw client
+method: the in-flight App callback must see the captured function still
+installed on the host.
 
 ## Verification and integration
 

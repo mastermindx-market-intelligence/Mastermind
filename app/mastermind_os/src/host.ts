@@ -27,6 +27,7 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import { decodeMissionResult, type MissionResultDocument } from "./mission-result";
 import { decodeWorkDocument, type WorkDocument } from "./work";
 import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
 import {
@@ -85,6 +86,11 @@ export interface RawClient {
     resultEnvelopeDigest: string;
     signal: AbortSignal;
   }): Promise<unknown>;
+  /**
+   * Optional compound acquisition. Absent on native clients: no compound
+   * command is registered there. Signal stays outside the five-field selector.
+   */
+  readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
   readCurrentWindow(request: { signal: AbortSignal }): Promise<unknown>;
 }
 /**
@@ -117,6 +123,8 @@ export interface MissionHost {
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
+  /** Mounted only when the raw method and the client invalidation generation both exist. */
+  readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
   }) => Promise<WindowDocument>;
@@ -366,6 +374,35 @@ export function bindMissionHost(
       if (!decoded) throw new Error("RESULT_RESPONSE_INVALID");
       return decoded;
     },
+    ...(client.readMissionResult && client.invalidationGeneration ? {
+      async readMissionResult(request: ResultSelection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = normalizeResultSelection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch;
+        const sourceGeneration = client.invalidationGeneration?.();
+        const read = client.readMissionResult;
+        let invalidated = false;
+        const verify = () => {
+          const state = client.getState();
+          if (invalidated || signal.aborted || started !== epoch
+            || sourceGeneration !== client.invalidationGeneration?.()
+            || read !== client.readMissionResult
+            || state.status !== "signed_in" || !state.acquisition)
+            throw new Error("READ_CANCELLED");
+        };
+        verify();
+        const release = client.subscribe(() => { invalidated = true; });
+        try {
+          verify();
+          const raw = await read!.call(client, { ...selected, signal });
+          verify();
+          const decoded = decodeMissionResult(raw, selected);
+          if (!decoded.ok) throw new Error("MISSION_RESULT_RESPONSE_INVALID");
+          return decoded.document;
+        } finally { release(); }
+      },
+    } : {}),
     async readCurrentWindow({ signal }) {
       const started = epoch;
       check(signal, started);
