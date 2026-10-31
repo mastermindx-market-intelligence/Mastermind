@@ -8,7 +8,9 @@ import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os import os_public_edge_transition as module
-from ops.executive_os.os_public_edge import GET_ROUTES, HOST, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import (
+    GET_ROUTES, HOST, MCP_MAX_BODY, MCP_METADATA_ROUTE, MCP_ROUTES, POST_ROUTES, asset_routes,
+)
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
     preparation_complete, restart_diagnostic, stage_transition,
@@ -561,3 +563,221 @@ def test_two_get_proxies_cannot_replace_the_post_proxy():
     inner_of(live)[0]["handle"].append(inner_of(live)[1]["handle"].pop())
     with pytest.raises(ValueError):
         plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+# --- Public MCP entrypoint (#1656): the five-branch shape ------------------------
+# GET / POST / MCP-metadata-GET / MCP-POST / abort. Only the first branch's path
+# list is ever rewritten; the two MCP branches are observed and must stay exact.
+
+def mcp_proxy(port=49152, host="127.0.0.1"):
+    value = proxy(port)
+    value["headers"]["request"]["set"]["Host"] = [host]
+    return value
+
+
+def mcp_branches(port=49152):
+    return [
+        {"match": [{"method": ["GET"], "path": [MCP_METADATA_ROUTE]}], "handle": [proxy(port)]},
+        {"match": [{"method": ["POST"], "path": list(MCP_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": MCP_MAX_BODY}, mcp_proxy(port)]},
+    ]
+
+
+def mcp_fullconfig(old=OLD, port=49152):
+    get_paths = sorted(list(GET_ROUTES) + list(asset_routes(old)))
+    site = host_route(get_paths, port)
+    site["handle"][0]["routes"][2:2] = mcp_branches(port)
+    return fullconfig(old=old, port=port, site=site)
+
+
+@pytest.mark.parametrize("maker", [prepare_config, final_config])
+def test_mcp_shape_changes_only_the_get_path_list(maker):
+    live = mcp_fullconfig()
+    changed = maker(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert len(inner_of(changed)) == 5
+    stripped = copy.deepcopy(changed)
+    inner_of(stripped)[0]["match"][0]["path"] = None
+    original = copy.deepcopy(live)
+    inner_of(original)[0]["match"][0]["path"] = None
+    assert stripped == original
+    for index in (1, 2, 3, 4):
+        assert inner_of(changed)[index] == inner_of(live)[index]
+    assert changed["apps"]["tls"] == live["apps"]["tls"]
+    assert site_of(changed, index=1) == site_of(live, index=1)
+
+
+def test_mcp_shape_plans_the_same_route_sets_as_the_legacy_shape():
+    legacy_plan, legacy_prepare, legacy_final = transition_values()
+    mcp_plan, mcp_prepare, mcp_final = transition_values(mcp_fullconfig())
+    assert mcp_plan["get_routes"] == legacy_plan["get_routes"]
+    assert mcp_plan["post_routes"] == legacy_plan["post_routes"]
+    assert get_paths_of(mcp_prepare) == get_paths_of(legacy_prepare)
+    assert get_paths_of(mcp_final) == get_paths_of(legacy_final)
+    assert mcp_plan["bindings"]["observed_fullconfig_sha256"] != legacy_plan["bindings"]["observed_fullconfig_sha256"]
+    assert mcp_plan["bindings"]["prepare_fullconfig_sha256"] == module._sha256(mcp_prepare)
+    assert mcp_plan["bindings"]["final_fullconfig_sha256"] == module._sha256(mcp_final)
+    assert mcp_plan["installed"] is False and mcp_plan["published"] is False
+    assert preparation_complete(observed=mcp_prepare, prepared=copy.deepcopy(mcp_prepare))["prepared_observed_exactly"]
+
+
+def other_route():
+    return {"match": [{"method": ["GET"], "path": ["/extra"]}], "handle": [proxy()]}
+
+
+@pytest.mark.parametrize("mangle", [
+    pytest.param(lambda c: inner_of(c)[2]["handle"][0]["upstreams"][0].__setitem__(
+        "dial", "127.0.0.1:8443"), id="metadata-wrong-upstream"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][1]["upstreams"][0].__setitem__(
+        "dial", "10.0.0.5:49152"), id="mcp-non-loopback-upstream"),
+    pytest.param(lambda c: inner_of(c)[2]["match"][0].__setitem__(
+        "path", [MCP_METADATA_ROUTE, "/.well-known/oauth-authorization-server"]), id="metadata-extra-path"),
+    pytest.param(lambda c: inner_of(c)[2]["match"][0].__setitem__(
+        "path", ["/.well-known/oauth-protected-resource"]), id="metadata-wrong-path"),
+    pytest.param(lambda c: inner_of(c)[2]["match"][0].__setitem__("method", ["POST"]), id="metadata-wrong-method"),
+    pytest.param(lambda c: inner_of(c)[2]["handle"].append(proxy()), id="metadata-extra-proxy"),
+    pytest.param(lambda c: inner_of(c)[3]["match"][0].__setitem__("path", ["/mcp", "/mcp/"]), id="mcp-extra-path"),
+    pytest.param(lambda c: inner_of(c)[3]["match"][0].__setitem__("path", ["/mcp/*"]), id="mcp-wildcard-path"),
+    pytest.param(lambda c: inner_of(c)[3]["match"][0].__setitem__("method", ["GET"]), id="mcp-wrong-method"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][0].__setitem__("max_size", 1048576), id="mcp-larger-body"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][0].__setitem__("max_size", 64000.0), id="mcp-float-body"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][0].__setitem__("max_size", True), id="mcp-bool-body"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"].pop(0), id="mcp-no-body-limit"),
+    pytest.param(lambda c: inner_of(c).pop(2), id="metadata-branch-missing"),
+    pytest.param(lambda c: inner_of(c).pop(3), id="mcp-branch-missing"),
+    pytest.param(lambda c: inner_of(c).pop(), id="terminal-abort-missing"),
+    pytest.param(lambda c: inner_of(c).insert(2, inner_of(c).pop(3)), id="mcp-branches-reordered"),
+    pytest.param(lambda c: inner_of(c).insert(4, copy.deepcopy(inner_of(c)[3])), id="mcp-post-duplicated"),
+    pytest.param(lambda c: inner_of(c).insert(2, other_route()), id="six-branches-extra-route"),
+    pytest.param(lambda c: inner_of(c).__setitem__(2, copy.deepcopy(inner_of(c)[0])), id="metadata-replaced-by-get-clone"),
+    pytest.param(lambda c: inner_of(c).__setitem__(3, copy.deepcopy(inner_of(c)[1])), id="mcp-replaced-by-os-post-clone"),
+    pytest.param(lambda c: inner_of(c).__setitem__(
+        4, {"handle": [{"handler": "static_response", "body": "open"}]}), id="terminal-not-abort"),
+    pytest.param(lambda c: inner_of(c).append(
+        {"handle": [{"handler": "static_response", "abort": True}]}), id="two-terminal-aborts"),
+])
+def test_mcp_shape_mutations_refuse(mangle):
+    live = mcp_fullconfig()
+    mangle(live)
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    with pytest.raises(ValueError):
+        prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                       relay_port=49152)
+    with pytest.raises(ValueError):
+        final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                     relay_port=49152)
+
+
+@pytest.mark.parametrize("count", [1, 2, 4, 6, 7])
+def test_only_three_or_five_inner_routes_are_accepted(count):
+    live = fullconfig()
+    routes = inner_of(live)
+    abort = routes[-1]
+    head = routes[:2]
+    del routes[:]
+    routes.extend(head + [other_route() for _ in range(count - 3)] + [abort])
+    routes[:] = routes[:count - 1] + [abort] if count < 3 else routes
+    assert len(routes) == count
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+# Real `caddy adapt` (v2.11.4) output for the owner template rendered with the
+# three-file manifest; all five branches share one group, so they stay mutually
+# exclusive. The /mcp POST branch alone presents the loopback Host.
+RETAINED_MCP_CADDY_ROUTE = {'match': [{'host': ['mcp.mastermind-x.com']}], 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'subroute', 'routes': [{'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['mcp.mastermind-x.com'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['GET'], 'path': ['/os/', '/os/auth/callback', '/workspace/programs/current', '/workspace/work/current', '/workspace/mission/current', '/workspace/mission/v3/current', '/workspace/result/current', '/workspace/plan/current', '/workspace/operator/activity/current', '/workspace/window/current', '/os/', '/os/assets/index-a.css', '/os/assets/index-b.js']}]}, {'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'request_body', 'max_size': 64000}, {'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['mcp.mastermind-x.com'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['POST'], 'path': ['/os/executive/context', '/os/executive/submit', '/os/executive/status']}]}, {'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['mcp.mastermind-x.com'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['GET'], 'path': ['/.well-known/oauth-protected-resource/mcp']}]}, {'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'request_body', 'max_size': 64000}, {'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['127.0.0.1'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['POST'], 'path': ['/mcp']}]}, {'handle': [{'abort': True, 'handler': 'static_response'}]}]}]}]}], 'terminal': True}
+
+
+def test_retained_caddy_adapter_topology_with_mcp_is_accepted():
+    route = copy.deepcopy(RETAINED_MCP_CADDY_ROUTE)
+    # Keep the real adapter wrappers, shared group, headers and 64KB body limits;
+    # substitute only the manifest paths for this deterministic fixture.
+    wrapper = route["handle"][0]["routes"][0]["handle"][0]["routes"]
+    assert len(wrapper) == 5 and {item.get("group") for item in wrapper[:4]} == {"group4"}
+    wrapper[0]["match"][0]["path"] = sorted(list(GET_ROUTES) + list(asset_routes(OLD)))
+    assert wrapper[2]["match"][0] == {"method": ["GET"], "path": [MCP_METADATA_ROUTE]}
+    assert wrapper[3]["match"][0] == {"method": ["POST"], "path": list(MCP_ROUTES)}
+    hosts = [branch["handle"][0]["routes"][0]["handle"][-1]["headers"]["request"]["set"]["Host"] for branch in wrapper[:4]]
+    assert hosts == [[HOST], [HOST], [HOST], ["127.0.0.1"]]
+    live = fullconfig(site=route)
+    planned = prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert planned != live
+    assert preparation_complete(observed=planned, prepared=copy.deepcopy(planned))["prepared_observed_exactly"]
+    finalized = final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    final_wrapper = site_of(finalized)["handle"][0]["routes"][0]["handle"][0]["routes"]
+    assert final_wrapper[1:] == wrapper[1:]
+    assert final_wrapper[0]["match"][0]["path"] == sorted(set(GET_ROUTES) | set(asset_routes(NEW)))
+
+
+# --- Proxy handler equality on every branch (#1656 independent review, finding 2) ---
+# Matching only the upstream let a changed Host, header-strip list, rewrite or
+# transport through the planner. The whole reverse_proxy handler must equal the
+# rendered one; only /mcp presents the gateway's loopback Host.
+
+def branch_proxy(config, index):
+    return inner_of(config)[index]["handle"][-1]
+
+
+PROXY_MUTATIONS = {
+    "host-changed": lambda p: p["headers"]["request"]["set"].__setitem__("Host", ["attacker.example"]),
+    "host-doubled": lambda p: p["headers"]["request"]["set"].__setitem__("Host", [HOST, "127.0.0.1"]),
+    "forwarded-for-changed": lambda p: p["headers"]["request"]["set"].__setitem__("X-Forwarded-For", ["203.0.113.9"]),
+    "forwarded-proto-changed": lambda p: p["headers"]["request"]["set"].__setitem__("X-Forwarded-Proto", ["http"]),
+    "extra-set-header": lambda p: p["headers"]["request"]["set"].__setitem__("X-Admin", ["1"]),
+    "strip-list-trimmed": lambda p: p["headers"]["request"]["delete"].remove("CF-Connecting-IP"),
+    "strip-list-emptied": lambda p: p["headers"]["request"].__setitem__("delete", []),
+    "headers-missing": lambda p: p.pop("headers"),
+    "response-headers-added": lambda p: p["headers"].__setitem__("response", {"set": {"X-Open": ["1"]}}),
+    "rewrite-added": lambda p: p.__setitem__("rewrite", {"uri": "/os/executive/submit"}),
+    "tls-transport": lambda p: p.__setitem__("transport", {"protocol": "http", "tls": {"insecure_skip_verify": True}}),
+    "other-transport": lambda p: p.__setitem__("transport", {"protocol": "fastcgi"}),
+    "handle-response-added": lambda p: p.__setitem__("handle_response", [{"routes": []}]),
+    "load-balancing-added": lambda p: p.__setitem__("load_balancing", {"retries": 3}),
+    "upstream-option-added": lambda p: p["upstreams"][0].__setitem__("max_requests", 1),
+    "second-upstream": lambda p: p["upstreams"].append({"dial": "127.0.0.1:8443"}),
+}
+
+
+@pytest.mark.parametrize("shape,index", [
+    ("legacy", 0), ("legacy", 1), ("mcp", 0), ("mcp", 1), ("mcp", 2), ("mcp", 3),
+])
+@pytest.mark.parametrize("mutation", sorted(PROXY_MUTATIONS))
+def test_every_branch_proxy_must_equal_the_rendered_handler(shape, index, mutation):
+    live = fullconfig() if shape == "legacy" else mcp_fullconfig()
+    PROXY_MUTATIONS[mutation](branch_proxy(live, index))
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    with pytest.raises(ValueError):
+        prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                       relay_port=49152)
+    with pytest.raises(ValueError):
+        final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                     relay_port=49152)
+
+
+@pytest.mark.parametrize("index,wrong_host", [(2, "127.0.0.1"), (3, HOST), (0, "127.0.0.1"), (1, "127.0.0.1")])
+def test_each_branch_presents_only_its_own_upstream_host(index, wrong_host):
+    live = mcp_fullconfig()
+    branch_proxy(live, index)["headers"]["request"]["set"]["Host"] = [wrong_host]
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+def test_proxy_equality_accepts_the_adapter_shape_without_a_transport():
+    live = mcp_fullconfig()
+    for index in range(4):
+        branch_proxy(live, index).pop("transport", None)
+    value = plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+                 current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert value["relay_port"] == 49152
+
+
+def test_a_proxy_for_another_relay_port_is_refused_on_every_branch():
+    live = mcp_fullconfig(port=49153)
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)

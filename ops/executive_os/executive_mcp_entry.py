@@ -43,7 +43,7 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'public_mcp_resource'}):
         raise ValueError('installed MCP configuration fields differ')
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
@@ -70,6 +70,7 @@ def validate_document(raw):
         raise ValueError('MCP requires its dedicated audit directory')
     validate_additional_resources(raw)
     validate_os_executive_resource(raw)
+    validate_public_mcp_resource(raw)
     build_os_commission_client(raw)
     validate_optional_mounts(raw)
     build_installed_principal_ruling_target(raw)
@@ -96,7 +97,12 @@ OS_EXECUTIVE_RESOURCE = PUBLIC_ORIGIN + '/os/executive'
 
 
 def validate_os_executive_resource(raw):
-    """One opt-in OS audience; existing tunnel resources remain independent."""
+    """One opt-in OS audience; existing tunnel resources stay configured beside it.
+
+    Naming an audience here does not pin it to one endpoint: the gateway verifier
+    accepts a token for any configured resource, so per-endpoint audience
+    restriction is a separate gateway obligation (docs/EXECUTIVE_MCP.md section 8).
+    """
     enabled = raw.get('os_executive_transport', False)
     if not enabled:
         if 'os_executive_resource' in raw:
@@ -107,6 +113,50 @@ def validate_os_executive_resource(raw):
             or raw.get('os_executive_resource') != OS_EXECUTIVE_RESOURCE):
         raise ValueError('OS Executive resource must be the exact installed OS audience')
     return OS_EXECUTIVE_RESOURCE
+
+
+PUBLIC_MCP_RESOURCE = PUBLIC_ORIGIN + '/mcp'
+PUBLIC_MCP_METADATA_URL = PUBLIC_ORIGIN + '/.well-known/oauth-protected-resource/mcp'
+
+
+def validate_public_mcp_resource(raw):
+    """Opt-in public MCP audience: this gateway process serves /mcp for it alone.
+
+    Absent keeps the installed behavior unchanged. Present, the value must be the
+    exact public resource on the plain Web-CEO v3 composition; the COO wrappers,
+    release control and every other profile refuse it. A process that offers this
+    audience at /mcp offers no other one there (the OS audience stays on its own
+    transport routes), so the tunnel entrypoint needs its own gateway instance.
+    """
+    if 'public_mcp_resource' not in raw:
+        return None
+    if (raw.get('executive_mcp_profile') != 'web_ceo_v3'
+            or raw['public_mcp_resource'] != PUBLIC_MCP_RESOURCE
+            or {'coo', 'principal_ruling_target'} & set(raw)):
+        raise ValueError(
+            'public MCP resource must be the exact public audience on the plain v3 profile'
+        )
+    return PUBLIC_MCP_RESOURCE
+
+
+def build_public_policies(raw, policies, additional_policies=()):
+    """Public MCP audience over the primary grants; only the audience and challenge change."""
+    resource = validate_public_mcp_resource(raw)
+    if resource is None:
+        return None
+    from integrations.business_mcp_auth.contracts import validate_resource_policy
+    from integrations.mastermind_executive_app.gateway import AppPolicies
+    taken = {policies.read.resource, policies.submit.resource}
+    for extra in additional_policies:
+        taken.update((extra.read.resource, extra.submit.resource))
+    if resource in taken:
+        raise ValueError('public MCP resource cannot duplicate a configured Executive OAuth resource')
+    return AppPolicies(
+        read=validate_resource_policy(dataclasses.replace(
+            policies.read, resource=resource, resource_metadata_url=PUBLIC_MCP_METADATA_URL)),
+        submit=validate_resource_policy(dataclasses.replace(
+            policies.submit, resource=resource, resource_metadata_url=PUBLIC_MCP_METADATA_URL)),
+    )
 
 
 def build_os_commission_client(raw):
@@ -481,6 +531,7 @@ def main(argv=None):
         policies=policies, mastermind_root=source, macro_root_flag=None, environ={},
         ceo_ingress_socket_path=raw['ceo_ingress_socket_path'],
         read_from_ceo_ingress=True, additional_policies=additional_policies,
+        public_policies=build_public_policies(raw, policies, additional_policies),
         read_timeout=65.0,
     )
     profile = validate_installed_mcp_profile_current(
