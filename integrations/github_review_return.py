@@ -21,6 +21,7 @@ from control_plane.github_review_publication_record import (
     ExecutiveReviewPublicationRecord,
 )
 from control_plane.github_review_result_reader import ExecutiveVerifiedReviewResults
+from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmission
 from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_slack_thread import (
     SlackReviewResultNotifier, SlackReviewThreadUnavailable,
@@ -158,10 +159,13 @@ class GitHubReviewReturn:
         publication = ExecutiveReviewPublicationRecord(
             runtime=self._runtime, transport=self._github,
             job_id=job_id, publication_guard=self._guard,
+            expected_publisher=self._github.expected_publisher(),
+            decision=decision, pull_requests=self._github,
         )
         outcome = publish_verified_review(
             decision=decision, job_id=job_id, results=self._results,
             publications=publication, pull_requests=self._github,
+            admissions=ExecutiveReviewJobAdmission(runtime=self._runtime),
             readback=self._github,
         )
         visibility = "NOT_APPLICABLE"

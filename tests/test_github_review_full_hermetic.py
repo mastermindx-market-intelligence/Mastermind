@@ -58,6 +58,7 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
     github = GitHubReviewAPI(
         repository=REPO, installation_id=4242,
         token_source=HostCredentials(), publisher_login="reviewer-bot[bot]",
+        publisher_user_id=9001,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
     slack = SlackWebApiDialogueClient(

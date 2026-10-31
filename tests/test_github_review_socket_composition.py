@@ -34,7 +34,7 @@ def test_public_socket_composition_is_dormant_and_has_no_runtime_database(tmp_pa
         private_key_source=private_key_source,
         webhook_secret_source=Hook(),
         relay_client=slack(),
-        publisher_login="reviewer-bot[bot]",
+        publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
         socket_client=socket,
     )
     assert app._fabric is socket
@@ -63,7 +63,7 @@ def test_mixed_inprocess_and_socket_ports_never_compose(tmp_path):
             webhook_secret_source=Hook(),
             runtime=Runtime.at(tmp_path / "runtime"),
             admission_guard=lambda: None, socket_client=socket,
-            relay_client=slack(), publisher_login="reviewer-bot[bot]",
+            relay_client=slack(), publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
         )
 
 
@@ -73,7 +73,7 @@ def test_no_runtime_or_socket_is_a_configuration_refusal():
             settings=_settings(enabled=False), app_id=123,
             private_key_source=lambda: b"not-used",
             webhook_secret_source=Hook(), relay_client=slack(),
-            publisher_login="reviewer-bot[bot]",
+            publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
         )
 
 def test_public_socket_host_cannot_select_executive_worker_route(tmp_path):
@@ -85,7 +85,7 @@ def test_public_socket_host_cannot_select_executive_worker_route(tmp_path):
             settings=_settings(enabled=False), app_id=123,
             private_key_source=lambda: b"unread",
             webhook_secret_source=Hook(),
-            relay_client=slack(), publisher_login="reviewer-bot[bot]",
+            relay_client=slack(), publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
             socket_client=socket,
             worker_constraints={"eligible_quota_classes": ["codex-native"]},
         )

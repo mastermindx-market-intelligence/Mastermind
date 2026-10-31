@@ -42,8 +42,11 @@ in this file (nothing is gated to one platform).
 """
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -59,6 +62,17 @@ DELIVERY_ID = "11111111-2222-3333-4444-555555555555"
 JOB_ID = "JOB-042"
 PULL_NUMBER = 1739
 OTHER_PULL_NUMBER = 1740
+EXPECTED_PUBLISHER = ing.ExpectedReviewPublisher(
+    user_id=424242, login="mastermind-reviewer[bot]"
+)
+
+
+def _review_fact(**kwargs):
+    return ing.PublishedReviewFacts(
+        author_user_id=EXPECTED_PUBLISHER.user_id,
+        author_login=EXPECTED_PUBLISHER.login,
+        **kwargs,
+    )
 
 
 def _policy(**overrides) -> gri.ReviewIntentPolicy:
@@ -206,6 +220,30 @@ class FakeVisibility:
         self.refused.append(summary)
 
 
+class FakeAdmittedJobs:
+    """Canonical readback simulator: evidence is indexed by admission command."""
+
+    def __init__(self, decision, job_id, *, override=None):
+        self.lookups = []
+        self.command_id = decision.command_id
+        self.facts = (
+            override if override is not None else
+            ing.AdmittedJobFacts(
+                job_id=job_id,
+                command_id=decision.command_id,
+                repository=decision.repository,
+                pull_number=decision.pull_number,
+                frozen_head_sha=decision.frozen_head_sha,
+                actor=decision.actor,
+                intent_id=decision.intent_id,
+            )
+        )
+
+    def read_admitted_job(self, *, command_id):
+        self.lookups.append(command_id)
+        return self.facts if command_id == self.command_id else None
+
+
 class FakeResults:
     def __init__(self, result: ing.VerifiedReviewResult | None) -> None:
         self.result = result
@@ -217,6 +255,9 @@ class FakeResults:
 
 
 class FakePublications:
+    def publishing_principal(self):
+        return EXPECTED_PUBLISHER
+
     def __init__(self, *, unknown: bool = False) -> None:
         self.published: dict[str, str] = {}
         self.calls: list[dict] = []
@@ -276,7 +317,7 @@ class FakeTransport:
             return ()
         _, _, landed_commit, landed_event, landed_body = self.landed
         return (
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="review-recovered",
                 commit_id=landed_commit,
                 event=landed_event,
@@ -286,13 +327,59 @@ class FakeTransport:
 
 
 class FakeIndex:
-    """The host's existing record of already-published command ids."""
+    """Inert test stand-in for the canonical UNIQUE EventStore reservation.
+
+    A shared lock models the first-writer property across adapter instances.
+    Production must use the incumbent persistent events.command_id transaction.
+    """
 
     def __init__(self, *ids: str) -> None:
         self.ids = set(ids)
+        self.claims = {}
+        self.lock = threading.Lock()
 
     def published_command_ids(self) -> frozenset[str]:
-        return frozenset(self.ids)
+        with self.lock:
+            return frozenset(self.ids)
+
+    def reserve_publication(self, *, publication_command_id, repository,
+                            pull_number, head_sha, event, body):
+        identity = (repository, pull_number, head_sha, event, body)
+        with self.lock:
+            prior = self.claims.get(publication_command_id)
+            if prior is None:
+                self.claims[publication_command_id] = identity
+                return True
+            if prior != identity:
+                raise ing.ReviewVerificationRefused("publication claim identity mismatch")
+            return False
+
+    def confirm_publication(self, *, publication_command_id, repository,
+                            pull_number, head_sha, event, body, review_id):
+        identity = (repository, pull_number, head_sha, event, body)
+        with self.lock:
+            if self.claims.get(publication_command_id) != identity:
+                raise ing.ReviewVerificationRefused("publication confirmation mismatch")
+            self.ids.add(publication_command_id)
+
+
+class SuccessTransport:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.submits = 0
+        self.receipt = None
+
+    def submit_review(self, *, repository, pull_number, commit_id, event, body):
+        with self.lock:
+            self.submits += 1
+            self.receipt = _review_fact(
+                review_id="review-real", commit_id=commit_id, event=event, body=body
+            )
+            return "review-real"
+
+    def read_reviews(self, *, repository, pull_number, commit_id):
+        with self.lock:
+            return () if self.receipt is None else (self.receipt,)
 
 
 def _verified(**overrides) -> ing.VerifiedReviewResult:
@@ -347,13 +434,24 @@ def _admitted_decision(policy=None):
     return fabric, outcome
 
 
-def _publish(decision, job_id, *, results=None, publications=None, pull_requests=None, readback=None):
+def _final_guard(pulls=None):
+    _, admitted = _admitted_decision()
+    return ing.FinalPullRequestCheck(
+        decision=admitted.decision,
+        pull_requests=pulls if pulls is not None else FakePullRequests(),
+    )
+
+
+def _publish(decision, job_id, *, results=None, publications=None,
+             pull_requests=None, readback=None, admissions="default"):
+    binding = FakeAdmittedJobs(decision, job_id) if admissions == "default" else admissions
     return ing.publish_verified_review(
         decision=decision,
         job_id=job_id,
         results=results if results is not None else FakeResults(_verified(job_id=job_id)),
         publications=publications if publications is not None else FakePublications(),
         pull_requests=pull_requests if pull_requests is not None else FakePullRequests(),
+        admissions=binding,
         readback=readback,
     )
 
@@ -602,11 +700,19 @@ class TestSignedIdentityBinding:
     def test_a_comment_on_a_plain_issue_earns_no_read_and_no_job(self) -> None:
         fabric = FakeFabric()
         reads = FakePullRequests()
-        outcome = _admit(_comment_body(link=False), event="issue_comment", pull_requests=reads, fabric=fabric)
+        visibility = FakeVisibility()
+        outcome = _admit(
+            _comment_body(link=False, sender="outsider"),
+            event="issue_comment", pull_requests=reads,
+            fabric=fabric, visibility=visibility,
+        )
         assert outcome.state is ing.AdmissionState.REFUSED
         assert outcome.decision.refusal is gri.ReviewIntentRefusal.PULL_REQUEST_IDENTITY_UNBOUND
         assert reads.reads == 0
         assert fabric.jobs == {}
+        assert visibility.admitted == []
+        assert visibility.refused == []
+        assert outcome.visibility_error is None
 
 
 class TestActorPermissionPort:
@@ -732,7 +838,7 @@ class TestPublicationEffectUncertainty:
             repository=REPOSITORY,
             pull_number=PULL_NUMBER,
         )
-        return ing.PublishedReviewFacts(
+        return _review_fact(
             review_id="review-recovered",
             commit_id=HEAD_SHA,
             event="COMMENT",
@@ -781,13 +887,13 @@ class TestPublicationEffectUncertainty:
             pull_number=PULL_NUMBER,
         )
         for wrong in (
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="r", commit_id=MOVED_HEAD_SHA, event="COMMENT", body=body
             ),
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="r", commit_id=HEAD_SHA, event="REQUEST_CHANGES", body=body
             ),
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="r", commit_id=HEAD_SHA, event="COMMENT", body=body + " edited"
             ),
         ):
@@ -802,7 +908,7 @@ class TestPublicationEffectUncertainty:
 
     def test_the_concrete_adapter_reconciles_internally_and_returns_one_review_id(self) -> None:
         transport = FakeTransport(lands=True)
-        adapter = ing.ReconcilingReviewPublication(
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
             transport=transport, published=FakeIndex()
         )
         _, outcome = _admitted_decision()
@@ -817,11 +923,11 @@ class TestPublicationEffectUncertainty:
         assert published.state is ing.PublishState.PUBLISHED
         assert published.review_id == "review-recovered"
         assert transport.submits == 1
-        assert transport.readbacks == 2  # preflight and effect reconciliation
+        assert transport.readbacks == 2
 
     def test_the_concrete_adapter_reraises_an_unmatched_effect(self) -> None:
         transport = FakeTransport(lands=False)
-        adapter = ing.ReconcilingReviewPublication(
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
             transport=transport, published=FakeIndex()
         )
         with pytest.raises(ing.PublicationEffectUnknown):
@@ -837,7 +943,7 @@ class TestPublicationEffectUncertainty:
 
     def test_the_concrete_adapter_refuses_an_approval_verb_outright(self) -> None:
         transport = FakeTransport(lands=True)
-        adapter = ing.ReconcilingReviewPublication(
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
             transport=transport, published=FakeIndex()
         )
         with pytest.raises(ing.ReviewVerificationRefused):
@@ -853,9 +959,9 @@ class TestPublicationEffectUncertainty:
 
     def test_the_concrete_adapter_refuses_an_unbound_transport(self) -> None:
         with pytest.raises(ing.ReviewIngressError):
-            ing.ReconcilingReviewPublication(transport=object(), published=FakeIndex())
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=object(), published=FakeIndex())
         with pytest.raises(ing.ReviewIngressError):
-            ing.ReconcilingReviewPublication(
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
                 transport=FakeTransport(lands=False), published=object()
             )
 
@@ -901,6 +1007,18 @@ class TestPublication:
         assert first.state is ing.PublishState.PUBLISHED
         assert second.state is ing.PublishState.ALREADY_PUBLISHED
         assert len(publications.calls) == 1
+
+    def test_moved_head_refuses_publication(self) -> None:
+        _, outcome = _admitted_decision()
+        publications = FakePublications()
+        published = _publish(
+            outcome.decision, outcome.job_id,
+            pull_requests=FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA)),
+            publications=publications,
+        )
+        assert published.state is ing.PublishState.REFUSED
+        assert published.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
+        assert publications.calls == []
 
     def test_unverified_result_refuses_publication(self) -> None:
         _, outcome = _admitted_decision()
@@ -987,70 +1105,359 @@ class TestPublication:
         assert "worker-reviewer" in body
         assert "worker-builder" in body
 
-
-def test_external_github_source_contracts_are_publicly_exported():
-    """The host can import the authenticated external-origin port by name."""
-    from control_plane import github_review_intent_ingress as ingress
-    assert "ExternalGitHubSourceFacts" in ingress.__all__
-    assert "ExternalGitHubSourcePort" in ingress.__all__
-    assert ingress.ExternalGitHubSourceFacts.__name__ == "ExternalGitHubSourceFacts"
-
+# ---------------------------------------------------------------------------
+# Audit #1741: publication facts MUST be freshly sourced on exact frozen head.
+# ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
     "changed,refusal",
     [
         ({"state": "closed"}, gri.ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN.value),
         ({"draft": True}, gri.ReviewIntentRefusal.PULL_REQUEST_DRAFT.value),
-        ({"head_repository": "malicious/fork"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
-        ({"number": 9001}, gri.ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value),
+        ({"head_repository": "attacker/fork"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
         ({"title": "xoxb-secret-shaped-token"}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
         ({"title": "A" * 13000, "body": "B" * 13000}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
+        ({"number": 9001}, gri.ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value),
     ],
 )
-def test_integrated_publication_refuses_changed_pr_facts_without_moving_head(changed, refusal):
+def test_publication_refuses_changed_current_pr_facts_without_head_change(changed, refusal):
     _, admitted = _admitted_decision()
     reads = FakePullRequests(_pull_request(**changed))
     publications = FakePublications()
-    outcome = _publish(
-        admitted.decision,
-        admitted.job_id,
+    result = ing.publish_verified_review(
+        decision=admitted.decision,
+        job_id=admitted.job_id,
         pull_requests=reads,
+        results=FakeResults(_verified(job_id=admitted.job_id)),
         publications=publications,
+        admissions=FakeAdmittedJobs(admitted.decision, admitted.job_id),
     )
-    assert outcome.state is ing.PublishState.REFUSED
-    assert outcome.refusal == refusal
     assert reads.reads == 1
+    assert result.state is ing.PublishState.REFUSED
+    assert result.refusal == refusal
     assert publications.calls == []
 
 
-def test_integrated_combined_objective_over_bound_refused_before_ledger():
+def test_publication_fetches_current_facts_not_admission_snapshot():
+    _, admitted = _admitted_decision()
+    reads = FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA))
+    publications = FakePublications()
+    result = ing.publish_verified_review(
+        decision=admitted.decision,
+        job_id=admitted.job_id,
+        pull_requests=reads,
+        results=FakeResults(_verified(job_id=admitted.job_id)),
+        publications=publications,
+        admissions=FakeAdmittedJobs(admitted.decision, admitted.job_id),
+    )
+    assert reads.reads == 1
+    assert result.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
+    assert publications.calls == []
+
+
+def test_combined_objective_over_bound_refused_before_ledger():
     fabric = FakeFabric()
-    result = _admit(
+    outcome = _admit(
         fabric=fabric,
         pull_requests=FakePullRequests(_pull_request(
             title="A" * 13000, body="B" * 13000
         )),
     )
-    assert result.state is ing.AdmissionState.REFUSED
-    assert result.decision.refusal is gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED
+    assert outcome.state is ing.AdmissionState.REFUSED
+    assert outcome.decision.refusal is gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED
     assert fabric.admit_calls == 0
     assert fabric.jobs == {}
 
-def test_publication_fetches_current_facts_not_admission_snapshot():
-    """Publication must refuse a moved head from the authenticated fresh read."""
-    _, admitted = _admitted_decision()
-    reads = FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA))
-    publications = FakePublications()
-    outcome = _publish(
-        admitted.decision,
-        admitted.job_id,
-        pull_requests=reads,
-        publications=publications,
-    )
-    assert reads.reads == 1
-    assert outcome.state is ing.PublishState.REFUSED
-    assert outcome.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
-    assert publications.calls == []
+
+# Security review #1748 / cabfccbc: source-bound Job and atomic publication.
+class TestCurrentHeadIndependentSecurityFindings:
+    def test_valid_unrelated_job_b_cannot_publish_its_result_on_pr_a(self):
+        _, pr_a = _admitted_decision()
+        job_a = pr_a.job_id
+        job_b = "JOB-for-valid-other-PR"
+        results_b = FakeResults(_verified(job_id=job_b))
+        publications = FakePublications()
+        current = FakePullRequests()
+        owner = FakeAdmittedJobs(pr_a.decision, job_a)
+        out = _publish(
+            pr_a.decision, job_b, results=results_b,
+            publications=publications, pull_requests=current,
+            admissions=owner,
+        )
+        assert out.state is ing.PublishState.REFUSED
+        assert out.refusal == "ADMITTED_JOB_SOURCE_IDENTITY_MISMATCH"
+        assert owner.lookups == [pr_a.decision.command_id]
+        assert results_b.lookups == []
+        assert current.reads == 0
+        assert publications.calls == []
+
+    def test_swapping_two_genuine_admission_records_never_cross_binds(self):
+        _, pr_a = _admitted_decision()
+        _, pr_b = _admitted_decision()
+        other = ing.AdmittedJobFacts(
+            job_id="JOB-B", command_id="gh-review-intent:other",
+            repository=REPOSITORY, pull_number=OTHER_PULL_NUMBER,
+            frozen_head_sha=MOVED_HEAD_SHA, actor="alice", intent_id="intent-b",
+        )
+        owner = FakeAdmittedJobs(pr_a.decision, pr_a.job_id, override=other)
+        pub = FakePublications()
+        outcome = _publish(
+            pr_a.decision, "JOB-B",
+            results=FakeResults(_verified(job_id="JOB-B")),
+            publications=pub, admissions=owner,
+        )
+        assert outcome.refusal == "ADMITTED_JOB_SOURCE_IDENTITY_MISMATCH"
+        assert pub.calls == []
+
+    def test_canonical_job_read_is_required_and_fails_closed(self):
+        _, admitted = _admitted_decision()
+        with pytest.raises(ing.ReviewIngressUnavailable):
+            _publish(admitted.decision, admitted.job_id, admissions=None)
+        with pytest.raises(ing.ReviewIngressUnavailable):
+            _publish(admitted.decision, admitted.job_id, admissions=object())
+        class Unavailable:
+            def read_admitted_job(self, *, command_id):
+                raise OSError("DB unreachable")
+        with pytest.raises(ing.ReviewVerificationRefused, match="ADMITTED_JOB_READ_UNAVAILABLE"):
+            _publish(admitted.decision, admitted.job_id, admissions=Unavailable())
+
+    @pytest.mark.parametrize("secret", [
+        "xoxb-fake-reviewer-token", "github_pat_not-real-example",
+        "authorization: Bearer_secret_here", "-----BEGIN PRIVATE KEY-----",
+    ])
+    def test_verified_secret_shaped_summary_cannot_be_posted(self, secret):
+        _, admitted = _admitted_decision()
+        p = FakePublications()
+        outcome = _publish(
+            admitted.decision, admitted.job_id, publications=p,
+            results=FakeResults(_verified(job_id=admitted.job_id, summary=secret)),
+        )
+        assert outcome.refusal == "REVIEW_SUMMARY_SECRET_SHAPED"
+        assert p.calls == []
+
+    def test_concrete_success_sequential_two_calls_post_exactly_once(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        adapter1 = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
+        adapter2 = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "c"*32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="Reviewed, accepted.",
+        )
+        assert adapter1.publish_review(**fields) == "review-real"
+        assert adapter2.publish_review(**fields) == "review-real"
+        assert tx.submits == 1
+        assert fields["publication_command_id"] in ledger.published_command_ids()
+        assert len(ledger.claims) == 1
+
+    def test_concrete_success_concurrent_across_eight_instances_posts_only_once(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        adapters = [
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
+            for _ in range(8)
+        ]
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "d"*32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="Identical reviewed body.",
+        )
+        def attempt(adapter):
+            try:
+                return adapter.publish_review(**fields)
+            except ing.PublicationEffectUnknown:
+                return "EFFECT_UNKNOWN"
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            outputs = list(executor.map(attempt, adapters))
+        assert tx.submits == 1
+        assert "review-real" in outputs
+        assert all(x in {"review-real", "EFFECT_UNKNOWN"} for x in outputs)
+        assert len(ledger.claims) == 1
+
+    def test_effect_claim_is_sticky_if_readback_unavailable(self):
+        class BrokenReadback(SuccessTransport):
+            def read_reviews(self, **kwargs):
+                raise OSError("repository API timeout")
+        tx, ledger = BrokenReadback(), FakeIndex()
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "e"*32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="review",
+        )
+        for _ in range(2):
+            with pytest.raises(ing.PublicationEffectUnknown):
+                adapter.publish_review(**fields)
+        assert tx.submits == 0
+        assert len(ledger.claims) == 1
+
+    def test_concrete_post_unknown_and_readback_failure_remain_effect_unknown(self):
+        class LostReadback(SuccessTransport):
+            def submit_review(self, **kwargs):
+                super().submit_review(**kwargs)
+                raise ing.PublicationEffectUnknown("lost POST response")
+            def read_reviews(self, **kwargs):
+                if self.submits:
+                    raise OSError("readback timeout")
+                return ()
+        tx, ledger = LostReadback(), FakeIndex()
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "f"*32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="review",
+        )
+        with pytest.raises(ing.PublicationEffectUnknown):
+            adapter.publish_review(**fields)
+        with pytest.raises(ing.PublicationEffectUnknown):
+            adapter.publish_review(**fields)
+        assert tx.submits == 1
+
+    def test_concrete_requires_atomic_canonical_claim_and_conflict_fails(self):
+        class ReadOnly:
+            def published_command_ids(self):
+                return frozenset()
+        with pytest.raises(ing.ReviewIngressError):
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=SuccessTransport(), published=ReadOnly())
+        ledger = FakeIndex()
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=SuccessTransport(), published=ledger)
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "1"*32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="review",
+        )
+        assert adapter.publish_review(**fields) == "review-real"
+        with pytest.raises(ing.ReviewVerificationRefused):
+            adapter.publish_review(**{**fields, "body": "other review"})
+
+    def test_unavailable_reconciliation_read_stays_typed_unknown(self):
+        _, admitted = _admitted_decision()
+        class Broken:
+            def read_reviews(self, **kwargs):
+                raise OSError("lost readback")
+        p = FakePublications(unknown=True)
+        out = _publish(
+            admitted.decision, admitted.job_id, publications=p, readback=Broken()
+        )
+        assert out.refusal == "PUBLICATION_EFFECT_UNKNOWN"
+        assert len(p.calls) == 1
+
+    def test_blank_canonical_admission_does_not_post(self):
+        _, admitted = _admitted_decision()
+        class Missing:
+            def read_admitted_job(self, *, command_id):
+                return None
+        p = FakePublications()
+        out = _publish(admitted.decision, admitted.job_id, admissions=Missing(), publications=p)
+        assert out.refusal == "ADMITTED_JOB_SOURCE_IDENTITY_MISMATCH"
+        assert p.calls == []
+
+
+class TestAuthorBoundReadbackAndFinalEffectGuard:
+    def test_matching_foreign_review_cannot_confirm_and_first_authorized_writer_posts(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        tx.receipt = ing.PublishedReviewFacts(
+            review_id="review-alien", commit_id=HEAD_SHA, event="COMMENT",
+            body="same body", author_user_id=99, author_login="other-actor",
+        )
+        adapter = ing.ReconcilingReviewPublication(
+            transport=tx, published=ledger, expected_publisher=EXPECTED_PUBLISHER,
+            before_post=_final_guard(),
+        )
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "8" * 32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="same body",
+        )
+        assert adapter.publish_review(**fields) == "review-real"
+        assert tx.submits == 1
+        assert fields["publication_command_id"] in ledger.published_command_ids()
+
+    def test_alien_readback_does_not_settle_previous_unconfirmed_claim(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "9" * 32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="same body",
+        )
+        tx.receipt = ing.PublishedReviewFacts(
+            review_id="review-alien", commit_id=HEAD_SHA, event="COMMENT",
+            body="same body", author_user_id=99, author_login="other-actor",
+        )
+        assert ledger.reserve_publication(**fields)
+        adapter = ing.ReconcilingReviewPublication(
+            transport=tx, published=ledger, expected_publisher=EXPECTED_PUBLISHER,
+            before_post=_final_guard(),
+        )
+        with pytest.raises(ing.PublicationEffectUnknown):
+            adapter.publish_review(**fields)
+        assert tx.submits == 0
+        assert not ledger.published_command_ids()
+
+    @pytest.mark.parametrize("mutation,reason", [
+        ({"head_sha": MOVED_HEAD_SHA}, gri.ReviewIntentRefusal.HEAD_MOVED.value),
+        ({"draft": True}, gri.ReviewIntentRefusal.PULL_REQUEST_DRAFT.value),
+        ({"state": "closed"}, gri.ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN.value),
+        ({"head_repository": "other/repo"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
+    ])
+    def test_mutation_during_reviews_get_refuses_before_post(self, mutation, reason):
+        _, admitted = _admitted_decision()
+        pulls = FakePullRequests()
+        class MutatingReadback(SuccessTransport):
+            def read_reviews(self, **kwargs):
+                pulls.facts = _pull_request(**mutation)
+                return super().read_reviews(**kwargs)
+        tx, ledger = MutatingReadback(), FakeIndex()
+        adapter = ing.ReconcilingReviewPublication(
+            transport=tx, published=ledger,
+            expected_publisher=EXPECTED_PUBLISHER,
+            before_post=ing.FinalPullRequestCheck(
+                decision=admitted.decision, pull_requests=pulls,
+            ),
+        )
+        outcome = _publish(
+            admitted.decision, admitted.job_id,
+            publications=adapter, pull_requests=pulls, readback=tx,
+        )
+        assert outcome.state is ing.PublishState.REFUSED
+        assert outcome.refusal == reason
+        assert tx.submits == 0
+        assert pulls.reads == 2
+        assert len(ledger.claims) == 1
+
+    def test_publisher_id_and_login_both_required(self):
+        expected = _review_fact(
+            review_id="review-good", commit_id=HEAD_SHA, event="COMMENT", body="body",
+        )
+        for alien in (
+            dataclasses.replace(expected, author_user_id=8),
+            dataclasses.replace(expected, author_login="unrelated"),
+        ):
+            assert ing.reconcile_publication(
+                reviews=(alien,), commit_id=HEAD_SHA, event="COMMENT", body="body",
+                expected_publisher=EXPECTED_PUBLISHER,
+            ) is None
+
+    def test_untrusted_or_missing_publisher_and_final_guard_refuse_at_construction(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        with pytest.raises(TypeError):
+            ing.ReconcilingReviewPublication(transport=tx, published=ledger)
+        with pytest.raises(ing.ReviewIngressError):
+            ing.ReconcilingReviewPublication(
+                transport=tx, published=ledger,
+                expected_publisher=object(), before_post=_final_guard(),
+            )
+        with pytest.raises(ing.ReviewIngressError):
+            ing.ReconcilingReviewPublication(
+                transport=tx, published=ledger,
+                expected_publisher=EXPECTED_PUBLISHER, before_post=lambda: None,
+            )
+        assert tx.submits == 0
+
+
+def test_external_github_source_contracts_are_publicly_exported():
+    assert "ExternalGitHubSourceFacts" in ing.__all__
+    assert "ExternalGitHubSourcePort" in ing.__all__
+    assert "ExternalCommentAdvisory" in ing.__all__
 
 
 def test_rendered_review_body_limit_refused_before_publisher():
@@ -1064,3 +1471,58 @@ def test_rendered_review_body_limit_refused_before_publisher():
     assert result.state is ing.PublishState.REFUSED
     assert result.refusal == "REVIEW_BODY_OVER_BOUND"
     assert publications.calls == []
+
+
+class _AdvisoryPulls(FakePullRequests):
+    def read_external_source(self, *, repository, pull_number):
+        return ing.ExternalGitHubSourceFacts(
+            repository=REPOSITORY, pull_number=PULL_NUMBER, head_sha=HEAD_SHA,
+            submitter_login="alice", submitter_id=314,
+        )
+
+
+def _external_result(job_id):
+    return _verified(
+        job_id=job_id, source_basis="EXTERNAL_GITHUB_SUBMITTER",
+        builder_worker_id="", source_github_submitter_login="alice",
+        source_github_submitter_id=314,
+    )
+
+
+def test_external_draft_without_a_sealed_advisory_does_not_publish():
+    _, admitted = _admitted_decision()
+    publications = FakePublications()
+    outcome = _publish(
+        admitted.decision, admitted.job_id,
+        results=FakeResults(_external_result(admitted.job_id)),
+        publications=publications,
+        pull_requests=_AdvisoryPulls(_pull_request(draft=True)),
+    )
+    assert outcome.refusal == "EXTERNAL_ADVISORY_UNBOUND"
+    assert publications.calls == []
+
+
+def test_final_guard_draft_requires_sealed_comment_advisory():
+    _, admitted = _admitted_decision()
+    pulls = _AdvisoryPulls(_pull_request(draft=True))
+    proof = ing.ExternalCommentAdvisory(submitter_user_id=314, submitter_login="alice")
+    with pytest.raises(ing.FinalPostRefusal, match="PULL_REQUEST_DRAFT"):
+        ing.FinalPullRequestCheck(
+            decision=admitted.decision, pull_requests=pulls, event="COMMENT",
+        )()
+    ing.FinalPullRequestCheck(
+        decision=admitted.decision, pull_requests=pulls, event="COMMENT",
+        advisory=proof,
+    )()
+    with pytest.raises(ing.FinalPostRefusal, match="EXTERNAL_ADVISORY_VERB_REFUSED"):
+        ing.FinalPullRequestCheck(
+            decision=admitted.decision, pull_requests=pulls,
+            event="REQUEST_CHANGES", advisory=proof,
+        )()
+    with pytest.raises(ing.FinalPostRefusal, match="EXTERNAL_SOURCE_DRIFT"):
+        ing.FinalPullRequestCheck(
+            decision=admitted.decision, pull_requests=pulls, event="COMMENT",
+            advisory=ing.ExternalCommentAdvisory(
+                submitter_user_id=315, submitter_login="alice",
+            ),
+        )()

@@ -1,15 +1,17 @@
 """Real Executive event UNIQUE index arbitrates formal GitHub review effects."""
-import httpx
 import pytest
 
 from control_plane.executive_runtime import Runtime
+from control_plane.github_review_intent import PullRequestFacts
 from control_plane.github_review_intent_ingress import (
-    PublicationEffectUnknown, ReviewVerificationRefused,
+    ExpectedReviewPublisher, ExternalCommentAdvisory, ExternalGitHubSourceFacts,
+    FinalPostRefusal, PublicationEffectUnknown, ReviewVerificationRefused,
     PublishedReviewFacts, publication_command_id,
 )
 from control_plane.github_review_publication_record import (
     ExecutiveReviewPublicationRecord,
 )
+from test_github_review_runtime_adapter import decision
 
 REPO = "example/repo"
 HEAD = "a" * 40
@@ -18,6 +20,33 @@ BODY = "Advisory review from independently verified worker."
 COMMAND = publication_command_id(
     repository=REPO, pull_number=42, head_sha=HEAD, job_id=JOB,
 )
+PUBLISHER = ExpectedReviewPublisher(user_id=9001, login="reviewer-bot[bot]")
+
+
+def review_fact(**overrides):
+    base = dict(
+        review_id="789", commit_id=HEAD, event="COMMENT", body=BODY,
+        author_user_id=PUBLISHER.user_id, author_login=PUBLISHER.login,
+    )
+    base.update(overrides)
+    return PublishedReviewFacts(**base)
+
+
+class OpenPull:
+    def __init__(self, **overrides):
+        self.overrides = overrides
+        self.reads = 0
+
+    def read_pull_request(self, *, repository, pull_number):
+        self.reads += 1
+        base = dict(
+            repository=REPO, number=42, state="open", draft=False,
+            head_sha=HEAD, head_repository=REPO, base_repository=REPO,
+            base_sha="c" * 40, title="Reviewed source",
+            body="Separate worker review.",
+        )
+        base.update(self.overrides)
+        return PullRequestFacts(**base)
 
 
 class Transport:
@@ -26,20 +55,14 @@ class Transport:
         self.lands = lands
         self.submits = 0
         self.reads = 0
-        self.review = (
-            PublishedReviewFacts(
-                review_id="789", commit_id=HEAD, event="COMMENT", body=BODY,
-            ) if preexisting else None
-        )
+        self.review = review_fact() if preexisting else None
     def submit_review(self, *, repository, pull_number, commit_id, event, body):
         assert (repository, pull_number, commit_id, event, body) == (
             REPO, 42, HEAD, "COMMENT", BODY
         )
         self.submits += 1
         if self.lands:
-            self.review = PublishedReviewFacts(
-                review_id="789", commit_id=HEAD, event=event, body=body
-            )
+            self.review = review_fact(event=event, body=body)
         if self.unknown:
             raise PublicationEffectUnknown("unknown")
         return "789"
@@ -49,12 +72,16 @@ class Transport:
         return (self.review,) if self.review is not None else ()
 
 
-def publisher(tmp_path, transport=None, guard=lambda: None, runtime=None):
+def publisher(tmp_path, transport=None, guard=lambda: None, runtime=None, pulls=None):
     runtime = runtime or Runtime.at(tmp_path)
     transport = transport or Transport()
+    pulls = pulls or OpenPull()
     return ExecutiveReviewPublicationRecord(
         runtime=runtime, transport=transport, job_id=JOB,
         publication_guard=guard,
+        expected_publisher=PUBLISHER,
+        decision=decision(),
+        pull_requests=pulls,
     ), runtime, transport
 
 
@@ -110,9 +137,7 @@ def test_existing_reservation_later_readback_repairs_local_commit(tmp_path):
     app, runtime, gh = publisher(tmp_path, Transport(unknown=True, lands=False))
     with pytest.raises(PublicationEffectUnknown):
         call(app)
-    gh.review = PublishedReviewFacts(
-        review_id="789", commit_id=HEAD, event="COMMENT", body=BODY,
-    )
+    gh.review = review_fact()
     assert call(app) == "789"
     assert gh.submits == 1
     assert COMMAND in app.published_command_ids()
@@ -247,4 +272,111 @@ def test_publication_guard_revoked_during_readback_refuses_before_post(tmp_path)
         call(app)
     assert gh.submits == 0
     assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert COMMAND not in app.published_command_ids()
+
+
+@pytest.mark.parametrize("author", [
+    {"author_user_id": 8},
+    {"author_login": "other-actor"},
+])
+def test_identical_body_from_a_different_author_still_posts_once(tmp_path, author):
+    gh = Transport(preexisting=True)
+    gh.review = review_fact(**author)
+    app, runtime, transport = publisher(tmp_path, gh)
+    assert call(app) == "789"
+    assert transport.submits == 1
+    assert COMMAND in app.published_command_ids()
+    stored = runtime.store.get_event_by_command_id(COMMAND + ":confirmed")
+    assert stored.payload["review_id"] == "789"
+
+
+@pytest.mark.parametrize("mutation,code", [
+    ({"head_sha": "b" * 40}, "HEAD_MOVED"),
+    ({"draft": True}, "PULL_REQUEST_DRAFT"),
+    ({"state": "closed"}, "PULL_REQUEST_NOT_OPEN"),
+    ({"head_repository": "other/repo"}, "HEAD_REPOSITORY_MISMATCH"),
+])
+def test_mutation_during_reviews_get_refuses_before_post(tmp_path, mutation, code):
+    pulls = OpenPull()
+
+    class Mutating(Transport):
+        def read_reviews(self, *, repository, pull_number, commit_id):
+            pulls.overrides.update(mutation)
+            return super().read_reviews(
+                repository=repository, pull_number=pull_number, commit_id=commit_id
+            )
+
+    app, runtime, gh = publisher(tmp_path, Mutating(), pulls=pulls)
+    with pytest.raises(FinalPostRefusal, match=code):
+        call(app)
+    assert gh.submits == 0
+    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert COMMAND not in app.published_command_ids()
+    with pytest.raises(PublicationEffectUnknown):
+        call(app)
+    assert gh.submits == 0
+
+
+class DraftAdvisoryPull(OpenPull):
+    def __init__(self, *, submitter_id=314, submitter_login="alice"):
+        super().__init__(draft=True)
+        self.submitter_id = submitter_id
+        self.submitter_login = submitter_login
+
+    def read_external_source(self, *, repository, pull_number):
+        return ExternalGitHubSourceFacts(
+            repository=repository, pull_number=pull_number, head_sha=HEAD,
+            submitter_login=self.submitter_login, submitter_id=self.submitter_id,
+        )
+
+
+def test_approve_verb_is_refused_before_reservation(tmp_path):
+    app, runtime, gh = publisher(tmp_path)
+    with pytest.raises(ReviewVerificationRefused, match="VERB_REFUSED"):
+        call(app, event="APPROVE")
+    assert gh.submits == gh.reads == 0
+    assert runtime.store.get_event_by_command_id(COMMAND) is None
+
+
+def test_unsealed_draft_is_not_a_bypass(tmp_path):
+    app, runtime, gh = publisher(tmp_path, pulls=DraftAdvisoryPull())
+    with pytest.raises(FinalPostRefusal, match="PULL_REQUEST_DRAFT"):
+        call(app)
+    assert gh.submits == 0
+    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+
+
+def test_sealed_comment_advisory_posts_once_on_a_draft(tmp_path):
+    app, runtime, gh = publisher(tmp_path, pulls=DraftAdvisoryPull())
+    app.seal_external_comment_advisory(ExternalCommentAdvisory(
+        submitter_user_id=314, submitter_login="alice",
+    ))
+    assert call(app) == "789"
+    assert gh.submits == 1
+    assert call(app) == "789"
+    assert gh.submits == 1
+
+
+def test_sealed_advisory_cannot_use_request_changes(tmp_path):
+    app, runtime, gh = publisher(tmp_path, pulls=DraftAdvisoryPull())
+    app.seal_external_comment_advisory(ExternalCommentAdvisory(
+        submitter_user_id=314, submitter_login="alice",
+    ))
+    with pytest.raises(FinalPostRefusal, match="EXTERNAL_ADVISORY_VERB_REFUSED"):
+        call(app, event="REQUEST_CHANGES")
+    assert gh.submits == 0
+    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert COMMAND not in app.published_command_ids()
+
+
+def test_sealed_advisory_refuses_submitter_drift_before_post(tmp_path):
+    app, runtime, gh = publisher(
+        tmp_path, pulls=DraftAdvisoryPull(submitter_id=315),
+    )
+    app.seal_external_comment_advisory(ExternalCommentAdvisory(
+        submitter_user_id=314, submitter_login="alice",
+    ))
+    with pytest.raises(FinalPostRefusal, match="EXTERNAL_SOURCE_DRIFT"):
+        call(app)
+    assert gh.submits == 0
     assert COMMAND not in app.published_command_ids()

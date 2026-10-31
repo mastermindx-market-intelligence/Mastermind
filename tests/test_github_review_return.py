@@ -234,7 +234,8 @@ def test_return_factory_rejects_publisher_spoofing_api_subclass(tmp_path):
     runtime, builder, reviewer = completed_pair(tmp_path)
     forged = ForgedPublisher(
         repository="example/repo", installation_id=4242,
-        publisher_login="reviewer-bot[bot]", token_source=Tokens(),
+        publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
+        token_source=Tokens(),
         client=httpx.Client(transport=httpx.MockTransport(
             lambda req: httpx.Response(200, json={})
         )),

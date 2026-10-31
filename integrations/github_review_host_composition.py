@@ -39,6 +39,7 @@ def compose_github_review_host(
     socket_client: ExecutiveReviewSocketClient | None = None,
     relay_client: SlackWebApiDialogueClient,
     publisher_login: str,
+    publisher_user_id: int,
     worker_constraints: Mapping[str, Any] | None = None,
     public_repository_names_authorized: bool = False,
     app_token_http_client: httpx.Client | None = None,
@@ -82,6 +83,7 @@ def compose_github_review_host(
         installation_id=settings.installation_id,
         token_source=token_source,
         publisher_login=publisher_login,
+        publisher_user_id=publisher_user_id,
         client=github_http_client,
     )
     admission = (ExecutiveReviewJobAdmission(

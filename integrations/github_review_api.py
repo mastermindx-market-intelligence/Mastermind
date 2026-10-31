@@ -14,6 +14,7 @@ import httpx
 
 from control_plane.github_review_intent import PullRequestFacts
 from control_plane.github_review_intent_ingress import (
+    ExpectedReviewPublisher,
     ExternalGitHubSourceFacts,
     PublishedReviewFacts,
     PublicationEffectUnknown,
@@ -74,6 +75,7 @@ class GitHubReviewAPI:
         installation_id: int,
         token_source: InstallationTokenSource,
         publisher_login: str,
+        publisher_user_id: int,
         client: httpx.Client | None = None,
     ) -> None:
         self._repository = _repo_name(repository)
@@ -81,6 +83,10 @@ class GitHubReviewAPI:
         self._token_source = token_source
         if _LOGIN_RE.fullmatch(publisher_login) is None:
             raise GitHubReviewAPIUnavailable("GITHUB_PUBLISHER_IDENTITY_INVALID")
+        if type(publisher_user_id) is not int or publisher_user_id <= 0:
+            raise GitHubReviewAPIUnavailable("GITHUB_PUBLISHER_IDENTITY_INVALID")
+        self._publisher_login = publisher_login
+        self._publisher_user_id = publisher_user_id
         self._publisher = publisher_login.casefold()
         self._client = client if client is not None else httpx.Client(
             timeout=httpx.Timeout(3.0), follow_redirects=False
@@ -90,6 +96,17 @@ class GitHubReviewAPI:
     def publisher_login(self) -> str:
         """Validated immutable publication account for Executive return binding."""
         return self._publisher
+
+    @property
+    def publisher_user_id(self) -> int:
+        """Host-configured GitHub App user id. Never taken from a webhook."""
+        return self._publisher_user_id
+
+    def expected_publisher(self) -> ExpectedReviewPublisher:
+        """Both id and login the reconciliation guard must match."""
+        return ExpectedReviewPublisher(
+            user_id=self._publisher_user_id, login=self._publisher_login
+        )
 
     def _request(self, method: str, path: str, *, payload: dict | None = None) -> object:
         if method not in {"GET", "POST"} or not path.startswith(
@@ -283,10 +300,20 @@ class GitHubReviewAPI:
                 raise GitHubReviewAPIUnavailable("GITHUB_RESPONSE_INVALID")
             for item in records:
                 obj = _obj(item)
-                user = _obj(obj.get("user"))
+                user = obj.get("user")
+                if not isinstance(user, dict):
+                    continue
                 login = user.get("login")
-                # Never treat an unrelated actor's mimicked review as our own.
-                if not isinstance(login, str) or login.casefold() != self._publisher:
+                author_id = user.get("id")
+                # Both fields come from the authenticated GET. A missing id is
+                # not filled from the configured publisher, and a foreign
+                # author is retained so reconciliation can reject it.
+                if (
+                    not isinstance(login, str)
+                    or _LOGIN_RE.fullmatch(login) is None
+                    or type(author_id) is not int
+                    or author_id <= 0
+                ):
                     continue
                 review_sha = obj.get("commit_id")
                 event = _STATE_TO_EVENT.get(obj.get("state"))
@@ -298,6 +325,7 @@ class GitHubReviewAPI:
                 result.append(PublishedReviewFacts(
                     review_id=str(_number(obj.get("id"))),
                     commit_id=review_sha, event=event, body=review_body,
+                    author_user_id=author_id, author_login=login,
                 ))
             if len(records) < 100:
                 return tuple(result)

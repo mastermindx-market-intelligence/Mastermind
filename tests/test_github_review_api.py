@@ -2,9 +2,15 @@
 import httpx
 import pytest
 
+from control_plane.github_review_intent import (
+    IntentSource, ReviewIntentDecision, review_command_id, review_intent_id,
+)
 from control_plane.github_review_intent_ingress import (
+    ExpectedReviewPublisher,
+    FinalPullRequestCheck,
     PublicationEffectUnknown,
     ReconcilingReviewPublication,
+    ReviewVerificationRefused,
 )
 from integrations.github_review_api import (
     GitHubReviewAPI,
@@ -13,6 +19,10 @@ from integrations.github_review_api import (
 
 REPO = "example/repo"
 SHA = "a" * 40
+PUBLISHER_USER_ID = 9001
+PUBLISHER = ExpectedReviewPublisher(
+    user_id=PUBLISHER_USER_ID, login="reviewer-bot[bot]"
+)
 
 
 class Tokens:
@@ -29,7 +39,8 @@ def source(handler):
     client = httpx.Client(transport=httpx.MockTransport(handler))
     api = GitHubReviewAPI(
         repository=REPO, installation_id=4242,
-        publisher_login="reviewer-bot[bot]", token_source=token,
+        publisher_login="reviewer-bot[bot]", publisher_user_id=PUBLISHER_USER_ID,
+        token_source=token,
         client=client,
     )
     return api, token
@@ -42,6 +53,60 @@ def pr():
         "base": {"sha": "b" * 40, "repo": {"full_name": REPO}},
         "title": "Review it", "body": "No secrets",
     }
+
+
+def _decision():
+    intent_id = review_intent_id(repository=REPO, pull_number=42, head_sha=SHA)
+    return ReviewIntentDecision(
+        admitted=True, refusal=None, intent_source=IntentSource.INTENT_LABEL,
+        intent_id=intent_id, command_id=review_command_id(intent_id),
+        delivery_command_id="gh-review-delivery:" + "a" * 32,
+        repository=REPO, pull_number=42, frozen_head_sha=SHA, actor="alice",
+    )
+
+
+class Ledger:
+    """Test stand-in. Production reservation is the Executive EventStore."""
+
+    def __init__(self):
+        self.claims = {}
+        self.done = set()
+
+    def published_command_ids(self):
+        return frozenset(self.done)
+
+    def reserve_publication(
+        self, *, publication_command_id, repository, pull_number,
+        head_sha, event, body,
+    ):
+        identity = (repository, pull_number, head_sha, event, body)
+        prior = self.claims.get(publication_command_id)
+        if prior is None:
+            self.claims[publication_command_id] = identity
+            return True
+        if prior != identity:
+            raise ReviewVerificationRefused("publication claim identity mismatch")
+        return False
+
+    def confirm_publication(
+        self, *, publication_command_id, repository, pull_number,
+        head_sha, event, body, review_id,
+    ):
+        identity = (repository, pull_number, head_sha, event, body)
+        if self.claims.get(publication_command_id) != identity:
+            raise ReviewVerificationRefused("publication confirmation mismatch")
+        self.done.add(publication_command_id)
+
+
+def armed(api, published=None):
+    return ReconcilingReviewPublication(
+        transport=api,
+        published=published if published is not None else Ledger(),
+        expected_publisher=PUBLISHER,
+        before_post=FinalPullRequestCheck(
+            decision=_decision(), pull_requests=api,
+        ),
+    )
 
 
 def handler(request):
@@ -110,19 +175,21 @@ def test_uncertain_post_must_reconcile_from_own_review_readback():
         if req.method == "POST":
             attempts.append(req)
             raise httpx.ReadTimeout("response lost", request=req)
-        reads.append(req)
-        if not attempts:
-            return httpx.Response(200, json=[])
-        return httpx.Response(200, json=[
-            {"id": 123, "commit_id": SHA, "state": "COMMENTED", "body": "review body",
-             "user": {"login": "reviewer-bot[bot]"}},
-            {"id": 124, "commit_id": SHA, "state": "COMMENTED", "body": "review body",
-             "user": {"login": "not-our-bot"}},
-        ])
+        if req.url.path.endswith("/pulls/42/reviews"):
+            reads.append(req)
+            if not attempts:
+                return httpx.Response(200, json=[])
+            return httpx.Response(200, json=[
+                {"id": 123, "commit_id": SHA, "state": "COMMENTED", "body": "review body",
+                 "user": {"login": "reviewer-bot[bot]", "id": PUBLISHER_USER_ID}},
+                {"id": 124, "commit_id": SHA, "state": "COMMENTED", "body": "review body",
+                 "user": {"login": "not-our-bot", "id": 8}},
+            ])
+        if req.url.path.endswith("/pulls/42"):
+            return httpx.Response(200, json=pr())
+        return httpx.Response(404, json={"message": "not found"})
     api, _ = source(transport)
-    published = ReconcilingReviewPublication(
-        transport=api, published=type("Index", (), {"published_command_ids": lambda self: frozenset()})()
-    )
+    published = armed(api)
     review_id = published.publish_review(
         publication_command_id="gh-review-publish:" + "a" * 32,
         repository=REPO, pull_number=42, head_sha=SHA,
@@ -138,11 +205,13 @@ def test_uncertain_post_without_exact_readback_remains_uncertain():
         if req.method == "POST":
             attempts.append(req)
             raise httpx.ReadTimeout("response lost", request=req)
-        return httpx.Response(200, json=[])
+        if req.url.path.endswith("/pulls/42/reviews"):
+            return httpx.Response(200, json=[])
+        if req.url.path.endswith("/pulls/42"):
+            return httpx.Response(200, json=pr())
+        return httpx.Response(404, json={"message": "not found"})
     api, _ = source(transport)
-    published = ReconcilingReviewPublication(
-        transport=api, published=type("Index", (), {"published_command_ids": lambda self: frozenset()})()
-    )
+    published = armed(api)
     with pytest.raises(PublicationEffectUnknown):
         published.publish_review(
             publication_command_id="gh-review-publish:" + "a" * 32,
@@ -166,17 +235,16 @@ def test_missing_local_receipt_does_not_duplicate_a_review_already_on_github():
         if req.method == "POST":
             posts.append(req)
             raise AssertionError("preexisting review must not be reposted")
-        return httpx.Response(200, json=[
-            {"id": 867, "commit_id": SHA, "state": "COMMENTED", "body": "same review",
-             "user": {"login": "reviewer-bot[bot]"}},
-        ])
+        if req.url.path.endswith("/pulls/42/reviews"):
+            return httpx.Response(200, json=[
+                {"id": 867, "commit_id": SHA, "state": "COMMENTED", "body": "same review",
+                 "user": {"login": "reviewer-bot[bot]", "id": PUBLISHER_USER_ID}},
+            ])
+        if req.url.path.endswith("/pulls/42"):
+            return httpx.Response(200, json=pr())
+        return httpx.Response(404, json={"message": "not found"})
     api, _ = source(transport)
-    published = ReconcilingReviewPublication(
-        transport=api, published=type(
-            "MissingLocalIndex", (),
-            {"published_command_ids": lambda self: frozenset()},
-        )(),
-    )
+    published = armed(api)
     assert published.publish_review(
         publication_command_id="gh-review-publish:" + "a" * 32,
         repository=REPO, pull_number=42, head_sha=SHA,
@@ -221,12 +289,7 @@ def test_preflight_read_unavailable_is_typed_effect_unknown_without_post():
             return httpx.Response(200, json={"id": 222})
         return httpx.Response(503, json={"message": "temporarily unavailable"})
     api, _ = source(outage)
-    publisher = ReconcilingReviewPublication(
-        transport=api,
-        published=type("EmptyIndex", (), {
-            "published_command_ids": lambda self: frozenset(),
-        })(),
-    )
+    publisher = armed(api)
     with pytest.raises(PublicationEffectUnknown):
         publisher.publish_review(
             publication_command_id="gh-review-publish:" + "a" * 32,
@@ -280,3 +343,41 @@ def test_authenticated_draft_pr_submitter_is_valid_for_comment_only_advisory():
     assert origin.pull_number == 42 and origin.head_sha == SHA
     assert origin.submitter_login == "alice" and origin.submitter_id == 314
     assert tokens.calls == 1
+
+
+@pytest.mark.parametrize("user", [
+    {"login": "not-our-bot", "id": 8},
+    {"login": "reviewer-bot[bot]", "id": 8},
+    {"login": "not-our-bot", "id": PUBLISHER_USER_ID},
+    {"login": "reviewer-bot[bot]"},
+])
+def test_readback_does_not_fill_or_accept_a_foreign_author(user):
+    posts = []
+
+    def transport(req):
+        if req.method == "POST":
+            posts.append(req)
+            return httpx.Response(200, json={"id": 555})
+        if req.url.path.endswith("/pulls/42/reviews"):
+            return httpx.Response(200, json=[{
+                "id": 124, "commit_id": SHA, "state": "COMMENTED",
+                "body": "review body", "user": user,
+            }])
+        if req.url.path.endswith("/pulls/42"):
+            return httpx.Response(200, json=pr())
+        return httpx.Response(404, json={"message": "not found"})
+
+    api, _ = source(transport)
+    assert armed(api).publish_review(
+        publication_command_id="gh-review-publish:" + "b" * 32,
+        repository=REPO, pull_number=42, head_sha=SHA,
+        event="COMMENT", body="review body",
+    ) == "555"
+    assert len(posts) == 1
+    reviews = api.read_reviews(repository=REPO, pull_number=42, commit_id=SHA)
+    if "id" not in user:
+        assert reviews == ()
+    else:
+        assert reviews[0].author_user_id == user["id"]
+        assert reviews[0].author_login == user["login"]
+        assert reviews[0].review_id == "124"

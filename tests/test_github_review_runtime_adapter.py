@@ -74,6 +74,62 @@ def test_refusing_admission_guard_has_no_effect(tmp_path):
         adapter.admit_review_intent(decision=decision(), objective="Review exact PR")
     assert runtime.jobs.list_jobs() == []
 
+def test_read_admitted_job_uses_job_created_provenance(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    adapter = ExecutiveReviewJobAdmission(
+        runtime=runtime, admission_guard=lambda: None,
+    )
+    admitted = decision()
+    job_id = adapter.admit_review_intent(
+        decision=admitted, objective="Review exact PR",
+    )
+    facts = adapter.read_admitted_job(command_id=admitted.command_id)
+    assert facts is not None
+    assert facts.job_id == job_id
+    assert facts.command_id == admitted.command_id
+    assert facts.repository == admitted.repository
+    assert facts.pull_number == admitted.pull_number
+    assert facts.frozen_head_sha == admitted.frozen_head_sha
+    assert facts.actor == admitted.actor
+    assert facts.intent_id == admitted.intent_id
+    assert adapter.read_admitted_job(command_id="gh-review-intent:" + "ab" * 16) is None
+    assert adapter.read_admitted_job(command_id="not-a-review-command") is None
+
+
+def test_a_different_job_id_does_not_inherit_another_admission(tmp_path):
+    from control_plane.github_review_intent_ingress import publish_verified_review
+    from control_plane.github_review_publication_record import (
+        ExecutiveReviewPublicationRecord,
+    )
+    from test_github_review_result_reader import completed_pair
+    from test_github_review_publish_workflow import git_api
+
+    runtime, builder, reviewer_job = completed_pair(tmp_path)
+    github, history = git_api()
+    reader_module = __import__(
+        "control_plane.github_review_result_reader",
+        fromlist=["ExecutiveVerifiedReviewResults"],
+    )
+    results = reader_module.ExecutiveVerifiedReviewResults(
+        runtime=runtime, builder_job_id_for_review=lambda _job: builder,
+    )
+    publication = ExecutiveReviewPublicationRecord(
+        runtime=runtime, transport=github, job_id="JOB-other",
+        publication_guard=lambda: None,
+        expected_publisher=github.expected_publisher(),
+        decision=decision(), pull_requests=github,
+    )
+    outcome = publish_verified_review(
+        decision=decision(), job_id="JOB-other", results=results,
+        publications=publication, pull_requests=github,
+        admissions=ExecutiveReviewJobAdmission(runtime=runtime),
+        readback=github,
+    )
+    assert outcome.refusal == "ADMITTED_JOB_SOURCE_IDENTITY_MISMATCH"
+    assert history["posts"] == []
+    assert reviewer_job != "JOB-other"
+
+
 def test_commit_rechecks_external_authority_in_transaction(tmp_path):
     runtime = Runtime.at(tmp_path)
     checks = []

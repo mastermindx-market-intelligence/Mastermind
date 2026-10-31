@@ -13,6 +13,7 @@ from typing import Any
 
 from control_plane.executive_runtime import Runtime, StateConflict
 from control_plane.github_review_intent import ReviewIntentDecision
+from control_plane.github_review_intent_ingress import AdmittedJobFacts
 
 PREFIX = "gh-review-intent:"
 SCHEMA = "mastermind.github_review_runtime_admission.v1"
@@ -78,6 +79,56 @@ class ExecutiveReviewJobAdmission:
         ):
             raise ReviewAdmissionUnavailable("REVIEW_COMMAND_IDENTITY_CONFLICT")
         return job.job_id
+
+    def read_admitted_job(self, *, command_id: str) -> AdmittedJobFacts | None:
+        """Re-read the incumbent JOB_CREATED event, Job, and provenance.
+
+        This is a publication-time source check, not a new admission. It does
+        not arm or create a Job. Absence is None; the publisher refuses that.
+        """
+
+        if not isinstance(command_id, str) or not command_id.startswith(PREFIX):
+            return None
+        event = self._runtime.store.get_event_by_command_id(command_id)
+        if (
+            event is None
+            or event.event_type != "JOB_CREATED"
+            or event.command_id != command_id
+            or not event.job_id
+        ):
+            return None
+        job = self._runtime.jobs.get_job(event.job_id)
+        if job is None or job.job_id != event.job_id:
+            return None
+        provenance = event.payload.get("provenance")
+        if (
+            not isinstance(provenance, dict)
+            or provenance.get("schema") != SCHEMA
+            or provenance.get("command_id") != command_id
+        ):
+            return None
+        repository = provenance.get("repository")
+        pull_number = provenance.get("pull_number")
+        head_sha = provenance.get("frozen_head_sha")
+        actor = provenance.get("actor")
+        intent_id = provenance.get("intent_id")
+        if (
+            not isinstance(repository, str) or not repository
+            or type(pull_number) is not int or pull_number <= 0
+            or not isinstance(head_sha, str) or not head_sha
+            or not isinstance(actor, str) or not actor
+            or not isinstance(intent_id, str) or not intent_id
+        ):
+            return None
+        return AdmittedJobFacts(
+            job_id=job.job_id,
+            command_id=command_id,
+            repository=repository,
+            pull_number=pull_number,
+            frozen_head_sha=head_sha,
+            actor=actor,
+            intent_id=intent_id,
+        )
 
     def admit_review_intent(
         self, *, decision: ReviewIntentDecision, objective: str

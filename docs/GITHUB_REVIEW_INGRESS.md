@@ -32,8 +32,8 @@ has an owner:
 - **No second review registry and no second independent-review authority.** The
   Fabric's `review_required` / `reviews_job_id` / `orchestration_role='review'`
   model in `control_plane/executive_runtime.py` remains the only one. The
-  publication adapter takes its `PublishedCommandIndex` by injection and creates
-  no store.
+  publication adapter requires the incumbent Executive EventStore's atomic,
+  durable `events.command_id` reservation/confirmation port and creates no store.
 - **No second verdict vocabulary.** The verdict set is borrowed verbatim from
   `plugins/mastermind-sol/skills/review-pull-request/SKILL.md`.
 - **No second retry plane.** `PublicationEffectUnknown` is reconciled by reading
@@ -172,31 +172,53 @@ It takes no caller snapshot, because the whole question is what the head is
 is a coincidence. A moved head is refused with `HEAD_MOVED`; a read that answers
 about a different pull request is refused with `PULL_NUMBER_MISMATCH`.
 
-**An uncertain POST is reconciled, never retried blind.** When an adapter cannot
-observe its own review POST it raises `PublicationEffectUnknown`.
-`ReconcilingReviewPublication` then reconciles by reading the reviews already
-present at the exact commit, verb, and byte-identical body. A positive match
-returns the real review id; an unmatched effect is re-raised and reported as
-`PUBLICATION_EFFECT_UNKNOWN`. No path turns an unknown effect into a second
-formal review.
+**An uncertain POST is reconciled, never retried blind.** The concrete
+`ReconcilingReviewPublication` adapter must first atomically reserve an immutable
+publication command/payload using the *existing* Executive EventStore's
+`events.command_id` UNIQUE transaction. Only the first durable claimant can POST;
+all competing and repeated invocations must reconcile against the existing
+claim and authenticated exact GitHub review readback. A normal-success receipt
+is confirmed in that same incumbent ledger, and even a failed pre-POST or
+post-POST read keeps the claim sticky as `PublicationEffectUnknown` (not a
+safely retryable failure). An unmatched/failed read is reported as
+`PUBLICATION_EFFECT_UNKNOWN`, never a second GitHub POST. A read-only
+`published_command_ids()` preflight is **not** an atomic gate. Test fakes must
+not be substituted for that production ledger.
 
 **No unfenced auto-approval.** `PASS` maps to a GitHub `COMMENT`, never
 `APPROVE`. This slice mints no approval verb and no merge path at all, and
 `ReconcilingReviewPublication` refuses any verb outside
 `ALLOWED_REVIEW_EVENTS` before it can reach a socket.
 
-**Separate worker.** Publication refuses a result whose reviewer is the builder
-(`REVIEW_NOT_INDEPENDENT`) or whose reviewer identity is unknown
-(`REVIEWER_IDENTITY_UNKNOWN`). The reviewer must come from the Fabric's own
-worker identities, resolved by `Runtime.validated_role_completion` and
-`control_plane/fabric_result_projection`.
+**Separate worker and canonical Job source binding.** Publication refuses
+a result whose reviewer is the builder (`REVIEW_NOT_INDEPENDENT`) or whose
+reviewer identity is unknown (`REVIEWER_IDENTITY_UNKNOWN`). The reviewer must
+come from the Fabric's own worker identities, resolved by
+`Runtime.validated_role_completion` and `control_plane/fabric_result_projection`.
+A verified SAME result from an unrelated Job is *not* publishable against the
+currently admitted PR. Before result access or any GitHub effect, the required
+`AdmittedJobReadPort` must freshly join the incumbent `JOB_CREATED` ledger
+command to the actual Job and its persisted provenance: the exact command id,
+Job id, repository, PR, frozen head, actor, and intent id must agree with the
+admission decision. Missing/unreadable or mismatched binding refuses with
+`ADMITTED_JOB_READ_UNAVAILABLE` or `ADMITTED_JOB_SOURCE_IDENTITY_MISMATCH`.
+The caller-supplied `job_id` is never source authority.
+
+**Sensitive review output.** Verified reviewer text is not automatically safe
+for publication. A summary with credential/secret-shaped content is refused
+with `REVIEW_SUMMARY_SECRET_SHAPED` before fetching or posting; the concrete
+publisher also checks the entire outgoing body. It reuses the canonical
+credential-shape fence, not a second independently managed secret scanner.
 
 **Publish retry.** Publication carries its own deterministic command id bound to
 job and frozen head, so a retry reconciles to `ALREADY_PUBLISHED` instead of
 posting a second formal review.
 
-**Visibility is non-gating and opaque.** A Slack failure is recorded on the
-outcome, never raised, and never causes a second admission. It collapses to the
+**Visibility is non-gating and opaque.** A signed issue comment without a
+bound pull request returns `PULL_REQUEST_IDENTITY_UNBOUND` before any Slack
+notification, authenticated PR read or Job admission, even for an actor who is
+not allowlisted. Other eligible Slack failures are recorded on the outcome,
+never raised, and never cause a second admission. It collapses to the
 single fixed code `VISIBILITY_TRANSPORT_UNAVAILABLE`: transport exception text
 routinely embeds the workspace id, channel id, message id, API URL, and
 occasionally a token fragment, and `ReviewIngressOutcome` structurally refuses to
@@ -211,8 +233,9 @@ construct with any other value.
 | `FabricJobAdmissionPort` | `executive_runtime` Job registry — `create_job(..., command_id=decision.command_id)`; `admitted_command_ids()` reads the same index back |
 | `VisibilityPort` | The existing Slack Web API client in `integrations/slack_agent_dialogue/slack_web_api.py` |
 | `ReviewResultPort` | `Runtime.validated_role_completion` + `fabric_result_projection.project_fabric_role_result`, returning a result only when the projected receipt state is `SAME` |
-| `ReviewPublicationPort` | `ReconcilingReviewPublication`, bound to a `ReviewTransportPort` (`POST`/`GET /repos/{repo}/pulls/{n}/reviews`) and a `PublishedCommandIndex` |
-| `PublishedCommandIndex` | The host's existing durable record of published command ids — injected, never created here |
+| `AdmittedJobReadPort` | Fresh incumbent Executive `JOB_CREATED` command-to-Job join plus exact persisted Job provenance for repository, PR, head, actor and intent; absence/mismatch refuses before review publication |
+| `ReviewPublicationPort` | `ReconcilingReviewPublication`, bound to a `ReviewTransportPort` (`POST`/`GET /repos/{repo}/pulls/{n}/reviews`) and the canonical atomic `PublishedCommandIndex` |
+| `PublishedCommandIndex` | REQUIRED incumbent Executive EventStore `events.command_id` UNIQUE reservation/confirmation adapter; `reserve_publication` returns true only for first durable same-payload writer; `confirm_publication` persists authentic review id; read-only `published_command_ids` alone is insufficient |
 
 A missing port raises `ReviewIngressUnavailable` / `ReviewVerificationRefused`.
 There is no fallback to an unauthenticated client.
@@ -289,3 +312,13 @@ human-admin ceremony above.
 
 The `mcp` dev dependency is not installed here, so `tests/workbench_*` and
 `tests/*/test_*.py` that import it fail at collection.
+
+## Security re-review #5722645641 — author-bound readback and final POST authority
+
+The concrete publisher now requires an ExpectedReviewPublisher bound by the trusted host to the configured GitHub App posting principal (GitHub user.id and user.login, not an event/caller value). Each PublishedReviewFacts must preserve the authenticated GitHub GET review author's numeric id and login, and reconciliation confirms only when both match this principal in addition to the frozen commit/event/body. A third party posting an identical message can never confirm the atomic effect claim or suppress the original authorized first writer.
+
+The concrete ReconcilingReviewPublication also requires a FinalPullRequestCheck bound to the admitted decision and installation-scoped authenticated PR reader. After the potentially slow reviews GET, the guard re-reads the exact repository, pull number, frozen head, open/draft/fork state and current untrusted objective, then refuses a stale or changed PR before any POST. An arbitrary no-op callback and a missing guard are not accepted. Definite pre-POST refusal remains separate from PublicationEffectUnknown, and the original durable atomic reservation is sticky; it does not give permission to auto-retry a rejected publication.
+
+Native publication still refuses a draft. The only draft exception is an explicit `EXTERNAL_GITHUB_SUBMITTER` advisory whose verb is forced to `COMMENT`. That path seals the authenticated submitter id and login into `ExternalCommentAdvisory` and the final guard re-reads both after the reviews GET. A boolean, a missing seal, a `REQUEST_CHANGES` verb, or a submitter mismatch does not open the draft.
+
+The #1763 host adapter binds the App publisher user id and login, fills review authors from the authenticated GET, reserves publication on the incumbent EventStore, and passes this typed final check. That binding is source-only. No installed GitHub App, Executive handler, worker START, formal review, or Slack production proof follows from it.

@@ -15,13 +15,17 @@ import re
 from collections.abc import Callable
 
 from control_plane.executive_runtime import Runtime
+from control_plane.github_review_intent import ReviewIntentDecision
 from control_plane.github_review_intent_ingress import (
+    ExpectedReviewPublisher,
+    ExternalCommentAdvisory,
+    FinalPullRequestCheck,
     PublicationEffectUnknown,
+    PullRequestReadPort,
     ReconcilingReviewPublication,
     ReviewTransportPort,
     ReviewVerificationRefused,
     publication_command_id as expected_publication_command_id,
-    reconcile_publication,
 )
 
 _RESERVE = "GITHUB_REVIEW_PUBLICATION_RESERVED"
@@ -39,6 +43,9 @@ class ExecutiveReviewPublicationRecord:
         runtime: Runtime,
         transport: ReviewTransportPort,
         job_id: str,
+        expected_publisher: ExpectedReviewPublisher,
+        decision: ReviewIntentDecision,
+        pull_requests: PullRequestReadPort,
         publication_guard: Callable[[], None] | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
@@ -47,10 +54,35 @@ class ExecutiveReviewPublicationRecord:
             raise TypeError("authenticated GitHub review transport required")
         if not isinstance(job_id, str) or not job_id:
             raise TypeError("an exact canonical Job identity is required")
+        if not isinstance(expected_publisher, ExpectedReviewPublisher):
+            raise TypeError("host-owned GitHub publisher identity is required")
+        if not isinstance(decision, ReviewIntentDecision) or not decision.admitted:
+            raise TypeError("admitted review decision is required")
+        if not isinstance(pull_requests, PullRequestReadPort):
+            raise TypeError("authenticated pull-request reader is required")
         self._runtime = runtime
         self._transport = transport
         self._job_id = job_id
+        self._expected_publisher = expected_publisher
+        self._decision = decision
+        self._pull_requests = pull_requests
         self._guard = publication_guard
+        self._advisory: ExternalCommentAdvisory | None = None
+
+    def publishing_principal(self) -> ExpectedReviewPublisher:
+        return self._expected_publisher
+
+    def seal_external_comment_advisory(self, proof: ExternalCommentAdvisory) -> None:
+        """Bind one verified COMMENT submitter proof for the final guard.
+
+        Only ``publish_verified_review`` calls this after its authenticated
+        submitter re-read. The final guard reads GitHub again and still refuses
+        a draft when the proof, verb, or live submitter does not match.
+        """
+
+        if not isinstance(proof, ExternalCommentAdvisory):
+            raise ReviewVerificationRefused("EXTERNAL_SOURCE_INVALID")
+        self._advisory = proof
 
     def _authorize(self) -> None:
         if self._guard is None:
@@ -76,7 +108,7 @@ class ExecutiveReviewPublicationRecord:
             raise ReviewVerificationRefused("GITHUB_PUBLICATION_IDENTITY_DRIFT")
         if event not in {"COMMENT", "REQUEST_CHANGES"}:
             raise ReviewVerificationRefused("GITHUB_REVIEW_VERB_REFUSED")
-        if not isinstance(body, str) or not body or len(body) > 24000:
+        if not isinstance(body, str) or not body or len(body) > 16_000:
             raise ReviewVerificationRefused("GITHUB_REVIEW_BODY_INVALID")
         return {
             "schema": _SCHEMA, "job_id": job_id,
@@ -166,6 +198,39 @@ class ExecutiveReviewPublicationRecord:
                 actor="github-review-publisher", payload=material,
             )
 
+    def reserve_publication(
+        self, *, publication_command_id: str, repository: str,
+        pull_number: int, head_sha: str, event: str, body: str,
+    ) -> bool:
+        """Commit one incumbent UNIQUE claim. True only for the first writer."""
+
+        identity = self._identity(
+            command_id=publication_command_id, repository=repository,
+            pull_number=pull_number, head_sha=head_sha, event=event,
+            body=body, job_id=self._job_id,
+        )
+        return self._reserve(publication_command_id, identity) == "CREATED"
+
+    def confirm_publication(
+        self, *, publication_command_id: str, repository: str,
+        pull_number: int, head_sha: str, event: str, body: str, review_id: str,
+    ) -> None:
+        identity = self._identity(
+            command_id=publication_command_id, repository=repository,
+            pull_number=pull_number, head_sha=head_sha, event=event,
+            body=body, job_id=self._job_id,
+        )
+        self._confirm(publication_command_id, identity, review_id)
+
+    def _final_check(self, event: str) -> FinalPullRequestCheck:
+        return FinalPullRequestCheck(
+            decision=self._decision,
+            pull_requests=self._pull_requests,
+            event=event,
+            advisory=self._advisory,
+            host_guard=self._authorize,
+        )
+
     def publish_review(
         self, *,
         publication_command_id: str,
@@ -180,47 +245,21 @@ class ExecutiveReviewPublicationRecord:
             pull_number=pull_number, head_sha=head_sha, event=event,
             body=body, job_id=self._job_id,
         )
-        self._authorize()
         status, review_id = self._observe(publication_command_id, identity)
         if status == "CONFIRMED":
             assert review_id is not None
             return review_id
-        # The UNIQUE append is the only publication arbitration. It occurs
-        # before any potentially uncertain GitHub POST.
-        was_created = self._reserve(publication_command_id, identity) == "CREATED"
-        if not was_created:
-            # A previous publisher may be currently posting, may have crashed
-            # before POST, or may have posted but lost its reply. Only a
-            # *positive* GitHub readback can settle this; never retry POST.
-            try:
-                found = reconcile_publication(
-                    reviews=self._transport.read_reviews(
-                        repository=repository, pull_number=pull_number,
-                        commit_id=head_sha,
-                    ),
-                    commit_id=head_sha, event=event, body=body,
-                )
-            except Exception:
-                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
-            if found is None:
-                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
-            self._confirm(publication_command_id, identity, found)
-            return found
-        try:
-            # The existing pure adapter pre-reads GitHub, POSTs once at most,
-            # then performs its own readback after an ambiguous submission.
-            bridge = ReconcilingReviewPublication(
-                transport=self._transport, published=self,
-                before_post=self._authorize,
-            )
-            found = bridge.publish_review(
-                publication_command_id=publication_command_id,
-                repository=repository, pull_number=pull_number,
-                head_sha=head_sha, event=event, body=body,
-            )
-            self._confirm(publication_command_id, identity, found)
-            return found
-        except Exception:
-            # Reservation persists. The only next safe action is a positive
-            # authoritative GitHub readback, never another POST.
-            raise
+        # One bridge owns the single reserve, the reviews GET, the typed final
+        # check, and the POST. A second reserve here would turn the first
+        # writer into EFFECT_UNKNOWN and suppress the publication.
+        bridge = ReconcilingReviewPublication(
+            transport=self._transport,
+            published=self,
+            expected_publisher=self._expected_publisher,
+            before_post=self._final_check(event),
+        )
+        return bridge.publish_review(
+            publication_command_id=publication_command_id,
+            repository=repository, pull_number=pull_number,
+            head_sha=head_sha, event=event, body=body,
+        )

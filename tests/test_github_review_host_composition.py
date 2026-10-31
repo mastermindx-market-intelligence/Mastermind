@@ -123,7 +123,7 @@ def test_composition_proves_job_and_no_duplicate_with_real_app_jwt(tmp_path):
         private_key_source=lambda: pem,
         webhook_secret_source=Hook(), runtime=runtime,
         admission_guard=lambda: None,
-        relay_client=slack, publisher_login="reviewer-bot[bot]",
+        relay_client=slack, publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
         app_token_http_client=httpx.Client(transport=httpx.MockTransport(token_http)),
         github_http_client=httpx.Client(transport=httpx.MockTransport(github_http)),
     )
@@ -151,7 +151,7 @@ def test_disabled_composition_touches_neither_credentials_nor_runtime(tmp_path):
         settings=_settings(enabled=False), app_id=123,
         private_key_source=key, webhook_secret_source=Hook(), runtime=runtime,
         admission_guard=lambda: None, relay_client=slack,
-        publisher_login="reviewer-bot[bot]",
+        publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
         app_token_http_client=httpx.Client(transport=httpx.MockTransport(unavailable)),
         github_http_client=httpx.Client(transport=httpx.MockTransport(unavailable)),
     )

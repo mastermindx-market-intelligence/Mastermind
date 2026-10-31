@@ -131,6 +131,7 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
                 socket_path=socket_path
             ),
             relay_client=relay, publisher_login="reviewer-bot[bot]",
+            publisher_user_id=9001,
             app_token_http_client=httpx.Client(
                 transport=httpx.MockTransport(auth_transport)
             ),

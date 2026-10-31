@@ -6,12 +6,14 @@ from control_plane.github_review_intent_ingress import (
 )
 from control_plane.github_review_publication_record import ExecutiveReviewPublicationRecord
 from control_plane.github_review_result_reader import ExecutiveVerifiedReviewResults
+from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmission
 from integrations.github_review_api import GitHubReviewAPI
 from test_github_review_result_reader import completed_pair
 from test_github_review_runtime_adapter import decision
 
 REPO = "example/repo"
 HEAD = "a" * 40
+PUBLISHER_USER_ID = 9001
 
 
 class Tokens:
@@ -50,7 +52,7 @@ def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False, dr
             state["reviews"].append({
                 "id": 789, "commit_id": HEAD, "state": "COMMENTED",
                 "body": body["body"],
-                "user": {"login": "reviewer-bot[bot]"},
+                "user": {"login": "reviewer-bot[bot]", "id": PUBLISHER_USER_ID},
             })
             if unknown_post:
                 raise httpx.ReadTimeout("lost response after landed", request=req)
@@ -59,10 +61,23 @@ def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False, dr
 
     api = GitHubReviewAPI(
         repository=REPO, installation_id=4242, token_source=Tokens(),
-        publisher_login="reviewer-bot[bot]",
+        publisher_login="reviewer-bot[bot]", publisher_user_id=PUBLISHER_USER_ID,
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
     return api, state
+
+
+def publication_record(runtime, api, job_id):
+    return ExecutiveReviewPublicationRecord(
+        runtime=runtime, transport=api, job_id=job_id,
+        publication_guard=lambda: None,
+        expected_publisher=api.expected_publisher(),
+        decision=decision(), pull_requests=api,
+    )
+
+
+def admitted_jobs(runtime):
+    return ExecutiveReviewJobAdmission(runtime=runtime)
 
 
 def test_completed_distinct_worker_review_publishes_one_comment_and_readback(tmp_path):
@@ -71,12 +86,10 @@ def test_completed_distinct_worker_review_publishes_one_comment_and_readback(tmp
         runtime=runtime, builder_job_id_for_review=lambda job_id: builder
     )
     api, history = git_api()
-    pub = ExecutiveReviewPublicationRecord(
-        runtime=runtime, transport=api, job_id=reviewer_job,
-        publication_guard=lambda: None,
-    )
+    pub = publication_record(runtime, api, reviewer_job)
     args = dict(
         decision=decision(), job_id=reviewer_job, results=reader,
+        admissions=admitted_jobs(runtime),
         publications=pub, pull_requests=api, readback=api,
     )
     first = publish_verified_review(**args)
@@ -97,12 +110,10 @@ def test_moved_head_refuses_before_github_review_post(tmp_path):
         runtime=runtime, builder_job_id_for_review=lambda job_id: builder
     )
     api, history = git_api(moved_head=True)
-    publisher = ExecutiveReviewPublicationRecord(
-        runtime=runtime, transport=api, job_id=reviewer_job,
-        publication_guard=lambda: None,
-    )
+    publisher = publication_record(runtime, api, reviewer_job)
     outcome = publish_verified_review(
         decision=decision(), job_id=reviewer_job, results=reader,
+        admissions=admitted_jobs(runtime),
         publications=publisher, pull_requests=api, readback=api,
     )
     assert outcome.state is PublishState.REFUSED
@@ -115,12 +126,10 @@ def test_lost_post_reconciles_exact_github_review_without_duplicate(tmp_path):
         runtime=runtime, builder_job_id_for_review=lambda job_id: builder
     )
     api, history = git_api(unknown_post=True)
-    publisher = ExecutiveReviewPublicationRecord(
-        runtime=runtime, transport=api, job_id=reviewer_job,
-        publication_guard=lambda: None,
-    )
+    publisher = publication_record(runtime, api, reviewer_job)
     args = dict(
         decision=decision(), job_id=reviewer_job, results=reader,
+        admissions=admitted_jobs(runtime),
         publications=publisher, pull_requests=api, readback=api,
     )
     assert publish_verified_review(**args).state is PublishState.PUBLISHED
@@ -142,6 +151,9 @@ def test_top_level_unavailable_unknown_post_readback_reports_effect_unknown(tmp_
         def __init__(self):
             self.calls = 0
 
+        def publishing_principal(self):
+            return api.expected_publisher()
+
         def published_command_ids(self):
             return frozenset()
 
@@ -162,6 +174,7 @@ def test_top_level_unavailable_unknown_post_readback_reports_effect_unknown(tmp_
     readback = UnavailableReadback()
     result = publish_verified_review(
         decision=decision(), job_id=reviewer_job, results=reader,
+        admissions=admitted_jobs(runtime),
         publications=publications, pull_requests=api, readback=readback,
     )
     assert result.state is PublishState.REFUSED
@@ -230,12 +243,10 @@ def test_external_submitter_identity_changes_before_publication_refuses(tmp_path
         runtime=runtime, external_source=github,
         publisher_login="reviewer-bot[bot]",
     )
-    pub = ExecutiveReviewPublicationRecord(
-        runtime=runtime, transport=github, job_id=review_job,
-        publication_guard=lambda: None,
-    )
+    pub = publication_record(runtime, github, review_job)
     receipt = publish_verified_review(
         decision=decision(), job_id=review_job, results=results,
+        admissions=admitted_jobs(runtime),
         publications=pub, pull_requests=github, readback=github,
     )
     assert receipt.state is PublishState.REFUSED
@@ -271,12 +282,10 @@ def test_external_origin_without_publication_source_port_refuses_before_post(tmp
             return github.read_pull_request(
                 repository=repository, pull_number=pull_number
             )
-    pub = ExecutiveReviewPublicationRecord(
-        runtime=runtime, transport=github, job_id=review_job,
-        publication_guard=lambda: None,
-    )
+    pub = publication_record(runtime, github, review_job)
     receipt = publish_verified_review(
         decision=decision(), job_id=review_job, results=results,
+        admissions=admitted_jobs(runtime),
         publications=pub, pull_requests=PRHeadOnly(), readback=github,
     )
     assert receipt.state is PublishState.REFUSED
@@ -292,12 +301,10 @@ def test_external_moved_head_is_not_given_a_builder_identity(tmp_path):
         publisher_login="reviewer-bot[bot]",
     )
     assert results.load_verified_result(job_id=review_job) is None
-    pub = ExecutiveReviewPublicationRecord(
-        runtime=runtime, transport=github, job_id=review_job,
-        publication_guard=lambda: None,
-    )
+    pub = publication_record(runtime, github, review_job)
     receipt = publish_verified_review(
         decision=decision(), job_id=review_job, results=results,
+        admissions=admitted_jobs(runtime),
         publications=pub, pull_requests=github, readback=github,
     )
     assert receipt.state is PublishState.REFUSED
