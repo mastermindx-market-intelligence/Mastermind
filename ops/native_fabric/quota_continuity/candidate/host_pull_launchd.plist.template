@@ -20,6 +20,8 @@
     <string>__LOCK__</string>
     <string>/bin/bash</string>
     <string>__HOST_PULL__</string>
+    <string>--qualification-mode</string>
+    <string>__QUALIFICATION_MODE__</string>
   </array>
   <key>KeepAlive</key>
   <true/>

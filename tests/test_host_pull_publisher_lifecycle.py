@@ -296,7 +296,7 @@ exit 0
 
 
 def expected_argv(lock, pin):
-    return "/usr/bin/lockf\n-t\n0\n" + str(lock) + "\n/bin/bash\n" + str(pin) + "\n"
+    return "/usr/bin/lockf\n-t\n0\n" + str(lock) + "\n/bin/bash\n" + str(pin) + "\n--qualification-mode\noff\n"
 
 
 def prepare(workspace, *, body=b"#!/bin/bash\nexit 91\n", select=True):
@@ -384,7 +384,7 @@ def test_bash_syntax_and_no_pidfile_race():
     assert "kill -0" not in text
     assert "$HERE/host_pull.sh" not in text
     template = TEMPLATE.read_text()
-    for marker in ("__HOST_PULL__", "__STDOUT_LOG__", "__STDERR_LOG__", "__PATH__", "__LOCK__"):
+    for marker in ("__HOST_PULL__", "__STDOUT_LOG__", "__STDERR_LOG__", "__PATH__", "__LOCK__", "__QUALIFICATION_MODE__"):
         assert template.count(marker) == 1
     assert "__LOG__" not in template
     assert "com.mastermind.host-pull" in template
@@ -420,6 +420,7 @@ def test_stopped_publication_pins_only_verified_generation(
     assert plist["KeepAlive"] is True and plist["RunAtLoad"] is True
     assert plist["ProgramArguments"] == [
         "/usr/bin/lockf", "-t", "0", str(ctx["lock"]), "/bin/bash", str(ctx["pin"]),
+        "--qualification-mode", "off",
     ]
     assert plist["StandardOutPath"] == plist["StandardErrorPath"] == str(ctx["log"])
     text = ctx["plist"].read_text()
@@ -958,7 +959,7 @@ def test_lockf_contention_returns_75(workspace):
     out, err = first.communicate(timeout=5)
     assert first.returncode == 0, err
     recorded = (ctx["stub"] / "lockf.args").read_text().splitlines()
-    assert recorded == ["/bin/bash", str(ctx["pin"])]
+    assert recorded == ["/bin/bash", str(ctx["pin"]), "--qualification-mode", "off"]
     assert "/usr/bin/lockf" not in recorded
     log = (ctx["stub"] / "lockf.log").read_text()
     assert "-t 0 " in log
@@ -974,7 +975,7 @@ def test_production_launchctl_print_shape_is_accepted(workspace):
     result = run(ctx)
     assert result.returncode == 0, result.stderr
     plist = plistlib.loads(ctx["plist"].read_bytes())
-    assert plist["ProgramArguments"][-1] == str(ctx["pin"])
+    assert plist["ProgramArguments"][-3] == str(ctx["pin"])
     assert plist["EnvironmentVariables"]["PATH"] == SERVICE_PATH
     (ctx["stub"] / "launchctl.log").write_text("")
     second = run(ctx)
@@ -1095,7 +1096,7 @@ def test_loaded_idle_is_booted_out_before_one_bootstrap(workspace):
     assert log.index("bootout ") < log.index("bootstrap ")
     assert log.count("bootstrap ") == 1
     plist = plistlib.loads(ctx["plist"].read_bytes())
-    assert plist["ProgramArguments"][-1] == str(ctx["pin"])
+    assert plist["ProgramArguments"][-3] == str(ctx["pin"])
     assert_not_executed(ctx)
 
 
@@ -1289,7 +1290,6 @@ def test_bootstrap_effect_return_79_after_started_is_not_holder_loss(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["EXIT=79 STOP=0"]
-
 
 
 def test_bootstrap_effect_return_79_before_started_refuses_with_pre_effect_proof(tmp_path):
@@ -1668,6 +1668,7 @@ def test_second_installer_makes_no_mutation_while_first_holds_transaction(worksp
     plist = plistlib.loads(ctx["plist"].read_bytes())
     assert plist["ProgramArguments"] == [
         "/usr/bin/lockf", "-t", "0", str(ctx["lock"]), "/bin/bash", str(ctx["pin"]),
+        "--qualification-mode", "off",
     ]
     assert plist["ProgramArguments"].count("/bin/bash") == 1
     lockf_log = ctx["stub"] / "lockf.log"
@@ -1905,7 +1906,7 @@ def test_advance_rebinds_launchd_only_after_old_pid_settles(workspace):
     assert final["previous"] == selector.name
     assert final["sequence"] == before["sequence"] + 1
     plist = plistlib.loads(ctx["plist"].read_bytes())
-    assert plist["ProgramArguments"][-1] == str(pin)
+    assert plist["ProgramArguments"][-3] == str(pin)
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
     assert log.count("bootstrap ") == 1
@@ -2568,7 +2569,9 @@ def test_install_after_replace_failure_retains_own_or_peer_bytes_and_unknown(
         assert _selection(ctx)["generation"] == target.name
         installed = ctx["plist"].read_bytes()
         assert installed != original
-        assert plistlib.loads(installed)["ProgramArguments"][-1] == str(
+        # The reviewed H1 argv appends "--qualification-mode <mode>" after the
+        # collector pin, so the pin is third from the end, not last.
+        assert plistlib.loads(installed)["ProgramArguments"][-3] == str(
             target / "ext" / "host_pull.sh"
         )
         peer = b"PEER-AFTER-FAILED-REPLACE\n"
@@ -2692,6 +2695,14 @@ def test_source_has_no_unconditional_plist_restore_path():
     assert "restore_plist ||" not in text
     assert "py atomic-restore" not in text
     assert "py atomic-remove" not in text
+    # The dead restore/remove subcommands are removed as defense in depth.
+    # They had no caller in this source and only wrote a destination pathname
+    # without a custody proof, so their presence could only invite a future
+    # unconditional restore of bytes this lifecycle does not own.
+    assert "atomic-restore" not in text
+    assert "atomic-remove" not in text
+    assert 'cmd == "atomic-restore"' not in text
+    assert 'cmd == "atomic-remove"' not in text
 
 
 @pytest.mark.parametrize("action", ["edit", "delete", "delete-and-create"])
@@ -2848,16 +2859,23 @@ def test_postbootout_failed_install_never_restores_over_peer(workspace, action):
             proc.communicate(timeout=5)
 
 
-@pytest.mark.parametrize("action", ["edit", "delete"])
-def test_bootstrap_failure_does_not_restore_peer_plist(workspace, action):
-    """Failed bootstrap does not overwrite peer file before recovery."""
+@pytest.mark.parametrize(
+    "action", ["edit", "delete", "byte-equal-symlink", "wrong-mode"])
+def test_prebootstrap_peer_mutation_refuses_the_bootstrap(workspace, action):
+    """A peer that changes the installed plist before the effect gets no bootstrap.
+
+    The bootstrap effect consumes the installed plist by pathname, so the
+    reviewed identity of that plist is proved at the effect boundary, under
+    the publication lock, before launchctl can consume the path. An edited,
+    deleted, byte-equal symlinked or wrong-mode destination is refused: no
+    launchctl call is issued and the peer's bytes are left untouched.
+    """
     ctx = prepare(workspace)
     original = b"BOOTSTRAP-PEER-PREIMAGE\n"
     ctx["plist"].write_bytes(original)
     ctx["plist"].chmod(0o600)
     (ctx["stub"] / "print-mode").write_text("stopped\n")
     (ctx["stub"] / "print-style").write_text("notfound\n")
-    (ctx["stub"] / "bootstrap-fail-left").write_text("1\n")
     before = _selection(ctx)
     hold = workspace / "failed-bootstrap-peer"
     hold.write_text("")
@@ -2867,30 +2885,151 @@ def test_bootstrap_failure_does_not_restore_peer_plist(workspace, action):
     )
     try:
         _release_hold(proc, hold)
-        assert ctx["plist"].read_bytes() != original
+        installed = ctx["plist"].read_bytes()
+        assert installed != original
         peer = b"PEER-BEFORE-FAILED-BOOTSTRAP\n"
+        peer_file = workspace / "thirdparty-plist"
         if action == "delete":
             ctx["plist"].unlink()
+        elif action == "byte-equal-symlink":
+            # Byte-equal content behind a symlink is still a different file.
+            peer_file.write_bytes(installed)
+            ctx["plist"].unlink()
+            ctx["plist"].symlink_to(peer_file)
+        elif action == "wrong-mode":
+            ctx["plist"].chmod(0o644)
         else:
             ctx["plist"].write_bytes(peer)
         hold.unlink()
         _out, err = proc.communicate(timeout=12)
         assert proc.returncode == 78, err
         assert "EFFECT_UNKNOWN" in err
-        assert ctx["plist"].exists() == (action != "delete")
-        if action != "delete":
-            assert ctx["plist"].read_bytes() == peer
-        assert _selection(ctx) == before
-        assert receipt_body(ctx)["phase"] == "BOOTSTRAP"
-        assert (ctx["store"] / ".install-transaction.marker").exists()
-        assert launch_log(ctx).count("bootstrap ") == 1
+        assert "installed plist custody unproven before bootstrap" in err
+        # Zero bootstrap calls: an unproven plist never reaches launchctl.
+        assert launch_log(ctx).count("bootstrap ") == 0
         assert "bootout " not in launch_log(ctx)
+        # The peer's bytes are untouched by the refusal.
+        if action == "delete":
+            assert not ctx["plist"].exists()
+        elif action == "byte-equal-symlink":
+            assert ctx["plist"].is_symlink()
+            assert ctx["plist"].read_bytes() == installed
+            assert peer_file.read_bytes() == installed
+        elif action == "wrong-mode":
+            assert ctx["plist"].read_bytes() == installed
+            assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
+        else:
+            assert ctx["plist"].read_bytes() == peer
+        # The selector, the marker and the captured backup are preserved.
+        assert _selection(ctx) == before
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "BOOTSTRAP_CUSTODY"
+        backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == original
         assert_not_executed(ctx)
     finally:
         hold.unlink(missing_ok=True)
         if proc.poll() is None:
             proc.kill()
             proc.communicate(timeout=5)
+
+
+def test_prebootstrap_custody_admits_the_reviewed_plist(workspace):
+    """The reviewed plist is admitted at the effect boundary and bootstrapped once."""
+    ctx = prepare(workspace)
+    (ctx["stub"] / "print-mode").write_text("stopped\n")
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    result = run(ctx)
+    assert result.returncode == 0, result.stderr
+    installed = ctx["plist"].read_bytes()
+    assert installed
+    assert launch_log(ctx).count("bootstrap ") == 1
+    assert "bootout " not in launch_log(ctx)
+    # The reviewed mode is restored after the sealed consumption window.
+    assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
+    assert ctx["plist"].read_bytes() == installed
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert list(ctx["backup"].glob("*.receipt")) == []
+    assert_not_executed(ctx)
+
+
+def _py_helper_source():
+    """Extract the daemon's embedded python helper exactly as it is installed."""
+    raw = DAEMON.read_text()
+    marker = "python3 - \"$@\" <<'PY'\n"
+    start = raw.index(marker) + len(marker)
+    end = raw.index("\nPY\n", start)
+    return raw[start:end]
+
+
+@pytest.mark.parametrize(
+    "action",
+    ["intact", "wrong-digest", "wrong-mode", "symlink", "missing", "not-regular"],
+)
+def test_installed_plist_identity_proof_refuses_every_unproven_file(tmp_path, action):
+    """The O_NOFOLLOW identity proof admits only the reviewed regular file."""
+    dest = tmp_path / "com.mastermind.host-pull.plist"
+    payload = b"REVIEWED-PLIST-BYTES\n"
+    dest.write_bytes(payload)
+    dest.chmod(0o600)
+    digest = hashlib.sha256(payload).hexdigest()
+    other = tmp_path / "other.plist"
+    other.write_bytes(payload)
+    expected = digest
+    if action == "wrong-digest":
+        expected = "0" * 64
+    elif action == "wrong-mode":
+        dest.chmod(0o644)
+    elif action == "symlink":
+        dest.unlink()
+        dest.symlink_to(other)
+    elif action == "missing":
+        dest.unlink()
+    elif action == "not-regular":
+        dest.unlink()
+        dest.mkdir()
+    result = subprocess.run(
+        ["python3", "-", "verify-installed-plist", str(dest), expected],
+        input=_py_helper_source(), capture_output=True, text=True, timeout=30,
+    )
+    if action == "intact":
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode == 78, result.stdout + result.stderr
+        assert result.stderr.strip()
+    # A symlink is refused by name; every other unproven identity is refused
+    # by the identity proof. Neither is ever accepted as the reviewed file.
+    if action == "symlink":
+        assert "symlink refused" in result.stderr
+
+
+def test_bootstrap_custody_admission_is_inside_the_locked_effect():
+    """The digest is admitted at the effect boundary, under the publication lock."""
+    text = DAEMON.read_text()
+    start = text.index('elif cmd == "locked-effect":')
+    end = text.index('elif cmd == "write-receipt":', start)
+    branch = text[start:end]
+    # The effect arguments carry the reviewed digest, not just the purpose.
+    assert "if len(effect_args) != 5:" in branch
+    assert 'fail("bootstrap expected digest")' in branch
+    # The identity proof runs under the publication lock and before the
+    # effect marker, so a refusal is provably pre-effect.
+    assert "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)" in branch
+    assert "bind_installed_plist(bootstrap_dest, expected_sha)" in branch
+    assert branch.index("bind_installed_plist(bootstrap_dest") < branch.index("\n        mark_started()\n")
+    # The pathname is re-proved around the launchctl consumption.
+    assert "path_names_inode(dest, bootstrap_fd, 0o400)" in branch
+    assert "descriptor_still_proves(bootstrap_fd, expected_sha)" in branch
+    # The shell passes the reviewed digest of the plist to be consumed.
+    assert 'expected_sha="${RENDERED_SHA:-}"' in text
+    assert 'expected_sha="${PRE_PLIST_SHA:-}"' in text
+    assert ('run_locked bootstrap "$LAUNCHCTL" "$DOMAIN" "$DEST_PLIST" "$kind"'
+            ' "$expected_sha"') in text
+
 
 
 

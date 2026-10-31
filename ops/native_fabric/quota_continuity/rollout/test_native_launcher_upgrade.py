@@ -208,11 +208,31 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     raise AssertionError('historical collector preimage differs')
                 (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
                 cls.manifest['ext/' + name] = digest
-            # The host-pull daemon and plist are later than this paired upgrade.
-            # The disposable target keeps the reviewed 95-member closure.
-            for relative in ('ext/host_pull_daemon.sh', 'ext/host_pull_launchd.plist.template'):
+            # Both the H1 initializer and the host-pull daemon/plist are later
+            # than this *historical* paired upgrade. Never weaken or repin the
+            # exact 95-member production importer: remove all five *only in
+            # this disposable reconstruction*, retaining the real current
+            # 100-member image and its independently sealed manifest.
+            for relative in ('ext/host_pull_daemon.sh', 'ext/host_pull_launchd.plist.template',
+                             'ext/paid_initializer.py', 'ext/paid_initializer_nested_data.py',
+                             'ext/paid_initializer_token_data.py'):
                 cls.manifest.pop(relative)
                 (cls.built / 'native-code-stage' / relative).unlink()
+            # Restore the exact pre-H1 qualified-host byte preimage from the
+            # already retained immutable H1 fixture, *never* from the new
+            # selected 100-stage or ambient Git refs. The production importer
+            # must still recognize only the original 95-member source SHA.
+            frozen = json.loads((Path(__file__).resolve().parents[4] /
+                'tests/fixtures/paid-host-preinitializer-f608.json').read_bytes())
+            if frozen.get('source') != 'f608f52f35384dcfa8e4305dc594f1fbe823d5ec' or set(frozen['files']) != {'paid_host_qualification.py'}:
+                raise AssertionError('H1 original qualified-host preimage identity differs')
+            retained = frozen['files']['paid_host_qualification.py']
+            previous_sha = 'd2f5be14f345cf00b4bd4357d705713a24e373a7d1675229aab6202f0d500cad'
+            previous = zlib.decompress(base64.b64decode(retained['zlib_base64'], validate=True))
+            if retained['sha256'] != previous_sha or g.digest(previous) != previous_sha:
+                raise AssertionError('H1 qualified-host historical preimage differs')
+            (cls.built / 'native-code-stage/ext/paid_host_qualification.py').write_bytes(previous)
+            cls.manifest['ext/paid_host_qualification.py'] = previous_sha
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
