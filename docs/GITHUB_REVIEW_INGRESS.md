@@ -312,3 +312,11 @@ human-admin ceremony above.
 
 The `mcp` dev dependency is not installed here, so `tests/workbench_*` and
 `tests/*/test_*.py` that import it fail at collection.
+
+## Security re-review #5722645641 — author-bound readback and final POST authority
+
+The concrete publisher now requires an ExpectedReviewPublisher bound by the trusted host to the configured GitHub App posting principal (GitHub user.id and user.login, not an event/caller value). Each PublishedReviewFacts must preserve the authenticated GitHub GET review author's numeric id and login, and reconciliation confirms only when both match this principal in addition to the frozen commit/event/body. A third party posting an identical message can never confirm the atomic effect claim or suppress the original authorized first writer.
+
+The concrete ReconcilingReviewPublication also requires a FinalPullRequestCheck bound to the admitted decision and installation-scoped authenticated PR reader. After the potentially slow reviews GET, the guard re-reads the exact repository, pull number, frozen head, open/draft/fork state and current untrusted objective, then refuses a stale or changed PR before any POST. An arbitrary no-op callback and a missing guard are not accepted. Definite pre-POST refusal remains separate from PublicationEffectUnknown, and the original durable atomic reservation is sticky; it does not give permission to auto-retry a rejected publication.
+
+This is source-only until the downstream #1763 host adapter binds the real App publisher user id/login, populates those review authors from the authenticated GitHub API, and passes the required typed final PR check. No installed GitHub App, Executive handler, worker START, formal review or Slack production proof follows from this source contract.

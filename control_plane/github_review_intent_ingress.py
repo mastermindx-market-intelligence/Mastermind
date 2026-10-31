@@ -123,6 +123,14 @@ class ReviewVerificationRefused(ReviewIngressError):
     """A review result is not publishable as a formal GitHub review."""
 
 
+class FinalPostRefusal(ReviewVerificationRefused):
+    """Definite fresh PR authority refusal before POST (not unknown POST)."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 class PublicationEffectUnknown(ReviewIngressError):
     """A review POST was submitted but its effect could not be observed.
 
@@ -290,6 +298,10 @@ class ReviewResultPort(Protocol):
 class ReviewPublicationPort(Protocol):
     """Publish the formal GitHub review, exactly once per command id."""
 
+    def publishing_principal(self) -> ExpectedReviewPublisher:
+        """Trusted installed GitHub App publishing account, not caller input."""
+        ...
+
     def published_command_ids(self) -> frozenset[str]:
         ...
 
@@ -312,6 +324,20 @@ class ReviewPublicationPort(Protocol):
 
 
 @dataclasses.dataclass(frozen=True)
+class ExpectedReviewPublisher:
+    """Host-configured authenticated GitHub App posting user identity."""
+
+    user_id: int
+    login: str
+
+    def __post_init__(self) -> None:
+        if (type(self.user_id) is not int or self.user_id <= 0
+                or not isinstance(self.login, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:\[bot\])?", self.login) is None):
+            raise ReviewIngressError("GITHUB_PUBLISHER_IDENTITY_INVALID")
+
+
+@dataclasses.dataclass(frozen=True)
 class PublishedReviewFacts:
     """One review already present on a pull request, as read back."""
 
@@ -319,6 +345,8 @@ class PublishedReviewFacts:
     commit_id: str
     event: str
     body: str
+    author_user_id: int
+    author_login: str
 
 
 def published_review_is_valid(review: object) -> bool:
@@ -333,6 +361,9 @@ def published_review_is_valid(review: object) -> bool:
         and review.event in ALLOWED_REVIEW_EVENTS
         and isinstance(review.body, str)
         and len(review.body) <= MAX_REVIEW_BODY_CHARS
+        and type(review.author_user_id) is int and review.author_user_id > 0
+        and isinstance(review.author_login, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:\[bot\])?", review.author_login) is not None
     )
 
 
@@ -342,8 +373,9 @@ def reconcile_publication(
     commit_id: str,
     event: str,
     body: str,
+    expected_publisher: ExpectedReviewPublisher,
 ) -> str | None:
-    """Find the review id this exact POST already produced, or ``None``.
+    """Reconcile only a review by the configured authenticated App author.
 
     The reconciliation key is the triple GitHub itself fixes: the commit the
     review was pinned to, the verb it was submitted with, and the exact body.
@@ -352,12 +384,65 @@ def reconcile_publication(
     prevent from happening a second time.
     """
 
+    if not isinstance(expected_publisher, ExpectedReviewPublisher):
+        raise ReviewVerificationRefused("GITHUB_PUBLISHER_IDENTITY_UNAVAILABLE")
     for review in reviews:
         if not published_review_is_valid(review):
+            continue
+        if (review.author_user_id != expected_publisher.user_id
+                or review.author_login.casefold() != expected_publisher.login.casefold()):
             continue
         if review.commit_id == commit_id and review.event == event and review.body == body:
             return review.review_id
     return None
+
+
+
+@dataclasses.dataclass(frozen=True)
+class FinalPullRequestCheck:
+    """Mandatory final exact PR authority read after review GET and before POST."""
+
+    decision: ReviewIntentDecision
+    pull_requests: PullRequestReadPort
+
+    def matches(self, repository: str, number: int, sha: str) -> bool:
+        return (isinstance(self.decision, ReviewIntentDecision)
+                and isinstance(self.pull_requests, PullRequestReadPort)
+                and self.decision.admitted
+                and self.decision.repository == repository
+                and self.decision.pull_number == number
+                and self.decision.frozen_head_sha == sha
+                and self.decision.intent_source is not None)
+
+    def __call__(self) -> None:
+        decision = self.decision
+        if not self.matches(decision.repository, decision.pull_number, decision.frozen_head_sha):
+            raise FinalPostRefusal("POST_GUARD_SCOPE_MISMATCH")
+        try:
+            current = self.pull_requests.read_pull_request(
+                repository=decision.repository, pull_number=decision.pull_number
+            )
+        except Exception:
+            raise FinalPostRefusal("POST_GUARD_READ_UNAVAILABLE") from None
+        if not isinstance(current, PullRequestFacts):
+            raise FinalPostRefusal("POST_GUARD_READ_UNAVAILABLE")
+        if current.repository != decision.repository or current.number != decision.pull_number:
+            raise FinalPostRefusal(ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value)
+        try:
+            verify_frozen_head(decision=decision, pull_request=current)
+        except ReviewIntentError:
+            raise FinalPostRefusal(ReviewIntentRefusal.HEAD_MOVED.value) from None
+        if current.state != "open":
+            raise FinalPostRefusal(ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN.value)
+        if current.draft:
+            raise FinalPostRefusal(ReviewIntentRefusal.PULL_REQUEST_DRAFT.value)
+        if (current.base_repository != decision.repository
+                or current.head_repository != current.base_repository):
+            raise FinalPostRefusal(ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value)
+        try:
+            build_review_objective(pull_request=current, intent_source=decision.intent_source)
+        except ReviewIntentError:
+            raise FinalPostRefusal(ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value) from None
 
 
 @runtime_checkable
@@ -428,17 +513,23 @@ class ReconcilingReviewPublication:
 
     def __init__(
         self, *, transport: ReviewTransportPort, published: PublishedCommandIndex,
-        before_post=None,
+        expected_publisher: ExpectedReviewPublisher, before_post: FinalPullRequestCheck,
     ) -> None:
         if not isinstance(transport, ReviewTransportPort):
             raise ReviewIngressError("ReviewTransportPort is not bound on this host")
         if not isinstance(published, PublishedCommandIndex):
             raise ReviewIngressError("canonical atomic PublishedCommandIndex is not bound")
-        if before_post is not None and not callable(before_post):
-            raise ReviewIngressError("review effect-time guard must be callable")
+        if not isinstance(expected_publisher, ExpectedReviewPublisher):
+            raise ReviewIngressError("trusted GitHub publisher is required")
+        if not isinstance(before_post, FinalPullRequestCheck):
+            raise ReviewIngressError("mandatory typed final PR guard is required")
         self._transport = transport
         self._published = published
+        self._expected_publisher = expected_publisher
         self._before_post = before_post
+
+    def publishing_principal(self) -> ExpectedReviewPublisher:
+        return self._expected_publisher
 
     def published_command_ids(self) -> frozenset[str]:
         return self._published.published_command_ids()
@@ -453,6 +544,7 @@ class ReconcilingReviewPublication:
                     repository=repository, pull_number=pull_number, commit_id=head_sha
                 ),
                 commit_id=head_sha, event=event, body=body,
+                expected_publisher=self._expected_publisher,
             )
         except Exception:
             raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
@@ -475,6 +567,8 @@ class ReconcilingReviewPublication:
             raise ReviewVerificationRefused("review body contains a secret shape")
         if not re.fullmatch(r"gh-review-publish:[0-9a-f]{32}", publication_command_id):
             raise ReviewVerificationRefused("review publication command is invalid")
+        if not self._before_post.matches(repository, pull_number, head_sha):
+            raise ReviewVerificationRefused("POST_GUARD_SCOPE_MISMATCH")
         fields = dict(
             publication_command_id=publication_command_id,
             repository=repository, pull_number=pull_number,
@@ -507,9 +601,10 @@ class ReconcilingReviewPublication:
             # Prior first writer could still be POSTing or have lost its reply.
             raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
 
+        # Readback is a network window: recheck head/draft/fork/open after it.
+        # The prior atomic claim remains sticky even if this check refuses.
+        self._before_post()
         try:
-            if self._before_post is not None:
-                self._before_post()
             review_id = self._transport.submit_review(
                 repository=repository, pull_number=pull_number,
                 commit_id=head_sha, event=event, body=body,
@@ -939,6 +1034,9 @@ def publish_verified_review(
     assert isinstance(result_port, ReviewResultPort)
     assert isinstance(publication_port, ReviewPublicationPort)
     assert isinstance(pull_read, PullRequestReadPort)
+    publisher = publication_port.publishing_principal()
+    if not isinstance(publisher, ExpectedReviewPublisher):
+        raise ReviewIngressUnavailable("GITHUB_PUBLISHER_IDENTITY_UNAVAILABLE")
 
     if not decision.admitted or decision.frozen_head_sha is None:
         raise ReviewVerificationRefused("only an admitted decision may publish a review")
@@ -1088,6 +1186,10 @@ def publish_verified_review(
             event=event,
             body=body,
         )
+    except FinalPostRefusal as exc:
+        return ReviewPublishOutcome(
+            state=PublishState.REFUSED, publication_command_id=command, refusal=exc.code
+        )
     except PublicationEffectUnknown:
         # The POST may or may not have landed.  Reconcile it by readback at the
         # exact commit and body before anything is retried; a positive match
@@ -1109,6 +1211,7 @@ def publish_verified_review(
                 commit_id=decision.frozen_head_sha,
                 event=event,
                 body=body,
+                expected_publisher=publisher,
             )
         except Exception:
             # Missing authenticated readback preserves the original unknown
@@ -1141,6 +1244,9 @@ __all__ = [
     "ALLOWED_REVIEW_EVENTS",
     "AdmissionState",
     "ActorPermissionPort",
+    "ExpectedReviewPublisher",
+    "FinalPullRequestCheck",
+    "FinalPostRefusal",
     "AdmittedJobFacts",
     "AdmittedJobReadPort",
     "FabricJobAdmissionPort",

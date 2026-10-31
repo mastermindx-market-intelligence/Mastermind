@@ -42,6 +42,7 @@ in this file (nothing is gated to one platform).
 """
 from __future__ import annotations
 
+import dataclasses
 import inspect
 import json
 import threading
@@ -61,6 +62,17 @@ DELIVERY_ID = "11111111-2222-3333-4444-555555555555"
 JOB_ID = "JOB-042"
 PULL_NUMBER = 1739
 OTHER_PULL_NUMBER = 1740
+EXPECTED_PUBLISHER = ing.ExpectedReviewPublisher(
+    user_id=424242, login="mastermind-reviewer[bot]"
+)
+
+
+def _review_fact(**kwargs):
+    return ing.PublishedReviewFacts(
+        author_user_id=EXPECTED_PUBLISHER.user_id,
+        author_login=EXPECTED_PUBLISHER.login,
+        **kwargs,
+    )
 
 
 def _policy(**overrides) -> gri.ReviewIntentPolicy:
@@ -243,6 +255,9 @@ class FakeResults:
 
 
 class FakePublications:
+    def publishing_principal(self):
+        return EXPECTED_PUBLISHER
+
     def __init__(self, *, unknown: bool = False) -> None:
         self.published: dict[str, str] = {}
         self.calls: list[dict] = []
@@ -302,7 +317,7 @@ class FakeTransport:
             return ()
         _, _, landed_commit, landed_event, landed_body = self.landed
         return (
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="review-recovered",
                 commit_id=landed_commit,
                 event=landed_event,
@@ -357,7 +372,7 @@ class SuccessTransport:
     def submit_review(self, *, repository, pull_number, commit_id, event, body):
         with self.lock:
             self.submits += 1
-            self.receipt = ing.PublishedReviewFacts(
+            self.receipt = _review_fact(
                 review_id="review-real", commit_id=commit_id, event=event, body=body
             )
             return "review-real"
@@ -417,6 +432,14 @@ def _admitted_decision(policy=None):
     outcome = _admit(fabric=fabric, policy=policy)
     assert outcome.state is ing.AdmissionState.ADMITTED
     return fabric, outcome
+
+
+def _final_guard(pulls=None):
+    _, admitted = _admitted_decision()
+    return ing.FinalPullRequestCheck(
+        decision=admitted.decision,
+        pull_requests=pulls if pulls is not None else FakePullRequests(),
+    )
 
 
 def _publish(decision, job_id, *, results=None, publications=None,
@@ -815,7 +838,7 @@ class TestPublicationEffectUncertainty:
             repository=REPOSITORY,
             pull_number=PULL_NUMBER,
         )
-        return ing.PublishedReviewFacts(
+        return _review_fact(
             review_id="review-recovered",
             commit_id=HEAD_SHA,
             event="COMMENT",
@@ -864,13 +887,13 @@ class TestPublicationEffectUncertainty:
             pull_number=PULL_NUMBER,
         )
         for wrong in (
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="r", commit_id=MOVED_HEAD_SHA, event="COMMENT", body=body
             ),
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="r", commit_id=HEAD_SHA, event="REQUEST_CHANGES", body=body
             ),
-            ing.PublishedReviewFacts(
+            _review_fact(
                 review_id="r", commit_id=HEAD_SHA, event="COMMENT", body=body + " edited"
             ),
         ):
@@ -885,7 +908,7 @@ class TestPublicationEffectUncertainty:
 
     def test_the_concrete_adapter_reconciles_internally_and_returns_one_review_id(self) -> None:
         transport = FakeTransport(lands=True)
-        adapter = ing.ReconcilingReviewPublication(
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
             transport=transport, published=FakeIndex()
         )
         _, outcome = _admitted_decision()
@@ -904,7 +927,7 @@ class TestPublicationEffectUncertainty:
 
     def test_the_concrete_adapter_reraises_an_unmatched_effect(self) -> None:
         transport = FakeTransport(lands=False)
-        adapter = ing.ReconcilingReviewPublication(
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
             transport=transport, published=FakeIndex()
         )
         with pytest.raises(ing.PublicationEffectUnknown):
@@ -920,7 +943,7 @@ class TestPublicationEffectUncertainty:
 
     def test_the_concrete_adapter_refuses_an_approval_verb_outright(self) -> None:
         transport = FakeTransport(lands=True)
-        adapter = ing.ReconcilingReviewPublication(
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
             transport=transport, published=FakeIndex()
         )
         with pytest.raises(ing.ReviewVerificationRefused):
@@ -936,9 +959,9 @@ class TestPublicationEffectUncertainty:
 
     def test_the_concrete_adapter_refuses_an_unbound_transport(self) -> None:
         with pytest.raises(ing.ReviewIngressError):
-            ing.ReconcilingReviewPublication(transport=object(), published=FakeIndex())
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=object(), published=FakeIndex())
         with pytest.raises(ing.ReviewIngressError):
-            ing.ReconcilingReviewPublication(
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), 
                 transport=FakeTransport(lands=False), published=object()
             )
 
@@ -1214,8 +1237,8 @@ class TestCurrentHeadIndependentSecurityFindings:
 
     def test_concrete_success_sequential_two_calls_post_exactly_once(self):
         tx, ledger = SuccessTransport(), FakeIndex()
-        adapter1 = ing.ReconcilingReviewPublication(transport=tx, published=ledger)
-        adapter2 = ing.ReconcilingReviewPublication(transport=tx, published=ledger)
+        adapter1 = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
+        adapter2 = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
         fields = dict(
             publication_command_id="gh-review-publish:" + "c"*32,
             repository=REPOSITORY, pull_number=PULL_NUMBER,
@@ -1230,7 +1253,7 @@ class TestCurrentHeadIndependentSecurityFindings:
     def test_concrete_success_concurrent_across_eight_instances_posts_only_once(self):
         tx, ledger = SuccessTransport(), FakeIndex()
         adapters = [
-            ing.ReconcilingReviewPublication(transport=tx, published=ledger)
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
             for _ in range(8)
         ]
         fields = dict(
@@ -1255,7 +1278,7 @@ class TestCurrentHeadIndependentSecurityFindings:
             def read_reviews(self, **kwargs):
                 raise OSError("repository API timeout")
         tx, ledger = BrokenReadback(), FakeIndex()
-        adapter = ing.ReconcilingReviewPublication(transport=tx, published=ledger)
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
         fields = dict(
             publication_command_id="gh-review-publish:" + "e"*32,
             repository=REPOSITORY, pull_number=PULL_NUMBER,
@@ -1277,7 +1300,7 @@ class TestCurrentHeadIndependentSecurityFindings:
                     raise OSError("readback timeout")
                 return ()
         tx, ledger = LostReadback(), FakeIndex()
-        adapter = ing.ReconcilingReviewPublication(transport=tx, published=ledger)
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=tx, published=ledger)
         fields = dict(
             publication_command_id="gh-review-publish:" + "f"*32,
             repository=REPOSITORY, pull_number=PULL_NUMBER,
@@ -1294,9 +1317,9 @@ class TestCurrentHeadIndependentSecurityFindings:
             def published_command_ids(self):
                 return frozenset()
         with pytest.raises(ing.ReviewIngressError):
-            ing.ReconcilingReviewPublication(transport=SuccessTransport(), published=ReadOnly())
+            ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=SuccessTransport(), published=ReadOnly())
         ledger = FakeIndex()
-        adapter = ing.ReconcilingReviewPublication(transport=SuccessTransport(), published=ledger)
+        adapter = ing.ReconcilingReviewPublication(expected_publisher=EXPECTED_PUBLISHER, before_post=_final_guard(), transport=SuccessTransport(), published=ledger)
         fields = dict(
             publication_command_id="gh-review-publish:" + "1"*32,
             repository=REPOSITORY, pull_number=PULL_NUMBER,
@@ -1327,3 +1350,105 @@ class TestCurrentHeadIndependentSecurityFindings:
         out = _publish(admitted.decision, admitted.job_id, admissions=Missing(), publications=p)
         assert out.refusal == "ADMITTED_JOB_SOURCE_IDENTITY_MISMATCH"
         assert p.calls == []
+
+
+class TestAuthorBoundReadbackAndFinalEffectGuard:
+    def test_matching_foreign_review_cannot_confirm_and_first_authorized_writer_posts(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        tx.receipt = ing.PublishedReviewFacts(
+            review_id="review-alien", commit_id=HEAD_SHA, event="COMMENT",
+            body="same body", author_user_id=99, author_login="other-actor",
+        )
+        adapter = ing.ReconcilingReviewPublication(
+            transport=tx, published=ledger, expected_publisher=EXPECTED_PUBLISHER,
+            before_post=_final_guard(),
+        )
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "8" * 32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="same body",
+        )
+        assert adapter.publish_review(**fields) == "review-real"
+        assert tx.submits == 1
+        assert fields["publication_command_id"] in ledger.published_command_ids()
+
+    def test_alien_readback_does_not_settle_previous_unconfirmed_claim(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        fields = dict(
+            publication_command_id="gh-review-publish:" + "9" * 32,
+            repository=REPOSITORY, pull_number=PULL_NUMBER,
+            head_sha=HEAD_SHA, event="COMMENT", body="same body",
+        )
+        tx.receipt = ing.PublishedReviewFacts(
+            review_id="review-alien", commit_id=HEAD_SHA, event="COMMENT",
+            body="same body", author_user_id=99, author_login="other-actor",
+        )
+        assert ledger.reserve_publication(**fields)
+        adapter = ing.ReconcilingReviewPublication(
+            transport=tx, published=ledger, expected_publisher=EXPECTED_PUBLISHER,
+            before_post=_final_guard(),
+        )
+        with pytest.raises(ing.PublicationEffectUnknown):
+            adapter.publish_review(**fields)
+        assert tx.submits == 0
+        assert not ledger.published_command_ids()
+
+    @pytest.mark.parametrize("mutation,reason", [
+        ({"head_sha": MOVED_HEAD_SHA}, gri.ReviewIntentRefusal.HEAD_MOVED.value),
+        ({"draft": True}, gri.ReviewIntentRefusal.PULL_REQUEST_DRAFT.value),
+        ({"state": "closed"}, gri.ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN.value),
+        ({"head_repository": "other/repo"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
+    ])
+    def test_mutation_during_reviews_get_refuses_before_post(self, mutation, reason):
+        _, admitted = _admitted_decision()
+        pulls = FakePullRequests()
+        class MutatingReadback(SuccessTransport):
+            def read_reviews(self, **kwargs):
+                pulls.facts = _pull_request(**mutation)
+                return super().read_reviews(**kwargs)
+        tx, ledger = MutatingReadback(), FakeIndex()
+        adapter = ing.ReconcilingReviewPublication(
+            transport=tx, published=ledger,
+            expected_publisher=EXPECTED_PUBLISHER,
+            before_post=ing.FinalPullRequestCheck(
+                decision=admitted.decision, pull_requests=pulls,
+            ),
+        )
+        outcome = _publish(
+            admitted.decision, admitted.job_id,
+            publications=adapter, pull_requests=pulls, readback=tx,
+        )
+        assert outcome.state is ing.PublishState.REFUSED
+        assert outcome.refusal == reason
+        assert tx.submits == 0
+        assert pulls.reads == 2
+        assert len(ledger.claims) == 1
+
+    def test_publisher_id_and_login_both_required(self):
+        expected = _review_fact(
+            review_id="review-good", commit_id=HEAD_SHA, event="COMMENT", body="body",
+        )
+        for alien in (
+            dataclasses.replace(expected, author_user_id=8),
+            dataclasses.replace(expected, author_login="unrelated"),
+        ):
+            assert ing.reconcile_publication(
+                reviews=(alien,), commit_id=HEAD_SHA, event="COMMENT", body="body",
+                expected_publisher=EXPECTED_PUBLISHER,
+            ) is None
+
+    def test_untrusted_or_missing_publisher_and_final_guard_refuse_at_construction(self):
+        tx, ledger = SuccessTransport(), FakeIndex()
+        with pytest.raises(TypeError):
+            ing.ReconcilingReviewPublication(transport=tx, published=ledger)
+        with pytest.raises(ing.ReviewIngressError):
+            ing.ReconcilingReviewPublication(
+                transport=tx, published=ledger,
+                expected_publisher=object(), before_post=_final_guard(),
+            )
+        with pytest.raises(ing.ReviewIngressError):
+            ing.ReconcilingReviewPublication(
+                transport=tx, published=ledger,
+                expected_publisher=EXPECTED_PUBLISHER, before_post=lambda: None,
+            )
+        assert tx.submits == 0
