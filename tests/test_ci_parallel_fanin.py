@@ -32,6 +32,10 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
     assert shards["strategy"]["fail-fast"] is False
     assert shards["strategy"]["max-parallel"] == 3
     assert shards["runs-on"] == "ubuntu-latest"
+    assert type(shards["timeout-minutes"]) is int
+    assert 45 <= shards["timeout-minutes"] <= 60
+    assert type(data["jobs"]["test"]["timeout-minutes"]) is int
+    assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
     assert data["jobs"]["test"]["name"] == "test"
     assert data["jobs"]["test"]["needs"] == ["pytest_shards"]
 
@@ -39,6 +43,22 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
 @pytest.mark.parametrize(
     ("preimage", "mutation"),
     [
+        # Finite wall-clock budgets are mandatory; no silent removal or
+        # enormous timeout may bypass the queue's 100-minute check window.
+        ("    timeout-minutes: 60", ""),
+        ("    timeout-minutes: 60", "    timeout-minutes: null"),
+        ("    timeout-minutes: 60", "    timeout-minutes: true"),
+        ("    timeout-minutes: 60", '    timeout-minutes: "60"'),
+        ("    timeout-minutes: 60", "    timeout-minutes: 0"),
+        ("    timeout-minutes: 60", "    timeout-minutes: -5"),
+        ("    timeout-minutes: 60", "    timeout-minutes: 44"),
+        ("    timeout-minutes: 60", "    timeout-minutes: 61"),
+        ("    timeout-minutes: 60", "    timeout-minutes: 93"),
+        ("    timeout-minutes: 60", "    timeout-minutes: 120"),
+        ("    timeout-minutes: 8", ""),
+        ("    timeout-minutes: 8", "    timeout-minutes: null"),
+        ("    timeout-minutes: 8", "    timeout-minutes: 0"),
+        ("    timeout-minutes: 8", "    timeout-minutes: 90"),
         ("fail-fast: false", "fail-fast: true"),
         ("index: [0, 1, 2]", "index: [0, 2]"),
         # Matrix exclude can delete shard zero while leaving the remaining

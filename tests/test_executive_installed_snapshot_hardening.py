@@ -713,15 +713,26 @@ def test_installed_collector_refuses_when_direct_git_disappears_before_child(
     macro_sha = _git(macro, "rev-parse", "HEAD").stdout.strip()
     helper_called = False
     removed = False
+    # Source and Macro snapshots run in separate proof threads. Make the
+    # injected topology loss happen before Macro's first Git execution so this
+    # test observes the intended missing-.git refusal, not a scheduling-dependent
+    # unrelated Git failure from the concurrent observer.
+    import threading
+    source_observed = threading.Event()
 
     def runner(argv, **kwargs):
         nonlocal helper_called, removed
         if str(argv[0]) == "git":
+            if Path(kwargs["cwd"]) == macro:
+                assert source_observed.wait(timeout=3.0), (
+                    "source Git observation did not reach the fixture fault injection"
+                )
             result = _default_packet_runner(argv, **kwargs)
             # Remove Macro metadata after the source pre-observation completes.
             if Path(kwargs["cwd"]) == repo and not removed:
                 shutil.rmtree(macro / ".git")
                 removed = True
+                source_observed.set()
             return result
         helper_called = True
         return {
@@ -746,6 +757,8 @@ def test_installed_collector_refuses_when_direct_git_disappears_before_child(
         collector(
             repo_root=repo, macro_root_flag=str(macro), now=None, timeout=5.0,
         )
+    assert removed is True
+    assert not (macro / ".git").exists()
     assert helper_called is False
 
 
