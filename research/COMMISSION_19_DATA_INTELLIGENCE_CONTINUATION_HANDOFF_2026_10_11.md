@@ -857,7 +857,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 2. Daily 10-Q/10-K header watcher armed → r16 on `EVENT LABEL_FILING`.
 3. The seat ends this cycle on `DURABLE_EXECUTION_RUNNING` (two PR watchers + the label watcher live) and `PROVEN_OUTCOME` for the first live read.
 
-#### r16 cycle 2026-10-31 05:5xZ (seat dd5239a9, Opus 5.5) — wave 15: seat takeover; WP31 read 2 (a §5 monitoring read) lost both live episodes to a reader failure; W15 census lanes A–E and I accepted; WP26 zero-stock guard (Macro #10259) and WP28 CS-leg pins (Macro #10273) built by the seat and independently reviewed; #1246 and #9569 adopted
+#### r16 cycle 2026-10-31 05:5xZ (seat dd5239a9, Opus 5.5) — wave 15: seat takeover; WP31 read 2 (a §5 monitoring read) lost both live episodes to a reader failure; W15 census lanes A–E and I accepted; WP26 zero-stock guard (Macro #10259) and WP28 CS-leg pins (Macro #10273) built by the seat and independently reviewed; #1246 and #9569 adopted; G (Macro #10284) built and reviewed; Mastermind's base-wide red traced to pytest 9.2.0 and pinned (Mastermind #1899)
 
 **Takeover.** Seat 7ab343c8 shows no live evidence after r15. This seat took the program under the 2026-10-24 leadership-continuity ruling (Mastermind #1842). Takeover comment on #1243: 6539757087. Last consumed edge: 6333090012. Routing follows the Chairman's 2026-10-12 intent ("Revert back to normal subagent fabric orchestration"): `pool pick` placement, no POOL_ESCALATION_REASON, no native Claude subagents. Fabric dispatch through `fabric_task.py` is not usable from this seat (`claude auth status` loggedIn=false, so FABRIC_IDENTITY_UNVERIFIED / CLAUDE_LOGIN_REQUIRED). Lanes therefore use the kit route `pool remote` (the r6 route), and the lease still validates admission.
 
@@ -891,7 +891,23 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
   Hand-minted trees avoid the refusal but get SESSION ROOT QUARANTINE: no pytest, no git content reads, no interpreter discovery. So build lanes cannot test, and read-only lanes need the diff pasted inline. The seat does not mutate shared donor configs.
 - **The ubuntu3 donor is a partial clone with a promisor remote.** An existence probe for a missing object lazy-fetches and can hang. Seat mints therefore take the SHA from `git rev-parse`, probe with `rev-parse --verify -q`, and never use `cat-file -e`.
 - **`engine.capital_structure` imports only on Python 3.12.** `document_terms` seals a closure over `co_code`, so 3.11 and 3.14 fail at import. CI uses 3.12.
-- **Mastermind master protection.** The merge queue and the required check `test`; 0 required approving reviews (read 06:15Z).
+- **Mastermind master protection.** The merge queue and the required check `test`; 0 required approving reviews (read 06:15Z). Re-read 10:08Z: classic protection requires only `test`. The ruleset adds only the merge queue (ALLGREEN, 100 min check timeout, squash).
+- **The Macro sweeper defers every armed refresh (sweep run 41187048194, 09:03Z).**
+  - Main commit `6b77c45c6e0d` (#10268, 08:57Z) edited `.github/ci/legacy-jobs.yml`. The sweeper reads that as a change to the check definitions, so every armed proof older than it is stale and needs a main-merge refresh. #9569, #10259 and #10273 are each "checks are clean but the proof is stale".
+  - The global cap is 8 in-flight PR proofs and 20 were in flight, so 0 refresh slots were free: "52 blocked, 2 incomplete, 3 pending, 30 refresh-deferred … 0/8 bounded update attempt(s)".
+  - Sweeps triggered by a cancelled or skipped workflow run only `lease_reconcile_pass`, which does nothing without a refresh lease ("no durable refresh owner; no full sweep dispatched"). Only success-triggered sweeps rotate refreshes.
+  - **Seat decision:** no manual update-branch on C19's PRs. That would take slots the cap withholds from 27 other PRs. The sweeper's rotation owns the refresh. Each PR watcher exits on the head change, and the seat re-arms one watcher at the new head.
+- **C19 lane trees (read-only census of `~/lanes/wt/c19-*`, about 09:30Z).**
+  - ubuntu0 (152 entries), ubuntu1 (57), ubuntu3 (155) and m1 hold no C19 tree, so no wave 15 tree remains on them.
+  - ubuntu2 (209 entries) holds two from the 10-17 wave: `c19-w5s-wp31-gates-20261017` and `c19-w5s-wp32-p5p6-20261017`. Directory mtime is 9 days ago and no process names them. The seat did not remove them.
+  - mb did not answer ssh (timeout), so its trees are UNKNOWN.
+  - Free disk: ubuntu2 64G (93% used), ubuntu3 84G (91%), ubuntu0 223G (75%), ubuntu1 594G (55%). ubuntu2's figure fits its `host_disk_below_staging_reserve` refusal (lane M row).
+- **#1899's red rollup is the non-required `shadow-gate` timing out, not a test failure (10:06Z).**
+  - On `94df6a26`, `test` and pytest shards 0–2 passed (34m, 37m, 21m), as did CodeQL and the Analyze jobs. This is D20's fix observed on hosted CI.
+  - `shadow-gate` (rwe-shadow.yml run 41186963305) was cancelled at the job's `timeout-minutes: 45`, 2674 s into "Run repository test gate inside the realized environment". The environment step passed in 29 s, and the log has no FAILED or ERROR line.
+  - rwe-shadow.yml runs on `pull_request` only and says of itself that it is never required, so it never enters the merge group. #1899 stayed at queue position 1.
+  - Under master's definition, unchanged since #342 (2026-09-01), shadow-gate cannot pass. In the last 40 runs, every run on that definition was cancelled at 45 m (10-22 ×2, 10-24, 10-25, 10-31). All 24 successes in the last 100 runs came from one branch, draft Mastermind #1836 (`cursor/host-pull-publisher-lifecycle-83dd`). That branch raises the timeout to 150 and adds a setup-node step; its test step runs 75–115 m.
+  - The first #1899 watcher exited on that rollup. It was replaced by one watcher that tracks the queue entry, not the PR rollup.
 
 **W15 lanes** (packets and returns under `~/.local/state/mastermind/c19-lanes/w15-20261031/`; read-only packets frozen at Macro `1c858789`)
 
@@ -915,11 +931,15 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 | K | independent review of Macro #10273 | glm-5.3, ubuntu3 | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (four notes; the seat closed the `legacy-jobs.yml` search gap) |
 | L | independent review of Macro #10074 at `1627e6d4`, diff inline | glm-5.3, ubuntu3 | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (L1–L7 PASS, four notes; the seat opened the cited lines and closed two search gaps) |
 | G (seat) | WP31 final-failure counter + `not_evaluable_detail` (counts only), plus #10074 notes 1–3, under L.7 while guarded mints are down | SSD worktree | Macro #10284 at `f478e8ee`; 223 passed on 3.12 |
-| M | independent review of Macro #10284 at `f478e8ee`, diff inline | glm-5.3: admission refused on ubuntu3 and ubuntu0 (`host_temperature_at_or_above_limit`) and on ubuntu2 (`host_disk_below_staging_reserve`), rc=75 each. Launched on ubuntu3 at 08:37Z, only after `pool hosts glm` reported it eligible (run `c19-w15-m4-review-10284-20261031`) | RUNNING at the time of this entry; no verdict yet |
+| M | independent review of Macro #10284 at `f478e8ee`, diff inline | glm-5.3, ubuntu3. Admission was refused first on ubuntu3 and ubuntu0 (`host_temperature_at_or_above_limit`) and on ubuntu2 (`host_disk_below_staging_reserve`), rc=75 each; launched at 08:37Z only after `pool hosts glm` reported ubuntu3 eligible (run `c19-w15-m4-review-10284-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (M1–M6 PASS). The seat closed M's two gaps, fixed notes 1–2 in `59425290` (tests only) and accepted note 3. Review comment 6541371627; labeled `merge-on-green` |
+| N | independent review of Mastermind #1899 (pytest pin) at `94df6a26`, read-only | glm-5.3, ubuntu0, launched 09:05Z after `pool hosts glm` reported it ELIGIBLE (run `c19-w15-n-review-mm1899-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (N1–N6 PASS). N matched each of the four FAILED tests' fakes to its CI error; traced the four-state `State` undo to the second delete; found `ci.yml:79` the only unpinned install; confirmed the lock diffs are header-only; found every `pyproject.toml` reader among those the author ran. The seat re-read all seven cited lines and checked that the sha256 matches both headers. Note 1 (the five tests red again once unpinned) accepted as owner debt. Note 2 (the Linux lock was re-verified on Darwin) accepted as stated. Note 3 (`<9.2` admits 9.2.0rc1) refuted: PEP 440 excludes pre-releases of V from `<V`, and `packaging` rejects 9.2.0rc1 even with `prereleases=True`. Review comment 6541579892; auto-merge enabled; one GraphQL watcher on the queue |
+| U8·U2 | design packet for one shared EDGAR acceptance clock (prereg §10 A2): helper contract with caller-declared provenance, evaluator parity test, per-reader impact table, the 13F late-roll window, the docstring relabel text, and a phased plan whose last phase alone stores true UTC (paired with removing the evaluator correction under a prereg amendment); read-only | glm-5.3, ubuntu0, detached clean tree at `66a071645251`, launched 10:21Z (run `c19-w15-u2-design-20261031`) | RUNNING |
+| U8·U5 | design packet for the capital-structure leg's release, for the CS-V2 owner: join key through sanctioned readers only (no bridge module, D15), the full #1258 F4 hold conditions, the D4 PIT-ladder question, which #10273 pins change at release, and a release outline; read-only, C19 builds none of it | glm-5.3. ubuntu1 refused admission (rc=75, `host_temperature_at_or_above_limit`, run `c19-w15-u5-design-20261031`); relaunched at 10:21Z on ubuntu2 after `pool hosts glm` reported it eligible, detached clean tree at `66a071645251` (run `c19-w15-u5b-design-20261031`) | RUNNING |
 
 **DECIDED**
 - **D12. Adopt Mastermind #1246 and carry it to merged.** This supersedes D1's hold on that PR under #1842: it has had no writer since 2026-10-04. Its bytes are unchanged. A non-authoring check found no credential-shaped strings, standard-library-only probes, and `testpaths=["tests"]`. Adoption comment 6539963244; marked ready and queued at 06:16Z.
   - **Correction, seat error.** The seat's watcher for this PR was dead from the start. It asked `gh pr view` for `mergeQueueEntry`, which this `gh` does not offer as a JSON field, and `2>/dev/null || continue` hid the error, so it printed nothing for over two hours. A GraphQL read at 08:38Z showed OPEN, not merged, `mergeQueueEntry` null, head `90b7b32f`, check rollup SUCCESS: the PR is not in the queue. The watcher is stopped. The other PR watchers do not use that field.
+  - **Why #1246 left the queue.** Its queue timeline records `failed_checks`. The merge group failed on five tests that fail on every Mastermind PR and merge group since about 06:40Z, and none of them is in #1246's bytes. Cause and fix: D20. #1246 was re-queued at 10:29:11Z after #1899 merged (GraphQL readback: QUEUED, position 2, head `90b7b32f`), with one GraphQL watcher that prints its read errors.
 - **D13. Adopt Macro #9569** (the publication-seam copy says account-wide, not company-specific). It had no writer since 10-18 and no hold. F2 is the independent review. Base-synced through the update-branch API (head `b6735f97`); comment 6540190881. The sweeper owns the merge. C19 never sets or unsets `MACRO_INTEGRATED_ANSWER_ENABLED`.
   - **Gap the seat closed.** The adoption comment said the sweeper owned the merge, but `merge-on-green` was never applied: the timeline showed only `ready_for_review` at 06:40:22Z, and the watcher read `labels=[]` with checks concluded at 07:55Z. The seat applied the label at about 08:10Z and read it back at head `b6735f97`.
 - **D14. WP26 zero-stock guard: Macro #10259.**
@@ -963,6 +983,22 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
   - The new counter `revisions_reader_final_failures` closes the gap that left read 2's 3/2 ambiguous.
   - The tests pass on 3.12 (223), and a mutation check turned the production wiring test red. Because the seat authored it, G carries no `merge-on-green` until lane M's independent review is accepted.
   - The seat's own reading found that every S-leg `reason` in `scripts/c19_wp31_sources.py` is a fixed token, so the detail map should carry no value. That reading is not independent; M1 tests it separately.
+  - M accepted (review 6541371627). Notes 1–2 were fixed in `59425290` (tests only; the scripts are byte-identical to `f478e8ee`), each mutation-checked; note 3 accepted. 224 passed. Labeled `merge-on-green` at `59425290`.
+- **D20. Mastermind's base-wide red is pytest 9.2.0; fix is Mastermind #1899, a pin.**
+  - Hosted CI installs `pip install -e ".[dev]"` with no lock (`.github/workflows/ci.yml:79`). The dev extra said `pytest>=8,<10`, so CI picked up pytest 9.2.0, released after the last green master push (`bb85b429f`). Between the green and red runs only pytest (9.1.1 → 9.2.0) and sse-starlette (3.5.1 → 3.6.0) changed.
+  - Two pytest 9.2.0 changes explain all five tests:
+    - `FDCapture.snap()` now calls `os.fstat()` while a test's `os.fstat` patch is still active (four FAILED tests);
+    - `monkeypatch.setattr()` now takes the old value from `target.__dict__`, and starlette `State` keeps values in `_state`, so repeated `raising=False` sets undo into a second delete (`KeyError: 'scheduler'` in the health test's teardown).
+  - The seat reproduced both on CPython 3.12: the four non-vendor tests fail on 9.2.0 and pass on 9.1.1; a standalone `State` test errors on 9.2.0 and passes on 9.1.1.
+  - #1899 changes the dev extra to `pytest>=8,<9.2` and rewrites only the two gate-lock headers (new pyproject sha256; pip-tools `--reuse-hashes` reproduced every pin and hash). The locks already pin `pytest==9.1.1`. 680 passed, 4 skipped on 9.1.1.
+  - **Why a pin, not test fixes.** The five tests belong to four other owners (health readiness, CAP-S1 canary, Executive autonomy control, H1 input wrapper), and every PR in the repo is blocked until the base is green. The pin also aligns hosted CI with what the gate locks already pin. The test repairs are a follow-up for their owners, after which the bound can widen.
+  - The seat authored #1899, so it took no auto-merge until an independent review was accepted. Lane N (lanes table) approved with notes and the seat accepted it. Auto-merge was then enabled at `94df6a26` (comment 6541579892). It merged at 10:23:46Z as `ed42f8605c71`.
+  - On `94df6a26`, hosted `test` and pytest shards 0–2 passed (FACTS, shadow-gate).
+  - **Land check (10:26Z), merge groups green, master push not yet read.**
+    - Merge-group CI run 41189563397 on `ed42f8605c71` passed. Its three shard logs install pytest 9.1.1 and hold no `FAILED tests/` or `ERROR tests/` line.
+    - The modules holding the five tests finished every case they started: `test_health_readiness` 11/11, `test_cap_s1_mastermind_operator_canary` 306/306, `test_h1_input_wrapper` 61/61, `test_executive_autonomy_control` 385/385. These logs print case counts through `CI_MODULE`, with no per-test pass line, so the pass claim rests on those counts, the shard conclusions and the absent failure lines.
+    - The next merge group (`dcd79fc4`, #1868) also passed (run 41189993962).
+    - The master push run on `ed42f8605c71` (41192578900) was cancelled, superseded by #1868's push. The master push run on `dcd79fc4` (41192579625) was still running at 10:28Z, so no master push run has concluded green yet.
 - **Retraction, by name (E2).** The r15-era claim "trial-budgets lint disabled at BASE" is withdrawn. The lint runs, but only via `run_ci_pack.py --gate data` in the data-health lane, never on a PR. That residual goes to the CI owner.
 
 **UPGRADE PLAN** (proposals; no new prereg, no budget enlargement)
@@ -980,20 +1016,23 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 - **U6.** WP26 (D14). Production proof: the next daily build's commodities payload keeps `sources.crude_stocks.state == "available"`. If historical zeros in the live EIA store invalidate a series, that is recorded with its scope, not reverted silently.
 - **U7.** r15 OPEN items are reclassified under #1842 (below). An item waiting only on an absent owner becomes seat work. An item held by a real authority (CS-V2 W4/W6, prereg) stays held under its key.
 - **U8.** GLM design lanes for U2 and U5, one frozen packet each, after G.
+  - **Launched before G, by seat decision (10:21Z).** Both lanes are read-only and frozen against main `66a071645251`. Neither packet reads or depends on G's files (#10284 changes only the WP31 reader's failure counter). G's merge waits on the sweeper, not on the seat, so holding the lanes would have bought nothing. Rows U8·U2 and U8·U5 in the lanes table. Each return is judged by artifact: the seat re-opens every cited line and runs the two lens checks before ACCEPT.
 
 **OPEN** (owner → next action)
-- **Macro #10284** (G), seat → judge lane M by its artifact. On ACCEPT, post the review on the PR and add `merge-on-green`. Land-check after merge.
+- **Macro #10284** (G), seat → lane M accepted; labeled. The watcher owns the wait. After merge: land-check against fresh main, re-read the AAPL headers, then read 2b (D17).
 - **Agent OS WS-COMMISSION-19**, seat → a separate small Macro PR. The record on main still calls the next run "the label look"; D17 corrects that.
-- **Macro #10259**, seat → the sweeper merges on concluded green. Then the #8125 note and the U6 production proof.
-- **Macro #10273**, seat → the sweeper merges on concluded green.
-- **Macro #9569**, seat → the sweeper merges on concluded green.
-- **Mastermind #1246**, seat → read its queue timeline for why it is not queued, then re-queue if the recorded reason permits (D12).
+- **Macro #10259, #10273, #9569**, sweeper → refresh, then merge on concluded green, under the cap (FACTS, sweeper). Seat → re-arm one watcher at each new head; land-check each merge. Then for #10259: the #8125 note and the U6 production proof.
+- **Mastermind #1899**, MERGED as `ed42f8605c71` (D20). Seat → read master push run 41192579625 once it concludes. Merge groups are green; no master push run has concluded yet.
+- **Mastermind #1246**, merge queue → merge on concluded green. Re-queued at 10:29:11Z, position 2 (D12, D20). One GraphQL watcher tracks the queue entry.
 - **Read 2b**, seat → after G lands (D17): one evaluator run, counts only, a §5 monitoring read.
 - **Findings delivered with this cycle, owner → action:**
   - Fabric owner: the donor allowlist on all four hosts; read-only lanes lose Bash in hand-minted trees; qwen_exec infers 429 from the wrapper; auto NO_HOST rc=3. Separately, three admission refusals at 08:2x–08:33Z and `pool hosts glm` = NONE at 08:3xZ: ubuntu0 `cpu_tctl` 93.9°C (limit 85), ubuntu3 88.5°C (limit 80), ubuntu2 disk 63.1 GB (reserve 75), ubuntu1 load 21.3 (gate 10). m1 and ubuntu4 report `explicit-canary-only`, and this seat did not use them to get around the guards. At 08:37Z ubuntu3 read 43°C and cleared its thermal-recovery wait, so it qualified without any guard being touched. Whether this NONE shares a cause with the earlier NO_HOST is not established.
   - Host owner: the ubuntu0 donor (`~/lanes/repos/macro`) printed a stale `.git/gc.log` warning and repeated `Could not read c95397e4…` errors during `fetch` at 08:3xZ. The fetch and the checkout at `f478e8ee` still succeeded. The seat did not touch the shared store.
   - CS owner: `engine.capital_structure` imports only on 3.12.
-  - CI owner: the CS job is `gate: data`; main check-definition changes stale every armed proof under the saturated cap; the trial-budgets lint runs only in data-health.
+  - CI owner: the CS job is `gate: data`; a main check-definition change (#10268's `legacy-jobs.yml` edit) stales every armed proof, and under the saturated cap that defers every refresh (FACTS, sweeper); the trial-budgets lint runs only in data-health.
+  - Test owners (health readiness, CAP-S1 canary, Executive autonomy control, H1 input wrapper) → make the five tests 9.2-safe: patch the module-local `fstat` reference instead of global `os.fstat`, and build a fresh `State`/app per `health_client` call. Then widen the bound in `pyproject.toml` (D20).
+  - RWE shadow owner: on master's rwe-shadow.yml (`timeout-minutes: 45`), `shadow-gate` is cancelled on every PR that touches `pyproject.toml`, `requirements/gate-*.lock`, `scripts/rwe_env.py` or the workflow, so it reports red on any dependency PR without ever reaching a verdict (FACTS). The only raise, to 150, is inside draft #1836 alongside an unrelated fabric change. Land the timeout on its own, or shard the shadow test step. C19 does not edit the workflow.
+  - Fabric owner (append): ubuntu2 holds two stale 10-17 C19 lane trees and runs at 93% disk (FACTS, lane trees); the seat did not read the staging-reserve threshold and did not remove the trees.
   - Debt-maturity owner: D4.
   - Composer/forensics owner: record the consumed `snapshot_id` (E3).
 - **Unchanged from r15:**
@@ -1006,7 +1045,9 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
   - Linear MAS-263 and Executive OAuth (human /mcp).
 
 **NEXT**
-1. Land this r16 through the Mastermind merge queue, and post a pointer on #1243.
-2. The PR watchers own the waits on #10259, #9569 and #10273. #1246 has no watcher until the seat has read why it left the queue. Each merge gets a land-check against fresh main.
-3. When lane M returns, judge it by its artifact. On ACCEPT, G goes to the sweeper with one watcher, then read 2b (D17) after G lands.
-4. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING (three PR watchers and lane M live; #1246 needs seat action). MERGED for #10074 only, and it has no production proof beyond the land check until read 2b uses it. PROVEN_OUTCOME for the W15 census wave and the independent reviews. No W15 build has reached PRODUCTION_PROOF.
+1. Carry this r16 through the Mastermind merge queue, and post a pointer on #1243.
+2. Carry #1246 through the queue, and read master push run 41192579625 once it concludes.
+3. The PR watchers own the waits on #10284, #10259, #9569 and #10273. Each merge gets a land-check against fresh main.
+4. Read 2b (D17) after G lands: one evaluator run, counts only.
+5. Judge the U8 lanes by artifact when they deliver, and record each verdict.
+6. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING. MERGED for #10074 only, with no production proof beyond the land check. PROVEN_OUTCOME for the W15 census wave and the independent reviews. No W15 build has reached PRODUCTION_PROOF.
