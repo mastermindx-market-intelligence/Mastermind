@@ -24,13 +24,13 @@ jobs:
     name: pytest shard ${{ matrix.index }}
     runs-on: ubuntu-latest
     # Retain protected master's bounded five-minute headroom for test setup.
-    # All three shards must still succeed within the finite 45-minute limit.
+    # All six shards must still succeed within the finite 45-minute limit.
     timeout-minutes: 45
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 6
       matrix:
-        index: [0, 1, 2]
+        index: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,7 +112,7 @@ jobs:
             xargs -0 -n1 bash -n
 
       - name: Run repository test shard
-        run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
+        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 
   # Branch protection requires exactly the stable context "test". Matrix
   # checks alone have dynamic names and are NOT a sufficient required check.
@@ -140,4 +140,4 @@ jobs:
             exit 1
           fi
           # Same discovery/exclusion/total-cover plan, never a test skip.
-          python scripts/ci_pytest.py --plan-only --jobs 3
+          python scripts/ci_pytest.py --plan-only --jobs 6
