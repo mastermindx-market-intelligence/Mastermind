@@ -382,6 +382,11 @@ def read_decision_availability(
         ("nav_history", "nav_history.jsonl", True),
     ):
         data[key], sources[key], signatures[key] = _read(base_dir / filename, lines=lines)
+    # The ledger is append-only: selection reads the effective view (one row per asof), while
+    # sources/signatures above stay computed on the raw file.
+    if isinstance(data["decisions"], list):
+        from bot import decision_rows
+        data["decisions"] = decision_rows.effective_rows(data["decisions"])
     wal_path = base_dir / "paper_transaction.json"
     try:
         wal_signature = _signature(wal_path)
