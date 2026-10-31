@@ -856,6 +856,451 @@ class FleetStorageVolumeTests(unittest.TestCase):
                      "temp_gc_generic", "reap", "scratch_reap"):
             self.assertIn(name + ".rc_missing", receipt["incomplete_substeps"])
 
+    # -- B11: the unenrolled stale-pack reaper is never invoked apply-capable.
+
+    @staticmethod
+    def _tree_snapshot(root):
+        """Content-addressed snapshot of a directory tree, or None if absent."""
+        if not root.exists():
+            return None
+        rows = []
+        for path in sorted(root.rglob("*")):
+            try:
+                info = path.lstat()
+            except OSError:
+                continue
+            rows.append((str(path), info.st_size, info.st_mtime_ns, info.st_mode))
+        return rows
+
+    # Two argv shapes a later edit could smuggle into the stale-pack builder.
+    # Each is applied to a throwaway copy of the REAL sweep source, so the
+    # mutation is proved against the production code path and not against a
+    # re-implementation of it.
+    _STALE_PACK_MUTATIONS = (
+        # An apply abbreviation inside the argv literal, before the guard.
+        ("apply-abbreviation-in-the-builder-literal",
+         "    argv = [sys.executable, helper_text, '--json',\n"
+         "            '--min-age-minutes', str(min_age_minutes)]",
+         "    argv = [sys.executable, helper_text, '--json', '--app',\n"
+         "            '--min-age-minutes', str(min_age_minutes)]"),
+        # An apply abbreviation appended after the builder's own guard.
+        ("apply-abbreviation-appended-after-the-guard",
+         "    _assert_stale_pack_argv_allowed(argv)\n    return argv",
+         "    _assert_stale_pack_argv_allowed(argv)\n"
+         "    argv.append('--app')\n    return argv"),
+    )
+
+    def _load_mutated_sweep(self, old, new):
+        """Load a throwaway copy of the real sweep source with one edit applied."""
+        source = (SOURCE / "sweep.py").read_text()
+        self.assertEqual(source.count(old), 1,
+                         "the mutation anchor must exist exactly once")
+        mutated_source = source.replace(old, new, 1)
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp) / "sweep_mutated.py"
+            path.write_text(mutated_source)
+            return load("fleet_test_sweep_mutated", path)
+
+    def _run_sweep(self, sweep_module, stale_rc=0,
+                   stale_receipt='{"status":"ok"}'):
+        """Run main() with every executable child mocked.
+
+        Returns (exit status, receipt, calls, created) where calls is the
+        ORDERED list of (key, argv) the sweep handed to its children, and
+        created lists the files the sweep wrote into the disposable state
+        directory. No helper, host, network or native file is touched.
+        """
+        calls = []
+
+        def fake_guarded(out, key, argv, timeout, env=None, limit=600):
+            calls.append((key, list(argv)))
+            out[key + "_rc"] = stale_rc if key == "stale_packs" else 0
+            out[key] = (stale_receipt if key == "stale_packs"
+                        else '{"status":"ok"}')
+            return None
+
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            usage = mock.Mock(free=180 * sweep_module.GIB,
+                              total=460 * sweep_module.GIB)
+            with mock.patch.object(sweep_module, "STATE", state), (
+                mock.patch.object(sweep_module, "LOCK", state / "sweep.lock")
+            ), mock.patch.object(sweep_module, "ssd_receipts", return_value=[]), (
+                mock.patch.object(sweep_module, "grants", return_value="ok")
+            ), mock.patch.object(sweep_module, "guarded",
+                                 side_effect=fake_guarded), (
+                mock.patch.object(sweep_module, "_pool_archive_mount",
+                                  return_value=None)
+            ), mock.patch.object(sweep_module, "floor_for_host",
+                                 return_value=200.0), (
+                mock.patch.object(sweep_module.shutil, "disk_usage",
+                                  return_value=usage)
+            ), mock.patch.object(sweep_module, "_external_volume_snapshots",
+                                 return_value=[]), (
+                mock.patch.object(sweep_module.Path, "home", return_value=state)
+            ), mock.patch.object(sweep_module.os, "uname",
+                                 return_value=mock.Mock(nodename="m2studio.local")), (
+                contextlib.redirect_stdout(io.StringIO())
+            ) as output:
+                status = sweep_module.main()
+            receipt = json.loads(output.getvalue())
+            created = sorted(path.name for path in state.iterdir())
+        return status, receipt, calls, created
+
+    def _expected_stale_pack_argv(self, sweep_module, helper):
+        """The one argv shape the stale-pack pass is allowed to emit."""
+        return [sys.executable, str(helper), "--json", "--min-age-minutes", "120"]
+
+    def test_stale_pack_invocation_is_never_apply_capable(self):
+        # Pure argv construction. No helper, host, file or process is touched.
+        helper = pathlib.Path("/nonexistent/stale_pack_reaper.py")
+        argv = self.sweep.stale_pack_argv(helper)
+        # EXACT argv equality. The contract is not "no --apply somewhere in
+        # there"; it is precisely this one shape and nothing else.
+        self.assertEqual(argv, [sys.executable, str(helper), "--json",
+                                "--min-age-minutes", "120"])
+        self.assertEqual(argv, self._expected_stale_pack_argv(self.sweep, helper))
+        self.assertNotIn("--apply", argv)
+        self.assertEqual(
+            [token for token in argv if self.sweep._is_apply_capable(token)], [])
+        self.assertIn("--json", argv)
+        self.assertEqual(argv[-2:], ["--min-age-minutes", "120"])
+        # The incumbent age is preserved.
+        self.assertEqual(self.sweep.stale_pack_argv(helper)[-1], "120")
+        # The guard is fail closed: an apply-capable spelling is refused, not
+        # passed through to the unenrolled helper.
+        for token in ("--apply", "--apply-now", "--force-apply", "--mode=apply"):
+            with self.subTest(token=token):
+                self.assertTrue(self.sweep._is_apply_capable(token))
+                with self.assertRaises(ValueError):
+                    self.sweep._assert_not_apply_capable(
+                        ["python3", "/x/stale_pack_reaper.py", token])
+
+    def test_apply_abbreviations_are_what_argparse_really_accepts(self):
+        # The premise of the prefix rule, proved against argparse itself. The
+        # installed helper is never read and never executed: this replicates
+        # ONLY its parser, whose default ArgumentParser() sets allow_abbrev.
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--apply", action="store_true")
+        parser.add_argument("--json", action="store_true")
+        parser.add_argument("--min-age-minutes", type=int, default=120)
+        for token in ("--a", "--ap", "--app", "--appl"):
+            with self.subTest(token=token):
+                namespace = parser.parse_args(
+                    ["--json", token, "--min-age-minutes", "120"])
+                self.assertTrue(namespace.apply,
+                                "argparse accepted " + token + " as --apply")
+                # The guard must see what argparse actually accepts.
+                self.assertTrue(self.sweep._is_apply_capable(token))
+
+    def test_stale_pack_argv_refuses_apply_abbreviation_attacks(self):
+        # The abbreviations a denylist of whole tokens misses. Each of these
+        # arms the helper's --apply branch, and each must be refused.
+        helper = pathlib.Path("/nonexistent/stale_pack_reaper.py")
+        for token in ("--a", "--ap", "--app", "--appl", "--apply"):
+            with self.subTest(token=token):
+                self.assertTrue(self.sweep._is_apply_capable(token))
+                with self.assertRaises(ValueError):
+                    self.sweep._assert_not_apply_capable(
+                        ["python3", "/x/stale_pack_reaper.py", token])
+                # The allowlist refuses the abbreviation in either option slot
+                # and as an extra trailing token.
+                for argv in (
+                        [sys.executable, str(helper), token,
+                         "--min-age-minutes", "120"],
+                        [sys.executable, str(helper), "--json",
+                         "--min-age-minutes", "120", token],
+                        [sys.executable, str(helper), "--json", token, "120"]):
+                    with self.assertRaises(ValueError):
+                        self.sweep._assert_stale_pack_argv_allowed(argv)
+
+    def test_stale_pack_argv_refuses_hostile_min_age_minutes(self):
+        # An adversarial age must never reach the helper as a token: a bool
+        # is not an int here, a string is not an int here, and an option-like
+        # value is not an int here either.
+        helper = pathlib.Path("/nonexistent/stale_pack_reaper.py")
+        hostile = (0, -1, -120, True, False, None, 120.0, 12.5,
+                   "--app", "--apply", "5 --apply", "", " ", "120\n",
+                   "0x10", "1e3", "120 ", [120], {"minutes": 120})
+        for value in hostile:
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(ValueError):
+                    self.sweep.stale_pack_argv(helper, value)
+        # The BUILDER refuses these on its own, with the argv allowlist
+        # stubbed out. The builder's own type/range contract must not depend
+        # on a second layer that happens to catch the same value.
+        with mock.patch.object(self.sweep, "_assert_stale_pack_argv_allowed",
+                               return_value=None):
+            for value in hostile:
+                with self.subTest(value=repr(value), layer="builder-only"):
+                    with self.assertRaises(ValueError):
+                        self.sweep.stale_pack_argv(helper, value)
+        # The age token itself is canonical and positive.
+        for minutes_text in ("0120", "+120", "-120", " 120", "120 ", "0",
+                             "", "120\n", "abc"):
+            with self.subTest(minutes=repr(minutes_text)):
+                with self.assertRaises(ValueError):
+                    self.sweep._assert_stale_pack_argv_allowed(
+                        [sys.executable, str(helper), "--json",
+                         "--min-age-minutes", minutes_text])
+        # The incumbent value still works.
+        self.assertEqual(self.sweep.stale_pack_argv(helper, 120)[-1], "120")
+        self.assertEqual(self.sweep.stale_pack_argv(helper)[-1], "120")
+
+    def test_stale_pack_argv_refuses_an_option_like_helper_path(self):
+        # The helper path is an argv token too: an option-like path would be
+        # parsed by the helper's own parser, not treated as a script.
+        for helper in ("--apply", "--app", "-a", "--json", ""):
+            with self.subTest(helper=helper):
+                with self.assertRaises(ValueError):
+                    self.sweep.stale_pack_argv(helper)
+        # The BUILDER refuses an option-like path on its own, with the argv
+        # allowlist stubbed out.
+        with mock.patch.object(self.sweep, "_assert_stale_pack_argv_allowed",
+                               return_value=None):
+            for helper in ("--apply", "--app", "-a", "--json"):
+                with self.subTest(helper=helper, layer="builder-only"):
+                    with self.assertRaises(ValueError):
+                        self.sweep.stale_pack_argv(helper)
+        # A real path is fine.
+        self.assertEqual(
+            self.sweep.stale_pack_argv(
+                pathlib.Path("/x/stale_pack_reaper.py"))[1],
+            "/x/stale_pack_reaper.py")
+
+    def test_no_apply_capable_stale_pack_invocation_exists_in_the_module(self):
+        # The oracle must be the REAL builder, not a literal scan. The builder
+        # assembles the argv from str(helper) and the STALE_PACK_HELPER
+        # constant, so a scan of string literals never inspects the argv that
+        # is actually executed. A literal scan cannot even see a new direct
+        # guarded(..., [..., str(HERE / STALE_PACK_HELPER), '--apply']).
+        import ast
+        import inspect
+
+        # 1. Guard invocation capture: the builder hands its own argv to the
+        #    allowlist guard, exactly once.
+        helper = pathlib.Path("/nonexistent/stale_pack_reaper.py")
+        captured = []
+        real_guard = self.sweep._assert_stale_pack_argv_allowed
+
+        def spy(argv):
+            captured.append(list(argv))
+            return real_guard(argv)
+
+        with mock.patch.object(self.sweep, "_assert_stale_pack_argv_allowed",
+                               side_effect=spy):
+            argv = self.sweep.stale_pack_argv(helper)
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0], argv)
+        self.assertEqual(captured[0],
+                         self._expected_stale_pack_argv(self.sweep, helper))
+
+        # 2. Real builder identity: the argv the child actually receives IS
+        #    the builder's argv, and it names the real helper.
+        status, receipt, calls, created = self._run_sweep(self.sweep)
+        stale_calls = [argv for key, argv in calls if key == "stale_packs"]
+        self.assertEqual(len(stale_calls), 1)
+        self.assertEqual(stale_calls[0],
+                         self.sweep.stale_pack_argv(
+                             self.sweep.HERE / self.sweep.STALE_PACK_HELPER))
+        self.assertEqual(stale_calls[0][1],
+                         str(self.sweep.HERE / self.sweep.STALE_PACK_HELPER))
+
+        # 3. Exactly one stale-pack invocation site, and it is the guarded
+        #    pass. The marker is the SOURCE IDENTITY of the unenrolled helper
+        #    (the STALE_PACK_HELPER constant, or a stale-pack literal), which
+        #    a direct new call site would have to use.
+        tree = ast.parse(inspect.getsource(self.sweep))
+        stale_functions = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            has_marker = False
+            guarded_calls = []
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Name) and sub.id == "STALE_PACK_HELPER":
+                    has_marker = True
+                if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                    if "stale_pack_reaper" in sub.value:
+                        has_marker = True
+                if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                        and sub.func.id == "guarded"):
+                    guarded_calls.append(sub)
+            if has_marker and guarded_calls:
+                stale_functions.append((node.name, guarded_calls))
+        self.assertEqual(len(stale_functions), 1,
+                         "exactly one function may invoke the unenrolled helper")
+        name, guarded_calls = stale_functions[0]
+        self.assertEqual(name, "stale_pack_discovery_pass")
+        self.assertEqual(len(guarded_calls), 1)
+        # The argv is not a literal list: it is the single builder's output.
+        self.assertFalse(isinstance(guarded_calls[0].args[1], (ast.List, ast.Tuple)))
+
+        # 4. Neither the builder nor the pass carries an apply-capable literal.
+        for function in (self.sweep.stale_pack_argv,
+                         self.sweep.stale_pack_discovery_pass):
+            for node in ast.walk(ast.parse(inspect.getsource(function))):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    self.assertFalse(
+                        self.sweep._is_apply_capable(node.value),
+                        function.__name__ + " contains " + repr(node.value))
+
+        # Exactly one stale-pack call site in main(), and it is the guarded pass.
+        main_source = inspect.getsource(self.sweep.main)
+        self.assertIn("stale_pack_discovery_pass(out, 'stale_packs'", main_source)
+        self.assertNotIn("stale_pack_reaper.py", main_source)
+        # The unenrolled helper itself is not shipped by this source tree.
+        self.assertFalse(
+            (self.sweep.HERE / "stale_pack_reaper.py").exists())
+
+    def test_stale_pack_pass_holds_unapplied_on_the_eligible_mac_path(self):
+        # Execute only the sweep coordinator with every executable child mocked
+        # and the host presented as an eligible Mac. The captured argv is the
+        # proof: the stale-pack pass still runs (telemetry retained) but never
+        # carries apply capability, the receipt names the hold, and no native
+        # file is created, changed or removed.
+        native_state = pathlib.Path.home() / ".local/state/mastermind/storage-cleanup"
+        native_before = self._tree_snapshot(native_state)
+        status, receipt, calls, created = self._run_sweep(self.sweep)
+
+        # The recurring pass still runs exactly once: telemetry retained, no
+        # duplicate reaper introduced. The count is over the ordered CALL
+        # LIST, not over a dict key: a second call would overwrite the first
+        # and the old count could never see it.
+        stale_calls = [argv for key, argv in calls if key == "stale_packs"]
+        self.assertEqual(len(stale_calls), 1)
+        argv = stale_calls[0]
+        self.assertEqual(argv,
+                         self._expected_stale_pack_argv(
+                             self.sweep,
+                             self.sweep.HERE / self.sweep.STALE_PACK_HELPER))
+        self.assertNotIn("--apply", argv)
+        self.assertEqual(
+            [token for token in argv
+             if self.sweep._is_apply_capable(token)], [])
+        self.assertTrue(argv[1].endswith("stale_pack_reaper.py"))
+        self.assertIn("--json", argv)
+
+        self.assertEqual(receipt["stale_packs_hold"],
+                         "HELD_UNQUALIFIED_STALE_PACK_HELPER")
+        self.assertEqual(receipt["stale_packs_effect_state"], "NOT_APPLIED")
+        self.assertIn("stale_packs.held_unqualified_helper",
+                      receipt["incomplete_substeps"])
+        self.assertTrue(receipt["degraded"])
+        self.assertNotEqual(status, 0)
+
+        # The only writes are the sweep's own receipt in the disposable
+        # state directory; nothing native was touched.
+        self.assertIn("sweep-log.jsonl", created)
+        self.assertTrue(all(name.startswith("sweep") for name in created),
+                        created)
+        self.assertEqual(native_before, self._tree_snapshot(native_state),
+                         "no native storage-cleanup file was created or changed")
+
+    def test_stale_pack_hold_survives_helper_failures(self):
+        # The hold is a property of the PASS, not of one lucky exit code. An
+        # incomplete scratch discovery, a timeout and a launch error must all
+        # keep the hold, the NOT_APPLIED effect state, the degraded receipt
+        # and the nonzero exit, and none of them may carry apply capability.
+        cases = (
+            (2, '{"scratch_discovery": {"complete": false, "errors": ["denied"]}}'),
+            (0, '{"scratch_discovery": {"complete": false, "errors": ["denied"]}}'),
+            (124, "TIMEOUT after 1800s"),
+            (125, "ERROR FileNotFoundError: helper absent"),
+        )
+        for rc, helper_receipt in cases:
+            with self.subTest(rc=rc):
+                status, receipt, calls, _ = self._run_sweep(
+                    self.sweep, stale_rc=rc, stale_receipt=helper_receipt)
+                self.assertEqual(receipt["stale_packs_rc"], rc)
+                self.assertEqual(receipt["stale_packs_hold"],
+                                 "HELD_UNQUALIFIED_STALE_PACK_HELPER")
+                self.assertEqual(receipt["stale_packs_effect_state"], "NOT_APPLIED")
+                self.assertIn("stale_packs.held_unqualified_helper",
+                              receipt["incomplete_substeps"])
+                self.assertTrue(receipt["degraded"])
+                self.assertNotEqual(status, 0)
+                stale_calls = [argv for key, argv in calls
+                               if key == "stale_packs"]
+                self.assertEqual(len(stale_calls), 1)
+                self.assertEqual(stale_calls[0],
+                                 self._expected_stale_pack_argv(
+                                     self.sweep,
+                                     self.sweep.HERE / self.sweep.STALE_PACK_HELPER))
+
+    def test_stale_pack_allowlist_kills_an_apply_abbreviation_mutation(self):
+        # A later edit that smuggles an apply abbreviation into the builder
+        # must fail closed BEFORE the guarded child executes. The mutation is
+        # applied to a throwaway copy of the REAL sweep source, so the proof
+        # is against the production code path.
+        helper = pathlib.Path("/nonexistent/stale_pack_reaper.py")
+        expected = self._expected_stale_pack_argv(self.sweep, helper)
+        for label, old, new in self._STALE_PACK_MUTATIONS:
+            with self.subTest(mutation=label):
+                mutated = self._load_mutated_sweep(old, new)
+
+                # 1. The mutated builder cannot ship a compliant argv: the
+                #    exact-argv regression fails against the mutant.
+                try:
+                    shipped = mutated.stale_pack_argv(helper)
+                except ValueError:
+                    shipped = None
+                self.assertNotEqual(shipped, expected)
+
+                # 2. The allowlist itself refuses the smuggled shape.
+                with self.assertRaises(ValueError):
+                    mutated._assert_stale_pack_argv_allowed(
+                        [sys.executable, str(helper), "--json", "--app",
+                         "--min-age-minutes", "120"])
+
+                # 3. The production path never hands an apply-capable argv to
+                #    a child: the stale-pack child is not executed at all.
+                status, receipt, calls, _ = self._run_sweep(mutated)
+                self.assertEqual([argv for key, argv in calls
+                                  if key == "stale_packs"], [])
+                for key, argv in calls:
+                    if any("stale_pack_reaper" in token for token in argv):
+                        for token in argv:
+                            self.assertFalse(
+                                mutated._is_apply_capable(token),
+                                "an apply-capable token reached a child")
+
+                # 4. The refusal is receipted, not swallowed: the sweep stays
+                #    degraded and the hold is still named.
+                self.assertEqual(receipt["stale_packs_hold"],
+                                 "HELD_UNQUALIFIED_STALE_PACK_HELPER")
+                self.assertEqual(receipt["stale_packs_effect_state"], "NOT_APPLIED")
+                self.assertEqual(receipt["stale_packs_rc"], 78)
+                self.assertTrue(receipt["degraded"])
+                self.assertNotEqual(status, 0)
+
+    def test_stale_pack_hold_marker_degrades_the_sweep_receipt(self):
+        # Pure finish() classification: no helper, host or file is touched.
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            with mock.patch.object(self.sweep, "STATE", state), mock.patch.object(
+                self.sweep, "_external_volume_snapshots", return_value=[]
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                code = self.sweep.finish({
+                    "mode": "calm",
+                    "stale_packs_rc": 0,
+                    "stale_packs": '{"applied": false, "removed": 0}',
+                    "stale_packs_hold": "HELD_UNQUALIFIED_STALE_PACK_HELPER",
+                    "stale_packs_effect_state": "NOT_APPLIED",
+                })
+            receipt = json.loads(output.getvalue())
+        self.assertEqual(code, 1)
+        self.assertTrue(receipt["degraded"])
+        self.assertIn("stale_packs.held_unqualified_helper",
+                      receipt["incomplete_substeps"])
+        self.assertEqual(receipt["stale_packs_effect_state"], "NOT_APPLIED")
+        self.assertEqual(receipt["stale_packs_hold"],
+                         "HELD_UNQUALIFIED_STALE_PACK_HELPER")
+
 
 if __name__ == "__main__":
     unittest.main()
