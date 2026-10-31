@@ -13,6 +13,7 @@ import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { ConversationWindow } from "./conversations/ConversationWindow";
 import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
+import { RetainedResults } from "./RetainedResults";
 import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
 import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
 import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
@@ -3167,6 +3168,25 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       Refresh Work
     </button>
   );
+  const retainedResultHost = window.MastermindMissionHost;
+  const retainedResultsPanel = selection && !directSelected &&
+    retainedResultHost?.readResultReferences && retainedResultHost.readResult &&
+    (!authState || authState.acquisition) ? (
+      <RetainedResults
+        key={JSON.stringify([authRevision, selectionSeq.current, selection,
+          retainedResultHost.invalidationGeneration?.() ?? 0])}
+        selection={selection}
+        authGeneration={authRevision}
+        hostGeneration={retainedResultHost.invalidationGeneration?.() ?? 0}
+        locale={locale}
+        missionState={d?.read_state.state ?? "UNAVAILABLE"}
+        readReferences={retainedResultHost.readResultReferences}
+        readResult={retainedResultHost.readResult}
+        renderResult={(selected, document) => (
+          <ResultCard state={{ kind: "READY", selection: selected, document }} />
+        )}
+      />
+    ) : null;
   let content: React.ReactNode;
   if (active === "Today")
     content = (
@@ -3287,6 +3307,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             </div>
           </section>
           {!directSelected ? <ProjectTabs active={projectTab ?? "Overview"} onChange={setProjectTab} /> : null}
+          {retainedResultsPanel}
           {directSelected ? directResultPanel : !d ? (
             <section className="card empty-panel">
               <h2>{projectTab}</h2>
@@ -3464,6 +3485,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       <>
         {directResultPanel}
         <Mission d={d} />
+        {retainedResultsPanel}
         {missionV3 && isDocv3(missionV3) ? (
           <ResultRefs
             d={missionV3}

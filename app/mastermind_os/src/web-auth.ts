@@ -843,6 +843,26 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         },
       );
     },
+    readResultReferences: ({ workRef, rootJobId, signal }) => {
+      if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      // Fixed retained-result reference read: the same Acquisition READ
+      // token, origin, permission and 16KiB cap as the retained Result
+      // route; the typed allowed 503 unavailable body carries this route's
+      // own closed schema. No extra selector, cursor or arbitrary URL.
+      return read(
+        "acquisition",
+        `${ORIGIN}/workspace/result-references/current?${new URLSearchParams({
+          work_ref: workRef,
+          root_job_id: rootJobId,
+        })}`,
+        signal,
+        {
+          cap: 16_384,
+          typedUnavailableSchema: "mastermind.workspace_result_references.v1",
+        },
+      );
+    },
     readCurrentWindow: ({ signal }) =>
       read("content", `${ORIGIN}/workspace/window/current`, signal),
   };
