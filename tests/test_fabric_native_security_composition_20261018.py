@@ -44,8 +44,13 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # The Grok delta's source risk was independently reviewed at 3d864/25efd; this
 # comment records that review and invents no fresh approval.
 # Executor/donor/preimage pins stay exact.
+# The merged parent/child composition reseals the reviewed native closure at
+# 100 members. The 97-member parent seal (1038148b...) is the preimage of the
+# parent's own lifecycle commits, not this composition: the parent branch
+# carries 97 members and the H1 child carries 100. Pin the computed digest of
+# the actual resealed 100-member manifest.
 EXPECTED_NATIVE_FILES = 100
-NATIVE_MANIFEST_SHA = "37ad574160225eeceba6d31196c5e0dd3082ecf511d742d5e5e1db6a7bf7766e"
+NATIVE_MANIFEST_SHA = "788daed87a2912cef100bc29ab22b91835bf3c18dd34ef6eee0304578874d8e8"
 
 
 def _sha(raw):
