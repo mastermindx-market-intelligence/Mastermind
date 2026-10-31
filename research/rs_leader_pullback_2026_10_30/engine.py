@@ -83,7 +83,17 @@ def validate_bars(raw: pd.DataFrame, rules: Rules, *,
     if required - set(raw.columns):
         raise ValueError(f"missing bar columns: {sorted(required - set(raw.columns))}")
     b = raw.copy()
-    b["timestamp_utc"] = pd.to_datetime(b["timestamp_utc"], utc=True, errors="raise")
+    # utc=True would silently LOCALIZE a naive display-time string as UTC.
+    # Verify the original instant is aware before any normalization.
+    def _aware_utc(value: Any) -> pd.Timestamp:
+        try:
+            instant = pd.Timestamp(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("invalid timezone-qualified source instant") from exc
+        if pd.isna(instant) or instant.tzinfo is None or instant.utcoffset() is None:
+            raise ValueError("timezone-qualified RTH timestamp required")
+        return instant.tz_convert("UTC")
+    b["timestamp_utc"] = b["timestamp_utc"].map(_aware_utc)
     if b["timestamp_utc"].isna().any() or b["symbol"].isna().any():
         raise ValueError("missing timestamp or symbol")
     for col in ("open", "high", "low", "close", "volume"):
@@ -154,8 +164,25 @@ def leader_panel(daily: pd.DataFrame, memberships: pd.DataFrame, rules: Rules) -
         raise ValueError("duplicate daily row")
     m = memberships.copy()
     m["start_date"] = pd.to_datetime(m["start_date"], errors="raise").dt.date
-    m["end_date"] = pd.to_datetime(m["end_date"], errors="coerce").map(
-        lambda x: x.date() if pd.notna(x) else None)
+    # Only explicitly blank/null means an open-ended PIT interval.  A malformed
+    # nonblank historical end must never become indefinite membership.
+    def _end_date(value: Any) -> date | None:
+        if value is None or value is pd.NaT or (isinstance(value, str) and not value.strip()):
+            return None
+        if isinstance(value, (float, np.floating)) and np.isnan(value):
+            return None
+        if not isinstance(value, (str, date, pd.Timestamp)):
+            raise ValueError("invalid PIT end date type")
+        try:
+            parsed = pd.Timestamp(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("invalid PIT end date") from exc
+        if pd.isna(parsed):
+            raise ValueError("invalid PIT end date: nonblank null")
+        return parsed.date()
+    m["end_date"] = m["end_date"].map(_end_date)
+    if any(end is not None and end <= start for start, end in zip(m.start_date, m.end_date)):
+        raise ValueError("invalid PIT membership interval; end must follow start")
     if d["date"].isna().any() or m["start_date"].isna().any():
         raise ValueError("invalid as-of date")
     spy = d[d.symbol == "SPY"].set_index("date").sort_index()["close"]
@@ -216,10 +243,28 @@ def leader_panel(daily: pd.DataFrame, memberships: pd.DataFrame, rules: Rules) -
     return out
 def _oscillator(b: pd.DataFrame, rules: Rules) -> pd.DataFrame:
     b = b.copy()
-    if {"osc_fast", "osc_slow", "osc_oversold"}.issubset(b.columns):
-        a = pd.to_numeric(b.osc_fast, errors="coerce")
-        z = pd.to_numeric(b.osc_slow, errors="coerce")
-        flag = _strict_bool(b.osc_oversold)
+    exported = {"osc_fast", "osc_slow", "osc_oversold"}
+    present = exported.intersection(b.columns)
+    if present and present != exported:
+        raise ValueError("partial supplied oscillator export cannot fall back to price-MACD proxy")
+    if present:
+        try:
+            a = pd.to_numeric(b.osc_fast, errors="raise").astype(float)
+            z = pd.to_numeric(b.osc_slow, errors="raise").astype(float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid supplied oscillator numeric value") from exc
+        if np.isinf(a.to_numpy()).any() or np.isinf(z.to_numpy()).any():
+            raise ValueError("invalid supplied oscillator infinite value")
+        def parse_flag(value: Any) -> bool | None:
+            if value is None or value is pd.NA or (isinstance(value, (float, np.floating)) and np.isnan(value)):
+                return None
+            if isinstance(value, (bool, np.bool_)):
+                return bool(value)
+            parsed = {"true": True, "false": False, "1": True, "0": False}.get(str(value).strip().lower())
+            if parsed is None:
+                raise ValueError("invalid supplied oscillator oversold flag")
+            return parsed
+        flag = pd.Series([parse_flag(x) for x in b.osc_oversold], index=b.index, dtype=object)
     else:
         close = b.close.astype(float)
         fast = close.ewm(span=12, adjust=False, min_periods=12).mean()
@@ -231,9 +276,12 @@ def _oscillator(b: pd.DataFrame, rules: Rules) -> pd.DataFrame:
         loss = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
         rsi = 100 - 100 / (1 + gain / loss.replace(0, np.nan))
         rsi = rsi.where(loss != 0, 100)
-        flag = rsi <= rules.rsi_oversold
-    b["osc_cross"] = ((a.shift(1) <= z.shift(1)) & (a > z) &
-                      (a < 0) & (z < 0) & flag).fillna(False)
+        flag = (rsi <= rules.rsi_oversold).where(rsi.notna(), pd.NA)
+    # Warmup/missing line or past-line means UNKNOWN, not a negative cross.
+    enough = a.notna() & z.notna() & a.shift(1).notna() & z.shift(1).notna() & flag.notna()
+    observed = ((a.shift(1) <= z.shift(1)) & (a > z) & (a < 0) & (z < 0) &
+                flag.fillna(False).astype(bool))
+    b["osc_cross"] = observed.astype(object).where(enough, pd.NA)
     return b
 def _fill_trade(b: pd.DataFrame, entry_i: int, base_entry: float, stop: float,
                 rules: Rules, strategy: str, signal_i: int, method: str) -> dict[str, Any]:
@@ -260,9 +308,13 @@ def _fill_trade(b: pd.DataFrame, entry_i: int, base_entry: float, stop: float,
             exit_px, reason, exit_i = stop, "STOP", j
         elif float(bar.high) >= target:
             exit_px, reason, exit_i = target, "TARGET", j
-        elif len(sessions) >= rules.hold_sessions and (j + 1 == len(b) or
-              b.iloc[j + 1].session_date != day):
-            if j + 1 < len(b):
+        elif len(sessions) >= rules.hold_sessions:
+            # A timed close is observable only at a fully qualified final
+            # RTH candle. The next day's existence must never determine it.
+            owner_full = (getattr(bar, "session_coverage_state", None) == "FULL_SUPPORTED_BARS"
+                          and getattr(bar, "terminal_stub_minutes", None) == 0)
+            session_last = (j + 1 == len(b) or b.iloc[j + 1].session_date != day)
+            if owner_full and session_last:
                 exit_px, reason, exit_i = float(bar.close), "TIME", j
         if exit_i is not None:
             break
@@ -298,7 +350,8 @@ def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rul
     days = sorted(leaders)
     result = {k: [] for k in ("pivot", "macd_rsi_proxy", "hybrid")}
     diagnostics = {k: {"candidate_count": 0, "skipped_no_leader": 0,
-                       "skipped_overlap": 0, "censored": 0} for k in result}
+                       "skipped_overlap": 0, "censored": 0,
+                       "osc_unavailable": 0} for k in result}
     for symbol, raw in b.groupby("symbol", sort=False):
         g = _oscillator(raw.reset_index(drop=True), rules)
         n = len(g)
@@ -314,7 +367,9 @@ def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rul
                         else days[j] if j >= 0 else None)
             eligible.append(previous in leaders and
                             symbol in leaders[previous]["leaders"])
-        cross = g.osc_cross.to_numpy(dtype=bool)
+        cross = [None if pd.isna(value) else bool(value) for value in g.osc_cross]
+        diagnostics["macd_rsi_proxy"]["osc_unavailable"] += sum(x is None for x in cross)
+        diagnostics["hybrid"]["osc_unavailable"] += sum(x is None for x in cross)
         candidates = {k: [] for k in result}
         red = 0
         for i in range(n):
@@ -334,13 +389,13 @@ def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rul
                             candidate = (i, j, price, stop, "stop_above_pivot_high")
                             candidates["pivot"].append(candidate)
                             lo = max(0, i - rules.hybrid_lookback_bars + 1)
-                            if bool(cross[lo:i + 1].any()):
+                            if any(x is True for x in cross[lo:i + 1]):
                                 candidates["hybrid"].append(candidate)
                             break
                         if float(nxt.low) <= stop:
                             break
                 red = 0
-            if cross[i] and i + 1 < n:
+            if cross[i] is True and i + 1 < n:
                 stop = float(g.iloc[max(0, i - 4):i + 1].low.min()) - rules.tick
                 candidates["macd_rsi_proxy"].append((i, i + 1, float(g.iloc[i + 1].open),
                                                       stop, "next_bar_open"))
