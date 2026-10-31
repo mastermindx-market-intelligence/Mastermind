@@ -250,7 +250,6 @@ def evaluate_paired(opportunities: pd.DataFrame, outcomes: pd.DataFrame,
             raise ValueError("unobserved outcome relative to analysis cutoff")
     wide = a.set_index(["opportunity_id", "policy"])
     details = []
-    development_bound = None
     for row in o.itertuples(index=False):
         c = wide.loc[(row.opportunity_id, protocol.candidate)]
         b = wide.loc[(row.opportunity_id, protocol.baseline)]
@@ -258,10 +257,6 @@ def evaluate_paired(opportunities: pd.DataFrame, outcomes: pd.DataFrame,
             raise ValueError("cannot trade an ineligible episode")
         if not row.signal and c.status == "RESOLVED":
             raise ValueError("candidate trade issued with no as-of signal")
-        if row.split != "HOLDOUT":
-            for x in (c, b):
-                if pd.notna(x["_end"]) and (development_bound is None or x["_end"] > development_bound):
-                    development_bound = x["_end"]
         supported = row.eligible and c.status in {"RESOLVED", "NO_ENTRY"} and b.status in {"RESOLVED", "NO_ENTRY"}
         details.append({"opportunity_id": row.opportunity_id, "symbol": row.symbol,
                         "session_date": row.session_date.isoformat(), "split": row.split,
@@ -272,11 +267,28 @@ def evaluate_paired(opportunities: pd.DataFrame, outcomes: pd.DataFrame,
                         "paired_supported": bool(supported),
                         "delta_r": float(c["_r"] - b["_r"]) if supported else None})
     df = pd.DataFrame(details)
+    # Both calibration and holdout are true chronological boundaries.  No
+    # earlier split's outcome can become known inside the embargo window of
+    # the next split. Use the *later* of event-end and known-at to prevent a
+    # delayed label from training against a later decision even when its price
+    # observation closed earlier.
+    rank_by_split = {name: i for i, name in enumerate(SPLITS)}
+    for split in ("CALIBRATION", "HOLDOUT"):
+        target = o[o.split == split]
+        if target.empty:
+            continue
+        next_start = target.decision_utc.min()
+        previous_ids = set(o.loc[o.split.map(rank_by_split) < rank_by_split[split],
+                                 "opportunity_id"])
+        if not previous_ids:
+            continue
+        prior_labels = a.loc[a.opportunity_id.isin(previous_ids), ["_end", "_known"]]
+        latest = max((timestamp for col in prior_labels for timestamp in prior_labels[col]
+                      if pd.notna(timestamp)), default=None)
+        if latest is not None and latest >= next_start - pd.Timedelta(days=protocol.embargo_calendar_days):
+            raise ValueError(f"development label overlaps {split.lower()} embargo: purge before comparison")
     held = o[o.split == "HOLDOUT"]
     holdout_start = held.decision_utc.min() if not held.empty else None
-    if holdout_start is not None and development_bound is not None:
-        if development_bound >= holdout_start - pd.Timedelta(days=protocol.embargo_calendar_days):
-            raise ValueError("development label overlaps holdout embargo: purge before comparison")
     if not held.empty and protocol.registered_at_utc is not None:
         if _clock(protocol.registered_at_utc) >= holdout_start:
             raise ValueError("holdout registration postdates first decision")
