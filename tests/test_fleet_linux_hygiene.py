@@ -1,5 +1,9 @@
 """Hermetic safety checks: never start actual host GC or cache removal."""
+import ast
+import contextlib
 import importlib.util
+import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,16 +14,84 @@ spec = importlib.util.spec_from_file_location("linux_hygiene", SOURCE)
 h = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(h)
 
+# Ambient package-manager configuration makes the production code refuse a
+# cache target outright. The suite must not depend on the host's shell.
+MANAGER_ENV_OVERRIDES = ("XDG_CACHE_HOME", "PIP_CACHE_DIR", "PIP_CONFIG_FILE",
+                         "UV_CACHE_DIR", "UV_CONFIG_FILE", "UV_NO_CACHE",
+                         "npm_config_cache", "NPM_CONFIG_CACHE",
+                         "npm_config_userconfig", "NPM_CONFIG_USERCONFIG")
+
+
+class ManagerInvocationAttempted(RuntimeError):
+    """Raised when any code path tries to execute a real package manager."""
+
+
+@contextlib.contextmanager
+def without_manager_env_overrides():
+    """Temporarily drop ambient package-manager config so runs are hermetic."""
+    saved = {key: os.environ.pop(key, None) for key in MANAGER_ENV_OVERRIDES}
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is not None:
+                os.environ[key] = value
+
+
+def load_module(path: Path, name: str):
+    """Load an isolated copy of the hygiene module (mutation control only)."""
+    module_spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def mutated_gate_source(text: str) -> str:
+    """Flip ONLY the fail-closed `return False` of the production release gate.
+
+    The rewrite is located by AST, so it provably targets the single
+    `return False` inside `manager_effect_target_bound(root, cache)` and no
+    other line of the production source.
+    """
+    returns = []
+    for node in ast.walk(ast.parse(text)):
+        if (isinstance(node, ast.FunctionDef)
+                and node.name == "manager_effect_target_bound"):
+            returns.extend(statement for statement in ast.walk(node)
+                           if (isinstance(statement, ast.Return)
+                               and isinstance(statement.value, ast.Constant)
+                               and statement.value.value is False))
+    if len(returns) != 1:
+        raise AssertionError(
+            "expected exactly one fail-closed release-gate return, "
+            f"found {len(returns)}")
+    target = returns[0]
+    lines = text.splitlines(keepends=True)
+    start = sum(len(line) for line in lines[:target.lineno - 1]) + target.col_offset
+    end = sum(len(line) for line in lines[:target.end_lineno - 1]) + target.end_col_offset
+    if text[start:end] != "return False":
+        raise AssertionError("release-gate rewrite did not target `return False`")
+    return text[:start] + "return True" + text[end:]
+
 
 class FleetLinuxHygieneTests(unittest.TestCase):
-    def setUp(self):
-        # Historical manager settlement tests simulate a future *qualified*
-        # inode-bound effect handoff. Production code ALWAYS holds this gate
-        # closed; this mock does not run a real manager or authorize cleanup.
-        self._inert_effect_fixture = patch.object(
-            h, "manager_effect_target_bound", return_value=True)
-        self._inert_effect_fixture.start()
-        self.addCleanup(self._inert_effect_fixture.stop)
+    # NOTE: there is deliberately NO class-wide fixture for the production
+    # release gate. `manager_effect_target_bound()` returns False in
+    # production and the negative regressions below must exercise that real
+    # function, so it is never patched for the whole class.
+
+    def _simulated_bound_effect(self):
+        """Simulated-future-handoff fixture for HISTORICAL effect-path tests.
+
+        Production `manager_effect_target_bound()` always returns False: no
+        reviewed inode-bound package-manager handoff exists yet. These legacy
+        regressions simulate a future *qualified* handoff so the manager
+        effect branch (durable intent, settlement, byte drift) can be
+        exercised hermetically. The mock never runs a real manager and never
+        authorizes cleanup. It must not be applied to any test whose purpose
+        is to prove the production hold.
+        """
+        return patch.object(h, "manager_effect_target_bound", return_value=True)
 
     def test_pressure_levels_and_enforced_reserve(self):
         self.assertEqual(h.classify(900, 800, 0.4), "CALM")
@@ -129,7 +201,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             base = Path(d)
             (base / ".cache/pip").mkdir(parents=True)
-            with patch.object(h, "package_busy", return_value=False), patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h.subprocess, "run",
                     return_value=SimpleNamespace(returncode=17,
@@ -153,7 +226,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
                 self.assertTrue((base / h.HOLD).exists())
                 self.assertIn("PRE_EFFECT cache=pip", (base / h.HOLD).read_text())
                 return SimpleNamespace(returncode=0, stderr="")
-            with patch.object(h, "package_busy", return_value=False), patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h.subprocess, "run", side_effect=checked_package_call):
                 results = h.cache_cleanup(base, base, "CAUTION")
@@ -174,7 +248,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
                 self.assertIn(report["effect_id"], (state / h.HOLD).read_text())
                 receipts.append(report)
                 return real_append(state, report)
-            with patch.object(h, "package_busy", return_value=False), patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h.subprocess, "run", return_value=SimpleNamespace(returncode=0, stderr="")), patch.object(
                     h, "append_receipt", side_effect=record_while_held):
@@ -192,7 +267,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / ".cache/pip").mkdir(parents=True)
-            with patch.object(h, "package_busy", return_value=False), patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h.subprocess, "run", return_value=SimpleNamespace(returncode=0, stderr="")) as manager, patch.object(
                     h, "append_receipt", return_value=False):
@@ -226,11 +302,13 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             self.assertEqual(__import__("json").loads(rows[0])["state"],
                              "DEFERRED_ALREADY_RUNNING")
 
-    def test_unbound_cache_target_refuses_after_injected_peer_path_swap(self):
-        """Peer symlink swap must not reach any manager or clear a hold.
+    def _assert_unbound_target_refused(self, module):
+        """Mutation-sensitive negative regression against a real release gate.
 
-        This uses the REAL production (fail-closed) gate rather than the
-        simulated future confinement used by legacy manager-effect fixtures.
+        `module` supplies `manager_effect_target_bound`, and it is
+        deliberately NOT patched here: the production invariant itself is
+        what is under test. Any package-manager execution aborts the
+        regression, so a released gate cannot slip through unnoticed.
         """
         with tempfile.TemporaryDirectory() as d:
             home = Path(d)
@@ -255,13 +333,14 @@ class FleetLinuxHygieneTests(unittest.TestCase):
                     cache.symlink_to(outside, target_is_directory=True)
                 return dict(snapshot)
 
-            with patch.object(h, "manager_effect_target_bound", return_value=False), (
-                patch.object(h, "package_busy", return_value=False)
-            ), patch.object(h.shutil, "which", return_value="/usr/bin/python3"), (
-                patch.object(h, "volume", side_effect=preimage_then_peer_redirect)
-            ), patch.object(h.subprocess, "run", side_effect=AssertionError(
-                    "unbound destructive manager must never be called")):
-                result = h.cache_cleanup(home, home, "CAUTION")
+            with without_manager_env_overrides(), patch.object(
+                    module, "package_busy", return_value=False), patch.object(
+                    module.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    module, "volume", side_effect=preimage_then_peer_redirect), patch.object(
+                    module.subprocess, "run",
+                    side_effect=ManagerInvocationAttempted(
+                        "unbound destructive manager must never be called")):
+                result = module.cache_cleanup(home, home, "CAUTION")
 
             self.assertEqual(calls[0], 2)
             self.assertEqual(result[0]["state"], "HELD_UNBOUND_CACHE_TARGET")
@@ -269,7 +348,127 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             self.assertTrue(cache.is_symlink())
             self.assertTrue(original.is_dir())
             self.assertEqual(sentinel.read_text(), "protected")
-            self.assertFalse((home / h.HOLD).exists())
+            self.assertFalse((home / module.HOLD).exists())
+
+    def test_unbound_cache_target_refuses_after_injected_peer_path_swap(self):
+        """Peer symlink swap must not reach any manager or clear a hold.
+
+        The REAL production (fail-closed) gate is exercised: it is never
+        mocked here, so this regression fails if production ever returns
+        True.
+        """
+        self._assert_unbound_target_refused(h)
+
+    def _assert_real_run_holds(self, module, root: Path, state: Path):
+        """Real `run()`/`main()` integration against the production gate.
+
+        `cache_cleanup` and the production release gate are NOT mocked. Only
+        the read-only observation sources (volume/memory/reserve/candidates)
+        and the package-activity scanner are pinned, so the sweep mode and
+        the mandatory preconditions are deterministic on any host.
+        """
+        (root / ".cache/pip").mkdir(parents=True, exist_ok=True)
+        (root / "lanes").mkdir(parents=True, exist_ok=True)
+        sentinel = root / ".cache/pip/keep"
+        sentinel.write_text("protected")
+        root_volume = {"state": "OK", "device": 1,
+                       "total_bytes": 900 * 1024 ** 3,
+                       "available_bytes": 180 * 1024 ** 3,
+                       "inodes_total": 1000, "inodes_available": 500,
+                       "total_gib": 900.0, "free_gib": 180.0,
+                       "inodes_free_fraction": 0.5}
+        lanes_volume = dict(root_volume)
+        cache_volume = dict(root_volume)
+
+        def observed_volume(path):
+            target = Path(path)
+            if target == Path("/"):
+                return dict(root_volume)
+            if target == root / ".cache/pip":
+                return dict(cache_volume)
+            if target == root / "lanes":
+                return dict(lanes_volume)
+            return {"state": "UNAVAILABLE"}
+
+        with without_manager_env_overrides(), patch.object(
+                module, "volume", side_effect=observed_volume), patch.object(
+                module, "memory", return_value={"state": "OK"}), patch.object(
+                module, "reserve",
+                return_value={"state": "CONFIGURED", "floor_gib": 75}), patch.object(
+                module, "candidates", return_value={"state": "OBSERVED_ONLY"}
+        ), patch.object(module, "package_busy", return_value=False), patch.object(
+                module.subprocess, "run",
+                side_effect=ManagerInvocationAttempted(
+                    "no package manager may run under the production hold")):
+            row = module.run(state, root, True)
+            self.assertEqual(row["mode"], "CAUTION")
+            self.assertEqual(row["cleanup"][0]["state"], "HELD_UNBOUND_CACHE_TARGET")
+            self.assertEqual(row["cleanup"][0]["effect_state"], "NOT_APPLIED")
+            self.assertTrue(row["degraded"])
+            self.assertEqual(row["effect_hold"], "ABSENT")
+            self.assertEqual(row["attributable_reclaimed_bytes"], 0)
+            self.assertFalse((state / module.HOLD).exists())
+            self.assertEqual(sentinel.read_text(), "protected")
+
+            # The same hold must make the CLI exit nonzero and must be
+            # recorded in the ORIGINAL ledger by the ORIGINAL writer.
+            with patch.object(module.Path, "home", return_value=root):
+                exit_code = module.main(["--state-dir", str(state),
+                                         "--apply-safe-caches"])
+            self.assertEqual(exit_code, 1)
+            ledger = (state / module.LEDGER).read_text().splitlines()
+            self.assertEqual(len(ledger), 1)
+            recorded = json.loads(ledger[0])
+            self.assertNotEqual(recorded.get("state"), "FAILED")
+            self.assertTrue(recorded["degraded"])
+            self.assertEqual(recorded["cleanup"][0]["state"],
+                             "HELD_UNBOUND_CACHE_TARGET")
+            self.assertEqual(recorded["cleanup"][0]["effect_state"], "NOT_APPLIED")
+            self.assertEqual(recorded["effect_hold"], "ABSENT")
+            self.assertEqual(sentinel.read_text(), "protected")
+
+    def test_unbound_cache_target_degrades_the_real_run_path(self):
+        """The production hold must degrade a real run() and exit nonzero.
+
+        `cache_cleanup` itself is NOT mocked: the real production gate
+        refuses the unbound cache target, `run()` reports degraded, `main()`
+        exits nonzero and the original ledger records the refusal.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            state = root / "state"
+            state.mkdir()
+            self._assert_real_run_holds(h, root, state)
+
+    def test_production_release_gate_mutation_is_detected(self):
+        """A `return False` -> `return True` gate mutation must be killed.
+
+        The mutation is applied to an ISOLATED COPY of the production source
+        and is located by AST, so it provably touches only the single
+        fail-closed return of `manager_effect_target_bound`. The
+        repository's production source is never modified, and the subprocess
+        stub raises, so no package manager is ever invoked.
+        """
+        original = SOURCE.read_text()
+        mutated = mutated_gate_source(original)
+        self.assertNotEqual(mutated, original)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            copy = root / "linux_hygiene_mutated.py"
+            copy.write_text(mutated)
+            mutant = load_module(copy, "linux_hygiene_mutated")
+            # Production still holds the gate closed; the mutant released it.
+            self.assertIs(h.manager_effect_target_bound(root, root), False)
+            self.assertIs(mutant.manager_effect_target_bound(root, root), True)
+            # The negative regression kills the mutant: instead of refusing
+            # the unbound target it reaches a destructive manager call.
+            with self.assertRaises(ManagerInvocationAttempted):
+                self._assert_unbound_target_refused(mutant)
+            # The real-run integration kills the mutant as well.
+            state = root / "state"
+            state.mkdir()
+            with self.assertRaises(ManagerInvocationAttempted):
+                self._assert_real_run_holds(mutant, root, state)
 
     def test_unbound_cache_target_is_degraded_but_no_effect_hold_created(self):
         """Never report a successful purge when no atomic manager target exists."""
@@ -360,7 +559,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
                 self.assertEqual(argv[argv.index("--cache-dir") + 1], str(cache))
                 self.assertTrue((root / h.HOLD).exists())
                 return SimpleNamespace(returncode=0, stderr="")
-            with patch.object(h, "package_busy", return_value=False), patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h.subprocess, "run", side_effect=inspect):
                 result = h.cache_cleanup(root, root, "CAUTION")
@@ -373,7 +573,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             root = Path(d)
             (root / ".cache/pip").mkdir(parents=True)
             (root / ".cache/uv").mkdir(parents=True)
-            with patch.object(h, "package_busy", side_effect=[False, False, True]) as busy, patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", side_effect=[False, False, True]) as busy, patch.object(
                     h.shutil, "which", return_value="/usr/bin/uv"), patch.object(
                     h.subprocess, "run",
                     return_value=SimpleNamespace(returncode=0, stderr="")) as purge:
@@ -441,7 +642,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
                 self.assertIn("PRE_EFFECT cache=pip", marker)
                 self.assertIn('"available_bytes": 300000', marker)
                 return SimpleNamespace(returncode=0, stderr="")
-            with patch.object(h, "package_busy", return_value=False), patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h, "volume", side_effect=[pre_root, pre_cache, post_root, post_cache]), patch.object(
                     h.subprocess, "run", side_effect=run_manager):
@@ -463,7 +665,8 @@ class FleetLinuxHygieneTests(unittest.TestCase):
                 return {"state": "OK", "device": device,
                         "total_bytes": 1000000, "available_bytes": 300000,
                         "inodes_total": 1000, "inodes_available": 500}
-            with patch.object(h, "package_busy", return_value=False), patch.object(
+            with self._simulated_bound_effect(), patch.object(
+                    h, "package_busy", return_value=False), patch.object(
                     h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
                     h, "volume", side_effect=[snapshot(5), snapshot(5),
                                              snapshot(6), snapshot(5)]), patch.object(
