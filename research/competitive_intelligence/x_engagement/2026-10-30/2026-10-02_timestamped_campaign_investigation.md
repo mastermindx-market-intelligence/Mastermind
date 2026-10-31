@@ -53,6 +53,29 @@
 
 **Source quality ranking:** company affiliate terms = first-party incentive-policy evidence; indexed X profile = direct *rendered public post evidence* from an **unverified third-party mirror**; decoded status timestamp = mathematically sound conditional on an authentic source hyperlink; ownership and payment = **unknown**.
 
+## Historical control: March 4 and March 10, 2026
+
+A second **historical** public timeline [@gatoroscillator, TwStalker](https://w.twstalker.com/gatoroscillator), crawled about seven months before this research date, exposes another repeat of the same campaign choreography. Unlike the October slice retrieved from @FinancialF33756, this source shows a **different participant feed, a different brand announcement, and different promoter authors**. Both are still third-party X mirrors and cannot be treated as independent authentication by X.
+
+The firm-handle posted its website redesign at **2026-03-10 10:00:00.427 UTC** (status `2031309085035929887`). Four visible creators subsequently quoted **that exact original** using follow/repost/tag giveaway rules:
+
+| Original creator | Original status ID | Snowflake-derived time (UTC) | Required follows visible in mirror |
+| --- | --- | --- | --- |
+| @fundedchemist | `2031382714851656068` | 2026-03-10 14:52:35.143 | @EquityEdgeUK, @EquitySpace1 |
+| @babujin_fx | `2031388661363659161` | 2026-03-10 15:16:12.902 | @EquityEdgeUK, @EquitySpace1, @babujin_fx |
+| @gaffapips | `2031411321321742778` | 2026-03-10 16:46:15.457 | @EquityEdgeUK, @EquitySpace1, @gaffapips |
+| @JadeJMA | `2031421810915332315` | 2026-03-10 17:27:56.371 | @EquityEdgeUK, @EquitySpace1, @JadeJMA |
+
+This selected four-originator run spans **155 minutes 21.228 seconds**. It begins **4 hours 52 minutes 34.716 seconds** after the brand's new-website post, rather than simultaneously with the original.
+
+The same older page also exposes a **2026-03-04** cumulative-payout brand post (`2029142307178721715`, 10:30:00.329 UTC), and a follow-up @fundedchemist giveaway (`2029238364432715803`, 16:51:42.163 UTC) requiring @EquityEdgeUK, @EquitySpace1 and self. This is a separate campaign date; **do not collapse it into the March 10 four-post burst**.
+
+**Replication implication:** the repeated structure appears in at least **two distinct events on March 4 / March 10** and in the **October 2** burst, each corresponding to brand marketing announcements. The documented mechanism is a **reusable marketing-event-linked template + shared follower recipient**, spanning months. This is stronger evidence of *intentional distribution coordination as a marketing mechanism* than merely seeing accounts repost over unrelated periods. It is **not** proof of brand administration, exclusive ownership, authentic account links, prearranged payments, coercion, automation or violations. A third-party creator can willingly reuse a template and seek an audience without sharing login access.
+
+**Cross-provider negative control:** the March @gatoroscillator mirror contains many unrelated prop-firm campaigns (Blue Guardian, FXIFY, FundingPips, etc.) alongside Equity Edge. That account is an observable **multi-brand promotion participant/aggregator**, not evidence it belongs to Equity Edge. Without total-post denominators, no promotional-share or reciprocity rates should be calculated.
+
+The accompanying [March historical control CSV](2026-03_historical_campaign_control.csv) preserves seven original status IDs, including the March 4 separate announcement and author post. Preserve the October [14-event sample](2026-10-02_timestamped_campaign_sample.csv) separately. Their sum is **21 documented source events across purposively selected archival views**, not 21 unique people, completed follow actions, or authenticated native platform events.
+
 ## Collection limitations and responsible use
 
 - This is a **purposively selected example**, selected from a single participant who engages in giveaways. **Selection bias is high**. Six creators and six tagged messages are not a numerator with a valid 30-day total-post denominator.
@@ -64,7 +87,7 @@
 
 ## Recovery frontier
 
-1. Find **at least two independent public source views** or direct authenticated X records corroborating *the same* stable status IDs and author handles; prioritize @EquitySpace1 owner/official acknowledgement. If no alternate viewpoint is available, keep the evidence as one mirror sample.
+1. Find **two independently archived views of the same original status IDs** or direct authenticated X records corroborating *the same* stable status IDs and author handles; prioritize @EquitySpace1 owner/official acknowledgement. If no alternate viewpoint is available, keep the evidence as one mirror sample.
 2. Attempt a second **independent participation sample** with source post IDs (e.g., @nightflow643161 or @MD__SANII), using the same exact date/window and dedupe rules. Compare whether that participant also enters competitor giveaways.
 3. Obtain X-permitted event export for a real, uniform October 1–30 window. Compute author-denominated participation, reciprocity and selective synchronization only after completeness and timestamps are defensible.
 4. Preserve [existing graph](interaccount_edges_first_pass.json) baseline **181 directed typed edges / 98 nodes / 77 source URLs** unchanged until graph schema and duplicate-account effects are reconciled. New CSV is a separate scoped, observed-event sample, not inflated network centrality.
