@@ -272,6 +272,317 @@ def upgrade(bundle):
         return receipt
 
 
+SUCCESSOR_SCHEMA = "native-ingress-launcher-successor.v1"
+SUCCESSOR_FROM = "d044c24940df13d24ff6241f0da9cec3dc24d90dd60604a08c82e0ad8613586c"
+SUCCESSOR_TO = "43e814339a16582e2205f12117e1f17c40dce2e42a9c52d815a37c043e772e1b"
+SUCCESSOR_MANIFEST = "66205e3fcbea978b195d147db932c2bf33c3e806d7d00f7666665863470c90eb"
+SUCCESSOR_MEMBER_COUNT = 102
+_SUCCESSOR_PLAN_FIELDS = frozenset({
+    "schema", "prior_upgrade_bundle", "prior_upgrade_digest", "bootstrap_digest",
+    "store", "expected_selection", "target_generation", "from_launcher",
+    "to_launcher", "manifest_sha256", "entries", "digest",
+})
+
+
+def _successor_directory(path):
+    if not isinstance(path, (str, Path)):
+        raise ValueError("invalid successor artifact path")
+    path = Path(path)
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise ValueError("canonical successor artifact directory required")
+    generation.require(path, stat.S_ISDIR, 0o700)
+    return path
+
+
+def _successor_json(path):
+    generation.require(path, stat.S_ISREG, 0o600)
+    return generation.unique_json(generation.regular_bytes(path, 65536))
+
+
+def _successor_sources():
+    new = generation.regular_bytes(Path(generation.__file__).resolve())
+    addition = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
+                b'    if relative == "ext/host_pull_launchd.plist.template":\n'
+                b'        return\n')
+    if generation.digest(new) != SUCCESSOR_TO or new.count(addition) != 1:
+        raise ValueError("successor launcher source differs")
+    old = new.replace(addition, b"", 1)
+    if generation.digest(old) != SUCCESSOR_FROM:
+        raise ValueError("successor launcher is not the exact fixed-name extension")
+    return old, new
+
+
+def _successor_origin(prior_upgrade):
+    """Authenticate the completed old epoch; never replay or rewrite it."""
+    prior_upgrade = _successor_directory(prior_upgrade)
+    prior = _successor_json(prior_upgrade / "PLAN.json")
+    old_fields = {"schema", "original_bundle", "bootstrap_digest", "store",
+                  "expected_selection", "target_generation", "from_launcher",
+                  "to_launcher", "manifest_sha256", "entries", "digest"}
+    if type(prior) is not dict or set(prior) != old_fields or prior["schema"] != UPGRADE_SCHEMA:
+        raise ValueError("invalid predecessor upgrade plan")
+    if type(prior["original_bundle"]) is not str:
+        raise ValueError("invalid predecessor original bundle")
+    original = _successor_directory(prior["original_bundle"])
+    _, base = read_plan(original)
+    original_fields = {"schema", "bootstrap_epoch", "store", "initial_generation",
+                       "stable_ext", "launcher_digest", "launcher_path", "python",
+                       "entries", "flat_code_preimages", "flat_code_absent", "digest"}
+    if set(base) != original_fields or base["launcher_digest"] != UPGRADE_FROM:
+        raise ValueError("successor requires the retained original bootstrap")
+    if {p.name for p in original.iterdir()} != {
+            "PLAN.json", "native_generation.py", "pool.original", "pool.bridge",
+            "task.original", "task.bridge", "remote.original", "remote.bridge"}:
+        raise ValueError("original bootstrap artifact set differs")
+    for path in original.iterdir():
+        generation.require(path, stat.S_ISREG, 0o600)
+    old, new = _successor_sources()
+    raw = generation.regular_bytes(original / "native_generation.py")
+    old_fragment = b'or parts[1] in {"yes", "host_pull_probe.template"})'
+    new_fragment = (b'or parts[1] in {"yes", "host_pull_probe.template",\n'
+                    b'                        "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json"})')
+    if (generation.digest(raw) != UPGRADE_FROM or raw.count(old_fragment) != 1
+            or raw.replace(old_fragment, new_fragment, 1) != old):
+        raise ValueError("original launcher lineage differs")
+    store = Path(base["store"])
+    receipts = store / "bootstrap"
+    generation.require(receipts, stat.S_ISDIR, 0o700)
+    phase1 = {"schema": SCHEMA, "phase": 1, "plan_digest": base["digest"],
+              "initial_generation": base["initial_generation"],
+              "bridged": ["pool", "task"], "remote": "legacy"}
+    if _successor_json(receipts / (base["digest"] + ".phase1.json")) != phase1:
+        raise ValueError("original phase-one receipt differs")
+    if any(os.path.lexists(receipts / (base["digest"] + suffix))
+           for suffix in (".rollback.json", ".phase2.json")):
+        raise ValueError("successor requires the legacy-remote phase-one epoch")
+    _, initial_meta = generation.verify(store, base["initial_generation"])
+    unsupported_original = {"ext/paid_pyyaml_6_0_3.zip", "ext/paid_pyyaml_provenance.json",
+                            "ext/host_pull_launchd.plist.template"}
+    if unsupported_original & set(initial_meta["files"]):
+        raise ValueError("original bootstrap selection exceeds its original launcher")
+    _upgrade_pointer(prior["expected_selection"])
+    _, before_meta = generation.verify(store, prior["expected_selection"]["generation"])
+    if {"ext/paid_pyyaml_6_0_3.zip", "ext/paid_pyyaml_provenance.json",
+            "ext/host_pull_launchd.plist.template"} & set(before_meta["files"]):
+        raise ValueError("historical prior selection exceeds its original launcher")
+    _, target_meta = generation.verify(store, prior["target_generation"])
+    manifest = (json.dumps(target_meta["files"], sort_keys=True, indent=2) + "\n").encode()
+    if len(target_meta["files"]) != 95 or generation.digest(manifest) != UPGRADE_MANIFEST:
+        raise ValueError("historical target is not the reviewed 95-member closure")
+    payloads = {"native_generation.py": old}
+    entries = {}
+    old_launcher = store / "launchers" / (SUCCESSOR_FROM + ".py")
+    for name in ("pool", "task", "remote"):
+        entry = base["entries"][name]
+        bootstrap_bridge = (shell_bridge(Path(base["python"]), Path(base["launcher_path"]), store, "pool")
+                            if name == "pool" else task_bridge(
+                                generation.regular_bytes(original / "task.original"),
+                                Path(base["python"]), Path(base["launcher_path"]), store))
+        if name != "remote" and generation.digest(bootstrap_bridge) != entry["bridge"]:
+            raise ValueError("original bridge derivation differs")
+        row = {"target": entry["target"], "mode": entry["mode"],
+               "previous": entry["preimage"] if name == "remote" else entry["bridge"]}
+        if name != "remote":
+            bridge = (shell_bridge(Path(base["python"]), old_launcher, store, "pool")
+                      if name == "pool" else task_bridge(
+                          generation.regular_bytes(original / "task.original"),
+                          Path(base["python"]), old_launcher, store))
+            payloads[name + ".bridge"] = bridge
+            row["bridge"] = generation.digest(bridge)
+        entries[name] = row
+    expected = {"schema": UPGRADE_SCHEMA, "original_bundle": str(original),
+                "bootstrap_digest": base["digest"], "store": str(store),
+                "expected_selection": prior["expected_selection"],
+                "target_generation": prior["target_generation"],
+                "from_launcher": UPGRADE_FROM, "to_launcher": SUCCESSOR_FROM,
+                "manifest_sha256": UPGRADE_MANIFEST, "entries": entries}
+    expected["digest"] = generation.digest(generation.canonical(expected))
+    if prior != expected or {p.name for p in prior_upgrade.iterdir()} != {"PLAN.json", *payloads}:
+        raise ValueError("predecessor upgrade derivation differs")
+    for name, wanted in payloads.items():
+        generation.require(prior_upgrade / name, stat.S_ISREG, 0o600)
+        if generation.regular_bytes(prior_upgrade / name) != wanted:
+            raise ValueError("predecessor payload differs")
+    for path, wanted in ((Path(base["launcher_path"]), raw), (old_launcher, old)):
+        generation.require(path, stat.S_ISREG, 0o555)
+        if generation.regular_bytes(path) != wanted:
+            raise ValueError("retained predecessor launcher differs")
+    intent = {"schema": UPGRADE_SCHEMA, "plan_digest": prior["digest"],
+              "bootstrap_digest": base["digest"]}
+    selected = {"schema": generation.POINTER_SCHEMA, "generation": prior["target_generation"],
+                "previous": prior["expected_selection"]["generation"],
+                "sequence": prior["expected_selection"]["sequence"] + 1}
+    receipt = {"schema": UPGRADE_SCHEMA, "plan_digest": prior["digest"],
+               "bootstrap_digest": base["digest"],
+               "previous_selection": prior["expected_selection"], "selection": selected,
+               "bridged": ["pool", "task"], "remote": "legacy"}
+    if (_successor_json(receipts / ".paired-launcher-upgrade.json") != intent
+            or _successor_json(receipts / (prior["digest"] + ".upgrade.json")) != receipt):
+        raise ValueError("completed predecessor intent or receipt differs")
+    return prior_upgrade, prior, original, base, new, selected
+
+
+def _successor_plan(prior_upgrade, target, previous):
+    if type(target) is not str or not generation.HEX.fullmatch(target):
+        raise ValueError("invalid successor target identity")
+    prior_upgrade, prior, original, base, new, completed = _successor_origin(prior_upgrade)
+    _upgrade_pointer(previous)
+    if previous["sequence"] < completed["sequence"] or (
+            previous["sequence"] == completed["sequence"] and previous != completed):
+        raise ValueError("successor selection predates the completed predecessor")
+    store = Path(base["store"])
+    _, before = generation.verify(store, previous["generation"])
+    if "ext/host_pull_launchd.plist.template" in before["files"]:
+        raise ValueError("old launcher cannot qualify the current selection")
+    _, after = generation.verify(store, target)
+    manifest = (json.dumps(after["files"], sort_keys=True, indent=2) + "\n").encode()
+    if (len(after["files"]) != SUCCESSOR_MEMBER_COUNT
+            or generation.digest(manifest) != SUCCESSOR_MANIFEST
+            or "ext/host_pull_launchd.plist.template" not in after["files"]):
+        raise ValueError("target is not the reviewed successor closure")
+    launcher = store / "launchers" / (SUCCESSOR_TO + ".py")
+    entries = {}
+    payloads = {"native_generation.py": new}
+    for name in ("pool", "task", "remote"):
+        entry = prior["entries"][name]
+        row = {"target": entry["target"], "mode": entry["mode"],
+               "previous": entry["previous"] if name == "remote" else entry["bridge"]}
+        if name != "remote":
+            bridge = (shell_bridge(Path(base["python"]), launcher, store, "pool")
+                      if name == "pool" else task_bridge(
+                          generation.regular_bytes(original / "task.original"),
+                          Path(base["python"]), launcher, store))
+            payloads[name + ".bridge"] = bridge
+            row["bridge"] = generation.digest(bridge)
+        entries[name] = row
+    plan = {"schema": SUCCESSOR_SCHEMA, "prior_upgrade_bundle": str(prior_upgrade),
+            "prior_upgrade_digest": prior["digest"], "bootstrap_digest": base["digest"],
+            "store": str(store), "expected_selection": previous, "target_generation": target,
+            "from_launcher": SUCCESSOR_FROM, "to_launcher": SUCCESSOR_TO,
+            "manifest_sha256": SUCCESSOR_MANIFEST, "entries": entries}
+    plan["digest"] = generation.digest(generation.canonical(plan))
+    return plan, payloads
+
+
+def prepare_successor(prior_upgrade, target, output):
+    _, _, _, base, _, _ = _successor_origin(prior_upgrade)
+    store = Path(base["store"])
+    output = Path(output).absolute()
+    generation.require(output.parent, stat.S_ISDIR)
+    if (output.parent.resolve(strict=True) != output.parent
+            or output.is_relative_to(store.parent) or os.path.lexists(output)):
+        raise ValueError("fresh external canonical successor bundle required")
+    with generation.publication_lock(store):
+        plan, payloads = _successor_plan(prior_upgrade, target, generation.current(store))
+        _upgrade_entries(plan)
+        if os.path.lexists(store / "bootstrap/.launcher-successor-v1.json"):
+            raise ValueError("successor already has an original transaction")
+        output.mkdir(mode=0o700)
+        for name, raw in payloads.items():
+            generation.atomic_bytes(output / name, raw, 0o600)
+        generation.atomic_bytes(output / "PLAN.json", generation.canonical(plan) + b"\n", 0o600)
+    return plan
+
+
+def read_successor(bundle):
+    bundle = _successor_directory(bundle)
+    plan = _successor_json(bundle / "PLAN.json")
+    if type(plan) is not dict or set(plan) != _SUCCESSOR_PLAN_FIELDS or plan["schema"] != SUCCESSOR_SCHEMA:
+        raise ValueError("invalid launcher successor plan")
+    expected, payloads = _successor_plan(plan["prior_upgrade_bundle"], plan["target_generation"],
+                                        plan["expected_selection"])
+    if plan != expected or {p.name for p in bundle.iterdir()} != {"PLAN.json", *payloads}:
+        raise ValueError("successor plan or artifact set differs")
+    for name, raw in payloads.items():
+        generation.require(bundle / name, stat.S_ISREG, 0o600)
+        if generation.regular_bytes(bundle / name) != raw:
+            raise ValueError("successor payload differs")
+    return plan, payloads
+
+
+
+def _require_successor_launcher(plan, payloads):
+    launcher = Path(plan["store"]) / "launchers" / (SUCCESSOR_TO + ".py")
+    generation.require(launcher, stat.S_ISREG, 0o555)
+    if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
+        raise ValueError("published successor launcher differs")
+
+
+def apply_successor(bundle):
+    """Advance only this retained source transition; no process or service control."""
+    plan, payloads = read_successor(bundle)
+    store = Path(plan["store"])
+    with generation.publication_lock(store):
+        # Full retained chain, source and target qualification at the actual write boundary.
+        again, checked = read_successor(bundle)
+        if again != plan or checked != payloads:
+            raise ValueError("successor inputs changed")
+        intent_path = store / "bootstrap/.launcher-successor-v1.json"
+        intent = {"schema": SUCCESSOR_SCHEMA, "plan_digest": plan["digest"],
+                  "prior_upgrade_digest": plan["prior_upgrade_digest"],
+                  "bootstrap_digest": plan["bootstrap_digest"]}
+        exists = os.path.lexists(intent_path)
+        if exists and _successor_json(intent_path) != intent:
+            raise ValueError("foreign launcher successor transaction")
+        previous = plan["expected_selection"]
+        selected = {"schema": generation.POINTER_SCHEMA, "generation": plan["target_generation"],
+                    "previous": previous["generation"], "sequence": previous["sequence"] + 1}
+        receipt = {"schema": SUCCESSOR_SCHEMA, "plan_digest": plan["digest"],
+                   "prior_upgrade_digest": plan["prior_upgrade_digest"],
+                   "bootstrap_digest": plan["bootstrap_digest"],
+                   "previous_selection": previous, "selection": selected,
+                   "from_launcher": SUCCESSOR_FROM, "to_launcher": SUCCESSOR_TO,
+                   "manifest_sha256": SUCCESSOR_MANIFEST,
+                   "bridged": ["pool", "task"], "remote": "legacy"}
+        receipt_path = store / "bootstrap" / (plan["digest"] + ".successor.json")
+        launcher = store / "launchers" / (SUCCESSOR_TO + ".py")
+        current = generation.current(store)
+        completed = os.path.lexists(receipt_path)
+        if completed or current == selected:
+            if not exists or current != selected or (completed and _successor_json(receipt_path) != receipt):
+                raise ValueError("completed successor no longer matches current state")
+            _upgrade_entries(plan, complete=True)
+            _require_successor_launcher(plan, payloads)
+            if not completed:
+                _record_once(receipt_path, receipt)
+            return receipt
+        if current != previous:
+            raise ValueError("successor selection compare-and-swap refused")
+        _upgrade_entries(plan, partial=exists)
+        _require_studio_consumer_pin(plan, "bridge")
+        if not exists:
+            _record_once(intent_path, intent)
+        directory = store / "launchers"
+        generation.require(directory, stat.S_ISDIR, 0o700)
+        if os.path.lexists(launcher):
+            generation.require(launcher, stat.S_ISREG, 0o555)
+            if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
+                raise ValueError("published successor launcher differs")
+        else:
+            generation.atomic_bytes(launcher, payloads["native_generation.py"], 0o555)
+        _require_successor_launcher(plan, payloads)
+        for name in ("pool", "task"):
+            read_successor(bundle)
+            _upgrade_entries(plan, partial=True)
+            if generation.current(store) != previous:
+                raise ValueError("successor selection changed before ingress replacement")
+            if name == "pool":
+                _require_studio_consumer_pin(plan, "bridge")
+            _require_successor_launcher(plan, payloads)
+            entry = plan["entries"][name]
+            if generation.digest(generation.regular_bytes(entry["target"])) != entry["bridge"]:
+                generation.atomic_bytes(Path(entry["target"]), payloads[name + ".bridge"], entry["mode"])
+        read_successor(bundle)
+        _upgrade_entries(plan, complete=True)
+        if generation.current(store) != previous:
+            raise ValueError("successor selection changed before commit")
+        _require_successor_launcher(plan, payloads)
+        if generation._select_locked(store, plan["target_generation"], previous["generation"]) != selected:
+            raise ValueError("successor selection readback differs")
+        _record_once(receipt_path, receipt)
+        return receipt
+
+
 def relocate_pool(raw):
     """Preserve every incumbent subcommand; relocate one fixed KIT_DIR line."""
     text = raw.decode("utf-8")
@@ -620,6 +931,12 @@ def main():
     prepare_pair.add_argument("--output", type=Path, required=True)
     apply_pair = sub.add_parser("upgrade")
     apply_pair.add_argument("--bundle", type=Path, required=True)
+    prepare_next = sub.add_parser("prepare-successor")
+    prepare_next.add_argument("--prior-upgrade-bundle", type=Path, required=True)
+    prepare_next.add_argument("--target-generation", required=True)
+    prepare_next.add_argument("--output", type=Path, required=True)
+    apply_next = sub.add_parser("successor")
+    apply_next.add_argument("--bundle", type=Path, required=True)
     for command in ("phase1", "phase2", "rollback"):
         action = sub.add_parser(command)
         action.add_argument("--bundle", type=Path, required=True)
@@ -632,6 +949,10 @@ def main():
         result = prepare_upgrade(args.original_bundle, args.target_generation, args.output)
     elif args.command == "upgrade":
         result = upgrade(args.bundle)
+    elif args.command == "prepare-successor":
+        result = prepare_successor(args.prior_upgrade_bundle, args.target_generation, args.output)
+    elif args.command == "successor":
+        result = apply_successor(args.bundle)
     elif args.command == "phase1":
         result = phase1(args.bundle)
     elif args.command == "phase2":
