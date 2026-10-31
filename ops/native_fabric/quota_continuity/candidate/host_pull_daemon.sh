@@ -612,6 +612,14 @@ elif cmd == "backup":
         fail("backup readback")
     sys.stdout.write(target + "\n" + digest + "\n")
 
+elif cmd == "check-stranded-plist":
+    dest = sys.argv[2]
+    require_safe(dest, "plist")
+    if os.path.lexists(dest):
+        observed = os.lstat(dest)
+        if stat.S_ISREG(observed.st_mode) and stat.S_IMODE(observed.st_mode) == 0o400:
+            fail("STRANDED_PLIST_SEAL: stranded 0400 plist; reconciliation required; no restoration or retry")
+
 elif cmd == "install-rendered":
     src, dest = sys.argv[2:4]
     fault = sys.argv[4] if len(sys.argv) > 4 else ""
@@ -838,51 +846,6 @@ elif cmd == "locked-effect":
         finally:
             os.close(fd)
 
-    def path_names_inode(path, fd, expected_mode):
-        # The path must still name the descriptor's inode. A replaced entry, a
-        # symlink, another owner or a changed mode is drift, not the proven
-        # file.
-        try:
-            st_path = os.lstat(path)
-            st_fd = os.fstat(fd)
-        except OSError:
-            return False
-        if stat.S_ISLNK(st_path.st_mode):
-            return False
-        return (stat.S_ISREG(st_path.st_mode)
-                and st_path.st_dev == st_fd.st_dev
-                and st_path.st_ino == st_fd.st_ino
-                and st_path.st_uid == os.geteuid()
-                and stat.S_IMODE(st_path.st_mode) == expected_mode)
-
-    def descriptor_still_proves(fd, expected_sha):
-        # Re-read the sealed descriptor. The bytes launchctl consumed must
-        # still be the reviewed bytes and not a peer's later rewrite.
-        try:
-            os.lseek(fd, 0, os.SEEK_SET)
-            raw = bytearray()
-            while len(raw) <= 1048576:
-                chunk = os.read(fd, min(65536, 1048577 - len(raw)))
-                if not chunk:
-                    break
-                raw.extend(chunk)
-            st_fd = os.fstat(fd)
-        except OSError:
-            return False
-        return (len(raw) <= 1048576
-                and stat.S_ISREG(st_fd.st_mode)
-                and stat.S_IMODE(st_fd.st_mode) == 0o400
-                and hashlib.sha256(raw).hexdigest() == expected_sha)
-
-    def unseal_inode(fd):
-        # Restore the reviewed 0600 mode only while it is still our own seal.
-        # A peer mode change inside the window is left untouched and reported.
-        try:
-            if stat.S_IMODE(os.fstat(fd).st_mode) == 0o400:
-                os.fchmod(fd, 0o600)
-        except OSError:
-            pass
-
     def same_pid_still_running(launchctl, ps_bin, target, pid):
         if re.fullmatch(r"[1-9][0-9]*", pid or "") is None:
             return False
@@ -906,7 +869,6 @@ elif cmd == "locked-effect":
 
     # O_CLOEXEC keeps the lock on this process across the effect subprocess.
     # The open mode and flock match native_generation.publication_lock.
-    bootstrap_fd = None
     lock_fd = os.open(store + "/.publication.lock",
                       os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
     try:
@@ -934,38 +896,17 @@ elif cmd == "locked-effect":
         # publication lock would fence a command the installer no longer owns.
         if not transaction_fence_held(fence):
             raise SystemExit(79)
-        # Pre-effect custody admission for the bootstrap effect. The
-        # destination is the artifact launchctl is about to consume by
-        # pathname, so its reviewed identity is proved here, under the
-        # publication lock, at the effect boundary, against the digest the
-        # caller rendered. A peer substitute, a mode change, a symlink or a
-        # deletion refuses the effect: no launchctl call is issued and not one
-        # plist byte is written.
+        # This candidate has no OS-enforced custody mechanism for the whole
+        # pathname AND leaf, nor a binding to the exact bytes launchctl will
+        # reopen. Same-UID peers can chmod/rewrite the leaf or rename any
+        # mutable ancestor. Hashes, inode checks, flock and a temporary 0400
+        # mode cannot close that window; post-effect checks miss swap-back.
+        # Refuse both new and rollback BEFORE started/launchctl. Do not seal,
+        # restore, retry, assume /dev/fd, or infer privilege from uid/mode.
         if kind == "bootstrap":
-            try:
-                bootstrap_fd, _proved_digest = bind_installed_plist(bootstrap_dest, expected_sha)
-                # Seal the proven inode for the consumption window so a peer
-                # cannot rewrite the reviewed bytes in place, and re-prove the
-                # path against the descriptor at the last moment before the
-                # effect. launchctl consumes a pathname, so the residual race
-                # is a peer that replaces the directory entry inside that
-                # window; it is detected and reported, never restored over.
-                # A seal that cannot be applied leaves the content writable
-                # inside the window, so the path cannot be safely bound and
-                # the effect is refused instead of admitted.
-                try:
-                    os.fchmod(bootstrap_fd, 0o400)
-                except OSError:
-                    fail("installed plist seal refused")
-                if not path_names_inode(bootstrap_dest, bootstrap_fd, 0o400):
-                    fail("bootstrap path drift")
-            except BaseException:
-                note_reason("custody-unproven")
-                if bootstrap_fd is not None:
-                    unseal_inode(bootstrap_fd)
-                    os.close(bootstrap_fd)
-                    bootstrap_fd = None
-                raise
+            note_reason("custody-unproven")
+            fail("BOOTSTRAP_CUSTODY_UNPROVEN: OS-enforced whole-path and leaf custody "
+                 "and exact launchctl input bytes unavailable")
         mark_started()
         if kind == "bootout":
             launchctl, ps_bin, target, expected_pid = effect_args
@@ -979,27 +920,6 @@ elif cmd == "locked-effect":
                 if same_pid_still_running(launchctl, ps_bin, target, expected_pid):
                     raise SystemExit(76)
                 raise SystemExit(77)
-        elif kind == "bootstrap":
-            launchctl, domain, dest = bootstrap_launchctl, bootstrap_domain, bootstrap_dest
-            require_safe(launchctl, "launchctl")
-            require_safe(dest, "plist")
-            if re.fullmatch(r"gui/[0-9]+", domain) is None:
-                fail("bootstrap domain")
-            try:
-                proc = subprocess.run([launchctl, "bootstrap", domain, dest], check=False)
-                # The consumed pathname must still name the sealed inode and
-                # the sealed bytes must still be the reviewed bytes. A peer
-                # substitution inside the window is an uncertain effect, never
-                # a silent success.
-                drift = (not path_names_inode(dest, bootstrap_fd, 0o400)
-                         or not descriptor_still_proves(bootstrap_fd, expected_sha))
-            finally:
-                unseal_inode(bootstrap_fd)
-            if drift:
-                note_reason("custody-drift")
-                fail("bootstrap path drift")
-            if proc.returncode != 0:
-                raise SystemExit(proc.returncode if proc.returncode != 76 else 1)
         else:
             src, dest, fault = effect_args
             if fault == "-":
@@ -1008,9 +928,6 @@ elif cmd == "locked-effect":
         if enforce_generation:
             read_selected()
     finally:
-        if bootstrap_fd is not None:
-            unseal_inode(bootstrap_fd)
-            os.close(bootstrap_fd)
         os.close(lock_fd)
 
 elif cmd == "write-receipt":
@@ -2112,6 +2029,7 @@ case "$COMMAND" in
     fi
     # Before the first launchd read. Contention writes a receipt and returns
     # without launchctl, plist, or backup mutations.
+    py check-stranded-plist "$DEST_PLIST" || die 78 "stranded plist refused before install"
     acquire_install_transaction
     resolve_tool launchctl /bin/launchctl
     LAUNCHCTL=$TOOL_PATH

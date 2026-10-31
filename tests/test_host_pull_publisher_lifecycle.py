@@ -98,6 +98,8 @@ def publish(workspace, body, select_expect=None):
 def write_stubs(bin_dir, state):
     bin_dir.mkdir()
     state.mkdir()
+    # Use the test interpreter, avoiding host developer-tool Python shims.
+    (bin_dir / "python3").symlink_to(sys.executable)
     launchctl = bin_dir / "launchctl"
     launchctl.write_text(r"""#!/bin/sh
 set -u
@@ -376,6 +378,31 @@ def assert_not_executed(ctx):
     assert ORIGINAL_HOST_PULL.is_file()
 
 
+def assert_bootstrap_refused(ctx, result):
+    assert result.returncode == 78, result.stderr
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in result.stderr
+    assert "bootstrap " not in launch_log(ctx)
+    assert receipt_body(ctx)["phase"] == "BOOTSTRAP_CUSTODY"
+
+
+def seed_running_target(ctx):
+    """Model an existing target without executing a bootstrap to create it."""
+    raw = TEMPLATE.read_bytes()
+    substitutions = {
+        "__HOST_PULL__": str(ctx["pin"]), "__STDOUT_LOG__": str(ctx["log"]),
+        "__STDERR_LOG__": str(ctx["log"]), "__PATH__": SERVICE_PATH,
+        "__LOCK__": str(ctx["lock"]), "__QUALIFICATION_MODE__": "off",
+    }
+    # Paths in these fixtures contain only the renderer's admitted characters.
+    for key, value in substitutions.items():
+        raw = raw.replace(key.encode(), value.encode())
+    ctx["plist"].write_bytes(raw)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").touch()
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+
+
 def test_bash_syntax_and_no_pidfile_race():
     subprocess.run(["/bin/bash", "-n", str(DAEMON)], check=True)
     text = DAEMON.read_text()
@@ -414,7 +441,7 @@ def test_stopped_publication_pins_only_verified_generation(
         assert "bootstrap " not in launch_log(ctx)
         ctx["plist"].chmod(0o600)
     result = run(ctx)
-    assert result.returncode == 0, result.stderr
+    assert_bootstrap_refused(ctx, result)
     plist = plistlib.loads(ctx["plist"].read_bytes())
     assert plist["Label"] == LABEL
     assert plist["KeepAlive"] is True and plist["RunAtLoad"] is True
@@ -429,13 +456,13 @@ def test_stopped_publication_pins_only_verified_generation(
     assert "/ext/host_pull.sh" in text
     assert "native-code-releases/" + ctx["release"].name + "/ext/host_pull.sh" in text
     log = launch_log(ctx)
-    assert log.count("\nbootstrap ") == 1 or log.count("bootstrap ") == 1
+    assert "bootstrap " not in log
     assert "bootout " not in log
     assert not (ctx["stub"] / "lockf.log").exists() or (ctx["stub"] / "lockf.log").read_text() == ""
     assert_not_executed(ctx)
 
 
-def test_bootout_waits_for_old_pid_before_one_bootstrap(workspace):
+def test_bootout_waits_for_old_pid_before_bootstrap_refusal(workspace):
     ctx = prepare(workspace)
     ctx["plist"].write_bytes(b"OLD-PLIST\n")
     ctx["plist"].chmod(0o600)
@@ -461,9 +488,10 @@ def test_bootout_waits_for_old_pid_before_one_bootstrap(workspace):
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     (ctx["stub"] / "pause-pid").unlink()
     out, err = proc.communicate(timeout=10)
-    assert proc.returncode == 0, err
+    assert proc.returncode == 78, err
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in err
     assert ctx["plist"].read_bytes() != b"OLD-PLIST\n"
-    assert launch_log(ctx).count("bootstrap ") == 1
+    assert launch_log(ctx).count("bootstrap ") == 0
     assert_not_executed(ctx)
 
 
@@ -561,15 +589,15 @@ def test_bootstrap_failure_retains_candidate_and_is_not_green(workspace):
     # A label absent before installation cannot be certified as the recovered
     # *original* collector merely because rollback bootstrap returned zero.
     assert "EFFECT_UNKNOWN" in result.stderr
-    assert "bootstrap failed" in result.stderr
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in result.stderr
     assert "recovered original service:" not in result.stderr
     assert (ctx["store"] / ".install-transaction.marker").is_file()
     receipt = receipt_body(ctx)
     assert receipt["outcome"] == "EFFECT_UNKNOWN"
-    assert receipt["phase"] == "BOOTSTRAP"
+    assert receipt["phase"] == "BOOTSTRAP_CUSTODY"
     assert ctx["plist"].read_bytes() != original
     assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
-    assert launch_log(ctx).count("bootstrap ") == 1
+    assert launch_log(ctx).count("bootstrap ") == 0
     backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == original
@@ -591,20 +619,20 @@ def test_running_service_missing_preimage_refuses_before_mutation(workspace):
     assert_not_executed(ctx)
 
 
-def test_post_bootstrap_unverified_argv_records_effect_unknown(workspace):
+def test_unverified_argv_never_bypasses_prebootstrap_custody_refusal(workspace):
     ctx = prepare(workspace)
     (ctx["stub"] / "print-style").write_text("notfound\n")
     # Existing fixture advertises a different collector without any argv edit.
     result = run(ctx)
     assert result.returncode == 78, result.stderr
     assert "EFFECT_UNKNOWN" in result.stderr
-    assert "bootstrap did not pin the verified collector" in result.stderr
-    assert launch_log(ctx).count("bootstrap ") == 1
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in result.stderr
+    assert launch_log(ctx).count("bootstrap ") == 0
     assert "bootout " not in launch_log(ctx)
     assert (ctx["store"] / ".install-transaction.marker").exists()
     receipt = receipt_body(ctx)
     assert receipt["outcome"] == "EFFECT_UNKNOWN"
-    assert receipt["phase"] == "POST_BOOTSTRAP_VERIFY"
+    assert receipt["phase"] == "BOOTSTRAP_CUSTODY"
     assert_not_executed(ctx)
 
 
@@ -618,10 +646,10 @@ def test_failed_bootstrap_does_not_attempt_unowned_rollback(workspace):
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     result = run(ctx)
     assert result.returncode == 78, result.stderr
-    assert "bootstrap failed" in result.stderr
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in result.stderr
     assert "EFFECT_UNKNOWN" in result.stderr
     assert ctx["plist"].read_bytes() != original
-    assert launch_log(ctx).count("bootstrap ") == 1
+    assert launch_log(ctx).count("bootstrap ") == 0
     assert_not_executed(ctx)
 
 
@@ -629,8 +657,7 @@ def test_idempotent_when_already_pinned(workspace):
     ctx = prepare(workspace)
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
-    first = run(ctx)
-    assert first.returncode == 0, first.stderr
+    seed_running_target(ctx)
     pinned = ctx["plist"].read_bytes()
     (ctx["stub"] / "launchctl.log").write_text("")
     second = run(ctx)
@@ -645,7 +672,7 @@ def test_disk_plist_drift_while_running_fails_closed(workspace):
     ctx = prepare(workspace)
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
-    assert run(ctx).returncode == 0
+    seed_running_target(ctx)
     ctx["plist"].chmod(0o600)
     ctx["plist"].write_bytes(ctx["plist"].read_bytes() + b"\n")
     ctx["plist"].chmod(0o600)
@@ -816,7 +843,7 @@ def test_publisher_verify_is_required(workspace):
     ctx["env"]["REAL_PUBLISHER"] = str(PUBLISHER)
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     result = run(ctx, publisher=wrapper)
-    assert result.returncode == 0, result.stderr
+    assert_bootstrap_refused(ctx, result)
     recorded = log.read_text()
     assert "verify --store " in recorded
     assert ctx["release"].name in recorded
@@ -972,6 +999,7 @@ def test_production_launchctl_print_shape_is_accepted(workspace):
     (ctx["stub"] / "print-style").write_text("production\n")
     (ctx["stub"] / "print-mode").write_text("absent\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    seed_running_target(ctx)
     result = run(ctx)
     assert result.returncode == 0, result.stderr
     plist = plistlib.loads(ctx["plist"].read_bytes())
@@ -1084,17 +1112,17 @@ def test_launchctl_lookalikes_fail_closed(workspace, style):
     assert_not_executed(ctx)
 
 
-def test_loaded_idle_is_booted_out_before_one_bootstrap(workspace):
+def test_loaded_idle_is_booted_out_before_bootstrap_refusal(workspace):
     ctx = prepare(workspace)
     ctx["plist"].write_bytes(b"OLD-PLIST\n")
     ctx["plist"].chmod(0o600)
     (ctx["stub"] / "print-mode").write_text("idle\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     result = run(ctx)
-    assert result.returncode == 0, result.stderr
+    assert_bootstrap_refused(ctx, result)
     log = launch_log(ctx)
-    assert log.index("bootout ") < log.index("bootstrap ")
-    assert log.count("bootstrap ") == 1
+    assert log.count("bootout ") == 1
+    assert log.count("bootstrap ") == 0
     plist = plistlib.loads(ctx["plist"].read_bytes())
     assert plist["ProgramArguments"][-3] == str(ctx["pin"])
     assert_not_executed(ctx)
@@ -1119,7 +1147,8 @@ def test_publication_lock_blocks_select_during_bootout(workspace):
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     (ctx["stub"] / "pause-bootout").unlink()
     _out, err = proc.communicate(timeout=10)
-    assert proc.returncode == 0, err
+    assert proc.returncode == 78, err
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in err
     current = json.loads((ctx["store"] / "CURRENT.json").read_text())
     assert current["generation"] == ctx["release"].name
     assert_not_executed(ctx)
@@ -1661,10 +1690,11 @@ def test_second_installer_makes_no_mutation_while_first_holds_transaction(worksp
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     hold.unlink()
     _out, err = proc.communicate(timeout=10)
-    assert proc.returncode == 0, err
+    assert proc.returncode == 78, err
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in err
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
-    assert log.count("bootstrap ") == 1
+    assert log.count("bootstrap ") == 0
     plist = plistlib.loads(ctx["plist"].read_bytes())
     assert plist["ProgramArguments"] == [
         "/usr/bin/lockf", "-t", "0", str(ctx["lock"]), "/bin/bash", str(ctx["pin"]),
@@ -1774,8 +1804,8 @@ def test_outliving_child_does_not_keep_transaction_lock(workspace):
 def test_holder_death_before_arm_does_not_mutate_after_peer_install(workspace):
     """Kill only A's lock helper after the old label read and before arm.
 
-    B then completes the install and clears the marker. A must not boot out
-    or replace B's service from the stale read.
+    B reaches custody refusal and retains its marker. A must not boot out,
+    clear B's marker, or replace B's plist from the stale read.
     """
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1820,13 +1850,14 @@ def test_holder_death_before_arm_does_not_mutate_after_peer_install(workspace):
         (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
         (ctx["stub"] / "pause-pid").unlink()
         _out, err = other.communicate(timeout=10)
-        assert other.returncode == 0, err
-        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert other.returncode == 78, err
+        assert "BOOTSTRAP_CUSTODY_UNPROVEN" in err
+        assert (ctx["store"] / ".install-transaction.marker").exists()
         log_after_peer = launch_log(ctx)
         plist_after_peer = ctx["plist"].read_bytes()
         backups_after_peer = _plist_backups(ctx)
         assert log_after_peer.count("bootout ") == 1
-        assert log_after_peer.count("bootstrap ") == 1
+        assert log_after_peer.count("bootstrap ") == 0
         assert plist_after_peer != original
         assert backups_after_peer
         hold.unlink()
@@ -1837,9 +1868,12 @@ def test_holder_death_before_arm_does_not_mutate_after_peer_install(workspace):
         assert launch_log(ctx) == log_after_peer
         assert ctx["plist"].read_bytes() == plist_after_peer
         assert _plist_backups(ctx) == backups_after_peer
-        assert not (ctx["store"] / ".install-transaction.marker").exists()
-        assert (ctx["stub"] / "print-mode").read_text().strip() == "running"
-        receipt = receipt_body(ctx)
+        assert (ctx["store"] / ".install-transaction.marker").exists()
+        assert (ctx["stub"] / "print-mode").read_text().strip() == "absent"
+        receipts = {row["phase"]: row for row in (
+            json.loads(path.read_text()) for path in ctx["backup"].glob("*.receipt"))}
+        assert set(receipts) == {"BOOTSTRAP_CUSTODY", "INSTALL_HOLDER_LOST"}
+        receipt = receipts["INSTALL_HOLDER_LOST"]
         assert receipt["outcome"] == "EFFECT_UNKNOWN"
         assert receipt["phase"] == "INSTALL_HOLDER_LOST"
         assert "holder lost" in receipt["reason"]
@@ -1870,7 +1904,7 @@ def _wait_for(proc, path):
     assert path.exists()
 
 
-def test_advance_rebinds_launchd_only_after_old_pid_settles(workspace):
+def test_advance_retains_selector_and_stopped_service_on_custody_refusal(workspace):
     """Selector CAS and the launchd pin move together, and only after the old pid is dead."""
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 7\n")
     selector = ctx["release"]
@@ -1900,7 +1934,8 @@ def test_advance_rebinds_launchd_only_after_old_pid_settles(workspace):
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], pin))
     (ctx["stub"] / "pause-pid").unlink()
     _out, err = proc.communicate(timeout=10)
-    assert proc.returncode == 0, err
+    assert proc.returncode == 78, err
+    assert "BOOTSTRAP_CUSTODY_UNPROVEN" in err
     final = _selection(ctx)
     assert final["generation"] == target.name
     assert final["previous"] == selector.name
@@ -1909,9 +1944,9 @@ def test_advance_rebinds_launchd_only_after_old_pid_settles(workspace):
     assert plist["ProgramArguments"][-3] == str(pin)
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
-    assert log.count("bootstrap ") == 1
-    assert log.index("bootout ") < log.index("bootstrap ")
-    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert log.count("bootstrap ") == 0
+    assert "bootstrap " not in log
+    assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
 
@@ -2018,12 +2053,12 @@ def test_advance_preserves_selector_when_rollback_argv_mismatches(workspace):
     assert final["sequence"] == before["sequence"] + 1
     log = launch_log(ctx)
     assert log.count("bootout ") == 1
-    assert log.count("bootstrap ") == 1
-    assert log.index("bootout ") < log.index("bootstrap ")
+    assert log.count("bootstrap ") == 0
+    assert "bootstrap " not in log
     receipt = receipt_body(ctx)
     assert receipt["outcome"] == "EFFECT_UNKNOWN"
     assert receipt["service"] == "stopped-uncertain"
-    assert receipt["phase"] == "BOOTSTRAP"
+    assert receipt["phase"] == "BOOTSTRAP_CUSTODY"
     assert (ctx["store"] / ".install-transaction.marker").exists()
     assert_not_executed(ctx)
 
@@ -2865,8 +2900,8 @@ def test_prebootstrap_peer_mutation_refuses_the_bootstrap(workspace, action):
     """A peer that changes the installed plist before the effect gets no bootstrap.
 
     The bootstrap effect consumes the installed plist by pathname, so the
-    reviewed identity of that plist is proved at the effect boundary, under
-    the publication lock, before launchctl can consume the path. An edited,
+    candidate cannot prove OS-enforced custody of the whole path and leaf,
+    so the effect is refused under the publication lock before launchctl. An edited,
     deleted, byte-equal symlinked or wrong-mode destination is refused: no
     launchctl call is issued and the peer's bytes are left untouched.
     """
@@ -2937,23 +2972,23 @@ def test_prebootstrap_peer_mutation_refuses_the_bootstrap(workspace, action):
             proc.communicate(timeout=5)
 
 
-def test_prebootstrap_custody_admits_the_reviewed_plist(workspace):
-    """The reviewed plist is admitted at the effect boundary and bootstrapped once."""
+def test_prebootstrap_custody_refuses_even_the_reviewed_plist(workspace):
+    """A reviewed hash and 0600 mode cannot admit pathname consumption."""
     ctx = prepare(workspace)
     (ctx["stub"] / "print-mode").write_text("stopped\n")
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
     result = run(ctx)
-    assert result.returncode == 0, result.stderr
+    assert_bootstrap_refused(ctx, result)
     installed = ctx["plist"].read_bytes()
     assert installed
-    assert launch_log(ctx).count("bootstrap ") == 1
+    assert launch_log(ctx).count("bootstrap ") == 0
     assert "bootout " not in launch_log(ctx)
-    # The reviewed mode is restored after the sealed consumption window.
+    # The refusal never seals or restores the reviewed inode.
     assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
     assert ctx["plist"].read_bytes() == installed
-    assert not (ctx["store"] / ".install-transaction.marker").exists()
-    assert list(ctx["backup"].glob("*.receipt")) == []
+    assert (ctx["store"] / ".install-transaction.marker").exists()
+    assert receipt_body(ctx)["phase"] == "BOOTSTRAP_CUSTODY"
     assert_not_executed(ctx)
 
 
@@ -2964,6 +2999,103 @@ def _py_helper_source():
     start = raw.index(marker) + len(marker)
     end = raw.index("\nPY\n", start)
     return raw[start:end]
+
+
+def _pathname_bootstrap_attack(ctx, attack, purpose):
+    """Real pathname open by a fake launchctl, after daemon admission.
+
+    Only scratch directories and the embedded helper are involved. The parent
+    owns the transaction fence; the fake kills only its own helper parent.
+    """
+    payload = b"REVIEWED-PLIST\n"
+    ctx["plist"].write_bytes(payload)
+    ctx["plist"].chmod(0o600)
+    fake = Path(ctx["env"]["PATH"].split(":")[0]) / "launchctl"
+    fake.write_text("#!" + sys.executable + "\n" + r'''
+import hashlib, os, pathlib, signal, sys
+dest = pathlib.Path(sys.argv[3])
+state = pathlib.Path(os.environ["STUB_STATE"])
+attack = (state / "attack").read_text()
+if attack == "kill":
+    (state / "sealed-mode").write_text(oct(dest.stat().st_mode & 0o777))
+    os.kill(os.getppid(), signal.SIGKILL)
+else:
+    original = dest.parent.with_name("LaunchAgents-original")
+    os.rename(dest.parent, original)
+    dest.parent.mkdir()
+    dest.write_bytes(b"UNREVIEWED-PEER-PLIST\n")
+    (state / "consumed-sha").write_text(hashlib.sha256(dest.read_bytes()).hexdigest())
+    if attack == "swap-back":
+        dest.unlink()
+        dest.parent.rmdir()
+        os.rename(original, dest.parent)
+''')
+    fake.chmod(0o755)
+    (ctx["stub"] / "attack").write_text(attack)
+    work = ctx["stub"] / "locked-work"
+    work.mkdir()
+    fence = ctx["stub"] / "fence"
+    with fence.open("w+") as held:
+        held.write("armed\n")
+        held.flush()
+        fcntl.flock(held, fcntl.LOCK_EX)
+        result = subprocess.run(
+            [sys.executable, "-", "locked-effect", str(ctx["store"]),
+             ctx["release"].name, ctx["release"].name, str(PUBLISHER),
+             str(work), "-", "bootstrap", str(fence), str(fake),
+             "gui/501", str(ctx["plist"]), purpose,
+             hashlib.sha256(payload).hexdigest()],
+            input=_py_helper_source(), env=ctx["env"], capture_output=True,
+            text=True, timeout=15,
+        )
+    return result, work
+
+
+@pytest.mark.parametrize("purpose", ["new", "rollback"])
+def test_bootstrap_inflight_directory_swap_cannot_consume_peer_plist(workspace, purpose):
+    ctx = prepare(workspace)
+    result, work = _pathname_bootstrap_attack(ctx, "swap", purpose)
+    assert not (ctx["stub"] / "consumed-sha").exists(), result.stderr
+    assert result.returncode == 78
+    assert (work / "reason").read_text() == "custody-unproven\n"
+    assert not (work / "started").exists()
+
+
+@pytest.mark.parametrize("purpose", ["new", "rollback"])
+def test_bootstrap_inflight_swap_back_cannot_report_success(workspace, purpose):
+    ctx = prepare(workspace)
+    result, work = _pathname_bootstrap_attack(ctx, "swap-back", purpose)
+    consumed = ctx["stub"] / "consumed-sha"
+    assert result.returncode == 78, (
+        f"false-clean rc={result.returncode}; consumed="
+        + (consumed.read_text() if consumed.exists() else "none"))
+    assert not consumed.exists()
+    assert not (work / "started").exists()
+
+
+def test_sigkill_after_plist_seal_strands_0400_and_refuses_next_install(workspace):
+    ctx = prepare(workspace)
+    result, work = _pathname_bootstrap_attack(ctx, "kill", "new")
+    # The repaired daemon must refuse before sealing or dispatching the fake.
+    assert result.returncode == 78, result.stderr
+    assert not (ctx["stub"] / "sealed-mode").exists()
+    assert not (work / "started").exists()
+    # Reproduce a historical seal + SIGKILL without relying on the removed
+    # unsafe path. No cleanup handler can restore this inode's mode.
+    killed = subprocess.run([sys.executable, "-c",
+        "import os,signal,sys; os.chmod(sys.argv[1],0o400); "
+        "os.kill(os.getpid(),signal.SIGKILL)", str(ctx["plist"])])
+    assert killed.returncode == -signal.SIGKILL
+    before = ctx["plist"].read_bytes()
+    marker = ctx["store"] / ".install-transaction.marker"
+    marker.write_bytes(b"historical-interrupted-install\n")
+    refused = run(ctx)
+    assert refused.returncode == 78
+    assert marker.read_bytes() == b"historical-interrupted-install\n"
+    assert "stranded 0400 plist" in refused.stderr
+    assert ctx["plist"].read_bytes() == before
+    assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o400
+    assert "bootstrap " not in launch_log(ctx)
 
 
 @pytest.mark.parametrize(
@@ -3016,14 +3148,14 @@ def test_bootstrap_custody_admission_is_inside_the_locked_effect():
     # The effect arguments carry the reviewed digest, not just the purpose.
     assert "if len(effect_args) != 5:" in branch
     assert 'fail("bootstrap expected digest")' in branch
-    # The identity proof runs under the publication lock and before the
-    # effect marker, so a refusal is provably pre-effect.
+    # Custody refusal runs under the publication lock and before the
+    # effect marker; a reviewed digest cannot authorize pathname consumption.
     assert "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)" in branch
-    assert "bind_installed_plist(bootstrap_dest, expected_sha)" in branch
-    assert branch.index("bind_installed_plist(bootstrap_dest") < branch.index("\n        mark_started()\n")
-    # The pathname is re-proved around the launchctl consumption.
-    assert "path_names_inode(dest, bootstrap_fd, 0o400)" in branch
-    assert "descriptor_still_proves(bootstrap_fd, expected_sha)" in branch
+    assert 'fail("BOOTSTRAP_CUSTODY_UNPROVEN:' in branch
+    assert branch.index('fail("BOOTSTRAP_CUSTODY_UNPROVEN:') < branch.index("\n        mark_started()\n")
+    # No pathname-consuming bootstrap or temporary sealing path remains.
+    assert '[launchctl, "bootstrap"' not in branch
+    assert "os.fchmod" not in branch
     # The shell passes the reviewed digest of the plist to be consumed.
     assert 'expected_sha="${RENDERED_SHA:-}"' in text
     assert 'expected_sha="${PRE_PLIST_SHA:-}"' in text
@@ -3033,78 +3165,16 @@ def test_bootstrap_custody_admission_is_inside_the_locked_effect():
 
 
 
-@pytest.mark.parametrize("action", [
-    "intact", "edit", "delete", "wrong-mode", "symlink",
-])
-def test_postbootstrap_success_reproves_admitted_plist(workspace, action):
-    """Running PID/argv alone must not release the marker for a changed disk plist."""
+def test_postbootstrap_pause_cannot_enable_unproven_bootstrap(workspace):
+    """A hermetic post-effect pause cannot override the custody refusal."""
     ctx = prepare(workspace)
-    (ctx["stub"] / "print-mode").write_text("stopped\n")
-    (ctx["stub"] / "print-style").write_text("notfound\n")
-    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
-    original_selector = _selection(ctx)
-    hold = workspace / "hold-after-bootstrap-verify"
+    hold = workspace / "hold-after-bootstrap"
     hold.write_text("")
-    proc = subprocess.Popen(
-        base_args(ctx, hold_after_bootstrap=hold),
-        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-    )
-    try:
-        _release_hold(proc, hold)
-        installed = ctx["plist"].read_bytes()
-        assert installed
-        assert "bootstrap " in launch_log(ctx)
-        assert (ctx["stub"] / "print-mode").read_text().strip() == "running"
-        assert (ctx["stub"] / "argv").read_text() == expected_argv(ctx["lock"], ctx["pin"])
-        assert (ctx["stub"] / "ps-alive").exists()
-        peer = b"PEER-POST-BOOTSTRAP-PLIST\n"
-        peer_file = workspace / "thirdparty-plist"
-        if action == "edit":
-            ctx["plist"].write_bytes(peer)
-        elif action == "delete":
-            ctx["plist"].unlink()
-        elif action == "wrong-mode":
-            ctx["plist"].chmod(0o644)
-        elif action == "symlink":
-            peer_file.write_bytes(peer)
-            ctx["plist"].unlink()
-            ctx["plist"].symlink_to(peer_file)
-        hold.unlink()
-        _out, err = proc.communicate(timeout=15)
-        assert _selection(ctx) == original_selector
-        log = launch_log(ctx)
-        assert "bootout " not in log
-        assert log.count("bootstrap ") == 1
-        assert_not_executed(ctx)
-        if action == "intact":
-            assert proc.returncode == 0, err
-            assert not (ctx["store"] / ".install-transaction.marker").exists()
-            assert ctx["plist"].read_bytes() == installed
-            assert list(ctx["backup"].glob("*.receipt")) == []
-        else:
-            assert proc.returncode == 78, err
-            assert "EFFECT_UNKNOWN" in err
-            assert "installed plist identity unproven" in err
-            receipt = receipt_body(ctx)
-            assert receipt["outcome"] == "EFFECT_UNKNOWN"
-            assert receipt["phase"] == "POST_BOOTSTRAP_VERIFY"
-            assert (ctx["store"] / ".install-transaction.marker").exists()
-            if action == "edit":
-                assert ctx["plist"].read_bytes() == peer
-            elif action == "delete":
-                assert not ctx["plist"].exists()
-            elif action == "wrong-mode":
-                assert ctx["plist"].read_bytes() == installed
-                assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o644
-            elif action == "symlink":
-                assert ctx["plist"].is_symlink()
-                assert ctx["plist"].read_bytes() == peer
-                assert peer_file.read_bytes() == peer
-    finally:
-        hold.unlink(missing_ok=True)
-        if proc.poll() is None:
-            proc.kill()
-            proc.communicate(timeout=5)
+    result = run(ctx, hold_after_bootstrap=hold)
+    assert_bootstrap_refused(ctx, result)
+    assert not Path(str(hold) + ".ready").exists()
+    assert receipt_body(ctx)["phase"] == "BOOTSTRAP_CUSTODY"
+
 
 
 def test_postbootstrap_plist_seal_guard_is_production_noninteractive(workspace):
@@ -3124,8 +3194,7 @@ def test_already_running_target_must_prove_disk_plist_identity(workspace, action
     ctx = prepare(workspace)
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
-    initial = run(ctx)
-    assert initial.returncode == 0, initial.stderr
+    seed_running_target(ctx)
     installed = ctx["plist"].read_bytes()
     before = _selection(ctx)
     (ctx["stub"] / "launchctl.log").write_text("")
@@ -3173,8 +3242,7 @@ def test_advance_from_pairs_only_after_strict_disk_plist_identity(workspace, act
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 71\n")
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
-    installed = run(ctx)
-    assert installed.returncode == 0, installed.stderr
+    seed_running_target(ctx)
     original = ctx["release"]
     before = _selection(ctx)
 

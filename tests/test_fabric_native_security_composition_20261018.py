@@ -50,7 +50,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # carries 97 members and the H1 child carries 100. Pin the computed digest of
 # the actual resealed 100-member manifest.
 EXPECTED_NATIVE_FILES = 100
-NATIVE_MANIFEST_SHA = "712e3ad887f628cba8a1f76bb190805a1bc3bc5a6f313c2900695fee49c5c406"
+NATIVE_MANIFEST_SHA = "ce018ba3f1b7f2d6fce888a49f2acafe38e24f51fdaa3597eba0ffcbeca8f877"
 
 
 def _sha(raw):
