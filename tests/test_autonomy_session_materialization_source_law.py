@@ -350,7 +350,16 @@ def test_current_runtime_proves_v2_was_impossible_and_v3_is_not_built() -> None:
     bind_resume = definition(RUNTIME, "OperatorHarnessRegistry.bind_resume_result")
     unknown = definition(RUNTIME, "OperatorHarnessRegistry.record_effect_unknown")
     seal = definition(RUNTIME, "OperatorHarnessRegistry.seal_attestation")
-    binding_source = definition(RUNTIME, "Runtime.current_harness_binding_source")
+    binding_wrapper = ast.parse(
+        definition(RUNTIME, "Runtime.current_harness_binding_source")
+    ).body[0]
+    delegation = binding_wrapper.body[-1]
+    assert isinstance(delegation, ast.Return)
+    assert ast.dump(delegation.value) == ast.dump(ast.parse(
+        "_current_harness_binding_source_from_snapshot(self.store, connection, token)",
+        mode="eval",
+    ).body)
+    binding_source = definition(RUNTIME, "_current_harness_binding_source_from_snapshot")
     source = text(RUNTIME)
 
     assert "OperationReceiptKind.APPLIED: OperationReceiptKind.EFFECT_UNKNOWN" in receipt

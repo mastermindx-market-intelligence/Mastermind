@@ -16,6 +16,9 @@ from typing import Any
 
 _ROOT = Path(__file__).resolve().parent.parent
 _POLICY_PATH = _ROOT / "config" / "authority_map.yml"
+# Match the existing ReleaseControllerPolicy source budget for this same file,
+# while retaining COO's own parser and complete accepted-source digest.
+_MAX_COO_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
 
 _EXPECTED_SCALARS = {
     "schema_version": 1,
@@ -129,9 +132,12 @@ class CooCyclePolicy:
             raise CooCyclePolicyError("unsupported COO policy version")
         source_path = Path(path).resolve() if path is not None else _POLICY_PATH
         try:
-            raw = source_path.read_bytes()
+            with source_path.open("rb") as policy_source:
+                raw = policy_source.read(_MAX_COO_POLICY_SOURCE_BYTES + 1)
         except OSError as exc:
             raise CooCyclePolicyError(f"COO cycle policy is unavailable: {exc}") from exc
+        if len(raw) > _MAX_COO_POLICY_SOURCE_BYTES:
+            raise CooCyclePolicyError("COO cycle policy source exceeds byte limit")
         values = _extract_block(raw, "coo_cycle_policy" if version == 1 else "coo_hierarchy_policy")
         scalars = _EXPECTED_SCALARS if version == 1 else _HIERARCHY_SCALARS
         expected_keys = set(_EXPECTED_SCALARS) | {"allowed_child_cost_classes"}

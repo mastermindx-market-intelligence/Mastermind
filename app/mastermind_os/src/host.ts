@@ -510,6 +510,7 @@ export async function createNativeClient(
   }
   return {
     executive: executive.transport,
+    executiveSession: executive.sessionTransport,
     getState: () => ({ ...current }),
     invalidationGeneration: () => epoch,
     subscribe(listener) {

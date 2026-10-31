@@ -461,3 +461,106 @@ def test_worker_readiness_authority_decision_gains_no_new_fields():
         "allowed_write_paths",
         "validation_commands",
     }
+
+
+# The existing ReleaseControllerPolicy consumes this same authority-map
+# source under a 2 MiB ceiling. COO applies its own acquisition gate and parser.
+_BOUNDED_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
+
+
+def _record_coo_policy_source_reads(monkeypatch, selected):
+    original_open = Path.open
+    requests, handles = [], []
+
+    class Reader:
+        def __init__(self, handle):
+            self.handle = handle
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def read(self, size=-1):
+            value = self.handle.read(size)
+            requests.append((size, len(value)))
+            return value
+
+    def tracked_open(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        if path != selected:
+            return handle
+        handles.append(handle)
+        return Reader(handle)
+
+    monkeypatch.setattr(Path, "open", tracked_open)
+    return requests, handles
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+def test_bounded_policy_source_coo_exact_limit_preserves_raw_digest(
+    tmp_path, monkeypatch, newline,
+):
+    import control_plane.executive_coo_policy as policy_module
+    expected = CooCyclePolicy.load(_POLICY_PATH)
+    raw = _POLICY_PATH.read_bytes().replace(b"\n", newline)
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    assert raw.endswith(newline) and len(raw) + 1 < limit
+    raw += b"#" + b"x" * (limit - len(raw) - 1)
+    selected = tmp_path / "bounded-authority.yml"
+    selected.write_bytes(raw)
+    requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
+    original_parse = policy_module._extract_block
+
+    def parse_after_close(value, block):
+        assert len(handles) == 1 and handles[0].closed
+        return original_parse(value, block)
+
+    monkeypatch.setattr(policy_module, "_extract_block", parse_after_close)
+    actual = CooCyclePolicy.load(selected)
+    assert actual.to_dict() == expected.to_dict()
+    assert actual.policy_sha256 == expected.policy_sha256
+    assert actual.source_sha256 == hashlib.sha256(raw).hexdigest()
+    assert requests == [(limit + 1, limit)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+@pytest.mark.parametrize("fault", ["valid", "invalid_utf8", "multibyte"])
+def test_bounded_policy_source_coo_overflow_precedes_decode_and_parse(
+    tmp_path, monkeypatch, fault,
+):
+    import control_plane.executive_coo_policy as policy_module
+    limit = _BOUNDED_POLICY_SOURCE_BYTES
+    raw = _POLICY_PATH.read_bytes()
+    if fault == "multibyte":
+        raw += b"#" + "é".encode("utf-8") * ((limit - len(raw)) // 2 + 1)
+        assert len(raw.decode("utf-8")) < limit < len(raw)
+    else:
+        raw += b"#" + b"x" * (limit - len(raw))
+        if fault == "invalid_utf8":
+            raw = b"\xff" + raw[1:]
+    selected = tmp_path / "over-limit-authority.yml"
+    selected.write_bytes(raw)
+    requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
+
+    def forbidden_parse(_raw):
+        pytest.fail("over-limit COO policy source reached the parser")
+
+    monkeypatch.setattr(policy_module, "_extract_block", forbidden_parse)
+    with pytest.raises(CooCyclePolicyError, match="source exceeds byte limit"):
+        CooCyclePolicy.load(selected)
+    assert requests == [(limit + 1, limit + 1)]
+    assert len(handles) == 1 and handles[0].closed
+
+
+def test_bounded_policy_source_coo_keeps_utf8_and_missing_file_refusals(tmp_path):
+    selected = tmp_path / "bad-authority.yml"
+    selected.write_bytes(b"\xff")
+    with pytest.raises(CooCyclePolicyError, match="not UTF-8") as caught:
+        CooCyclePolicy.load(selected)
+    assert isinstance(caught.value.__cause__, UnicodeDecodeError)
+    with pytest.raises(CooCyclePolicyError, match="unavailable") as missing:
+        CooCyclePolicy.load(tmp_path / "missing-authority.yml")
+    assert isinstance(missing.value.__cause__, FileNotFoundError)
