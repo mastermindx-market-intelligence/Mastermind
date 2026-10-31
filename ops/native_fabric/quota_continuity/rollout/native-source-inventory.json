@@ -470,7 +470,7 @@
     "ext/paid_initializer.py": {
       "bytes": 31701,
       "installed_preimage_sha256": null,
-      "sha256": "30b61b297534a972f5da09f47e901487d7307e05e4d44283407c91a95fb23cdc",
+      "sha256": "d203b1363cdc6f926d9542a2ecfb2ec6b24dd1da46c3fd1f527caea232132749",
       "source": "candidate/paid_initializer.py"
     },
     "ext/paid_initializer_nested_data.py": {
@@ -486,15 +486,15 @@
       "source": "candidate/paid_initializer_token_data.py"
     },
     "ext/paid_model_owner.py": {
-      "bytes": 16870,
+      "bytes": 16818,
       "installed_preimage_sha256": null,
-      "sha256": "1ff9487916942eefd2e586891be160cc16c5e93cd501a720363d4e9c7297ea0c",
+      "sha256": "75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b",
       "source": "candidate/paid_model_owner.py"
     },
     "ext/paid_provider_entry.py": {
-      "bytes": 36314,
+      "bytes": 36798,
       "installed_preimage_sha256": null,
-      "sha256": "3e9b821dd345162cef12bce6a2d5b40be16d8711fb7a2c3750de17c7261c03cf",
+      "sha256": "780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0",
       "source": "candidate/paid_provider_entry.py"
     },
     "ext/paid_pyyaml_6_0_3.zip": {
@@ -510,9 +510,9 @@
       "source": "candidate/paid_pyyaml_provenance.json"
     },
     "ext/paid_yaml_runtime.py": {
-      "bytes": 4376,
+      "bytes": 17160,
       "installed_preimage_sha256": null,
-      "sha256": "ea16d60373ccb50a93d85ed3f1557aad765174b7ddef81fb65622648b0c02f07",
+      "sha256": "cf5a1fbc4617cd88133ac6a5a315c82c90fbb971784be674fbaa8a50c4baa6e8",
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
@@ -618,9 +618,9 @@
       "source": "../grok47/overlay/sub.sh"
     },
     "ext/support_bundle.py": {
-      "bytes": 18662,
+      "bytes": 19070,
       "installed_preimage_sha256": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
-      "sha256": "5fecd5fa93617a720476c9e2c5cf17de78de245e9cc04c811ba213265a41f2bb",
+      "sha256": "212df1af82652235ea10c9cabe95400aa40f8e819c6d5ef4c15666dbbfca3a4b",
       "source": "candidate/support_bundle.py"
     },
     "ext/yes": {

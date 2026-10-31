@@ -106,6 +106,13 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if g.digest(payload) != old[name]:
                     raise AssertionError('historical95 payload differs')
                 (cls.built / 'native-code-stage' / name).write_bytes(payload)
+            # The held-executor YAML repair changes a member which the
+            # original inverse did not need to retain. Restore its exact
+            # historical public bytes without changing the retained95 map.
+            yaml_preimage = fixture.with_name('paid-yaml-root-pre-held-5cba.py.txt').read_bytes()
+            if g.digest(yaml_preimage) != 'ea16d60373ccb50a93d85ed3f1557aad765174b7ddef81fb65622648b0c02f07' or old['ext/paid_yaml_runtime.py'] != g.digest(yaml_preimage):
+                raise AssertionError('historical YAML loader preimage differs')
+            (cls.built / 'native-code-stage/ext/paid_yaml_runtime.py').write_bytes(yaml_preimage)
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:

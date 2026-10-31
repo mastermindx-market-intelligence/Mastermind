@@ -79,7 +79,9 @@ def test_manual_and_paid_support_closures_are_distinct(tmp_path):
     code='''
 import support_bundle as support
 assert support.PAID_MODEL_SOURCE_FILES-support.SOURCE_FILES=={'paid_glm_model_client.py','paid_model_owner.py','linux_process_identity.py'}
-assert support.PAID_INITIALIZED_SOURCE_FILES-support.PAID_MODEL_SOURCE_FILES=={'paid_provider_entry.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py'}
+assert support.PAID_INITIALIZED_SOURCE_FILES-support.PAID_MODEL_SOURCE_FILES=={'paid_provider_entry.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py','paid_yaml_runtime.py','paid_pyyaml_6_0_3.zip','paid_pyyaml_provenance.json'}
+assert support.PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES in support.SOURCE_GENERATIONS
+assert support.PRE_HELD_YAML_PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES in support.SOURCE_GENERATIONS
 assert support.PAID_MODEL_SOURCE_FILES in support.SOURCE_GENERATIONS
 assert support.PAID_INITIALIZED_SOURCE_FILES in support.SOURCE_GENERATIONS
 assert 'paid_glm_model_client.py' not in support.PHYSICAL_ROOT_SOURCE_FILES

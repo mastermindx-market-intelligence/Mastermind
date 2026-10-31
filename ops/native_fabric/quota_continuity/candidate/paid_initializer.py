@@ -27,7 +27,7 @@ NESTED_OUTER_SHA256 = 'c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0
 NESTED_OUTER_SIZE = 587
 _TOKEN_DATA = _NESTED_DATA = None
 _INITIALIZER_SOURCE_HASHES = None
-_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '3e9b821dd345162cef12bce6a2d5b40be16d8711fb7a2c3750de17c7261c03cf', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}
+_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}
 PURPOSE = 'canonical-paid-qualification.v1'
 LIMIT = 16384
 _SHA = re.compile(r'[0-9a-f]{64}\Z')

@@ -217,7 +217,17 @@ def test_source_sets_preserve_every_prior_generation_exactly():
     from ops.native_fabric.quota_continuity.candidate import paid_model_owner
     assert entry.SUPPORT_FILES==paid_model_owner._PAID_SUPPORT_FILES==support.PAID_INITIALIZED_SOURCE_FILES
     assert support.PAID_INITIALIZED_SOURCE_FILES-support.PAID_MODEL_SOURCE_FILES=={
-        'paid_provider_entry.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py'}
+        'paid_provider_entry.py','paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py',
+        'paid_yaml_runtime.py','paid_pyyaml_6_0_3.zip','paid_pyyaml_provenance.json'}
+    assert entry.YAML_NAMES=={'paid_yaml_runtime.py','paid_pyyaml_6_0_3.zip','paid_pyyaml_provenance.json'}
+    assert len(entry.BUNDLE_NAMES)==len(entry.INITIALIZER_NAMES)==len(entry.YAML_NAMES)==3
+    assert entry.SOURCE_NAMES==entry.BUNDLE_NAMES|entry.INITIALIZER_NAMES|entry.YAML_NAMES
+    assert len(entry.SOURCE_NAMES)==9 and len(entry.SUPPORT_FILES)==47
+    assert support.PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES==entry.SUPPORT_FILES-entry.YAML_NAMES
+    assert len(support.PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES)==44
+    assert len(support.PRE_HELD_YAML_PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES)==45
+    assert support.PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES in support.SOURCE_GENERATIONS
+    assert support.PRE_HELD_YAML_PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES in support.SOURCE_GENERATIONS
     assert support.PAID_MODEL_SOURCE_FILES in support.SOURCE_GENERATIONS
     assert support.PAID_MODEL_PHYSICAL_ROOT_SOURCE_FILES in support.SOURCE_GENERATIONS
     assert support.SOURCE_FILES in support.SOURCE_GENERATIONS

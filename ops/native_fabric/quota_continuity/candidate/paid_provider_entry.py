@@ -27,8 +27,9 @@ BUNDLE_NAMES = frozenset({'paid_provider_entry.py', 'paid_glm_model_client.py',
                           'linux_process_identity.py'})
 INITIALIZER_NAMES = frozenset({'paid_initializer.py', 'paid_initializer_token_data.py',
                                'paid_initializer_nested_data.py'})
-SOURCE_NAMES = BUNDLE_NAMES | INITIALIZER_NAMES
-SUPPORT_FILES = frozenset(['artifact_production.py', 'artifact_reader.py', 'bailian_keys.py', 'capacity_preflight.py', 'codex_usage.py', 'commission_deadline.py', 'fabric_client_projection.py', 'fabric_cpu_scope.py', 'fabric_operator_client.py', 'fabric_operator_diagnostics.py', 'fabric_operator_stop.py', 'fabric_policy_snapshot.py', 'glm_bound_claude.py', 'glm_codex_exec.sh', 'glm_keys.py', 'go_codex_exec.sh', 'go_remote_capsule.py', 'go_remote_codex.py', 'lane_runtime.py', 'lease_broker.py', 'linux_process_identity.py', 'mm_codex_exec.sh', 'mm_feeder_lib.py', 'model_tier.py', 'native_remote.py', 'native_runtime_bindings.py', 'paid_glm_model_client.py', 'paid_initializer.py', 'paid_initializer_nested_data.py', 'paid_initializer_token_data.py', 'paid_model_owner.py', 'paid_provider_entry.py', 'pick.py', 'pool_ledger.py', 'pools.yaml', 'provider_outcome.py', 'quota_circuit.py', 'qwen_exec.sh', 'recovery_artifacts.py', 'remote_sub_exec.py', 'slot.py', 'studio_mcp_projection.sh', 'sub.sh', 'yes'])
+YAML_NAMES = frozenset({'paid_yaml_runtime.py', 'paid_pyyaml_6_0_3.zip', 'paid_pyyaml_provenance.json'})
+SOURCE_NAMES = BUNDLE_NAMES | INITIALIZER_NAMES | YAML_NAMES
+SUPPORT_FILES = frozenset('artifact_production.py artifact_reader.py bailian_keys.py capacity_preflight.py codex_usage.py commission_deadline.py fabric_client_projection.py fabric_cpu_scope.py fabric_operator_client.py fabric_operator_diagnostics.py fabric_operator_stop.py fabric_policy_snapshot.py glm_bound_claude.py glm_codex_exec.sh glm_keys.py go_codex_exec.sh go_remote_capsule.py go_remote_codex.py lane_runtime.py lease_broker.py linux_process_identity.py mm_codex_exec.sh mm_feeder_lib.py model_tier.py native_remote.py native_runtime_bindings.py paid_glm_model_client.py paid_initializer.py paid_initializer_nested_data.py paid_initializer_token_data.py paid_model_owner.py paid_provider_entry.py paid_pyyaml_6_0_3.zip paid_pyyaml_provenance.json paid_yaml_runtime.py pick.py pool_ledger.py pools.yaml provider_outcome.py quota_circuit.py qwen_exec.sh recovery_artifacts.py remote_sub_exec.py slot.py studio_mcp_projection.sh sub.sh yes'.split())
 _EXECUTOR_SEAL = object()
 FIELDS = frozenset(('schema_version purpose host_ref transport_alias python_path capture_root '
     'initializer_commitment initializer_commitment_sha256 run_id model lease_id account '
@@ -340,11 +341,19 @@ def _support_imports(owner):
             owner.check()
     if any(name in sys.modules for name in names):refuse()
     loader=Loader();sys.meta_path.insert(0,loader)
-    try:yield
+    try:
+        import paid_yaml_runtime as yaml_runtime
+        with yaml_runtime.held_yaml(owner.sources['paid_pyyaml_6_0_3.zip'],
+                owner.sources['paid_pyyaml_provenance.json'],owner.check):
+            yield
     finally:
-        sys.meta_path.remove(loader)
+        indices=[i for i,item in enumerate(sys.meta_path) if item is loader]
+        drift=indices!=[0]
+        for index in reversed(indices):del sys.meta_path[index]
         for name,module in installed.items():
             if sys.modules.get(name) is module:del sys.modules[name]
+            elif name in sys.modules:drift=True
+        if drift:refuse()
 
 
 def _load_initializer(sources,expected):

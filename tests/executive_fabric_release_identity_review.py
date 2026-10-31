@@ -418,7 +418,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': 'd7fcc
                                                                         'int',
                                                                         '502'))},
  'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': 'e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0', 'sites': ((34, 17, 20, 'int', '501'), (452, 85, 90, 'int', '0o700'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': '1ff9487916942eefd2e586891be160cc16c5e93cd501a720363d4e9c7297ea0c',
+ 'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': '75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b',
  'sites': ((147, 32, 37, 'int', '0o700'), (230, 68, 73, 'int', '0o700'))},
  'scripts/executive_paid_fabric_shim.py': {'sha256': 'e80b95a09ce31153e7bff2ea7b85dd1eb8d8850d4d6029ec27250cd8f13228f1',
                                            'sites': ((43, 81, 84, 'int', '450'),)}})
@@ -453,7 +453,7 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 }
 
 # Input-mode bounds and exact ignored Linux symlink mode, never target authority.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '30b61b297534a972f5da09f47e901487d7307e05e4d44283407c91a95fb23cdc',
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': 'd203b1363cdc6f926d9542a2ecfb2ec6b24dd1da46c3fd1f527caea232132749',
  'sites': ((71, 35, 40, 'int', '0o777'), (216, 30, 35, 'int', '0o777'), (226, 33, 38, 'int', '0o777'))}
 
 # Exact reviewed recurring-readiness principal checks; no runtime admission.

@@ -96,11 +96,12 @@ or credentials are modified on any actual host.
 
 ## October 31 integration: require a positive result, not just a green step
 
-The accepted 102-member H1 source union and four-path CI fixture repair are
-composed on original PR #1847. The native payload manifest remains exactly
-`66205e3fcbea978b195d147db932c2bf33c3e806d7d00f7666665863470c90eb`;
-production initializer, provider and native successor bytes are unchanged.
-The historical 95-member fixture and paired installer checks remain intact.
+The prior accepted 102-member H1 union and four-path fixture repair were
+composed on original PR #1847 at manifest
+`66205e3fcbea978b195d147db932c2bf33c3e806d7d00f7666665863470c90eb`.
+That identity is historical component evidence after the sealed-YAML gap below;
+it does not qualify the changed production closure. The historical 95-member
+fixture and paired installer checks remain intact.
 
 Independent changed-risk review found that a mandatory Docker step alone
 does not prove the positive: pytest returns zero when its selected node is
@@ -148,3 +149,62 @@ fixture; property values are never proof or diagnostic output.
 Fixed CI notices appear only after each fail-closed gate succeeds under the
 existing `sh -eu` owner. They qualify disposable test mechanics, not a paid
 provider request, approved initializer commitment or production H1 admission.
+
+
+## P1.T3.S1: close the actual executor's held YAML dependency
+
+The real `-I -S -B` executor reaches routing-policy validation from lane
+admission. The policy parser imports `yaml`, while the former held flat-module
+closure supplied none. Native payload membership alone did not make the
+already-reviewed PyYAML archive available to that executor. An exact-source
+no-site discriminator reproduced this missing dependency; the earlier hosted
+failure's masked primary cause remains unclaimed.
+
+A separate `held_yaml` context in the existing `paid_yaml_runtime.py` now
+validates the exact reviewed archive and provenance, their 19-member inventory
+and 17 Python modules, and serves the pure package from memory. It never reopens
+an archive path, changes `sys.path`, uses site packages, or falls back to a
+binary extension. It rejects pre-existing YAML namespaces, checks the real held
+source owner before member execution, after import and at exit, and removes
+only its exact module and finder objects. Foreign replacements remain visible
+and cause refusal, including `None` sentinels, equal-comparing foreign finders,
+and duplicate references to an owned finder. Failed imports and interrupted
+owner checks receive the same exact cleanup. The original Root-only `_read`
+and `load_yaml` functions and their custody/cache behavior remain unchanged.
+
+The three existing YAML assets join the held support and descriptor bindings:
+47 support members, 48 with the existing optional artifact delivery member,
+and nine source bindings. The three executable entry modules and three
+initializer modules remain separate sets. Earlier 44/45 support generations
+remain recognized by the publisher. Fixed whitespace-separated support
+literals preserve the exact source sets while retaining the unchanged 100000
+byte command ceiling; no dependency or binding is omitted.
+
+The rebuilt native payload has 102 members and manifest
+`0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec`.
+Only the initializer's actual entry pin, provider entry, model owner, support
+publisher and YAML loader payloads change from the prior accepted union.
+The native inventory, successor installer target and finite test pins derive
+from those actual bytes. Historical paired-transition targets stay unchanged.
+
+The private Linux fixture now provisions the same finite valid policy in its
+snapshot and stable path and calls the real publisher in a fresh no-site
+process using the actual held-source owner. It does not adopt pytest's ambient
+YAML namespace or replace publication/admission validation. The canonical
+model branch uses its explicit private gateway database and needs no invented
+broker accounts or ledger activation files.
+
+Fresh fixture failures emit a bounded PRIMARY annotation before final cleanup
+can mask the original predicate. Only fixed public source selectors, typed
+return/timeout/receipt states and a finite known refusal-prefix enum can leave
+the fixture. Unknown, canary-bearing or terminal-control output maps to UNKNOWN;
+raw output, messages, suffixes, paths, config and argv are never emitted. These
+are newly generated facts from a new execution, not retrieval or reconstruction
+of held historical raw logs. Settlement guards are unchanged.
+
+Local no-site library/policy positives and adversarial refusals qualify the
+source composition only. Exact new-head controlled Linux evidence must still
+prove the original initializer once and all 23 provider-module cases, each
+with zero skips/errors/failures, followed by all required checks and normal
+independent protected delivery. No installed generation or runtime is changed
+by this source repair.

@@ -268,30 +268,75 @@ def _request_material(account,lanes,config,system,stage):
     return p,descriptor
 
 
-def _publish_support(stage,lanes,monkeypatch):
+_FIXTURE_POLICY = b'{"routing":{},"pools":{"grok":{"windows":{"weekly":{}}}}}\n'
+_PUBLISH_SUPPORT = r'''
+import hashlib,json,os,stat,sys,types
+from pathlib import Path
+def load(name,path,expected):
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        before=os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or not 0<before.st_size<=2*1024*1024:raise ValueError()
+        raw=os.pread(fd,before.st_size+1,0)
+        if len(raw)!=before.st_size or hashlib.sha256(raw).hexdigest()!=expected:raise ValueError()
+    finally:os.close(fd)
+    module=types.ModuleType(name);module.__file__=str(path)
+    exec(compile(raw,str(path),'exec'),module.__dict__)
+    return module
+try:
+    source,stable,publisher=map(Path,sys.argv[1:])
+    data=json.loads(sys.stdin.buffer.read(32769))
+    manifest=data['manifest']
+    entry=load('_fixture_publication_entry',source/'paid_provider_entry.py',manifest['paid_provider_entry.py'])
+    # This is the real held-source owner over sealed, fixture-only inputs.
+    # Its import context supplies the same vetted YAML used by the executor.
+    with entry._SupportSources(source,manifest) as owner:
+        with entry._support_imports(owner):
+            support=load('_fixture_support_publisher',publisher,data['publisher_sha256'])
+            result=support.publish(source,stable,manifest)
+    print(result.parent.name)
+except Exception:
+    sys.stderr.write('fixture support publication refused\n')
+    raise SystemExit(78)
+'''
+
+
+def _publish_support(stage,lanes):
     from ops.native_fabric.quota_continuity.candidate import support_bundle as support
-    from ops.native_fabric.quota_continuity.source import fabric_policy_snapshot as policy
-    # Actual immutable support publisher and alias validation; this file is
-    # fixture routing DATA, not an installed policy/admission authorization.
-    monkeypatch.setitem(sys.modules,'fabric_policy_snapshot',policy)
-    monkeypatch.setattr(policy,'validate_publication',lambda *a:None)
-    sources=lanes/'fixture-support-source';sources.mkdir(mode=0o700)
+    # Both snapshot and stable policy are finite private fixture DATA. Real
+    # publication/admission validation stays active; no installed policy read.
+    (lanes/'orch').mkdir(mode=0o700)
+    policy=lanes/'orch/fabric';policy.mkdir(mode=0o700)
+    with (policy/'pools.yaml').open('xb') as stream:stream.write(_FIXTURE_POLICY)
+    (policy/'pools.yaml').chmod(0o600)
+    parent=lanes/'fixture-support-source';parent.mkdir(mode=0o700)
+    sources=parent/'ext';sources.mkdir(mode=0o700)
     for name in support.PAID_INITIALIZED_SOURCE_FILES:
-        raw=b'pools: {}\n' if name=='pools.yaml' else (stage/name).read_bytes()
+        raw=_FIXTURE_POLICY if name=='pools.yaml' else (stage/name).read_bytes()
         (sources/name).write_bytes(raw)
+        (sources/name).chmod(0o555)
     manifest={n:hashlib.sha256((sources/n).read_bytes()).hexdigest() for n in support.PAID_INITIALIZED_SOURCE_FILES}
-    return support.publish(sources,lanes/'ext',manifest),manifest
+    sources.chmod(0o555);parent.chmod(0o555)
+    # A fresh no-site process cannot adopt pytest's ambient YAML namespace.
+    # Only the real publisher's validated digest crosses back, never a path.
+    data=dict(manifest=manifest,publisher_sha256=hashlib.sha256((stage/'support_bundle.py').read_bytes()).hexdigest())
+    result=subprocess.run([sys.executable,'-I','-S','-B','-c',_PUBLISH_SUPPORT,
+        str(sources),str(lanes/'ext'),str(stage/'support_bundle.py')],
+        input=entry.canonical(data),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+    expected=hashlib.sha256(entry.canonical(dict(schema='remote-support-code.v1',files=manifest))).hexdigest()
+    assert result.returncode==0 and result.stdout==expected.encode()+b'\n' and not result.stderr, 'fixture support publication refused'
+    return lanes/'support-releases'/expected/'ext',manifest
 
 
 @linux_fixture
 @pytest.mark.parametrize('failure',[None,'source-drift','expired','lost-response','truncated-response'])
-def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypatch,modules,record_property,failure):
+def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypatch,modules,record_property,request,failure):
     cap,gw=modules
     stage=_source_stage(tmp_path)
     system=Path('/usr/bin/python3')
     with _exclusive_home_fixture() as (account,lanes,glm,settlement), ExitStack() as cleanup:
         p,descriptor=_request_material(account,lanes,glm/'config.json',system,stage)
-        here,support=_publish_support(stage,lanes,monkeypatch)
+        here,support=_publish_support(stage,lanes)
         run=p['binding']['attempt_id'];now=time.time()
         # Explicit local Control peer, Root/source constructor and broker
         # fixture; actual authority/codec/intent algorithms are not replaced.
@@ -390,7 +435,7 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
             REMOTE_SUB_LANES=str(lanes),POOL_LEASE_ID=lease['id'],POOL_ACCOUNT=p['paid_account'],LANE_REMOTE_HOST='ubuntu0',
             SUPPORT_DIGEST=here.parent.name,REMOTE_SUB_CHILD_TIMEOUT='35',REMOTE_SUB_COMMISSION_BUDGET_SECONDS='35')
         namespace=_fixture_output_namespace(lanes,log)
-        executor=executor_identity=None
+        executor=executor_identity=executed=None
         try:
             settlement['safe']=False
             executor=subprocess.Popen(shlex.split(command),env=env,stdin=subprocess.DEVNULL,
@@ -426,6 +471,14 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
                 observed=gateway.authorize_canonical(capsule['token'],model=p['paid_route']['model'],run_id=run,host='ubuntu0')
                 with pytest.raises(gw.LeaseGatewayError):gateway._consume_canonical_provider_intent(observed)
                 assert posts==[1] and intents==[1]
+        except Exception as primary:
+            try:
+                from tests.h1_provider_failure_metadata import failure_notice
+                try:raw=_fixture_owned_bytes(lanes/'ext'/('lanes_'+run+'.stdout'),namespace)
+                except Exception:raw=None
+                failure_notice(request,primary,executed,raw)
+            except Exception:pass
+            raise
         finally:
             try:close_server()
             finally:
