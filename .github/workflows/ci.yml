@@ -133,17 +133,26 @@ jobs:
       - name: H1 required real Linux no-ACL positive journey
         if: matrix.index == 2
         run: |
+          set -euo pipefail
+          H1_CI_SOURCE="$(mktemp -d "${RUNNER_TEMP}/h1-public-source.XXXXXX")"
+          # Only tracked public source enters the fixture. In particular,
+          # checkout Git metadata and its authentication config stay outside.
+          git archive --format=tar HEAD | tar -x -C "$H1_CI_SOURCE"
+          chmod 0555 "$H1_CI_SOURCE"
           docker build --file tests/h1_ci_fixture/Dockerfile \
             --tag mastermind-h1-noacl:${{ github.sha }} tests/h1_ci_fixture
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
             --tmpfs /tmp:rw,mode=1777 \
             --tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700 \
-            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${H1_CI_SOURCE},dst=/repo,readonly" \
             mastermind-h1-noacl:${{ github.sha }} \
-            /usr/bin/python3.12 -B -m pytest -q --noconftest \
-              -p no:cacheprovider \
-              tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+            /bin/sh -eu -c '
+              /usr/bin/python3.12 -B -m pytest -q --noconftest \
+                -p no:cacheprovider --junitxml=/tmp/h1-positive.xml \
+                tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+              /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_positive.py /tmp/h1-positive.xml
+            '
 
       - name: Run repository test shard
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}

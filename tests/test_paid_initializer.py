@@ -924,7 +924,13 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     assert real['if']=='matrix.index == 2' and not real.get('continue-on-error',False)
     assert all(value in real['run'] for value in ('--network=none','--cap-drop=ALL','--read-only',
         '--tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700',
-        'tests/h1_ci_fixture/Dockerfile','tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire'))
+        'tests/h1_ci_fixture/Dockerfile','tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
+        '/bin/sh -eu -c', '--junitxml=/tmp/h1-positive.xml',
+        'set -euo pipefail', 'git archive --format=tar HEAD | tar -x -C "$H1_CI_SOURCE"',
+        'chmod 0555 "$H1_CI_SOURCE"',
+        '--mount "type=bind,src=${H1_CI_SOURCE},dst=/repo,readonly"',
+        '/usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_positive.py /tmp/h1-positive.xml'))
+    assert 'src=${GITHUB_WORKSPACE}' not in real['run']
     pre=preflight[0][1];assert pre['if']=='matrix.index == 2' and not pre.get('continue-on-error',False)
     assert shlex.split(pre['run'])==['python','-m','pytest','-q','--tb=short','-p','scripts.ci_pytest_timing',
         'tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup',

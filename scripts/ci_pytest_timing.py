@@ -201,6 +201,39 @@ _H1_OWNED = {'tests/test_paid_initializer.py': {'cases': ('test_actual_linux_ini
 
 
 
+_H1_OWNED['tests/test_paid_provider_entry_linux.py'] = {
+    'cases': (
+        'test_actual_compiled_c_executor_model_and_original_result',
+        'test_compiled_fixture_data_assembles_against_real_wire_and_compilers',
+        'test_retained_output_canary_discriminator_uses_owned_fixed_leaves',
+        'test_retained_output_symlink_and_original_namespace_swap_refuse',
+        'test_unknown_process_settlement_preserves_disposable_namespace',
+        'test_executor_timeout_terminates_only_same_identity_once_and_consumes',
+        'test_truncated_http_fixture_announces_full_body_then_closes',
+        'test_model_cleanup_requires_exact_original_terminal_before_removal',
+        'test_executor_identity_retains_actual_popen_pid_and_start_scope',
+    ),
+    'functions': (
+        '_identity', '_fixture_output_namespace', '_fixture_owned_bytes',
+        '_assert_fixture_outputs_private', '_fixture_executor_identity',
+        '_communicate_fixture_executor', '_fixture_model_settled',
+        '_fixture_http_response', '_exclusive_home_fixture', '_source_stage',
+        '_request_material', '_publish_support',
+        'test_actual_compiled_c_executor_model_and_original_result',
+        'test_compiled_fixture_data_assembles_against_real_wire_and_compilers',
+        'test_retained_output_canary_discriminator_uses_owned_fixed_leaves',
+        'test_retained_output_symlink_and_original_namespace_swap_refuse',
+        'test_unknown_process_settlement_preserves_disposable_namespace',
+        'test_executor_timeout_terminates_only_same_identity_once_and_consumes',
+        'test_truncated_http_fixture_announces_full_body_then_closes',
+        'test_model_cleanup_requires_exact_original_terminal_before_removal',
+        'test_executor_identity_retains_actual_popen_pid_and_start_scope',
+        'observed_stat', 'stat_fixed', 'close_server', '__init__',
+        '__getattr__', 'communicate', 'poll', 'terminate', 'log_message', 'do_POST',
+    ),
+}
+
+
 def _h1_failure_metadata(nodeid,phase,*,error=None,crash=None):
     module=nodeid.split('::',1)[0]
     if module not in _H1_OWNED or phase not in ('collect','setup','call','teardown'):return None

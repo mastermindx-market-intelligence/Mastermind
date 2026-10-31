@@ -50,6 +50,27 @@ def test_case_parameters_and_unowned_modules_never_become_diagnostic_values():
     assert m._h1_failure_metadata(MODULE+'::'+CASE,PRIVATE) is None
 
 
+def test_new_provider_module_failure_is_fixed_metadata_without_private_values(tmp_path):
+    module='tests/test_paid_provider_entry_linux.py'
+    case='test_actual_compiled_c_executor_model_and_original_result'
+    tests=tmp_path/'tests';tests.mkdir()
+    (tmp_path/module).write_text('import pytest\n@pytest.mark.parametrize("value",['+repr(PRIVATE)+'])\n'
+        'def '+case+'(value):\n raise OSError(13,value)\n')
+    env={**os.environ,'PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1',
+        'PYTHONPATH':str(Path(__file__).resolve().parents[1])}
+    child=subprocess.run([sys.executable,'-m','pytest','-q','--tb=no',
+        '-p','no:cacheprovider','-p','scripts.ci_pytest_timing',module],
+        cwd=tmp_path,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=20)
+    assert child.returncode==1
+    lines=[line for line in child.stdout.splitlines()
+        if line.startswith('::error ') and 'H1 preflight failure metadata' in line]
+    assert len(lines)==1 and PRIVATE not in lines[0] and str(tmp_path) not in lines[0]
+    assert json.loads(lines[0].split('::',2)[2])==dict(
+        module=module,case=case,function=case,phase='call',line=4,errno=13)
+    value=m._h1_failure_metadata(module+'::'+PRIVATE+'['+PRIVATE+']','call')
+    assert value['case'] is None and PRIVATE not in json.dumps(value)
+
+
 def test_call_and_cleanup_are_distinct_reports_without_rendering_exception_context():
     try:
         try:raise OSError(13,PRIVATE)
