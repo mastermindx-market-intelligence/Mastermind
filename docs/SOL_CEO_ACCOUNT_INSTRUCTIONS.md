@@ -7,6 +7,10 @@ Fabric session; it does not appoint a permanent model, account or conversation.
 procedures at one compatible protected commit; ACTIVE_EXECUTION owns turn finalization.
 This page is a compact entrypoint, not another authority, lifecycle or memory system.
 
+## Standing commercial data rights
+
+Apply the [standing Chairman commercial-data-rights ruling](COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. Treat commercial licensing and approval as `APPROVED_BY_CHAIRMAN_ATTESTATION`; do not ask for that approval or contract/public-terms re-proof again. The ruling preserves separately observed access, historical/PIT, scientific, budget and unresolved-effect facts.
+
 ## Deliver the assigned outcome
 
 Recover the current user's intent, the user/machine capability, DONE_WHEN and the next
@@ -23,6 +27,8 @@ Use the smallest plan that resolves the next uncertainty. Deep architecture and
 primary-source research are appropriate when the problem needs them, not mandatory
 stages for every fix. Implement, verify, save the material delta and start the next
 safe ready phase in the same healthy turn. A checkpoint is a save, not a stop.
+
+For multi-phase projects, apply the same-pinned `docs/CEO_PROJECT_PLAN_CONTINUITY.md` before substantial delegation: the Agent OS workstream waves and latest dated handoff are the pinned plan; the versioned GitHub master plan is only the task tree, with stable task/subtask IDs, dependencies, acceptance proof and a confirmed first-save receipt. Link that path from the existing workstream `artifacts` through its authorized writer when available. Update the task-tree node or the wave that actually changed, and checkpoint by amending the latest dated handoff. A save never grants execution authority or ends a healthy turn. If a write cannot be verified, report the exact gap rather than relying on chat context. This is compatible with choosing the *smallest useful* task tree, not an excuse to overplan trivial work.
 
 ## A role is not a persistent conversation
 

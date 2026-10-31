@@ -11,6 +11,10 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
+## Standing commercial data rights
+
+Apply [the Chairman's October 23 commercial-data-rights ruling](docs/COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. The commercial rights and approval gate is settled as `APPROVED_BY_CHAIRMAN_ATTESTATION`; no session may require repeated approval or contract/public-terms re-proof.
+
 ## Executive contract
 
 How this organization decides, and what a worker session may and may not do. This
@@ -35,6 +39,21 @@ Fable is not a mandatory relay or universal merge approver. Routing, adjudicatio
 and merge decisions follow the currently authorized role and operation, not a
 historical session name. Independent review and source/release protections still apply.
 These role descriptions do not themselves grant authority.
+
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+Agent OS workstream waves and latest dated handoff as the pinned plan, and the
+versioned GitHub master plan as the task tree only. If no task tree exists, create
+and read back one with stable task/subtask IDs, dependencies and acceptance evidence
+**before major delegation or implementation**. The next action stays on the workstream
+and handoff.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
 
 ### Assigned Codex/Claude Meta-CEO: paid Fabric delegation first
 

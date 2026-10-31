@@ -84,7 +84,10 @@ fn main() {
             auth::executive_auth_status,
             auth::executive_context,
             auth::executive_submit,
-            auth::executive_status
+            auth::executive_status,
+            auth::executive_session_context,
+            auth::executive_session_reply,
+            auth::executive_session_references
         ])
         .run(tauri::generate_context!())
         .expect("tauri runtime error");

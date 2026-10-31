@@ -1,0 +1,19 @@
+{
+  "baseline_generation": "ac9acf0daf5a438934f3862afa02039734aa100812d4e040eda5966388817c3b",
+  "baseline_pick_sha256": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
+  "baseline_sequence": 22,
+  "baseline_source": "EXACT_VERIFIED_EXISTING_IMMUTABLE_SELECTED_GENERATION",
+  "changed_member": "ext/pick.py",
+  "changed_member_sha256": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
+  "live_effects_authorized": false,
+  "member_count": 95,
+  "native_publisher": "existing native_generation.py publish/select; never this staging helper",
+  "proposed_generation": "854dd5456c005f6385daecb6e93658025d59f94e496dd5f9374d7896d06eed87",
+  "protected_review_picker_sha256": "4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df",
+  "protected_source_commit": "fbb0c69818edeb4217cdc1b2f353df2f00cd70fc",
+  "protected_source_pr": 1797,
+  "schema": "mastermind.fabric_native_r28_gen22_interim_provenance.v1",
+  "stable_ext": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext",
+  "status": "SOURCE_ONLY_NOT_PUBLISHED_NOT_SELECTED",
+  "unchanged_members": 94
+}

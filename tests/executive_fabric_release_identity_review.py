@@ -282,8 +282,8 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '111c20b38b335741ad612b8f2fa69b6d672716d50d071286d978d6a4997ad495',
-    "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1711, 46, 49, 'int', '400'), (1711, 66, 69, 'int', '500')),
+    "sha256": '8a8e7e98b4563bf251c980aef81ebc8c47209ea73ec27f85e221e8f8eb754999',
+    "sites": ((101, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1739, 46, 49, 'int', '400'), (1739, 66, 69, 'int', '500')),
 }
 
 
@@ -291,8 +291,8 @@ REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
 # This exact token is the Root config-directory permission mode, not a UID.
 # Source, path, AST location and complete token must all match; scanner unchanged.
 REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
-    "sha256": 'd7d4e069e76e689f2d476c1ec1c7289f3e5c700c26e9f7a55e0db3044fdcdfdd',
-    "sites": ((339, 46, 51, 'int', '0o755'),),
+    "sha256": 'd667f7028932ff89502649543fa3699f6961e1df5a522a2ffb1fa91367376844',
+    "sites": ((347, 46, 51, 'int', '0o755'),),
 }
 
 
@@ -449,26 +449,32 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'e68f6df4d70ca6bc68260bfbd9b64d95a0209926ca70fb9dda9872915739093a',
+    'sha256': 'dbd0462bce4d33c049e18673638c0fff60f6525b5bf3611527bc5cb029b790a6',
     'sites': ((335, 24, 27, 'int', '501'),
-              (6535, 35, 37, 'int', '80'),
-              (6536, 50, 55, 'int', '0o755'),
-              (7073, 41, 46, 'int', '0o644')),
+              (6551, 35, 37, 'int', '80'),
+              (6552, 50, 55, 'int', '0o755'),
+              (7089, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
-    'sha256': 'aea09940df9475c571002309fa70eae88d19d2b2034b9f1a4700a3e86619534d',
-    'sites': ((55, 21, 24, 'int', '501'),),
+    'sha256': 'eabe51db9bb94dc3589b8d05a7f4bbe42799d179d8c8d26e6be534a68612c0ee',
+    'sites': ((60, 21, 24, 'int', '501'),),
 }
 
 
 # Fixed pre-census ancestor permission modes; not account UIDs. Only the
 # exact reviewed source, AST Constant and complete token qualify.
 REVIEWED_FILES['control_plane/executive_backup.py'] = {
-    'sha256': 'e7f236811c233322e82792c151c694076c81b19c0067f113c77f6a4d0d27cc8a',
-    'sites': ((3500, 39, 44, 'int', '0o711'),
-              (3502, 43, 48, 'int', '0o700'),
-              (3504, 39, 44, 'int', '0o755')),
+    'sha256': '058965ae78b61f072ba3720f877bac7b54538a6e06f296db7135217cf05721cd',
+    'sites': ((3505, 39, 44, 'int', '0o711'), (3507, 43, 48, 'int', '0o700'), (3509, 39, 44, 'int', '0o755')),
+}
+
+
+# Source-only stateless H1 packet: fixed outer byte length/permission mode and
+# native transport UID. Exact file hash, AST Constants and whole tokens only.
+REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
+    'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
+    'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
 }
