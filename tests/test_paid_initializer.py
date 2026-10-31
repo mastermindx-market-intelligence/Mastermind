@@ -926,11 +926,17 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         '--tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700',
         'tests/h1_ci_fixture/Dockerfile','tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
         '/bin/sh -eu -c', '--junitxml=/tmp/h1-positive.xml',
+        '--env MMX_H1_CONTROLLED_LINUX_FIXTURE=1',
+        '--junitxml=/tmp/h1-provider-entry.xml',
+        '/usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_provider_entry.py /tmp/h1-provider-entry.xml',
         'set -euo pipefail', 'git archive --format=tar HEAD | tar -x -C "$H1_CI_SOURCE"',
         'chmod 0555 "$H1_CI_SOURCE"',
         '--mount "type=bind,src=${H1_CI_SOURCE},dst=/repo,readonly"',
         '/usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_positive.py /tmp/h1-positive.xml'))
     assert 'src=${GITHUB_WORKSPACE}' not in real['run']
+    assert real['run'].count('-p scripts.ci_pytest_timing')==2
+    assert real['run'].index('require_positive.py /tmp/h1-positive.xml')<real['run'].index('title=H1 isolated initializer fixture proof')
+    assert real['run'].index('require_provider_entry.py /tmp/h1-provider-entry.xml')<real['run'].index('title=H1 isolated provider module fixture proof')
     pre=preflight[0][1];assert pre['if']=='matrix.index == 2' and not pre.get('continue-on-error',False)
     assert shlex.split(pre['run'])==['python','-m','pytest','-q','--tb=short','-p','scripts.ci_pytest_timing',
         'tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup',

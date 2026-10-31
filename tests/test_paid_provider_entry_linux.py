@@ -42,8 +42,15 @@ from tests.test_paid_glm_canonical import modules
 
 ROOT=Path(__file__).resolve().parents[1]
 NATIVE=ROOT/'ops/native_fabric/quota_continuity/candidate'
-linux_fixture=pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),
-                            reason='actual Linux CPython3.12 compiled process/custody fixture')
+def _controlled_linux_fixture_requested():
+    # This test-only selector requests the explicit disposable CI account; it
+    # is not host approval. Real startup/custody checks still run unchanged.
+    return (sys.platform=='linux' and sys.version_info[:2]==(3,12)
+            and os.environ.get('MMX_H1_CONTROLLED_LINUX_FIXTURE')=='1')
+
+
+linux_fixture=pytest.mark.skipif(not _controlled_linux_fixture_requested(),
+    reason='requires explicit controlled Linux CPython3.12 process/custody fixture')
 
 
 def _identity(info):

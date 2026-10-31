@@ -143,15 +143,22 @@ jobs:
             --tag mastermind-h1-noacl:${{ github.sha }} tests/h1_ci_fixture
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
+            --env MMX_H1_CONTROLLED_LINUX_FIXTURE=1 \
             --tmpfs /tmp:rw,mode=1777 \
             --tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700 \
             --mount "type=bind,src=${H1_CI_SOURCE},dst=/repo,readonly" \
             mastermind-h1-noacl:${{ github.sha }} \
             /bin/sh -eu -c '
               /usr/bin/python3.12 -B -m pytest -q --noconftest \
-                -p no:cacheprovider --junitxml=/tmp/h1-positive.xml \
+                -p no:cacheprovider -p scripts.ci_pytest_timing --junitxml=/tmp/h1-positive.xml \
                 tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
               /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_positive.py /tmp/h1-positive.xml
+              echo "::notice title=H1 isolated initializer fixture proof::exact required node passed once; zero skipped, failures or errors; CI fixture only"
+              /usr/bin/python3.12 -B -m pytest -q --noconftest \
+                -p no:cacheprovider -p scripts.ci_pytest_timing --junitxml=/tmp/h1-provider-entry.xml \
+                tests/test_paid_provider_entry_linux.py
+              /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_provider_entry.py /tmp/h1-provider-entry.xml
+              echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
       - name: Run repository test shard
