@@ -23,9 +23,10 @@ jobs:
   pytest_shards:
     name: pytest shard ${{ matrix.index }}
     runs-on: ubuntu-latest
-    # Retain protected master's bounded five-minute headroom for test setup.
-    # All three shards must still succeed within the finite 45-minute limit.
-    timeout-minutes: 45
+    # Keep all modules and the protected fan-in gate; hosted merge-group shard 0
+    # needs headroom beyond the observed 45-minute full-suite plus cleanup.
+    # 60 minutes stays inside the merge queue's 100-minute check response limit.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 3
