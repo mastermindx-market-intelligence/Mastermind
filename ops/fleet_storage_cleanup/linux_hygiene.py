@@ -231,6 +231,20 @@ def effect_volume_pair_ok(root_volume: dict, cache_volume: dict) -> bool:
     return root_volume["device"] == cache_volume["device"]
 
 
+def manager_effect_target_bound(root: Path, cache: Path) -> bool:
+    """Release HOLD: no approved inode-bound package-manager handoff exists.
+
+    A trusted pathname at preflight is not an atomic confinement of a later
+    third-party subprocess. A peer can rename/re-symlink it before the manager
+    opens the string path; a post-effect validation cannot undo a deletion.
+    Until an independently reviewed, executable FD/namespace confinement
+    contract is available, no external manager purge is permitted. Do not
+    enable this through an environment flag, host permission or timed retry.
+    Existing effect-path regressions use hermetic mocks of this safety gate.
+    """
+    return False
+
+
 def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
     """Only package-manager cache APIs; no arbitrary rm, /tmp or Git pruning."""
     # A prior uncertain manager effect is never a green calm-hour receipt.
@@ -272,6 +286,14 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
         before_root, before_cache = volume(Path("/")), volume(cache)
         if not effect_volume_pair_ok(before_root, before_cache):
             results.append({"cache": name, "state": "SKIPPED_UNVERIFIED_EFFECT_VOLUME"})
+            break
+        # The old path checks above do not pin the effective target to the
+        # subprocess. Refuse before PRE_EFFECT or any manager execution until
+        # the incumbent source authority qualifies an inode-bound handoff.
+        if not manager_effect_target_bound(root, cache):
+            results.append({"cache": name, "state": "HELD_UNBOUND_CACHE_TARGET",
+                            "reason": "manager_target_handoff_unproven",
+                            "effect_state": "NOT_APPLIED"})
             break
         marker = state / HOLD
         effect_id = f"{time.time_ns()}-{os.getpid()}"
@@ -422,6 +444,7 @@ def run(state: Path, root: Path, apply_safe_caches: bool) -> dict:
                           or (before.get("state") == "OK" and after.get("device") != before.get("device"))
                           or any(x.get("state") in ("FAILED", "EFFECT_UNVERIFIED",
                                                    "HELD_EFFECT_UNVERIFIED",
+                                                   "HELD_UNBOUND_CACHE_TARGET",
                                                    "MARKER_UNAVAILABLE",
                                                    "SKIPPED_UNVERIFIED_EFFECT_VOLUME",
                                                    "SKIPPED_MANDATORY_OBSERVATION_UNVERIFIED")
