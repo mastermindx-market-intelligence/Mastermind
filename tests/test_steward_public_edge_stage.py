@@ -467,3 +467,164 @@ def test_cli_refusal_is_fixed_and_does_not_echo_paths(tmp_path, capsys):
         "error": "SOURCE_DIRTY",
     }
     assert "very-private-name" not in out
+
+
+def _snapshot_bundle(output: Path):
+    rows = {}
+    for path in sorted(output.iterdir()):
+        info = path.stat()
+        rows[path.name] = (
+            path.read_bytes(),
+            info.st_mode,
+            info.st_mtime_ns,
+            info.st_size,
+        )
+    return rows
+
+
+def test_verify_reconciles_exact_bundle_without_mutating_output(tmp_path):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "staged"
+    subject.stage(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+    before = _snapshot_bundle(output)
+
+    result = subject.verify(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+
+    assert result["status"] == "STAGED_ALREADY_PRESENT"
+    assert result["source_commit"] == commit
+    assert result["source_tree"] == tree
+    assert _snapshot_bundle(output) == before
+
+
+def test_verify_absent_output_is_determinate_and_creates_nothing(tmp_path):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "missing"
+
+    result = subject.verify(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+
+    assert result["status"] == "OUTPUT_NOT_FOUND"
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("mutation", ["changed-file", "extra-file"])
+def test_verify_reports_determinate_artifact_mismatch(tmp_path, mutation):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "staged"
+    subject.stage(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+    if mutation == "changed-file":
+        (output / subject.CADDY_NAME).write_text("changed\n", encoding="utf-8")
+    else:
+        (output / "unexpected").write_text("extra\n", encoding="utf-8")
+
+    result = subject.verify(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+    assert result["status"] == "ARTIFACT_MISMATCH"
+
+
+def test_ambiguous_publish_is_reconciled_by_fresh_verify(tmp_path, monkeypatch):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "staged"
+    replace = os.replace
+
+    def publish_then_raise(source, destination):
+        replace(source, destination)
+        raise OSError("lost rename acknowledgement")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(subject.os, "replace", publish_then_raise)
+        with pytest.raises(subject.StageError, match="PUBLISH_EFFECT_UNKNOWN"):
+            subject.stage(
+                source_repo=repo,
+                accepted_commit=commit,
+                accepted_tree=tree,
+                output_dir=output,
+            )
+
+    result = subject.verify(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+    assert result["status"] == "STAGED_ALREADY_PRESENT"
+
+
+def test_cli_verify_is_public_and_nonmutating(tmp_path, capsys):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "staged"
+    subject.stage(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+    before = _snapshot_bundle(output)
+    code = subject.main(
+        [
+            "--mode", "verify",
+            "--source-repo", os.fspath(repo),
+            "--accepted-commit", commit,
+            "--accepted-tree", tree,
+            "--output-dir", os.fspath(output),
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert payload["ok"] is True
+    assert payload["status"] == "STAGED_ALREADY_PRESENT"
+    assert _snapshot_bundle(output) == before
+
+
+def test_verify_read_failure_is_effect_unknown_and_nonmutating(tmp_path, monkeypatch):
+    repo, commit, tree = _fixture_repo(tmp_path)
+    output = tmp_path / "staged"
+    subject.stage(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+    before = _snapshot_bundle(output)
+    open_file = subject.os.open
+
+    def fail_one_child(path, flags, *, dir_fd=None):
+        if dir_fd is not None and path == subject.CADDY_NAME:
+            raise OSError("readback unavailable")
+        if dir_fd is not None:
+            return open_file(path, flags, dir_fd=dir_fd)
+        return open_file(path, flags)
+
+    monkeypatch.setattr(subject.os, "open", fail_one_child)
+    result = subject.verify(
+        source_repo=repo,
+        accepted_commit=commit,
+        accepted_tree=tree,
+        output_dir=output,
+    )
+
+    assert result["status"] == "VERIFY_EFFECT_UNKNOWN"
+    assert _snapshot_bundle(output) == before
