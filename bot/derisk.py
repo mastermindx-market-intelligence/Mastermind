@@ -186,28 +186,40 @@ def _theme_drop(drivers: list | None) -> tuple[bool, str]:
     return False, ""
 
 
-def _distribution_escalation(pid: str) -> tuple[int, str]:
+def _distribution_escalation(pid: str) -> tuple[int, str, bool]:
     """W-I task 1 — DISTRIBUTION ESCALATOR. Read the pid's held book for distribution tells (crowding
-    + 3D/weekly-MACD bear + defensive-RS crossover) and return ``(severity_bump, reason)``. When
+    + 3D/weekly-MACD bear + defensive-RS crossover) and return ``(severity_bump, reason,
+    ledger_unavailable)``. When
     >= book_weight_escalate_frac of book weight sits in >=min_tells distributing names, bump +1.
 
     SHRINK-ONLY + degrade-safe: any failure (no holdings module, no price series, empty book) returns
-    ``(0, "")`` so the tripwire is byte-identical to today. The bump is composed via max() by the
-    caller — it can only ADD severity into the already-validated ladder, never un-cap. The reason
-    string names the tells (spec 1b: 'distribution: SMH crowd99+3D-MACD-bear ...')."""
+    ``(0, "", False)`` so the tripwire is byte-identical to today. The bump is composed via max() by
+    the caller — it can only ADD severity into the already-validated ladder, never un-cap. The reason
+    string names the tells (spec 1b: 'distribution: SMH crowd99+3D-MACD-bear ...').
+
+    The third element is LEDGER_UNAVAILABLE. Because this escalator is shrink-only, an unreadable
+    positions ledger silently WITHHOLDS a severity bump, and under-reaction is risk suppression just
+    as much as over-reaction is. A bare ``(0, "")`` would be indistinguishable from "the held book
+    is not distributing", so loss of authority is reported separately — never as an absence of
+    tells, and never as a fabricated bump this process has no evidence for."""
     try:
         from portfolio import position_log, distribution_tells
-        held = position_log.open_positions(pid if pid != "flagship" else None)
     except Exception:  # noqa: BLE001
-        return 0, ""
+        return 0, "", False
+    try:
+        held = position_log.open_positions(pid if pid != "flagship" else None)
+    except position_log.LedgerUnavailable as exc:
+        return 0, f"distribution: UNAVAILABLE — positions ledger unreadable ({exc.kind})", True
+    except Exception:  # noqa: BLE001
+        return 0, "", False
     if not held:
-        return 0, ""
+        return 0, "", False
     try:
         sc = distribution_tells.score(held)
     except Exception:  # noqa: BLE001
-        return 0, ""
+        return 0, "", False
     bump = int(sc.get("escalate_severity") or 0)
-    return (bump, sc.get("reason") or "") if bump > 0 else (0, "")
+    return (bump, sc.get("reason") or "", False) if bump > 0 else (0, "", False)
 
 
 def tripwire(pid: str, asof: str, *, regime: dict | None = None) -> dict:
@@ -271,12 +283,17 @@ def tripwire(pid: str, asof: str, *, regime: dict | None = None) -> dict:
     # stacking beyond the ladder's floor. A distribution read WITHOUT a hard confirmation lifts
     # severity to 1 (advisory) but does not on its own auto-cut — the hard-confirmation gate
     # (severity>=2) is unchanged, exactly as caution-alone never auto-cuts.
+    ledger_unavailable = False
     try:
-        dist_bump, dist_reason = _distribution_escalation(pid)
+        dist_bump, dist_reason, ledger_unavailable = _distribution_escalation(pid)
         if dist_bump > 0:
             severity = min(3, severity + dist_bump)
             if dist_reason:
                 reasons.append(dist_reason)
+        elif ledger_unavailable and dist_reason:
+            # No bump is invented from evidence we could not read — but the gap is NAMED, so a
+            # downstream reader can never mistake a silent withhold for a clean distribution read.
+            reasons.append(dist_reason)
     except Exception:  # noqa: BLE001
         pass
 
@@ -287,6 +304,7 @@ def tripwire(pid: str, asof: str, *, regime: dict | None = None) -> dict:
         "state": state,
         "gross_cap": rs.get("gross_cap"),
         "risk_state": rs,
+        "ledger_unavailable": ledger_unavailable,
     }
 
 
@@ -357,8 +375,20 @@ def derisk_flagship(asof: str | None = None, *, regime: dict | None = None, forc
     # positions had no derisk off-ramp at all, so the tripwire only ever targeted the smaller
     # conviction piece.  Extend to _DERISKED_SLEEVES = {conviction, leadership}.
     # Subtract-only invariant preserved: we only trim/exit, never add.
-    held = [p for p in position_log.open_positions()
-            if (p or {}).get("sleeve") in _DERISKED_SLEEVES]
+    # HELD-RISK EVIDENCE GATE. "flat" is a positive claim that the book carries NO held risk. When
+    # the lifecycle ledger is unreadable this process can no longer make that claim, and the old
+    # corrupt-reads-as-empty path turned exactly that loss of authority into a silent no-op cut.
+    # Report the outage instead — and do NOT cut from evidence we do not have (the paper account
+    # proves what is held now, never when it opened or at what price, so a cut sized from it would
+    # fabricate lifecycle). Freeze, surface, let the operator repair the ledger.
+    try:
+        held = [p for p in position_log.open_positions()
+                if (p or {}).get("sleeve") in _DERISKED_SLEEVES]
+    except position_log.LedgerUnavailable as exc:
+        _unavailable = {**out, "action": "unavailable", "ledger_unavailable": True,
+                        "error": f"{exc}"[:240]}
+        _write_artifact(asof, "flagship", _unavailable)
+        return {**_unavailable, "skipped": "positions_ledger_unavailable"}
     if not held:
         _write_artifact(asof, "flagship", {**out, "action": "flat"})
         return {**out, "skipped": "flat"}
@@ -538,8 +568,20 @@ def derisk_heavyweight(asof: str | None = None, *, regime: dict | None = None,
 
     # Held Heavyweight names, scoped to its pid + its single "heavy" sleeve. Subtract-only invariant
     # preserved: we only trim/exit, never add.
-    held = [p for p in position_log.open_positions(_HW_PID)
-            if (p or {}).get("sleeve") in _HEAVYWEIGHT_SLEEVES]
+    # HELD-RISK EVIDENCE GATE. "flat" is a positive claim that the book carries NO held risk. When
+    # the lifecycle ledger is unreadable this process can no longer make that claim, and the old
+    # corrupt-reads-as-empty path turned exactly that loss of authority into a silent no-op cut.
+    # Report the outage instead — and do NOT cut from evidence we do not have (the paper account
+    # proves what is held now, never when it opened or at what price, so a cut sized from it would
+    # fabricate lifecycle). Freeze, surface, let the operator repair the ledger.
+    try:
+        held = [p for p in position_log.open_positions(_HW_PID)
+                if (p or {}).get("sleeve") in _HEAVYWEIGHT_SLEEVES]
+    except position_log.LedgerUnavailable as exc:
+        _unavailable = {**out, "action": "unavailable", "ledger_unavailable": True,
+                        "error": f"{exc}"[:240]}
+        _write_artifact(asof, _HW_PID, _unavailable)
+        return {**_unavailable, "skipped": "positions_ledger_unavailable"}
     if not held:
         _write_artifact(asof, _HW_PID, {**out, "action": "flat"})
         return {**out, "skipped": "flat"}
