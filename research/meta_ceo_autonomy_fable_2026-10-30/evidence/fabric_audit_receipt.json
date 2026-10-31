@@ -1,0 +1,21 @@
+{
+  "schema": "research_evidence_record.v1",
+  "scope": "Bounded research audit, not canonical Executive Job or final pack review",
+  "run_id": "autonomy-exec-seam-audit-20261030-01",
+  "root_id": "meta-ceo-autonomy-census-20261030",
+  "parent_id": "web-autonomy-research-principal-20261030",
+  "observed_state": "TERMINAL",
+  "rc": 0,
+  "signal": "ok",
+  "root_verified": true,
+  "controller_return": "RECORDED",
+  "response_bytes": 20811,
+  "response_sha256": "8ac5d68c2c0fb537abb809bae213b4079edf531bf1d713cfab7b3fe27bf89169",
+  "digest_scope": "exact complete adapter response; not cryptographic artifact or served-model attestation",
+  "raw_report_accepted": false,
+  "parent_disposition": "Advisory source map consumed; overbroad assertions corrected against source. No wholesale acceptance or pending replacement.",
+  "adjudication_file": "../08_FABRIC_SOURCE_AUDIT_ADJUDICATION.md",
+  "retry_allowed": false,
+  "watcher_armed": false,
+  "production_effects": false
+}

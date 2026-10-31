@@ -1,0 +1,429 @@
+{
+  "source_commit": "bb85b429f2ffffd38408080ce4df7d6378c34100",
+  "source_path": "research/EXECUTIVE_ECOSYSTEM_COMPLETION_CAPABILITY_LEDGER_2026-10-17.md",
+  "interpretation": "Frozen baseline extraction, not fresh classification or a replacement ledger",
+  "capabilities": [
+    {
+      "id": "E1",
+      "capability": "Control service + SQLite lifecycle (Jobs, Attempts, Workers, Events, process generations, quota classes)",
+      "baseline_classification": "`PROVEN_LIVE`",
+      "owner": "`control_plane/`, launchd `com.mastermind.executive.control`",
+      "baseline_evidence": "pid 86128 @91c1cac5; 21 COMPLETED jobs; 316 events",
+      "effect_risk": "reads are safe; all writes only through ingress/broker",
+      "original_completion_test": "`launchctl list` shows control running; COMPLETED count \u2265 21 after the next operation"
+    },
+    {
+      "id": "E2",
+      "capability": "Typed LOST reconciliation across supervisor restart (no duplicate effect)",
+      "baseline_classification": "`PROVEN_LIVE`",
+      "owner": "control supervisor",
+      "baseline_evidence": "11 LOST attempts, every reason `process identity absent during supervisor restart`, each followed by a COMPLETED re-attempt (e.g. JOB-025 LOST 04:01:24Z \u2192 COMPLETED 04:02:15Z)",
+      "effect_risk": "none; this is the recovery path the mission must keep",
+      "original_completion_test": "next restart yields LOST\u2192COMPLETED without a second result row"
+    },
+    {
+      "id": "E3",
+      "capability": "CEO ingress app socket (`ceo-ingress.sock`, launchd `CeoIngress`)",
+      "baseline_classification": "`PROVEN_LIVE` (projection)",
+      "owner": "`control_plane/executive_ceo_ingress.py`, `ceo-submit-state-v1.json`",
+      "baseline_evidence": "`ceo_ingress_app_armed true`, ACL/binding/topology valid (10-12)",
+      "effect_risk": "none for status reads",
+      "original_completion_test": "`ceo_intent_status` answers through the gateway for a known intent id"
+    },
+    {
+      "id": "E4",
+      "capability": "CEO **submit** execution arm (new intents become Jobs)",
+      "baseline_classification": "`DARK_OR_DISCONNECTED`",
+      "owner": "`ops/executive_os/autonomy-control.sh ceo-submit-arm --expected-sha <installed>` (root)",
+      "baseline_evidence": "`ceo_submit_armed false`, state `CEO_SUBMIT_DISARMED` 2026-10-12; CHECKPOINT 2026-10-18 04:2xZ (seat 873aabd3; plan \u00a76): still disarmed. S2 `08d78873` is installed, but acceptance REFUSED, so nothing was armed.",
+      "effect_risk": "arming makes every authenticated submit effectful; coexistence law `DEC:FIRST-WEB-CEO-ROOT-BINDS-THE-ARMED-OPERATOR-HARNESS`; **security/auth \u2192 independent review before arm**",
+      "original_completion_test": "an authenticated `submit_ceo_intent` yields a QUEUED Job whose `ceo-intent` id is visible via `ceo_intent_status`"
+    },
+    {
+      "id": "E5",
+      "capability": "COO autonomy + operator-harness arms (decomposition, planner children, worker harness)",
+      "baseline_classification": "`DARK_OR_DISCONNECTED`",
+      "owner": "`autonomy-control.sh arm` (root) gated by `acceptance_passed`, `gate_b_passed`, `provider_readiness_passed`, `runtime_quiescent`",
+      "baseline_evidence": "all four predicates `false` (10-15 22:43Z); `coo_autonomy_armed false`, `coo_operator_harness_armed false`, `worker_operator_harness_armed false`; CHECKPOINT 2026-10-18 04:2xZ (seat 873aabd3; plan \u00a76): NOT ARMED. `acceptance_passed` is still false (the S2 acceptance was refused at 04:09Z). Arm also enforces the 30-min readiness margin, and the one passing receipt lapsed for that purpose at 04:26:45Z.",
+      "effect_risk": "arming starts provider-billed workers; must follow E6 and F1",
+      "original_completion_test": "`autonomy-state-v1.json` `state ARMED` at the installed SHA with all predicates `true`"
+    },
+    {
+      "id": "E6",
+      "capability": "Acceptance maintenance of the installed release",
+      "baseline_classification": "`PARTIAL` (acceptance BLOCKED at CHECKPOINT 2026-10-18 04:2xZ)",
+      "owner": "`ops/executive_os/acceptance_maintenance.py`, `acceptance.sh` (root); production owner confirms install/readiness",
+      "baseline_evidence": "`91c1cac5` directory holds baseline/descriptor/inventory/preparing/prestate; `preparing.json` schema `mastermind.executive_acceptance_maintenance/supersede_unstarted_v1`; descriptor: predecessor `25c4b792`, successor `91c1cac5`, superseded unstarted `84c8a09d`, frozen base `7cff784b`, root `JOB-003` (root event 20), terminal `JOB-006` / `ATT-f036984f\u2026` (marker event 56) carried, template proof `JOB-024`, worker `codex-01`, quota `codex-native`; **no receipt**; last receipt `25c4b792`; CORRECTION 2 (2026-10-17 13:5xZ, seat 873aabd3): no acceptance has run since `25c4b792` (2026-10-11 21:07Z); the acceptance preflight `readiness.validate_receipt_file` needs a passing readiness receipt with \u226530 min margin and the live `provider-readiness-v2.json` is FAILED (`provider_turn_failed`, 2026-10-12T07:08:21Z), so acceptance cannot run until the human credential rotation (plan \"Human gate (Lane R)\") and one `--verify-ready` pass; the prepared `91c1cac5` descriptor stays NOT_STARTED with its bundle never edited and is superseded as unstarted by a new preparation against successor S' = current protected master head (`ee0f0d9b` after #1571, or newer at install time): `acceptance_maintenance.py --predecessor-sha 25c4b7923734392b1013afae179966985819d847 --successor-sha S' --root-job-id JOB-003 --carry-terminal-dispatch --supersede-unstarted-sha 91c1cac5a20a01f4bf1ac9e92e55613fd4640e1f --superseded-descriptor-sha256 91695ef2a4e89f8ca8c7ff65950808a7d38069542d3551b15bb0379c0c2d5a80` (canonical JSON digest, `am.digest(descriptor)`; a file-bytes sha256 is the wrong convention), then `install.sh S'`, one `--verify-ready`, `acceptance.sh` once; CHECKPOINT 2026-10-18 04:2xZ (seat 873aabd3; plan \u00a76): S' = S2 = `08d78873`. The supersede was prepared with descriptor `6594613b\u2026d906`. The one same-generation `--verify-ready` PASSED at 03:59:35Z with the credential unchanged. Install SUCCEEDED at 04:08Z. `acceptance.sh` at 04:09Z REFUSED fail-closed with 'control account directory group set drifted' (`acceptance.py:1053`): gid 470 `_mastermind_minimax` contains `_mastermind_exec`, but no `fabric_attended_probe` stanza is staged (row F3). The receipt (expires 04:56:45Z) fell below the 30-min margin at 04:26:45Z, so the canary is spent. There is no acceptance receipt for S2.",
+      "effect_risk": "irreversible host operation; the mission requires independent review for it; the prepared bundle **binds `JOB-003`** \u2014 cancelling or duplicating that root invalidates the lineage, so the acceptance is recovered as prepared, never re-prepared; CHECKPOINT 2026-10-18: a further canary needs the Chairman's word. Never strip the group, weaken the check or hand-edit `control.json`. The Chairman ruling is (a) finite publication + `finite-control-stage`, then one canary \u2192 acceptance \u2192 arm, or (b) hold S2 installed-unaccepted.",
+      "original_completion_test": "receipt for the installed SHA under `/var/db/mastermind-executive/control/acceptance` **and** `acceptance_passed true`"
+    },
+    {
+      "id": "E7",
+      "capability": "Release coherence across services",
+      "baseline_classification": "`BROKEN` (mixed releases; not re-read after the 2026-10-18 S2 install)",
+      "owner": "release owner + `ops/executive_os/install.sh` (root)",
+      "baseline_evidence": "control/mcp/privileged/worker plist `91c1cac5`; relays `326c8469`; tunnel `a858ac24`; autonomy-state names `1a8698cb`; master `a552a5e5`; CORRECTION 2 (2026-10-17 13:5xZ, seat 873aabd3): protected master head is now `ee0f0d9ba71d76dbc8144f56f3566a1f9dc70a71` (#1571 merged; or newer at install time); the next install successor is S' = current master head from a FRESH clone with a fresh `os_release_assets` prepare and fresh install-inputs (dir 0700 root:wheel; `control-before.json`, `control-successor-input.json`, `worker-before.json` 0400; successor input = the live `control.json` with `proof_base_sha` \u2192 S' and `proof_source_repository` \u2192 `/var/db/mastermind-executive/control/admin-checkout/S'`); the clean clone `Mastermind-ad125292` and the `os-web-assets/codex01-ad125292` bundle are STALE for ordinary install mode (`install_source_policy` requires checkout HEAD == local origin/master == expected sha); install leaves services stopped and nothing host-mutating happens before the Lane R human gate clears; CHECKPOINT 2026-10-18 04:2xZ (seat 873aabd3; plan \u00a76): install of S2 `08d78873` SUCCEEDED at 04:08Z. `start-readside` at 04:17Z runs control (pid 78990), sol-state-relay (pid 78959) and mcp from `08d78873`; the `worker.codex` launchd job is ABSENT (preserved). The checkpoint did not cover the agent-relay and tunnel releases, and no release is accepted, so the completion test is still unmet.",
+      "effect_risk": "a partial reinstall can split relay identity from control; never restart an unrelated service to \"fix\" it",
+      "original_completion_test": "every `com.mastermind.executive.*` ProgramArguments path resolves to one release SHA that equals the accepted installed SHA"
+    },
+    {
+      "id": "E8",
+      "capability": "Historical queued roots JOB-002 (Phase 1C-A proof receipt, codex-native, attempt 1/3 after LOST), JOB-003 and JOB-013 (read-only SUMMON / post-#1191 acceptance-review aggregation roots, codex-coo)",
+      "baseline_classification": "`PARTIAL` (unconsumed, not duplicated)",
+      "owner": "control lifecycle; original parents (ceo-intents `auto-84df0a25\u2026`, `auto-640728df\u2026`)",
+      "baseline_evidence": "QUEUED since 2026-10-03/10-04; `JOB-003` is the bound root of the prepared `91c1cac5` acceptance (E6) and is consumed by that acceptance, never cancelled; `operator_harness_armed false` blocks codex-coo placement",
+      "effect_risk": "**creating a replacement root duplicates work the brief forbids**",
+      "original_completion_test": "each reaches COMPLETED with `result_json` consumed by its original parent, **or** a recorded lawful disposition (`cancel_requested_at_ms` + reason) \u2014 never a new root for the same objective"
+    },
+    {
+      "id": "E9",
+      "capability": "Planner child launch under a sealed grant (`launch_spec.effective_grant_digest`)",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "`control_plane/executive_worker_broker.py` `_LAUNCH_SPEC_FIELDS`",
+      "baseline_evidence": "JOB-006 FAILED (`RemoteBrokerError: launch_spec has unknown fields: ['effective_grant_digest']`) under an older broker; installed `91c1cac5` broker **accepts** the field (6 references)",
+      "effect_risk": "none until E5 arms",
+      "original_completion_test": "a planner child under JOB-003 (or the next root) reaches RUNNING with no `BrokerProtocolError`"
+    },
+    {
+      "id": "E10",
+      "capability": "COO attention inbox",
+      "baseline_classification": "`PARTIAL`",
+      "owner": "`control_plane/executive_inbox.py --root /var/db/mastermind-executive/control/db`",
+      "baseline_evidence": "20 items: 19 `unresolved_next_actions` (\"Supervisor may run the persisted validation command\"), 1 `job_failed` (JOB-006); degraded: boot packet not collected",
+      "effect_risk": "none for reads",
+      "original_completion_test": "`unresolved_next_actions` count falls to 0 through validation runs or recorded dispositions; `degraded` list empty"
+    },
+    {
+      "id": "E11",
+      "capability": "Boot packet / Chairman-cognition macro grounding",
+      "baseline_classification": "`PARTIAL`",
+      "owner": "`control.json` macro root (install-inputs, root) + `control_plane/ceo_boot_packet.py resolve_macro_root`",
+      "baseline_evidence": "inbox grounding macro root/sha `null`; host `macro-sources/88804ed7` is behind macro main `1aeaf687`",
+      "effect_risk": "hand-editing `control.json` is forbidden (sealed config) \u2014 goes through the install path",
+      "original_completion_test": "inbox `grounding.macro_sha` equals a current macro `main` ancestor and `boot packet not collected` is absent"
+    },
+    {
+      "id": "E12",
+      "capability": "Worker broker quota classes / capability policies",
+      "baseline_classification": "`BUILT_NOT_PROVEN` (no live worker)",
+      "owner": "`worker_quota_classes` rows; policies `2026-09-22.native-claude-admission-p0`, `2026-10-11.native-return-host-source`; profiles `sealed.worker.write.no-extensions.v1`, `operator.appserver.readonly.docs-mcp.native-helper.v1`",
+      "baseline_evidence": "7 `AVAILABLE` rows for `codex-01` (gpt-5.6-sol, xhigh, harness 0.159.2)",
+      "effect_risk": "none until F1",
+      "original_completion_test": "one attempt under each used profile reaches COMPLETED post-arm"
+    },
+    {
+      "id": "F1",
+      "capability": "`codex-01` service worker (`worker.codex` plist, codex 0.159.2, uid 451 `_mastermind_worker`)",
+      "baseline_classification": "`DARK_OR_DISCONNECTED` (unchanged at CORRECTION 2, 2026-10-17 13:5xZ)",
+      "owner": "launchd + `config/worker-codex.json` + `provider-readiness-v2.json`",
+      "baseline_evidence": "plist at `91c1cac5` but **disabled**; worker row ONLINE is stale (no attempt since 10-12); CORRECTION 2 (2026-10-17 13:5xZ, seat 873aabd3, read-only): `provider-readiness-v2.json` passed false, refusal `provider_turn_failed`, observed_at 2026-10-12T07:08:21Z, credential and readiness deadline 2026-10-12T08:07:01Z, expected_credential_kind `device-auth`; inference canary exit_code 1, timed_out false, result_valid false, model gpt-5.6-sol, codex 0.159.2, provider_error_terms `[\"capacity\",\"model\"]`, provider identity refusal none, forced workspace id not applied (a provider capacity/model-availability turn failure, not an identity failure); PASSING receipts renewed about hourly by device revalidation from 2026-10-03T11:46Z to the last passing receipt 2026-10-12T04:30:43Z, chain broken at the 07:08Z failed canary; slot `codex-01` (`provider_worker_slots.py`) default_credential_kind service-account, workspace_binding_class company-workspace-admin-attested, oauth_seat_ref empty (no Multilogin seat) \u2014 the Oct 3\u201312 chain ran on the device-auth FALLBACK kind; every automated requalification route refuses on the failed receipt (`readiness_receipt_not_passing` from classify_device_revalidation / validate_revalidation_predecessor_document / classify_refresh_eligibility; `requalification_identity_continuity_unproven` from classify_terminal_requalification, a route for the reviewed 0.147.0 \u2192 0.159.2 upgrade only; `drift_requalification_credential_changed` from classify_company_device_drift_requalification; current-pin recovery needs `/var/db/mastermind-executive/provider-recovery/current-pin/grant.json` and the release ships no ordinary grant creator); `provision-worker-auth.sh` ordinary reuse returns 2 and dispatch fails closed (exit 65, \"existing provider readiness receipt is stale or invalid\"); CHECKPOINT 2026-10-18 04:2xZ (seat 873aabd3; plan \u00a76): #1591 added the explicit same-generation admission, which gave the one PASSING `--verify-ready` at 03:59:35Z (codex 0.159.2 pin `16593cc2\u2026`, credential UNCHANGED, no rotation). The receipt expires at 04:56:45Z and was spent without acceptance or arm. The `worker.codex` launchd job is ABSENT (preserved). State unchanged.",
+      "effect_risk": "enabling starts a provider-billed process; `operator_harness_armed false` stays until E5; CORRECTION 2: the only lawful recovery is explicit credential rotation with an enrollment mode \u2014 EXACT_HUMAN_GATE for the Chairman / production owner (plan \"Human gate (Lane R)\"); the seat never runs logout/login; the Oct 12 terms were capacity/model, so a rotation alone may not clear a provider-capacity condition and the single fresh canary must be spent deliberately",
+      "original_completion_test": "`launchctl print system/com.mastermind.executive.worker.codex` running and `heartbeat_at_ms` advancing on a live attempt \u2014 CORRECTION 2 (2026-10-17 13:5xZ): completion now also requires a passing readiness receipt (one `--verify-ready` after the human rotation, \u226530 min margin) **and** a successful acceptance on successor S'"
+    },
+    {
+      "id": "F2",
+      "capability": "Personal-Pro realms `codex-pro-01/02/03`",
+      "baseline_classification": "`PARTIAL`",
+      "owner": "launchd plists + `provider-readiness-codex-pro-0N-v2.json` + attestations 0.147.0",
+      "baseline_evidence": "services disabled; pro02/pro03 READY receipts expired 2026-10-10T23:30Z; pro01 `ENROLLED_NOT_READY` (WS P3); CORRECTION 2 (2026-10-17 13:5xZ, seat 873aabd3): codex-pro-01 receipt FAILED `process_failed` 2026-10-09T04:28Z; codex-pro-02/03 passing receipts EXPIRED 2026-10-10T23:30Z (confirmed)",
+      "effect_risk": "re-enrollment is a human/provider ceremony \u2014 never automatic",
+      "original_completion_test": "fresh in-validity readiness receipts and running services"
+    },
+    {
+      "id": "F3",
+      "capability": "Native Claude worker `claude8-native-01` + `claude-minimax-finite-01`",
+      "baseline_classification": "`BUILT_NOT_PROVEN` (new completion blocker, CHECKPOINT 2026-10-18 04:2xZ)",
+      "owner": "`config/worker-claude8-native-01.json`, attestations; #1560 finite native enrollment (merged); #1563 stages inactive finite initial admission (merged; GitHub `mergedAt` 2026-10-17T23:57:29Z, the seat brief says 03:04Z); host publication chain `finite_definition_publication.py` \u2192 `autonomy_control.py finite-control-stage`",
+      "baseline_evidence": "configs and attestations present; no attempt rows; CHECKPOINT 2026-10-18 04:2xZ (seat 873aabd3; plan \u00a76): the finite lane registered the finite worker principals on the host on 2026-10-14 at 19:57 (gid 470 `_mastermind_minimax`, with `_mastermind_exec` a member). The host publication chain was never run: `control.json` has no `fabric_attended_probe` stanza and `FINITE_DEFINITION_DIR` `config/fabric-minimax-finite-01` is absent.",
+      "effect_risk": "duplicate enrollment or a second admission plane; **new completion blocker:** registered-but-unstaged principals make acceptance of ANY release refuse ('control account directory group set drifted') until the finite definition is published and staged or the Chairman rules. Never strip the group, weaken the check or hand-edit `control.json`.",
+      "original_completion_test": "one Job placed on this worker's quota class COMPLETES; exactly one enrollment record; and, first, the `fabric_attended_probe` stanza is staged through `finite-control-stage` (or the Chairman rules), so that acceptance no longer refuses on group drift"
+    },
+    {
+      "id": "F4",
+      "capability": "Subagent Fabric kit (`fabric_task.py`, `pick.py`, `remote_sub.sh`, `pools.yaml`, `pool_ledger.py`)",
+      "baseline_classification": "`PROVEN_LIVE` (adapter usable; hosts reachable)",
+      "owner": "handoff kit `meta-ceo-b-2026-09-08/ext` + `orch/fabric/pools.yaml`",
+      "baseline_evidence": "`fabric_task.py --help` (needs the kit `ext` dir on `sys.path`); hosts m1/mb/ubuntu1/ubuntu2/mmx-ubuntu0 reachable 10-17; `GROK_EXHAUSTED`, `CODEX_EXHAUSTED`, `minimax_weekly_catchup true`",
+      "effect_risk": "shared pools/quotas; **never edit `pools.yaml`/`pick.py`/`RELAUNCH_QUEUE.txt`**",
+      "original_completion_test": "one `request` \u2192 RUNNING \u2192 result artifact read by this seat"
+    },
+    {
+      "id": "F5",
+      "capability": "Executive \u2194 Fabric bridge (`control_plane/executive_fabric_bridge_broker.py`, sealed assignment snapshot)",
+      "baseline_classification": "`DARK_OR_DISCONNECTED`",
+      "owner": "Executive Fabric arm (brief: new CEO submissions disarmed through it)",
+      "baseline_evidence": "code at `a552a5e5` with seal/uid-sweep checks; no live assignment observed",
+      "effect_risk": "a bridged placement is an effect on shared Fabric capacity",
+      "original_completion_test": "one Job placed through the bridge returns a sealed snapshot and a retained result"
+    },
+    {
+      "id": "F6",
+      "capability": "Remote worker gateway for Linux hosts (`ops/executive_os/remote_worker_gateway*.py`, systemd templates)",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "release owner + host owner",
+      "baseline_evidence": "source present; gateway health on hosts not inspected",
+      "effect_risk": "starting it is host-effectful",
+      "original_completion_test": "gateway health on one Ubuntu host and one attempt placed there"
+    },
+    {
+      "id": "F7",
+      "capability": "Stateless MCP for the private Fabric gateway + bounded result paging",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "#1543 (merged); **#1566 / #1536 open, Sol writer**",
+      "baseline_evidence": "open PRs green, unreviewed, updated 10-17",
+      "effect_risk": "duplicating Sol's lane",
+      "original_completion_test": "one oversized retained result paged end-to-end through the gateway"
+    },
+    {
+      "id": "G1",
+      "capability": "Executive MCP v3 gateway `web_ceo_v3` (127.0.0.1:8443, Auth0 RS256, scopes `read` / `intent.submit`)",
+      "baseline_classification": "`PROVEN_LIVE`",
+      "owner": "`integrations/executive_mcp/`, `ops/executive_os/executive_mcp_entry.py`, launchd `\u2026executive.mcp`",
+      "baseline_evidence": "pid 85849 @91c1cac5; unauthenticated 403 locally, 401 at edge",
+      "effect_risk": "none for reads",
+      "original_completion_test": "authenticated `/workspace/mission/current` returns 200 with a schema-valid body"
+    },
+    {
+      "id": "G2",
+      "capability": "Workspace read routes (`/workspace/{programs,work,mission,mission/v3,mission/v4,result,window,plan}/current`)",
+      "baseline_classification": "`PROVEN_LIVE` (auth gate observed; authenticated payload not exercised by this seat)",
+      "owner": "same",
+      "baseline_evidence": "edge 401 / local 403",
+      "effect_risk": "none",
+      "original_completion_test": "as G1 for each route"
+    },
+    {
+      "id": "G3",
+      "capability": "**OS executive transport** `/os/executive/{context,submit,status}` (`OsExecutiveTransportApp` \u2192 inner `submit_ceo_intent` / `ceo_intent_status`)",
+      "baseline_classification": "`DARK_OR_DISCONNECTED`",
+      "owner": "install config (root): `executive-mcp.json` needs `os_executive_transport: true`, `os_executive_resource == OS_EXECUTIVE_RESOURCE`, `os_commission_port`; validated by `executive_mcp_entry.validate_os_executive_resource` / `build_os_commission_client`; runbook `docs/runbooks/mastermind-os-public-launch.md`; design `research/MASTERMIND_OS_EXECUTIVE_TRANSPORT_V1.md`",
+      "baseline_evidence": "source + tests at `a552a5e5`; installed config lacks the three keys; local **404**",
+      "effect_risk": "enabling exposes the submit path to authenticated web principals \u2014 **security/auth change \u2192 one independent review**; depends on E4 for effect",
+      "original_completion_test": "unauthenticated POST `/os/executive/context` returns **401 not 404** locally and via edge; an authenticated submit yields a `ceo_intent_status` the app can read"
+    },
+    {
+      "id": "G4",
+      "capability": "OS session transport `/os/executive/session/{context,send,reply}` (`InstalledSessionBridgeClient`)",
+      "baseline_classification": "`DARK_OR_DISCONNECTED`",
+      "owner": "same gate + `integrations/session_bridge/installed.py` (`ATTENDED_FABRIC_SOURCE_STATUS.md`: uninstalled, no production backend)",
+      "baseline_evidence": "source + tests; 404 live",
+      "effect_risk": "a second dialogue carrier if composed outside the installed bridge",
+      "original_completion_test": "`session/context` 401 not 404; one send\u2192reply round trip consumed in the app"
+    },
+    {
+      "id": "G5",
+      "capability": "Studio commission owner (`os_commission_port`, root-sealed `config/os-commission-publication.json`, `ops/executive_os/os_commission_auth_entry.py`, `integrations/studio_direct_mcp/commission-service.mjs`)",
+      "baseline_classification": "`BUILT_NOT_PROVEN` (source) / **not installed**",
+      "owner": "installer flags `--enable-repository-workspaces --os-commission-config-sha256 <sha256>` (runbook \u00a7Root-sealed Studio opt-in)",
+      "baseline_evidence": "config absent from `config/`; Studio MCP connector in this seat answers `Session not found`",
+      "effect_risk": "commission preparation writes `research/executive_commissions/COMMISSION.md` through the incumbent Git publisher \u2014 a source writer",
+      "original_completion_test": "sealed config present; loopback `/os-internal/commission/prepare` answers; one commission prepared and committed by the incumbent publisher"
+    },
+    {
+      "id": "G6",
+      "capability": "Public edge (chisel `R:127.0.0.1:<relay>:127.0.0.1:8443` \u2192 VPS Caddy `os_public_edge.caddy.template`)",
+      "baseline_classification": "`PARTIAL`",
+      "owner": "`ops/executive_os/os_tunnel_entry.py`, `os_public_edge.py --relay-port`",
+      "baseline_evidence": "`/os/` 200, `/workspace/*` 401; GET allowlist + POST `/os/executive/{context,submit,status}` present in template; tunnel reconnects (last connect 10-16 21:41)",
+      "effect_risk": "VPS config is a separate host effect",
+      "original_completion_test": "POST `/os/executive/context` via edge returns the gateway's own status once G3 is installed"
+    },
+    {
+      "id": "G7",
+      "capability": "OS web-asset release (`ops/executive_os/os_release_assets.py prepare/import`, sealed v1/v2 receipts)",
+      "baseline_classification": "`PROVEN_LIVE`",
+      "owner": "release owner",
+      "baseline_evidence": "deployed bundle carries the Launch binding (`VITE_MM_EXECUTIVE_RESOURCE`, `intent.submit`); receipts through 10-15 21:13",
+      "effect_risk": "none",
+      "original_completion_test": "v2 receipt digest equals the served bundle bytes"
+    },
+    {
+      "id": "G8",
+      "capability": "Claude Executive MCP adapter (node 127.0.0.1:8444 \u2192 8443)",
+      "baseline_classification": "`BUILT_NOT_PROVEN`; Fable enrollment with `intent.submit` **`REJECTED_BY_DESIGN`** (`integrations/claude_executive_mcp/README.md`)",
+      "owner": "adapter owner",
+      "baseline_evidence": "listener up; \"TRANSPORT BUILT / ENROLLMENT HELD / NO COO MUTATION AUTHORITY\"",
+      "effect_risk": "enrolling Fable to submit would create a second principal path",
+      "original_completion_test": "read-scope call returns a workspace projection; no submit scope on Fable's client"
+    },
+    {
+      "id": "A1",
+      "capability": "Web app served at `/os/` (React 19.3 / TS / Vite 8.3)",
+      "baseline_classification": "`PROVEN_LIVE` (serving)",
+      "owner": "`app/mastermind_os/`",
+      "baseline_evidence": "200, bundle `index-dP5lZ6yG.js`",
+      "effect_risk": "none",
+      "original_completion_test": "authenticated load renders mission/programs with live data (browser proof)"
+    },
+    {
+      "id": "A2",
+      "capability": "Meta-CEO office, conversation window, inbox, knowledge, fabric inspectors, product-acceptance panel (`src/meta-ceo`, `src/conversations`, `src/inbox`, `src/fabric`, `src/product-acceptance`)",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "same",
+      "baseline_evidence": "source + vitest files present; `node_modules` absent in W (needs `npm ci --ignore-scripts`); no live journey evidence this seat",
+      "effect_risk": "none",
+      "original_completion_test": "vitest green at `a552a5e5` **and** Phase E journeys E1\u2013E8 with authenticated live data"
+    },
+    {
+      "id": "A3",
+      "capability": "Conversational objective entry \u2192 submit (`src/orchestration/os-executive-host.ts`, `executive-launch-command-port.ts`, `web-auth.ts` \u2192 `${ORIGIN}/os/executive/<route>`)",
+      "baseline_classification": "`BUILT_NOT_PROVEN`, blocked by G3",
+      "owner": "same + G3",
+      "baseline_evidence": "`web-auth.ts:629`; bundle carries the route strings",
+      "effect_risk": "an inert preview must never be substituted (brief)",
+      "original_completion_test": "submit \u2192 `ceo-intent` id \u2192 status \u2192 Job \u2192 result rendered in the same conversation"
+    },
+    {
+      "id": "A4",
+      "capability": "Interrupted-connection recovery without duplicate submit (IndexedDB pending-pointer stores; `_unknown_outcome` \u2192 read `ceo_intent_status`)",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "`src/orchestration/indexeddb-*pending-pointer-store.ts`, `os_transport.py`",
+      "baseline_evidence": "source + tests",
+      "effect_risk": "a blind re-submit would create a duplicate root",
+      "original_completion_test": "connection killed mid-submit; app reconciles via status; exactly one Job exists"
+    },
+    {
+      "id": "A5",
+      "capability": "Native app (Tauri 2, `src-tauri/`, `src/native-executive-transport.ts createNativeExecutiveTransport`)",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "same",
+      "baseline_evidence": "source present; no build evidence",
+      "effect_risk": "none",
+      "original_completion_test": "`npm run build` + Tauri build succeed; native app completes the A3 journey"
+    },
+    {
+      "id": "A6",
+      "capability": "Responsive mobile/desktop qualification",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "same",
+      "baseline_evidence": "not observed",
+      "effect_risk": "none",
+      "original_completion_test": "375 px and desktop captures of office + conversation with no horizontal scroll and no clipped controls"
+    },
+    {
+      "id": "C1",
+      "capability": "Agent OS knowledge plane (macro `agentos/`)",
+      "baseline_classification": "`PROVEN_LIVE`; programme record `NOT_BUILT`",
+      "owner": "macro `agentos/workstreams`, `handoffs`; `scripts/agentos.py validate`",
+      "baseline_evidence": "1602 records / 0 errors; `WS-EXECUTIVE-AUTONOMY-V1-CLOSURE` P4/P5 `todo` with a 10-10 frontier that names `326c8469` as installed (now `91c1cac5`); no ecosystem workstream",
+      "effect_risk": "hand-editing generated views; duplicating P4/P5",
+      "original_completion_test": "`WS-EXECUTIVE-ECOSYSTEM-COMPLETION` + handoff merged on macro main; P4/P5 condition text refreshed to the installed `91c1cac5` facts; validate 0 errors"
+    },
+    {
+      "id": "C2",
+      "capability": "Linear portfolio projection",
+      "baseline_classification": "`DARK_OR_DISCONNECTED` (from this seat: connector unauthenticated)",
+      "owner": "Linear via its existing owner",
+      "baseline_evidence": "not observed",
+      "effect_risk": "a second projection store",
+      "original_completion_test": "the programme's Linear issue reflects ledger state (owner-run)"
+    },
+    {
+      "id": "C3",
+      "capability": "Slack transport (agent-relay, sol-state-relay, dialogue bridge)",
+      "baseline_classification": "`PARTIAL`",
+      "owner": "launchd relays @326c8469; `autonomy-control.sh dialogue-canary-*`",
+      "baseline_evidence": "relays running (agent-relay last exit 2); `dialogue_bridge` arm false; Slack MCP unauthenticated here",
+      "effect_risk": "a parallel relay",
+      "original_completion_test": "relay health readback + one dialogue canary publish/reconcile"
+    },
+    {
+      "id": "C4",
+      "capability": "Seat memory",
+      "baseline_classification": "`PROVEN_LIVE`",
+      "owner": "`~/.claude/projects/\u2026/memory/executive-ecosystem-completion-fable-meta-ceo-program.md` (+ `MEMORY.md` index)",
+      "baseline_evidence": "written 2026-10-17",
+      "effect_risk": "none",
+      "original_completion_test": "file exists and is indexed"
+    },
+    {
+      "id": "C5",
+      "capability": "GitHub as source/proof owner",
+      "baseline_classification": "`PROVEN_LIVE`",
+      "owner": "Mastermind + macro repos; protected master/main",
+      "baseline_evidence": "PRs listed in \u00a73/\u00a74",
+      "effect_risk": "none",
+      "original_completion_test": "this ledger and plan merged behind green checks"
+    },
+    {
+      "id": "H1",
+      "capability": "Chairman \u2192 CEO ingress \u2192 COO decomposition \u2192 \u22652 governed children (one via Fabric) \u2192 retained results \u2192 review \u2192 **original-parent consumption** \u2192 app outcome",
+      "baseline_classification": "`NOT_BUILT` as a proven journey (WS P5: `AUTONOMY_V1_PROVEN_LIVE=false`)",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "one root with \u22652 children COMPLETED; `result_json` consumed by the original parent; the app shows the outcome from live data",
+      "depends_on": "E4 E5 E6 F1 F5 G3 A3"
+    },
+    {
+      "id": "H2",
+      "capability": "Routine direct-to-worker task",
+      "baseline_classification": "`PARTIAL` (JOB-014\u2026025 host proofs completed on codex-native before 10-12)",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "one **new** routine Job COMPLETED post-arm and read by its submitter",
+      "depends_on": "E4 F1"
+    },
+    {
+      "id": "H3",
+      "capability": "Operator \u2192 child \u2192 original-parent reviewed return",
+      "baseline_classification": "`BUILT_NOT_PROVEN` (`review_required`, `reviews_job_id`; JOB-003/013 are review roots)",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "a review Job linked by `reviews_job_id` completes and the parent consumes it",
+      "depends_on": "E5 E8"
+    },
+    {
+      "id": "H4",
+      "capability": "Interrupted connection + reconciliation",
+      "baseline_classification": "`PROVEN_LIVE` at worker-process level (E2); `BUILT_NOT_PROVEN` at submit level (A4)",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "A4 test",
+      "depends_on": "A4 G3"
+    },
+    {
+      "id": "H5",
+      "capability": "Conflicting source writer / permission \u2192 fail-closed",
+      "baseline_classification": "`BUILT_NOT_PROVEN` (`allowed_write_paths_json`, `authority_policy_hash`, `requested_authorities_json`)",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "a Job touching a path outside `allowed_write_paths` is refused with a typed error and no effect",
+      "depends_on": "E5"
+    },
+    {
+      "id": "H6",
+      "capability": "Rejected/failed worker \u2192 lawful repair or escalation",
+      "baseline_classification": "`PARTIAL` (JOB-006 typed FAILED; repair present in installed broker; `escalation_target`; inbox `job_failed`)",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "a failed child yields a repair child or an escalation item consumed by the parent; no duplicate root",
+      "depends_on": "E5 E9"
+    },
+    {
+      "id": "H7",
+      "capability": "Chairman correction in flight",
+      "baseline_classification": "`BUILT_NOT_PROVEN` (`cancel_requested_at_ms`, DECISION_REQUEST path)",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "a correction on a RUNNING Job terminalizes it with a typed state and the parent consumes the correction",
+      "depends_on": "E5"
+    },
+    {
+      "id": "H8",
+      "capability": "App/browser interaction with authenticated live data + result consumption",
+      "baseline_classification": "`BUILT_NOT_PROVEN`",
+      "owner": "Existing Executive/app acceptance owners",
+      "baseline_evidence": "Original journey row; not a new live observation",
+      "effect_risk": "Preserve admitted original operation and effect fences",
+      "original_completion_test": "browser capture + network trace of authenticated submit/status/result in the Mastermind OS app",
+      "depends_on": "A1\u2013A3 G3"
+    }
+  ]
+}

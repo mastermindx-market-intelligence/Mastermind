@@ -1,0 +1,170 @@
+{
+  "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+  "workstreams": [
+    {
+      "key": "AGENT-EVAL-FABRIC",
+      "title": "Mastermind Agent Evaluation & Organizational Learning Fabric (Fable COO program)",
+      "status": "active",
+      "owner": "coo-fable",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-AGENT-EVAL-FABRIC.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-AGENT-EVAL-FABRIC.md",
+      "sha256": "8dc0709dd0634cfafa64313edccf039af241b200131935a9f787c2d190e8c740",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "AGENT-OS",
+      "title": "Mastermind Agent OS \u2014 organizational knowledge and work-identity plane",
+      "status": "done",
+      "owner": "chairman",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-AGENT-OS.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-AGENT-OS.md",
+      "sha256": "5d08f9ba05709c2d80c337c5bcb7cc66cabf8e850faa416f413150f58dac1dd8",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "BROWSER-FABRIC",
+      "title": "Central Browser Fabric for Mastermind agents",
+      "status": "active",
+      "owner": "Sol AI CEO",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-BROWSER-FABRIC.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-BROWSER-FABRIC.md",
+      "sha256": "bcffdb98d479d1d07efd4f56de9b156c4c01060f43230c2a6085c92fc512b409",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "CHAIRMAN-CONTROL-ROOM",
+      "title": "Chairman Control Room \u2014 cross-session navigation and active dialogue",
+      "status": "active",
+      "owner": "ceo-sol",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md",
+      "sha256": "89824b745df57188f2a2bdc04fc978a1df28695bcc526de789cba56113b1b22a",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "CODE-INTELLIGENCE-FABRIC",
+      "title": "Code Intelligence Fabric \u2014 governed global discovery and exact-worktree semantics",
+      "status": "active",
+      "owner": "ceo-sol",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-CODE-INTELLIGENCE-FABRIC.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-CODE-INTELLIGENCE-FABRIC.md",
+      "sha256": "ca6f6ceca1176d23c0cb9d474ab72dba492a9c502b6d9f7669d0b834fea47852",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "EXECUTIVE-ATTENTION-ECONOMICS",
+      "title": "Executive Attention Economics \u2014 source-attributed cognition allocation frontier",
+      "status": "active",
+      "owner": "ceo-sol",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-EXECUTIVE-ATTENTION-ECONOMICS.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-EXECUTIVE-ATTENTION-ECONOMICS.md",
+      "sha256": "13ada1b8e16b794ac7a3c0f78cb0ae147a65f71810f650a5a2a2f596155bdbff",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "EXECUTIVE-AUTONOMY-V1-CLOSURE",
+      "title": "Executive OS Autonomy V1 \u2014 principal closure through one real production acceptance operation",
+      "status": "active",
+      "owner": "coo-fable",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md",
+      "sha256": "d55a77afe7080295c428557c483d380bf26a2b7e335392c8a5b11a9a3d83d9e8",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "EXECUTIVE-CAPACITY-FABRIC",
+      "title": "Executive Capacity Fabric \u2014 heterogeneous provider and subscription placement",
+      "status": "active",
+      "owner": "ceo-sol",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-EXECUTIVE-CAPACITY-FABRIC.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-EXECUTIVE-CAPACITY-FABRIC.md",
+      "sha256": "659117fb72b2a54e23d56e42b0afc0b44ef84264e21b2d4142b9eb4e81a34b9f",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "EXECUTIVE-ECOSYSTEM-COMPLETION",
+      "title": "Executive Ecosystem Completion \u2014 Executive OS, Subagent Fabric, Mastermind OS app and continuity proven as one multi-level path",
+      "status": "active",
+      "owner": "astra-meta-ceo",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+      "sha256": "9e79a4459672cff080d7fd5f6e5552cb3758cfb2450f8c5e320e4a88ccd60d12",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "EXECUTIVE-OS-DISASTER-RECOVERY",
+      "title": "Executive OS off-host disaster recovery and point-in-time restore",
+      "status": "active",
+      "owner": "coo-fable",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-EXECUTIVE-OS-DISASTER-RECOVERY.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-EXECUTIVE-OS-DISASTER-RECOVERY.md",
+      "sha256": "b069bafc2abc29e85f48b4957006e50489e56a4d54ec798d3bda09917ef2c776",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "FLEET-STORAGE-LIFECYCLE",
+      "title": "Fleet storage lifecycle \u2014 pool attribution, reclaim gates, and what only the operator may decide",
+      "status": "blocked",
+      "owner": "claude storage-worktree-lifecycle-law seat",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-FLEET-STORAGE-LIFECYCLE.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-FLEET-STORAGE-LIFECYCLE.md",
+      "sha256": "e4b6f550580dbeedd31299b4b92395b73371f02f8fe19c9638034690d469de45",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "OPERATION-ASSURANCE",
+      "title": "Mastermind Operation Assurance (OLS) \u2014 liveness/soundness checker to full production",
+      "status": "active",
+      "owner": "Fable principal (COO seat), Sol retains architecture + release acceptance",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-OPERATION-ASSURANCE.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-OPERATION-ASSURANCE.md",
+      "sha256": "6ce1d7a0282a28c57cb0c87c354520d1134f36aef72fa09101f7441ec01d9b29",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "ORCHESTRATOR-PROJECT-CONTINUITY",
+      "title": "Durable project direction and recovery across Codex and Claude orchestrators",
+      "status": "active",
+      "owner": "codex",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-ORCHESTRATOR-PROJECT-CONTINUITY.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-ORCHESTRATOR-PROJECT-CONTINUITY.md",
+      "sha256": "8df12bd694b3d1fd65fc17fcee654218de29414c42e30c13c6871eb9738ef9c6",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "REPRODUCIBLE-WORKER-ENVIRONMENTS",
+      "title": "Reproducible worker environments and toolchain identity",
+      "status": "active",
+      "owner": "fable-coo",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-REPRODUCIBLE-WORKER-ENVIRONMENTS.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-REPRODUCIBLE-WORKER-ENVIRONMENTS.md",
+      "sha256": "0339ff860dd78dd4177c010f77ef290213618ef5cfa2a889354de4f149a3487c",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    },
+    {
+      "key": "RUNNER-FLEET-RESILIENCE",
+      "title": "Runner fleet resilience and physical failure-domain separation",
+      "status": "active",
+      "owner": "ceo-sol",
+      "source_commit": "1c85878983323f9ab38fff56a15771166d0f8aeb",
+      "source_path": "agentos/workstreams/WS-RUNNER-FLEET-RESILIENCE.md",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/1c85878983323f9ab38fff56a15771166d0f8aeb/agentos/workstreams/WS-RUNNER-FLEET-RESILIENCE.md",
+      "sha256": "574f9ed9fc39411c8aa8c3290c648ea94314d356fdea0f9ee27fa28fb0f4568d",
+      "proof_limit": "Organizational record; not current live worker or deployment evidence"
+    }
+  ]
+}
