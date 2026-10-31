@@ -71,6 +71,15 @@ chronological split. Each policy outcome supplies `RESOLVED`, `NO_ENTRY`,
 `CENSORED` or `UNAVAILABLE`, with resolved net risk-unit return and actual
 outcome/availability clocks. A missing paired policy or mismatched population
 is an error, never an implicit zero or an unpaired favorable survivor.
+Explicit nullable PIT eligibility or signal remains in the predeclared
+coverage population, but **both policy outcomes must be UNAVAILABLE**.
+A definitive no-signal candidate must be `NO_ENTRY` rather than a
+censored trade; a censoring boundary after the analysis cutoff is refused.
+A scheduled `TIME` exit requires an owner-confirmed completed final
+RTH bar, not merely a later day appended to the source frame.
+Supplied oscillator columns cannot silently fall back to the price proxy;
+warmup/null indicator samples remain unavailable, not false crosses.
+Malformed PIT membership endpoints and offset-naive bar clocks are refused.
 
 ```python
 import pandas as pd
@@ -102,8 +111,13 @@ The owner must establish source entitlement, PIT issuer/epoch, consistent
 execution costs, and actual forward issuance before any edge claim.
 
 Tests: `python -m pytest -q research/rs_leader_pullback_2026_10_30/tests`
-(the latest local source candidate passed **77 synthetic conformance tests**,
+(the latest local source candidate passed **97 synthetic conformance tests**,
 plus five successful unittest subtests; this is not CI or empirical proof).
+The canonical hosted shard discovers only top-level `tests/test_*.py`.
+New `tests/test_rs_leader_pullback_research_gate.py` executes all three
+research test files through a bounded subprocess and fails if fewer than 97
+tests run; it was locally smoke-tested. Hosted exact-head CI acceptance is
+separately required.
 
 ## Required historical research before signal promotion
 
@@ -116,4 +130,4 @@ plus five successful unittest subtests; this is not CI or empirical proof).
 
 ## Honest limits
 
-The 29 local synthetic tests demonstrate computational invariants, not trading performance. This tool cannot independently prove a vendor archive's historic point-in-time quality, whether the supplied indicator repaints, a real fill, or alpha. The current conversation's connected Studio Direct and Executive read paths were unavailable at the data-acquisition attempt, and this execution container had no historical intraday CSV dataset or network access. Thus **no cross-equity historical win rate, return or comparison is claimed**. Mastermind PR #1338 is related *exit* research, not our entry-study validation, and must not be treated as a completed substitute.
+The 97 locally passing synthetic tests demonstrate computational invariants, not trading performance. This tool cannot independently prove a vendor archive's historic point-in-time quality, whether the supplied indicator repaints, a real fill, or alpha. The current conversation's connected Studio Direct and Executive read paths were unavailable at the data-acquisition attempt, and this execution container had no historical intraday CSV dataset or network access. Thus **no cross-equity historical win rate, return or comparison is claimed**. Mastermind PR #1338 is related *exit* research, not our entry-study validation, and must not be treated as a completed substitute.
