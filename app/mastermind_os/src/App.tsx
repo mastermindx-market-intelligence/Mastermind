@@ -12,6 +12,10 @@ import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { ConversationWindow } from "./conversations/ConversationWindow";
+import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
+import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
+import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
+import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
 import { useObservedConversation } from "./conversations/useObservedConversation";
 import {
   OperationController,
@@ -37,6 +41,8 @@ import {
   type OrchestratorCommandBinding,
 } from "./orchestration/host-command-bindings";
 import { SelectedSessionContinuation } from "./orchestration/ui/SelectedSessionContinuation";
+import { DirectNativeResultPanel } from "./orchestration/ui/DirectNativeResultPanel";
+import { directLocationInput } from "./direct-native-location";
 import {
   completeExecutiveSessionBinding,
   readSessionOwnerContext,
@@ -46,11 +52,9 @@ import {
   allEvidence,
   decodeMission,
   decodeMissionv3,
-  locationSelectionInput,
   normalizeSelection,
   programsFromControlRoom,
   relationshipsForMission,
-  selectionFromLocation,
   unavailableMission,
   type MissionDocument,
   type MissionSelection,
@@ -1270,7 +1274,7 @@ export interface AppProps {
 }
 export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const native = "__TAURI_INTERNALS__" in window,
-    initialLocation = useMemo(() => locationSelectionInput(), []),
+    initialLocation = useMemo(() => directLocationInput(), []),
     initial = useMemo(
       () =>
         initialLocation.hasIdentity
@@ -1279,8 +1283,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       [initialLocation],
     ),
     [selection, setSelection] = useState<MissionSelection | null>(initial),
-    [active, setActive] = useState<View>("Today"),
-    [projectTab, setProjectTab] = useState<ProjectTab | null>(null),
+    [active, setActive] = useState<View>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Projects" : "Today"),
+    [projectTab, setProjectTab] = useState<ProjectTab | null>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Overview" : null),
     [index, setIndex] = useState<ProgramIndex>({
       programs: [],
       state: "PENDING",
@@ -1450,6 +1454,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
+  const answerView = useQualifiedOriginalAnswer();
+  // React may abandon an interrupted render. Only the committed layout
+  // publishes a current identity to the private reply acceptance fence.
+  useLayoutEffect(() => {
+    answerView.setCurrent(sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+      active: active === "Conversations",
+    } : null);
+  }, [active, signedIn, sessionBinding, sessionOwner?.principalScope,
+    sessionOwner?.generation, authRevision, selection?.workRef, selection?.rootJobId]);
   const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
     const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
     const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
@@ -1457,7 +1475,29 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
       liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
   };
+  const makeSessionController = (
+    binding: MountedExecutiveSessionBinding,
+    ctx: { principalScope: string; generation: string },
+    sequence: number,
+  ): OperationController => {
+    const identity = { binding, principalScope: ctx.principalScope, generation: ctx.generation,
+      selectionSeq: sequence, authRevision };
+    // The real mounted host supplies the existing native qualified reader.
+    // An older unqualified fixture is fail-dark: it cannot clear an original
+    // hint by promoting a receipt without a validated answer.
+    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswer>({
+      port: binding.port,
+      readAnswer: (pointer, signal) => typeof binding.port.readQualifiedAnswer === "function"
+        ? binding.port.readQualifiedAnswer(pointer, signal)
+        : Promise.resolve({ receipt: { ...pointer, disposition: "unknown", reason: "UNKNOWN_RECEIPT" }, answer: null }),
+      isCurrent: () => ownsSession(binding, ctx, sequence) && answerView.isCurrent(identity),
+      onAdmission: () => { if (ownsSession(binding, ctx, sequence)) answerView.invalidate(); },
+      onAnswer: (pointer, answer) => answerView.stage(identity, pointer, answer),
+    });
+    return new OperationController(wrapper, binding.store);
+  };
   const invalidateSessionPresentation = () => {
+    answerView.invalidate();
     sessionSlot.current?.controller.invalidate();
     sessionSlot.current = null;
     const held = sessionPending.current;
@@ -1584,12 +1624,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       return;
     if (cur) cur.controller.invalidate();
     sessionSlot.current = {
-      controller: new OperationController(sessionBinding.port, sessionBinding.store),
+      controller: makeSessionController(sessionBinding, sessionOwner, selectionSeq.current),
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
     };
-  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation]);
+  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation, authRevision]);
   useEffect(() => {
     // Discover the retained hint without invoking prepare, submit or even a
     // status request. This is available before any launch catalog is loaded.
@@ -1661,6 +1701,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     setSessionRefusal(null);
   }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
     selection?.workRef, selection?.rootJobId]);
+  useEffect(() => {
+    if (active !== "Conversations") answerView.leavePresentation();
+  }, [active]);
+
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
     recoveryFlight.current++;
@@ -1725,6 +1769,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         setReopenedOperation(null);
         recoveryFlight.current++;
         setRecoverInFlight(false);
+        answerView.invalidate();
         sessionSlot.current?.controller.invalidate();
         const heldSession = sessionPending.current;
         if (heldSession) {
@@ -2062,7 +2107,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   }, [native, authRevision, authState?.acquisition, workRevision]);
   useEffect(() => {
     const restoreSelection = () => {
-      const next = selectionFromLocation();
+      const next = directLocationInput().selection;
       office.clearSelection(next);
       observedConversation.clear();
       selectionSeq.current += 1;
@@ -2243,6 +2288,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       active === "Conversations"
         ? observedConversation.projection.conversation.source.state
         : legacyConversationState,
+    directSelected = !!selection && new URL(window.location.href).searchParams.get("direct_native_job")===selection.rootJobId,
+    directRoute = active === "Projects" && directSelected,
     headerState = conversationActive
       ? conversationState
       : active === "Inbox" || active === "Knowledge"
@@ -2339,7 +2386,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             : active === "Fleet & Capacity"
               ? "Capacity source not connected. No host readiness was inferred."
               : notice,
-    open = (w: string, r: string | null) => {
+    open = (w: string, r: string | null, direct = false) => {
       if (r) {
         office.clearSelection({ workRef: w, rootJobId: r });
         observedConversation.clear();
@@ -2356,6 +2403,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           work_ref: next.workRef,
           root_job_id: next.rootJobId,
         }).toString();
+        // Read-selection hint only; the authenticated direct endpoint still
+        // proves the Job, original principal, receiver and terminal identity.
+        if(direct)location.searchParams.set("direct_native_job",r);
         window.history.pushState(
           null,
           "",
@@ -2440,7 +2490,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       const sel = state.missionSelection
         ? normalizeSelection(state.missionSelection)
         : null;
-      if (sel) open(sel.workRef, sel.rootJobId);
+      if (sel) open(sel.workRef, sel.rootJobId,bindingAtStart.directNative?.isDirectSelection(sel)===true);
     }
     pending.complete({ status: state.status });
     pendingCommand.current = null;
@@ -2560,7 +2610,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           // mission selection, including when initial discovery had failed.
           if (state.status === "accepted") {
             const next = state.missionSelection ? normalizeSelection(state.missionSelection) : null;
-            if (next) open(next.workRef, next.rootJobId);
+            if (next) open(next.workRef, next.rootJobId,binding.directNative?.isDirectSelection(next)===true);
           }
         } else {
           setReopenedOperation({ ...restored, pointer: state.pointer ?? restored.pointer, reason: state.reason });
@@ -2629,7 +2679,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       sessionSlot.current.generation !== ctx.generation
     ) {
       sessionSlot.current?.controller.invalidate();
-      controller = new OperationController(binding.port, binding.store);
+      controller = makeSessionController(binding, ctx, selectionSeq.current);
       sessionSlot.current = {
         controller,
         binding,
@@ -2752,6 +2802,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          locale={locale}
           key={JSON.stringify([
             ownerContext?.principalScope,
             ownerContext?.generation,
@@ -2764,7 +2815,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               : "Launch choices are unavailable. Your draft is retained."
           }
           submitting={heldKind === "launch" && commandBusy}
-          blocked={!!currentReopened}
+          blocked={!!currentReopened || heldKind === "consume"}
           error={
             currentRefusal?.kind === "launch"
               ? currentRefusal.reason
@@ -2843,6 +2894,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   );
   const sessionLive =
     !!sessionBinding && signedIn && !!sessionOwner && !!sessionTargetKey;
+  // A qualified original READ is scoped to the current selected-session
+  // owner, even if the old target is now unavailable for NEW sends.
+  const presentedSessionAnswer = answerView.visible(
+    sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+    } : null,
+  );
   const sessionContinuationUnavailable =
     sessionBinding && !sessionLive ? "SESSION_UNAVAILABLE" : undefined;
   const sessionContinuationPanel = sessionBinding ? (
@@ -2970,6 +3032,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     // unavailable code as Work, with no fabricated session or dispatch state.
     sessionUnavailableCard
   );
+  const directResultPanel = directSelected && selection ? <DirectNativeResultPanel
+    key={JSON.stringify([ownerContext?.principalScope,ownerContext?.generation,selection.workRef,selection.rootJobId,commandSelectionRevision])}
+    locale={locale} selection={{work_ref:selection.workRef,job_id:selection.rootJobId,attempt_id:null}}
+    read={commandReady ? commandBinding?.directNative?.read : undefined}
+    held={heldKind==="consume" || currentReopened?.pointer?.kind==="consume"}
+    recovery={heldKind==="consume" ? checkStatusControl : null}
+    onConsume={(selected,digest,complete)=>{
+      const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const ctx=live ? readOwnerContext(live.port) : null;
+      if(commandSelectionRevision!==selectionSeq.current||!live||live!==commandBinding||!ctx||
+        ctx.principalScope!==ownerContext?.principalScope||ctx.generation!==ownerContext?.generation){complete({status:"refused"});return;}
+      const intent=live.directNative?.makeConsumeIntent(selected,digest)??null;
+      beginCommand("consume",intent,complete);
+    }} /> : null;
   const pickResult = (sel: ResultSelection) => {
     const valid = normalizeResultSelection(sel);
     if (!valid) return;
@@ -3124,6 +3200,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         <ConversationWindow
           locale={locale}
           continuation={sessionContinuationPanel}
+          historicalAnswers={<HistoricalOriginalAnswers
+            binding={sessionBinding}
+            selection={selection}
+            principalScope={sessionOwner?.principalScope ?? null}
+            generation={sessionOwner?.generation ?? null}
+            authRevision={authRevision}
+            selectionSeq={selectionSeq.current}
+            activeReadRef={presentedSessionAnswer?.answer.readRef}
+          />}
+          qualifiedAnswer={presentedSessionAnswer}
+          onQualifiedAnswerCommitted={answerView.acknowledgeRender}
           notesPresentation="collapsed"
           projection={observedConversation.projection}
           draft={observedConversation.draft}
@@ -3149,11 +3236,25 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} />;
+  else if (directRoute)
+    content = <>
+      {directResultPanel}
+      <details className="reason-details">
+        <summary>{locale === "zh-CN" ? "任务范围与项目来源" : "Task scope and project source"}</summary>
+        <dl>
+          <dt>{locale === "zh-CN" ? "工作流" : "Workstream"}</dt><dd><code>{selection?.workRef}</code></dd>
+          <dt>Job</dt><dd><code>{selection?.rootJobId}</code></dd>
+          <dt>{locale === "zh-CN" ? "项目来源" : "Project source"}</dt><dd><State value={office.projection.programs.source.state} /></dd>
+        </dl>
+        <p>{visibleNotice}</p>
+        {programsRefreshControl}
+      </details>
+    </>;
   else if (active === "Projects")
     content = (
       <>
         {programsRefreshControl}
-        {projectTab && selection ? (
+        {(projectTab || directSelected) && selection ? (
         <>
           <section className="hero">
             <div>
@@ -3185,8 +3286,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               </div>
             </div>
           </section>
-          <ProjectTabs active={projectTab} onChange={setProjectTab} />
-          {!d ? (
+          {!directSelected ? <ProjectTabs active={projectTab ?? "Overview"} onChange={setProjectTab} /> : null}
+          {directSelected ? directResultPanel : !d ? (
             <section className="card empty-panel">
               <h2>{projectTab}</h2>
               <State value="UNAVAILABLE" />
@@ -3361,6 +3462,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   else if (active === "Mission Workspace")
     content = (
       <>
+        {directResultPanel}
         <Mission d={d} />
         {missionV3 && isDocv3(missionV3) ? (
           <ResultRefs
@@ -3537,14 +3639,14 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       <main id="content" tabIndex={-1}>
         <header>
           <div>
-            <span className="eyebrow">{active}</span>
+            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : active}</span>
             <h1 ref={routeHeading} tabIndex={-1}>
-              {active}
+              {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : active}
             </h1>
-            <p>{headerSummary}</p>
+            <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>
           </div>
           <div className="facts">
-            <State value={headerState} />
+            {!directRoute ? <State value={headerState} /> : null}
             {authState ? (
               <div>
                 <small>
@@ -3610,9 +3712,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             ) : null}
           </div>
         </header>
-        <div className="notice" role="status">
+        {!directRoute ? <div className="notice" role="status">
           {visibleNotice}
-        </div>
+        </div> : null}
         {build ? (
           <details className="build-details">
             <summary>Build details</summary>

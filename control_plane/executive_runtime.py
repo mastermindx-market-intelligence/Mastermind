@@ -16,6 +16,7 @@ included in events or public ``to_dict`` output.
 from __future__ import annotations
 
 import base64
+import copy
 import dataclasses
 import hashlib
 import fnmatch
@@ -38,6 +39,10 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
 
+from control_plane.executive_readback_contract import (
+    format_runtime_utc_timestamp, valid_lost_reason,
+)
+
 from common.commission_ref import (
     CommissionRef,
     CommissionRefError,
@@ -57,6 +62,7 @@ from control_plane.executive_coo_policy import (
     CooCyclePolicy,
     CooCyclePolicyError,
     EXPECTED_POLICY_SHA256,
+    HIERARCHY_POLICY_SHA256,
 )
 from control_plane.executive_orchestration_principal import (
     base_process_identity,
@@ -104,11 +110,12 @@ from control_plane.operator_harness_contract import (
 )
 from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 
 WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
+_COO_PLAN_ADMISSION_SCHEMA_V3 = "mastermind.coo_plan_admission/v3"
 
 
 def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
@@ -225,6 +232,8 @@ HOST_EXECUTION_BINDING_V3 = "mastermind.host_execution_binding/v3"
 V3_HOST_EXECUTION_BINDING_KEYS = frozenset(
     V2_HOST_EXECUTION_BINDING_KEYS | {"work_placement_union"}
 )
+CHILD_WORKSPACE_POLICY = "mastermind.coo_readonly_child_workspace/v1"
+CHILD_WORKSPACE_POLICY_KEY = "child_workspace_policy"
 WORK_PLACEMENT_UNION_MAX_MEMBERS = 8
 # A1-ARM finite control context wire constants.  The context is a private
 # immutable composition input issued by the trusted control owner; it is
@@ -304,13 +313,15 @@ _MAX_JOB_DEPTH = 64
 _SCHEMA_UPGRADE_BARRIER = "executive-schema-upgrade.in-progress.json"
 # Historical exact-v4 fingerprint: frozen verbatim so prior-version recognition
 # and the reviewed v4->v5 transition can still prove an exact v4 source.  The
-# current store verification below uses the separate v5 fingerprint.
+# current store verification below uses the separate v6 fingerprint.
 _NORMALIZED_V4_SCHEMA_DIGEST = (
     "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
 )
 _NORMALIZED_V5_SCHEMA_DIGEST = (
     "b2fe4455306b2bdcf4f698d958e420e4f885e941dc1f0b8db602cbb39edcedbd"
 )
+_NORMALIZED_V6_SCHEMA_DIGEST = "4ed21db1880afe43bdab58ea07da335c2db60a218ccdedee44eaefd1d2175c05"
+_NORMALIZED_V7_SCHEMA_DIGEST = "7692d62bd4126dd6fcaec2873ee9506a1faac96b3246684366e1dfa6e34c6a87"
 _V2_ROOT_CREATION_CAPABILITY = object()
 _COO_CYCLE_PLANNER_CREATION_CAPABILITY = object()
 _COO_CYCLE_CHILD_CREATION_CAPABILITY = object()
@@ -606,11 +617,9 @@ def _load_canonical_digest_pair(
 
 
 def _iso(timestamp_ms: int | None) -> str:
-    if timestamp_ms is None:
-        return ""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(
-        timespec="seconds"
-    )
+    # The producer's injectable Runtime clock owns provenance. Never compare
+    # this trusted timestamp with the host wall clock while serializing.
+    return format_runtime_utc_timestamp(timestamp_ms)
 
 
 def _enum_value(value: str | Enum, enum_type: type[Enum]) -> str:
@@ -635,6 +644,96 @@ def _normalise_capabilities(
     )
 
 
+def normalize_paid_subject_review_binding(value: Any) -> dict[str, Any]:
+    """Validate the root-declared first-profile Codex review recipe.
+
+    This is routing DATA, not admission or physical independence evidence.
+    Actual Worker/quota and owned-process checks still occur at claim/run time.
+    """
+    from control_plane.model_router import ModelRouter, RoutingPolicyError
+    keys = {
+        "schema_version", "model_alias", "eligible_quota_classes", "provider",
+        "model", "effort", "cost_class", "routing_policy_version",
+        "execution_profile_id", "execution_profile_digest",
+        "capability_policy_version", "capability_policy_digest", "authorities",
+    }
+    if (type(value) is not dict or any(type(key) is not str for key in value)
+            or set(value) != keys
+            or any(type(value[key]) is not str for key in keys - {
+                "eligible_quota_classes", "authorities"})
+            or type(value["eligible_quota_classes"]) is not list
+            or len(value["eligible_quota_classes"]) != 1
+            or type(value["eligible_quota_classes"][0]) is not str
+            or _ROUTING_VALUE_RE.fullmatch(value["eligible_quota_classes"][0]) is None
+            or type(value["authorities"]) is not list
+            or any(type(item) is not str for item in value["authorities"])
+            or value["authorities"] != ["READ"]
+            or value["schema_version"] != "mastermind.paid_subject_review_binding/v1"
+            or value["model_alias"] != "standard.review"
+            or value["provider"] != "codex" or value["cost_class"] != "default"):
+        raise StateConflict("paid-subject review recipe is not the closed READ-only Codex binding")
+    try:
+        router = ModelRouter.load()
+        alias = router.resolve_model_alias("standard.review")
+        profile = router.capability_registry.resolve(alias.execution_profile_id)
+    except (RoutingPolicyError, CapabilityPolicyError, KeyError, ValueError) as exc:
+        raise StateConflict("paid-subject review catalogue is unavailable") from exc
+    expected = {
+        "model": alias.model, "effort": alias.effort,
+        "cost_class": alias.cost_class, "provider": alias.provider_alias,
+        "routing_policy_version": router.policy_version,
+        **{key: getattr(alias, key) for key in (
+            "execution_profile_id", "execution_profile_digest",
+            "capability_policy_version", "capability_policy_digest")},
+    }
+    if (any(value[key] != expected[key] for key in expected)
+            or alias.adapter_id != "codex-cli" or not alias.worker_eligible
+            or profile.profile_id != "sealed.worker.readonly.no-extensions.v1"
+            or not profile.enabled or profile.write_capable
+            or profile.execution_surface != "codex-exec"
+            or profile.sandbox_policy != "read-only"
+            or profile.auth_realm != "dedicated-worker-account"
+            or profile.approval_policy != "never" or profile.network_policy != "disabled"
+            or profile.native_helper_policy.value != "DISABLED"
+            or profile.native_helper is not None or profile.skills or profile.mcp_servers
+            or profile.plugins or profile.resource_grants):
+        raise StateConflict("paid-subject review recipe differs from the qualified readonly catalogue")
+    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+
+
+def paid_subject_review_constraints(root_constraints: Mapping[str, Any]) -> dict[str, Any]:
+    """Project only the host-declared recipe, without widening its root ceiling."""
+    recipe = normalize_paid_subject_review_binding(
+        root_constraints.get("paid_subject_review_binding")
+    )
+    root_cost = root_constraints.get("cost_class")
+    if root_cost not in _COST_CLASS_RANK or _COST_CLASS_RANK[root_cost] < _COST_CLASS_RANK["default"]:
+        raise StateConflict("paid-subject review requires an originally declared default-tier root ceiling")
+    projected = {key: recipe[key] for key in (
+        "eligible_quota_classes", "provider", "model", "effort", "cost_class",
+        "routing_policy_version", "execution_profile_id", "execution_profile_digest",
+        "capability_policy_version", "capability_policy_digest")}
+    projected.update(preferred_model_aliases=[recipe["model_alias"]], required_capabilities=["read"])
+    if root_constraints.get("base_sha"):
+        projected["base_sha"] = root_constraints["base_sha"]
+    return _normalise_constraints(projected)
+
+
+def _paid_review_constraints_for_target(connection, root_row, reviewed_job_id):
+    if reviewed_job_id is None:
+        return None
+    reviewed = connection.execute("SELECT * FROM jobs WHERE job_id=?", (reviewed_job_id,)).fetchone()
+    if reviewed is None:
+        raise StateConflict("paid-subject review lost its target")
+    target_constraints = _strict_canonical_json_loads(str(reviewed["constraints_json"]), name="review target constraints")
+    if target_constraints.get("execution_profile_id") != "fabric.paid.glm.sealed-input.v1":
+        return None
+    root_constraints = _strict_canonical_json_loads(str(root_row["constraints_json"]), name="review root constraints")
+    return paid_subject_review_constraints(root_constraints)
+
+
+from control_plane import direct_native_execution as direct_native
+
 def _normalise_constraints(
     value: dict[str, Any] | None,
     *,
@@ -643,6 +742,15 @@ def _normalise_constraints(
     if value is not None and not isinstance(value, dict):
         raise StateConflict("job constraints must be a mapping")
     raw = value or {}
+    direct_fields = {}
+    if direct_native.POLICY_KEY in raw:
+        if raw[direct_native.POLICY_KEY] != direct_native.POLICY:
+            raise StateConflict("direct native policy is invalid")
+        direct_fields[direct_native.POLICY_KEY] = direct_native.POLICY
+        token=raw.get("direct_native_worker_id")
+        if type(token) is not str or _WORKER_ID_RE.fullmatch(token) is None:
+            raise StateConflict("direct native configured Worker identity is invalid")
+        direct_fields["direct_native_worker_id"]=token
     role_fields: dict[str, Any] = {}
     if "responsibility_intent" in raw or "responsibility_intent_digest" in raw:
         from control_plane.executive_responsibility import (
@@ -673,7 +781,7 @@ def _normalise_constraints(
     eligible = sorted(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
-    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields}
+    result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields}
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):
@@ -882,10 +990,34 @@ def _normalise_constraints(
         if result.get("provider") != route["provider_alias"]:
             raise StateConflict("attended route provider drifted")
         result["attended_route"] = route
+    if "paid_execution_route" in raw:
+        from control_plane.executive_paid_fabric_composition import normalize_paid_execution_route
+        if "attended_route" in raw:
+            raise StateConflict("paid and attended route kinds cannot be mixed")
+        try:
+            route = normalize_paid_execution_route(raw["paid_execution_route"])
+        except ValueError as exc:
+            raise StateConflict("paid route constraints are invalid") from exc
+        for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
+            if result.get(key) != route[key].lower():
+                raise StateConflict(f"paid route constraint drifted at {key}")
+        if (result.get("preferred_model_aliases") != [route["model_alias"]]
+                or result.get("provider") != route["provider_alias"]):
+            raise StateConflict("paid route catalogue identity drifted")
+        result["paid_execution_route"] = route
+    if host_admitted_placement_union and CHILD_WORKSPACE_POLICY_KEY in raw:
+        if raw[CHILD_WORKSPACE_POLICY_KEY] != CHILD_WORKSPACE_POLICY:
+            raise StateConflict("unknown host child workspace policy")
+        result[CHILD_WORKSPACE_POLICY_KEY] = CHILD_WORKSPACE_POLICY
     if host_admitted_placement_union and "work_placement_union" in raw:
         result["work_placement_union"] = _normalise_work_placement_union(
             raw["work_placement_union"]
         )
+        if "paid_subject_review_binding" in raw:
+            result["paid_subject_review_binding"] = normalize_paid_subject_review_binding(
+                raw["paid_subject_review_binding"]
+            )
     return result
 
 
@@ -906,6 +1038,7 @@ def _normalise_work_placement_union(
         if not isinstance(member, Mapping) or set(member) not in (
             {"provider_realm", "quota_class"},
             {"provider_realm", "quota_class", "attended_route"},
+            {"provider_realm", "quota_class", "paid_execution_route"},
         ):
             raise StateConflict(
                 "host work-placement union member must name exactly "
@@ -930,6 +1063,16 @@ def _normalise_work_placement_union(
                 raise StateConflict(str(exc)) from exc
             if normalized_member["provider_realm"] != normalized_member["attended_route"]["provider_alias"]:
                 raise StateConflict("attended host member provider differs from its route")
+        if "paid_execution_route" in member:
+            from control_plane.executive_paid_fabric_composition import normalize_paid_execution_route
+            try:
+                normalized_member["paid_execution_route"] = normalize_paid_execution_route(
+                    member["paid_execution_route"]
+                )
+            except ValueError as exc:
+                raise StateConflict("paid host placement route is invalid") from exc
+            if normalized_member["provider_realm"] != normalized_member["paid_execution_route"]["provider_alias"]:
+                raise StateConflict("paid host member provider differs from its route")
         identity = (
             normalized_member["provider_realm"],
             normalized_member["quota_class"],
@@ -1062,7 +1205,25 @@ def _project_work_placement(
             projected[key] = route[key].lower()
         if "model" in placement and str(placement["model"]).lower() != route["model"].lower():
             raise StateConflict("attended placement cannot change its exact catalogue model")
-    if plan_schema_version == "mastermind.execution_plan/v4":
+    if "paid_execution_route" in member:
+        from control_plane.executive_paid_fabric_composition import normalize_paid_execution_route
+        if "attended_route" in member:
+            raise StateConflict("paid and attended placement kinds cannot be mixed")
+        try:
+            route = normalize_paid_execution_route(member["paid_execution_route"])
+        except ValueError as exc:
+            raise StateConflict("paid placement route is invalid") from exc
+        if provider_realm != route["provider_alias"]:
+            raise StateConflict("paid placement provider differs from its route")
+        projected.pop("attended_route", None)
+        projected["paid_execution_route"] = route
+        projected["preferred_model_aliases"] = [route["model_alias"]]
+        for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
+            projected[key] = route[key].lower()
+        if "model" in placement and str(placement["model"]).lower() != route["model"].lower():
+            raise StateConflict("paid placement cannot change its exact catalogue model")
+    if plan_schema_version in {"mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}:
         reasons = list(projected.get("routing_reason_codes") or [])
         if "manual_pool_override" not in reasons:
             reasons.append("manual_pool_override")
@@ -1074,7 +1235,7 @@ def _project_work_placement(
     # currently eligible quota row serves the requested model, claim returns
     # no capacity and the caller must not silently fall back.
     if "model" in placement:
-        if plan_schema_version != "mastermind.execution_plan/v4":
+        if plan_schema_version not in {"mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}:
             raise StateConflict("plan step model override requires execution plan v4")
         model = str(placement.get("model") or "").strip().lower()
         if (
@@ -1129,6 +1290,11 @@ def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bo
         return True
     metadata = _capacity_route_metadata(row)
     if "attended_route" in constraints and metadata.get("attended_route") != constraints["attended_route"]:
+        return False
+    if "paid_execution_route" in constraints and (
+        "attended_route" in constraints
+        or metadata.get("paid_execution_route") != constraints["paid_execution_route"]
+    ):
         return False
     if aliases:
         worker_policy_version = (
@@ -1522,6 +1688,10 @@ def _constraints_with_host_execution_binding(
 
     raw_caller = dict(constraints or {})
     normalized_caller = _normalise_constraints(raw_caller)
+    if CHILD_WORKSPACE_POLICY_KEY in raw_caller:
+        raise StateConflict("child workspace policy is host-owned, not caller input")
+    if "paid_subject_review_binding" in raw_caller:
+        raise StateConflict("paid-subject review recipe is host composition, not caller constraints")
     if execution_binding is None:
         return normalized_caller
     if not isinstance(execution_binding, Mapping):
@@ -1535,8 +1705,15 @@ def _constraints_with_host_execution_binding(
     carried = dict(execution_binding)
     carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
     admitted_union = None
+    review_recipe = None
+    child_policy = None
     if version == HOST_EXECUTION_BINDING_V3:
-        if set(carried) != set(V3_HOST_EXECUTION_BINDING_KEYS):
+        expected_keys = set(V3_HOST_EXECUTION_BINDING_KEYS)
+        if CHILD_WORKSPACE_POLICY_KEY in carried:
+            expected_keys.add(CHILD_WORKSPACE_POLICY_KEY)
+        if "paid_subject_review_binding" in carried:
+            expected_keys.add("paid_subject_review_binding")
+        if set(carried) != expected_keys:
             raise StateConflict(
                 "v2 host execution binding fields are incomplete or drifted"
             )
@@ -1545,9 +1722,17 @@ def _constraints_with_host_execution_binding(
                 "caller constraint work_placement_union conflicts "
                 "with reviewed host composition"
             )
+        if CHILD_WORKSPACE_POLICY_KEY in carried:
+            child_policy = carried.pop(CHILD_WORKSPACE_POLICY_KEY)
+            if child_policy != CHILD_WORKSPACE_POLICY:
+                raise StateConflict("unknown host child workspace policy")
         admitted_union = _normalise_work_placement_union(
             carried.pop("work_placement_union")
         )
+        if "paid_subject_review_binding" in carried:
+            review_recipe = normalize_paid_subject_review_binding(
+                carried.pop("paid_subject_review_binding")
+            )
     if set(carried) != set(V2_HOST_EXECUTION_BINDING_KEYS):
         raise StateConflict(
             "v2 host execution binding fields are incomplete or drifted"
@@ -1563,6 +1748,11 @@ def _constraints_with_host_execution_binding(
     normalized_caller.update(bound)
     if admitted_union is not None:
         normalized_caller["work_placement_union"] = admitted_union
+        if child_policy is not None:
+            normalized_caller[CHILD_WORKSPACE_POLICY_KEY] = child_policy
+        if review_recipe is not None:
+            normalized_caller["paid_subject_review_binding"] = review_recipe
+            paid_subject_review_constraints(normalized_caller)
         return _normalise_constraints(
             normalized_caller,
             host_admitted_placement_union=True,
@@ -1610,6 +1800,9 @@ def _dialogue_source_from_root_creation(
     ).fetchone()
     if root_row is None:
         raise StateConflict("terminal completion lost its strict v2 root")
+    direct = _direct_native_provenance(connection,root_row)
+    if direct is not None:
+        return normalize_executive_dialogue_source(direct["source"])
     root_role, root_orchestration, _root_digest = _decode_orchestration_job_fields(
         root_row
     )
@@ -1955,7 +2148,7 @@ def _validated_interactive_active_plan_seal(
         != attempt_row["execution_principal_snapshot_digest"]
         or seal["placement_snapshot_digest"]
         != attempt_row["placement_snapshot_digest"]
-        or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _job_coo_policy(connection, str(attempt_row["job_id"])).policy_sha256
     ):
         raise StateConflict(
             "interactive active plan seal does not match its durable identity"
@@ -2303,6 +2496,68 @@ class CurrentCapacityCommitmentFacts:
         return {
             field.name: getattr(self, field.name) for field in dataclasses.fields(self)
         }
+
+
+def _direct_native_provenance(connection, row, *, required=False):
+    if row is None:
+        raise StateConflict("direct native Job is unavailable")
+    if row["orchestration_role"] is not None:
+        if required: raise StateConflict("direct native Job cannot have an orchestration role")
+        return None
+    # Legacy rows gain no new canonical-format requirement. A new direct
+    # record cannot be demoted by deleting its marker, however.
+    hinted = _json_loads(row["constraints_json"],fallback={})
+    if hinted.get(direct_native.POLICY_KEY) != direct_native.POLICY:
+        direct_origin=connection.execute("SELECT event_id FROM events WHERE event_type='JOB_CREATED' AND job_id=? AND json_type(payload_json,'$.provenance.direct_native') IS NOT NULL LIMIT 1",(row["job_id"],)).fetchone()
+        if required or direct_origin is not None: raise StateConflict("Job is not an intact direct native admission")
+        return None
+    constraints = _strict_canonical_json_loads(str(row["constraints_json"]), name="direct Job constraints")
+    events = connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2",(row["job_id"],)).fetchall()
+    if len(events) != 1:
+        raise StateConflict("direct native creation provenance is unavailable")
+    created = _strict_canonical_json_loads(str(events[0][0]),name="direct Job creation")
+    outer = created.get("provenance")
+    value = outer.get("direct_native") if isinstance(outer,dict) else None
+    keys = {"schema_version","principal_scope","receiver_binding_digest","authority_generation_digest","source","source_digest","binding"}
+    if (type(value) is not dict or set(value) != keys or value["schema_version"] != direct_native.PROVENANCE_SCHEMA
+            or row["parent_job_id"] is not None or row["root_job_id"] != row["job_id"]
+            or row["orchestration_role"] is not None or row["attempt_limit"] != 1
+            or set(json.loads(row["requested_authorities_json"])) != {"READ","RESEARCH"}
+            or json.loads(row["allowed_write_paths_json"]) or json.loads(row["validation_commands_json"])):
+        raise StateConflict("direct native immutable Job provenance is invalid")
+    for key in ("principal_scope","receiver_binding_digest","authority_generation_digest","source_digest"):
+        direct_native.require_digest(value[key])
+    source = normalize_executive_dialogue_source(value["source"]).to_dict()
+    binding = direct_native.normalize_binding(value["binding"])
+    if (source != value["source"] or orchestration_digest(source) != value["source_digest"]
+            or value["receiver_binding_digest"] != direct_native.receiver_binding(value["principal_scope"],source)
+            or any(constraints.get(k) != v for k,v in binding.items() if k!="worker_id")
+            or constraints.get("direct_native_worker_id") != binding["worker_id"]
+            or row["branch"] != f"codex/job-{row['job_id'].lower()}"
+            or Path(row["worktree"]).name != row["job_id"].lower()
+            or created.get("direct_workspace") != dict(worktree=row["worktree"],branch=row["branch"],base_sha=binding["base_sha"])):
+        raise StateConflict("direct native source/binding drifted")
+    return dict(value)
+
+
+def _require_direct_workspace(connection, row, *, required=True):
+    provenance = _direct_native_provenance(connection,row)
+    if provenance is None: return None
+    rows = connection.execute("SELECT event_type,payload_json FROM events WHERE command_id=?",(f"direct-workspace:{row['job_id']}:completed",)).fetchall()
+    if not rows and not required: return None
+    if len(rows)!=1 or rows[0]["event_type"] != "DIRECT_NATIVE_WORKSPACE_COMPLETED":
+        raise StateConflict("direct workspace has no same-call allocator completion")
+    value=json.loads(rows[0]["payload_json"])
+    requested=connection.execute("SELECT payload_json FROM events WHERE command_id=?",(f"direct-workspace:{row['job_id']}:requested",)).fetchone()
+    if (requested is None or value["admission_digest"] != orchestration_digest(provenance)
+            or value["reservation_sha256"] != orchestration_digest(json.loads(requested[0]))
+            or value["receipt"]["workspace_path"] != row["worktree"]
+            or value["receipt"]["base_sha"] != provenance["binding"]["base_sha"]
+            or value["receipt"]["branch"] != row["branch"]):
+        raise StateConflict("direct workspace completion source changed")
+    from control_plane.executive_workspace import verify_child_clone_identity
+    verify_child_clone_identity(Path(row["worktree"]),value["identity"],control_uid=value["control_uid"],shared_gid=value["shared_gid"])
+    return value
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -3047,17 +3302,72 @@ _MIGRATION_5: tuple[str, ...] = (
     """,
 )
 
-_MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
-    (1, "executive_runtime_core", _MIGRATION_1),
-    (2, "durable_parent_child_review_contract", _MIGRATION_2),
-    (3, "ohf_session_epochs_and_process_generations", _MIGRATION_3),
-    (4, "executive_phase1fc_orchestration_contract", _MIGRATION_4),
-    (5, "executive_finite_drive_arm_contract", _MIGRATION_5),
+# Versioned nested-coordinator DDL; migrations 1-5 remain byte-for-byte frozen.
+# Installation requires the explicit offline v5-to-v6 migration, never startup.
+_MIGRATION_6: tuple[str, ...] = (
+    'DROP INDEX jobs_one_plan_per_root',
+    "CREATE UNIQUE INDEX jobs_one_plan_per_coordinator ON jobs(parent_job_id) WHERE orchestration_role='plan'",
+    'DROP INDEX jobs_one_revision_per_round',
+    "CREATE UNIQUE INDEX jobs_one_revision_per_round ON jobs(parent_job_id,plan_digest,plan_step_id,repair_round) WHERE orchestration_role IN ('work','repair')",
+    "CREATE UNIQUE INDEX jobs_one_coordinator_per_step ON jobs(parent_job_id,plan_digest,plan_step_id) WHERE orchestration_role='aggregation' AND parent_job_id IS NOT NULL",
+    'DROP TRIGGER jobs_orchestration_contract_insert',
+    """
+    CREATE TRIGGER jobs_orchestration_contract_insert
+    BEFORE INSERT ON jobs
+    WHEN
+      (NEW.orchestration_role IS NULL AND (
+        NEW.orchestration_provenance_json IS NOT NULL OR
+        NEW.orchestration_provenance_digest IS NOT NULL OR
+        NEW.plan_attempt_id IS NOT NULL OR NEW.plan_digest IS NOT NULL OR
+        NEW.plan_step_id IS NOT NULL OR NEW.repair_round IS NOT NULL OR
+        NEW.supersedes_job_id IS NOT NULL
+      )) OR
+      (NEW.orchestration_role IS NOT NULL AND (
+        NEW.orchestration_role NOT IN ('plan','work','review','repair','aggregation') OR
+        NEW.orchestration_provenance_json IS NULL OR
+        NOT json_valid(NEW.orchestration_provenance_json) OR
+        json_type(NEW.orchestration_provenance_json) != 'object' OR
+        NEW.orchestration_provenance_digest IS NULL OR
+        length(NEW.orchestration_provenance_digest) != 64
+      )) OR
+      ((NEW.orchestration_role='plan' OR (NEW.orchestration_role='aggregation' AND NEW.parent_job_id IS NULL)) AND (
+        NEW.plan_attempt_id IS NOT NULL OR NEW.plan_digest IS NOT NULL OR
+        NEW.plan_step_id IS NOT NULL OR NEW.repair_round IS NOT NULL OR
+        NEW.supersedes_job_id IS NOT NULL
+      )) OR
+      (NEW.orchestration_role='aggregation' AND NEW.parent_job_id IS NOT NULL AND (
+        NEW.plan_attempt_id IS NULL OR NEW.plan_digest IS NULL OR
+        NEW.plan_step_id IS NULL OR typeof(NEW.repair_round) != 'integer' OR
+        NEW.repair_round != 0 OR NEW.supersedes_job_id IS NOT NULL OR
+        NEW.reviews_job_id IS NOT NULL
+      )) OR
+      (NEW.orchestration_role='work' AND (
+        NEW.plan_attempt_id IS NULL OR NEW.plan_digest IS NULL OR
+        NEW.plan_step_id IS NULL OR typeof(NEW.repair_round) != 'integer' OR
+        NEW.repair_round != 0 OR
+        NEW.supersedes_job_id IS NOT NULL
+      )) OR
+      (NEW.orchestration_role='review' AND (
+        NEW.plan_attempt_id IS NULL OR NEW.plan_digest IS NULL OR
+        NEW.plan_step_id IS NULL OR typeof(NEW.repair_round) != 'integer' OR
+        NEW.repair_round NOT BETWEEN 0 AND 2 OR
+        NEW.supersedes_job_id IS NOT NULL OR NEW.reviews_job_id IS NULL
+      )) OR
+      (NEW.orchestration_role='repair' AND (
+        NEW.plan_attempt_id IS NULL OR NEW.plan_digest IS NULL OR
+        NEW.plan_step_id IS NULL OR typeof(NEW.repair_round) != 'integer' OR
+        NEW.repair_round NOT BETWEEN 1 AND 2 OR
+        NEW.supersedes_job_id IS NULL
+      ))
+    BEGIN SELECT RAISE(ABORT, 'invalid orchestration job contract'); END
+    """,
 )
 
 
-# Inactive candidate only: deliberately NOT a member of _MIGRATIONS. A separately
-# reviewed offline successor is required before any production installation.
+
+# Reviewed physical DDL follows the immutable hierarchy migration as v7.
+# Existing stores require the explicit offline v6-to-v7 owner. The historical
+# candidate symbol remains an internal alias for the unchanged DDL.
 _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE: tuple[str, ...] = (
     """
     CREATE TABLE physical_resource_commitments (
@@ -3244,6 +3554,17 @@ _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE: tuple[str, ...] = (
     BEGIN SELECT RAISE(ABORT, 'physical resource revision requires a new bound Event'); END
     """,
 
+)
+
+
+_MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
+    (1, "executive_runtime_core", _MIGRATION_1),
+    (2, "durable_parent_child_review_contract", _MIGRATION_2),
+    (3, "ohf_session_epochs_and_process_generations", _MIGRATION_3),
+    (4, "executive_phase1fc_orchestration_contract", _MIGRATION_4),
+    (5, "executive_finite_drive_arm_contract", _MIGRATION_5),
+    (6, "executive_nested_coordinator_contract", _MIGRATION_6),
+    (7, "executive_physical_resource_contract", _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE),
 )
 
 
@@ -3900,9 +4221,9 @@ class RuntimeStore:
         """Mutation-free preflight for every normal writable existing-store open.
 
         This runs before chmod, WAL selection, directory creation, or a writable
-        SQLite connection.  Exact v1-v4 stores are therefore routed only to the
+        SQLite connection.  Exact v1-v6 stores are therefore routed only to the
         separately explicit offline upgrade API; ordinary startup cannot append
-        migration 5 or create a sidecar as a by-product of discovering staleness.
+        migration 6 or 7 or create a sidecar as a by-product of discovering staleness.
         """
 
         connection: sqlite3.Connection | None = None
@@ -3949,6 +4270,8 @@ class RuntimeStore:
         current = versions[-1]
         if current < SCHEMA_VERSION:
             required_upgrade = (
+                "upgrade_v6_to_v7" if current == 6 else
+                "upgrade_v5_to_v6" if current == 5 else
                 "upgrade_v4_to_v5" if current == 4 else "upgrade_v3_to_v4"
             )
             raise ExecutiveSchemaUpgradeRequired(
@@ -3959,9 +4282,9 @@ class RuntimeStore:
             raise PersistenceError(
                 f"executive runtime schema v{current} is unsupported by v{SCHEMA_VERSION} code"
             )
-        if schema_digest != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if schema_digest != _NORMALIZED_V7_SCHEMA_DIGEST:
             raise PersistenceError(
-                "existing Executive schema v5 does not match the exact reviewed DDL"
+                "existing Executive schema v7 does not match the exact reviewed DDL"
             )
         if self._upgrade_barrier_present():
             raise PersistenceError(
@@ -4136,9 +4459,9 @@ class RuntimeStore:
                 raise PersistenceError(
                     f"migration {version} checksum/name does not match code"
                 )
-        if _normalized_schema_digest(connection) != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if _normalized_schema_digest(connection) != _NORMALIZED_V7_SCHEMA_DIGEST:
             raise PersistenceError(
-                "executive runtime schema v5 does not match the exact reviewed DDL"
+                "executive runtime schema v7 does not match the exact reviewed DDL"
             )
 
     def _open_existing_writable(self) -> sqlite3.Connection:
@@ -4265,7 +4588,7 @@ class RuntimeStore:
     def _migrate(self, connection: sqlite3.Connection) -> None:
         if not self._database_was_absent:
             raise PersistenceError(
-                "generic migration is fresh-database-only under schema v5"
+                "generic migration is fresh-database-only under schema v7"
             )
         try:
             connection.execute("BEGIN EXCLUSIVE")
@@ -4287,7 +4610,7 @@ class RuntimeStore:
             }
             if existing:
                 raise ExecutiveSchemaUpgradeRequired(
-                    "generic migration refuses a pre-existing migration vector under schema v5"
+                    "generic migration refuses a pre-existing migration vector under schema v7"
                 )
             known_versions = {version for version, _, _ in _MIGRATIONS}
             unknown = sorted(set(existing) - known_versions)
@@ -4516,6 +4839,128 @@ class RuntimeStore:
         finally:
             self._read_connections.discard(connection)
             connection.close()
+
+    def unique_root_created_event(
+        self, job_id: str, *, max_payload_bytes: int = 65536,
+    ) -> Event:
+        """Validate root uniqueness with at most two metadata rows and one payload.
+
+        Missing/duplicate/oversized roots fail closed. No full job history load.
+        """
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("invalid root job")
+        if type(max_payload_bytes) is not int or not 1 <= max_payload_bytes <= 65536:
+            raise ValueError("invalid root payload budget")
+        with self.read() as conn:
+            rows = conn.execute(
+                """SELECT event_id, length(CAST(payload_json AS BLOB)) AS bytes
+                     FROM events WHERE job_id=? AND event_type='JOB_CREATED'
+                     ORDER BY event_id LIMIT 2""",
+                (job_id,),
+            ).fetchall()
+            if len(rows) != 1 or rows[0]["bytes"] > max_payload_bytes:
+                raise ValueError("original root unavailable or budget exceeded")
+            row = conn.execute("SELECT * FROM events WHERE event_id=?",
+                               (rows[0]["event_id"],)).fetchone()
+            if row is None:
+                raise ValueError("original root changed")
+            return _event_from_row(row)
+
+    def bounded_event_by_id(
+        self, event_id: int, *, max_payload_bytes: int = 65536,
+    ) -> Event | None:
+        """Read one exact Event only after checking its UTF-8 payload byte size."""
+        if type(event_id) is not int or event_id < 1:
+            raise ValueError("invalid event ID")
+        if type(max_payload_bytes) is not int or not 1 <= max_payload_bytes <= 65536:
+            raise ValueError("invalid payload limit")
+        with self.read() as conn:
+            size = conn.execute(
+                "SELECT length(CAST(payload_json AS BLOB)) FROM events WHERE event_id=?",
+                (event_id,),
+            ).fetchone()
+            if size is None:
+                return None
+            if size[0] > max_payload_bytes:
+                raise ValueError("event payload budget exceeded")
+            row = conn.execute("SELECT * FROM events WHERE event_id=?",
+                               (event_id,)).fetchone()
+            return None if row is None else _event_from_row(row)
+
+    def bounded_aggregate_events(
+        self, aggregate_type: str, aggregate_id: str, *,
+        connection: sqlite3.Connection | None = None,
+        max_events: int = 256, max_total_bytes: int = 1048576,
+    ) -> list[Event]:
+        """Full bounded exact aggregate read; refuse incomplete histories.
+
+        The existing (aggregate_type, aggregate_id, sequence) uniqueness index
+        gives finite metadata acquisition. The aggregate is never silently
+        truncated: overflow or oversized UTF-8 payload material is unavailable.
+        """
+        if (type(aggregate_type) is not str or not aggregate_type
+                or type(aggregate_id) is not str or not aggregate_id
+                or type(max_events) is not int or not 1 <= max_events <= 256
+                or type(max_total_bytes) is not int
+                or not 1 <= max_total_bytes <= 1048576):
+            raise ValueError("invalid bounded aggregate selection")
+
+        def _load(conn: sqlite3.Connection) -> list[Event]:
+            meta = conn.execute(
+                """SELECT event_id, length(CAST(payload_json AS BLOB)) AS nbytes
+                     FROM events WHERE aggregate_type=? AND aggregate_id=?
+                     ORDER BY sequence LIMIT ?""",
+                (aggregate_type, aggregate_id, max_events + 1),
+            ).fetchall()
+            if len(meta) > max_events or sum(int(row["nbytes"]) for row in meta) > max_total_bytes:
+                raise ValueError("original aggregate exceeds reader budget")
+            if not meta:
+                return []
+            rows = conn.execute(
+                """SELECT * FROM events WHERE aggregate_type=? AND aggregate_id=?
+                     ORDER BY sequence LIMIT ?""",
+                (aggregate_type, aggregate_id, max_events),
+            ).fetchall()
+            if len(rows) != len(meta) or [row["event_id"] for row in rows] != [
+                    row["event_id"] for row in meta]:
+                raise ValueError("original aggregate changed")
+            return [_event_from_row(row) for row in rows]
+
+        if connection is not None:
+            return _load(connection)
+        with self.read() as conn:
+            return _load(conn)
+
+    def bounded_event_metadata_window(
+        self, *, high_water: int | None = None,
+        before_event_id: int | None = None, limit: int = 256,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """Finite metadata-only provenance window; never materializes payloads.
+
+        This is an acquisition primitive, not an authorized reference API:
+        callers must additionally bound nested event reads and raw payload bytes.
+        """
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("invalid provenance window limit")
+        if high_water is not None and (type(high_water) is not int or high_water < 0):
+            raise ValueError("invalid provenance watermark")
+        if before_event_id is not None and (
+                type(before_event_id) is not int or before_event_id < 1):
+            raise ValueError("invalid provenance position")
+        with self.read() as conn:
+            if high_water is None:
+                high_water = int(conn.execute(
+                    "SELECT COALESCE(MAX(event_id),0) FROM events").fetchone()[0])
+            upper = min(high_water, before_event_id - 1) if before_event_id is not None else high_water
+            rows = conn.execute(
+                """SELECT event_id, event_type, command_id, aggregate_type,
+                          aggregate_id, actor, job_id, attempt_id, worker_id,
+                          created_at_ms, length(CAST(payload_json AS BLOB)) AS payload_bytes
+                     FROM events WHERE event_id <= ?
+                 ORDER BY event_id DESC LIMIT ?""",
+                (upper, limit),
+            ).fetchall()
+            return high_water, [dict(row) for row in rows]
 
     def list_events(
         self,
@@ -4828,6 +5273,36 @@ def _accepted_orchestration_root_provenance(
     return _orchestration_root_creator(provenance) is not None
 
 
+def _accepted_nested_coordinator_provenance(
+    provenance: Mapping[str, Any] | None,
+    *,
+    parent_job_id: Any,
+    root_job_id: Any,
+    job_id: Any,
+    depth: int,
+) -> bool:
+    # Subordinate only: this never changes original-root authority.
+    if (
+        not isinstance(provenance, Mapping)
+        or provenance.get("schema_version")
+        != "mastermind.executive_orchestration_provenance/v2"
+        or provenance.get("creator") != "coo_cycle"
+        or parent_job_id is None
+        or root_job_id == job_id
+        or type(depth) is not int
+        or not 1 <= depth <= 2
+        or not isinstance(provenance.get("hierarchy_grant"), Mapping)
+    ):
+        return False
+    from control_plane.executive_coo_hierarchy import HierarchyError, validate_grant
+
+    try:
+        validate_grant(provenance["hierarchy_grant"])
+    except HierarchyError:
+        return False
+    return True
+
+
 def _ceo_intent_root_provenance(
     provenance: Mapping[str, Any] | None,
 ) -> bool:
@@ -4872,10 +5347,16 @@ def _decode_orchestration_job_fields(
         "root_job_id",
         "role",
     }
+    nested = isinstance(provenance, dict) and provenance.get("schema_version") == "mastermind.executive_orchestration_provenance/v2"
+    if nested:
+        expected_keys.add("hierarchy_grant")
     if not isinstance(provenance, dict) or set(provenance) != expected_keys:
         raise PersistenceError("orchestration provenance is not the closed wire")
     if (
-        provenance["schema_version"] != _ORCHESTRATION_PROVENANCE_SCHEMA
+        provenance["schema_version"] not in {
+            "mastermind.executive_orchestration_provenance/v1",
+            "mastermind.executive_orchestration_provenance/v2",
+        }
         or provenance["job_id"] != row["job_id"]
         or provenance["parent_job_id"] != row["parent_job_id"]
         or provenance["root_job_id"] != row["root_job_id"]
@@ -4883,7 +5364,17 @@ def _decode_orchestration_job_fields(
         or re.fullmatch(r"[0-9a-f]{64}", str(provenance["source_digest"])) is None
     ):
         raise PersistenceError("orchestration provenance identity mismatch")
-    if role == "aggregation":
+    if nested:
+        from control_plane.executive_coo_hierarchy import validate_grant, HierarchyError
+        try:
+            validate_grant(provenance["hierarchy_grant"])
+        except HierarchyError as exc:
+            raise PersistenceError(str(exc)) from exc
+        if (role != "aggregation" or provenance["creator"] != "coo_cycle"
+                or row["parent_job_id"] is None or row["root_job_id"] == row["job_id"]
+                or not 1 <= int(row["depth"]) <= 2):
+            raise PersistenceError("nested coordinator provenance is invalid")
+    elif role == "aggregation":
         if (
             not _accepted_orchestration_root_provenance(provenance)
             or row["parent_job_id"] is not None
@@ -4893,6 +5384,90 @@ def _decode_orchestration_job_fields(
     elif provenance["creator"] != "coo_cycle" or row["parent_job_id"] is None:
         raise PersistenceError("orchestration child lacks COO cycle provenance")
     return role, provenance, str(row["orchestration_provenance_digest"])
+
+
+def _direct_attempt_view(connection, row):
+    """Internal Event-validated view; schema7 role-null columns stay NULL."""
+    if row is None: return row
+    # Schema7's enforced role floor makes an actual persisted orchestration
+    # grant an incumbent row, never this Event-backed role-null variant.
+    if row["effective_grant_json"] is not None:
+        return row
+    job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(row["job_id"],)).fetchone()
+    admission=_direct_native_provenance(connection,job)
+    if admission is None: return row
+    fields=("effective_grant_json","effective_grant_digest","placement_snapshot_json","placement_snapshot_digest",
+            "execution_principal_snapshot_json","execution_principal_snapshot_digest")
+    if any(row[k] is not None for k in fields):
+        raise StateConflict("direct role-null Attempt violated schema7 NULL floor")
+    claims=connection.execute("SELECT * FROM events WHERE event_type='JOB_CLAIMED' AND attempt_id=? LIMIT 2",(row["attempt_id"],)).fetchall()
+    if len(claims)!=1:
+        raise StateConflict("direct Attempt requires exactly one immutable claim")
+    claim=claims[0];payload=_strict_canonical_json_loads(claim["payload_json"],name="direct claim")
+    value=payload.get("direct_native_claim")
+    keys={"schema_version","admission_digest","effective_grant","effective_grant_digest","placement_snapshot","placement_snapshot_digest"}
+    authority=_authorize_job_row(job)
+    expected_grant=dict(schema_version="mastermind.executive_effective_grant/v1",authorities=list(authority.requested),
+        write_paths=[],validation_argv=[],policy_sha=authority.policy_sha256,job_id=row["job_id"],role=None)
+    if (type(value) is not dict or set(value)!=keys or value["schema_version"]!="mastermind.direct_native_claim/v1"
+            or value["admission_digest"]!=orchestration_digest(admission)
+            or claim["command_id"]!=f"direct-native-dispatch:{row['job_id']}"
+            or claim["aggregate_type"]!="job" or claim["aggregate_id"]!=row["job_id"]
+            or claim["job_id"]!=row["job_id"] or claim["worker_id"]!=row["worker_id"]
+            or claim["quota_class"]!=row["quota_class"]
+            or payload.get("fence_generation")!=row["fence_generation"]
+            or payload.get("attempt_number")!=row["attempt_number"]
+            or value["effective_grant"]!=expected_grant
+            or value["effective_grant_digest"]!=orchestration_digest(expected_grant)
+            or value["placement_snapshot_digest"]!=orchestration_digest(value["placement_snapshot"])):
+        raise StateConflict("direct Attempt immutable grant/claim join changed")
+    placement=validate_placement_snapshot(value["placement_snapshot"])
+    if (placement["worker_id"]!=row["worker_id"] or row["worker_id"]!=admission["binding"]["worker_id"] or placement["quota_class"]!=row["quota_class"]
+            or placement["provider"]!="codex" or placement["provider"]!=admission["binding"]["provider"]):
+        raise StateConflict("direct Attempt placement differs from actual native claim")
+    result=dict(row)
+    result.update(effective_grant_json=_json_dumps(expected_grant),effective_grant_digest=value["effective_grant_digest"],
+        placement_snapshot_json=_json_dumps(placement),placement_snapshot_digest=value["placement_snapshot_digest"])
+    principals=connection.execute("SELECT * FROM events WHERE event_type='DIRECT_NATIVE_LAUNCH_PRINCIPAL' AND attempt_id=? LIMIT 2",(row["attempt_id"],)).fetchall()
+    if len(principals)>1 or (not principals and row["status"] in {"RUNNING","CHECKPOINTED","COMPLETED"}):
+        raise StateConflict("direct native launch principal is missing or conflicting")
+    if principals:
+        event=principals[0];principal=_strict_canonical_json_loads(event["payload_json"],name="direct principal")
+        metadata=_strict_canonical_json_loads(row["launch_metadata_json"],name="direct launch metadata")
+        if (set(principal)!={"schema_version","admission_digest","claim_digest","principal","principal_digest","launch_attestation_sha256"}
+                or principal["schema_version"]!="mastermind.direct_native_launch_principal/v1"
+                or event["command_id"]!=f"direct-native-principal:{row['attempt_id']}"
+                or event["aggregate_type"]!="attempt" or event["aggregate_id"]!=row["attempt_id"]
+                or event["job_id"]!=row["job_id"] or event["worker_id"]!=row["worker_id"] or event["quota_class"]!=row["quota_class"]
+                or principal["admission_digest"]!=orchestration_digest(admission)
+                or principal["claim_digest"]!=orchestration_digest(value)
+                or principal["principal_digest"]!=orchestration_digest(principal["principal"])
+                or principal["launch_attestation_sha256"]!=metadata.get("launch_attestation_sha256")):
+            raise StateConflict("direct native launch principal provenance changed")
+        result.update(execution_principal_snapshot_json=_json_dumps(principal["principal"]),
+            execution_principal_snapshot_digest=principal["principal_digest"])
+    return result
+
+
+def _direct_terminal_attempt_view(connection, attempt_row):
+    """Derive only genuine direct evidence; preserve incumbent launch views.
+
+    Legacy owners may pass an already-qualified merged launch projection. Its
+    remote identity and recovery material must not be replaced by the raw row.
+    The new role-null variant instead always derives from its durable admission
+    and raw Attempt, never from caller-projected grant or principal fields.
+    """
+    original = connection.execute(
+        "SELECT * FROM attempts WHERE attempt_id=?", (attempt_row["attempt_id"],)
+    ).fetchone()
+    if original is None or original["effective_grant_json"] is not None:
+        return attempt_row
+    job = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (original["job_id"],)
+    ).fetchone()
+    if _direct_native_provenance(connection, job) is None:
+        return attempt_row
+    return _direct_attempt_view(connection, original)
 
 
 def _attempt_from_row(row: sqlite3.Row) -> Attempt:
@@ -5717,8 +6292,12 @@ def _living_child_rows(
     placeholders = ",".join("?" for _ in _TERMINAL_JOB_STATUSES)
     terminal = [status.value for status in _TERMINAL_JOB_STATUSES]
     return connection.execute(
-        f"SELECT * FROM jobs WHERE parent_job_id=? AND status NOT IN ({placeholders}) "
-        "ORDER BY created_at_ms,job_id",
+        "WITH RECURSIVE descendants(job_id) AS ("
+        "SELECT job_id FROM jobs WHERE parent_job_id=? UNION "
+        "SELECT child.job_id FROM jobs child JOIN descendants parent "
+        "ON child.parent_job_id=parent.job_id) "
+        "SELECT jobs.* FROM jobs JOIN descendants USING(job_id) "
+        f"WHERE status NOT IN ({placeholders}) ORDER BY created_at_ms,job_id",
         (parent_job_id, *terminal),
     ).fetchall()
 
@@ -5754,7 +6333,12 @@ def _assert_parent_aggregation_allowed(
     """Fail closed until the explicit Phase 1F-C cycle is allowed to aggregate."""
 
     children = connection.execute(
-        "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY created_at_ms,job_id",
+        "WITH RECURSIVE descendants(job_id) AS ("
+        "SELECT job_id FROM jobs WHERE parent_job_id=? UNION "
+        "SELECT child.job_id FROM jobs child JOIN descendants parent "
+        "ON child.parent_job_id=parent.job_id) "
+        "SELECT jobs.* FROM jobs JOIN descendants USING(job_id) "
+        "ORDER BY created_at_ms,job_id",
         (parent_job_id,),
     ).fetchall()
     if not children:
@@ -5838,6 +6422,55 @@ def _quota_from_row(row: sqlite3.Row) -> WorkerQuotaClass:
         fence_generation=int(row["fence_counter"]),
         last_seen_at=_iso(int(row["last_seen_at_ms"])),
         metadata=dict(_json_loads(row["metadata_json"], fallback={})),
+    )
+
+
+def _worker_from_rows(
+    worker_row: sqlite3.Row, quota_rows: list[sqlite3.Row],
+) -> Worker:
+    """Construct the canonical Worker from its row and all acquired quota rows."""
+
+    quotas = [_quota_from_row(row) for row in quota_rows]
+    statuses = {quota.status for quota in quotas}
+    if worker_row["identity_status"] != "ONLINE":
+        aggregate_status = WorkerStatus(worker_row["identity_status"])
+    else:
+        for candidate in (
+            WorkerStatus.AVAILABLE,
+            WorkerStatus.BUSY,
+            WorkerStatus.RATE_LIMITED,
+            WorkerStatus.DRAINING,
+            WorkerStatus.OFFLINE,
+            WorkerStatus.ERROR,
+        ):
+            if candidate in statuses:
+                aggregate_status = candidate
+                break
+        else:  # pragma: no cover - registration guarantees a class
+            aggregate_status = WorkerStatus.ERROR
+    active_jobs = sorted(
+        {quota.active_job_id for quota in quotas if quota.active_job_id}
+    )
+    capabilities = sorted({item for quota in quotas for item in quota.capabilities})
+    legacy_quotas = {
+        quota.quota_class: {
+            "status": quota.status.value,
+            "capabilities": quota.capabilities,
+            "active_job_id": quota.active_job_id,
+        }
+        for quota in quotas
+    }
+    return Worker(
+        worker_id=str(worker_row["worker_id"]),
+        provider=str(worker_row["provider"]),
+        account_label=str(worker_row["account_label"]),
+        worker_type=str(worker_row["worker_type"]),
+        status=aggregate_status,
+        capabilities=capabilities,
+        active_job_id=active_jobs[0] if active_jobs else None,
+        last_seen_at=_iso(int(worker_row["last_seen_at_ms"])),
+        metadata=dict(_json_loads(worker_row["metadata_json"], fallback={})),
+        quota_classes=legacy_quotas,
     )
 
 
@@ -6105,48 +6738,7 @@ class WorkerRegistry:
                 """,
                 (worker_id,),
             ).fetchall()
-        quotas = [_quota_from_row(row) for row in quota_rows]
-        statuses = {quota.status for quota in quotas}
-        if worker_row["identity_status"] != "ONLINE":
-            aggregate_status = WorkerStatus(worker_row["identity_status"])
-        else:
-            for candidate in (
-                WorkerStatus.AVAILABLE,
-                WorkerStatus.BUSY,
-                WorkerStatus.RATE_LIMITED,
-                WorkerStatus.DRAINING,
-                WorkerStatus.OFFLINE,
-                WorkerStatus.ERROR,
-            ):
-                if candidate in statuses:
-                    aggregate_status = candidate
-                    break
-            else:  # pragma: no cover - registration guarantees a class
-                aggregate_status = WorkerStatus.ERROR
-        active_jobs = sorted(
-            {quota.active_job_id for quota in quotas if quota.active_job_id}
-        )
-        capabilities = sorted({item for quota in quotas for item in quota.capabilities})
-        legacy_quotas = {
-            quota.quota_class: {
-                "status": quota.status.value,
-                "capabilities": quota.capabilities,
-                "active_job_id": quota.active_job_id,
-            }
-            for quota in quotas
-        }
-        return Worker(
-            worker_id=str(worker_row["worker_id"]),
-            provider=str(worker_row["provider"]),
-            account_label=str(worker_row["account_label"]),
-            worker_type=str(worker_row["worker_type"]),
-            status=aggregate_status,
-            capabilities=capabilities,
-            active_job_id=active_jobs[0] if active_jobs else None,
-            last_seen_at=_iso(int(worker_row["last_seen_at_ms"])),
-            metadata=dict(_json_loads(worker_row["metadata_json"], fallback={})),
-            quota_classes=legacy_quotas,
-        )
+        return _worker_from_rows(worker_row, quota_rows)
 
     def list_workers(self) -> list[Worker]:
         with self.store.read() as connection:
@@ -7092,6 +7684,44 @@ def _validated_retry_safety_block_evidence(
         )
 
 
+def _coordinator_policy_pin(connection: sqlite3.Connection, scope: str) -> str:
+    """Read the immutable pin even when current policy source cannot load."""
+    rows = connection.execute("SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?", (scope,)).fetchall()
+    if len(rows) > 1:
+        raise StateConflict("coordinator has ambiguous admitted policy")
+    if rows:
+        value = _strict_canonical_json_loads(str(rows[0][0]), name="admitted coordinator policy")
+        pin = value.get("policy_sha") if isinstance(value, dict) else None
+        if pin not in {EXPECTED_POLICY_SHA256, HIERARCHY_POLICY_SHA256}:
+            raise StateConflict("coordinator has an unrecognized admitted policy")
+        return pin
+    row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (scope,)).fetchone()
+    if row is not None and row["parent_job_id"] is not None and row["orchestration_role"] == "aggregation":
+        _, provenance, _ = _decode_orchestration_job_fields(row)
+        return str(provenance["hierarchy_grant"]["policy_sha256"])
+    return EXPECTED_POLICY_SHA256
+
+
+def _coordinator_event_identity(root: sqlite3.Row, schema: str) -> dict[str, Any]:
+    if root["parent_job_id"] is None:
+        return {"schema_version": schema, "root_job_id": str(root["root_job_id"])}
+    return {"schema_version": schema.rsplit("/", 1)[0] + "/v2",
+            "root_job_id": str(root["root_job_id"]), "coordinator_job_id": str(root["job_id"])}
+
+
+def _coordinator_selection_matches(root: sqlite3.Row, selected: sqlite3.Row) -> bool:
+    return (root["root_job_id"] == selected["root_job_id"]
+            and (selected["job_id"] == root["job_id"]
+                 or selected["parent_job_id"] == root["job_id"]))
+
+
+def _dispatch_scope(connection: sqlite3.Connection, job_id: str) -> str:
+    row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+    if row is None:
+        raise StateConflict("dispatch scope lost its Job")
+    return str(row["job_id"] if row["orchestration_role"] == "aggregation" else row["parent_job_id"])
+
+
 def _validated_coo_cycle_block_event(
     connection: sqlite3.Connection,
     event_row: sqlite3.Row,
@@ -7127,18 +7757,21 @@ def _validated_coo_cycle_block_event(
         "evidence_digest",
         "command_id",
     }
+    nested = isinstance(payload, dict) and payload.get("coordinator_job_id") is not None
+    if nested:
+        expected_keys.add("coordinator_job_id")
     if not isinstance(payload, dict) or set(payload) != expected_keys:
         raise StateConflict("COO_CYCLE_BLOCKED payload is not the closed wire")
     selected_id = payload.get("selected_job_id")
     reason = payload.get("reason")
     evidence_value = payload.get("evidence")
     if (
-        payload.get("schema_version") != "mastermind.coo_cycle_block/v1"
-        or payload.get("root_job_id") != expected_root_id
+        payload.get("schema_version") != ("mastermind.coo_cycle_block/v2" if nested else "mastermind.coo_cycle_block/v1")
+        or payload.get("coordinator_job_id", payload.get("root_job_id")) != expected_root_id
         or not isinstance(selected_id, str)
         or not selected_id
         or reason not in COO_CYCLE_BLOCK_REASONS
-        or payload.get("policy_sha") != EXPECTED_POLICY_SHA256
+        or payload.get("policy_sha") != _coordinator_policy_pin(connection, expected_root_id)
         or not isinstance(evidence_value, dict)
         or not isinstance(payload.get("evidence_digest"), str)
         or payload["evidence_digest"] != orchestration_digest(evidence_value)
@@ -7156,8 +7789,9 @@ def _validated_coo_cycle_block_event(
     if (
         root is None
         or selected is None
-        or root["root_job_id"] != expected_root_id
-        or selected["root_job_id"] != expected_root_id
+        or not _coordinator_selection_matches(root, selected)
+        or payload.get("root_job_id") != root["root_job_id"]
+        or nested != (root["parent_job_id"] is not None)
         or (reason != "invalid_root" and root["orchestration_role"] != "aggregation")
         or event_row["attempt_id"] != selected["current_attempt_id"]
     ):
@@ -7242,6 +7876,9 @@ def _validated_coo_dispatch_effect_event(
         "phase",
         "command_id",
     }
+    nested = isinstance(payload, dict) and payload.get("coordinator_job_id") is not None
+    if nested:
+        expected_keys.add("coordinator_job_id")
     if not isinstance(payload, dict) or set(payload) != expected_keys:
         raise StateConflict("COO dispatch effect payload is not the closed wire")
 
@@ -7250,8 +7887,8 @@ def _validated_coo_dispatch_effect_event(
     attempt_id = payload.get("attempt_id")
     suffix = ":effect-unknown" if phase == "EFFECT_UNKNOWN" else ":reconciled"
     if (
-        payload.get("schema_version") != _COO_DISPATCH_EFFECT_SCHEMA
-        or payload.get("root_job_id") != expected_root_id
+        payload.get("schema_version") != (_COO_DISPATCH_EFFECT_SCHEMA.rsplit("/", 1)[0]+"/v2" if nested else _COO_DISPATCH_EFFECT_SCHEMA)
+        or payload.get("coordinator_job_id", payload.get("root_job_id")) != expected_root_id
         or not isinstance(selected_id, str)
         or not selected_id
         or not isinstance(dispatch_command, str)
@@ -7277,9 +7914,10 @@ def _validated_coo_dispatch_effect_event(
     if (
         root is None
         or selected is None
-        or root["root_job_id"] != expected_root_id
         or root["orchestration_role"] != "aggregation"
-        or selected["root_job_id"] != expected_root_id
+        or not _coordinator_selection_matches(root, selected)
+        or payload.get("root_job_id") != root["root_job_id"]
+        or nested != (root["parent_job_id"] is not None)
         or claim is None
         or claim["event_type"] != "JOB_CLAIMED"
         or claim["job_id"] != selected_id
@@ -7449,7 +8087,7 @@ def _requeue_outcome_from_event(
         "SELECT root_job_id FROM jobs WHERE job_id=?", (expected_job_id,)
     ).fetchone()
     if root_row is None or event_row["command_id"] != (
-        f"coo-cycle:{root_row['root_job_id']}:requeue:"
+        f"coo-cycle:{_dispatch_scope(connection, expected_job_id)}:requeue:"
         f"{expected_job_id}:{event_row['attempt_id']}"
     ):
         raise StateConflict("command-aware JOB_REQUEUED command identity is invalid")
@@ -7736,6 +8374,7 @@ def _validated_sealed_worker_launch_material(
     attempt_row: sqlite3.Row,
     *,
     allow_unsealed_principal: bool = False,
+    connection: sqlite3.Connection | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Re-derive a SEALED_WORKER principal from its complete launch receipt.
 
@@ -7745,6 +8384,29 @@ def _validated_sealed_worker_launch_material(
     projection.  No caller text, Worker row, or later model result contributes
     to this identity.
     """
+
+    if connection is not None:
+        attempt_row = _direct_terminal_attempt_view(connection, attempt_row)
+    from control_plane.executive_paid_runtime import (
+        is_paid_attempt, validated_paid_launch_material,
+    )
+    if connection is not None and is_paid_attempt(connection, attempt_row):
+        return validated_paid_launch_material(
+            connection, attempt_row,
+            allow_unsealed_principal=allow_unsealed_principal,
+        )
+    if connection is None:
+        # A direct legacy helper caller cannot qualify a paid Job/claim join.
+        raw = _strict_canonical_json_loads(
+            str(attempt_row["launch_metadata_json"]), name="launch dispatch metadata"
+        )
+        if isinstance(raw, dict) and (
+            raw.get("schema_version") == "mastermind.executive_paid_process_launch/v1"
+            or (isinstance(raw.get("launch_attestation"), dict)
+                and raw["launch_attestation"].get("schema_version")
+                == "mastermind.executive_paid_model_launch_attestation/v1")
+        ):
+            raise StateConflict("paid launch validation requires its original transaction")
 
     metadata = _strict_canonical_json_loads(
         str(attempt_row["launch_metadata_json"]), name="sealed-worker launch metadata"
@@ -8089,6 +8751,16 @@ def _sealed_worker_result_payload(
 ) -> dict[str, Any]:
     """Build seal-equivalent evidence from the immutable sealed-worker receipt."""
 
+    attempt_row = _direct_terminal_attempt_view(connection, attempt_row)
+    from control_plane.executive_paid_runtime import (
+        is_paid_attempt, paid_sealed_worker_result_payload,
+    )
+    if is_paid_attempt(connection, attempt_row):
+        return paid_sealed_worker_result_payload(
+            connection, attempt_row, expected_role=expected_role,
+            terminal_payload=terminal_payload,
+        )
+
     if not isinstance(terminal_payload, dict):
         raise StateConflict("sealed-worker terminal payload is not an object")
     evidence = terminal_payload.get("result_evidence")
@@ -8309,7 +8981,7 @@ def _sealed_worker_result_payload(
     ):
         raise StateConflict("sealed-worker collection/result identity is invalid")
     attestation, _principal, _placement, grant = (
-        _validated_sealed_worker_launch_material(attempt_row)
+        _validated_sealed_worker_launch_material(attempt_row, connection=connection)
     )
     job_row = connection.execute(
         "SELECT root_job_id,validation_commands_json,result_json FROM jobs WHERE job_id=?",
@@ -8453,6 +9125,31 @@ def _sealed_worker_result_payload(
         )
     envelope = dict(result["structured_output"])
     envelope_digest = orchestration_digest(envelope)
+    if expected_role is None:
+        # Actual local sealed evidence above is mandatory; role-null is not a
+        # legacy summary conversion or a Fabric role-result impersonation.
+        full_job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(attempt_row["job_id"],)).fetchone()
+        admission=_direct_native_provenance(connection,full_job,required=True)
+        keys={"schema_version","status","job_id","attempt_id","admission_digest","payload",
+              "result_evidence","result_envelope","result_envelope_digest","artifact_receipt_digest",
+              "validation_receipt_digest","effective_grant_digest"}
+        if (is_fabric or type(terminal_payload) is not dict or set(terminal_payload)!=keys
+                or terminal_payload["schema_version"] != direct_native.TERMINAL_SCHEMA
+                or terminal_payload["status"] != "COMPLETED"
+                or terminal_payload["job_id"] != attempt_row["job_id"]
+                or terminal_payload["attempt_id"] != attempt_row["attempt_id"]
+                or terminal_payload["admission_digest"] != orchestration_digest(admission)
+                or terminal_payload["payload"] != direct_native.public_payload(envelope)
+                or envelope.get("status") != "COMPLETED" or "role_result" in envelope
+                or result["artifact_manifest"] != []
+                or terminal_payload["result_envelope"] != envelope
+                or terminal_payload["result_envelope_digest"] != envelope_digest
+                or terminal_payload["artifact_receipt_digest"] != orchestration_digest([])
+                or terminal_payload["validation_receipt_digest"] != evidence["validation_receipts_digest"]
+                or terminal_payload["effective_grant_digest"] != attempt_row["effective_grant_digest"]
+                or (job_row["result_json"] is not None and json.loads(job_row["result_json"]) != terminal_payload)):
+            raise StateConflict("direct native terminal lost actual sealed result evidence")
+        return copy.deepcopy(terminal_payload)
     role_result = envelope.get("role_result")
     artifact_manifest = result["artifact_manifest"]
     declared_artifacts = (
@@ -8524,7 +9221,7 @@ def _sealed_worker_result_payload(
         ),
         "placement_snapshot_digest": str(attempt_row["placement_snapshot_digest"]),
         "effective_grant_digest": str(attempt_row["effective_grant_digest"]),
-        "policy_sha": CooCyclePolicy.load().policy_sha256,
+        "policy_sha": _job_coo_policy(connection, str(attempt_row["job_id"])).policy_sha256,
     }
 
 
@@ -8807,7 +9504,7 @@ def _validated_orchestration_terminal_generation(
         or admission.get("effective_grant_digest")
         != attempt_row["effective_grant_digest"]
         or admission.get("effective_grant_digest") != seal["effective_grant_digest"]
-        or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+        or admission.get("policy_sha") != _job_coo_policy(connection, str(attempt_row["job_id"])).policy_sha256
         or admission.get("policy_sha") != seal["policy_sha"]
         or admission.get("launch_decision") != LaunchDecision.ALLOW.value
         or not isinstance(decision, dict)
@@ -8827,8 +9524,16 @@ def _validated_sealed_worker_terminal_evidence(
 ) -> dict[str, Any]:
     """Validate the sealed-worker equivalent without accepting OHF table evidence."""
 
+    from control_plane.executive_paid_runtime import (
+        is_paid_attempt, validated_paid_terminal_evidence,
+    )
+    if is_paid_attempt(connection, attempt_row):
+        return validated_paid_terminal_evidence(
+            connection, attempt_row=attempt_row, seal=seal,
+        )
+
     attestation, principal, placement, grant = _validated_sealed_worker_launch_material(
-        attempt_row
+        attempt_row, connection=connection
     )
     attestation_digest = orchestration_digest(attestation)
     exit_events = connection.execute(
@@ -8873,7 +9578,7 @@ def _validated_sealed_worker_terminal_evidence(
         seal["observed_attestation_digest"] != attestation_digest
         or seal["work_admission_command_id"]
         != f"sealed-worker-launch:{attempt_row['attempt_id']}"
-        or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+        or seal["policy_sha"] != _job_coo_policy(connection, str(attempt_row["job_id"])).policy_sha256
         or seal["execution_principal_snapshot_digest"]
         != attempt_row["execution_principal_snapshot_digest"]
         or seal["placement_snapshot_digest"] != attempt_row["placement_snapshot_digest"]
@@ -9023,7 +9728,7 @@ def _validated_orchestration_child_terminal_payload(
         raise StateConflict("orchestration role body digest mismatches its seal")
     if role == "plan":
         if (
-            job_row["parent_job_id"] != job_row["root_job_id"]
+            body.get("coordinator_job_id", body.get("root_job_id")) != job_row["parent_job_id"]
             or body.get("root_job_id") != job_row["root_job_id"]
             or body.get("plan_attempt_id") != attempt_row["attempt_id"]
         ):
@@ -9116,6 +9821,9 @@ _WORK_DEPENDENCY_REVISION_KEYS = frozenset(
 )
 
 
+WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 = "mastermind.work_dependency_manifest/v2"
+
+
 def _validate_work_dependency_manifest(
     value: Any,
     *,
@@ -9123,6 +9831,7 @@ def _validate_work_dependency_manifest(
     plan_attempt_id: str,
     plan_digest: str,
     plan_step_id: str,
+    coordinator_job_id: str | None = None,
 ) -> dict[str, Any]:
     """Validate one closed, digest-bound dependency snapshot."""
 
@@ -9136,6 +9845,9 @@ def _validate_work_dependency_manifest(
         "revisions",
         "dependency_manifest_digest",
     }
+    nested = isinstance(value, Mapping) and value.get("schema_version") == WORK_DEPENDENCY_MANIFEST_SCHEMA_V2
+    if nested:
+        expected_keys.add("coordinator_job_id")
     if not isinstance(value, Mapping) or set(value) != expected_keys:
         raise StateConflict("work dependency manifest is not the closed wire")
     manifest = dict(value)
@@ -9143,7 +9855,8 @@ def _validate_work_dependency_manifest(
     revisions = manifest.get("revisions")
     manifest_digest = manifest.get("dependency_manifest_digest")
     if (
-        manifest.get("schema_version") != WORK_DEPENDENCY_MANIFEST_SCHEMA
+        manifest.get("schema_version") not in {WORK_DEPENDENCY_MANIFEST_SCHEMA, WORK_DEPENDENCY_MANIFEST_SCHEMA_V2}
+        or (nested and (not coordinator_job_id or manifest.get("coordinator_job_id") != coordinator_job_id))
         or manifest.get("root_job_id") != root_job_id
         or manifest.get("plan_attempt_id") != plan_attempt_id
         or manifest.get("plan_digest") != plan_digest
@@ -9157,7 +9870,7 @@ def _validate_work_dependency_manifest(
         or not isinstance(plan_digest, str)
         or _DIGEST_RE.fullmatch(plan_digest) is None
         or not isinstance(prerequisites, list)
-        or len(prerequisites) > 7
+        or len(prerequisites) > (15 if nested else 7)
         or any(
             not isinstance(item, str) or _COMMAND_ID_RE.fullmatch(item) is None
             for item in prerequisites
@@ -9247,9 +9960,10 @@ def _work_dependency_manifest(
     """Derive the canonical accepted-revision snapshot for one V3/V4 work step."""
 
     if (
-        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
-        or admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2
-        or admission.get("root_job_id") != root_row["job_id"]
+        plan_body.get("schema_version") not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
+        or admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+        or admission.get("root_job_id") != root_row["root_job_id"]
+        or admission.get("coordinator_job_id", admission.get("root_job_id")) != root_row["job_id"]
         or admission.get("plan_attempt_id") != plan_body.get("plan_attempt_id")
         or admission.get("plan_digest") is None
     ):
@@ -9283,8 +9997,9 @@ def _work_dependency_manifest(
         for prerequisite in prerequisites
     ]
     manifest: dict[str, Any] = {
-        "schema_version": WORK_DEPENDENCY_MANIFEST_SCHEMA,
-        "root_job_id": str(root_row["job_id"]),
+        "schema_version": (WORK_DEPENDENCY_MANIFEST_SCHEMA_V2 if plan_body["schema_version"] == "mastermind.execution_plan/v5" else WORK_DEPENDENCY_MANIFEST_SCHEMA),
+        "root_job_id": str(root_row["root_job_id"]),
+        **({"coordinator_job_id": str(root_row["job_id"])} if plan_body["schema_version"] == "mastermind.execution_plan/v5" else {}),
         "plan_attempt_id": str(admission["plan_attempt_id"]),
         "plan_digest": str(admission["plan_digest"]),
         "plan_step_id": plan_step_id,
@@ -9294,7 +10009,8 @@ def _work_dependency_manifest(
     manifest["dependency_manifest_digest"] = orchestration_digest(manifest)
     return _validate_work_dependency_manifest(
         manifest,
-        root_job_id=str(root_row["job_id"]),
+        root_job_id=str(root_row["root_job_id"]),
+        coordinator_job_id=str(root_row["job_id"]),
         plan_attempt_id=str(admission["plan_attempt_id"]),
         plan_digest=str(admission["plan_digest"]),
         plan_step_id=plan_step_id,
@@ -9331,22 +10047,25 @@ def _validated_plan_admission(
         "command_id",
         "reservation_digest",
     }
+    if isinstance(admission, dict) and admission.get("schema_version") == _COO_PLAN_ADMISSION_SCHEMA_V3:
+        keys.add("coordinator_job_id")
     admission_schema = admission.get("schema_version") if isinstance(admission, dict) else None
     if (
         not isinstance(admission, dict)
         or set(admission) != keys
         or admission_schema
-        not in {_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2}
+        not in {_COO_PLAN_ADMISSION_SCHEMA_V1, _COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
     ):
         raise StateConflict("COO plan admission is not the closed wire")
     digest_input = dict(admission)
     reservation_digest = digest_input.pop("reservation_digest", None)
-    policy = CooCyclePolicy.load()
+    policy = CooCyclePolicy.for_digest(admission.get("policy_sha"))
     expected_command = (
         f"coo-cycle:{root_row['job_id']}:admit-plan:{admission.get('plan_attempt_id')}"
     )
     if (
-        admission.get("root_job_id") != root_row["job_id"]
+        admission.get("root_job_id") != root_row["root_job_id"]
+        or admission.get("coordinator_job_id", admission.get("root_job_id")) != root_row["job_id"]
         or admission.get("policy_sha") != policy.policy_sha256
         or event["actor"] != "coo"
         or event["aggregate_type"] != "job"
@@ -9394,7 +10113,7 @@ def _validated_plan_admission(
         not (completed_history or active_interactive)
         or plan_attempt["plan_role"] != "plan"
         or plan_attempt["plan_parent"] != root_row["job_id"]
-        or plan_attempt["plan_root"] != root_row["job_id"]
+        or plan_attempt["plan_root"] != root_row["root_job_id"]
     ):
         raise StateConflict(
             "COO plan admission lost its active interactive or completed planner Attempt"
@@ -9444,13 +10163,13 @@ def _validated_plan_admission(
             expected_run_id=str(plan_attempt["attempt_id"]),
             expected_worker_id=str(plan_attempt["worker_id"]),
             expected_role="plan",
-            expected_root_job_id=str(root_row["job_id"]),
+            expected_root_job_id=str(root_row["root_job_id"]),
         )
     except Exception as exc:
         raise StateConflict(f"sealed plan result is invalid: {exc}") from exc
     plan_body = dict(envelope["role_result"])
     expected_admission_schema = (
-        _COO_PLAN_ADMISSION_SCHEMA_V2
+        _COO_PLAN_ADMISSION_SCHEMA_V3 if plan_body.get("schema_version") == "mastermind.execution_plan/v5" else _COO_PLAN_ADMISSION_SCHEMA_V2
         if plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
         else _COO_PLAN_ADMISSION_SCHEMA_V1
     )
@@ -9467,6 +10186,10 @@ def _validated_plan_admission(
         plan_body["steps"]
     ):
         raise StateConflict("COO plan admission step manifest is malformed")
+    if (policy.schema_version == 2) != (admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V3):
+        raise StateConflict("admission policy version does not match the sealed plan")
+    if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V3 and plan_body.get("coordinator_job_id") != root_row["job_id"]:
+        raise StateConflict("sealed plan coordinator identity drifted")
     requirements: list[bool] = []
     root_validations = _strict_canonical_json_loads(
         str(root_row["validation_commands_json"]), name="root validation commands"
@@ -9475,11 +10198,7 @@ def _validated_plan_admission(
     for ordinal, (reserved, step) in enumerate(
         zip(reservation_steps, plan_body["steps"], strict=True)
     ):
-        required = bool(
-            step["review_required"]
-            or root_row["business_impact"] in {"material", "critical"}
-            or step["business_impact"] in {"material", "critical"}
-        )
+        required = _step_review_required(step, root_row)
         requirements.append(required)
         expected_member_command = f"{expected_command}:member:{ordinal}"
         if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V1:
@@ -9522,7 +10241,7 @@ def _validated_plan_admission(
             or reserved["plan_step_id"] != step["step_id"]
             or reserved["review_required"] is not required
             or reserved["step_slots"]
-            != policy.reserved_step_slots(review_required=required)
+            != _step_slots(policy, step, required)
         ):
             raise StateConflict("COO plan admission reservation arithmetic drifted")
         if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V1:
@@ -9547,7 +10266,7 @@ def _validated_plan_admission(
         expected_validation_argv = root_validations if expected_validation_ids else []
         if step["validation_ids"] != expected_validation_ids:
             raise StateConflict("typed plan changed the mandatory root validation set")
-        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V2 and prerequisite_step_ids:
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3} and prerequisite_step_ids:
             continue
 
         member = connection.execute(
@@ -9580,7 +10299,7 @@ def _validated_plan_admission(
             ) = None
         if (
             member is None
-            or member_role != "work"
+            or member_role != ("aggregation" if step.get("delegation") else "work")
             or member["parent_job_id"] != root_row["job_id"]
             or member["plan_attempt_id"] != admission["plan_attempt_id"]
             or member["plan_digest"] != admission["plan_digest"]
@@ -9602,7 +10321,7 @@ def _validated_plan_admission(
             or member_event["job_id"] != member["job_id"]
         ):
             raise StateConflict("COO plan admission member manifest drifted")
-        if admission_schema == _COO_PLAN_ADMISSION_SCHEMA_V2:
+        if admission_schema in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}:
             dependency_manifest = _work_dependency_manifest(
                 connection,
                 root_row=root_row,
@@ -9614,7 +10333,9 @@ def _validated_plan_admission(
             connection,
             event_row=member_event,
             root_row=root_row,
-            role="work",
+            role="aggregation" if step.get("delegation") else "work",
+            delegation=step.get("delegation"),
+                    business_impact=_step_coordinator_impact(root_row, step),
             objective=str(step["objective"]),
             requested_authorities=list(step["requested_authorities"]),
             allowed_write_paths=list(step["allowed_write_paths"]),
@@ -9632,12 +10353,159 @@ def _validated_plan_admission(
             dependency_manifest=dependency_manifest,
         )
     try:
-        expected_total = policy.reserved_children_total(tuple(requirements))
+        expected_total = _hierarchy_reservation(policy, root_row, plan_body["steps"], tuple(requirements))
     except CooCyclePolicyError as exc:
         raise StateConflict(f"COO plan reservation exceeds policy: {exc}") from exc
     if admission["reserved_children_total"] != expected_total:
         raise StateConflict("COO plan admission total reservation drifted")
     return admission, plan_body
+
+def _review_candidate_exclusions(
+    connection: sqlite3.Connection, review_job: sqlite3.Row
+) -> tuple[str, str] | tuple[str, str, str]:
+    """Exclude known non-independent placement before spending a review claim.
+
+    The completed target's sealed identity supplies the exclusions. Final
+    review acceptance still checks the actual OS principal, provider home,
+    grant and full execution identity.
+    """
+    reviewed = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (review_job["reviews_job_id"],)
+    ).fetchone()
+    if (
+        reviewed is None or reviewed["orchestration_role"] not in {"work", "repair"}
+        or reviewed["root_job_id"] != review_job["root_job_id"]
+        or reviewed["parent_job_id"] != review_job["parent_job_id"]
+    ):
+        raise StateConflict("review claim lost its exact reviewed revision")
+    attempt, _seal, _terminal, _digest = _validated_role_completion_material(
+        connection, job_row=reviewed,
+        expected_role=str(reviewed["orchestration_role"]),
+        root_job_id=str(review_job["root_job_id"]),
+    )
+    try:
+        principal = _load_canonical_digest_pair(
+            attempt["execution_principal_snapshot_json"],
+            attempt["execution_principal_snapshot_digest"],
+            name="reviewed execution principal snapshot",
+        )
+    except PersistenceError as exc:
+        raise StateConflict("review target has no qualified execution identity") from exc
+    if isinstance(principal, dict) and principal.get("schema_version") == (
+        "mastermind.paid_model_execution_principal/v1"
+    ):
+        from control_plane.executive_paid_runtime import validated_paid_launch_material
+        _attestation, qualified, _placement, _grant = validated_paid_launch_material(
+            connection, attempt
+        )
+        if principal != qualified:
+            raise StateConflict("paid review target principal differs from its owned launch")
+        # The third member narrows claim-time selection; v1 keeps its original tuple.
+        return qualified["worker_id"], qualified["account_label"], "codex"
+    if (
+        not isinstance(principal, dict)
+        or set(principal) != {
+            "schema_version", "attempt_id", "worker_id", "quota_class", "provider",
+            "account_label", "placement_snapshot_digest", "os_principal_name",
+            "os_principal_uid", "provider_home_identity",
+        }
+        or principal["schema_version"] != "mastermind.execution_principal_snapshot/v1"
+        or principal["attempt_id"] != attempt["attempt_id"]
+        or principal["worker_id"] != attempt["worker_id"]
+        or not isinstance(principal["worker_id"], str) or not principal["worker_id"]
+        or not isinstance(principal["account_label"], str) or not principal["account_label"].strip()
+    ):
+        raise StateConflict("review target execution identity differs from its completed Attempt")
+    return principal["worker_id"], principal["account_label"]
+
+
+def _paid_subject_codex_review_is_independent(
+    connection: sqlite3.Connection, *, review: sqlite3.Row,
+    reviewed: sqlite3.Row, review_grant: dict[str, Any],
+) -> bool:
+    """Narrow paid SUBJECT -> qualified sealed Codex REVIEWER policy.
+
+    Both identities are re-derived through their real owned launch receipts.
+    An absent paid home never participates in an independence comparison.
+    This grants neither paid review nor shared-UID execution independence.
+    """
+    try:
+        from control_plane.executive_paid_runtime import validated_paid_launch_material
+        subject_att, subject, _subject_placement, _subject_grant = (
+            validated_paid_launch_material(connection, reviewed)
+        )
+        reviewer_att, reviewer, _reviewer_placement, qualified_review_grant = (
+            _validated_sealed_worker_launch_material(review, connection=connection)
+        )
+        jobs = connection.execute(
+            "SELECT * FROM jobs WHERE job_id IN (?,?)",
+            (review["job_id"], reviewed["job_id"]),
+        ).fetchall()
+        by_id = {row["job_id"]: row for row in jobs}
+        review_job, subject_job = by_id[review["job_id"]], by_id[reviewed["job_id"]]
+        if (
+            review["execution_mode"] != AttemptExecutionMode.SEALED_WORKER.value
+            or reviewed["execution_mode"] != AttemptExecutionMode.SEALED_WORKER.value
+            or review_job["orchestration_role"] != "review"
+            or subject_job["orchestration_role"] not in {"work", "repair"}
+            or review_job["reviews_job_id"] != subject_job["job_id"]
+            or review_job["root_job_id"] != subject_job["root_job_id"]
+            or review_job["parent_job_id"] != subject_job["parent_job_id"]
+            or review_job["current_attempt_id"] != review["attempt_id"]
+            or subject_job["current_attempt_id"] != reviewed["attempt_id"]
+            or reviewer_att["schema_version"] != "mastermind.executive_launch_attestation/v1"
+            or reviewer["schema_version"] != "mastermind.execution_principal_snapshot/v1"
+            or reviewer["provider"] != "codex" or subject["provider"] != "glm"
+            or review["attempt_id"] == reviewed["attempt_id"]
+            or reviewer["worker_id"] == subject["worker_id"]
+            or reviewer["account_label"] == subject["account_label"]
+            or not reviewer["account_label"] or not subject["account_label"]
+            or review_grant != qualified_review_grant
+            or review_grant.get("authorities") != ["READ"]
+            or review_grant.get("write_paths") != []
+            or review_grant.get("validation_argv") != []
+        ):
+            return False
+        # Canonical boot identity has provenance through each complete owned
+        # launch; a caller-supplied PID/boot label is never accepted here.
+        rproc, sproc = reviewer_att["process_identity"], subject_att["process_identity"]
+        r_os = (rproc["boot_id"], reviewer["os_principal_name"], reviewer["os_principal_uid"])
+        s_os = (sproc["boot_id"], subject["os_principal_name"], subject["os_principal_uid"])
+        if (not all(isinstance(v, str) and v for v in (r_os[0], r_os[1], s_os[0], s_os[1]))
+                or type(r_os[2]) is not int or type(s_os[2]) is not int
+                or r_os == s_os
+                or (r_os[0], r_os[2]) == (s_os[0], s_os[2])):
+            return False
+        r_generation = tuple(rproc[k] for k in ("boot_id", "pid", "pgid", "start_identity"))
+        s_generation = tuple(sproc[k] for k in ("boot_id", "pid", "pgid", "start_identity"))
+        if r_generation == s_generation:
+            return False
+        # Retain the existing profile/capability qualification on the v1 side.
+        constraints = _strict_canonical_json_loads(
+            str(review_job["constraints_json"]), name="Codex review constraints"
+        )
+        metadata = _strict_canonical_json_loads(
+            str(review["launch_metadata_json"]), name="Codex review launch"
+        )
+        routing = metadata.get("routing", {})
+        profile = ExecutionCapabilityRegistry.load().resolve(constraints["execution_profile_id"])
+        if (routing.get("adapter_id") != "codex-cli"
+                or routing.get("execution_profile_id") != profile.profile_id
+                or routing.get("execution_profile_digest") != profile.profile_digest
+                or constraints.get("execution_profile_digest") != profile.profile_digest
+                or profile.execution_surface != "codex-exec"
+                or profile.auth_realm != "dedicated-worker-account"
+                or profile.sandbox_policy != "read-only" or profile.write_capable
+                or profile.mcp_servers or profile.plugins or profile.skills
+                or profile.resource_grants or profile.skill_grants
+                or not profile.enabled or profile.approval_policy != "never"
+                or profile.network_policy != "disabled"
+                or profile.native_helper is not None):
+            return False
+        return True
+    except (KeyError, TypeError, ValueError, RuntimeProofError, CapabilityPolicyError):
+        return False
+
 
 def _review_attempt_is_independent(
     connection: sqlite3.Connection,
@@ -9672,6 +10540,12 @@ def _review_attempt_is_independent(
         )
     except PersistenceError:
         return False
+    if isinstance(reviewed_principal, dict) and reviewed_principal.get("schema_version") == (
+        "mastermind.paid_model_execution_principal/v1"
+    ):
+        return _paid_subject_codex_review_is_independent(
+            connection, review=review, reviewed=reviewed, review_grant=review_grant,
+        )
     principal_keys = {
         "schema_version",
         "attempt_id",
@@ -9824,6 +10698,9 @@ def _validated_role_completion_material(
         memoized = loader._node_begin(str(job_row["job_id"]))
         if memoized is not None:
             return memoized
+    if root_job_id not in {str(job_row["root_job_id"]), str(job_row["parent_job_id"])}:
+        raise StateConflict("completion scope differs from the Job ancestry")
+    root_job_id = str(job_row["root_job_id"])
     attempt_id = job_row["current_attempt_id"]
     attempt = connection.execute(
         "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
@@ -9971,6 +10848,12 @@ def _validated_role_completion_material(
             )
         ):
             raise StateConflict("sealed repair is not authorized by its exact reject")
+    if expected_role == "aggregation" and role_result.get("schema_version") == "mastermind.aggregation_result/v2":
+        # Its exact handoff was checked by the fenced terminal transaction.
+        # Completed rows cannot admit new children; defend a corrupt live
+        # descendant without re-reading every accepted result for each parent.
+        if _living_child_rows(connection, str(job_row["job_id"])):
+            raise StateConflict("completed coordinator has living descendants")
     terminal = _orchestration_terminal_receipt(
         connection,
         attempt_id=str(attempt_id),
@@ -9997,7 +10880,7 @@ def _current_orchestration_tree_material_for_dispatch(
     ).fetchall()
     if len(children) > int(admission["reserved_children_total"]):
         raise StateConflict("orchestration tree exceeds its reserved child total")
-    policy = CooCyclePolicy.load()
+    policy = CooCyclePolicy.for_digest(admission["policy_sha"])
     reservations = {str(item["plan_step_id"]): item for item in admission["steps"]}
     result: list[dict[str, Any]] = []
     for step in plan_body["steps"]:
@@ -10007,7 +10890,7 @@ def _current_orchestration_tree_material_for_dispatch(
             [
                 row
                 for row in children
-                if row["orchestration_role"] in {"work", "repair"}
+                if row["orchestration_role"] in {"work", "repair", "aggregation"}
                 and row["plan_step_id"] == step_id
             ],
             key=lambda row: (int(row["repair_round"]), str(row["job_id"])),
@@ -10019,8 +10902,8 @@ def _current_orchestration_tree_material_for_dispatch(
         ]
         if not revisions:
             deferred_v3 = bool(
-                admission.get("schema_version") == _COO_PLAN_ADMISSION_SCHEMA_V2
-                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+                admission.get("schema_version") in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+                and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
                 and step.get("prerequisite_step_ids")
                 and reservation.get("initial_work_job_id") is None
                 and reservation.get("initial_work_command_id") is None
@@ -10028,7 +10911,7 @@ def _current_orchestration_tree_material_for_dispatch(
             if deferred_v3 and not reviews:
                 continue
             raise StateConflict("admitted step lost its initial work revision")
-        if revisions[0]["orchestration_role"] != "work":
+        if revisions[0]["orchestration_role"] != ("aggregation" if next(step for step in plan_body["steps"] if step["step_id"] == step_id).get("delegation") else "work"):
             raise StateConflict("admitted step lost its initial work revision")
         for index, revision in enumerate(revisions):
             if (
@@ -10067,8 +10950,8 @@ def _current_orchestration_tree_material_for_dispatch(
         )
     expected_ids = {str(step["step_id"]) for step in plan_body["steps"]}
     if any(
-        row["orchestration_role"] not in {"plan", "work", "repair", "review"}
-        or int(row["depth"]) != 1
+        row["orchestration_role"] not in {"plan", "work", "repair", "review", "aggregation"}
+        or int(row["depth"]) != int(root_row["depth"]) + 1
         or (
             row["orchestration_role"] != "plan"
             and row["plan_step_id"] not in expected_ids
@@ -10112,16 +10995,16 @@ def _accepted_current_step_revision(
         (root_row["job_id"],),
     ).fetchall()
 
-    policy = CooCyclePolicy.load()
+    policy = CooCyclePolicy.for_digest(admission["policy_sha"])
     revisions = [
         row
         for row in children
-        if row["orchestration_role"] in {"work", "repair"}
+        if row["orchestration_role"] in {"work", "repair", "aggregation"}
         and str(row["plan_step_id"]) == plan_step_id
     ]
     revisions.sort(key=lambda row: (int(row["repair_round"]), str(row["job_id"])))
 
-    if not revisions or revisions[0]["orchestration_role"] != "work":
+    if not revisions or revisions[0]["orchestration_role"] != ("aggregation" if next(step for step in plan_body["steps"] if step["step_id"] == plan_step_id).get("delegation") else "work"):
         raise StateConflict("plan step has no initial work revision")
 
     for index, revision in enumerate(revisions):
@@ -10172,7 +11055,7 @@ def _accepted_current_step_revision(
             connection,
             job_row=current,
             expected_role=str(current["orchestration_role"]),
-            root_job_id=str(root_row["job_id"]),
+            root_job_id=str(root_row["root_job_id"]),
         )
     )
 
@@ -10188,7 +11071,7 @@ def _accepted_current_step_revision(
                 connection,
                 job_row=review,
                 expected_role="review",
-                root_job_id=str(root_row["job_id"]),
+                root_job_id=str(root_row["root_job_id"]),
             )
         )
         body = review_seal["result_envelope"]["role_result"]
@@ -10289,14 +11172,14 @@ def _validated_job_dependency_manifest(
     """Load the immutable V3 dependency snapshot for one work Job."""
 
     role, provenance, _ = _decode_orchestration_job_fields(job_row)
-    if role != "work":
+    if role not in {"work", "aggregation"} or job_row["parent_job_id"] is None:
         return None
     if (
         not isinstance(provenance, Mapping)
         or provenance.get("creator") != "coo_cycle"
         or provenance.get("job_id") != job_row["job_id"]
         or provenance.get("root_job_id") != job_row["root_job_id"]
-        or provenance.get("role") != "work"
+        or provenance.get("role") != role
         or not isinstance(provenance.get("command_id"), str)
         or _COMMAND_ID_RE.fullmatch(str(provenance["command_id"])) is None
     ):
@@ -10304,7 +11187,7 @@ def _validated_job_dependency_manifest(
 
     root_row = connection.execute(
         "SELECT * FROM jobs WHERE job_id=?",
-        (job_row["root_job_id"],),
+        (job_row["parent_job_id"],),
     ).fetchone()
     if root_row is None:
         raise StateConflict("work dependency root is unavailable")
@@ -10332,14 +11215,14 @@ def _validated_job_dependency_manifest(
         name="work dependency JOB_CREATED payload",
     )
 
-    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+    is_v3 = plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
     has_manifest = "dependency_manifest" in payload
     has_digest = "dependency_manifest_digest" in payload
     if not is_v3:
         if has_manifest or has_digest:
             raise StateConflict("legacy work unexpectedly carries dependency evidence")
         return None
-    if admission.get("schema_version") != _COO_PLAN_ADMISSION_SCHEMA_V2:
+    if admission.get("schema_version") not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}:
         raise StateConflict("V3/V4 work dependency admission is not V2")
     if not has_manifest or not has_digest:
         raise StateConflict("V3/V4 work is missing immutable dependency evidence")
@@ -10347,6 +11230,7 @@ def _validated_job_dependency_manifest(
     manifest = _validate_work_dependency_manifest(
         payload["dependency_manifest"],
         root_job_id=str(job_row["root_job_id"]),
+        coordinator_job_id=str(job_row["parent_job_id"]),
         plan_attempt_id=str(job_row["plan_attempt_id"]),
         plan_digest=str(job_row["plan_digest"]),
         plan_step_id=str(job_row["plan_step_id"]),
@@ -10369,7 +11253,7 @@ def _assert_dependency_manifest_current(
 
     root_row = connection.execute(
         "SELECT * FROM jobs WHERE job_id=?",
-        (job_row["root_job_id"],),
+        (job_row["parent_job_id"],),
     ).fetchone()
     if root_row is None:
         raise StateConflict("work dependency manifest is no longer current: root missing")
@@ -10402,19 +11286,30 @@ def _current_orchestration_tree_material(
         "SELECT * FROM jobs WHERE parent_job_id=? ORDER BY job_id",
         (root_row["job_id"],),
     ).fetchall()
-    living = [
-        str(row["job_id"])
-        for row in children
-        if JobStatus(row["status"]) not in _TERMINAL_JOB_STATUSES
-    ]
+    living = [str(row["job_id"]) for row in _living_child_rows(connection, str(root_row["job_id"]))]
+    unknown = connection.execute("""
+        WITH RECURSIVE subtree(job_id) AS (
+          SELECT job_id FROM jobs WHERE job_id=?
+          UNION SELECT j.job_id FROM jobs j JOIN subtree s ON j.parent_job_id=s.job_id
+        )
+        SELECT e.command_id FROM events e JOIN subtree s ON s.job_id=e.job_id
+        WHERE e.event_type=? AND NOT EXISTS (
+          SELECT 1 FROM events r WHERE r.command_id=
+            substr(e.command_id,1,length(e.command_id)-length(':effect-unknown')) || ':reconciled'
+            AND r.event_type=?
+        ) LIMIT 1
+    """, (root_row["job_id"], _COO_DISPATCH_EFFECT_UNKNOWN_EVENT_TYPE,
+           _COO_DISPATCH_RECONCILED_EVENT_TYPE)).fetchone()
+    if unknown is not None:
+        raise StateConflict("aggregation handoff refuses unresolved descendant dispatch effect")
     if living:
         raise StateConflict(
             "aggregation handoff refuses living child Jobs: " + ", ".join(living)
         )
-    if any(int(row["depth"]) != 1 for row in children):
+    if any(int(row["depth"]) != int(root_row["depth"]) + 1 for row in children):
         raise StateConflict("orchestration tree contains a non-direct child")
     known_steps = {str(step["step_id"]) for step in plan_body["steps"]}
-    allowed_roles = {"plan", "work", "repair", "review"}
+    allowed_roles = {"plan", "work", "repair", "review", "aggregation"}
     if any(
         row["orchestration_role"] not in allowed_roles
         or (
@@ -10463,7 +11358,7 @@ def _current_orchestration_tree_material(
                     connection,
                     job_row=revision,
                     expected_role=str(revision["orchestration_role"]),
-                    root_job_id=str(root_row["job_id"]),
+                    root_job_id=str(root_row["root_job_id"]),
                 )
             )
             history_out.append(
@@ -10500,7 +11395,7 @@ def _current_orchestration_tree_material(
                     connection,
                     job_row=review,
                     expected_role="review",
-                    root_job_id=str(root_row["job_id"]),
+                    root_job_id=str(root_row["root_job_id"]),
                 )
             )
             if (
@@ -10557,8 +11452,21 @@ def _assert_orchestration_lineage_for_create(
     if (
         parent_role != "aggregation"
         or parent_provenance is None
-        or not _accepted_orchestration_root_provenance(parent_provenance)
-        or parent_row["root_job_id"] != parent_row["job_id"]
+        or not (
+            (
+                _accepted_orchestration_root_provenance(parent_provenance)
+                and parent_row["parent_job_id"] is None
+                and parent_row["root_job_id"] == parent_row["job_id"]
+                and int(parent_row["depth"]) == 0
+            )
+            or _accepted_nested_coordinator_provenance(
+                parent_provenance,
+                parent_job_id=parent_row["parent_job_id"],
+                root_job_id=parent_row["root_job_id"],
+                job_id=parent_row["job_id"],
+                depth=int(parent_row["depth"]),
+            )
+        )
     ):
         raise StateConflict("orchestration child requires a strict v2 aggregation root")
     if role == "plan":
@@ -10600,7 +11508,7 @@ def _assert_orchestration_lineage_for_create(
     )
     if sealed_plan_digest != plan_digest:
         raise StateConflict("plan digest does not match the sealed plan role result")
-    if role == "work":
+    if role in {"work", "aggregation"}:
         return
     if role == "review":
         reviewed = connection.execute(
@@ -10667,7 +11575,7 @@ def _assert_orchestration_lineage_for_create(
                 connection,
                 job_row=review_row,
                 expected_role="review",
-                root_job_id=str(parent_row["job_id"]),
+                root_job_id=str(parent_row["root_job_id"]),
             )
         )
         role_result = review_seal["result_envelope"].get("role_result")
@@ -10675,7 +11583,7 @@ def _assert_orchestration_lineage_for_create(
             not isinstance(role_result, dict)
             or review_digest != rejected_review_result_digest
             or role_result.get("verdict") != "reject"
-            or role_result.get("root_job_id") != parent_row["job_id"]
+            or role_result.get("root_job_id") != parent_row["root_job_id"]
             or role_result.get("plan_attempt_id") != plan_attempt_id
             or role_result.get("plan_digest") != plan_digest
             or role_result.get("plan_step_id") != plan_step_id
@@ -10725,14 +11633,18 @@ def _validated_aggregation_handoff(
         "command_id",
         "handoff_digest",
     }
+    nested = isinstance(handoff, dict) and handoff.get("schema_version") == "mastermind.aggregation_handoff/v2"
+    if nested:
+        keys.add("coordinator_job_id")
     if not isinstance(handoff, dict) or set(handoff) != keys:
         raise StateConflict("aggregation handoff is not the closed wire")
     digest = handoff.get("handoff_digest")
     digest_input = dict(handoff)
     digest_input.pop("handoff_digest")
     if (
-        handoff.get("schema_version") != "mastermind.aggregation_handoff/v1"
-        or handoff.get("root_job_id") != job_row["job_id"]
+        handoff.get("schema_version") not in {"mastermind.aggregation_handoff/v1", "mastermind.aggregation_handoff/v2"}
+        or handoff.get("root_job_id") != job_row["root_job_id"]
+        or handoff.get("coordinator_job_id", handoff.get("root_job_id")) != job_row["job_id"]
         or rows[0]["actor"] != "coo"
         or rows[0]["aggregate_type"] != "job"
         or rows[0]["aggregate_id"] != job_row["job_id"]
@@ -10758,7 +11670,8 @@ def _validated_aggregation_handoff(
         or handoff["reservation_digest"] != admission["reservation_digest"]
         or handoff["revisions"] != revisions
         or handoff["rejected_history"] != rejected_history
-        or handoff["aggregate_result_schema"] != "mastermind.aggregation_result/v1"
+        or handoff["aggregate_result_schema"] != ("mastermind.aggregation_result/v2" if nested else "mastermind.aggregation_result/v1")
+        or nested != (admission["schema_version"] == _COO_PLAN_ADMISSION_SCHEMA_V3)
         or handoff["allowed_evidence_reads"] != ["attempts", "events", "jobs"]
     ):
         raise StateConflict("aggregation handoff no longer matches the current tree")
@@ -10818,7 +11731,7 @@ def _validated_aggregation_terminal_payload(
             expected_run_id=str(attempt_row["attempt_id"]),
             expected_worker_id=str(attempt_row["worker_id"]),
             expected_role="aggregation",
-            expected_root_job_id=str(root["job_id"]),
+            expected_root_job_id=str(root["root_job_id"]),
         )
     except Exception as exc:
         raise StateConflict(f"typed aggregation result is invalid: {exc}") from exc
@@ -10840,7 +11753,9 @@ def _validated_aggregation_terminal_payload(
     ]
     if (
         result_digest(body) != seal["role_result_digest"]
-        or body.get("root_job_id") != root["job_id"]
+        or body.get("root_job_id") != root["root_job_id"]
+        or body.get("coordinator_job_id", body.get("root_job_id")) != root["job_id"]
+        or body.get("schema_version") != handoff["aggregate_result_schema"]
         or body.get("handoff_digest") != handoff["handoff_digest"]
         or body.get("policy_sha") != handoff["policy_sha"]
         or body.get("plan_attempt_id") != handoff["plan_attempt_id"]
@@ -10862,7 +11777,7 @@ def _assert_orchestration_dispatch_eligible(
     if role is None or provenance is None:
         raise StateConflict("dispatch target is not a closed orchestration Job")
     root = connection.execute(
-        "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+        "SELECT * FROM jobs WHERE job_id=?", (job_row["job_id"] if role == "aggregation" else job_row["parent_job_id"],)
     ).fetchone()
     if root is None:
         raise StateConflict("orchestration dispatch lost its strict-v2 root")
@@ -10870,11 +11785,30 @@ def _assert_orchestration_dispatch_eligible(
     if (
         root_role != "aggregation"
         or root_provenance is None
-        or not _accepted_orchestration_root_provenance(root_provenance)
-        or root["parent_job_id"] is not None
-        or root["root_job_id"] != root["job_id"]
+        or not (
+            (
+                _accepted_orchestration_root_provenance(root_provenance)
+                and root["parent_job_id"] is None
+                and root["root_job_id"] == root["job_id"]
+                and int(root["depth"]) == 0
+            )
+            or _accepted_nested_coordinator_provenance(
+                root_provenance,
+                parent_job_id=root["parent_job_id"],
+                root_job_id=root["root_job_id"],
+                job_id=root["job_id"],
+                depth=int(root["depth"]),
+            )
+        )
     ):
         raise StateConflict("orchestration dispatch root is not strict CEO intent v2")
+    if root["parent_job_id"] is not None:
+        from control_plane.executive_coo_hierarchy import ancestors, assert_admission_open, HierarchyError
+        jobs, _ = _hierarchy_material(connection, root)
+        try:
+            assert_admission_open(jobs, str(root["parent_job_id"]))
+        except HierarchyError as exc:
+            raise StateConflict(str(exc)) from exc
     if role == "aggregation":
         if (
             root["status"] != JobStatus.QUEUED.value
@@ -10884,7 +11818,7 @@ def _assert_orchestration_dispatch_eligible(
             raise StateConflict("aggregation dispatch requires an eligible queued root")
         _validated_aggregation_handoff(connection, job_row)
         return
-    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != 1:
+    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != int(root["depth"]) + 1:
         raise StateConflict(
             "orchestration dispatch target is outside the direct root subtree"
         )
@@ -10941,7 +11875,7 @@ def _assert_orchestration_requeue_eligible(
     if role is None or provenance is None:
         raise StateConflict("requeue target is not a closed orchestration Job")
     root = connection.execute(
-        "SELECT * FROM jobs WHERE job_id=?", (job_row["root_job_id"],)
+        "SELECT * FROM jobs WHERE job_id=?", (job_row["job_id"] if role == "aggregation" else job_row["parent_job_id"],)
     ).fetchone()
     if root is None:
         raise StateConflict("orchestration requeue lost its strict-v2 root")
@@ -10949,15 +11883,34 @@ def _assert_orchestration_requeue_eligible(
     if (
         root_role != "aggregation"
         or root_provenance is None
-        or not _accepted_orchestration_root_provenance(root_provenance)
-        or root["parent_job_id"] is not None
-        or root["root_job_id"] != root["job_id"]
+        or not (
+            (
+                _accepted_orchestration_root_provenance(root_provenance)
+                and root["parent_job_id"] is None
+                and root["root_job_id"] == root["job_id"]
+                and int(root["depth"]) == 0
+            )
+            or _accepted_nested_coordinator_provenance(
+                root_provenance,
+                parent_job_id=root["parent_job_id"],
+                root_job_id=root["root_job_id"],
+                job_id=root["job_id"],
+                depth=int(root["depth"]),
+            )
+        )
     ):
         raise StateConflict("orchestration requeue root is not strict CEO intent v2")
+    if root["parent_job_id"] is not None:
+        from control_plane.executive_coo_hierarchy import ancestors, assert_admission_open, HierarchyError
+        jobs, _ = _hierarchy_material(connection, root)
+        try:
+            assert_admission_open(jobs, str(root["parent_job_id"]))
+        except HierarchyError as exc:
+            raise StateConflict(str(exc)) from exc
     if role == "aggregation":
         _validated_aggregation_handoff(connection, job_row)
         return
-    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != 1:
+    if job_row["parent_job_id"] != root["job_id"] or int(job_row["depth"]) != int(root["depth"]) + 1:
         raise StateConflict(
             "orchestration requeue target is outside the direct subtree"
         )
@@ -11004,6 +11957,117 @@ def _assert_orchestration_requeue_eligible(
     raise StateConflict("orchestration requeue role is invalid")
 
 
+def _job_coo_policy(connection: sqlite3.Connection, job_id: str) -> CooCyclePolicy:
+    """Select the immutable policy for this Job without following live settings.
+
+    The original planner predates plan admission and retains v1 transport
+    evidence. Its V5 result selects v2 only for the new reservation. Descendant
+    planners are already bound to their coordinator's immutable v2 grant.
+    """
+    row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+    if row is None:
+        raise StateConflict("orchestration policy lost its Job")
+    if row["orchestration_role"] == "plan":
+        parent = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["parent_job_id"],)).fetchone()
+        if parent is not None and parent["parent_job_id"] is not None:
+            return CooCyclePolicy.for_digest(_coordinator_grant(parent)["policy_sha256"])
+        return CooCyclePolicy.load(version=1)
+    scope = row["job_id"] if row["orchestration_role"] == "aggregation" else row["parent_job_id"]
+    event = connection.execute("SELECT payload_json FROM events WHERE event_type='COO_PLAN_ADMITTED' AND job_id=?", (scope,)).fetchone()
+    if event is not None:
+        admission = _strict_canonical_json_loads(str(event[0]), name="admitted policy")
+        return CooCyclePolicy.for_digest(admission.get("policy_sha"))
+    if row["parent_job_id"] is not None and row["orchestration_role"] == "aggregation":
+        return CooCyclePolicy.for_digest(_coordinator_grant(row)["policy_sha256"])
+    return CooCyclePolicy.load(version=1)
+
+
+def _coordinator_grant(row: sqlite3.Row) -> dict[str, Any]:
+    from control_plane.executive_coo_hierarchy import root_grant
+    role, provenance, _ = _decode_orchestration_job_fields(row)
+    if role != "aggregation" or not isinstance(provenance, dict):
+        raise StateConflict("coordinator is not a closed aggregation Job")
+    if (
+        row["parent_job_id"] is None
+        and row["root_job_id"] == row["job_id"]
+        and _accepted_orchestration_root_provenance(provenance)
+    ):
+        return root_grant()
+    grant = provenance.get("hierarchy_grant")
+    if not isinstance(grant, dict):
+        raise StateConflict("nested coordinator has no immutable inherited grant")
+    return grant
+
+
+def _hierarchy_material(connection: sqlite3.Connection, coordinator: sqlite3.Row):
+    from control_plane.executive_coo_hierarchy import validate_tree, HierarchyError
+    rows = connection.execute(
+        "SELECT * FROM jobs WHERE root_job_id=? ORDER BY job_id LIMIT 18",
+        (coordinator["root_job_id"],),
+    ).fetchall()
+    try:
+        jobs = validate_tree([dict(row) for row in rows], str(coordinator["root_job_id"]))
+        grants = {str(row["job_id"]): _coordinator_grant(row) for row in rows
+                  if row["orchestration_role"] == "aggregation"}
+        return jobs, grants
+    except HierarchyError as exc:
+        raise StateConflict(str(exc)) from exc
+
+
+def _assert_hierarchy_creation_capacity(connection: sqlite3.Connection,
+                                        coordinator: sqlite3.Row) -> None:
+    from control_plane.executive_coo_hierarchy import assert_creation_capacity, HierarchyError
+    jobs, grants = _hierarchy_material(connection, coordinator)
+    try:
+        assert_creation_capacity(jobs, str(coordinator["job_id"]), grants)
+    except HierarchyError as exc:
+        raise StateConflict(str(exc)) from exc
+    # Each nested coordinator is itself a reserved, immutable member of its
+    # parent's sealed plan. Validate that reservation before spending its grant.
+    if coordinator["parent_job_id"] is not None:
+        parent = connection.execute("SELECT * FROM jobs WHERE job_id=?",
+                                    (coordinator["parent_job_id"],)).fetchone()
+        if parent is None:
+            raise StateConflict("nested coordinator lost its parent reservation")
+        _validated_plan_admission(connection, parent)
+
+
+def _hierarchy_reservation(policy: CooCyclePolicy, root: sqlite3.Row,
+                           steps: list[dict[str, Any]], requirements: tuple[bool, ...]) -> int:
+    if policy.schema_version == 1:
+        return policy.reserved_children_total(requirements)
+    grant = _coordinator_grant(root)
+    material = [dict(step, review_required=required)
+                for step, required in zip(steps, requirements, strict=True)]
+    return policy.reserved_hierarchy_children(
+        tuple(material), coordinator_depth=int(root["depth"]),
+        descendant_limit=grant["descendant_limit"], max_depth=grant["max_depth"],
+    )
+
+
+def _step_coordinator_impact(root: sqlite3.Row, step: Mapping[str, Any]) -> str | None:
+    if step.get("delegation") is None:
+        return None
+    impacts = ("routine", "material", "critical")
+    return impacts[max(impacts.index(root["business_impact"]), impacts.index(step["business_impact"]))]
+
+
+def _step_review_required(step: Mapping[str, Any], root: sqlite3.Row) -> bool:
+    # Coordinators close through their own accepted children and aggregate
+    # result. Material leaf work still reserves its independent review/repair.
+    if step.get("delegation") is not None:
+        return False
+    return bool(step["review_required"]
+                or root["business_impact"] in {"material", "critical"}
+                or step["business_impact"] in {"material", "critical"})
+
+
+def _step_slots(policy: CooCyclePolicy, step: Mapping[str, Any], required: bool) -> int:
+    delegation = step.get("delegation")
+    return (1 + delegation["descendant_limit"] if delegation is not None
+            else policy.reserved_step_slots(review_required=required))
+
+
 def _assert_cycle_root_open_for_child_mutation(
     connection: sqlite3.Connection, root_row: sqlite3.Row
 ) -> None:
@@ -11016,6 +12080,13 @@ def _assert_cycle_root_open_for_child_mutation(
         or root_row["cancel_requested_at_ms"] is not None
     ):
         raise StateConflict("cycle root is not open for a new child mutation")
+    if root_row["parent_job_id"] is not None:
+        from control_plane.executive_coo_hierarchy import assert_admission_open, HierarchyError
+        jobs, _ = _hierarchy_material(connection, root_row)
+        try:
+            assert_admission_open(jobs, str(root_row["job_id"]))
+        except HierarchyError as exc:
+            raise StateConflict(str(exc)) from exc
     advanced = connection.execute(
         """
         SELECT 1 FROM events
@@ -11026,6 +12097,115 @@ def _assert_cycle_root_open_for_child_mutation(
     ).fetchone()
     if advanced is not None:
         raise StateConflict("cycle root already reached handoff or a blocked state")
+
+
+def _coo_child_workspace_coordinates(connection, parent_row, job_id, role):
+    if role not in {"work", "review", "repair"}:
+        return parent_row["worktree"], parent_row["branch"]
+    original = connection.execute("SELECT * FROM jobs WHERE job_id=?",
+                                  (parent_row["root_job_id"],)).fetchone()
+    if original is None:
+        raise StateConflict("child workspace lost original root")
+    constraints = _strict_canonical_json_loads(str(original["constraints_json"]), name="root constraints")
+    if constraints.get(CHILD_WORKSPACE_POLICY_KEY) != CHILD_WORKSPACE_POLICY:
+        return parent_row["worktree"], parent_row["branch"]
+    if not original["worktree"] or _COMMAND_ID_RE.fullmatch(job_id) is None:
+        raise StateConflict("child workspace root/Job identity invalid")
+    return str(Path(original["worktree"]).parent / job_id.lower()), "codex/job-" + job_id.lower()
+
+
+def _coo_child_workspace_binding(connection, row):
+    if row is None:
+        raise StateConflict("child workspace Job is absent")
+    if row["orchestration_role"] not in {"work", "review", "repair"} or row["parent_job_id"] is None:
+        return None
+    root = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["root_job_id"],)).fetchone()
+    if root is None:
+        raise StateConflict("child workspace root disappeared")
+    constraints = _strict_canonical_json_loads(root["constraints_json"], name="root constraints")
+    if constraints.get(CHILD_WORKSPACE_POLICY_KEY) != CHILD_WORKSPACE_POLICY:
+        return None
+    parent = connection.execute("SELECT * FROM jobs WHERE job_id=?", (row["parent_job_id"],)).fetchone()
+    worktree, branch = _coo_child_workspace_coordinates(connection, parent, str(row["job_id"]), row["orchestration_role"])
+    if (row["worktree"] != worktree or row["branch"] != branch
+            or set(json.loads(row["requested_authorities_json"])) - {"READ", "RESEARCH"}
+            or json.loads(row["allowed_write_paths_json"]) or json.loads(row["validation_commands_json"])):
+        raise StateConflict("child workspace readonly assignment/grant drifted")
+    created = connection.execute("SELECT * FROM events WHERE event_type='JOB_CREATED' AND job_id=?",
+                                 (row["job_id"],)).fetchone()
+    if created is None:
+        raise StateConflict("child workspace creation provenance is absent")
+    subject = None
+    target_id = row["reviews_job_id"] if row["orchestration_role"] == "review" else row["supersedes_job_id"]
+    if target_id is not None:
+        target = connection.execute("SELECT * FROM jobs WHERE job_id=?", (target_id,)).fetchone()
+        if (target is None or target["root_job_id"] != row["root_job_id"]
+                or target["orchestration_role"] not in {"work", "repair"}
+                or json.loads(target["allowed_write_paths_json"]) or json.loads(target["validation_commands_json"])
+                or set(json.loads(target["requested_authorities_json"])) - {"READ", "RESEARCH"}):
+            raise StateConflict("analysis review/repair cannot substitute a written source revision")
+        attempt, _seal, _terminal, result_digest = _validated_role_completion_material(
+            connection, job_row=target, expected_role=target["orchestration_role"],
+            root_job_id=str(row["root_job_id"]))
+        subject = dict(job_id=target_id, attempt_id=attempt["attempt_id"], result_digest=result_digest)
+        if row["orchestration_role"] == "repair":
+            created_payload = json.loads(created["payload_json"])
+            rejected = connection.execute("SELECT * FROM jobs WHERE job_id=?",
+                (created_payload.get("rejected_review_job_id"),)).fetchone()
+            if rejected is None or rejected["reviews_job_id"] != target_id:
+                raise StateConflict("analysis repair lost its rejected review")
+            review_attempt, _rs, _rt, review_digest = _validated_role_completion_material(
+                connection, job_row=rejected, expected_role="review", root_job_id=str(row["root_job_id"]))
+            if created_payload.get("rejected_review_result_digest") != review_digest:
+                raise StateConflict("analysis repair rejected review digest drifted")
+            subject["rejected_review"] = dict(job_id=rejected["job_id"],
+                attempt_id=review_attempt["attempt_id"], result_digest=review_digest)
+        if row["orchestration_role"] == "review" and json.loads(created["payload_json"]).get("reviewed_result_digest") != result_digest:
+            raise StateConflict("analysis review subject digest drifted")
+    return dict(root_job_id=row["root_job_id"], parent_job_id=row["parent_job_id"], job_id=row["job_id"],
+        role=row["orchestration_role"], base_sha=constraints["base_sha"], worktree=worktree,
+        branch=branch, creation_payload_sha256=orchestration_digest(json.loads(created["payload_json"])),
+        authority_policy_hash=row["authority_policy_hash"], subject=subject)
+
+
+def _require_coo_child_workspace_completion(connection, row, *, required=True):
+    binding = _coo_child_workspace_binding(connection, row)
+    if binding is None:
+        return None
+    job_id = str(row["job_id"])
+    requested = connection.execute("SELECT * FROM events WHERE command_id=?",
+        (f"coo-workspace:{job_id}:requested",)).fetchone()
+    completed = connection.execute("SELECT * FROM events WHERE command_id=?",
+        (f"coo-workspace:{job_id}:completed",)).fetchone()
+    if completed is None:
+        if required:
+            raise StateConflict("child workspace has no committed allocator provenance")
+        return None
+    if requested is None:
+        raise StateConflict("child workspace lost its allocation reservation")
+    for event, kind in ((requested,"COO_CHILD_WORKSPACE_REQUESTED"),(completed,"COO_CHILD_WORKSPACE_COMPLETED")):
+        if (event["event_type"] != kind or event["job_id"] != job_id or event["aggregate_id"] != job_id
+                or event["aggregate_type"] != "job" or event["actor"] != "control-child-workspace-owner"):
+            raise StateConflict("child workspace event provenance drifted")
+    reservation = json.loads(requested["payload_json"])
+    value = json.loads(completed["payload_json"])
+    if (set(reservation) != {"schema_version","binding","source_repository","source_identity","shared_gid","control_uid"}
+            or set(value) != set(reservation) | {"reservation_sha256","receipt","identity"}
+            or any(value.get(key) != expected for key,expected in reservation.items())
+            or value["schema_version"] != CHILD_WORKSPACE_POLICY or value["binding"] != binding
+            or value["reservation_sha256"] != orchestration_digest(reservation)
+            or value["control_uid"] != os.geteuid()):
+        raise StateConflict("child workspace immutable assignment drifted")
+    receipt = value["receipt"]
+    if (receipt.get("workspace_path") != binding["worktree"] or receipt.get("branch") != binding["branch"]
+            or receipt.get("base_sha") != binding["base_sha"] or receipt.get("remote_count") != 0
+            or receipt.get("source_repository") != value["source_repository"]
+            or receipt.get("git_dir_is_private") is not True):
+        raise StateConflict("child workspace allocator receipt drifted")
+    from control_plane.executive_workspace import verify_child_clone_identity
+    verify_child_clone_identity(Path(binding["worktree"]), value["identity"],
+        control_uid=value["control_uid"], shared_gid=value["shared_gid"])
+    return value
 
 
 def _insert_cycle_child(
@@ -11055,22 +12235,49 @@ def _insert_cycle_child(
     plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
     allow_active_interactive_plan: bool = False,
+    delegation: Mapping[str, Any] | None = None,
+    business_impact: str | None = None,
 ) -> sqlite3.Row:
     """Insert one cycle-owned direct child inside its caller's transaction."""
 
-    policy = CooCyclePolicy.load()
-    if role not in {"work", "review", "repair"}:
+    nested_plan = plan_schema_version == "mastermind.execution_plan/v5"
+    policy = CooCyclePolicy.load(version=2 if nested_plan else 1)
+    _, parent_provenance, _ = _decode_orchestration_job_fields(root_row)
+    hierarchy_grant = None
+    if role == "aggregation":
+        if not nested_plan or delegation is None or review_required:
+            raise StateConflict("coordinator creation requires a reserved v5 delegation")
+        from control_plane.executive_coo_hierarchy import inherited_grant, root_grant, HierarchyError
+        try:
+            inherited = (parent_provenance or {}).get("hierarchy_grant") or root_grant()
+            hierarchy_grant = inherited_grant(int(root_row["depth"]), inherited, delegation)
+        except HierarchyError as exc:
+            raise StateConflict(str(exc)) from exc
+    elif delegation is not None:
+        raise StateConflict("leaf cannot carry a coordinator grant")
+    if role not in {"work", "review", "repair", "aggregation"}:
         raise StateConflict("cycle child insertion role is invalid")
     if _COMMAND_ID_RE.fullmatch(command_id) is None:
         raise StateConflict("cycle child command_id is invalid")
+    impact = _normalise_business_impact(business_impact or root_row["business_impact"])
+    if business_impact is not None and role != "aggregation":
+        raise StateConflict("only coordinator steps may specify inherited impact")
     root_constraints = _normalise_constraints(
         _strict_canonical_json_loads(
             str(root_row["constraints_json"]), name="root constraints"
-        )
+        ),
+        host_admitted_placement_union=role == "aggregation",
     )
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
-    if role == "work" and placement is not None:
+    paid_review = (_paid_review_constraints_for_target(connection, root_row, reviews_job_id)
+                   if role == "review" else None)
+    if paid_review is not None:
+        if (requested_authorities != ["READ"] or validation_commands or allowed_write_paths
+                or cost_class != paid_review["cost_class"]):
+            raise StateConflict("paid-subject review must use its declared READ-only root recipe")
+        constraints = paid_review
+    if role in {"work", "aggregation"} and placement is not None:
         constraints = _project_work_placement(
             constraints,
             root_constraints,
@@ -11080,11 +12287,25 @@ def _insert_cycle_child(
             ),
             plan_schema_version=plan_schema_version,
         )
-    constraints = _normalise_constraints(constraints)
+    constraints = _normalise_constraints(
+        constraints, host_admitted_placement_union=role == "aggregation"
+    )
+    if role == "aggregation" and constraints.get("execution_profile_id") == "fabric.paid.glm.sealed-input.v1":
+        raise StateConflict("paid model-only profile cannot become a coordinator")
+    numbers = [
+        int(match.group(1))
+        for row in connection.execute("SELECT job_id FROM jobs")
+        if (match := re.fullmatch(r"JOB-(\d+)", str(row[0])))
+    ]
+    job_id = f"JOB-{max(numbers, default=0) + 1:03d}"
+    child_worktree, child_branch = _coo_child_workspace_coordinates(connection, root_row, job_id, role)
+    isolated = child_worktree != root_row["worktree"]
+    if isolated and (set(requested_authorities) - {"READ", "RESEARCH"} or allowed_write_paths or validation_commands):
+        raise StateConflict("isolated analysis child admits READ/RESEARCH only")
     try:
         authority = ExecutiveAuthorityPolicy.load().authorize(
             requested_authorities,
-            worktree=root_row["worktree"],
+            worktree=child_worktree,
             allowed_write_paths=allowed_write_paths,
             validation_commands=validation_commands,
         )
@@ -11136,21 +12357,16 @@ def _insert_cycle_child(
         ),
         allow_active_interactive_plan=allow_active_interactive_plan,
     )
-    numbers = [
-        int(match.group(1))
-        for row in connection.execute("SELECT job_id FROM jobs")
-        if (match := re.fullmatch(r"JOB-(\d+)", str(row[0])))
-    ]
-    job_id = f"JOB-{max(numbers, default=0) + 1:03d}"
     timestamp = store.now_ms()
     evidence = dict(creation_evidence or {})
     manifest = None
     if dependency_manifest is not None:
-        if role != "work":
+        if role not in {"work", "aggregation"}:
             raise StateConflict("only V3/V4 work may carry a dependency manifest")
         manifest = _validate_work_dependency_manifest(
             dependency_manifest,
-            root_job_id=str(root_row["job_id"]),
+            root_job_id=str(root_row["root_job_id"]),
+            coordinator_job_id=str(root_row["job_id"]),
             plan_attempt_id=plan_attempt_id,
             plan_digest=plan_digest,
             plan_step_id=plan_step_id,
@@ -11162,6 +12378,7 @@ def _insert_cycle_child(
             "rejected_review_result_digest",
         },
         "work": set(),
+        "aggregation": set(),
     }[role]
     if set(evidence) != expected_evidence_keys or any(
         re.fullmatch(r"[0-9a-f]{64}", value) is None
@@ -11184,11 +12401,16 @@ def _insert_cycle_child(
         "command_id": command_id,
         "job_id": job_id,
         "parent_job_id": str(root_row["job_id"]),
-        "root_job_id": str(root_row["job_id"]),
+        "root_job_id": str(root_row["root_job_id"]),
         "role": role,
     }
+    if hierarchy_grant is not None:
+        provenance["schema_version"] = "mastermind.executive_orchestration_provenance/v2"
+        provenance["hierarchy_grant"] = hierarchy_grant
+    if nested_plan:
+        _assert_hierarchy_creation_capacity(connection, root_row)
     provenance_digest = orchestration_digest(provenance)
-    timestamp = _finite_fresh_effect(store, connection, str(root_row["job_id"]))
+    timestamp = _finite_fresh_effect(store, connection, str(root_row["root_job_id"]))
     connection.execute(
         """
         INSERT INTO jobs(
@@ -11209,8 +12431,8 @@ def _insert_cycle_child(
             int(root_row["priority"]),
             JobStatus.QUEUED.value,
             root_row["authority_level"],
-            root_row["branch"],
-            authority.worktree or root_row["worktree"],
+            child_branch,
+            authority.worktree or child_worktree,
             _json_dumps(constraints),
             _json_dumps(list(authority.requested)),
             authority.policy_sha256,
@@ -11221,11 +12443,11 @@ def _insert_cycle_child(
             timestamp,
             timestamp,
             root_row["job_id"],
-            root_row["job_id"],
-            1,
+            root_row["root_job_id"],
+            int(root_row["depth"]) + 1,
             "coo",
             "coo",
-            root_row["business_impact"],
+            impact,
             int(review_required),
             reviews_job_id,
             role,
@@ -11248,11 +12470,11 @@ def _insert_cycle_child(
         payload={
             "status": JobStatus.QUEUED.value,
             "parent_job_id": str(root_row["job_id"]),
-            "root_job_id": str(root_row["job_id"]),
-            "depth": 1,
+            "root_job_id": str(root_row["root_job_id"]),
+            "depth": int(root_row["depth"]) + 1,
             "owner_seat": "coo",
             "escalation_target": "coo",
-            "business_impact": str(root_row["business_impact"]),
+            "business_impact": impact,
             "review_required": review_required,
             "reviews_job_id": reviews_job_id,
             "orchestration_role": role,
@@ -11308,6 +12530,8 @@ def _reconcile_cycle_child_creation(
     placement: dict[str, Any] | None = None,
     plan_schema_version: str | None = None,
     dependency_manifest: Mapping[str, Any] | None = None,
+    delegation: Mapping[str, Any] | None = None,
+    business_impact: str | None = None,
 ) -> sqlite3.Row:
     """Reconcile one immutable child creation without consulting mutable phase state."""
 
@@ -11326,14 +12550,39 @@ def _reconcile_cycle_child_creation(
     if row is None:
         raise StateConflict("cycle child replay lost its Job")
     stored_role, provenance, provenance_digest = _decode_orchestration_job_fields(row)
+    if role == "aggregation":
+        from control_plane.executive_coo_hierarchy import inherited_grant, HierarchyError
+        try:
+            expected_grant = inherited_grant(int(root_row["depth"]), _coordinator_grant(root_row), delegation)
+        except HierarchyError as exc:
+            raise StateConflict(str(exc)) from exc
+        if (provenance or {}).get("hierarchy_grant") != expected_grant:
+            raise StateConflict("coordinator inherited grant drifted from reservation")
+    impact = _normalise_business_impact(business_impact or root_row["business_impact"])
+    if business_impact is not None and role != "aggregation":
+        raise StateConflict("only coordinator steps may specify inherited impact")
+    # A pre-inheritance coordinator may retain the legacy no-pool shape.
+    # Preserve that absence; a present v3 union must still match exactly.
+    stored_constraints = _strict_canonical_json_loads(
+        str(row["constraints_json"]), name="cycle child constraints"
+    )
+    carries_union = role == "aggregation" and "work_placement_union" in stored_constraints
     root_constraints = _normalise_constraints(
         _strict_canonical_json_loads(
             str(root_row["constraints_json"]), name="root constraints"
-        )
+        ),
+        host_admitted_placement_union=carries_union,
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
-    if role == "work" and placement is not None:
+    paid_review = (_paid_review_constraints_for_target(connection, root_row, reviews_job_id)
+                   if role == "review" else None)
+    if paid_review is not None:
+        if (requested_authorities != ["READ"] or validation_commands or allowed_write_paths
+                or cost_class != paid_review["cost_class"]):
+            raise StateConflict("paid-subject review replay differs from its root recipe")
+        expected_constraints = paid_review
+    if role in {"work", "aggregation"} and placement is not None:
         expected_constraints = _project_work_placement(
             expected_constraints,
             root_constraints,
@@ -11343,7 +12592,9 @@ def _reconcile_cycle_child_creation(
             ),
             plan_schema_version=plan_schema_version,
         )
-    expected_constraints = _normalise_constraints(expected_constraints)
+    expected_constraints = _normalise_constraints(
+        expected_constraints, host_admitted_placement_union=carries_union
+    )
     stored_authorities = _strict_canonical_json_loads(
         str(row["requested_authorities_json"]), name="cycle child authorities"
     )
@@ -11353,31 +12604,30 @@ def _reconcile_cycle_child_creation(
     stored_validations = _strict_canonical_json_loads(
         str(row["validation_commands_json"]), name="cycle child validations"
     )
-    stored_constraints = _strict_canonical_json_loads(
-        str(row["constraints_json"]), name="cycle child constraints"
-    )
     evidence = dict(creation_evidence or {})
     manifest = None
     if dependency_manifest is not None:
-        if role != "work":
+        if role not in {"work", "aggregation"}:
             raise StateConflict("only V3/V4 work may carry a dependency manifest")
         manifest = _validate_work_dependency_manifest(
             dependency_manifest,
-            root_job_id=str(root_row["job_id"]),
+            root_job_id=str(root_row["root_job_id"]),
+            coordinator_job_id=str(root_row["job_id"]),
             plan_attempt_id=plan_attempt_id,
             plan_digest=plan_digest,
             plan_step_id=plan_step_id,
         )
     source_id = provenance_source_id or str(root_row["job_id"])
     source_digest = provenance_source_digest or plan_digest
+    child_worktree, child_branch = _coo_child_workspace_coordinates(connection, root_row, str(row["job_id"]), role)
     expected_payload: dict[str, Any] = {
         "status": JobStatus.QUEUED.value,
         "parent_job_id": str(root_row["job_id"]),
-        "root_job_id": str(root_row["job_id"]),
-        "depth": 1,
+        "root_job_id": str(root_row["root_job_id"]),
+        "depth": int(root_row["depth"]) + 1,
         "owner_seat": "coo",
         "escalation_target": "coo",
-        "business_impact": str(root_row["business_impact"]),
+        "business_impact": impact,
         "review_required": review_required,
         "reviews_job_id": reviews_job_id,
         "orchestration_role": role,
@@ -11413,13 +12663,14 @@ def _reconcile_cycle_child_creation(
         or row["department"] != root_row["department"]
         or row["priority"] != root_row["priority"]
         or row["authority_level"] != root_row["authority_level"]
-        or row["branch"] != root_row["branch"]
+        or row["branch"] != child_branch
+        or row["worktree"] != child_worktree
         or row["parent_job_id"] != root_row["job_id"]
-        or row["root_job_id"] != root_row["job_id"]
-        or int(row["depth"]) != 1
+        or row["root_job_id"] != root_row["root_job_id"]
+        or int(row["depth"]) != int(root_row["depth"]) + 1
         or row["owner_seat"] != "coo"
         or row["escalation_target"] != "coo"
-        or row["business_impact"] != root_row["business_impact"]
+        or row["business_impact"] != impact
         or bool(row["review_required"]) is not review_required
         or row["reviews_job_id"] != reviews_job_id
         or row["plan_attempt_id"] != plan_attempt_id
@@ -11647,6 +12898,14 @@ def finite_host_binding_digest(constraints: Mapping[str, Any]) -> str:
         if has_union
         else V2_HOST_EXECUTION_BINDING_KEYS
     )
+    if "paid_subject_review_binding" in raw:
+        if not has_union:
+            raise StateConflict("paid-subject review recipe requires the v3 host binding")
+        keys = keys | {"paid_subject_review_binding"}
+    if CHILD_WORKSPACE_POLICY_KEY in raw:
+        if not has_union or raw[CHILD_WORKSPACE_POLICY_KEY] != CHILD_WORKSPACE_POLICY:
+            raise StateConflict("persisted child workspace policy drifted")
+        keys = keys | {CHILD_WORKSPACE_POLICY_KEY}
     binding: dict[str, Any] = {}
     for key in sorted(keys):
         if key not in raw:
@@ -11654,7 +12913,8 @@ def finite_host_binding_digest(constraints: Mapping[str, Any]) -> str:
         binding[key] = (
             _normalise_work_placement_union(raw[key])
             if key == "work_placement_union"
-            else raw[key]
+            else normalize_paid_subject_review_binding(raw[key])
+            if key == "paid_subject_review_binding" else raw[key]
         )
     binding[HOST_EXECUTION_BINDING_VERSION_KEY] = version
     return orchestration_digest(binding)
@@ -12082,7 +13342,7 @@ def _finite_charged_reservation(
         raise StateConflict("finite issuance requires one original claim receipt")
     claim = claims[0]
     payload = _strict_canonical_json_loads(str(claim["payload_json"]), name="finite claim")
-    command = f"coo-cycle:{definition['root_job_id']}:dispatch:{row['job_id']}:attempt:{row['attempt_number']}"
+    command = f"coo-cycle:{_dispatch_scope(connection, str(row['job_id']))}:dispatch:{row['job_id']}:attempt:{row['attempt_number']}"
     if (
         claim["aggregate_type"] != "job"
         or claim["aggregate_id"] != row["job_id"]
@@ -12312,6 +13572,10 @@ class JobRegistry:
                 numbers.append(int(match.group(1)))
         number = max(numbers, default=0) + 1
         job_id = f"JOB-{number:03d}"
+        if isinstance(spec.event_provenance, Mapping) and "direct_native" in spec.event_provenance:
+            root = Path(str(spec.worktree)).parent
+            spec = dataclasses.replace(spec, worktree=str(root / job_id.lower()),
+                branch=f"codex/job-{job_id.lower()}")
         root_job_id = job_id if spec.parent_job_id is None else spec.parent_root_job_id
         if root_job_id is None:
             raise StateConflict("child Job requires its parent's exact root identity")
@@ -12427,6 +13691,8 @@ class JobRegistry:
             )
         if spec.event_provenance is not None:
             event_payload["provenance"] = dict(spec.event_provenance)
+            if "direct_native" in spec.event_provenance:
+                event_payload["direct_workspace"]=dict(worktree=spec.worktree,branch=spec.branch,base_sha=spec.constraints["base_sha"])
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -12717,10 +13983,25 @@ class JobRegistry:
             raise StateConflict(f"root job {root_token!r} does not exist")
         if (
             root.orchestration_role != "aggregation"
-            or root.parent_job_id is not None
-            or root.root_job_id != root.job_id
+
             or not isinstance(root.orchestration_provenance, dict)
-            or not _accepted_orchestration_root_provenance(root.orchestration_provenance)
+            or not (
+                (
+                    _accepted_orchestration_root_provenance(
+                        root.orchestration_provenance
+                    )
+                    and root.parent_job_id is None
+                    and root.root_job_id == root.job_id
+                    and root.depth == 0
+                )
+                or _accepted_nested_coordinator_provenance(
+                    root.orchestration_provenance,
+                    parent_job_id=root.parent_job_id,
+                    root_job_id=root.root_job_id,
+                    job_id=root.job_id,
+                    depth=root.depth,
+                )
+            )
         ):
             raise StateConflict(
                 "planner creation requires a strict v2 aggregation root"
@@ -12922,8 +14203,21 @@ class JobRegistry:
             if (
                 role != "aggregation"
                 or provenance is None
-                or not _accepted_orchestration_root_provenance(provenance)
-                or root["root_job_id"] != root["job_id"]
+                or not (
+                    (
+                        _accepted_orchestration_root_provenance(provenance)
+                        and root["parent_job_id"] is None
+                        and root["root_job_id"] == root["job_id"]
+                        and int(root["depth"]) == 0
+                    )
+                    or _accepted_nested_coordinator_provenance(
+                        provenance,
+                        parent_job_id=root["parent_job_id"],
+                        root_job_id=root["root_job_id"],
+                        job_id=root["job_id"],
+                        depth=int(root["depth"]),
+                    )
+                )
             ):
                 raise StateConflict("plan admission requires a strict-v2 root")
             existing_command = connection.execute(
@@ -13073,7 +14367,7 @@ class JobRegistry:
                     expected_run_id=str(plan_attempt["attempt_id"]),
                     expected_worker_id=str(plan_attempt["worker_id"]),
                     expected_role="plan",
-                    expected_root_job_id=root_token,
+                    expected_root_job_id=str(root["root_job_id"]),
                 )
             except Exception as exc:
                 raise StateConflict(f"typed plan is invalid: {exc}") from exc
@@ -13081,23 +14375,23 @@ class JobRegistry:
             plan_digest = result_digest(plan_body)
             if plan_digest != seal["role_result_digest"]:
                 raise StateConflict("typed plan digest differs from its seal")
-            policy = CooCyclePolicy.load()
+            is_v5 = plan_body["schema_version"] == "mastermind.execution_plan/v5"
+            if (is_v5 and plan_body.get("coordinator_job_id") != root_token
+                    or not is_v5 and root["parent_job_id"] is not None):
+                raise StateConflict("typed plan coordinator identity is invalid")
+            policy = CooCyclePolicy.load(version=2 if is_v5 else 1)
             requirements = tuple(
-                bool(
-                    step["review_required"]
-                    or root["business_impact"] in {"material", "critical"}
-                    or step["business_impact"] in {"material", "critical"}
-                )
+                _step_review_required(step, root)
                 for step in plan_body["steps"]
             )
             is_v3 = plan_body["schema_version"] in {
                 "mastermind.execution_plan/v3",
-                "mastermind.execution_plan/v4",
+                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5",
             }
             if plan_body["schema_version"] in {
                 "mastermind.execution_plan/v2",
                 "mastermind.execution_plan/v3",
-                "mastermind.execution_plan/v4",
+                "mastermind.execution_plan/v4", "mastermind.execution_plan/v5",
             }:
                 requires_placement = plan_body["schema_version"] in {
                     "mastermind.execution_plan/v2",
@@ -13118,7 +14412,7 @@ class JobRegistry:
                         set(placement) if isinstance(placement, dict) else set()
                     )
                     v4_keys_valid = (
-                        plan_body["schema_version"] == "mastermind.execution_plan/v4"
+                        plan_body["schema_version"] in {"mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
                         and actual_placement_keys
                         in (
                             expected_placement_keys,
@@ -13128,11 +14422,11 @@ class JobRegistry:
                     if (
                         not isinstance(placement, dict)
                         or (
-                            plan_body["schema_version"] != "mastermind.execution_plan/v4"
+                            plan_body["schema_version"] not in {"mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
                             and actual_placement_keys != expected_placement_keys
                         )
                         or (
-                            plan_body["schema_version"] == "mastermind.execution_plan/v4"
+                            plan_body["schema_version"] in {"mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
                             and not v4_keys_valid
                         )
                     ):
@@ -13140,7 +14434,7 @@ class JobRegistry:
                             "v2/v3/v4 plan step placement is invalid"
                         )
             try:
-                reserved_total = policy.reserved_children_total(requirements)
+                reserved_total = _hierarchy_reservation(policy, root, plan_body["steps"], requirements)
             except CooCyclePolicyError as exc:
                 raise StateConflict(f"plan capacity exceeds policy: {exc}") from exc
             root_validations = _strict_canonical_json_loads(
@@ -13162,9 +14456,7 @@ class JobRegistry:
                         {
                             "ordinal": ordinal,
                             "plan_step_id": str(step["step_id"]),
-                            "step_slots": policy.reserved_step_slots(
-                                review_required=requirements[ordinal]
-                            ),
+                            "step_slots": _step_slots(policy, step, requirements[ordinal]),
                             "review_required": requirements[ordinal],
                             "prerequisite_step_ids": list(
                                 step["prerequisite_step_ids"]
@@ -13203,9 +14495,7 @@ class JobRegistry:
                     {
                         "ordinal": ordinal,
                         "plan_step_id": str(step["step_id"]),
-                        "step_slots": policy.reserved_step_slots(
-                            review_required=requirements[ordinal]
-                        ),
+                        "step_slots": _step_slots(policy, step, requirements[ordinal]),
                         "review_required": requirements[ordinal],
                         "work_job_id": str(member["job_id"]),
                         "member_command_id": member_command,
@@ -13213,11 +14503,12 @@ class JobRegistry:
                 )
             admission: dict[str, Any] = {
                 "schema_version": (
-                    _COO_PLAN_ADMISSION_SCHEMA_V2
+                    _COO_PLAN_ADMISSION_SCHEMA_V3 if is_v5 else _COO_PLAN_ADMISSION_SCHEMA_V2
                     if is_v3
                     else _COO_PLAN_ADMISSION_SCHEMA_V1
                 ),
-                "root_job_id": root_token,
+                "root_job_id": str(root["root_job_id"]),
+                **({"coordinator_job_id": root_token} if is_v5 else {}),
                 "policy_sha": policy.policy_sha256,
                 "plan_attempt_id": str(plan_attempt["attempt_id"]),
                 "plan_digest": plan_digest,
@@ -13245,7 +14536,9 @@ class JobRegistry:
                         connection,
                         self.store,
                         root_row=root,
-                        role="work",
+                        role="aggregation" if step.get("delegation") else "work",
+                        delegation=step.get("delegation"),
+                    business_impact=_step_coordinator_impact(root, step),
                         objective=str(step["objective"]),
                         requested_authorities=list(step["requested_authorities"]),
                         allowed_write_paths=list(step["allowed_write_paths"]),
@@ -13315,8 +14608,8 @@ class JobRegistry:
                 None,
             )
             if (
-                admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
-                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
                 or step is None
                 or not step["prerequisite_step_ids"]
             ):
@@ -13324,8 +14617,8 @@ class JobRegistry:
             existing = connection.execute(
                 """
                 SELECT 1 FROM jobs
-                WHERE root_job_id=? AND plan_step_id=?
-                  AND orchestration_role IN ('work','repair')
+                WHERE parent_job_id=? AND plan_step_id=?
+                  AND orchestration_role IN ('aggregation','work','repair')
                 LIMIT 1
                 """,
                 (root_token, step_token),
@@ -13380,8 +14673,8 @@ class JobRegistry:
                 None,
             )
             if (
-                admission["schema_version"] != _COO_PLAN_ADMISSION_SCHEMA_V2
-                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+                admission["schema_version"] not in {_COO_PLAN_ADMISSION_SCHEMA_V2, _COO_PLAN_ADMISSION_SCHEMA_V3}
+                or plan_body["schema_version"] not in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
                 or step is None
                 or reservation is None
                 or not step["prerequisite_step_ids"]
@@ -13398,7 +14691,8 @@ class JobRegistry:
             )
             supplied_manifest = _validate_work_dependency_manifest(
                 dependency_manifest,
-                root_job_id=root_token,
+                root_job_id=str(root["root_job_id"]),
+                coordinator_job_id=root_token,
                 plan_attempt_id=str(admission["plan_attempt_id"]),
                 plan_digest=str(admission["plan_digest"]),
                 plan_step_id=step_token,
@@ -13424,7 +14718,9 @@ class JobRegistry:
                     connection,
                     event_row=existing_command,
                     root_row=root,
-                    role="work",
+                    role="aggregation" if step.get("delegation") else "work",
+                    delegation=step.get("delegation"),
+                    business_impact=_step_coordinator_impact(root, step),
                     objective=str(step["objective"]),
                     requested_authorities=list(step["requested_authorities"]),
                     allowed_write_paths=list(step["allowed_write_paths"]),
@@ -13446,8 +14742,8 @@ class JobRegistry:
             existing_step_rows = connection.execute(
                 """
                 SELECT * FROM jobs
-                WHERE root_job_id=? AND plan_step_id=?
-                  AND orchestration_role IN ('work','repair','review')
+                WHERE parent_job_id=? AND plan_step_id=?
+                  AND orchestration_role IN ('aggregation','work','repair','review')
                 ORDER BY job_id
                 """,
                 (root_token, step_token),
@@ -13468,7 +14764,9 @@ class JobRegistry:
                 connection,
                 self.store,
                 root_row=root,
-                role="work",
+                role="aggregation" if step.get("delegation") else "work",
+                    delegation=step.get("delegation"),
+                    business_impact=_step_coordinator_impact(root, step),
                 objective=str(step["objective"]),
                 requested_authorities=list(step["requested_authorities"]),
                 allowed_write_paths=list(step["allowed_write_paths"]),
@@ -13531,13 +14829,18 @@ class JobRegistry:
             )
             if step is None:
                 raise StateConflict("review target is absent from the admitted plan")
+            paid_review = _paid_review_constraints_for_target(connection, root, reviewed_job_id)
+            review_cost_class = (paid_review["cost_class"] if paid_review is not None
+                                 else str(step["cost_class"]))
             has_tests = "RUN_TESTS" in step["requested_authorities"]
+            if paid_review is not None and has_tests:
+                raise StateConflict("paid-subject review recipe does not admit RUN_TESTS")
             review_authorities = ["READ", *(["RUN_TESTS"] if has_tests else [])]
             root_validations = _strict_canonical_json_loads(
                 str(root["validation_commands_json"]), name="root validations"
             )
             review_validations = root_validations if has_tests else []
-            policy = CooCyclePolicy.load()
+            policy = CooCyclePolicy.for_digest(admission["policy_sha"])
             reviews = connection.execute(
                 "SELECT * FROM jobs WHERE reviews_job_id=? ORDER BY job_id",
                 (reviewed_job_id,),
@@ -13582,6 +14885,7 @@ class JobRegistry:
                     connection,
                     event_row=existing,
                     root_row=root,
+                plan_schema_version=str(plan_body["schema_version"]),
                     role="review",
                     objective=(
                         f"Independently review {reviewed_job_id}: {reviewed['objective']}"
@@ -13589,7 +14893,7 @@ class JobRegistry:
                     requested_authorities=review_authorities,
                     allowed_write_paths=[],
                     validation_commands=review_validations,
-                    cost_class=str(step["cost_class"]),
+                    cost_class=review_cost_class,
                     attempt_limit=policy.review_job_attempt_limit,
                     review_required=False,
                     command_id=command_id,
@@ -13656,12 +14960,13 @@ class JobRegistry:
                 connection,
                 self.store,
                 root_row=root,
+                plan_schema_version=str(plan_body["schema_version"]),
                 role="review",
                 objective=f"Independently review {reviewed_job_id}: {reviewed['objective']}",
                 requested_authorities=review_authorities,
                 allowed_write_paths=[],
                 validation_commands=review_validations,
-                cost_class=str(step["cost_class"]),
+                cost_class=review_cost_class,
                 attempt_limit=policy.review_job_attempt_limit,
                 review_required=False,
                 command_id=command_id,
@@ -13771,6 +15076,7 @@ class JobRegistry:
                     connection,
                     event_row=existing,
                     root_row=root,
+                plan_schema_version=str(plan_body["schema_version"]),
                     role="repair",
                     objective=f"Repair {rejected_job_id}: {step['objective']}",
                     requested_authorities=list(step["requested_authorities"]),
@@ -13806,7 +15112,7 @@ class JobRegistry:
                     connection, root, admission, plan_body
                 )
             }.get(str(rejected["plan_step_id"]))
-            policy = CooCyclePolicy.load()
+            policy = CooCyclePolicy.for_digest(admission["policy_sha"])
             if (
                 current is None
                 or current["current_job_id"] != rejected_job_id
@@ -13822,6 +15128,7 @@ class JobRegistry:
                 connection,
                 self.store,
                 root_row=root,
+                plan_schema_version=str(plan_body["schema_version"]),
                 role="repair",
                 objective=f"Repair {rejected_job_id}: {step['objective']}",
                 requested_authorities=list(step["requested_authorities"]),
@@ -13871,9 +15178,21 @@ class JobRegistry:
             if (
                 role != "aggregation"
                 or provenance is None
-                or not _accepted_orchestration_root_provenance(provenance)
-                or root["parent_job_id"] is not None
-                or root["root_job_id"] != root["job_id"]
+                or not (
+                    (
+                        _accepted_orchestration_root_provenance(provenance)
+                        and root["parent_job_id"] is None
+                        and root["root_job_id"] == root["job_id"]
+                        and int(root["depth"]) == 0
+                    )
+                    or _accepted_nested_coordinator_provenance(
+                        provenance,
+                        parent_job_id=root["parent_job_id"],
+                        root_job_id=root["root_job_id"],
+                        job_id=root["job_id"],
+                        depth=int(root["depth"]),
+                    )
+                )
             ):
                 raise StateConflict("aggregation handoff requires a strict-v2 root")
             existing = connection.execute(
@@ -13906,15 +15225,16 @@ class JobRegistry:
                 connection, root, admission, plan_body
             )
             handoff: dict[str, Any] = {
-                "schema_version": "mastermind.aggregation_handoff/v1",
-                "root_job_id": root_token,
+                "schema_version": ("mastermind.aggregation_handoff/v2" if admission["schema_version"] == _COO_PLAN_ADMISSION_SCHEMA_V3 else "mastermind.aggregation_handoff/v1"),
+                "root_job_id": str(root["root_job_id"]),
+                **({"coordinator_job_id": root_token} if admission["schema_version"] == _COO_PLAN_ADMISSION_SCHEMA_V3 else {}),
                 "policy_sha": admission["policy_sha"],
                 "plan_attempt_id": admission["plan_attempt_id"],
                 "plan_digest": admission["plan_digest"],
                 "reservation_digest": admission["reservation_digest"],
                 "revisions": revisions,
                 "rejected_history": rejected_history,
-                "aggregate_result_schema": "mastermind.aggregation_result/v1",
+                "aggregate_result_schema": ("mastermind.aggregation_result/v2" if admission["schema_version"] == _COO_PLAN_ADMISSION_SCHEMA_V3 else "mastermind.aggregation_result/v1"),
                 "allowed_evidence_reads": ["attempts", "events", "jobs"],
                 "command_id": command_id,
             }
@@ -14103,9 +15423,8 @@ class JobRegistry:
             if (
                 root is None
                 or selected is None
-                or root["root_job_id"] != root_token
                 or root["orchestration_role"] != "aggregation"
-                or selected["root_job_id"] != root_token
+                or not _coordinator_selection_matches(root, selected)
                 or selected["current_attempt_id"] != attempt_token
             ):
                 return self._retry_reconciliation(
@@ -14202,8 +15521,8 @@ class JobRegistry:
                 "SELECT payload_json FROM events WHERE event_type='COO_AGGREGATION_HANDOFF_READY' AND job_id=?",
                 (root_token,),
             ).fetchone()
-            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
-            if policy_digest != EXPECTED_POLICY_SHA256:
+            policy_digest = policy_sha or _coordinator_policy_pin(connection, root_token)
+            if policy_digest != _coordinator_policy_pin(connection, root_token):
                 raise StateConflict(
                     "COO block policy digest is not the reviewed policy"
                 )
@@ -14215,8 +15534,7 @@ class JobRegistry:
                 attempt_id=attempt_token,
             )
             payload = {
-                "schema_version": "mastermind.coo_cycle_block/v1",
-                "root_job_id": root_token,
+                **_coordinator_event_identity(root, "mastermind.coo_cycle_block/v1"),
                 "selected_job_id": selected_token,
                 "reason": "state_conflict",
                 "policy_sha": policy_digest,
@@ -14281,9 +15599,8 @@ class JobRegistry:
             if (
                 root is None
                 or selected is None
-                or root["root_job_id"] != root_token
                 or root["orchestration_role"] != "aggregation"
-                or selected["root_job_id"] != root_token
+                or not _coordinator_selection_matches(root, selected)
                 or claim is None
                 or claim["event_type"] != "JOB_CLAIMED"
                 or claim["job_id"] != selected_token
@@ -14323,8 +15640,7 @@ class JobRegistry:
                 )
 
             payload = {
-                "schema_version": _COO_DISPATCH_EFFECT_SCHEMA,
-                "root_job_id": root_token,
+                **_coordinator_event_identity(root, _COO_DISPATCH_EFFECT_SCHEMA),
                 "selected_job_id": selected_token,
                 "dispatch_command_id": dispatch_token,
                 "attempt_id": str(claim["attempt_id"]),
@@ -14432,8 +15748,9 @@ class JobRegistry:
                 )
 
             payload = {
-                "schema_version": _COO_DISPATCH_EFFECT_SCHEMA,
-                "root_job_id": root_token,
+                "schema_version": pending["schema_version"],
+                "root_job_id": pending["root_job_id"],
+                **({"coordinator_job_id": pending["coordinator_job_id"]} if "coordinator_job_id" in pending else {}),
                 "selected_job_id": selected_token,
                 "dispatch_command_id": dispatch_token,
                 "attempt_id": pending["attempt_id"],
@@ -14512,8 +15829,7 @@ class JobRegistry:
             if (
                 root is None
                 or selected is None
-                or root["root_job_id"] != root_token
-                or selected["root_job_id"] != root_token
+                or not _coordinator_selection_matches(root, selected)
                 or (
                     reason != "invalid_root"
                     and root["orchestration_role"] != "aggregation"
@@ -14546,14 +15862,13 @@ class JobRegistry:
                 if handoff_event
                 else {}
             )
-            policy_digest = policy_sha or CooCyclePolicy.load().policy_sha256
-            if policy_digest != EXPECTED_POLICY_SHA256:
+            policy_digest = policy_sha or _coordinator_policy_pin(connection, root_token)
+            if policy_digest != _coordinator_policy_pin(connection, root_token):
                 raise StateConflict(
                     "COO block policy digest is not the reviewed policy"
                 )
             payload = {
-                "schema_version": "mastermind.coo_cycle_block/v1",
-                "root_job_id": root_token,
+                **_coordinator_event_identity(root, "mastermind.coo_cycle_block/v1"),
                 "selected_job_id": selected_token,
                 "reason": reason,
                 "policy_sha": policy_digest,
@@ -14644,6 +15959,7 @@ class JobRegistry:
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
         _principal_commit_guard: Callable[[], None] | None = None,
+        _direct_native_admission: direct_native.DirectNativeAdmission | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -14659,6 +15975,21 @@ class JobRegistry:
         that must record who asked and on what grounding.  It changes no job
         column and confers no authority.
         """
+        if _direct_native_admission is not None:
+            if type(_direct_native_admission) is not direct_native.DirectNativeAdmission:
+                raise StateConflict("direct native admission has no owner capability")
+            _direct_native_admission.check()
+            if (orchestration_role is not None or parent_job_id is not None or attempt_limit != 1
+                    or set(requested_authorities or ()) != {"READ", "RESEARCH"}
+                    or allowed_write_paths or validation_commands or review_required or reviews_job_id
+                    or any(v is not None for v in (plan_attempt_id,plan_digest,plan_step_id,repair_round,supersedes_job_id))):
+                raise StateConflict("direct native Job exceeds its closed read-only contract")
+            expected = direct_native.admission_material(_direct_native_admission)
+            if not isinstance(provenance, dict) or provenance.get("direct_native") != expected:
+                raise StateConflict("direct native Job lost its admitted source")
+        elif ((isinstance(constraints,dict) and direct_native.POLICY_KEY in constraints)
+                or (isinstance(provenance,dict) and "direct_native" in provenance)):
+            raise StateConflict("direct native creation requires its private host admission")
         objective = str(objective).strip()
         if not objective:
             raise StateConflict("objective is required")
@@ -14836,6 +16167,10 @@ class JobRegistry:
             )
         except (AuthorityDenied, AuthorityPolicyError) as exc:
             raise StateConflict(f"job authority is denied: {exc}") from exc
+        if (normalized_constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY
+                and (set(authority.requested) - {"READ", "RESEARCH"}
+                     or authority.allowed_write_paths or authority.validation_commands)):
+            raise StateConflict("read-only child workspace root admits READ/RESEARCH only")
         if (
             orchestration_role in {"plan", "aggregation"}
             and "READ" not in authority.requested
@@ -14858,6 +16193,8 @@ class JobRegistry:
                 "review orchestration Job grant requires READ plus optional RUN_TESTS and empty writes"
             )
         def recheck_principal():
+            if _direct_native_admission is not None:
+                _direct_native_admission.check()
             if _principal_commit_guard is None:
                 return
             if (not callable(_principal_commit_guard)
@@ -14947,7 +16284,10 @@ class JobRegistry:
                 ).fetchone()
                 if parent_row is None:
                     raise StateConflict(f"parent job {parent_job_id!r} does not exist")
-                _decode_orchestration_job_fields(parent_row)
+                _, parent_provenance, _ = _decode_orchestration_job_fields(parent_row)
+                if orchestration_role == "plan" and (parent_provenance or {}).get("hierarchy_grant"):
+                    coo_policy = CooCyclePolicy.load(version=2)
+                    _assert_hierarchy_creation_capacity(connection, parent_row)
                 if (
                     orchestration_role is None
                     and parent_row["orchestration_role"] is not None
@@ -15146,6 +16486,163 @@ class JobRegistry:
             # Refusal rolls back both the Job and its JOB_CREATED event.
             recheck_principal()
         return job
+
+    def create_direct_native_job(self, intent, *, fingerprint, command_id, workspace_root, admission):
+        if type(admission) is not direct_native.DirectNativeAdmission:
+            raise StateConflict("direct admission is not host-issued")
+        admission.check()
+        from control_plane.ceo_intent import validate_intent, INTENT_SCHEMA_DIRECT, _provenance
+        intent=validate_intent(intent)
+        if intent["schema"] != INTENT_SCHEMA_DIRECT or intent["workstream"] != admission.access.work_ref:
+            raise StateConflict("direct intent and host source differ")
+        root=Path(workspace_root)
+        if not root.is_absolute() or root != root.resolve(strict=True):
+            raise StateConflict("direct workspace root must be an existing canonical owner directory")
+        material=direct_native.admission_material(admission)
+        if intent["grounding"]["mastermind_sha"] != material["binding"]["base_sha"]:
+            raise StateConflict("direct native grounding differs from the actual host source release")
+        provenance=_provenance(intent,fingerprint)
+        provenance["direct_native"]=material
+        constraints=dict(material["binding"],required_capabilities=["read"],direct_native_worker_id=material["binding"]["worker_id"],
+            **{direct_native.POLICY_KEY:direct_native.POLICY})
+        return self.create_job(intent["objective"],department=intent["department"],priority=intent["priority"],
+            worktree=str(root / intent["intent_id"]),branch=f"codex/{intent['intent_id']}",
+            constraints=constraints,attempt_limit=1,requested_authorities=["READ","RESEARCH"],
+            command_id=command_id,provenance=provenance,_direct_native_admission=admission)
+
+    def direct_native_provenance(self, job_id):
+        with self.store.read() as connection:
+            row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            return copy.deepcopy(_direct_native_provenance(connection,row,required=True))
+
+    def prepare_direct_native_workspace(self, job_id, *, source_repository, shared_gid, access):
+        from control_plane import executive_workspace as owner
+        if type(access) is not direct_native.DirectNativeExecutionAccess:
+            raise StateConflict("direct workspace requires current native execution access")
+        access.check()
+        source=Path(source_repository)
+        if not source.is_absolute() or type(shared_gid) is not int or shared_gid<0:
+            raise StateConflict("direct workspace source/custody is invalid")
+        source=source.resolve(strict=True)
+        with self.store.transaction() as connection:
+            row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            material=_direct_native_provenance(connection,row,required=True)
+            if (material["principal_scope"] != access.principal_scope
+                    or material["authority_generation_digest"] != access.authority_generation_digest
+                    or material["source"]["work_ref"] != access.work_ref):
+                raise StateConflict("direct workspace access differs")
+            completed=_require_direct_workspace(connection,row,required=False)
+            if completed is not None:
+                if completed["source_repository"] != str(source) or completed["shared_gid"] != shared_gid:
+                    raise StateConflict("direct workspace replay source changed")
+                return completed
+            if row["status"] != "QUEUED" or row["current_attempt_id"] is not None or row["attempt_count"] != 0:
+                raise StateConflict("direct workspace requires a never-started Job")
+            command=f"direct-workspace:{job_id}:requested"
+            if connection.execute("SELECT 1 FROM events WHERE command_id=?",(command,)).fetchone():
+                raise StateConflict("direct allocation unresolved; no retry or adoption")
+            reservation=dict(admission_digest=orchestration_digest(material),source_repository=str(source),
+                source_identity=owner.child_workspace_directory_identity(source),control_uid=os.geteuid(),shared_gid=shared_gid)
+            access.check()
+            self.store.append_event(connection,aggregate_type="job",aggregate_id=job_id,job_id=job_id,
+                event_type="DIRECT_NATIVE_WORKSPACE_REQUESTED",command_id=command,payload=reservation)
+        created=owner.create_readonly_child_clone(source,Path(row["worktree"]).parent,job_id=job_id,
+            base_sha=material["binding"]["base_sha"],branch=row["branch"],shared_gid=shared_gid)
+        if not owner.is_created_child_clone(created):
+            raise StateConflict("direct workspace receipt is not allocator-owned")
+        completion=dict(reservation,reservation_sha256=orchestration_digest(reservation),
+            receipt=created.receipt.to_dict(),identity=created.identity)
+        with self.store.transaction() as connection:
+            current=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            if (_direct_native_provenance(connection,current,required=True) != material
+                    or current["status"] != "QUEUED" or current["attempt_count"] != 0
+                    or owner.child_workspace_directory_identity(source) != reservation["source_identity"]):
+                raise StateConflict("direct allocation source changed")
+            requested=connection.execute("SELECT event_type,job_id,payload_json FROM events WHERE command_id=?",(f"direct-workspace:{job_id}:requested",)).fetchone()
+            if (requested is None or requested["event_type"]!="DIRECT_NATIVE_WORKSPACE_REQUESTED"
+                    or requested["job_id"]!=job_id or json.loads(requested["payload_json"])!=reservation):
+                raise StateConflict("direct allocation reservation changed")
+            access.check()
+            owner.verify_child_clone_identity(Path(row["worktree"]),created.identity,control_uid=os.geteuid(),shared_gid=shared_gid)
+            self.store.append_event(connection,aggregate_type="job",aggregate_id=job_id,job_id=job_id,
+                event_type="DIRECT_NATIVE_WORKSPACE_COMPLETED",command_id=f"direct-workspace:{job_id}:completed",payload=completion)
+        return completion
+
+    def prepare_coo_child_workspace(self, job_id: str, *, source_repository: str | Path,
+                                    shared_gid: int) -> dict[str, Any] | None:
+        """Existing Control owner: reserve once, allocate locally, commit provenance.
+
+        No socket command accepts this API or a receipt DTO. A lost/failed
+        allocation with only REQUESTED evidence is unknown, never auto-adopted.
+        """
+        from control_plane import executive_workspace as owner
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if _coo_child_workspace_binding(connection, row) is None:
+                # No new custody prerequisites attach to legacy Jobs/planners.
+                return None
+        source = Path(source_repository)
+        if (not source.is_absolute() or type(shared_gid) is not int or shared_gid < 0):
+            raise StateConflict("child workspace source/custody is not canonical")
+        source = source.resolve(strict=True)
+        with self.store.transaction() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            binding = _coo_child_workspace_binding(connection, row)
+            if binding is None:
+                return None
+            completed = _require_coo_child_workspace_completion(connection, row, required=False)
+            if completed is not None:
+                if (completed["source_repository"] != str(source)
+                        or completed["shared_gid"] != shared_gid):
+                    raise StateConflict("child workspace replay source/custody changed")
+                return completed
+            if (row["status"] != JobStatus.QUEUED.value or row["current_attempt_id"] is not None
+                    or row["attempt_count"] != 0):
+                raise StateConflict("child workspace allocation requires never-started queued Job")
+            command = f"coo-workspace:{job_id}:requested"
+            if connection.execute("SELECT 1 FROM events WHERE command_id=?", (command,)).fetchone():
+                raise StateConflict("child workspace allocation unresolved; do not retry/adopt")
+            reservation = dict(schema_version=CHILD_WORKSPACE_POLICY, binding=binding,
+                source_repository=str(source), source_identity=owner.child_workspace_directory_identity(source),
+                shared_gid=shared_gid, control_uid=os.geteuid())
+            self.store.append_event(connection, aggregate_type="job", aggregate_id=job_id,
+                event_type="COO_CHILD_WORKSPACE_REQUESTED", job_id=job_id,
+                command_id=command, actor="control-child-workspace-owner", payload=reservation)
+        # Deliberately outside the SQL transaction; REQUESTED owns every partial
+        # result, including failure or process loss before the completion commit.
+        created = owner.create_readonly_child_clone(source, Path(binding["worktree"]).parent,
+            job_id=job_id, base_sha=binding["base_sha"], branch=binding["branch"], shared_gid=shared_gid)
+        if not owner.is_created_child_clone(created):
+            raise StateConflict("child workspace receipt did not originate in allocator")
+        if owner.child_workspace_directory_identity(source) != reservation["source_identity"]:
+            raise StateConflict("child workspace source identity changed")
+        completion = dict(schema_version=CHILD_WORKSPACE_POLICY, binding=binding,
+            reservation_sha256=orchestration_digest(reservation), source_repository=str(source),
+            source_identity=reservation["source_identity"], shared_gid=shared_gid,
+            control_uid=os.geteuid(), receipt=created.receipt.to_dict(), identity=created.identity)
+        with self.store.transaction() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if (_coo_child_workspace_binding(connection, row) != binding
+                    or row["status"] != JobStatus.QUEUED.value or row["attempt_count"] != 0
+                    or row["current_attempt_id"] is not None):
+                raise StateConflict("child workspace Job changed while allocating")
+            requested = connection.execute("SELECT * FROM events WHERE command_id=?",
+                (f"coo-workspace:{job_id}:requested",)).fetchone()
+            if (requested is None or requested["event_type"] != "COO_CHILD_WORKSPACE_REQUESTED"
+                    or json.loads(requested["payload_json"]) != reservation):
+                raise StateConflict("child workspace reservation changed")
+            owner.verify_child_clone_identity(Path(binding["worktree"]), created.identity,
+                control_uid=os.geteuid(), shared_gid=shared_gid)
+            self.store.append_event(connection, aggregate_type="job", aggregate_id=job_id,
+                event_type="COO_CHILD_WORKSPACE_COMPLETED", job_id=job_id,
+                command_id=f"coo-workspace:{job_id}:completed", actor="control-child-workspace-owner",
+                payload=completion)
+        return completion
+
+    def coo_child_workspace_completion(self, job_id: str) -> dict[str, Any] | None:
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            return _require_coo_child_workspace_completion(connection, row)
 
     def get_job(self, job_id: str) -> Job | None:
         with self.store.read() as connection:
@@ -15851,7 +17348,7 @@ class AttemptRegistry:
             row = connection.execute(
                 "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
             ).fetchone()
-            return _attempt_from_row(row) if row else None
+            return _attempt_from_row(_direct_attempt_view(connection,row)) if row else None
 
     def list_attempts(self, job_id: str | None = None) -> list[Attempt]:
         with self.store.read() as connection:
@@ -15864,7 +17361,7 @@ class AttemptRegistry:
                 rows = connection.execute(
                     "SELECT * FROM attempts ORDER BY created_at_ms,attempt_id"
                 ).fetchall()
-            return [_attempt_from_row(row) for row in rows]
+            return [_attempt_from_row(_direct_attempt_view(connection,row)) for row in rows]
 
     def _claim_job_in_transaction(
         self,
@@ -15946,6 +17443,33 @@ class AttemptRegistry:
 
         if exact_target is not None:
             _validate_exact_worker_target_selection(connection, exact_target, job_row, capacity, authority_policy_hash)
+        # A readonly review quota is another view of the existing Worker,
+        # never another physical slot. The common transactional claim seam
+        # makes this symmetric for every quota/path on that same Worker.
+        worker_quotas = connection.execute(
+            "SELECT metadata_json,held_attempt_id FROM worker_quota_classes WHERE worker_id=?",
+            (capacity["worker_id"],),
+        ).fetchall()
+        single_worker_capacity = _direct_native_provenance(connection,job_row) is not None
+        # The direct native view is this existing physical Worker, never a new
+        # simultaneous slot. Make the fence symmetric for incumbent claims.
+        for held in worker_quotas:
+            if held["held_attempt_id"] is not None:
+                held_job=connection.execute("SELECT j.* FROM jobs j JOIN attempts a ON a.job_id=j.job_id WHERE a.attempt_id=?",(held["held_attempt_id"],)).fetchone()
+                if held_job is not None and _direct_native_provenance(connection,held_job) is not None:
+                    single_worker_capacity=True
+        for worker_quota in worker_quotas:
+            quota_metadata = _strict_canonical_json_loads(
+                str(worker_quota["metadata_json"]), name="shared Worker capacity metadata"
+            )
+            if "single_worker_capacity" in quota_metadata:
+                if quota_metadata["single_worker_capacity"] is not True:
+                    raise StateConflict("shared Worker capacity declaration must be exactly true")
+                single_worker_capacity = True
+        if single_worker_capacity and any(row["held_attempt_id"] is not None for row in worker_quotas):
+            if is_c2:
+                raise StateConflict("C2_SELECTED_CAPACITY_NOT_CURRENT")
+            return None
         if orchestration_role == "work":
             _assert_dependency_manifest_current(
                 connection,
@@ -15985,6 +17509,7 @@ class AttemptRegistry:
                 (capacity["worker_id"], capacity["quota_class"]),
             ).fetchone()[0]
         )
+        is_direct=_direct_native_provenance(connection,job_row) is not None
         connection.execute(
             """
             INSERT INTO attempts(
@@ -16014,16 +17539,16 @@ class AttemptRegistry:
                 timestamp,
                 (
                     _json_dumps(dict(effective_grant))
-                    if effective_grant is not None
+                    if effective_grant is not None and not is_direct
                     else None
                 ),
-                effective_grant_digest,
+                effective_grant_digest if not is_direct else None,
                 (
                     _json_dumps(dict(placement_snapshot))
-                    if placement_snapshot is not None
+                    if placement_snapshot is not None and not is_direct
                     else None
                 ),
-                placement_snapshot_digest,
+                placement_snapshot_digest if not is_direct else None,
             ),
         )
         if is_c2:
@@ -16062,7 +17587,7 @@ class AttemptRegistry:
             "selected_model_alias": _capacity_model_alias(capacity) or None,
             "routing_reason_codes": constraints.get("routing_reason_codes", []),
         }
-        if orchestration_role is not None:
+        if orchestration_role is not None or is_direct:
             claim_payload.update(
                 {
                     "orchestration_role": str(orchestration_role),
@@ -16098,6 +17623,15 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        if is_direct:
+            claim_payload["direct_native_claim"]=dict(schema_version="mastermind.direct_native_claim/v1",
+                admission_digest=orchestration_digest(_direct_native_provenance(connection,job_row,required=True)),
+                effective_grant=dict(effective_grant),effective_grant_digest=effective_grant_digest,
+                placement_snapshot=dict(placement_snapshot),placement_snapshot_digest=placement_snapshot_digest)
+        from control_plane.executive_paid_runtime import paid_claim_binding
+        paid_binding = paid_claim_binding(capacity, constraints)
+        if paid_binding is not None:
+            claim_payload["paid_capacity_binding"] = paid_binding
         if _initial_capacity_evidence is not None:
             claim_payload["capacity_evidence"] = dict(_initial_capacity_evidence)
         if exact_target is not None:
@@ -16123,7 +17657,7 @@ class AttemptRegistry:
         if attempt_row is None:  # pragma: no cover - same-transaction invariant
             raise PersistenceError("claimed Attempt disappeared inside its transaction")
         return AttemptLease(
-            attempt=_attempt_from_row(attempt_row),
+            attempt=_attempt_from_row(_direct_attempt_view(connection,attempt_row)),
             lease_token=lease_token,
         )
 
@@ -16139,6 +17673,7 @@ class AttemptRegistry:
         _coo_cycle_dispatch_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
         _initial_prepared: object | None = None,
+        _direct_native_access: direct_native.DirectNativeExecutionAccess | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -16154,6 +17689,7 @@ class AttemptRegistry:
         if (
             command_id is not None
             and _coo_cycle_dispatch_capability is not _COO_CYCLE_DISPATCH_CAPABILITY
+            and _direct_native_access is None
         ):
             raise StateConflict(
                 "command-bound claim requires the COO dispatch boundary"
@@ -16171,6 +17707,24 @@ class AttemptRegistry:
                 raise StateConflict("exact worker target requires command-bound child dispatch")
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
+            direct_row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
+            direct_provenance=_direct_native_provenance(connection,direct_row) if direct_row is not None else None
+            if direct_provenance is not None:
+                if (type(_direct_native_access) is not direct_native.DirectNativeExecutionAccess
+                        or command_id != f"direct-native-dispatch:{job_id}"
+                        or _coo_cycle_dispatch_capability is not None or exact_target is not None):
+                    raise StateConflict("direct native Job requires its exact host dispatch")
+                _direct_native_access.check()
+                expected_worker=direct_provenance["binding"]["worker_id"]
+                if worker_id not in (None,expected_worker):
+                    raise StateConflict("direct dispatch Worker differs from its actual configured owner")
+                worker_id=expected_worker
+                if (direct_provenance["principal_scope"] != _direct_native_access.principal_scope
+                        or direct_provenance["source"]["work_ref"] != _direct_native_access.work_ref
+                        or direct_provenance["authority_generation_digest"] != _direct_native_access.authority_generation_digest):
+                    raise StateConflict("direct native dispatch authority changed")
+            elif _direct_native_access is not None:
+                raise StateConflict("direct access cannot claim an incumbent Job")
             if command_id is not None:
                 existing_dispatch = connection.execute(
                     "SELECT * FROM events WHERE command_id=?", (str(command_id),)
@@ -16204,7 +17758,7 @@ class AttemptRegistry:
                     ).fetchone()
                     if attempt_row is None or attempt_row["job_id"] != job_id:
                         raise PersistenceError("dispatch replay lost its bound Attempt")
-                    replay_attempt = _attempt_from_row(attempt_row)
+                    replay_attempt = _attempt_from_row(_direct_attempt_view(connection,attempt_row))
                     replay_token = attempt_row["lease_token"]
                     if replay_attempt.status in _LEASE_ACTIVE_ATTEMPT_STATUSES:
                         if replay_token is None:
@@ -16255,6 +17809,9 @@ class AttemptRegistry:
                 return None
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
+            _require_coo_child_workspace_completion(connection, job_row)
+            if direct_provenance is not None:
+                _require_direct_workspace(connection,job_row)
             authority = _authorize_job_row(job_row)
             if exact_target is not None:
                 timestamp = self.store.now_ms()
@@ -16263,7 +17820,7 @@ class AttemptRegistry:
             quarantined_workers: set[str] = set()
             if orchestration_role is not None:
                 try:
-                    coo_policy = CooCyclePolicy.load()
+                    coo_policy = _job_coo_policy(connection, str(job_row["job_id"]))
                 except CooCyclePolicyError as exc:
                     raise StateConflict(f"COO cycle policy is invalid: {exc}") from exc
                 limit = int(job_row["attempt_limit"])
@@ -16364,12 +17921,16 @@ class AttemptRegistry:
                     raise StateConflict(
                         "orchestration claim requires exact command-bound COO dispatch"
                     )
-            elif _coo_cycle_dispatch_capability is not None or command_id is not None:
+            elif direct_provenance is None and (_coo_cycle_dispatch_capability is not None or command_id is not None):
                 raise StateConflict(
                     "COO dispatch capability cannot claim a legacy role-null Job"
                 )
             constraints = _normalise_constraints(
                 _json_loads(job_row["constraints_json"], fallback={})
+            )
+            review_exclusions = (
+                _review_candidate_exclusions(connection, job_row)
+                if orchestration_role == "review" else None
             )
             candidate_rows = connection.execute("""
                 SELECT q.*,w.provider AS worker_provider,w.account_label,
@@ -16386,6 +17947,23 @@ class AttemptRegistry:
             eligible_classes = set(constraints["eligible_quota_classes"])
             candidates: list[sqlite3.Row] = []
             for row in candidate_rows:
+                if review_exclusions is not None and len(review_exclusions) == 3:
+                    # This first cross-kind profile permits only an existing
+                    # qualified sealed Codex reviewer of a paid subject.
+                    review_metadata = _json_loads(row["metadata_json"], fallback={})
+                    if (row["provider"] != "codex"
+                            or row["worker_provider"] != "codex"
+                            or review_metadata.get("adapter_id") != "codex-cli"
+                            or review_metadata.get("model_alias") != "standard.review"
+                            or review_metadata.get("single_worker_capacity") is not True
+                            or review_metadata.get("execution_profile_id")
+                            != "sealed.worker.readonly.no-extensions.v1"):
+                        continue
+                if review_exclusions is not None and (
+                    row["worker_id"] == review_exclusions[0]
+                    or row["account_label"] == review_exclusions[1]
+                ):
+                    continue
                 if (
                     orchestration_role is not None
                     and str(row["worker_id"]) in quarantined_workers
@@ -16454,6 +18032,18 @@ class AttemptRegistry:
                     raise StateConflict(
                         f"placement snapshot is invalid: {exc}"
                     ) from exc
+            if direct_provenance is not None:
+                if capacity["provider"] != "codex" or capacity["worker_provider"] != "codex":
+                    raise StateConflict("direct native dispatch requires the actual Codex Worker")
+                effective_grant=dict(schema_version="mastermind.executive_effective_grant/v1",
+                    authorities=list(authority.requested),write_paths=[],validation_argv=[],
+                    policy_sha=authority.policy_sha256,job_id=job_id,role=None)
+                effective_grant_digest=orchestration_digest(effective_grant)
+                placement_snapshot=build_placement_snapshot(worker_id=str(capacity["worker_id"]),
+                    quota_class=str(capacity["quota_class"]),provider=str(capacity["provider"]),
+                    account_label=str(capacity["account_label"]),observed_at_ms=timestamp)
+                placement_snapshot_digest=orchestration_digest(placement_snapshot)
+                _direct_native_access.check()
             claimed = self._claim_job_in_transaction(
                 connection,
                 job_row=job_row,
@@ -16474,6 +18064,8 @@ class AttemptRegistry:
                 exact_target=exact_target,
                 _initial_capacity_evidence=(_initial_prepared.evidence if _initial_prepared is not None else None),
             )
+            if direct_provenance is not None:
+                _direct_native_access.check()
             if _initial_prepared is not None and claimed is None:
                 raise StateConflict("finite initial common claim lost CAS")
         return claimed
@@ -16556,11 +18148,11 @@ class AttemptRegistry:
             ):
                 raise StateConflict("terminal dispatch requires an exact lost-return marker")
             pending = _validated_coo_dispatch_effect_event(
-                connection, marker, expected_root_id=job["root_job_id"]
+                connection, marker, expected_root_id=_dispatch_scope(connection, job_id)
             )
             if resolution is not None:
                 resolved = _validated_coo_dispatch_effect_event(
-                    connection, resolution, expected_root_id=job["root_job_id"],
+                    connection, resolution, expected_root_id=_dispatch_scope(connection, job_id),
                 )
                 if any(resolved[key] != pending[key] for key in
                        ("selected_job_id", "attempt_id", "dispatch_command_id")):
@@ -16578,7 +18170,7 @@ class AttemptRegistry:
                 claim["payload_json"], name="terminal dispatch claim"
             )
             expected_command = (
-                f"coo-cycle:{job['root_job_id']}:dispatch:{job_id}:attempt:"
+                f"coo-cycle:{_dispatch_scope(connection, job_id)}:dispatch:{job_id}:attempt:"
                 f"{attempt['attempt_number']}"
             )
             if (
@@ -16627,7 +18219,8 @@ class AttemptRegistry:
         job = JobRegistry(self.store).get_job(job_id)
         if job is None:
             raise StateConflict(f"job {job_id!r} does not exist")
-        prefix = f"coo-cycle:{job.root_job_id}:dispatch:{job.job_id}:attempt:"
+        scope_id = job.job_id if job.orchestration_role == "aggregation" else job.parent_job_id
+        prefix = f"coo-cycle:{scope_id}:dispatch:{job.job_id}:attempt:"
         suffix = command_id[len(prefix) :] if command_id.startswith(prefix) else ""
         if not suffix.isdigit() or suffix.startswith("0") or str(int(suffix)) != suffix:
             raise StateConflict(
@@ -17151,7 +18744,16 @@ class AttemptRegistry:
                 event_type="ATTEMPT_REMOTE_LAUNCH_PINNED", actor="supervisor",
                 job_id=str(row["job_id"]), attempt_id=attempt_id,
                 worker_id=str(row["worker_id"]), quota_class=str(row["quota_class"]),
-                payload={"identity_digest": identity_digest}, timestamp_ms=timestamp,
+                payload={"identity_digest": identity_digest, **(
+                    {
+                        "paid_runtime_pin_version": int(row["version"]) + 1,
+                        "paid_runtime_fence_generation": int(row["fence_generation"]),
+                    }
+                    if _json_loads(connection.execute(
+                        "SELECT constraints_json FROM jobs WHERE job_id=?", (row["job_id"],)
+                    ).fetchone()[0], fallback={}).get("execution_profile_id")
+                    == "fabric.paid.glm.sealed-input.v1" else {}
+                )}, timestamp_ms=timestamp,
             )
         value = self.get_attempt(attempt_id)
         assert value is not None
@@ -17337,24 +18939,36 @@ class AttemptRegistry:
                     "OPERATOR_HARNESS running transition is owned by harness state"
                 )
             job_row = connection.execute(
-                "SELECT orchestration_role FROM jobs WHERE job_id=?",
+                "SELECT * FROM jobs WHERE job_id=?",
                 (row["job_id"],),
             ).fetchone()
             if job_row is None:  # pragma: no cover - foreign key invariant
                 raise PersistenceError(f"attempt {attempt_id} lost its Job")
             orchestration_principal: dict[str, Any] | None = None
             orchestration_principal_digest: str | None = None
-            if job_row["orchestration_role"] is not None:
-                if required_launch_attestation_schema not in {
-                    None,
-                    "mastermind.executive_launch_attestation/v1",
-                }:
+            from control_plane.executive_paid_runtime import is_paid_attempt
+            paid_attempt = is_paid_attempt(connection, row)
+            if paid_attempt and required_launch_attestation_schema != (
+                "mastermind.executive_paid_model_launch_attestation/v1"
+            ):
+                raise StateConflict("paid Attempt requires its exact launch schema")
+            if not paid_attempt and required_launch_attestation_schema == (
+                "mastermind.executive_paid_model_launch_attestation/v1"
+            ):
+                raise StateConflict("paid launch schema differs from immutable Job profile")
+            if job_row["orchestration_role"] is not None or _direct_native_provenance(connection,job_row) is not None:
+                if required_launch_attestation_schema not in (
+                    {"mastermind.executive_paid_model_launch_attestation/v1"}
+                    if paid_attempt else {
+                        None, "mastermind.executive_launch_attestation/v1",
+                    }
+                ):
                     raise StateConflict(
                         f"attempt {attempt_id} launch attestation schema is not accepted"
                     )
                 _attestation, orchestration_principal, _placement, _grant = (
                     _validated_sealed_worker_launch_material(
-                        row, allow_unsealed_principal=True
+                        row, allow_unsealed_principal=True, connection=connection
                     )
                 )
                 if (
@@ -17451,6 +19065,20 @@ class AttemptRegistry:
                         "launch attestation process identity differs from durable columns"
                     )
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
+            direct_provenance=_direct_native_provenance(connection,job_row)
+            if direct_provenance is not None:
+                original_view=_direct_attempt_view(connection,row)
+                claim=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CLAIMED' AND attempt_id=?",(attempt_id,)).fetchone()
+                claim_value=json.loads(claim[0])["direct_native_claim"]
+                metadata=json.loads(row["launch_metadata_json"])
+                self.store.append_event(connection,aggregate_type="attempt",aggregate_id=attempt_id,
+                    job_id=row["job_id"],attempt_id=attempt_id,worker_id=row["worker_id"],quota_class=row["quota_class"],
+                    event_type="DIRECT_NATIVE_LAUNCH_PRINCIPAL",command_id=f"direct-native-principal:{attempt_id}",
+                    payload=dict(schema_version="mastermind.direct_native_launch_principal/v1",
+                        admission_digest=orchestration_digest(direct_provenance),claim_digest=orchestration_digest(claim_value),
+                        principal=orchestration_principal,principal_digest=orchestration_principal_digest,
+                        launch_attestation_sha256=metadata["launch_attestation_sha256"]))
+                orchestration_principal=None
             if orchestration_principal is None:
                 updated = connection.execute(
                     """
@@ -17713,6 +19341,8 @@ class AttemptRegistry:
                         job_row=job_row,
                         payload=payload,
                     )
+                elif _direct_native_provenance(connection,job_row) is not None:
+                    structured = _sealed_worker_result_payload(connection,row,expected_role=None,terminal_payload=payload)
                 else:
                     structured = JobPayload.from_value(payload).to_dict()
                     _assert_parent_aggregation_allowed(
@@ -17762,6 +19392,9 @@ class AttemptRegistry:
                 (timestamp, row["worker_id"], row["quota_class"], attempt_id),
             )
             event_payload: dict[str, Any] = {"status": job_status.value}
+            if status is AttemptStatus.COMPLETED and _direct_native_provenance(connection,job_row) is not None:
+                event_payload.update(direct_native_terminal_digest=orchestration_digest(structured),
+                    admission_digest=structured["admission_digest"])
             if review_evidence is not None:
                 event_payload["review"] = review_evidence
             self.store.append_event(
@@ -17832,9 +19465,15 @@ class AttemptRegistry:
         provider session) with the live process.  Unverified suspicions wait for
         lease-expiry reconciliation and cannot prematurely free or fence work.
         """
-        reason = str(reason).strip()
-        if not reason:
-            raise StateConflict("mark_lost requires a reason")
+        # New LOST transitions require a real reason string; coercing None or
+        # 42 would fabricate an apparently valid recovery reason. Retain
+        # whitespace normalization for existing string callers and accept
+        # historical persisted free-text reasons at the Web read boundary.
+        if type(reason) is not str:
+            raise StateConflict("mark_lost requires a bounded printable reason")
+        reason = reason.strip()
+        if not valid_lost_reason(reason):
+            raise StateConflict("mark_lost requires a bounded printable reason")
         if verified_process_absent is not True:
             raise StateConflict("mark_lost requires verified_process_absent=True")
         timestamp = self.store.now_ms()
@@ -19097,7 +20736,7 @@ class OperatorHarnessRegistry:
                     "execution_principal_snapshot_digest": stable_digest,
                     "placement_snapshot_digest": str(row["placement_snapshot_digest"]),
                     "effective_grant_digest": str(row["effective_grant_digest"]),
-                    "policy_sha": CooCyclePolicy.load().policy_sha256,
+                    "policy_sha": _job_coo_policy(connection, str(row["job_id"])).policy_sha256,
                     "launch_decision": LaunchDecision.ALLOW.value,
                 }
                 self.store.append_event(
@@ -19253,7 +20892,7 @@ class OperatorHarnessRegistry:
             or admission.get("placement_snapshot_digest")
             != row["placement_snapshot_digest"]
             or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or admission.get("policy_sha") != _job_coo_policy(connection, str(row["job_id"])).policy_sha256
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {
@@ -19726,7 +21365,7 @@ class OperatorHarnessRegistry:
             != attempt_row["execution_principal_snapshot_digest"]
             or seal["placement_snapshot_digest"]
             != attempt_row["placement_snapshot_digest"]
-            or seal["policy_sha"] != CooCyclePolicy.load().policy_sha256
+            or seal["policy_sha"] != _job_coo_policy(connection, str(job_row["job_id"])).policy_sha256
         ):
             raise StateConflict(
                 "interactive active plan seal does not match its durable identity"
@@ -20141,7 +21780,7 @@ class OperatorHarnessRegistry:
                 ),
                 "placement_snapshot_digest": str(row["placement_snapshot_digest"]),
                 "effective_grant_digest": str(row["effective_grant_digest"]),
-                "policy_sha": CooCyclePolicy.load().policy_sha256,
+                "policy_sha": _job_coo_policy(connection, str(row["job_id"])).policy_sha256,
             }
             existing = self._event(connection, command_id)
             if existing is not None:
@@ -21041,7 +22680,7 @@ class OperatorHarnessRegistry:
             or admission.get("placement_snapshot_digest")
             != row["placement_snapshot_digest"]
             or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or admission.get("policy_sha") != CooCyclePolicy.load().policy_sha256
+            or admission.get("policy_sha") != _job_coo_policy(connection, str(row["job_id"])).policy_sha256
             or admission.get("launch_decision") != LaunchDecision.ALLOW.value
             or decision
             != {
@@ -24163,11 +25802,11 @@ def _bounded_role_result_material(
 ) -> BoundedRoleResultSnapshot:
     """Identity/root/digest law for one selection, before any payload return."""
 
-    # Narrow identity columns first: membership, role, terminal status, and
-    # the exact current Attempt precede every projected payload column.
+    # Narrow identity columns first: membership, role, terminal status, depth,
+    # and the exact current Attempt precede every projected payload column.
     selected = loader.execute(
         "SELECT job_id,parent_job_id,root_job_id,orchestration_role,status,"
-        "current_attempt_id FROM jobs WHERE job_id=?",
+        "current_attempt_id,depth FROM jobs WHERE job_id=?",
         (job_token,),
     ).fetchone()
     if selected is None:
@@ -24175,23 +25814,36 @@ def _bounded_role_result_material(
             f"terminal completion Job {job_token!r} does not exist"
         )
     if (
-        selected["orchestration_role"] not in {"plan", "work", "review", "repair", "aggregation"}
+        selected["orchestration_role"]
+        not in {"plan", "work", "review", "repair", "aggregation"}
         or selected["status"] != JobStatus.COMPLETED.value
         or selected["root_job_id"] != root_token
-        or (
-            selected["orchestration_role"] == "aggregation"
-            and (job_token != root_token or selected["parent_job_id"] is not None)
-        )
-        or (
-            selected["orchestration_role"] != "aggregation"
-            and selected["parent_job_id"] != root_token
-        )
         or selected["current_attempt_id"] != attempt_token
     ):
         raise StateConflict("terminal completion binding is not current")
 
-    # The frozen narrow root metadata comes from the aggregation self-root's
-    # own validated provenance and its unique immutable creation Event.
+    current = selected
+    visited = {job_token}
+    while current["job_id"] != root_token:
+        parent_id = current["parent_job_id"]
+        if not parent_id or parent_id in visited or len(visited) > 3:
+            raise StateConflict("terminal completion ancestry is invalid")
+        parent = loader.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (parent_id,)
+        ).fetchone()
+        if (
+            parent is None
+            or parent["root_job_id"] != root_token
+            or parent["orchestration_role"] != "aggregation"
+            or int(parent["depth"]) + 1 != int(current["depth"])
+        ):
+            raise StateConflict("terminal completion ancestry is invalid")
+        _decode_orchestration_job_fields(parent)
+        visited.add(parent_id)
+        current = parent
+    if int(current["depth"]) != 0 or current["parent_job_id"] is not None:
+        raise StateConflict("terminal completion original root is invalid")
+
     root_row = loader.execute(
         "SELECT job_id,parent_job_id,root_job_id,orchestration_role,"
         "orchestration_provenance_json,orchestration_provenance_digest,"
@@ -24516,7 +26168,10 @@ class BoundedRootOrigin:
 
 
 class BoundedRuntimeReadObservation:
-    """Runtime-created fixed facade; no connection, SQL or pagination surface."""
+    """Runtime-owned fixed selections; no connection or SQL surface.
+
+    Pagination is limited to the fixed immutable original-reference selector.
+    """
     def __init__(self, store: RuntimeStore, *, _capability: object) -> None:
         if _capability is not _RUNTIME_ACQUISITION_CAPABILITY:
             raise StateConflict("bounded observation is Runtime-owned")
@@ -24604,6 +26259,389 @@ class BoundedRuntimeReadObservation:
             if type(result.truncated) is bool and not result.truncated:
                 self._origin_roots = tuple(result.roots)
             return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    @staticmethod
+    def _load_session_original_request_bounded(
+        loader: _BoundedRoleResultLoader, read_ref: str,
+    ) -> tuple[Event, dict[str, Any]]:
+        """Load one original request and root through the selection's loader."""
+        from control_plane.native_continuation import (
+            _ACTOR, _EVENT, _PREFIX, _READ, _SCHEMA, _continue_key,
+            _digest, _request_key, _validate_payload,
+        )
+
+        match = _READ.fullmatch(read_ref) if isinstance(read_ref, str) else None
+        if match is None:
+            raise RuntimeReadUnavailable("invalid original read reference")
+        row = loader.execute("SELECT * FROM events WHERE command_id=?",
+                             (_PREFIX + match[1],)).fetchone()
+        event = None if row is None else _event_from_row(row)
+        if (event is None or event.event_type != _EVENT or event.actor != _ACTOR
+                or event.aggregate_type != "session_bridge_continue"
+                or event.aggregate_id != match[1]):
+            raise RuntimeReadUnavailable("original request unavailable")
+        value = event.payload
+        _validate_payload(value)
+        if (value.get("schema") != _SCHEMA or value.get("read_ref") != read_ref
+                or _request_key(value["operation_key"]) != match[1]
+                or value["request_message_key"] != _continue_key(value["operation_key"])
+                or (event.job_id, event.attempt_id, event.worker_id) != (
+                    value["job_id"], value["attempt_id"], value["worker_id"])):
+            raise RuntimeReadUnavailable("original request binding changed")
+        metadata = loader.execute(
+            "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
+            "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
+            "ORDER BY event_id LIMIT 2", (value["root_job_id"],),
+        ).fetchall()
+        if len(metadata) != 1 or metadata[0]["payload_bytes"] > 65536:
+            raise RuntimeReadUnavailable("original root cardinality or size changed")
+        root_row = loader.execute("SELECT * FROM events WHERE event_id=?",
+                                  (metadata[0]["event_id"],)).fetchone()
+        if root_row is None:
+            raise RuntimeReadUnavailable("original root disappeared")
+        root = _event_from_row(root_row)
+        if (root.event_id != value["root_event_id"]
+                or _digest(root.to_dict()) != value["root_event_sha256"]):
+            raise RuntimeReadUnavailable("original root changed")
+        return event, value
+
+    def read_session_original_request_bounded(
+        self, *, read_ref: str,
+    ) -> tuple[Event, dict[str, Any]]:
+        """Select immutable reference provenance without COMMIT or live state.
+
+        One loader and one VM activation bound the complete request/root join.
+        The READ owner must close this observation and obtain its finalized
+        receipt before returning the reference; UNKNOWN remains admissible.
+        """
+        self._select()
+        try:
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                return self._load_session_original_request_bounded(loader, read_ref)
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("original request VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_session_reply_evidence_bounded(
+        self, *, read_ref: str,
+    ) -> tuple[Event, dict[str, Any], tuple[Event, ...], Event | None, Event | None]:
+        """Select complete immutable reply evidence on one bounded snapshot.
+
+        This is material acquisition, not COMMIT admission or reply proof. The
+        existing READ owner validates the separate global command Events against
+        the complete aggregate and the canonical Dialogue message. Return order
+        is request, payload, aggregate, Continue COMMIT, native COMMIT. No live
+        writer, target, Wake or Dialogue source is acquired here. The caller must
+        close the observation and obtain its finalized receipt before use.
+        """
+        self._select()
+        try:
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                event, value = self._load_session_original_request_bounded(loader, read_ref)
+                # One bounded metadata row retains the complete ordered ID set
+                # without consuming 256 metadata rows and 256 full Event rows.
+                # Every selected metadata/full column shares this same loader.
+                metadata = loader.execute(
+                    "SELECT COUNT(*) AS event_count,"
+                    "COALESCE(SUM(nbytes),0) AS payload_bytes,"
+                    "json_group_array(event_id) AS event_ids_json FROM ("
+                    "SELECT event_id,length(CAST(payload_json AS BLOB)) AS nbytes "
+                    "FROM events WHERE aggregate_type=? AND aggregate_id=? "
+                    "ORDER BY sequence LIMIT 257)",
+                    (event.aggregate_type, event.aggregate_id),
+                ).fetchone()
+                if metadata["event_count"] > 256 or metadata["payload_bytes"] > 1048576:
+                    raise RuntimeReadUnavailable("original aggregate exceeds reader budget")
+                event_ids = json.loads(metadata["event_ids_json"])
+                rows = loader.execute(
+                    "SELECT * FROM events WHERE aggregate_type=? AND aggregate_id=? "
+                    "ORDER BY sequence LIMIT 256",
+                    (event.aggregate_type, event.aggregate_id),
+                ).fetchall()
+                if (len(rows) != metadata["event_count"]
+                        or [row["event_id"] for row in rows] != event_ids):
+                    raise RuntimeReadUnavailable("original aggregate changed")
+                events = tuple(_event_from_row(row) for row in rows)
+                # Preserve global exact-command lookups independently of the
+                # aggregate; an Event on a different aggregate cannot vanish.
+                indexed: list[Event | None] = []
+                for prefix in ("session-bridge-continue-commit:",
+                               "session-bridge-native-reply-commit:"):
+                    row = loader.execute("SELECT * FROM events WHERE command_id=?",
+                                         (prefix + event.aggregate_id,)).fetchone()
+                    indexed.append(None if row is None else _event_from_row(row))
+                return event, value, events, indexed[0], indexed[1]
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("reply evidence VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_session_live_writer_bounded(
+        self, *, read_ref: str,
+    ) -> tuple[
+        Event, dict[str, Any], ActiveOperatorBindingFacts, Any,
+        ExecutiveDialogueSource, tuple[Event, ...],
+    ]:
+        """Acquire one original request's live fallback facts on a bounded read.
+
+        Return request, payload, original harness facts, CurrentTargetEpoch,
+        root Dialogue source and complete original Job/Attempt Event history.
+        Every selector derives from the newly validated original payload.
+
+        This is a separate observation after immutable reply evidence when
+        native admission is absent; those two snapshots do not share a budget.
+        The READ owner must close this observation and obtain its receipt before
+        validating the detached bridge facts or awaiting Dialogue. UNKNOWN is
+        valid. One loader and VM activation cover all selected SQLite material,
+        including nested harness/enrollment reads. Inherited retained-writer
+        CooCyclePolicy and ExecutionCapabilityRegistry I/O is not qualified by
+        those SQL bounds.
+        """
+        self._select()
+        try:
+            from control_plane.executive_current_target import (
+                _current_target_epoch_from_facts,
+                _current_target_job_identity,
+                _validate_current_target_attempt,
+                _validate_current_target_worker_quota,
+                job_id_from_operation_key,
+            )
+
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                event, value = self._load_session_original_request_bounded(loader, read_ref)
+                original_facts = _current_harness_binding_source_from_snapshot(
+                    self._store, loader, value["attempt_id"])
+
+                operation_key = value["context"]["operation_key"]
+                job_id = job_id_from_operation_key(operation_key)
+                row = loader.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+                ).fetchone()
+                job = None if row is None else _job_from_row(row)
+                identity = _current_target_job_identity(
+                    operation_key=operation_key, job_id=job_id, job=job)
+                row = loader.execute(
+                    "SELECT * FROM attempts WHERE attempt_id=?",
+                    (job.current_attempt_id,),
+                ).fetchone()
+                attempt = None if row is None else _attempt_from_row(row)
+                _validate_current_target_attempt(job_id=job_id, job=job, attempt=attempt)
+
+                worker_row = loader.execute(
+                    "SELECT * FROM workers WHERE worker_id=?", (attempt.worker_id,)
+                ).fetchone()
+                worker = None
+                if worker_row is not None:
+                    quota_rows = loader.execute(
+                        """
+                        SELECT q.*, a.job_id AS active_job_id
+                        FROM worker_quota_classes q
+                        LEFT JOIN attempts a ON a.attempt_id=q.held_attempt_id
+                        WHERE q.worker_id=? ORDER BY q.quota_class
+                        """,
+                        (attempt.worker_id,),
+                    ).fetchall()
+                    worker = _worker_from_rows(worker_row, quota_rows)
+                # Keep the exact held-slot selection separate from aggregate
+                # Worker availability, including its canonical normalization.
+                quota_row = loader.execute(
+                    """
+                    SELECT q.*, a.job_id AS active_job_id
+                    FROM worker_quota_classes q
+                    LEFT JOIN attempts a ON a.attempt_id=q.held_attempt_id
+                    WHERE q.worker_id=? AND q.quota_class=?
+                    """,
+                    (attempt.worker_id, str(attempt.quota_class).strip().lower()),
+                ).fetchone()
+                quota = None if quota_row is None else _quota_from_row(quota_row)
+                _validate_current_target_worker_quota(
+                    job_id=job_id, job=job, attempt=attempt, worker=worker, quota=quota)
+
+                # The original and current Attempt selectors are independent.
+                # Even equal IDs retain the second canonical lease-time check.
+                current_token = str(attempt.attempt_id or "").strip()
+                if not current_token:
+                    raise StateConflict("runtime binding source requires an attempt_id")
+                current_facts = _current_harness_binding_source_from_snapshot(
+                    self._store, loader, current_token)
+                current = _current_target_epoch_from_facts(
+                    job_id=job_id, identity=identity, job=job, attempt=attempt,
+                    quota=quota, harness=current_facts)
+
+                source = _dialogue_source_from_root_creation(
+                    loader, root_job_id=value["root_job_id"])
+                if type(source) is not ExecutiveDialogueSource:
+                    raise RuntimeReadUnavailable("original dialogue source unavailable")
+                # The complete existing scope counts every Event before the
+                # bridge filters Wake records. Never accept a truncated prefix.
+                # The shared 512-row loader may refuse before the legacy 1024
+                # history ceiling; that fixed budget is not increased here.
+                rows = loader.execute(
+                    "SELECT * FROM events WHERE job_id=? AND attempt_id=? "
+                    "ORDER BY event_id LIMIT 1025",
+                    (value["job_id"], value["attempt_id"]),
+                ).fetchall()
+                if len(rows) > 1024:
+                    raise RuntimeReadUnavailable("physical source evidence exceeds bound")
+                events = tuple(_event_from_row(row) for row in rows)
+                return event, value, original_facts, current, source, events
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("live writer VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_session_reply_references_bounded(
+        self, *, work_ref: str, root_job_id: str | None,
+        original_principals: tuple[tuple[str, ...], ...],
+        high_water: int | None, before_event_id: int | None, page_size: int,
+    ) -> tuple[int, int | None, tuple[dict[str, Any], ...]]:
+        """Select one immutable original-request reference page.
+
+        The calling READ owner derives the one or two accepted identities and
+        authenticates its cursor; neither authority nor a cursor key lives here.
+        The fixed metadata window, candidate Events and matching original roots
+        share one loader and one VM activation on this observation's retained
+        connection. A caller must close the observation and obtain its finalized
+        receipt before returning the page; this selection does not require SAME.
+        """
+        self._select()
+        try:
+            from control_plane.native_continuation import (
+                _ACTOR, _EVENT, _IDENTITY, _PREFIX, _TOKEN, _continue_key,
+                _digest, _request_key, _validate_payload,
+            )
+
+            if (type(work_ref) is not str or _TOKEN.fullmatch(work_ref) is None
+                    or (root_job_id is not None and
+                        (type(root_job_id) is not str or _TOKEN.fullmatch(root_job_id) is None))
+                    or type(page_size) is not int or not 1 <= page_size <= 32
+                    or (high_water is not None and
+                        (type(high_water) is not int or high_water < 0))
+                    or (before_event_id is not None and
+                        (type(before_event_id) is not int or before_event_id < 1))
+                    or type(original_principals) is not tuple
+                    or not 1 <= len(original_principals) <= 2
+                    or any(type(identity) is not tuple or len(identity) != len(_IDENTITY)
+                           or any(type(value) is not str or not value for value in identity)
+                           for identity in original_principals)
+                    or len(set(original_principals)) != len(original_principals)
+                    or (len(original_principals) == 2
+                        and original_principals[0][1:] != original_principals[1][1:])):
+                raise RuntimeReadUnavailable("invalid original reference selector")
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                if high_water is None:
+                    high_water = int(loader.execute(
+                        "SELECT COALESCE(MAX(event_id),0) AS high_water FROM events"
+                    ).fetchone()[0])
+                upper = high_water if before_event_id is None else min(
+                    high_water, before_event_id - 1)
+                window = loader.execute(
+                    "SELECT event_id,event_type,command_id,aggregate_type,aggregate_id,"
+                    "actor,job_id,attempt_id,worker_id,created_at_ms,"
+                    "length(CAST(payload_json AS BLOB)) AS payload_bytes "
+                    "FROM events WHERE event_id<=? ORDER BY event_id DESC LIMIT ?",
+                    (upper, 256),
+                ).fetchall()
+                rows: list[dict[str, Any]] = []
+                candidate_reads = 0
+                position = None
+                for meta in window:
+                    position = meta["event_id"]
+                    if (meta["event_type"] != _EVENT
+                            or meta["aggregate_type"] != "session_bridge_continue"
+                            or meta["actor"] != _ACTOR):
+                        continue
+                    candidate_reads += 1
+                    if candidate_reads > 32:
+                        # The uninspected 33rd candidate remains on the next page.
+                        position += 1
+                        break
+                    if meta["payload_bytes"] > 65536:
+                        raise RuntimeReadUnavailable("oversized original request")
+                    row = loader.execute("SELECT * FROM events WHERE event_id=?",
+                                         (position,)).fetchone()
+                    if row is None:
+                        raise RuntimeReadUnavailable("original request disappeared")
+                    event = _event_from_row(row)
+                    value = event.payload
+                    _validate_payload(value)
+                    if (event.event_type != _EVENT
+                            or value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
+                            or event.command_id != _PREFIX + _request_key(value["operation_key"])
+                            or event.aggregate_id != _request_key(value["operation_key"])
+                            or value["request_message_key"] != _continue_key(value["operation_key"])
+                            or (event.job_id, event.attempt_id, event.worker_id) !=
+                            (value["job_id"], value["attempt_id"], value["worker_id"])):
+                        raise RuntimeReadUnavailable("original request binding changed")
+                    if (value["context"]["work_ref"] != work_ref
+                            or (root_job_id is not None and value["root_job_id"] != root_job_id)
+                            or tuple(value["principal"][key] for key in _IDENTITY)
+                            not in original_principals):
+                        continue
+                    # Foreign work/principal scope never triggers a root read.
+                    metadata = loader.execute(
+                        "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
+                        "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
+                        "ORDER BY event_id LIMIT 2", (value["root_job_id"],),
+                    ).fetchall()
+                    if len(metadata) != 1 or metadata[0]["payload_bytes"] > 65536:
+                        raise RuntimeReadUnavailable("original root cardinality or size changed")
+                    root_row = loader.execute("SELECT * FROM events WHERE event_id=?",
+                                              (metadata[0]["event_id"],)).fetchone()
+                    if root_row is None:
+                        raise RuntimeReadUnavailable("original root disappeared")
+                    root = _event_from_row(root_row)
+                    if (root.event_id != value["root_event_id"]
+                            or _digest(root.to_dict()) != value["root_event_sha256"]):
+                        raise RuntimeReadUnavailable("original root changed")
+                    rows.append({
+                        "read_ref": value["read_ref"],
+                        "operation_key": value["operation_key"],
+                        "request_ref": event.command_id,
+                        "request_event_id": event.event_id,
+                        "request_revision": _digest(event.to_dict()),
+                        "requested_at": event.created_at,
+                        "work_ref": work_ref,
+                        "root_job_id": value["root_job_id"],
+                        "target_ref": value["target_ref"],
+                        "reference_only": True,
+                    })
+                    if len(rows) >= page_size:
+                        break
+                return high_water, position, tuple(rows)
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("original reference VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
         except BaseException:
             self._failed = True
             raise
@@ -24897,6 +26935,540 @@ class BoundedRuntimeReadObservation:
         return self._receipt
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class BoundedDirectResultSnapshot:
+    job_id: str
+    attempt_id: str
+    work_ref: str
+    read_generation: str
+    terminal_digest: str
+    admission: dict[str, Any]
+    completion: dict[str, Any]
+    consumption: dict[str, Any]
+
+
+def _current_harness_binding_source_from_snapshot(
+    store: RuntimeStore,
+    connection: sqlite3.Connection | _BoundedRoleResultLoader,
+    token: str,
+) -> ActiveOperatorBindingFacts:
+    """Validate one admitted writer through the canonical snapshot reader.
+
+    Runtime owners call this private helper after snapshot custody checks or
+    through their existing private bounded loader. The store supplies the
+    original lease clock at its unchanged short-circuit validation point.
+    """
+
+    rows = connection.execute(
+        """
+            SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
+                   j.status AS job_status,j.owner_seat,j.orchestration_role,
+                   j.parent_job_id,j.root_job_id,j.orchestration_provenance_json,
+                   j.orchestration_provenance_digest,j.plan_attempt_id,j.plan_digest,
+                   j.plan_step_id,j.repair_round,j.supersedes_job_id,
+                   j.requested_authorities_json AS job_requested_authorities_json,
+                   j.allowed_write_paths_json AS job_allowed_write_paths_json,
+                   j.validation_commands_json AS job_validation_commands_json,
+                   j.authority_policy_hash AS job_authority_policy_hash,
+                   w.provider AS worker_provider,w.account_label AS worker_account_label,
+                   q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
+                   q.provider AS quota_provider,q.status AS quota_status,
+                   q.held_attempt_id,q.fence_counter AS quota_fence_counter,
+                   e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
+                   e.provider_session_id AS epoch_provider_session,
+                   g.process_generation_id,g.worker_id AS generation_worker,
+                   g.generation_number,g.provider_session_id AS generation_provider_session,
+                   g.pid AS generation_pid,g.pgid AS generation_pgid,
+                   g.process_start_identity AS generation_process_start_identity,
+                   g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
+                   g.observed_attestation_digest
+            FROM main.attempts a
+            JOIN main.jobs j ON j.job_id=a.job_id
+            JOIN main.workers w ON w.worker_id=a.worker_id
+            JOIN main.worker_quota_classes q
+              ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
+            LEFT JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
+              AND e.state='CURRENT'
+            LEFT JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
+              AND g.executive_writer_held=1
+            WHERE a.attempt_id=?
+            """,
+        (token,),
+    ).fetchall()
+    cardinality = connection.execute(
+        """
+            SELECT
+              (SELECT COUNT(*) FROM main.jobs WHERE current_attempt_id=?) AS current_jobs,
+              (SELECT COUNT(*) FROM main.harness_session_epochs
+                 WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
+              (SELECT COUNT(*) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
+              (SELECT MAX(g.generation_number) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
+            """,
+        (token, token, token, token),
+    ).fetchone()
+    if len(rows) != 1 or cardinality is None:
+        raise StateConflict("runtime binding source cardinality is not exact")
+    row = rows[0]
+    accepted_statuses = {
+        AttemptStatus.RUNNING.value: JobStatus.RUNNING.value,
+        AttemptStatus.CHECKPOINTED.value: JobStatus.CHECKPOINTED.value,
+        AttemptStatus.CANCEL_REQUESTED.value: JobStatus.CANCEL_REQUESTED.value,
+    }
+    expected_job_status = accepted_statuses.get(str(row["status"]))
+    if (
+        int(cardinality["current_jobs"]) != 1
+        or int(cardinality["current_epochs"]) != 1
+        or int(cardinality["held_writers"]) != 1
+        or cardinality["current_epoch_max_generation"] is None
+        or row["job_current_attempt_id"] != token
+        or expected_job_status is None
+        or row["job_status"] != expected_job_status
+        or row["lease_token"] is None
+        or int(row["lease_expires_at_ms"]) <= store.now_ms()
+        or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+        or row["orchestration_role"] not in _ORCHESTRATION_ROLES
+        or row["quota_worker_id"] != row["worker_id"]
+        or row["quota_quota_class"] != row["quota_class"]
+        or row["quota_provider"] != row["worker_provider"]
+        or row["quota_status"] != WorkerStatus.BUSY.value
+        or row["held_attempt_id"] != token
+        or int(row["quota_fence_counter"]) != int(row["fence_generation"])
+        or row["session_epoch_id"] is None
+        or row["process_generation_id"] is None
+        or row["epoch_state"] != SessionEpochState.CURRENT.value
+        or row["epoch_worker"] != row["worker_id"]
+        or row["generation_worker"] != row["worker_id"]
+        or not row["executive_writer_held"]
+        or row["ended_at_ms"] is not None
+        or not row["epoch_provider_session"]
+        or row["generation_provider_session"] != row["epoch_provider_session"]
+        or int(row["generation_number"])
+        != int(cardinality["current_epoch_max_generation"])
+        or not row["observed_attestation_digest"]
+    ):
+        raise StateConflict(
+            "runtime binding source is not one current actionable OHF writer"
+        )
+
+    try:
+        placement = _load_canonical_digest_pair(
+            row["placement_snapshot_json"],
+            row["placement_snapshot_digest"],
+            name="runtime binding placement snapshot",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding placement evidence is invalid: {exc}"
+        ) from exc
+    if (
+        not isinstance(placement, dict)
+        or placement.get("worker_id") != row["worker_id"]
+        or placement.get("quota_class") != row["quota_class"]
+        or placement.get("provider") != row["worker_provider"]
+        or placement.get("account_label") != row["worker_account_label"]
+    ):
+        raise StateConflict("runtime binding placement evidence drifted")
+
+    try:
+        grant = _load_canonical_digest_pair(
+            row["effective_grant_json"],
+            row["effective_grant_digest"],
+            name="runtime binding effective grant",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding effective grant evidence is invalid: {exc}"
+        ) from exc
+    try:
+        job_authorities = _strict_canonical_json_loads(
+            str(row["job_requested_authorities_json"]),
+            name="runtime binding Job requested authorities",
+        )
+        job_write_paths = _strict_canonical_json_loads(
+            str(row["job_allowed_write_paths_json"]),
+            name="runtime binding Job allowed write paths",
+        )
+        job_validation_argv = _strict_canonical_json_loads(
+            str(row["job_validation_commands_json"]),
+            name="runtime binding Job validation commands",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding effective grant Job evidence is invalid: {exc}"
+        ) from exc
+    grant_keys = {
+        "schema_version",
+        "authorities",
+        "write_paths",
+        "validation_argv",
+        "policy_sha",
+        "job_id",
+        "role",
+    }
+    if (
+        not isinstance(grant, dict)
+        or set(grant) != grant_keys
+        or grant.get("schema_version") != "mastermind.executive_effective_grant/v1"
+        or grant.get("job_id") != row["job_id"]
+        or grant.get("role") != row["orchestration_role"]
+        or grant.get("policy_sha") != row["authority_policy_hash"]
+        or row["job_authority_policy_hash"] != row["authority_policy_hash"]
+        or not _runtime_binding_ordered_unique_strings(
+            job_authorities, require_nonempty=True
+        )
+        or not _runtime_binding_ordered_unique_strings(
+            job_write_paths, require_nonempty=False
+        )
+        or not _runtime_binding_validation_argv(job_validation_argv)
+        or not _runtime_binding_ordered_unique_strings(
+            grant.get("authorities"), require_nonempty=True
+        )
+        or not _runtime_binding_ordered_unique_strings(
+            grant.get("write_paths"), require_nonempty=False
+        )
+        or not _runtime_binding_validation_argv(grant.get("validation_argv"))
+        or any(item not in job_authorities for item in grant["authorities"])
+        or any(item not in job_write_paths for item in grant["write_paths"])
+        or any(item not in job_validation_argv for item in grant["validation_argv"])
+    ):
+        raise StateConflict("runtime binding effective grant evidence drifted")
+    if row["orchestration_role"] in {"plan", "aggregation"} and (
+        grant["authorities"] != ["READ"]
+        or grant["write_paths"]
+        or grant["validation_argv"]
+    ):
+        raise StateConflict(
+            "runtime binding effective grant role semantics drifted"
+        )
+    if row["orchestration_role"] == "review" and (
+        grant["authorities"] != job_authorities
+        or any(item not in {"READ", "RUN_TESTS"} for item in job_authorities)
+        or "READ" not in job_authorities
+        or job_write_paths
+        or grant["write_paths"]
+        or grant["validation_argv"] != job_validation_argv
+        or bool(grant["validation_argv"]) != ("RUN_TESTS" in grant["authorities"])
+    ):
+        raise StateConflict(
+            "runtime binding effective grant role semantics drifted"
+        )
+
+    creation_events = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='JOB_CREATED' AND job_id=?
+               ORDER BY event_id""",
+        (row["job_id"],),
+    ).fetchall()
+    if len(creation_events) != 1:
+        raise StateConflict("runtime binding Job creation cardinality is not exact")
+    creation_event = creation_events[0]
+    try:
+        job_role, job_provenance, job_provenance_digest = (
+            _decode_orchestration_job_fields(row)
+        )
+        creation_payload = _strict_canonical_json_loads(
+            str(creation_event["payload_json"]),
+            name="runtime binding JOB_CREATED payload",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding Job creation evidence is invalid: {exc}"
+        ) from exc
+    expected_creation_actor = (
+        "operator" if job_role in {"aggregation", "plan"} else "coo"
+    )
+    if (
+        not isinstance(job_provenance, dict)
+        or not isinstance(creation_payload, dict)
+        or creation_event["sequence"] != 1
+        or creation_event["actor"] != expected_creation_actor
+        or creation_event["aggregate_type"] != "job"
+        or creation_event["aggregate_id"] != row["job_id"]
+        or creation_event["job_id"] != row["job_id"]
+        or creation_event["attempt_id"] is not None
+        or creation_event["worker_id"] is not None
+        or creation_event["quota_class"] is not None
+        or creation_event["command_id"] != job_provenance.get("command_id")
+        or not isinstance(creation_payload.get("owner_seat"), str)
+        or creation_payload.get("owner_seat") != row["owner_seat"]
+        or creation_payload.get("orchestration_role") != job_role
+        or creation_payload.get("orchestration_provenance_digest")
+        != job_provenance_digest
+    ):
+        raise StateConflict("runtime binding Job creation evidence drifted")
+
+    admissions = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+        (row["process_generation_id"],),
+    ).fetchall()
+    decisions = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='OHF_LAUNCH_DECISION'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+        (row["process_generation_id"],),
+    ).fetchall()
+    seals = connection.execute(
+        """SELECT 1 FROM main.events
+               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
+        (token,),
+    ).fetchall()
+    if seals:
+        retained_job = connection.execute(
+            "SELECT * FROM main.jobs WHERE job_id=?", (row["job_id"],)
+        ).fetchone()
+        retained_attempt = connection.execute(
+            "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
+        ).fetchone()
+        if (len(seals) != 1 or retained_job is None or retained_attempt is None
+                or not _interactive_tx5_admitted(retained_job)
+                or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
+                != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+            raise StateConflict("runtime binding source is not a retained native writer")
+        retained_seal = _validated_interactive_active_plan_seal(
+            connection, attempt_row=retained_attempt, job_row=retained_job)
+        if retained_seal["process_generation_id"] != row["process_generation_id"]:
+            raise StateConflict("runtime binding retained native generation changed")
+    if len(admissions) != 1 or len(decisions) != 1:
+        raise StateConflict(
+            "runtime binding source lacks one active work admission"
+        )
+    admission_event = admissions[0]
+    admission = _strict_canonical_json_loads(
+        str(admission_event["payload_json"]), name="runtime binding work admission"
+    )
+    decision = _strict_canonical_json_loads(
+        str(decisions[0]["payload_json"]), name="runtime binding launch decision"
+    )
+    admission_keys = {
+        "schema_version",
+        "job_id",
+        "attempt_id",
+        "worker_id",
+        "quota_class",
+        "orchestration_role",
+        "process_generation_id",
+        "provider_session_id",
+        "tx3_applied_command_id",
+        "observed_attestation_digest",
+        "principal_observation",
+        "principal_observation_digest",
+        "execution_principal_snapshot_digest",
+        "placement_snapshot_digest",
+        "effective_grant_digest",
+        "policy_sha",
+        "launch_decision",
+    }
+    immutable_digests = (
+        "observed_attestation_digest",
+        "principal_observation_digest",
+        "execution_principal_snapshot_digest",
+        "placement_snapshot_digest",
+        "effective_grant_digest",
+        "policy_sha",
+    )
+    decision_event = decisions[0]
+    tx3: sqlite3.Row | None = None
+    tx3_payload: Any = None
+    tx3_intent: sqlite3.Row | None = None
+    tx3_intent_payload: Any = None
+    expected_tx3_command_id: str | None = None
+    expected_tx3_applied: dict[str, Any] | None = None
+    expected_tx3_intent: dict[str, Any] | None = None
+    try:
+        generation_number = int(row["generation_number"])
+        if generation_number == 1:
+            expected_tx3_applied = {
+                "operation_kind": OperationKind.START_SESSION.value,
+                "provider_session_id": row["epoch_provider_session"],
+                "process_generation_id": row["process_generation_id"],
+            }
+            expected_tx3_intent = {
+                "schema_version": "mastermind.operator_harness_intent/v1",
+                "operation_kind": OperationKind.START_SESSION.value,
+                "attempt_id": token,
+                "session_epoch_id": row["session_epoch_id"],
+                "process_generation_id": row["process_generation_id"],
+                "worker_id": row["worker_id"],
+                "provider_session_id": None,
+            }
+        elif generation_number == 2:
+            expected_tx3_applied = {
+                "operation_kind": OperationKind.RESUME_SESSION.value,
+                "provider_session_id": row["epoch_provider_session"],
+                "process_generation_id": row["process_generation_id"],
+            }
+            expected_tx3_intent = {
+                "operation_kind": OperationKind.RESUME_SESSION.value,
+                "attempt_id": token,
+                "session_epoch_id": row["session_epoch_id"],
+                "process_generation_id": row["process_generation_id"],
+                "worker_id": row["worker_id"],
+                "provider_session_id": row["epoch_provider_session"],
+            }
+        from control_plane.native_desktop_parent import (
+            has_existing_parent, validated_enrollment_receipts,
+        )
+        if has_existing_parent(connection, token):
+            _, _, expected_tx3_intent, expected_tx3_applied = validated_enrollment_receipts(
+                connection, row, str(row["process_generation_id"]))
+        if expected_tx3_applied is not None and expected_tx3_intent is not None:
+            tx3_rows = connection.execute(
+                """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                (
+                    OperationReceiptKind.APPLIED.value,
+                    token,
+                    expected_tx3_applied["operation_kind"],
+                    row["process_generation_id"],
+                ),
+            ).fetchall()
+            tx3_intent_rows = connection.execute(
+                """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                (
+                    OperationReceiptKind.INTENT.value,
+                    token,
+                    expected_tx3_intent["operation_kind"],
+                    row["process_generation_id"],
+                ),
+            ).fetchall()
+            tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
+            tx3_intent = tx3_intent_rows[0] if len(tx3_intent_rows) == 1 else None
+        if tx3 is not None and tx3_intent is not None:
+            tx3_payload = _strict_canonical_json_loads(
+                str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
+            )
+            operation_id = OperationId(str(tx3["aggregate_id"]))
+            expected_tx3_command_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            tx3_intent_payload = _strict_canonical_json_loads(
+                str(tx3_intent["payload_json"]),
+                name="runtime binding TX-3 INTENT",
+            )
+    except (StateConflict, TypeError, ValueError) as exc:
+        raise StateConflict(
+            f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
+        ) from exc
+    if (
+        tx3 is None
+        or expected_tx3_applied is None
+        or expected_tx3_intent is None
+        or tx3["event_type"] != OperationReceiptKind.APPLIED.value
+        or tx3["command_id"] != expected_tx3_command_id
+        or tx3["command_id"] != admission.get("tx3_applied_command_id")
+        or tx3["actor"] != "supervisor"
+        or tx3["aggregate_type"] != "operator_operation"
+        or tx3["job_id"] != row["job_id"]
+        or tx3["attempt_id"] != token
+        or tx3["worker_id"] != row["worker_id"]
+        or tx3["quota_class"] != row["quota_class"]
+        or tx3_payload != expected_tx3_applied
+        or tx3_intent is None
+        or tx3_intent["event_type"] != OperationReceiptKind.INTENT.value
+        or tx3_intent["command_id"] != tx3["aggregate_id"]
+        or tx3_intent["actor"] != "supervisor"
+        or tx3_intent["aggregate_type"] != "operator_operation"
+        or tx3_intent["aggregate_id"] != tx3["aggregate_id"]
+        or tx3_intent["job_id"] != row["job_id"]
+        or tx3_intent["attempt_id"] != token
+        or tx3_intent["worker_id"] != row["worker_id"]
+        or tx3_intent["quota_class"] != row["quota_class"]
+        or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
+        or int(tx3["event_id"]) >= int(decision_event["event_id"])
+        or int(decision_event["event_id"]) >= int(admission_event["event_id"])
+        or tx3_intent_payload != expected_tx3_intent
+    ):
+        raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
+    observation = _validated_admission_principal(row, admission)
+    if (
+        set(admission) != admission_keys
+        or admission_event["command_id"]
+        != f"ohf-work-admit:{row['process_generation_id']}"
+        or admission_event["actor"] != "supervisor"
+        or admission_event["aggregate_type"] != "process_generation"
+        or admission_event["aggregate_id"] != row["process_generation_id"]
+        or admission_event["job_id"] != row["job_id"]
+        or admission_event["attempt_id"] != token
+        or admission_event["worker_id"] != row["worker_id"]
+        or admission_event["quota_class"] != row["quota_class"]
+        or admission.get("schema_version")
+        != "mastermind.orchestration_work_admission/v1"
+        or admission.get("job_id") != row["job_id"]
+        or admission.get("attempt_id") != token
+        or admission.get("worker_id") != row["worker_id"]
+        or admission.get("quota_class") != row["quota_class"]
+        or admission.get("orchestration_role") != row["orchestration_role"]
+        or admission.get("process_generation_id") != row["process_generation_id"]
+        or admission.get("provider_session_id") != row["epoch_provider_session"]
+        or admission.get("observed_attestation_digest")
+        != row["observed_attestation_digest"]
+        or admission.get("placement_snapshot_digest")
+        != row["placement_snapshot_digest"]
+        or admission.get("effective_grant_digest") != row["effective_grant_digest"]
+        or any(
+            not isinstance(admission.get(field), str)
+            or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
+            for field in immutable_digests
+        )
+        or admission.get("launch_decision") != LaunchDecision.ALLOW.value
+        or decision_event["actor"] != "supervisor"
+        or decision_event["aggregate_type"] != "process_generation"
+        or decision_event["aggregate_id"] != row["process_generation_id"]
+        or decision_event["job_id"] != row["job_id"]
+        or decision_event["attempt_id"] != token
+        or decision_event["worker_id"] != row["worker_id"]
+        or decision_event["quota_class"] != row["quota_class"]
+        or decision
+        != {
+            "decision": LaunchDecision.ALLOW.value,
+            "attestation_digest": row["observed_attestation_digest"],
+        }
+        or observation["process_generation_id"] != row["process_generation_id"]
+        or observation["provider_session_id"] != row["epoch_provider_session"]
+        or base_process_identity(observation["process_identity"])
+        != {
+            "pid": row["generation_pid"],
+            "pgid": row["generation_pgid"],
+            "process_start_identity": row["generation_process_start_identity"],
+            "boot_id": row["generation_boot_id"],
+        }
+    ):
+        raise StateConflict("runtime binding admission evidence drifted")
+    return ActiveOperatorBindingFacts(
+        attempt_id=token,
+        session_epoch_id=str(row["session_epoch_id"]),
+        generation_number=int(row["generation_number"]),
+        provider_session_id=str(row["epoch_provider_session"]),
+        provider=str(placement["provider"]),
+        account_label=str(placement["account_label"]),
+        owner_seat=str(row["owner_seat"]),
+        job_id=str(row["job_id"]),
+        worker_id=str(row["worker_id"]),
+        process_generation_id=str(row["process_generation_id"]),
+        pid=int(row["generation_pid"]),
+        pgid=int(row["generation_pgid"]),
+        process_start_identity=str(row["generation_process_start_identity"]),
+        boot_id=str(row["generation_boot_id"]),
+        admitted_unique_id=observation["process_identity"].get("unique_id"),
+        admitted_pidversion=observation["process_identity"].get("pidversion"),
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
@@ -24947,6 +27519,104 @@ class Runtime:
             )
         )
 
+
+    def require_direct_result_access(self, connection, selection, access):
+        if type(access) is direct_native.DirectNativeExecutionAccess:
+            access=access.access
+        if type(access) is not direct_native.DirectNativeAccess:
+            raise StateConflict("direct result access is not host-issued")
+        access.check()
+        bounded=connection.execute("SELECT job_id FROM jobs WHERE job_id=? AND length(CAST(constraints_json AS BLOB))<=32768 AND coalesce(length(CAST(result_json AS BLOB)),0)<=2097152 AND coalesce(length(CAST(checkpoint_json AS BLOB)),0)<=65536",(selection["job_id"],)).fetchone()
+        if bounded is None:
+            raise StateConflict("direct result Job unavailable or exceeds source budget")
+        row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection["job_id"],)).fetchone()
+        admitted=_direct_native_provenance(connection,row,required=True)
+        if (selection["work_ref"] != access.work_ref or admitted["source"]["work_ref"] != access.work_ref
+                or admitted["principal_scope"] != access.principal_scope
+                or admitted["authority_generation_digest"] != access.authority_generation_digest):
+            raise StateConflict("direct result current principal/source generation differs")
+        access.check()
+        return {"principal_scope":admitted["principal_scope"],"receiver_binding_digest":admitted["receiver_binding_digest"],
+                "source_digest":admitted["source_digest"],"admission_digest":orchestration_digest(admitted)}
+
+    def require_direct_native_launch_access(self, job_id, attempt_id, access, *, lease):
+        if type(access) is not direct_native.DirectNativeExecutionAccess:
+            raise StateConflict("direct native final launch requires execution authority")
+        access.check()
+        if type(lease) is not AttemptLease or lease.attempt.attempt_id != attempt_id or lease.attempt.job_id != job_id:
+            raise StateConflict("direct native launch requires its actual fresh lease")
+        with self.store.read() as connection:
+            self.require_direct_result_access(connection,dict(job_id=job_id,work_ref=access.work_ref),access)
+            row=self.attempts._leased_row(connection,attempt_id=attempt_id,
+                fence_generation=lease.attempt.fence_generation,lease_token=lease.lease_token,
+                timestamp=self.store.now_ms(),statuses={AttemptStatus.CLAIMED})
+            view=_attempt_from_row(_direct_attempt_view(connection,row))
+            worker=connection.execute("SELECT * FROM workers WHERE worker_id=?",(row["worker_id"],)).fetchone()
+            placement=view.placement_snapshot
+            if (row["job_id"] != job_id or view.worker_id != lease.attempt.worker_id
+                    or view.quota_class != lease.attempt.quota_class
+                    or view.effective_grant != lease.attempt.effective_grant
+                    or view.placement_snapshot != lease.attempt.placement_snapshot
+                    or worker is None or worker["identity_status"] != "ONLINE"
+                    or worker["provider"] != placement["provider"]
+                    or worker["account_label"] != placement["account_label"]):
+                raise StateConflict("direct native launch lost actual worker/grant/placement custody")
+            access.check()
+
+    def validate_direct_completion(self, connection, selection):
+        job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection["job_id"],)).fetchone()
+        admitted=_direct_native_provenance(connection,job,required=True)
+        attempt=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(selection["attempt_id"],)).fetchone()
+        if (job["status"] != "COMPLETED" or job["current_attempt_id"] != selection["attempt_id"]
+                or selection["work_ref"] != admitted["source"]["work_ref"] or job["attempt_count"] != 1
+                or attempt is None or attempt["job_id"] != job["job_id"] or attempt["status"] != "COMPLETED"
+                or attempt["lease_token"] is not None or job["result_json"] != attempt["result_json"]
+                or len(str(job["result_json"]).encode('utf8')) > 2_097_152):
+            raise StateConflict("direct result is not one exact terminal Attempt")
+        terminal=_sealed_worker_result_payload(connection,attempt,expected_role=None,
+            terminal_payload=_strict_canonical_json_loads(job["result_json"],name="direct terminal"))
+        sha=orchestration_digest(terminal)
+        events=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_COMPLETED' AND job_id=? AND attempt_id=? LIMIT 2",(job["job_id"],attempt["attempt_id"])).fetchall()
+        if len(events)!=1 or json.loads(events[0][0]) != dict(status="COMPLETED",direct_native_terminal_digest=sha,admission_digest=orchestration_digest(admitted)):
+            raise StateConflict("direct terminal lost its immutable completion Event")
+        return dict(payload=copy.deepcopy(terminal["payload"]),terminal_digest=sha,terminal_record=copy.deepcopy(terminal))
+
+    def read_direct_native_result_bounded(self, selection, *, access):
+        from common import direct_native_result_contract as wire
+        from control_plane.direct_native_result import direct_consumption_state,project_direct_native_result
+        selected=wire.validate_request(selection,consume=False)
+        try:
+            with self.observe_bounded_read() as observation:
+                observation._select()
+                observation._vm_progress.activate()
+                connection=_BoundedRoleResultLoader(observation._connection)
+                identity=self.require_direct_result_access(connection,selected,access)
+                row=connection.execute("SELECT current_attempt_id,status FROM jobs WHERE job_id=?",(selected["job_id"],)).fetchone()
+                if selected["attempt_id"] is None:
+                    selected["attempt_id"]=row["current_attempt_id"]
+                if selected["attempt_id"] is None or row["status"] != "COMPLETED":
+                    access.check()
+                    return wire.unavailable(selected,"NOT_TERMINAL")
+                completion=self.validate_direct_completion(connection,selected)
+                state=direct_consumption_state(connection,selected,identity,completion["terminal_digest"])
+                snapshot=BoundedDirectResultSnapshot(selected["job_id"],selected["attempt_id"],selected["work_ref"],
+                    observation._identity,completion["terminal_digest"],identity,completion,state)
+                if self.require_direct_result_access(connection,selected,access) != identity:
+                    raise StateConflict("direct result authority changed")
+            return project_direct_native_result(snapshot,observation.receipt).complete
+        except RuntimeRoleResultOverBudget:
+            return wire.unavailable(selected,"CONTENT_OVER_BUDGET")
+        except (StateConflict,ValueError,RuntimeReadUnavailable,sqlite3.Error):
+            return wire.unavailable(selected,"SOURCE_UNAVAILABLE")
+
+    def consume_direct_native_result(self, selection, *, access):
+        from common import direct_native_result_contract as wire
+        from control_plane.direct_native_result import consumption_command_id,consume_direct_result_in_transaction
+        selected=wire.validate_request(selection,consume=True)
+        with self.store.transaction() as connection:
+            identity=self.require_direct_result_access(connection,selected,access)
+            return consume_direct_result_in_transaction(self,connection,selected,access=access,
+                command_id=consumption_command_id(selected["operation_key"],identity))
 
     @contextmanager
     def bounded_acquisition(self) -> Iterator[BoundedRuntimeAcquisition]:
@@ -25786,513 +28456,8 @@ class Runtime:
                 )
         self.store._assert_owned_snapshot_connection(connection)
 
-        rows = connection.execute(
-            """
-            SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
-                   j.status AS job_status,j.owner_seat,j.orchestration_role,
-                   j.parent_job_id,j.root_job_id,j.orchestration_provenance_json,
-                   j.orchestration_provenance_digest,j.plan_attempt_id,j.plan_digest,
-                   j.plan_step_id,j.repair_round,j.supersedes_job_id,
-                   j.requested_authorities_json AS job_requested_authorities_json,
-                   j.allowed_write_paths_json AS job_allowed_write_paths_json,
-                   j.validation_commands_json AS job_validation_commands_json,
-                   j.authority_policy_hash AS job_authority_policy_hash,
-                   w.provider AS worker_provider,w.account_label AS worker_account_label,
-                   q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
-                   q.provider AS quota_provider,q.status AS quota_status,
-                   q.held_attempt_id,q.fence_counter AS quota_fence_counter,
-                   e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
-                   e.provider_session_id AS epoch_provider_session,
-                   g.process_generation_id,g.worker_id AS generation_worker,
-                   g.generation_number,g.provider_session_id AS generation_provider_session,
-                   g.pid AS generation_pid,g.pgid AS generation_pgid,
-                   g.process_start_identity AS generation_process_start_identity,
-                   g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
-                   g.observed_attestation_digest
-            FROM main.attempts a
-            JOIN main.jobs j ON j.job_id=a.job_id
-            JOIN main.workers w ON w.worker_id=a.worker_id
-            JOIN main.worker_quota_classes q
-              ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
-            LEFT JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
-              AND e.state='CURRENT'
-            LEFT JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
-              AND g.executive_writer_held=1
-            WHERE a.attempt_id=?
-            """,
-            (token,),
-        ).fetchall()
-        cardinality = connection.execute(
-            """
-            SELECT
-              (SELECT COUNT(*) FROM main.jobs WHERE current_attempt_id=?) AS current_jobs,
-              (SELECT COUNT(*) FROM main.harness_session_epochs
-                 WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
-              (SELECT COUNT(*) FROM main.process_generations g
-                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
-                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
-              (SELECT MAX(g.generation_number) FROM main.process_generations g
-                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
-                 WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
-            """,
-            (token, token, token, token),
-        ).fetchone()
-        if len(rows) != 1 or cardinality is None:
-            raise StateConflict("runtime binding source cardinality is not exact")
-        row = rows[0]
-        accepted_statuses = {
-            AttemptStatus.RUNNING.value: JobStatus.RUNNING.value,
-            AttemptStatus.CHECKPOINTED.value: JobStatus.CHECKPOINTED.value,
-            AttemptStatus.CANCEL_REQUESTED.value: JobStatus.CANCEL_REQUESTED.value,
-        }
-        expected_job_status = accepted_statuses.get(str(row["status"]))
-        if (
-            int(cardinality["current_jobs"]) != 1
-            or int(cardinality["current_epochs"]) != 1
-            or int(cardinality["held_writers"]) != 1
-            or cardinality["current_epoch_max_generation"] is None
-            or row["job_current_attempt_id"] != token
-            or expected_job_status is None
-            or row["job_status"] != expected_job_status
-            or row["lease_token"] is None
-            or int(row["lease_expires_at_ms"]) <= self.store.now_ms()
-            or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
-            or row["orchestration_role"] not in _ORCHESTRATION_ROLES
-            or row["quota_worker_id"] != row["worker_id"]
-            or row["quota_quota_class"] != row["quota_class"]
-            or row["quota_provider"] != row["worker_provider"]
-            or row["quota_status"] != WorkerStatus.BUSY.value
-            or row["held_attempt_id"] != token
-            or int(row["quota_fence_counter"]) != int(row["fence_generation"])
-            or row["session_epoch_id"] is None
-            or row["process_generation_id"] is None
-            or row["epoch_state"] != SessionEpochState.CURRENT.value
-            or row["epoch_worker"] != row["worker_id"]
-            or row["generation_worker"] != row["worker_id"]
-            or not row["executive_writer_held"]
-            or row["ended_at_ms"] is not None
-            or not row["epoch_provider_session"]
-            or row["generation_provider_session"] != row["epoch_provider_session"]
-            or int(row["generation_number"])
-            != int(cardinality["current_epoch_max_generation"])
-            or not row["observed_attestation_digest"]
-        ):
-            raise StateConflict(
-                "runtime binding source is not one current actionable OHF writer"
-            )
-
-        try:
-            placement = _load_canonical_digest_pair(
-                row["placement_snapshot_json"],
-                row["placement_snapshot_digest"],
-                name="runtime binding placement snapshot",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding placement evidence is invalid: {exc}"
-            ) from exc
-        if (
-            not isinstance(placement, dict)
-            or placement.get("worker_id") != row["worker_id"]
-            or placement.get("quota_class") != row["quota_class"]
-            or placement.get("provider") != row["worker_provider"]
-            or placement.get("account_label") != row["worker_account_label"]
-        ):
-            raise StateConflict("runtime binding placement evidence drifted")
-
-        try:
-            grant = _load_canonical_digest_pair(
-                row["effective_grant_json"],
-                row["effective_grant_digest"],
-                name="runtime binding effective grant",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding effective grant evidence is invalid: {exc}"
-            ) from exc
-        try:
-            job_authorities = _strict_canonical_json_loads(
-                str(row["job_requested_authorities_json"]),
-                name="runtime binding Job requested authorities",
-            )
-            job_write_paths = _strict_canonical_json_loads(
-                str(row["job_allowed_write_paths_json"]),
-                name="runtime binding Job allowed write paths",
-            )
-            job_validation_argv = _strict_canonical_json_loads(
-                str(row["job_validation_commands_json"]),
-                name="runtime binding Job validation commands",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding effective grant Job evidence is invalid: {exc}"
-            ) from exc
-        grant_keys = {
-            "schema_version",
-            "authorities",
-            "write_paths",
-            "validation_argv",
-            "policy_sha",
-            "job_id",
-            "role",
-        }
-        if (
-            not isinstance(grant, dict)
-            or set(grant) != grant_keys
-            or grant.get("schema_version") != "mastermind.executive_effective_grant/v1"
-            or grant.get("job_id") != row["job_id"]
-            or grant.get("role") != row["orchestration_role"]
-            or grant.get("policy_sha") != row["authority_policy_hash"]
-            or row["job_authority_policy_hash"] != row["authority_policy_hash"]
-            or not _runtime_binding_ordered_unique_strings(
-                job_authorities, require_nonempty=True
-            )
-            or not _runtime_binding_ordered_unique_strings(
-                job_write_paths, require_nonempty=False
-            )
-            or not _runtime_binding_validation_argv(job_validation_argv)
-            or not _runtime_binding_ordered_unique_strings(
-                grant.get("authorities"), require_nonempty=True
-            )
-            or not _runtime_binding_ordered_unique_strings(
-                grant.get("write_paths"), require_nonempty=False
-            )
-            or not _runtime_binding_validation_argv(grant.get("validation_argv"))
-            or any(item not in job_authorities for item in grant["authorities"])
-            or any(item not in job_write_paths for item in grant["write_paths"])
-            or any(item not in job_validation_argv for item in grant["validation_argv"])
-        ):
-            raise StateConflict("runtime binding effective grant evidence drifted")
-        if row["orchestration_role"] in {"plan", "aggregation"} and (
-            grant["authorities"] != ["READ"]
-            or grant["write_paths"]
-            or grant["validation_argv"]
-        ):
-            raise StateConflict(
-                "runtime binding effective grant role semantics drifted"
-            )
-        if row["orchestration_role"] == "review" and (
-            grant["authorities"] != job_authorities
-            or any(item not in {"READ", "RUN_TESTS"} for item in job_authorities)
-            or "READ" not in job_authorities
-            or job_write_paths
-            or grant["write_paths"]
-            or grant["validation_argv"] != job_validation_argv
-            or bool(grant["validation_argv"]) != ("RUN_TESTS" in grant["authorities"])
-        ):
-            raise StateConflict(
-                "runtime binding effective grant role semantics drifted"
-            )
-
-        creation_events = connection.execute(
-            """SELECT * FROM main.events
-               WHERE event_type='JOB_CREATED' AND job_id=?
-               ORDER BY event_id""",
-            (row["job_id"],),
-        ).fetchall()
-        if len(creation_events) != 1:
-            raise StateConflict("runtime binding Job creation cardinality is not exact")
-        creation_event = creation_events[0]
-        try:
-            job_role, job_provenance, job_provenance_digest = (
-                _decode_orchestration_job_fields(row)
-            )
-            creation_payload = _strict_canonical_json_loads(
-                str(creation_event["payload_json"]),
-                name="runtime binding JOB_CREATED payload",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding Job creation evidence is invalid: {exc}"
-            ) from exc
-        expected_creation_actor = (
-            "operator" if job_role in {"aggregation", "plan"} else "coo"
-        )
-        if (
-            not isinstance(job_provenance, dict)
-            or not isinstance(creation_payload, dict)
-            or creation_event["sequence"] != 1
-            or creation_event["actor"] != expected_creation_actor
-            or creation_event["aggregate_type"] != "job"
-            or creation_event["aggregate_id"] != row["job_id"]
-            or creation_event["job_id"] != row["job_id"]
-            or creation_event["attempt_id"] is not None
-            or creation_event["worker_id"] is not None
-            or creation_event["quota_class"] is not None
-            or creation_event["command_id"] != job_provenance.get("command_id")
-            or not isinstance(creation_payload.get("owner_seat"), str)
-            or creation_payload.get("owner_seat") != row["owner_seat"]
-            or creation_payload.get("orchestration_role") != job_role
-            or creation_payload.get("orchestration_provenance_digest")
-            != job_provenance_digest
-        ):
-            raise StateConflict("runtime binding Job creation evidence drifted")
-
-        admissions = connection.execute(
-            """SELECT * FROM main.events
-               WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
-                 AND aggregate_type='process_generation' AND aggregate_id=?
-               ORDER BY event_id""",
-            (row["process_generation_id"],),
-        ).fetchall()
-        decisions = connection.execute(
-            """SELECT * FROM main.events
-               WHERE event_type='OHF_LAUNCH_DECISION'
-                 AND aggregate_type='process_generation' AND aggregate_id=?
-               ORDER BY event_id""",
-            (row["process_generation_id"],),
-        ).fetchall()
-        seals = connection.execute(
-            """SELECT 1 FROM main.events
-               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
-            (token,),
-        ).fetchall()
-        if seals:
-            retained_job = connection.execute(
-                "SELECT * FROM main.jobs WHERE job_id=?", (row["job_id"],)
-            ).fetchone()
-            retained_attempt = connection.execute(
-                "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
-            ).fetchone()
-            if (len(seals) != 1 or retained_job is None or retained_attempt is None
-                    or not _interactive_tx5_admitted(retained_job)
-                    or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
-                    != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
-                raise StateConflict("runtime binding source is not a retained native writer")
-            retained_seal = _validated_interactive_active_plan_seal(
-                connection, attempt_row=retained_attempt, job_row=retained_job)
-            if retained_seal["process_generation_id"] != row["process_generation_id"]:
-                raise StateConflict("runtime binding retained native generation changed")
-        if len(admissions) != 1 or len(decisions) != 1:
-            raise StateConflict(
-                "runtime binding source lacks one active work admission"
-            )
-        admission_event = admissions[0]
-        admission = _strict_canonical_json_loads(
-            str(admission_event["payload_json"]), name="runtime binding work admission"
-        )
-        decision = _strict_canonical_json_loads(
-            str(decisions[0]["payload_json"]), name="runtime binding launch decision"
-        )
-        admission_keys = {
-            "schema_version",
-            "job_id",
-            "attempt_id",
-            "worker_id",
-            "quota_class",
-            "orchestration_role",
-            "process_generation_id",
-            "provider_session_id",
-            "tx3_applied_command_id",
-            "observed_attestation_digest",
-            "principal_observation",
-            "principal_observation_digest",
-            "execution_principal_snapshot_digest",
-            "placement_snapshot_digest",
-            "effective_grant_digest",
-            "policy_sha",
-            "launch_decision",
-        }
-        immutable_digests = (
-            "observed_attestation_digest",
-            "principal_observation_digest",
-            "execution_principal_snapshot_digest",
-            "placement_snapshot_digest",
-            "effective_grant_digest",
-            "policy_sha",
-        )
-        decision_event = decisions[0]
-        tx3: sqlite3.Row | None = None
-        tx3_payload: Any = None
-        tx3_intent: sqlite3.Row | None = None
-        tx3_intent_payload: Any = None
-        expected_tx3_command_id: str | None = None
-        expected_tx3_applied: dict[str, Any] | None = None
-        expected_tx3_intent: dict[str, Any] | None = None
-        try:
-            generation_number = int(row["generation_number"])
-            if generation_number == 1:
-                expected_tx3_applied = {
-                    "operation_kind": OperationKind.START_SESSION.value,
-                    "provider_session_id": row["epoch_provider_session"],
-                    "process_generation_id": row["process_generation_id"],
-                }
-                expected_tx3_intent = {
-                    "schema_version": "mastermind.operator_harness_intent/v1",
-                    "operation_kind": OperationKind.START_SESSION.value,
-                    "attempt_id": token,
-                    "session_epoch_id": row["session_epoch_id"],
-                    "process_generation_id": row["process_generation_id"],
-                    "worker_id": row["worker_id"],
-                    "provider_session_id": None,
-                }
-            elif generation_number == 2:
-                expected_tx3_applied = {
-                    "operation_kind": OperationKind.RESUME_SESSION.value,
-                    "provider_session_id": row["epoch_provider_session"],
-                    "process_generation_id": row["process_generation_id"],
-                }
-                expected_tx3_intent = {
-                    "operation_kind": OperationKind.RESUME_SESSION.value,
-                    "attempt_id": token,
-                    "session_epoch_id": row["session_epoch_id"],
-                    "process_generation_id": row["process_generation_id"],
-                    "worker_id": row["worker_id"],
-                    "provider_session_id": row["epoch_provider_session"],
-                }
-            from control_plane.native_desktop_parent import (
-                has_existing_parent, validated_enrollment_receipts,
-            )
-            if has_existing_parent(connection, token):
-                _, _, expected_tx3_intent, expected_tx3_applied = validated_enrollment_receipts(
-                    connection, row, str(row["process_generation_id"]))
-            if expected_tx3_applied is not None and expected_tx3_intent is not None:
-                tx3_rows = connection.execute(
-                    """SELECT * FROM main.events
-                       WHERE event_type=? AND attempt_id=?
-                         AND json_extract(payload_json,'$.operation_kind')=?
-                         AND json_extract(payload_json,'$.process_generation_id')=?
-                       ORDER BY event_id""",
-                    (
-                        OperationReceiptKind.APPLIED.value,
-                        token,
-                        expected_tx3_applied["operation_kind"],
-                        row["process_generation_id"],
-                    ),
-                ).fetchall()
-                tx3_intent_rows = connection.execute(
-                    """SELECT * FROM main.events
-                       WHERE event_type=? AND attempt_id=?
-                         AND json_extract(payload_json,'$.operation_kind')=?
-                         AND json_extract(payload_json,'$.process_generation_id')=?
-                       ORDER BY event_id""",
-                    (
-                        OperationReceiptKind.INTENT.value,
-                        token,
-                        expected_tx3_intent["operation_kind"],
-                        row["process_generation_id"],
-                    ),
-                ).fetchall()
-                tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
-                tx3_intent = tx3_intent_rows[0] if len(tx3_intent_rows) == 1 else None
-            if tx3 is not None and tx3_intent is not None:
-                tx3_payload = _strict_canonical_json_loads(
-                    str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
-                )
-                operation_id = OperationId(str(tx3["aggregate_id"]))
-                expected_tx3_command_id = operation_receipt_command_id(
-                    operation_id, OperationReceiptKind.APPLIED
-                )
-                tx3_intent_payload = _strict_canonical_json_loads(
-                    str(tx3_intent["payload_json"]),
-                    name="runtime binding TX-3 INTENT",
-                )
-        except (StateConflict, TypeError, ValueError) as exc:
-            raise StateConflict(
-                f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
-            ) from exc
-        if (
-            tx3 is None
-            or expected_tx3_applied is None
-            or expected_tx3_intent is None
-            or tx3["event_type"] != OperationReceiptKind.APPLIED.value
-            or tx3["command_id"] != expected_tx3_command_id
-            or tx3["command_id"] != admission.get("tx3_applied_command_id")
-            or tx3["actor"] != "supervisor"
-            or tx3["aggregate_type"] != "operator_operation"
-            or tx3["job_id"] != row["job_id"]
-            or tx3["attempt_id"] != token
-            or tx3["worker_id"] != row["worker_id"]
-            or tx3["quota_class"] != row["quota_class"]
-            or tx3_payload != expected_tx3_applied
-            or tx3_intent is None
-            or tx3_intent["event_type"] != OperationReceiptKind.INTENT.value
-            or tx3_intent["command_id"] != tx3["aggregate_id"]
-            or tx3_intent["actor"] != "supervisor"
-            or tx3_intent["aggregate_type"] != "operator_operation"
-            or tx3_intent["aggregate_id"] != tx3["aggregate_id"]
-            or tx3_intent["job_id"] != row["job_id"]
-            or tx3_intent["attempt_id"] != token
-            or tx3_intent["worker_id"] != row["worker_id"]
-            or tx3_intent["quota_class"] != row["quota_class"]
-            or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
-            or int(tx3["event_id"]) >= int(decision_event["event_id"])
-            or int(decision_event["event_id"]) >= int(admission_event["event_id"])
-            or tx3_intent_payload != expected_tx3_intent
-        ):
-            raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
-        observation = _validated_admission_principal(row, admission)
-        if (
-            set(admission) != admission_keys
-            or admission_event["command_id"]
-            != f"ohf-work-admit:{row['process_generation_id']}"
-            or admission_event["actor"] != "supervisor"
-            or admission_event["aggregate_type"] != "process_generation"
-            or admission_event["aggregate_id"] != row["process_generation_id"]
-            or admission_event["job_id"] != row["job_id"]
-            or admission_event["attempt_id"] != token
-            or admission_event["worker_id"] != row["worker_id"]
-            or admission_event["quota_class"] != row["quota_class"]
-            or admission.get("schema_version")
-            != "mastermind.orchestration_work_admission/v1"
-            or admission.get("job_id") != row["job_id"]
-            or admission.get("attempt_id") != token
-            or admission.get("worker_id") != row["worker_id"]
-            or admission.get("quota_class") != row["quota_class"]
-            or admission.get("orchestration_role") != row["orchestration_role"]
-            or admission.get("process_generation_id") != row["process_generation_id"]
-            or admission.get("provider_session_id") != row["epoch_provider_session"]
-            or admission.get("observed_attestation_digest")
-            != row["observed_attestation_digest"]
-            or admission.get("placement_snapshot_digest")
-            != row["placement_snapshot_digest"]
-            or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or any(
-                not isinstance(admission.get(field), str)
-                or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
-                for field in immutable_digests
-            )
-            or admission.get("launch_decision") != LaunchDecision.ALLOW.value
-            or decision_event["actor"] != "supervisor"
-            or decision_event["aggregate_type"] != "process_generation"
-            or decision_event["aggregate_id"] != row["process_generation_id"]
-            or decision_event["job_id"] != row["job_id"]
-            or decision_event["attempt_id"] != token
-            or decision_event["worker_id"] != row["worker_id"]
-            or decision_event["quota_class"] != row["quota_class"]
-            or decision
-            != {
-                "decision": LaunchDecision.ALLOW.value,
-                "attestation_digest": row["observed_attestation_digest"],
-            }
-            or observation["process_generation_id"] != row["process_generation_id"]
-            or observation["provider_session_id"] != row["epoch_provider_session"]
-            or base_process_identity(observation["process_identity"])
-            != {
-                "pid": row["generation_pid"],
-                "pgid": row["generation_pgid"],
-                "process_start_identity": row["generation_process_start_identity"],
-                "boot_id": row["generation_boot_id"],
-            }
-        ):
-            raise StateConflict("runtime binding admission evidence drifted")
-        return ActiveOperatorBindingFacts(
-            attempt_id=token,
-            session_epoch_id=str(row["session_epoch_id"]),
-            generation_number=int(row["generation_number"]),
-            provider_session_id=str(row["epoch_provider_session"]),
-            provider=str(placement["provider"]),
-            account_label=str(placement["account_label"]),
-            owner_seat=str(row["owner_seat"]),
-            job_id=str(row["job_id"]),
-            worker_id=str(row["worker_id"]),
-            process_generation_id=str(row["process_generation_id"]),
-            pid=int(row["generation_pid"]),
-            pgid=int(row["generation_pgid"]),
-            process_start_identity=str(row["generation_process_start_identity"]),
-            boot_id=str(row["generation_boot_id"]),
-            admitted_unique_id=observation["process_identity"].get("unique_id"),
-            admitted_pidversion=observation["process_identity"].get("pidversion"),
+        return _current_harness_binding_source_from_snapshot(
+            self.store, connection, token
         )
 
 
@@ -28347,4 +30512,6 @@ __all__ = [
     "WorkerRegistry",
     "WorkerStatus",
     "normalize_executive_dialogue_source",
+    "normalize_paid_subject_review_binding",
+    "paid_subject_review_constraints",
 ]

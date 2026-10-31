@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Two-phase native ingress installation CANDIDATE; no worker/process control.
+"""Finite native ingress installation and paired upgrade; no worker/process control.
 
 prepare writes only a review bundle. phase1 changes pool and the fabric_task CLI
 branch. phase2 changes the flat remote controller only after an existing owner
 supplies a bound legacy-producer reconciliation receipt. The receipt is an
 explicit operational prerequisite, not process/lifecycle authority invented here.
+The closed paired upgrade preserves that phase-one epoch and the flat remote entry.
 """
 from __future__ import annotations
 
@@ -19,11 +20,256 @@ import stat
 import sys
 import uuid
 
+# Reuse the installed Studio Direct consumer census; it is the single owner
+# of pin observation, rather than duplicating a private-account registry here.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from ops.fabric_launch import install as studio_consumer_owner
+
 import native_generation as generation
 
 SCHEMA = "native-ingress-bootstrap.v1"
 DRAIN_SCHEMA = "native-ingress-legacy-producers-reconciled.v1"
 BRIDGE_MARKER = "NATIVE_GENERATION_CLI_BRIDGE_V1"
+UPGRADE_SCHEMA = "native-ingress-paired-launcher-upgrade.v1"
+UPGRADE_FROM = "8bc1153289914d793264ca5d684eb7206f2b5d38fcbaadc3de9f9cc04a9baa88"
+UPGRADE_TO = "d044c24940df13d24ff6241f0da9cec3dc24d90dd60604a08c82e0ad8613586c"
+UPGRADE_MANIFEST = "6ac208bbd80f706931b11e8147a879f6e3ced6fe704cde7b9f15e1c098e37ee4"
+
+
+def _upgrade_pointer(value):
+    if (type(value) is not dict or set(value) != {"schema", "generation", "sequence", "previous"}
+            or value["schema"] != generation.POINTER_SCHEMA
+            or type(value["sequence"]) is not int or value["sequence"] < 1
+            or type(value["generation"]) is not str
+            or not generation.HEX.fullmatch(value["generation"])
+            or (value["previous"] is not None and
+                (type(value["previous"]) is not str or not generation.HEX.fullmatch(value["previous"])))):
+        raise ValueError("invalid upgrade selection snapshot")
+
+
+def _upgrade_base(original):
+    original = Path(original)
+    if not original.is_absolute() or original.resolve(strict=True) != original:
+        raise ValueError("canonical original installation bundle required")
+    original, base = read_plan(original)
+    store = Path(base["store"])
+    receipts = store / "bootstrap"
+    generation.require(receipts, stat.S_ISDIR, 0o700)
+    receipt_path = receipts / (base["digest"] + ".phase1.json")
+    generation.require(receipt_path, stat.S_ISREG, 0o600)
+    receipt = generation.unique_json(generation.regular_bytes(receipt_path))
+    expected = {"schema": SCHEMA, "phase": 1, "plan_digest": base["digest"],
+                "initial_generation": base["initial_generation"],
+                "bridged": ["pool", "task"], "remote": "legacy"}
+    if receipt != expected:
+        raise ValueError("original paired installation receipt mismatch")
+    if any(os.path.lexists(receipts / (base["digest"] + suffix))
+           for suffix in (".rollback.json", ".phase2.json")):
+        raise ValueError("original installation is not the legacy-remote phase-one state")
+    old_raw = generation.regular_bytes(original / "native_generation.py")
+    if base["launcher_digest"] != UPGRADE_FROM or generation.digest(old_raw) != UPGRADE_FROM:
+        raise ValueError("unsupported original launcher")
+    old_fragment = b'or parts[1] in {"yes", "host_pull_probe.template"})'
+    new_fragment = (b'or parts[1] in {"yes", "host_pull_probe.template",\n'
+                    b'                        "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json"})')
+    if old_raw.count(old_fragment) != 1:
+        raise ValueError("original launcher allowlist differs")
+    new_raw = old_raw.replace(old_fragment, new_fragment)
+    if (generation.digest(new_raw) != UPGRADE_TO
+            or generation.regular_bytes(Path(generation.__file__).resolve()) != new_raw):
+        raise ValueError("protected launcher must differ only by the reviewed two names")
+    old_launcher = Path(base["launcher_path"])
+    generation.require(old_launcher, stat.S_ISREG, 0o555)
+    if generation.regular_bytes(old_launcher) != old_raw:
+        raise ValueError("original installed launcher differs")
+    for name in ("pool", "task"):
+        wanted = (shell_bridge(Path(base["python"]), old_launcher, store, "pool")
+                  if name == "pool" else task_bridge(
+                      generation.regular_bytes(original / "task.original"),
+                      Path(base["python"]), old_launcher, store))
+        if generation.digest(wanted) != base["entries"][name]["bridge"]:
+            raise ValueError("original bridge derivation differs")
+    return original, base, new_raw
+
+
+def _upgrade_plan(original, target, previous):
+    original, base, new_raw = _upgrade_base(original)
+    _upgrade_pointer(previous)
+    store = Path(base["store"])
+    _, old_meta = generation.verify(store, previous["generation"])
+    # These two names are the ONLY difference between the pinned verifiers.
+    if {"ext/paid_pyyaml_6_0_3.zip", "ext/paid_pyyaml_provenance.json"} & set(old_meta["files"]):
+        raise ValueError("old launcher cannot verify the prior selection")
+    _, target_meta = generation.verify(store, target)
+    manifest_raw = (json.dumps(target_meta["files"], sort_keys=True, indent=2) + "\n").encode()
+    if len(target_meta["files"]) != 95 or generation.digest(manifest_raw) != UPGRADE_MANIFEST:
+        raise ValueError("target is not the reviewed 95-member closure")
+    launcher = store / "launchers" / (UPGRADE_TO + ".py")
+    payloads = {"native_generation.py": new_raw}
+    entries = {}
+    for name in ("pool", "task", "remote"):
+        entry = base["entries"][name]
+        row = {"target": entry["target"], "mode": entry["mode"],
+               "previous": entry["preimage"] if name == "remote" else entry["bridge"]}
+        if name != "remote":
+            raw = (shell_bridge(Path(base["python"]), launcher, store, "pool")
+                   if name == "pool" else task_bridge(
+                       generation.regular_bytes(original / "task.original"),
+                       Path(base["python"]), launcher, store))
+            payloads[name + ".bridge"] = raw
+            row["bridge"] = generation.digest(raw)
+        entries[name] = row
+    plan = {"schema": UPGRADE_SCHEMA, "original_bundle": str(original),
+            "bootstrap_digest": base["digest"], "store": str(store),
+            "expected_selection": previous, "target_generation": target,
+            "from_launcher": UPGRADE_FROM, "to_launcher": UPGRADE_TO,
+            "manifest_sha256": UPGRADE_MANIFEST, "entries": entries}
+    plan["digest"] = generation.digest(generation.canonical(plan))
+    return plan, payloads
+
+
+def _upgrade_entries(plan, *, partial=False, complete=False):
+    for name, entry in plan["entries"].items():
+        target = Path(entry["target"])
+        if not target.is_absolute() or target.parent.resolve(strict=True) != target.parent:
+            raise ValueError("canonical ingress parent required")
+        generation.require(target.parent, stat.S_ISDIR)
+        generation.require(target, stat.S_ISREG, entry["mode"])
+        observed = generation.digest(generation.regular_bytes(target))
+        allowed = {entry["previous"]}
+        if name != "remote":
+            if complete:
+                allowed = {entry["bridge"]}
+            elif partial:
+                allowed.add(entry["bridge"])
+        if observed not in allowed:
+            raise ValueError("upgrade ingress preimage refused: " + name)
+
+
+def prepare_upgrade(original, target, output):
+    """Prepare one closed 8bc->d044 transition; never rewrite its old epoch."""
+    original, base, _ = _upgrade_base(original)
+    store = Path(base["store"])
+    output = Path(output).absolute()
+    generation.require(output.parent, stat.S_ISDIR)
+    if (output.parent.resolve(strict=True) != output.parent
+            or output.is_relative_to(store.parent) or os.path.lexists(output)):
+        raise ValueError("fresh external canonical upgrade bundle required")
+    with generation.publication_lock(store):
+        plan, payloads = _upgrade_plan(original, target, generation.current(store))
+        _upgrade_entries(plan)
+        if os.path.lexists(store / "bootstrap/.paired-launcher-upgrade.json"):
+            raise ValueError("paired upgrade already has an original transaction")
+        output.mkdir(mode=0o700)
+        for name, raw in payloads.items():
+            generation.atomic_bytes(output / name, raw, 0o600)
+        generation.atomic_bytes(output / "PLAN.json", generation.canonical(plan) + b"\n", 0o600)
+    return plan
+
+
+def read_upgrade(bundle):
+    bundle = Path(bundle).absolute()
+    if bundle.resolve(strict=True) != bundle:
+        raise ValueError("canonical upgrade bundle required")
+    generation.require(bundle, stat.S_ISDIR, 0o700)
+    generation.require(bundle / "PLAN.json", stat.S_ISREG, 0o600)
+    plan = generation.unique_json(generation.regular_bytes(bundle / "PLAN.json"))
+    fields = {"schema", "original_bundle", "bootstrap_digest", "store",
+              "expected_selection", "target_generation", "from_launcher",
+              "to_launcher", "manifest_sha256", "entries", "digest"}
+    if (type(plan) is not dict or set(plan) != fields or plan.get("schema") != UPGRADE_SCHEMA
+            or type(plan["original_bundle"]) is not str):
+        raise ValueError("invalid paired upgrade plan")
+    expected, payloads = _upgrade_plan(plan["original_bundle"], plan["target_generation"],
+                                       plan["expected_selection"])
+    if plan != expected or {p.name for p in bundle.iterdir()} != {"PLAN.json", *payloads}:
+        raise ValueError("upgrade plan or artifact set differs")
+    for name, raw in payloads.items():
+        generation.require(bundle / name, stat.S_ISREG, 0o600)
+        if generation.regular_bytes(bundle / name) != raw:
+            raise ValueError("upgrade payload differs: " + name)
+    return plan, payloads
+
+
+def upgrade(bundle):
+    """Finish only this retained transaction; never infer permission to retry work."""
+    plan, payloads = read_upgrade(bundle)
+    store = Path(plan["store"])
+    with generation.publication_lock(store):
+        # Requalify the authentic old epoch and target while holding the owner lock.
+        expected, _ = _upgrade_plan(plan["original_bundle"], plan["target_generation"],
+                                     plan["expected_selection"])
+        if expected != plan:
+            raise ValueError("upgrade inputs changed")
+        intent_path = store / "bootstrap/.paired-launcher-upgrade.json"
+        intent = {"schema": UPGRADE_SCHEMA, "plan_digest": plan["digest"],
+                  "bootstrap_digest": plan["bootstrap_digest"]}
+        exists = os.path.lexists(intent_path)
+        if exists:
+            generation.require(intent_path, stat.S_ISREG, 0o600)
+            if generation.unique_json(generation.regular_bytes(intent_path)) != intent:
+                raise ValueError("foreign paired upgrade transaction")
+        previous = plan["expected_selection"]
+        selected = {"schema": generation.POINTER_SCHEMA,
+                    "generation": plan["target_generation"],
+                    "previous": previous["generation"], "sequence": previous["sequence"] + 1}
+        receipt = {"schema": UPGRADE_SCHEMA, "plan_digest": plan["digest"],
+                   "bootstrap_digest": plan["bootstrap_digest"],
+                   "previous_selection": previous, "selection": selected,
+                   "bridged": ["pool", "task"], "remote": "legacy"}
+        receipt_path = store / "bootstrap" / (plan["digest"] + ".upgrade.json")
+        current = generation.current(store)
+        if os.path.lexists(receipt_path):
+            generation.require(receipt_path, stat.S_ISREG, 0o600)
+            if (not exists or current != selected
+                    or generation.unique_json(generation.regular_bytes(receipt_path)) != receipt):
+                raise ValueError("completed upgrade no longer matches current state")
+            _upgrade_entries(plan, complete=True)
+            launcher = store / "launchers" / (UPGRADE_TO + ".py")
+            generation.require(launcher, stat.S_ISREG, 0o555)
+            if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
+                raise ValueError("completed launcher differs")
+            return receipt
+        if current != previous and not (exists and current == selected):
+            raise ValueError("upgrade selection compare-and-swap refused")
+        if current == selected:
+            # Selection follows verified launcher and both bridges. Their loss
+            # cannot be an interruption of this transaction; never repair it.
+            _upgrade_entries(plan, complete=True)
+            launcher = store / "launchers" / (UPGRADE_TO + ".py")
+            generation.require(launcher, stat.S_ISREG, 0o555)
+            if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
+                raise ValueError("selected launcher differs")
+            _record_once(receipt_path, receipt)
+            return receipt
+        _upgrade_entries(plan, partial=exists)
+        if not exists:
+            _record_once(intent_path, intent)  # durable BEFORE any ingress mutation
+        directory = store / "launchers"
+        generation.require(directory, stat.S_ISDIR, 0o700)
+        launcher = directory / (UPGRADE_TO + ".py")
+        if os.path.lexists(launcher):
+            generation.require(launcher, stat.S_ISREG, 0o555)
+            if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
+                raise ValueError("published upgrade launcher differs")
+        else:
+            generation.atomic_bytes(launcher, payloads["native_generation.py"], 0o555)
+        for name in ("pool", "task"):
+            _upgrade_entries(plan, partial=True)
+            entry = plan["entries"][name]
+            if generation.digest(generation.regular_bytes(entry["target"])) != entry["bridge"]:
+                generation.atomic_bytes(Path(entry["target"]), payloads[name + ".bridge"], entry["mode"])
+        _upgrade_entries(plan, complete=True)
+        if generation.current(store) == previous:
+            actual = generation._select_locked(store, plan["target_generation"], previous["generation"])
+            if actual != selected:
+                raise ValueError("upgrade selection readback differs")
+        elif generation.current(store) != selected:
+            raise ValueError("upgrade selection changed during transaction")
+        _record_once(receipt_path, receipt)
+        return receipt
 
 
 def relocate_pool(raw):
@@ -245,10 +491,29 @@ def _receipts_dir(store):
     return directory
 
 
+def _require_studio_consumer_pin(plan, expected_field):
+    """Refuse pool ingress drift against the existing bounded Studio census."""
+    if expected_field not in ("bridge", "preimage"):
+        raise ValueError("STUDIO_CONSUMER_TARGET_INVALID")
+    entry = plan["entries"]["pool"]
+    try:
+        conflicts = studio_consumer_owner.pinned_consumers(
+            entry["target"], entry[expected_field],
+        )
+    except (OSError, ValueError):
+        raise ValueError("STUDIO_CONSUMER_CENSUS_REFUSED") from None
+    if type(conflicts) is not list:
+        raise ValueError("STUDIO_CONSUMER_CENSUS_REFUSED")
+    if conflicts:
+        # Do not expose private account identities or config filenames.
+        raise ValueError("STUDIO_CONSUMER_PIN_MIGRATION_REQUIRED")
+
+
 def phase1(bundle):
     bundle, plan = read_plan(bundle)
     store = Path(plan["store"])
     with generation.publication_lock(store):
+        _require_studio_consumer_pin(plan, "bridge")
         if os.path.lexists(_receipts_dir(store) / (plan["digest"] + ".rollback.json")):
             raise ValueError("bootstrap epoch is terminal after rollback; prepare a fresh plan")
         _preimages(plan, {"pool", "task"})
@@ -258,6 +523,9 @@ def phase1(bundle):
         elif selection["generation"] != plan["initial_generation"]:
             raise ValueError("bootstrap must initially select the reviewed target release")
         _install_launcher(bundle, plan)
+        # Re-observe pins immediately before replacing the global pool CLI.
+        # Coordinated releases must separately quiesce all Studio writers.
+        _require_studio_consumer_pin(plan, "bridge")
         # Each atomic replacement is independently safe: new launches get the
         # reviewed target (which may be V1, without publishing a relocated V0);
         # older processes retain their open old inode and all flat helpers.
@@ -275,6 +543,7 @@ def rollback(bundle):
     bundle, plan = read_plan(bundle)
     store = Path(plan["store"])
     with generation.publication_lock(store):
+        _require_studio_consumer_pin(plan, "preimage")
         _preimages(plan, {"pool", "task", "remote"})
         # Restore the flat child first. An old parent will therefore never enter
         # a new flat controller as its future ingress is restored.
@@ -345,6 +614,12 @@ def main():
     prep.add_argument("--initial", required=True)
     prep.add_argument("--pool-path", type=Path, required=True)
     prep.add_argument("--output", type=Path, required=True)
+    prepare_pair = sub.add_parser("prepare-upgrade")
+    prepare_pair.add_argument("--original-bundle", type=Path, required=True)
+    prepare_pair.add_argument("--target-generation", required=True)
+    prepare_pair.add_argument("--output", type=Path, required=True)
+    apply_pair = sub.add_parser("upgrade")
+    apply_pair.add_argument("--bundle", type=Path, required=True)
     for command in ("phase1", "phase2", "rollback"):
         action = sub.add_parser(command)
         action.add_argument("--bundle", type=Path, required=True)
@@ -353,6 +628,10 @@ def main():
     args = parser.parse_args()
     if args.command == "prepare":
         result = prepare(args.store, args.initial, args.pool_path, args.output)
+    elif args.command == "prepare-upgrade":
+        result = prepare_upgrade(args.original_bundle, args.target_generation, args.output)
+    elif args.command == "upgrade":
+        result = upgrade(args.bundle)
     elif args.command == "phase1":
         result = phase1(args.bundle)
     elif args.command == "phase2":

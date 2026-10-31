@@ -866,7 +866,7 @@ def test_all_discovered_tests_are_accounted_for():
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """Keep protected 45-minute headroom and a fail-closed bounded fan-in."""
+    """Keep a finite, adequate 60-minute shard window with fail-closed fan-in."""
     import yaml
 
     workflow = yaml.load(
@@ -877,7 +877,8 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     shards = jobs["pytest_shards"]
     gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
-    assert shards["timeout-minutes"] == 45
+    assert shards["timeout-minutes"] == 60
+    assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8
     assert shards["strategy"]["fail-fast"] is False
     assert shards["strategy"]["max-parallel"] == 3

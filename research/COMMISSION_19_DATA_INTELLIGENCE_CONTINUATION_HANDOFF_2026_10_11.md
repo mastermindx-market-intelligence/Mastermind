@@ -828,3 +828,373 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 1. Land this r14 (Mastermind merge queue) and the Macro Agent OS PR (W9 → done, W10 opened, handoff 2026-10-22).
 2. On `EVENT RELEASE`: the gated evaluator run → r15 + W10 (counts only).
 3. The seat ends this cycle on `DURABLE_EXECUTION_RUNNING` (watcher live) and on `PROVEN_OUTCOME` for the entitled-path proof.
+
+#### r15 cycle 2026-10-22 15:1xZ (seat 7ab343c8, Fable 5.1) — wave 14: WP31 natural clock FIRED (PHM 8-K item 2.02, 2026-10-22), first live read DONE — 1 eligible episode, label pending; read 1 voided by a transient reader failure, adapter repaired (Macro #10074), read 1b recovered it live
+
+**FACTS**
+- **Clock.** The re-armed EDGAR header watcher (30-min polls, submission headers only) exited at 2026-10-22T11:38:49Z on `PHM 8-K 2026-10-22 items 2.02, 9.01`. The filing's `-index-headers.html` manifest resolves (HTTP 200, 6 348 B) and lists `EX-99.1` — a prereg A3 release filing. No other universe issuer (AAPL, DHI, KBH, TOL) has filed an 8-K 2.02 / 10-Q / 10-K since registration.
+- **Read 1 (11:43Z → 12:18Z, rc 0, seat tree at main `0dc8ac5eeda1`-era sources, `data/trial_ledger.jsonl` of 2026-10-21).** Counts only: `episode_count=244`, `eligible=0`, `exposed=243`, `not_evaluable={pit_unrecoverable: 1}`, `label_pending=0`, `exhibit_failures=245`, verdict `MONITORING` (`monitoring_descriptive_only`), gates G-1 (frozen-prefix sha256 `44c9df65…`), G-2 (prereg commit `8e195093` is merged history), G-3 (budget row n≥6 beside 155 families) all passed. Adapter counts: submissions 10 requests / 0 shards missing, companyfacts 5 / 0 unavailable, k_inputs 244 / 0 unavailable, index_headers 500.
+- **Root cause of `pit_unrecoverable` (two observations).** The runner makes exactly ONE incumbent revisions-reader call (`engine.neuralweb.company_intelligence_reader.read_all_event_source_revisions`, a verified chain walk of up to 500 hops, one 8 s HTTP request per hop against the public R2 origin). It raised `CompanyIntelligenceReadError: Company Intelligence public source unavailable` (transport error on a generation-manifest hop; the origin served `manifest.json`, 531 KB, in 4.3 s and a 404 in 7.2 s during the window). By design every eligible S leg then became `chain_unreadable` and the one live episode was demoted to `NOT_EVALUABLE(pit_unrecoverable)`. A repeat probe of the same reader with a non-universe id (`MSFT:2026Q4`) succeeded → transient.
+- **`exhibit_failures=245`** are HTTP 404s on `-index-headers.html` for pre-2015 universe filings (sampled: KBH 2010, PHM 2011, TOL 2014 → 404; every 2015+ sample → 200). Those episodes are pre-registration and already EXPOSED; eligibility is unaffected. Recorded, not fixed.
+- **Repair — Macro PR #10074** (`claude/c19-w10-reader-retry-7ab343c8`, commit `0ae1f16d494d` off main `0dc8ac5eeda1`): `scripts/c19_wp31_production.py` `ProductionInputs.read_revisions()` performs the runner's one logical reader call with a bounded retry (3 attempts, 2 s × n backoff, same ids and same whole walk per attempt, the final exception propagates unchanged so `collect_s_legs` keeps its fail-closed path); counters `revisions_reader_attempts` / `revisions_reader_transient_failures`; the frozen reader module is untouched. Two synthetic, network-free tests; `tests/test_c19_wp31_production.py` 17 passed. merge-on-green armed; merge-queue-pilot is the only red (standing non-binding).
+- **Read 1b (12:31Z → 14:59Z, rc 0, head `0ae1f16d494d`).** Counts only: `episode_count=244`, **`eligible=1`, `label_pending=1`, `not_evaluable={}`**, `exposed=243`, `exhibit_failures=245`, verdict `MONITORING` (`monitoring_descriptive_only`; N = 1 < budget 6; `n_common_support=0`, `n_clusters=0`, `study_stopped=false`), arms emit A0=1, A1=0, A2=1, A2-K=1, A2-S=0 (the S leg abstained for the live episode — reason not opened). **`revisions_reader_attempts=2`, `revisions_reader_transient_failures=1`: the retry recovered a real transient failure during the read itself.** Exposure ledger: 184 lines (keys `at, issuer, q, reader`; values never opened). No episode, label, EPS or price value was printed or read outside the evaluator (PHM is now an exposure-risk issuer for the seat).
+- Read 1b is the SAME look as read 1, repaired: read 1 observed no label (PHM's 10-Q is not filed; §3.3 reads the label at the first run after that filing is accepted), so no episode was read twice.
+
+**DECIDED**
+- D9 **The first live read is DONE at the release rung:** one eligible episode minted with point-in-time features; the label look is the first evaluator run after PHM's 10-Q (prereg §3.3 / §9), recorded as r16. Nothing is declared: a look needs the §5 thresholds (40 episodes / 12 clusters, then 80 common-support); this is descriptive monitoring, N=1.
+- D10 **A transient transport error in the single reader call must not void a read.** Bounded retry in the C19 adapter (Macro #10074), never in the frozen reader; the fail-closed semantics are unchanged when every attempt fails.
+- D11 **Historical index-headers 404s stay recorded, not repaired:** they touch only pre-registration EXPOSED episodes and no eligible one.
+
+**OPEN** (owner → next action)
+- **Label look (r16)** — C19 seat → on the daily 10-Q/10-K header watcher's `EVENT LABEL_FILING` (universe, dated ≥ 2026-10-22): evaluator once from a tree carrying #10074, counts only.
+- **Macro #10074** — seat → merged and byte-verified (watcher armed).
+- **WP32 P3 free-tier 403** — Chairman / composer owner → a free-tier session; status/timing/headers only.
+- **Cold-compose 524; `x-consumed-receipts` at the edge** — composer/edge owner (r14 D7).
+- Unchanged from r14: P4/P6/P5/P7; K1 Q2/Q3 residuals; WP18 UI (R-WP18); EDGAR clock gap; R2 source_clock regression; G10/G11; G3; G1/G8/WP28; Linear MAS-263 / Executive OAuth (human).
+
+**NEXT**
+1. Land this r15 (Mastermind merge queue) and Macro #10074 (merge-on-green); W10 record updated on #10074.
+2. Daily 10-Q/10-K header watcher armed → r16 on `EVENT LABEL_FILING`.
+3. The seat ends this cycle on `DURABLE_EXECUTION_RUNNING` (two PR watchers + the label watcher live) and `PROVEN_OUTCOME` for the first live read.
+
+#### r16 cycle 2026-10-31 05:5xZ (seat dd5239a9, Opus 5.5) — wave 15: seat takeover; WP31 read 2 (a §5 monitoring read) lost both live episodes to a failed source read (cause open: transient reader failure or a short-lived chain break, see probe 1 below); W15 census lanes A–E and I accepted; WP26 zero-stock guard (Macro #10259) and WP28 CS-leg pins (Macro #10273) built by the seat and independently reviewed; #1246 and #9569 adopted; G (Macro #10284) built and reviewed; Mastermind's base-wide red traced to pytest 9.2.0 and pinned (Mastermind #1899)
+
+**Takeover.** Seat 7ab343c8 shows no live evidence after r15. This seat took the program under the 2026-10-24 leadership-continuity ruling (Mastermind #1842). Takeover comment on #1243: 6539757087. Last consumed edge: 6333090012. Routing follows the Chairman's 2026-10-12 intent ("Revert back to normal subagent fabric orchestration"): `pool pick` placement, no POOL_ESCALATION_REASON, no native Claude subagents. Fabric dispatch through `fabric_task.py` is not usable from this seat (`claude auth status` loggedIn=false, so FABRIC_IDENTITY_UNVERIFIED / CLAUDE_LOGIN_REQUIRED). Lanes therefore use the kit route `pool remote` (the r6 route), and the lease still validates admission.
+
+**FACTS — WP31 (counts only; exposure protocol)**
+- **The v1 exposure ledger is lost.** It lived under `/private/tmp` and was deleted. It held only evaluator rows for EXPOSED smoke episodes. No row concerned the ELIGIBLE PHM 2026 Q3 episode, and the transcript shows no non-evaluator PHM companyfacts read. It is not reconstructed. v2 restarts at read 2 under `~/.local/state/mastermind/c19-wp31/` (mode 700).
+- **Clock.** PHM's 10-Q was accepted 2026-10-22T20:05, so the run r15 called the "label look" was due. That name is informal: it means the first evaluator run after the label filing, not a prereg §5 look (D17). DHI filed an 8-K item 2.02 on 2026-10-29T16:51 (a new episode). A fiscal-Q4 10-K may give `label_unavailable`. The AAPL headers were re-read at 07:58Z (submissions headers only, repo SEC_UA): no 8-K, 10-Q or 10-K since 10-22. No dedicated EDGAR watcher was re-armed, because a new episode triggers no adjudicating look (§5 minimum: 40 episodes and 12 clusters). Headers are re-read at natural boundaries instead.
+- **Read 2 (r15's "label look"; under §5 a descriptive monitoring read)** ran from 2026-10-31T05:50:23Z to 06:16:13Z (rc 0, 26 min) at Macro `1627e6d48edd` (head of #10074, which carries the r15 retry). Counts:
+  - `episode_count=245` (+1, DHI);
+  - `exposed=243`, `eligible=0`, `label_pending=0`;
+  - `not_evaluable.pit_unrecoverable=2` (the formerly ELIGIBLE PHM episode and the new DHI one);
+  - `exhibit_failures=245`, `n_clusters=0`;
+  - verdict `MONITORING` (`monitoring_descriptive_only`), `study_stopped=false`;
+  - reader `attempts=3`, `transient_failures=2`.
+
+  It was appended to `prior_reads.json` as read 2. K1 caveat (§7): the Q2/Q3 residuals stand, and nothing here carries decision weight.
+- **Why the two episodes went `pit_unrecoverable`.** H-C ("a landed release carries no parseable `source_available_at`, so every episode dies when its release lands") is ruled out at code level:
+  - the workspace writer's `_lifecycle_clock` raises on a missing or unparseable clock;
+  - `_parse_utc` accepts the same ISO strings;
+  - `_edgar_json_acceptance_utc` returns None only on a parse failure or within hours of a DST transition, and 10-22 and 10-29 are not near one.
+
+  Probe 1 (06:36Z, one `read_all_event_source_revisions` walk for a non-universe id, max_hops=500): OK, 80.4 s, revisions=0. That refutes a persistent chain break. What remains is a transient reader failure (H-T), or a break that existed only around 05:50–06:16Z. Read 2's counts (3/2) cannot prove that every attempt failed, because the final failure re-raises without incrementing the counter. Timing fits a reader failure: read 1 failed in 35 min, read 1b succeeded on attempt 2 in 2.5 h, and read 2 took 26 min. The backoff is only 2 s, then 4 s.
+
+**FACTS — fleet and lanes**
+- **Capacity at 06:03Z.** glm 13/24 active, fair share 2; minimax 1/7; bailian 0/21 and 0/10 fleet-wide since 04:54Z (three keys, both qwen3.8 models, other seats' lanes included); grok EXHAUSTED. Between 06:00Z and 06:05Z, `pool remote auto` returned NO_HOST rc=3 five times. The same argv from the seat shell found four eligible hosts, and no cause was established. Naming an eligible host works.
+- **Guarded fabric mints are down on every pool host.** `--new-macro-worktree` refuses with rc=78 `FABRIC_SPARSE_GIT_CONFIG_UNQUALIFIED`, because each donor's git config fails the `_sparse_config` allowlist (`ext/remote_sub_exec.py:202-283`):
+  - ubuntu0: `http.lowspeedlimit`, `lowspeedtime` and `postbuffer`;
+  - ubuntu1: config file mode 664;
+  - ubuntu2: `gc.auto=0`;
+  - ubuntu3: `gc.auto`.
+
+  Hand-minted trees avoid the refusal but get SESSION ROOT QUARANTINE: no pytest, no git content reads, no interpreter discovery. So build lanes cannot test, and read-only lanes need the diff pasted inline. The seat does not mutate shared donor configs.
+- **The ubuntu3 donor is a partial clone with a promisor remote.** An existence probe for a missing object lazy-fetches and can hang. Seat mints therefore take the SHA from `git rev-parse`, probe with `rev-parse --verify -q`, and never use `cat-file -e`.
+- **`engine.capital_structure` imports only on Python 3.12.** `document_terms` seals a closure over `co_code`, so 3.11 and 3.14 fail at import. CI uses 3.12.
+- **Mastermind master protection.** The merge queue and the required check `test`; 0 required approving reviews (read 06:15Z). Re-read 10:08Z: classic protection requires only `test`. The ruleset adds only the merge queue (ALLGREEN, 100 min check timeout, squash).
+- **The Macro sweeper defers every armed refresh (sweep run 41187048194, 09:03Z).**
+  - Main commit `6b77c45c6e0d` (#10268, 08:57Z) edited `.github/ci/legacy-jobs.yml`. The sweeper reads that as a change to the check definitions, so every armed proof older than it is stale and needs a main-merge refresh. #9569, #10259 and #10273 are each "checks are clean but the proof is stale".
+  - The global cap is 8 in-flight PR proofs and 20 were in flight, so 0 refresh slots were free: "52 blocked, 2 incomplete, 3 pending, 30 refresh-deferred … 0/8 bounded update attempt(s)".
+  - Sweeps triggered by a cancelled or skipped workflow run only `lease_reconcile_pass`, which does nothing without a refresh lease ("no durable refresh owner; no full sweep dispatched"). Only success-triggered sweeps rotate refreshes.
+  - **Seat decision:** no manual update-branch on C19's PRs. That would take slots the cap withholds from 27 other PRs. The sweeper's rotation owns the refresh. Each PR watcher exits on the head change, and the seat re-arms one watcher at the new head.
+- **C19 lane trees (read-only census of `~/lanes/wt/c19-*`, about 09:30Z).**
+  - ubuntu0 (152 entries), ubuntu1 (57), ubuntu3 (155) and m1 hold no C19 tree, so no wave 15 tree remains on them.
+  - ubuntu2 (209 entries) holds two from the 10-17 wave: `c19-w5s-wp31-gates-20261017` and `c19-w5s-wp32-p5p6-20261017`. Directory mtime is 9 days ago and no process names them. The seat did not remove them.
+  - mb did not answer ssh (timeout), so its trees are UNKNOWN.
+  - Free disk: ubuntu2 64G (93% used), ubuntu3 84G (91%), ubuntu0 223G (75%), ubuntu1 594G (55%). ubuntu2's figure fits its `host_disk_below_staging_reserve` refusal (lane M row).
+- **#1899's red rollup is the non-required `shadow-gate` timing out, not a test failure (10:06Z).**
+  - On `94df6a26`, `test` and pytest shards 0–2 passed (34m, 37m, 21m), as did CodeQL and the Analyze jobs. This is D20's fix observed on hosted CI.
+  - `shadow-gate` (rwe-shadow.yml run 41186963305) was cancelled at the job's `timeout-minutes: 45`, 2674 s into "Run repository test gate inside the realized environment". The environment step passed in 29 s, and the log has no FAILED or ERROR line.
+  - rwe-shadow.yml runs on `pull_request` and `workflow_dispatch` only (no `merge_group` trigger) and says of itself that it is never required, so it never enters the merge group. #1899 stayed at queue position 1.
+  - Under master's definition, unchanged since #342 (2026-09-01), shadow-gate cannot pass. In the last 40 runs, every run on that definition was cancelled at 45 m (10-22 ×2, 10-24, 10-25, 10-31). All 24 successes in the last 100 runs came from one branch, draft Mastermind #1836 (`cursor/host-pull-publisher-lifecycle-83dd`). That branch raises the timeout to 150 and adds a setup-node step; its test step runs 75–115 m.
+  - The first #1899 watcher exited on that rollup. It was replaced by one watcher that tracks the queue entry, not the PR rollup.
+
+**W15 lanes** (packets and returns under `~/.local/state/mastermind/c19-lanes/w15-20261031/`; read-only packets frozen at Macro `1c858789`)
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| A | EDGAR acceptance-clock census | glm-5.3-flash, ubuntu3 | ACCEPT. The collector stores the submissions-JSON `acceptanceDateTime` under an ISO-UTC label, but that value reads LATER than true UTC by the New York offset (4 h EDT, 5 h EST; prereg §10 A2, correction `U = J + utcoffset_ET(J)`, recorded above in the A2 ruling). Every reader trusts the label and there is no shared normalizer → U2 |
+| B | event-workspace chain/source_clock census | minimax, ubuntu0 | ACCEPT. The chain link is computed at cycle start while the CAS checks at publish (so a generation can be skipped); no source_clock regression guard or retention; the fiscal-period tie-break causes the clock spike → U1 (b), (c) |
+| C | non-AAPL financial leg (G3/WP17) census | minimax, ubuntu2 | ACCEPT. `financial_facts` is AAPL-only at BASE; no non-AAPL ffprods generation → U3 |
+| D | capital-structure leg (G8/G1/WP13/WP28) census | minimax, m1 | ACCEPT. The leg is a hardcoded `held_unavailable`; D4: production callers use the lookahead-permitting maturity extractor → U5 |
+| E/E2 | hygiene census | minimax, ubuntu3 (E burned rc=75) | ACCEPT. E1 → WP26 build; E2 retraction (below); E4, E5, E7 closed at BASE |
+| F | independent review of Macro #9569 | glm-5.3, ubuntu2 | INVALID AS A REVIEW. Quarantine blocked the diff, and a capability gap is not a finding. Its static constraints were kept |
+| F2 | the same review, diff inline | glm-5.3, ubuntu2 | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (3 advisory notes, not repaired) |
+| H, H2 | WP26 build | bailian qwen3.8-flash, ubuntu2 | DEAD rc=1, both wrapper-inferred 429 (bailian outage) |
+| H3 | WP26 build | glm-5.3-flash | ECONOMIC_POLICY_REFUSED: `ROUTINE` is not a class token (valid: C0_MECHANICAL, C1_ROUTINE_BOUNDED, C2_COMPLEX_BOUNDED, C3_FRONTIER_JUDGMENT) |
+| H4 | WP26 build, hand-minted tree | glm-5.3-flash, ubuntu2 | NO DELIVERABLE. Quarantined; Step 0 was honored (no edit, PLATFORM_FAILURE) |
+| H5 | WP26 build, guarded mint | glm-5.3-flash, ubuntu2 | NOT STARTED: rc=78. Two same-class platform failures ban a third relaunch (L.4) |
+| H (seat) | WP26 build under L.7 | SSD worktree | Macro #10259 at `8211c702` |
+| I | WP27 deliver-or-reject census | glm-5.3-flash, ubuntu3 | ACCEPT. DEFER with three reopen prerequisites (D16) |
+| J | independent review of Macro #10259 | glm-5.3, ubuntu3 | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES |
+| U5 (seat) | WP28 CS-leg pins under L.7 | SSD worktree | Macro #10273 at `e84e06de` |
+| K | independent review of Macro #10273 | glm-5.3, ubuntu3 | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (four notes; the seat closed the `legacy-jobs.yml` search gap) |
+| L | independent review of Macro #10074 at `1627e6d4`, diff inline | glm-5.3, ubuntu3 | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (L1–L7 PASS, four notes; the seat opened the cited lines and closed two search gaps) |
+| G (seat) | WP31 final-failure counter + `not_evaluable_detail` (counts only), plus #10074 notes 1–3, under L.7 while guarded mints are down | SSD worktree | Macro #10284 at `f478e8ee`; 223 passed on 3.12 |
+| M | independent review of Macro #10284 at `f478e8ee`, diff inline | glm-5.3, ubuntu3. Admission was refused first on ubuntu3 and ubuntu0 (`host_temperature_at_or_above_limit`) and on ubuntu2 (`host_disk_below_staging_reserve`), rc=75 each; launched at 08:37Z only after `pool hosts glm` reported ubuntu3 eligible (run `c19-w15-m4-review-10284-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (M1–M6 PASS). The seat closed M's two gaps, fixed notes 1–2 in `59425290` (tests only) and accepted note 3. Review comment 6541371627; labeled `merge-on-green` |
+| N | independent review of Mastermind #1899 (pytest pin) at `94df6a26`, read-only | glm-5.3, ubuntu0, launched 09:05Z after `pool hosts glm` reported it ELIGIBLE (run `c19-w15-n-review-mm1899-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (N1–N6 PASS). N matched each of the four FAILED tests' fakes to its CI error; traced the four-state `State` undo to the second delete; found `ci.yml:79` the only unpinned install; confirmed the lock diffs are header-only; found every `pyproject.toml` reader among those the author ran. The seat re-read all seven cited lines and checked that the sha256 matches both headers. Note 1 (the five tests red again once unpinned) accepted as owner debt. Note 2 (the Linux lock was re-verified on Darwin) accepted as stated. Note 3 (`<9.2` admits 9.2.0rc1) refuted: PEP 440 excludes pre-releases of V from `<V`, and `packaging` rejects 9.2.0rc1 even with `prereleases=True`. Review comment 6541579892; at review time (queue entry first read at 10:09Z) auto-merge enabled and one GraphQL watcher on the queue; superseded by D20 (merged 10:23:46Z) |
+| U8·U2 | design packet for one shared EDGAR acceptance clock (prereg §10 A2): helper contract with caller-declared provenance, evaluator parity test, per-reader impact table, the 13F late-roll window, the docstring relabel text, and a phased plan whose last phase alone stores true UTC (paired with removing the evaluator correction under a prereg amendment); read-only | glm-5.3, ubuntu0, detached clean tree at `66a071645251`, launched 10:21Z (run `c19-w15-u2-design-20261031`) | RUNNING |
+| U8·U5 | design packet for the capital-structure leg's release, for the CS-V2 owner: join key through sanctioned readers only (no bridge module, D15), the full #1258 F4 hold conditions, the D4 PIT-ladder question, which #10273 pins change at release, and a release outline; read-only, C19 builds none of it | glm-5.3. ubuntu1 refused admission (rc=75, `host_temperature_at_or_above_limit`, run `c19-w15-u5-design-20261031`); relaunched at 10:21Z on ubuntu2 after `pool hosts glm` reported it eligible, detached clean tree at `66a071645251` (run `c19-w15-u5b-design-20261031`) | RUNNING |
+
+**DECIDED**
+- **D12. Adopt Mastermind #1246 and carry it to merged.** This supersedes D1's hold on that PR under #1842: it has had no writer since 2026-10-04. Its bytes are unchanged. A non-authoring check found no credential-shaped strings, standard-library-only probes, and `testpaths=["tests"]`. Adoption comment 6539963244; marked ready and queued at 06:16Z.
+  - **Correction, seat error.** The seat's watcher for this PR was dead from the start. It asked `gh pr view` for `mergeQueueEntry`, which this `gh` does not offer as a JSON field, and `2>/dev/null || continue` hid the error, so it printed nothing for over two hours. A GraphQL read at 08:38Z showed OPEN, not merged, `mergeQueueEntry` null, head `90b7b32f`, check rollup SUCCESS: the PR is not in the queue. The watcher is stopped. The other PR watchers do not use that field.
+  - **Why #1246 left the queue.** Its queue timeline records `failed_checks`. The merge group failed on five tests that fail on every Mastermind PR and merge group since about 06:40Z, and none of them is in #1246's bytes. Cause and fix: D20. #1246 was re-queued at 10:29:11Z after #1899 merged (GraphQL readback: QUEUED, position 2, head `90b7b32f`), with one GraphQL watcher that prints its read errors.
+- **D13. Adopt Macro #9569** (the publication-seam copy says account-wide, not company-specific). It had no writer since 10-18 and no hold. F2 is the independent review. Base-synced through the update-branch API (head `b6735f97`); comment 6540190881. The sweeper owns the merge. C19 never sets or unsets `MACRO_INTEGRATED_ANSWER_ENABLED`.
+  - **Gap the seat closed.** The adoption comment said the sweeper owned the merge, but `merge-on-green` was never applied: the timeline showed only `ready_for_review` at 06:40:22Z, and the watcher read `labels=[]` with checks concluded at 07:55Z. The seat applied the label at about 08:10Z and read it back at head `b6735f97`.
+- **D14. WP26 zero-stock guard: Macro #10259.**
+  - A `*_stocks` series with an exact zero at or before the cutoff is refused in the pure owner `engine/commodity_supply_context.py:build_physical_context`, with the new state `invalid_zero_stock`; negatives keep `invalid_negative_stock`. `scripts/build_commodities.py` is untouched (#10086).
+  - This takes over the wave-3 routing of WP26 to the #8125 owner (2026-10-12, recorded near the top of this file; comment 6118319139), because #8125 is a draft idle since 10-12. A note goes on #8125 at merge.
+  - J accepted. The seat closed J's search gap: the tokens appear only in the engine and its tests, there are two callers, and a zero probe over the five tracked `data/eia/*_stocks.parquet` found no row ≤ 0, so the guard darkens no live series today.
+  - Seat comment 6540767505; labeled `merge-on-green`.
+- **D15. WP28 CS-leg qualification pins: Macro #10273.**
+  - Offline pins cover:
+    - the spine's `issuer:<CIK10>` form;
+    - the manifest's `sec:cik:<CIK10>` form, including the refusal `issuer_id is detached`;
+    - both forms joining through `company_id_for_cik` once stripped;
+    - the resolver refusing either prefixed form;
+    - the leg's zero-arg `held_unavailable` hold.
+  - New `gate: code` job `c19-wp28-cs-leg-qualification`; the existing CS job is `gate: data` and never runs on a PR. TRIGGER GAP 0.
+  - 11 passed on 3.12.13; the mutation table is on the PR.
+  - D8's `issuer:`→`ISS:` bridge module is WITHDRAWN. Main already resolves CIK to issuer through `build_security_master.load_cik_map`, `theme_graph/identity_resolution.py` and `company_intelligence/identity.py:company_id_for_cik`, so a bridge would be a second identity plane.
+  - K accepted (seat comment 6540943575) and labeled `merge-on-green`. Notes 2 and 4 are obligations on the CS release PR. Note 1 goes to the CI owner if the depth-1 trigger-closure gate ever widens.
+- **D16. WP27 stays DEFERRED (R-WP27).** Lane I names the reopen prerequisites:
+  1. a disclosure-supported mapping from issuer to refining capacity;
+  2. issuer throughput-KPI extraction (zero hits today; XBRL has no refinery-capacity concept);
+  3. a cadence bridge from weekly EIA data to quarterly disclosures (EIA's annual capacity report would be a new gated source).
+
+  No build.
+- **D17. Read 2 was a §5 descriptive monitoring read, not an adjudicating look. No look was spent.**
+  - Under prereg §5, Look 1 is the first read at which the minimum (at least 40 common-support episodes and 12 clusters) is met, and Look 2 comes at 80. Every other read is descriptive monitoring. Read 2 had `eligible=0`, and its verdict is `MONITORING` / `monitoring_descriptive_only`.
+  - Read 2's output carries nothing derived from a label:
+    - `scripts/c19_wp31_stats.py:329-345` `common_support()` keeps only ELIGIBLE episodes with a label in (1, −1).
+    - `build_report` (:732-812) computes every label-derived field (n_common_support, Δ, interval, discordant pairs, per-arm emit/abstain) over ELIGIBLE episodes only.
+    - `not_evaluable` is a map from reason to count.
+  - §6 permits label reads only by the evaluator itself, and read 2 was the evaluator.
+  - **Withdrawn by name: the draft D17 that preceded this one.** It said "Read 2 is reconciled as the r15 label look, voided by a reader failure". Its precondition was that the seat cite an evaluator line that skips the label read for a `not_evaluable` episode. That premise fails as worded: step 5 reads labels for every episode (`scripts/c19_wp31_runner.py:132-159`) before step 7 assigns `pit_unrecoverable` (:182-183; `scripts/c19_wp31_sources.py:988-990`). So `label_pending=0` cannot show that no label was read. It was also the wrong test, because §6 permits the evaluator's own reads. The draft never left the seat's scratch; it is named here so no successor relies on it.
+  - **Consequence.** Read 2b (one evaluator run, counts only, the read 1 / 1b precedent) is permitted after G lands, so the final-failure counter can show whether the reader failed. It is again a monitoring read. It does not breach do_not_redo ("never run the evaluator … more than once per look"), because no look exists below the §5 thresholds.
+- **D18. Macro #10074 (reader retry) merged by seat ratification.**
+  - The sweeper's `merge-blocked` label was its own refusal 6347003895 against the older head `6104b24d`, and the sweeper never re-evaluated after the base-sync. Eight watcher reads from 06:23Z to 08:08Z showed the same state, so the watcher had nothing to wait for (L.4).
+  - Lane L independently reviewed head `1627e6d4` and returned APPROVE_WITH_NOTES, L1–L7 PASS. The seat ratified in comment 6541126760 and merged on 2026-10-31T08:25:30Z as `51404df7`, the same path as #7132 and #7337. Both labels stayed on the PR; `merge-blocked` was never removed.
+  - Land check: `origin/main` at `51404df7` contains the head's three files with blobs identical to `1627e6d4`.
+  - L's notes 1–3 are fixed in G. Note 4 (deterministic integrity refusals also get retried, costing wall-clock while the result still fails closed) stands as accepted.
+- **D19. G is Macro #10284, not a frozen lane packet.** Guarded mints are down and hand-minted trees cannot run pytest, so the seat built G under L.7 from fresh main `51404df7`.
+  - `not_evaluable_detail` counts NOT_EVALUABLE episodes by (`not_evaluable_reason`, `s.reason`) and is written to the report and the summary. It reads no other episode field, and classification is unchanged.
+  - The new counter `revisions_reader_final_failures` closes the gap that left read 2's 3/2 ambiguous.
+  - The tests pass on 3.12 (223), and a mutation check turned the production wiring test red. Because the seat authored it, G carries no `merge-on-green` until lane M's independent review is accepted.
+  - The seat's own reading found that every S-leg `reason` in `scripts/c19_wp31_sources.py` is a fixed token, so the detail map should carry no value. That reading is not independent; M1 tests it separately.
+  - M accepted (review 6541371627). Notes 1–2 were fixed in `59425290` (tests only; the scripts are byte-identical to `f478e8ee`), each mutation-checked; note 3 accepted. 224 passed. Labeled `merge-on-green` at `59425290`.
+- **D20. Mastermind's base-wide red is pytest 9.2.0; fix is Mastermind #1899, a pin.**
+  - Hosted CI installs `pip install -e ".[dev]"` with no lock (`.github/workflows/ci.yml:79`). The dev extra said `pytest>=8,<10`, so CI picked up pytest 9.2.0, released after the last green master push (`bb85b429f`). Between the green and red runs only pytest (9.1.1 → 9.2.0) and sse-starlette (3.5.1 → 3.6.0) changed.
+  - Two pytest 9.2.0 changes explain all five tests:
+    - `FDCapture.snap()` now calls `os.fstat()` while a test's `os.fstat` patch is still active (four FAILED tests);
+    - `monkeypatch.setattr()` now takes the old value from `target.__dict__`, and starlette `State` keeps values in `_state`, so repeated `raising=False` sets undo into a second delete (`KeyError: 'scheduler'` in the health test's teardown).
+  - The seat reproduced both on CPython 3.12: the four non-vendor tests fail on 9.2.0 and pass on 9.1.1; a standalone `State` test errors on 9.2.0 and passes on 9.1.1.
+  - #1899 changes the dev extra to `pytest>=8,<9.2` and rewrites only the two gate-lock headers (new pyproject sha256; pip-tools `--reuse-hashes` reproduced every pin and hash). The locks already pin `pytest==9.1.1`. 680 passed, 4 skipped on 9.1.1.
+  - **Why a pin, not test fixes.** The five tests belong to four other owners (health readiness, CAP-S1 canary, Executive autonomy control, H1 input wrapper), and every PR in the repo is blocked until the base is green. The pin also aligns hosted CI with what the gate locks already pin. The test repairs are a follow-up for their owners, after which the bound can widen.
+  - The seat authored #1899, so it took no auto-merge until an independent review was accepted. Lane N (lanes table) approved with notes and the seat accepted it. Auto-merge was then enabled at `94df6a26` (comment 6541579892). It merged at 10:23:46Z as `ed42f8605c71`.
+  - On `94df6a26`, hosted `test` and pytest shards 0–2 passed (FACTS, shadow-gate).
+  - **Land check (10:26Z), merge groups green, master push not yet read.**
+    - Merge-group CI run 41189563397 on `ed42f8605c71` passed. Its three shard logs install pytest 9.1.1 and hold no `FAILED tests/` or `ERROR tests/` line.
+    - The modules holding the five tests finished every case they started: `test_health_readiness` 11/11, `test_cap_s1_mastermind_operator_canary` 306/306, `test_h1_input_wrapper` 61/61, `test_executive_autonomy_control` 385/385. These logs print case counts through `CI_MODULE`, with no per-test pass line, so the pass claim rests on those counts, the shard conclusions and the absent failure lines.
+    - The next merge group (`dcd79fc4`, #1868) also passed (run 41189993962).
+    - The master push run on `ed42f8605c71` (41192578900) was cancelled, superseded by #1868's push. The master push run on `dcd79fc4` (41192579625) was still running at 10:28Z, so no master push run has concluded green yet.
+- **Retraction, by name (E2).** The r15-era claim "trial-budgets lint disabled at BASE" is withdrawn. The lint runs, but only via `run_ci_pack.py --gate data` in the data-health lane, never on a PR. That residual goes to the CI owner.
+
+**UPGRADE PLAN** (proposals; no new prereg, no budget enlargement)
+- **U1. WP31 reader observability.**
+  - G (Macro #10284, D19): a final-failure counter plus per-reason `not_evaluable_detail`, counts only, with classification unchanged.
+  - Then, as their own frozen packets:
+    - (a) a longer reader backoff;
+    - (b) a source_clock regression guard (warn first) plus B's fiscal-period tie-break fix;
+    - (c) B's chain-link CAS gap.
+  - (b) and (c) touch the event-workspace publisher, which is not C19's, so they go to its owner as proposals. Any S-leg semantic change needs a prereg amendment.
+- **U2. EDGAR acceptance clock.** A docstring-only relabel now. A normalizer that converts stored values would move WP31 cutoffs, so it is a design item.
+- **U3. Non-AAPL financial leg.** The composer side only; the SNOW FIF publish is a production effect outside C19's grant.
+- **U4.** #9569 carried to merged (D13).
+- **U5.** WP28 pins (D15). Wiring the leg waits for the #1258 F4 / CS-V2 W4+W6 release.
+- **U6.** WP26 (D14). Production proof: the next daily build's commodities payload keeps `sources.crude_stocks.state == "available"`. If historical zeros in the live EIA store invalidate a series, that is recorded with its scope, not reverted silently.
+- **U7.** r15 OPEN items are reclassified under #1842 (below). An item waiting only on an absent owner becomes seat work. An item held by a real authority (CS-V2 W4/W6, prereg) stays held under its key.
+- **U8.** GLM design lanes for U2 and U5, one frozen packet each, after G.
+  - **Launched before G, by seat decision (10:21Z).** Both lanes are read-only and frozen against main `66a071645251`. Neither packet reads or depends on G's files (#10284 changes only the WP31 reader's failure counter). G's merge waits on the sweeper, not on the seat, so holding the lanes would have bought nothing. Rows U8·U2 and U8·U5 in the lanes table. Each return is judged by artifact: the seat re-opens every cited line and runs the two lens checks before ACCEPT.
+
+**OPEN** (owner → next action)
+- **Macro #10284** (G), seat → lane M accepted; labeled. The watcher owns the wait. After merge: land-check against fresh main, re-read the AAPL headers, then read 2b (D17).
+- **Agent OS WS-COMMISSION-19**, seat → a separate small Macro PR. The record on main still calls the next run "the label look"; D17 corrects that.
+- **Macro #10259, #10273, #9569**, sweeper → refresh, then merge on concluded green, under the cap (FACTS, sweeper). Seat → re-arm one watcher at each new head; land-check each merge. Then for #10259: the #8125 note and the U6 production proof.
+- **Mastermind #1899**, MERGED as `ed42f8605c71` (D20). Seat → read master push run 41192579625 once it concludes. Merge groups are green; no master push run has concluded yet.
+- **Mastermind #1246**, merge queue → merge on concluded green. Re-queued at 10:29:11Z, position 2 (D12, D20). One GraphQL watcher tracks the queue entry.
+- **Read 2b**, seat → after G lands (D17): one evaluator run, counts only, a §5 monitoring read.
+- **Findings delivered with this cycle, owner → action:**
+  - Fabric owner: the donor allowlist on all four hosts; read-only lanes lose Bash in hand-minted trees; qwen_exec infers 429 from the wrapper; auto NO_HOST rc=3. Separately, three admission refusals at 08:2x–08:33Z and `pool hosts glm` = NONE at 08:3xZ: ubuntu0 `cpu_tctl` 93.9°C (limit 85), ubuntu3 88.5°C (limit 80), ubuntu2 disk 63.1 GB (reserve 75), ubuntu1 load 21.3 (gate 10). m1 and ubuntu4 report `explicit-canary-only`, and this seat did not use them to get around the guards. At 08:37Z ubuntu3 read 43°C and cleared its thermal-recovery wait, so it qualified without any guard being touched. Whether this NONE shares a cause with the earlier NO_HOST is not established.
+  - Host owner: the ubuntu0 donor (`~/lanes/repos/macro`) printed a stale `.git/gc.log` warning and repeated `Could not read c95397e4…` errors during `fetch` at 08:3xZ. The fetch and the checkout at `f478e8ee` still succeeded. The seat did not touch the shared store.
+  - CS owner: `engine.capital_structure` imports only on 3.12.
+  - CI owner: the CS job is `gate: data`; a main check-definition change (#10268's `legacy-jobs.yml` edit) stales every armed proof, and under the saturated cap that defers every refresh (FACTS, sweeper); the trial-budgets lint runs only in data-health.
+  - Test owners (health readiness, CAP-S1 canary, Executive autonomy control, H1 input wrapper) → make the five tests 9.2-safe: patch the module-local `fstat` reference instead of global `os.fstat`, and build a fresh `State`/app per `health_client` call. Then widen the bound in `pyproject.toml` (D20).
+  - RWE shadow owner: on master's rwe-shadow.yml (`timeout-minutes: 45`), `shadow-gate` is cancelled on every PR that touches `pyproject.toml`, `requirements/gate-*.lock`, `scripts/rwe_env.py` or the workflow, so it reports red on any dependency PR without ever reaching a verdict (FACTS). The only raise, to 150, is inside draft #1836 alongside an unrelated fabric change. Land the timeout on its own, or shard the shadow test step. C19 does not edit the workflow.
+  - Fabric owner (append): ubuntu2 holds two stale 10-17 C19 lane trees and runs at 93% disk (FACTS, lane trees); the seat did not read the staging-reserve threshold and did not remove the trees.
+  - Debt-maturity owner: D4.
+  - Composer/forensics owner: record the consumed `snapshot_id` (E3).
+- **Unchanged from r15:**
+  - WP32 P3 free-tier 403 (Chairman or composer owner; a free-tier session);
+  - cold-compose 524 and `x-consumed-receipts` at the edge (composer/edge owner, r14 D7);
+  - P4–P7;
+  - the K1 Q2/Q3 residuals;
+  - WP18 UI (R-WP18);
+  - G10/G11;
+  - Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r16 through the Mastermind merge queue, and post a pointer on #1243.
+2. Carry #1246 through the queue, and read master push run 41192579625 once it concludes.
+3. The PR watchers own the waits on #10284, #10259, #9569 and #10273. Each merge gets a land-check against fresh main.
+4. Read 2b (D17) after G lands: one evaluator run, counts only.
+5. Judge the U8 lanes by artifact when they deliver, and record each verdict.
+6. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING. MERGED for Macro #10074 and Mastermind #1899 (`ed42f8605c71`, 10:23:46Z, D20), with no production proof beyond each land check. PROVEN_OUTCOME for the W15 census wave and the independent reviews. No W15 build has reached PRODUCTION_PROOF.
+
+#### r17 cycle 2026-10-31 13:2xZ (seat dd5239a9, Opus 5.5) — wave 15 continued: r16 landed after an independent lane caught an inverted A2 direction; #1246 merged behind the #1899 pin; the seat tested prereg §10 A2's premise and refuted it (the submissions-JSON clock is true UTC), so Macro #10295 (built on A2) is closed and §10 A5 (Macro #10302) withdraws A2 from 2026-11-16; U2 and U5 design lanes judged; clock-reader census V2 judged; every place the seat repeated A2 as fact is retracted by name
+
+**FACTS — merges and CI**
+- **Mastermind #1898 (ledger r16)** merged 2026-10-31T12:27:47Z as `7e7beb3fa92f` (head `c9d30d7d`). Lane O returned REQUEST_CHANGES: r16 stated A2's direction backwards and carried one stale line. Both were repaired at `c9d30d7d`, and lane P re-reviewed the changed lines only: APPROVE. The master push run on `7e7beb3f` (41201211608) concluded success. #1243 pointer: comment 6543457854.
+  - **Seat error, corrected.** The seat enabled auto-merge on #1898 before any independent review, against its own D20 practice. It disarmed it, and re-queued only after P's approval and a green required `test` check.
+- **Mastermind #1246** merged 11:14:52Z through the merge queue as `840377bc8bda` (17 files). Its diff against head `90b7b32f` is empty, and the merge-group runs 41192950949 and 41192950846 passed. The master push run on `840377bc8bda` (41196055143) concluded success, which closes r16's open read on master. The earlier master push runs on `ed42f860`, `dcd79fc4` and `0341a089` were cancelled by later pushes and prove nothing either way.
+
+**FACTS — the EDGAR acceptance clock: A2's premise is false**
+- **What A2 assumed.** The submissions-JSON `acceptanceDateTime` J reads later than true UTC by the New York offset. Its correction `U = J + utcoffset_ET(J)` (the offset is −4 h or −5 h) subtracts 4–5 h.
+- **What the seat observed.** Live SEC reads, non-universe filers, headers only. Each JSON value was compared with the filing's SGML `<ACCEPTANCE-DATETIME>` read as New York time:
+  - A2's own four cited filings (the r11 receipts at lines 592–595 of this file), read live on 2026-10-31: 4 of 4 agree.
+  - 9 filers, 5 form types (10-K, 10-Q, 13F-HR, 4, 8-K), 2015–2026, EST and EDT: 117 of 117. Two pre-2015 index-headers returned 404 and were excluded.
+  - A sample of the stored 8-K capture of 2026-10-04: 76 of 76.
+  - MSFT `0001193125-26-027198`, the instant of A2's EST pin, reads `2026-01-28T21:04:38Z` both stored and live (header `20260128160438`, 16:04:38 EST). A2 pinned `2026-01-29T02:04:38Z`, which is 5 h later.
+- **Vintage.** The store's 2026-07-05 capture held New York wall time labelled `Z` for 27 non-universe issuers, which reads EARLIER than true UTC, the opposite of A2. The 2026-10-04 capture replaced them with true UTC (33 of 33 sampled). No capture or live read has shown A2's direction. What produced A2's readings is not established.
+- **Rule-level effect.** Applied to a value that is already true UTC, A2's correction puts WP31's `t_rel` 4–5 h early. `C(e)`, the cost exit, the K window and the A0 filter can each land one session early. The label is unchanged. The knowledge record is `DSC:EDGAR-SUBMISSIONS-ACCEPTANCE-DATETIME-IS-TRUE-UTC` (Macro #10297).
+- **A2's DST behaviour** (minute sweep of the frozen evaluator arithmetic). It returns None for J in 2026-03-08 07:00–10:59Z and 2026-11-01 06:00–10:59Z. Under the offset-at-U model, 60 true instants (2026-03-08 06:00–06:59Z) resolve exactly +1 h and none resolve wrong at fall-back. Every one of these lies outside EDGAR filing hours (17 CFR 232.12(c): 06:00–22:00 ET on business days), so WP31 is unaffected. The prereg's "the hour around a daylight-saving change" understates the windows; any correction is a new §10 amendment.
+- **Prereg line 333**, inside A2's body, still says A0 history reads 4–5 h late (lane T2 note). §10 is append-only, so that text stays. A5's "A0 history" paragraph (prereg :439-440 at `1079448b`) withdraws the statement outright, not only from E, once A5 merges. The A0 rule itself (read as given) never changed.
+- **#1243 report:** comment 6543409988 (12:33:29Z).
+
+**FACTS — §10 A5 (Macro #10302) and the withdrawn #10295**
+- **A5** reads J as given (true UTC) for J ≥ E = 2026-11-16T00:00:00Z. J < E keeps A2, so nothing already read changes. A5 is void if it merges at or after E. The switch is `A5_EFFECTIVE` at `scripts/c19_wp31_sources.py:93`, and the branch is at :282, reached from the production calls at :500 and :1237.
+- **Review chain.**
+  - Lane S was refused on ubuntu1 temperature (rc=75).
+  - Lane S2 (ubuntu0) returned APPROVE_WITH_NOTES at `0acca70e`. Its three notes (the cost exit is §5, the clock docstring, the E-boundary pins) were repaired at `1079448b`.
+  - Lanes S3 and T were refused on ubuntu1 temperature.
+  - Lane S4 (ubuntu0) re-reviewed the changed lines at `1079448b`: APPROVE, S3.1–S3.7 PASS. (The return's header and sentinel say "S3" because the packet was reused from the refused run.)
+  - Review record: comment 6543581504 (12:50:30Z). Labeled `merge-on-green`. The watcher read at 13:05Z: OPEN, pending 0, no red. Not merged.
+- **S4's two notes, accepted without change:**
+  - The unchanged sentence near `scripts/c19_wp31_sources.py:1237` calls the fail-closed path a row drop. The code actually returns `pit_unrecoverable` / `q_release_time_unresolved` (:1244-1247). This is docstring debt, and it rides the next §10 amendment that touches the file.
+  - The exactly-E test omits its sibling's `status == ELIGIBLE` check. That is immaterial.
+- **Macro #10295** (U2 phase 1: a shared `lib/edgar_clock.py` reproducing A2, collector docstring relabels and a 13F "KNOWN DEFECT" comment) was built on A2's premise. It was closed unmerged at 12:16:54Z with a retraction comment. Lane Q2's approval of it is superseded.
+
+**FACTS — clock-reader census V2** (`$P/out/V.txt`, Macro tree `51934abe0f75`). Coverage: the 39 assigned files were read. The search found 40 more: one display-only code file (`templates/market_memory_history.js:85`), 5 JSON/CSV artifacts (not opened) and 34 docs. The seat re-opened every flagged line at `51934abe` and ruled as follows:
+- **`collectors/edgar_13f.py:52-80` (flagged F1): no defect on current inputs.**
+  - Values ending `Z` take the aware branch and are converted to New York time before the 4 pm boundary.
+  - 14-digit numeric values are read as Eastern wall time, which is correct for the SGML form.
+  - Only a zone-less ISO string would be misread, and no in-repo writer produces one (:320 and :331 store the JSON value as-is).
+  - Its comment at :70-72 already says the submissions API emits UTC (`Z`). This reader treated the JSON as true UTC before A2, which corroborates A5.
+- **WP31 (`scripts/c19_wp31_sources.py:272-278`, `:491-497`, `:1229-1233`, flagged F1).** This is A2 as written, and A5 governs J ≥ E. The A0 leg (:897-899, :921-923, :980) and the A0 reader (:1506-1522) read raw values as UTC, which is correct under A5.
+- **The `fold=0` New York attach (flagged F2):** `collectors/sec_capital_structure.py:952-954`, `engine/institutional_census/sec_sources.py:472-474` and `scripts/research/dislocation_p0_a1_lib.py:572-574` and `:586-588`. This is moot. The repeated fall-back hour (Sunday 01:00–01:59 ET) is outside EDGAR filing hours. Note only.
+- **`engine/group_earnings.py:411-416` (flagged F3): disclosed.** A UTC date roll after 20:00 ET maps the filing to the next session, which is right for an after-hours print. The 14:30-UTC cut and its winter-intraday error are documented at :53-58 (`PREOPEN_CUT_UTC_MINUTES`, :158, :345).
+- **`research/prophet_us_audit/earnings_ignition_measurement.py:305-310` and `:336-348` (flagged F3): disclosed.** This research audit applies a fixed −4 h shift, which `_classify_window_true_et` quantifies. Note only.
+- **`engine/company_intelligence/pg_profile.py` `_admitted_fiscal_scope` (:2475-2502, flagged F3): a real edge, and it fails closed in the case the seat could construct.**
+  - `acceptance_clock` is a UTC instant (`_canonical_clock`, :2286-2293, :2319). The scope test compares quarter ends with its UTC date (`current_end < acceptance_clock.date()`, :2492).
+  - So a filing accepted between 20:00 and 22:00 EDT (19:00–22:00 EST) on a fiscal-quarter-end day admits the quarter that ended that day.
+  - A release naming the prior quarter then gets `document_period_verdict` = `"foreign"` (:1473-1500), and :2525 refuses with `document_period_not_admitted`.
+  - Only a release with no period signal at all (verdict None) would bind to the wrong quarter. `asof` (:2554) also takes the UTC date.
+  - An earnings release on the evening of the issuer's own fiscal-quarter end is unusual (unverified).
+  - Routed (OPEN). C19 does not edit company-intelligence code.
+- **V2 GAP 2:** `engine/institutional_census/sec_sources.py:1119` takes the Atom `<updated>` value as `accepted_at`. Whether `<updated>` equals the acceptance instant is UNKNOWN. Routed (OPEN).
+- **V2's other gaps stand as stated:** callers outside the 39 files were not chased; the naive branch at `catalyst_edgar_live.py:191` is untested; the 5 artifacts were not opened; store-form assumptions were not checked against stored bytes. None changes a WP31 rule.
+
+**FACTS — fleet and lanes**
+- **Four rc=75 temperature refusals on ubuntu1** (S, S3, T, U5) each came right after `pool hosts glm` reported the host ELIGIBLE. The picker reads cached telemetry, and admission re-reads the CPU sensor at launch (S3 saw load1 3.636). A refused run id is burned, and each was re-placed under a new id.
+- **Lane Q's full 13 GB Macro checkout on ubuntu2** tripped `host_disk_below_staging_reserve` (rc=75). Lane trees are now minted sparse (excluding `/data/`, `/site/`, `/mockups/` and `/verify_shots/`, about 1.1 GB).
+- **Hand-minted lane trees are quarantined.** The lane gets no Bash beyond simple `ls`/`grep` and no git, so every review packet carries its diff inline, and each lane's GAPS records the limit.
+- **Lane V** was refused before start (ECONOMIC_POLICY): `C1` is not a complexity token. V2 ran with `C1_ROUTINE_BOUNDED`.
+- **C19 lane trees at 13:2xZ:**
+  - ubuntu0, ubuntu1 and ubuntu3 hold none; the seat removed `c19-w15-v` on ubuntu0 after checking it was clean and no process named it.
+  - ubuntu2 still holds the two 10-17 `c19-w5s-*` trees. They are untouched, pending a decision.
+
+**W15 lanes, continued** (same directory; the U8 rows replace r16's RUNNING rows)
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| U8·U2 | U2 design packet (r16 row) | glm-5.3, ubuntu0, run `c19-w15-u2-design-20261031` | DELIVERED, DESIGN_READY (U2.txt:168). SUPERSEDED IN SUBSTANCE: its helper, its relabels and its phased plan rest on A2's premise (D23) |
+| U8·U5 | U5 design packet (r16 row) | glm-5.3, ubuntu2 (run `c19-w15-u5b-design-20261031`) after the ubuntu1 refusal | DELIVERED, DESIGN_READY (U5.txt:254). ACCEPTED AS A DESIGN INPUT with six corrections (D22) |
+| O | independent review of #1898 (r16) | glm-5.3, ubuntu2, 10:34Z (`c19-w15-o-review-r16-20261031`) | ACCEPT AS INDEPENDENT REVIEW, REQUEST_CHANGES (O.txt:50): A2's direction stated backwards, one stale line. Repaired at `c9d30d7d` |
+| P | changed-lines re-review of #1898 at `c9d30d7d` | glm-5.3, ubuntu2, 10:51Z (`c19-w15-p-rereview-r16-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (P.txt:72) |
+| Q | independent review of Macro #10295 | glm-5.3, ubuntu2, 11:14Z, full checkout | NOT STARTED: rc=75 `host_disk_below_staging_reserve` |
+| Q2 | the same review, sparse tree | glm-5.3, ubuntu2, 11:15Z (`c19-w15-q2-review-u2p1-20261031`) | APPROVE_WITH_NOTES (Q2.txt:78). SUPERSEDED: #10295 closed unmerged |
+| R | independent review of Macro #10297 (Agent OS records) | glm-5.3, ubuntu1, 11:24Z (`c19-w15-r-review-agentos10297-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (R.txt:48). R4 found a dropped routed item (the pre-2015 index-headers 404s), which was restored. A seat over-claim was reworded at `16781cde` |
+| S | independent review of Macro #10302 (A5) | glm-5.3, ubuntu1, 12:06Z | NOT STARTED: rc=75 temperature |
+| S2 | the same review | glm-5.3, ubuntu0, 12:07Z (`c19-w15-s2-review-a5-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES at `0acca70e` (S2.txt:43). Three notes repaired at `1079448b` |
+| S3 | changed-lines re-review of #10302 at `1079448b` | glm-5.3, ubuntu1 | NOT STARTED: rc=75 temperature |
+| T | re-review of #10297 at `16781cde` | glm-5.3, ubuntu1 | NOT STARTED: rc=75 temperature |
+| S4 | changed-lines re-review of #10302 at `1079448b` | glm-5.3, ubuntu0 (`c19-w15-s4-rereview-a5-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (S3.1–S3.7 PASS; two notes, no change) |
+| T2 | re-review of #10297 at `16781cde` | glm-5.3, ubuntu0 (`c19-w15-t2-rereview-agentos10297-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (T1–T9 PASS; two non-blocking notes, no change). Review record: comment 6543621247 |
+| V | census of every EDGAR acceptance-clock reader | glm-5.3-flash, ubuntu0 | NOT STARTED: ECONOMIC_POLICY, `C1` is not a complexity token |
+| V2 | the same census | glm-5.3-flash, ubuntu0, `C1_ROUTINE_BOUNDED`, 12:44Z to 13:05Z (`c19-w15-v2-census-clock-20261031`) | ACCEPT AS CENSUS, with the seat's rulings (FACTS, census V2). USAGE_RECEIPT_MISSING |
+
+**DECIDED**
+- **D21. A2's premise is refuted, and §10 A5 (Macro #10302) withdraws A2's correction for J ≥ 2026-11-16T00:00Z.**
+  - A5 is prospective. J < E keeps A2, so no completed read and no adopted amendment changes.
+  - The seat authored #10302, so it was labeled `merge-on-green` only after S4's accepted changed-lines review.
+  - The sweeper owns the merge. It must land before E, or A5 is void and a successor amendment with a later E is needed.
+  - Nothing in C19 builds a shared reader-side correction. The r11 "upstream clock gap" item is closed: current captures store true UTC under a true UTC label (FACTS, clock).
+- **D22. U5 is accepted as a design input for the CS-V2 owner, with six corrections:**
+  1. `:660-363` is a typo for `:360-363`.
+  2. F4 is located: Mastermind `research/product_intelligence_local_delivery_20261005/03_WORK_PACKAGES.md:65` (opt-in debt/share qualification, default-off financial publication, the W2/W4/W6 holds). This retracts U5's GAP 1 "F4 NOT_LOCATED".
+  3. `:113` "relaxes DEC-MI-BUILDOUT" is tagged (unverified).
+  4. C7 and `:65` "pinned contract": pins 1–4 hold in #10273's code, but #10273 is still open, so the pins are packet-sourced until it merges.
+  5. The CS-leg build stays blocked by the F4 hold, the C1 runner-listener fuse, W4/W6 (todo) and DEC-MI-BUILDOUT. C19 builds none of it.
+  6. Cite `DEC-CS-V2-EVIDENCE-IDENTITY-OCCURRENCE-BYTES`. U5 (`:91-92`, `:113`) and the seat's own packet (`U5.md:35`) cited the superseded `DEC-CS-V2-IDENTITY-DUAL-READ`. That is a seat packet error. This ledger and the Agent OS records do not cite it.
+- **D23. U2 is superseded in substance by A5.** Its design (a shared helper that applies A2, a phased store conversion, and removing the evaluator correction) assumes A2's premise. No part of it is built. V2's census replaces its reader inventory against true UTC.
+- **D24. V2's rulings stand as recorded in FACTS.** Two items are routed, and no C19 code changes.
+- **Retractions, by name (§7.5).** Each statement below treated A2's premise as fact. Each is withdrawn for current behaviour. A2 itself stays adopted for J < E (D21).
+  - Line 586: "The `acceptanceDateTime` clock was wrong (below)."
+  - Lines 591–596: "The submissions-JSON `acceptanceDateTime` J is NOT UTC. It is true UTC + |America/New_York offset| …", with its four receipts and the leak claim. Read live on 2026-10-31, all four filings agree with their SGML headers.
+  - Line 615: A2's correction, as a description of how the clock behaves. It stands as the adopted rule for J < E.
+  - Lines 623–625 (r11 OPEN): the "upstream clock gap" at `collectors/edgar_earnings_8k.py:12`, and "a collector fix must remove the evaluator's A2 correction in the same change". Line 626 (a `prior_filings` source supplies UTC or the raw JSON, never header ET) still holds.
+  - Line 751: the same gap, routed again.
+  - Line 916 (r16 lane A row): "…that value reads LATER than true UTC by the New York offset… correction `U = J + utcoffset_ET(J)`…". Lane A's census of readers stands; its premise does not.
+  - Line 1012 (r16 U2): "A docstring-only relabel now. A normalizer that converts stored values would move WP31 cutoffs, so it is a design item." No relabel is needed: the label is accurate.
+  - Outside this file:
+    - the seat's ruling to build U2 phase 1;
+    - #10295's body, its collector relabels and its 13F "KNOWN DEFECT" comment (never merged; retraction comment on #10295);
+    - `agentos/workstreams/WS-COMMISSION-19-DATA-INTELLIGENCE.md:109` (corrected in #10297).
+- **Retractions of the seat's own provisional U5 judgments.** Provisional corrections 2 (it compared the wrong file) and 3 ("C7 contradicts the join"), the seat's "F4 not located", and the "unverified" marker it put on `:577-581`.
+
+**UPGRADE PLAN**, deltas from r16:
+- U2 is replaced by D21 and D23. The only clock work left is routed (OPEN).
+- U5 is unchanged: the pins are in #10273, and wiring the leg waits for the F4 / CS-V2 W4+W6 release, now with U5's corrected design (D22) as an input.
+- U1, U3, U4, U6 and U7 are unchanged.
+
+**OPEN** (owner → next action)
+- **Macro #10302 (A5)**, sweeper → merge on concluded green before 2026-11-16T00:00Z. One watcher at `1079448b`. Seat → land-check, then a #1243 post.
+  - If it is still unmerged on 2026-11-13, the seat writes a successor amendment with a later E for fresh independent review. It does not merge it by hand.
+- **Macro #10297 (Agent OS records)**, sweeper → merge. One watcher at `16781cde`. This closes r16's Agent OS item.
+- **Macro #10284 (G), #10259, #10273 and #9569**, sweeper → merge on concluded green. #9569's head moved to `2bfcf449` in a sweeper base-sync at 12:55Z (labels `merge-on-green` and `merge-refresh-in-flight`). The PR's own diff is unchanged, so F2's review applies, and one watcher was re-armed at the new head.
+- **Read 2b**, seat → after #10284 lands: re-read the universe headers, then one evaluator run, counts only (D17).
+- **#10259 follow-ups**, seat → after #10259 lands: the #8125 note and the U6 production proof.
+- **Findings routed with this cycle** (owner → action):
+  - **Company-intelligence (pg_profile) owner:** `_admitted_fiscal_scope` and `asof` use the UTC date of the acceptance instant. Compare in America/New_York (FACTS, census V2). The realistic case fails closed; a period-silent release would not.
+  - **Institutional-census owner:** confirm that the Atom `<updated>` value at `sec_sources.py:1119` is the acceptance instant, or source `accepted_at` from the submissions JSON.
+  - **Fabric owner:** `pool hosts` ELIGIBLE does not predict thermal admission on ubuntu1. The picker uses cached telemetry, and admission re-reads the sensor (four refusals).
+  - **WP31 docstring debt:** the row-drop sentence near `c19_wp31_sources.py:1237`. It rides the next §10 amendment that touches the file.
+- **Unchanged from r16:**
+  - the r16 owner findings (fabric, host, CS, CI, test owners, RWE shadow, debt-maturity, composer/forensics);
+  - WP32 P3 free-tier 403;
+  - cold-compose 524 and `x-consumed-receipts`;
+  - P4–P7;
+  - the K1 Q2/Q3 residuals;
+  - WP18 UI;
+  - G10/G11;
+  - Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r17 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. One watcher each owns the waits on Macro #10302, #10297, #10284, #10259, #10273 and #9569. Land-check each merge against fresh main. #10302 must land before 2026-11-16T00:00Z.
+3. Read 2b after #10284 lands; the #8125 note and the U6 proof after #10259 lands.
+4. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING.
+   - MERGED: Mastermind #1898 (`7e7beb3f`) and #1246 (`840377bc8bda`), with master push CI green on both. Neither has production proof beyond its land check.
+   - PROVEN_OUTCOME: the clock refutation (live reads), the U2, U5 and V2 judgments, and the independent reviews.
+   - No W15 build has reached PRODUCTION_PROOF.

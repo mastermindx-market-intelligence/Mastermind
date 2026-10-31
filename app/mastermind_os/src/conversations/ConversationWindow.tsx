@@ -1,3 +1,4 @@
+import { ObservedTranscript } from "./ObservedTranscript";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { observedMissionAssociation } from "../workspace-contract";
 import type { OfficeProjection, SourceClaim } from "../meta-ceo/projection";
@@ -5,6 +6,8 @@ import type { MissionResultRead } from "../host";
 import { normalizeResultSelection, type ResultSelection } from "../result";
 import type { DraftInsertion, DraftSource } from "./drafts";
 import { ResultSourceReader } from "./ResultSourceReader";
+import type { OperationPointer } from "../orchestration/operation-controller";
+import type { QualifiedSessionAnswer } from "../orchestration/executive-session-command-port";
 import "./conversation.css";
 
 type ConversationLocale = "en" | "zh-CN";
@@ -68,10 +71,48 @@ const STATIC_ZH: Record<string, string> = {
 };
 function ui(locale: ConversationLocale, text: string) { return locale === "zh-CN" ? STATIC_ZH[text] ?? text : text; }
 
+/** Local, scope-fenced display of one already-validated original reply.
+ * A browser-local render is NOT a canonical parent-consumed acknowledgement. */
+export interface QualifiedConversationReply {
+  readonly pointer: OperationPointer;
+  readonly answer: QualifiedSessionAnswer;
+}
+
+function QualifiedReplyCard({ value, onCommitted }: {
+  value: QualifiedConversationReply;
+  onCommitted?: (value: QualifiedConversationReply) => void;
+}) {
+  const mounted = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    // The local owner may clear its original pending hint only AFTER React
+    // actually commits this exact answer into a connected conversation view.
+    if (mounted.current?.isConnected &&
+        mounted.current.textContent?.includes(value.answer.text)) {
+      onCommitted?.(value);
+    }
+  }, [value, onCommitted]);
+  return <section ref={mounted} className="conversation-result"
+      aria-label="Qualified original answer" data-operation-key={value.pointer.operationKey}>
+    <div>
+      <p className="conversation-eyebrow">Qualified original reply · READ only</p>
+      <h2>Original answer recovered</h2>
+      <p className="conversation-answer">{value.answer.text}</p>
+      <p className="conversation-history">Next step: {value.answer.nextStep}</p>
+      <p className="conversation-history">Original read reference: <code>{value.answer.readRef}</code></p>
+      <p className="conversation-history">Original-parent acceptance is not established by this local display.</p>
+    </div>
+  </section>;
+}
+
 export interface ConversationWindowProps {
   locale?: ConversationLocale;
   /** Exact parent-created owner-keyed element; this window supplies no command identity. */
   continuation?: ReactNode;
+  historicalAnswers?: ReactNode;
+  /** Exact current-scope native reply, independent of passive transcript data. */
+  qualifiedAnswer?: QualifiedConversationReply | null;
+  /** Called after the actual current React DOM commit, never by a receipt. */
+  onQualifiedAnswerCommitted?: (value: QualifiedConversationReply) => void;
   notesPresentation?: "inline" | "collapsed";
   projection: OfficeProjection;
   /** Shell-controlled, unsent text. Scope and auth isolation live in drafts.ts. */
@@ -170,14 +211,9 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
             <p>{association!.job_id} · {association!.attempt_id}</p>
             <p>{ui(locale, "Session identity has not been supplied for this window.")}</p></details>
           {state === "STALE" && <p className="conversation-history">{ui(locale, "Retained window; current conversation state is not established.")}</p>}
-          <section className="conversation-transcript" aria-label={ui(locale, "Observed responses")}>
-            {document.view.items.map(item => <article key={item.id} className="conversation-response">
-              <p className="conversation-eyebrow">{item.kind === "withheld" ? ui(locale, "Content withheld") : ui(locale, "Owner-visible response")} · {item.state}</p>
-              {item.kind === "withheld" ? <p>{ui(locale, "Content withheld by its owner.")}</p> : <p className="conversation-answer">{item.text}</p>}
-            </article>)}
-            {!document.view.items.length && <p>{ui(locale, "No visible response was supplied in this observed window.")}</p>}
-            {!!document.view.gaps.length && <p className="conversation-history">{ui(locale, "The owner reported gaps in this window.")}</p>}
-          </section>
+          <ObservedTranscript key={JSON.stringify([read.source.ref, document.view.source_ref, document.view.epoch,
+            association!.job_id, association!.attempt_id])} items={document.view.items} locale={locale} />
+          {!!document.view.gaps.length && <p className="conversation-history">{ui(locale, "The owner reported gaps in this window.")}</p>}
           <section className="conversation-result" aria-label={ui(locale, "Returned evidence")}>
             <div><p className="conversation-eyebrow">{ui(locale, "Returned evidence")}</p><h2>{resultSummary ? ui(locale, "A source-backed result is available.") : ui(locale, "Inspect the supplied sources.")}</h2>
               {resultSummary && <p>{resultSummary}</p>}
@@ -246,6 +282,9 @@ export function ConversationWindow(props: ConversationWindowProps) {
     <ConversationBody key={JSON.stringify([context.authGeneration, context.selection, context.sessionRef,
     context.bindingGeneration, conversation.source.state === "WITHHELD",
     mission.source.state === "WITHHELD", result.source.state === "WITHHELD"])} {...props} />
+    {props.qualifiedAnswer && <QualifiedReplyCard value={props.qualifiedAnswer}
+      onCommitted={props.onQualifiedAnswerCommitted} />}
+    {props.historicalAnswers}
     {props.continuation != null && <div className="conversation-continuation-slot">{props.continuation}</div>}
   </div>;
 }

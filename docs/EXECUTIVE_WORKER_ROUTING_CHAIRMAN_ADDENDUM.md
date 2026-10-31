@@ -328,6 +328,18 @@ Cursor is an execution surface, not a capability tier. Select the appropriate mo
 rather than treating `Cursor` as the worker identity. Prefer faster/economical models for normal
 coding and stronger long-horizon models only when the work requires them.
 
+For independent PR source/security review, **Cursor Cloud launched through an authorized
+GitHub-native `@cursor` comment is also a permissible attended external review surface**.
+It is not an Executive-provider alias, a new Fabric pool, or automatic fallback.
+Only after Fabric unavailability is verified and the original reviewer effects are reconciled
+may Cursor be selected for a genuinely separate and authorized review. The
+commissioner must obey denial/permission gates before commissioning a
+*different, authorized* review. Use the exact-head,
+read-only and identity-separation proof in protected `REVIEW_RETURN.md` Step 2B and
+`docs/CURSOR_CLOUD_INDEPENDENT_REVIEW.md`. Cursor's bot may publish using the
+triggering GitHub user's account; such a source review does not replace formal
+non-author GitHub approval or any mandatory Fabric START/acceptance proof.
+
 ### FABLE — scarce principal / escalation capacity
 
 Reserve Fable for materially high ambiguity or principal-level demands, especially:

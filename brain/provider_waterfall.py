@@ -21,6 +21,8 @@ from typing import Any
 
 import bot  # noqa: F401  # makes the vendored Macro engine importable
 
+from brain import provider_failure  # pure typing module — evidence only, never a routing input
+
 _CODEX_ID = "codex_account"
 
 
@@ -201,6 +203,7 @@ async def reason(prompt: str, **kwargs) -> dict:
     role = str(kwargs.get("role") or "pm")
     rungs = provider_rungs(role)
     attempts: list[dict[str, Any]] = []
+    failures: list = []
 
     if not rungs:
         return {
@@ -210,6 +213,9 @@ async def reason(prompt: str, **kwargs) -> dict:
             "provider": None,
             "shared_pool": True,
             "provider_attempts": attempts,
+            "provider_failures": list(failures),
+            "provider_failure": provider_failure.classify(
+                error="no shared Codex or Claude OAuth provider is available"),
             "error": "no shared Codex or Claude OAuth provider is available",
         }
 
@@ -245,6 +251,20 @@ async def reason(prompt: str, **kwargs) -> dict:
         result["provider_attempts"] = list(attempts)
         last = result
 
+        # EVIDENCE ONLY: type the failure next to the legacy error string.  The
+        # continue/return decisions below never read it (reserved-seat failover).
+        failure = None if (result.get("ok") and result.get("text")) else \
+            provider_failure.classify(
+                error=result.get("error"),
+                evidence=result.get("provider_failure_evidence"),
+                provider=rung["provider"],
+                key_id=rung["key_id"],
+                tools_used=result.get("tools_used"),
+            )
+        failures.append(failure)
+        result["provider_failures"] = list(failures)
+        result["provider_failure"] = failure
+
         if result.get("ok") and result.get("text"):
             return result
 
@@ -269,5 +289,8 @@ async def reason(prompt: str, **kwargs) -> dict:
         "provider": None,
         "shared_pool": True,
         "provider_attempts": attempts,
+        "provider_failures": list(failures),
+        "provider_failure": provider_failure.classify(
+            error="shared provider waterfall exhausted"),
         "error": "shared provider waterfall exhausted",
     }

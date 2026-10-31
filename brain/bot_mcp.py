@@ -102,11 +102,13 @@ def _json(obj) -> dict:
         payload = json.dumps(compact, default=str, ensure_ascii=False)
         if len(payload) <= 8000:
             return _ok(payload)
-    # Extremely wide objects still return valid JSON with their top-level scalar contract.
+    # Extremely wide objects still return valid JSON with their top-level scalar contract, plus
+    # the small freshness blocks: a read must never reach the model without its clocks.
     fallback = {
         str(k): v
         for k, v in (obj.items() if isinstance(obj, dict) else [])
         if v is None or isinstance(v, (bool, int, float, str))
+        or (k in _FRESHNESS_KEYS and isinstance(v, dict))
     }
     fallback["_transport_truncated"] = True
     fallback["_note"] = "Nested payload exceeded the MCP transport budget."
@@ -115,6 +117,45 @@ def _json(obj) -> dict:
 
 def _read_json(p: Path):
     return json.loads(p.read_text()) if p.exists() else None
+
+
+# --- vendored-file freshness (news estate D2, 2026-10-31) ---------------------------------------
+# get_news / get_intelligence answer from a VENDORED Macro snapshot, not a live feed. Each answer
+# names the file it came from and only the clocks that file itself carries: `asof` (the Macro
+# build date), `source_asof` (when the underlying news fetch ran; differs from `asof` when the
+# producer retained a previous build's feed), `retained_from_previous_build`, `generated_utc`.
+# An absent clock is null — never inferred from the file's mtime or from today's date.
+_FRESHNESS_BASIS = "vendored_macro_file"
+_FRESHNESS_KEYS = ("freshness", "alt_freshness")
+
+
+def _first_vendored(*rels: str):
+    """(rel, payload) of the first vendored file with a non-empty payload — the same precedence
+    as the `_read_json(site) or _read_json(data)` reads — else (None, {})."""
+    for rel in rels:
+        doc = _read_json(_V / rel)
+        if doc:
+            return rel, doc
+    return None, {}
+
+
+def _freshness(doc, rel) -> dict:
+    doc = doc if isinstance(doc, dict) else {}
+
+    def _clock(*keys):
+        for k in keys:
+            v = doc.get(k)
+            if isinstance(v, str) and v:
+                return v
+        return None
+
+    retained = doc.get("retained_from_previous_build")
+    return {"asof": _clock("asof", "as_of"),
+            "source_asof": _clock("source_asof"),
+            "retained_from_previous_build": retained if isinstance(retained, bool) else None,
+            "generated_utc": _clock("generated_utc"),
+            "basis": _FRESHNESS_BASIS,
+            "source_file": rel}
 
 
 def _pick(d, keys):
@@ -321,13 +362,13 @@ async def get_altdata(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_news(args):
     t = (args.get("ticker") or "").upper()
-    bt = (_read_json(_V / "site" / "news" / "by_ticker.json")
-          or _read_json(_V / "data" / "news" / "by_ticker.json") or {})
+    rel, bt = _first_vendored("site/news/by_ticker.json", "data/news/by_ticker.json")
     rec = (bt.get("tickers") or {}).get(t)
     if rec is None:
         return _ok(f"no news-flow signal for {t} — not covered by the macro news surface.")
     return _json({"ticker": t, "news": rec,
-                  "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone."})
+                  "note": "Public-record financial news flow. Context-only — informs narrative, never sizes alone.",
+                  "freshness": _freshness(bt, rel), "evidence_grade": "vendored_snapshot"})
 
 
 @tool("get_intelligence",
@@ -340,20 +381,32 @@ async def get_news(args):
       {"type": "object", "properties": {"ticker": {"type": "string"}}, "required": ["ticker"]})
 async def get_intelligence(args):
     t = (args.get("ticker") or "").upper()
-    uni = (_read_json(_V / "site" / "intelligence" / "by_ticker.json")
-           or _read_json(_V / "data" / "intelligence" / "by_ticker.json") or {})
+    urel, uni = _first_vendored("site/intelligence/by_ticker.json", "data/intelligence/by_ticker.json")
     rec = (uni.get("tickers") or {}).get(t)
-    if rec is None:
+    if rec is not None:
+        labels = {"freshness": _freshness(uni, urel), "evidence_grade": "vendored_snapshot"}
+    else:
         # the unified bundle isn't published yet — compose from the standalone feeds
-        news = ((_read_json(_V / "site" / "news" / "by_ticker.json") or {}).get("tickers") or {}).get(t)
-        mm = (_read_json(_V / "site" / "altdata" / "mastermind.json") or {}).get("signals") or []
+        nrel = "site/news/by_ticker.json"
+        ndoc = _read_json(_V / nrel) or {}
+        news = (ndoc.get("tickers") or {}).get(t)
+        arel = "site/altdata/mastermind.json"
+        adoc = _read_json(_V / arel) or {}
+        mm = adoc.get("signals") or []
         alt = next((s for s in mm if (s.get("ticker") or "").upper() == t), None)
         if news is None and alt is None:
             return _ok(f"no news or alt-data intelligence for {t}.")
         rec = {"ticker": t, "news": news, "alt": alt, "has_news": bool(news), "has_alt": bool(alt)}
+        labels = {"missing_reason": "ticker_absent_in_vendored_file",
+                  "fallback": "standalone_news_and_altdata_feeds",
+                  "evidence_grade": "legacy_fallback",
+                  "freshness": _freshness(ndoc, nrel if ndoc else None)}
+        if alt is not None:
+            labels["alt_freshness"] = _freshness(adoc, arel)
     return _json({"ticker": t, **rec,
                   "note": "News flow (what the tape says) + alt-data signal (what smart money does), side "
-                          "by side. Context-only — the divergence between them is the read; never sizes alone."})
+                          "by side. Context-only — the divergence between them is the read; never sizes alone.",
+                  **labels})
 
 
 @tool("get_quote",

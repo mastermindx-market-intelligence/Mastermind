@@ -273,6 +273,97 @@ def build_coo_principal_authorizer(raw, source, config_path):
     return coo_authorizer(policy=policies['coo'], load_binding=loader)
 
 
+def installed_os_session_policy_source(config_path, source, *, expected_uid):
+    """Bind the current root-sealed OS OAuth policy pair to the Runtime reader.
+
+    The incumbent network gateway installation is the sole authority for the
+    policy IDs and resource. Runtime may inspect that *same* sealed installation
+    under its own trusted uid, not derive pairing from a caller's bearer/frame
+    or add a second policy configuration. Missing/disabled/moved installations
+    are unavailable, never an inferred permission grant.
+    """
+    from integrations.mastermind_executive_app.gateway import load_app_policies
+    from integrations.business_mcp_auth.contracts import AuthError
+    from integrations.session_bridge.runtime_return import _trusted_read_pair
+    from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
+    path, source = Path(config_path), Path(source)
+
+    def require_policy_seal():
+        # POSIX mode alone is not an ownership seal on macOS: a non-root
+        # inherited ACL can grant directory-entry replacement privileges.
+        # Reuse the incumbent descriptor-bound ACL observer on both the
+        # installed gateway file and every ancestor of both sealed roots.
+        require_sealed_path(source, directory=True)
+        require_sealed_path(path)
+        seen = set()
+        for root in (source, path):
+            for node in (root, *root.parents):
+                if node in seen:
+                    continue
+                seen.add(node)
+                try:
+                    if has_macos_acl(node):
+                        raise ValueError("installed OS policy seal unavailable")
+                except FilesystemSecurityError:
+                    raise ValueError("installed OS policy seal unavailable") from None
+
+    require_policy_seal()
+    try:
+        raw = validate_document(json.loads(path.read_text()))
+    except AuthError:
+        # Optional mounted policies are parsed during validate_document and
+        # must obey the same bounded Control-factory refusal contract.
+        raise ValueError("installed OS policy pair unavailable") from None
+    require_policy_seal()
+    if (type(expected_uid) is not int or expected_uid < 0
+            or os.geteuid() != expected_uid
+            or source.name != raw["release_sha"]
+            or raw.get("os_executive_transport") is not True):
+        raise ValueError("installed OS policy source unavailable")
+
+    def os_pair(base_policies):
+        try:
+            additional = build_additional_policies(raw, load_app_policies(base_policies))
+        except AuthError:
+            # The closed OAuth parser uses AuthError(RuntimeError), which the
+            # Control factory's fail-dark ValueError guard cannot otherwise
+            # catch. A malformed root-sealed policy must not kill Control.
+            raise ValueError("installed OS policy pair unavailable") from None
+        paired = [pair for pair in additional
+                  if pair.read.resource == OS_EXECUTIVE_RESOURCE
+                  and pair.submit.resource == OS_EXECUTIVE_RESOURCE]
+        if len(paired) != 1:
+            raise ValueError("installed OS policy pair unavailable")
+        try:
+            # Reuse the Runtime owner's exact pairing discriminator, not a
+            # second policy-ID/issuer/subject invariant that could drift.
+            _trusted_read_pair(paired[0])
+        except (ValueError, TypeError, AuthError):
+            raise ValueError("installed OS policy pair unavailable") from None
+        return paired[0]
+
+    initial = os_pair(raw["policies"])
+    read_sealed_policies = current_projection_loader(
+        path, source, raw, "policies", None, expected_uid=expected_uid)
+
+    def current():
+        require_policy_seal()
+        try:
+            # The incumbent projection loader can also parse optional mounted
+            # policies during a drift check; normalize that closed AuthError
+            # instead of taking down the entire Session Bridge at read time.
+            pair = os_pair(read_sealed_policies())
+        except AuthError:
+            raise ValueError("installed OS policy pair unavailable") from None
+        require_policy_seal()
+        if pair != initial:
+            raise ValueError("installed OS policy pair changed")
+        return pair
+
+    return current
+
+
 def build_os_asset_manifest(source):
     """Deterministic build law; returns data, never writes or installs assets."""
     root = Path(source) / 'app/mastermind_os/dist'
@@ -288,7 +379,10 @@ def build_os_asset_manifest(source):
             directories.add(path.relative_to(root).as_posix())
     from integrations.mastermind_executive_app.os_assets import os_asset_mimes
     mimes = os_asset_mimes(names)
-    expected_directories = {'assets'} | ({'licenses', 'licenses/fonts'} if len(names) == 9 else set())
+    # The closed names/MIME owner also determines the exact parent topology;
+    # no independent size switch may drop required font or third-party notices.
+    expected_directories = {parent.as_posix() for name in mimes for parent in Path(name).parents
+                            if parent.as_posix() != '.'}
     if directories != expected_directories:
         raise ValueError('OS asset directory differs')
     css = [name for name, mime in mimes.items() if mime == 'text/css; charset=utf-8']
@@ -497,6 +591,7 @@ def main(argv=None):
             app = build_personal_read_mcp_app(settings, audit_sink=sink)
         elif profile == WEB_CEO_V3_PROFILE:
             from integrations.session_bridge.return_tools import NativeReplyReadTool
+            from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
             from integrations.mosyle_mdm.client import MosyleInventoryClient
             from integrations.mosyle_mdm.credential import FileMosyleCredentialSource
             from integrations.session_bridge.installed import InstalledSessionBridgeClient
@@ -529,6 +624,7 @@ def main(argv=None):
                 session_reply_handler=session_client.send,
                 session_summon_handler=session_client.summon,
                 session_reply_read_tool=NativeReplyReadTool(session_client),
+                session_reply_references_tool=NativeReplyReferencesTool(session_client),
                 enable_os_executive_transport=raw.get('os_executive_transport', False),
                 os_executive_resource=validate_os_executive_resource(raw),
                 os_commission_preparer=build_os_commission_client(raw),
@@ -542,6 +638,7 @@ def main(argv=None):
             from integrations.session_bridge.installed import InstalledSessionBridgeClient
 
             from integrations.session_bridge.return_tools import NativeReplyReadTool
+            from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
             session_client = InstalledSessionBridgeClient(
                 settings.ceo_ingress_socket_path
             )
@@ -552,6 +649,7 @@ def main(argv=None):
                 session_reply_handler=session_client.send,
                 session_summon_handler=session_client.summon,
                 session_reply_read_tool=NativeReplyReadTool(session_client),
+                session_reply_references_tool=NativeReplyReferencesTool(session_client),
                 **mounts,
             )
         elif profile == WEB_CEO_V2_PROFILE:

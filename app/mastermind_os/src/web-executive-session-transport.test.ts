@@ -89,7 +89,7 @@ const SEND_ARGS = {
 };
 
 describe("fixed selected-session transport", () => {
-  it("sends exactly the three fixed POST routes with exact argument shapes", async () => {
+  it("sends only the four fixed session POST routes with exact argument shapes", async () => {
     const e = setup();
     await e.login();
     expect(e.client.executiveSession!.available()).toBe(true);
@@ -99,13 +99,18 @@ describe("fixed selected-session transport", () => {
     await e.client.executiveSession!.context(SELECTION, signal);
     await e.client.executiveSession!.send(SEND_ARGS, signal);
     await e.client.executiveSession!.reply({ operation_key: SEND_ARGS.operation_key }, signal);
+    const args = {work_ref:"WS:ONE",root_job_id:"JOB-1",page_size:16,
+      cursor:"YWJjZA=="};
+    await e.client.executiveSession!.references!(args, signal);
     expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual(
-      ["context", "send", "reply"].map((route) => `${ORIGIN}/os/executive/session/${route}`),
+      ["context", "send", "reply", "references"].map((route) => `${ORIGIN}/os/executive/session/${route}`),
     );
     expect(e.fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))).toEqual([
       { selection: { work_ref: "WS:ONE", root_job_id: "JOB-1" } },
       { arguments: SEND_ARGS },
       { arguments: { operation_key: SEND_ARGS.operation_key } },
+      { arguments: {work_ref:"WS:ONE",root_job_id:"JOB-1",page_size:16,
+        cursor:"YWJjZA==" } },
     ]);
     for (const [, init] of e.fetcher.mock.calls)
       expect(init).toMatchObject({
