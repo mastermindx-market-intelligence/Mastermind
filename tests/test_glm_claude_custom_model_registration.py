@@ -16,7 +16,7 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "ops/native_fabric/quota_continuity/source/glm_bound_claude.py"
+SOURCE = ROOT / "ops/native_fabric/quota_continuity/candidate/glm_bound_claude.py"
 SPEC = importlib.util.spec_from_file_location("glm_bound_claude_custom_model_test", SOURCE)
 assert SPEC is not None and SPEC.loader is not None
 glm = importlib.util.module_from_spec(SPEC)
