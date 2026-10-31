@@ -98,6 +98,17 @@ def _amount(value: Any) -> float | None:
     raise ValueError("net_r requires a finite numeric or null")
 
 
+def _nullable_bool(value: Any) -> bool | None:
+    """Keep source unknown distinct from false; strings/numbers cannot attest truth."""
+    if value is None or value is pd.NA:
+        return None
+    if isinstance(value, (float, np.floating)) and math.isnan(value):
+        return None
+    if type(value) in (bool, np.bool_):
+        return bool(value)
+    raise ValueError("eligibility/signal must be genuine bool or source-unknown null")
+
+
 def _prepared_opportunities(frame: pd.DataFrame) -> pd.DataFrame:
     if OPP_COLUMNS - set(frame.columns):
         raise ValueError(f"missing opportunities columns {sorted(OPP_COLUMNS - set(frame.columns))}")
@@ -121,8 +132,8 @@ def _prepared_opportunities(frame: pd.DataFrame) -> pd.DataFrame:
                                all(c in "0123456789abcdef" for c in x)).all():
         raise ValueError("source payload must carry its 64-char lowercase hash")
     for col in ("eligible", "signal"):
-        if not a[col].map(lambda x: type(x) in (bool, np.bool_)).all():
-            raise ValueError(f"{col} must be genuine bool, not imputed or string")
+        a[col] = pd.Series([_nullable_bool(value) for value in a[col]],
+                           index=a.index, dtype=object)
     if not a.split.isin(SPLITS).all():
         raise ValueError("unknown split")
     for col in ("decision_utc", "bar_known_at_utc", "leader_known_at_utc", "regime_known_at_utc"):
@@ -248,16 +259,29 @@ def evaluate_paired(opportunities: pd.DataFrame, outcomes: pd.DataFrame,
             raise ValueError("future decision relative to analysis cutoff")
         if any(t is not None and t > asof for t in a["_known"]):
             raise ValueError("unobserved outcome relative to analysis cutoff")
+        # A censored/unavailable observation cannot already have reached a
+        # supplied future boundary. Missing known-at does not make a future
+        # boundary visible at this analysis snapshot.
+        if any(t is not None and t > asof
+               for t in a.loc[a.status.isin(("CENSORED", "UNAVAILABLE")), "_end"]):
+            raise ValueError("censoring boundary after analysis as-of")
     wide = a.set_index(["opportunity_id", "policy"])
     details = []
     for row in o.itertuples(index=False):
         c = wide.loc[(row.opportunity_id, protocol.candidate)]
         b = wide.loc[(row.opportunity_id, protocol.baseline)]
-        if not row.eligible and (c.status == "RESOLVED" or b.status == "RESOLVED"):
+        if row.eligible is None or row.signal is None:
+            if c.status != "UNAVAILABLE" or b.status != "UNAVAILABLE":
+                raise ValueError("unavailable eligibility or signal requires both policy outcomes unavailable")
+        if row.eligible is not True and (c.status == "RESOLVED" or b.status == "RESOLVED"):
             raise ValueError("cannot trade an ineligible episode")
-        if not row.signal and c.status == "RESOLVED":
+        if row.signal is not True and c.status == "RESOLVED":
             raise ValueError("candidate trade issued with no as-of signal")
-        supported = row.eligible and c.status in {"RESOLVED", "NO_ENTRY"} and b.status in {"RESOLVED", "NO_ENTRY"}
+        if row.eligible is True and row.signal is False and c.status != "NO_ENTRY":
+            raise ValueError("no-signal candidate must be NO_ENTRY, not censored/unavailable")
+        supported = (row.eligible is True and row.signal is not None and
+                     c.status in {"RESOLVED", "NO_ENTRY"} and
+                     b.status in {"RESOLVED", "NO_ENTRY"})
         details.append({"opportunity_id": row.opportunity_id, "symbol": row.symbol,
                         "session_date": row.session_date.isoformat(), "split": row.split,
                         "eligible": row.eligible, "signal": row.signal,
@@ -294,11 +318,15 @@ def evaluate_paired(opportunities: pd.DataFrame, outcomes: pd.DataFrame,
             raise ValueError("holdout registration postdates first decision")
     report: dict[str, Any] = {}
     for split in SPLITS:
-        cohort = df[(df.split == split) & df.eligible]
+        split_rows = df[df.split == split]
+        cohort = split_rows.loc[split_rows.eligible.map(lambda v: v is True).astype(bool)]
         paired = cohort.loc[cohort.paired_supported].copy()
-        result = {"eligible": len(cohort), "paired_supported": len(paired),
+        result = {"predeclared": len(split_rows),
+                  "eligibility_unknown": int(split_rows.eligible.map(lambda v: v is None).sum()),
+                  "eligible": len(cohort), "paired_supported": len(paired),
                   "unpaired_or_censored": len(cohort) - len(paired),
-                  "signal_count": int(cohort.signal.sum()),
+                  "signal_count": int(cohort.signal.map(lambda v: v is True).sum()),
+                  "signal_unknown": int(cohort.signal.map(lambda v: v is None).sum()),
                   "candidate_nonentries": int((cohort.candidate_status == "NO_ENTRY").sum()),
                   "baseline_nonentries": int((cohort.baseline_status == "NO_ENTRY").sum()),
                   "candidate_censored": int((cohort.candidate_status == "CENSORED").sum()),
@@ -320,6 +348,8 @@ def evaluate_paired(opportunities: pd.DataFrame, outcomes: pd.DataFrame,
             "holdout_status": ("ABSENT" if held.empty else
                                "REGISTRATION_NOT_PROVED" if protocol.registered_at_utc is None else
                                "REGISTRATION_DECLARED_NOT_INDEPENDENTLY_ATTESTED"),
-            "denominator": {"all_predeclared": len(df), "eligible": int(df.eligible.sum()),
-                            "ineligible": int((~df.eligible).sum())},
+            "denominator": {"all_predeclared": len(df),
+                            "eligible": int(df.eligible.map(lambda v: v is True).sum()),
+                            "ineligible": int(df.eligible.map(lambda v: v is False).sum()),
+                            "eligibility_unknown": int(df.eligible.map(lambda v: v is None).sum())},
             "splits": report, "paired_opportunities": details}
