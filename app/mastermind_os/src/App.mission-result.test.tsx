@@ -702,6 +702,93 @@ describe("App compound Mission/Result consumption", () => {
       await expectOfficeHalvesEmpty(user);
     },
   );
+
+  it("rejects a matching outer typed selection wrapping a sibling Job's nested Result", async () => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    window.MastermindMissionHost!.readMissionResult = async (request) => ({
+      ...producer.decoded,
+      selection: {
+        workRef: request.workRef,
+        rootJobId: request.rootJobId,
+        jobId: request.jobId,
+        attemptId: request.attemptId,
+        resultEnvelopeDigest: request.resultEnvelopeDigest,
+      },
+    });
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-002/ }));
+    // Outer selection is the JOB-002 click, but the role Result and its
+    // source observation still belong to JOB-004. Neither may publish.
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+    expect(e.calls("/workspace/result/current")).toHaveLength(0);
+    await expectOfficeHalvesEmpty(user);
+  });
+
+  it.each([
+    ["role-result", "work_ref"],
+    ["role-result", "root_job_id"],
+    ["role-result", "job_id"],
+    ["role-result", "attempt_id"],
+    ["role-result", "result_envelope_digest"],
+    ["source-observation", "work_ref"],
+    ["source-observation", "root_job_id"],
+    ["source-observation", "job_id"],
+    ["source-observation", "attempt_id"],
+    ["source-observation", "result_envelope_digest"],
+  ] as const)("rejects a crossed nested %s field %s", async (layer, field) => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    const forged = structuredClone(producer.decoded);
+    const target = layer === "role-result"
+      ? forged.roleResult.selection
+      : forged.roleResult.source_observation.selection;
+    target[field] = `${target[field]}-CROSSED`;
+    window.MastermindMissionHost!.readMissionResult = async () => forged;
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+    await expectOfficeHalvesEmpty(user);
+  });
+
+  it("rejects a crossed nested role-view selector even when both wire selectors match", async () => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    const forged = structuredClone(producer.decoded);
+    if (!forged.roleResult.result) throw new Error("positive producer role view missing");
+    forged.roleResult.result.selection.job_id = "JOB-002";
+    window.MastermindMissionHost!.readMissionResult = async () => forged;
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("bounded typed fixture result")).toBeNull();
+    await expectOfficeHalvesEmpty(user);
+  });
+
+  it("rejects a crossed typed UNAVAILABLE selection before showing its source reason", async () => {
+    const e = setup("bytes");
+    const producer = await e.ready();
+    window.MastermindMissionHost!.readMissionResult = async () => ({
+      schema: producer.decoded.schema,
+      availability: "UNAVAILABLE" as const,
+      selection: { ...producer.decoded.selection, jobId: "JOB-002" },
+      reasonCodes: ["SOURCE_CHANGED"] as const,
+      mission: null,
+      roleResult: null,
+    });
+    render(<App />);
+    const user = await openProject();
+    await user.click(await screen.findByRole("button", { name: /JOB-004/ }));
+    expect(await screen.findByText("MISSION_RESULT_RESPONSE_INVALID")).toBeTruthy();
+    expect(screen.queryByText("SOURCE_CHANGED")).toBeNull();
+    await expectOfficeHalvesEmpty(user);
+  });
+
 });
 
 async function renderExplicit(kind: ExplicitKind, directory: string) {

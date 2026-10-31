@@ -3102,6 +3102,28 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             withholdOwned(decoded.reasonCodes.join(", ") || "SOURCE_UNAVAILABLE");
             return;
           }
+          // The nested Result and its source observation each carry their own
+          // five-field selector. A substituted typed method could forge a
+          // matching compound selection around a sibling Job's actual Result.
+          const sameWireSelection = (
+            wire: ResultEnvelopeDigestShape["selection"] | null | undefined,
+          ) => !!wire
+            && wire.work_ref === valid.workRef
+            && wire.root_job_id === valid.rootJobId
+            && wire.job_id === valid.jobId
+            && wire.attempt_id === valid.attemptId
+            && wire.result_envelope_digest === valid.resultEnvelopeDigest;
+          const roleView = decoded.roleResult.result;
+          if (!sameWireSelection(decoded.roleResult.selection)
+            || !sameWireSelection(decoded.roleResult.source_observation?.selection)
+            || (roleView !== null && (!roleView?.selection
+              || roleView.selection.root_job_id !== valid.rootJobId
+              || roleView.selection.job_id !== valid.jobId
+              || roleView.selection.attempt_id !== valid.attemptId
+              || roleView.selection.result_envelope_digest !== valid.resultEnvelopeDigest))) {
+            withholdOwned("MISSION_RESULT_RESPONSE_INVALID");
+            return;
+          }
           // No async boundary between these fences and the synchronous
           // Office accept. Post-accept fences could leave a published pair.
           const accepted = office.acceptMissionResult(
