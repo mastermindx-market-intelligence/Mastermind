@@ -242,6 +242,25 @@ class PairedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "interleaved"):
             self.run_pair(p, o)
 
+    def test_calibration_embargo_refuses_development_overlap(self):
+        p, o = inputs(2)
+        p.loc[1, "split"] = "CALIBRATION"
+        with self.assertRaisesRegex(ValueError, "development label overlaps calibration embargo"):
+            self.run_pair(p, o, embargo_calendar_days=9)
+
+    def test_calibration_refuses_label_known_after_next_decision(self):
+        p, o = inputs(2)
+        p.loc[1, "split"] = "CALIBRATION"
+        o.loc[0, "outcome_known_at_utc"] = "2026-10-06T15:02:00Z"
+        with self.assertRaisesRegex(ValueError, "development label overlaps calibration embargo"):
+            self.run_pair(p, o, embargo_calendar_days=0)
+
+    def test_calibration_accepts_nonoverlapping_label_without_embargo(self):
+        p, o = inputs(2)
+        p.loc[1, "split"] = "CALIBRATION"
+        result = self.run_pair(p, o, embargo_calendar_days=0)
+        self.assertEqual(result["splits"]["CALIBRATION"]["eligible"], 1)
+
     def test_embargo_refuses_label_crossing_holdout(self):
         p, o = inputs(2)
         p.loc[1, "split"] = "HOLDOUT"
