@@ -1130,7 +1130,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 | S3 | changed-lines re-review of #10302 at `1079448b` | glm-5.3, ubuntu1 | NOT STARTED: rc=75 temperature |
 | T | re-review of #10297 at `16781cde` | glm-5.3, ubuntu1 | NOT STARTED: rc=75 temperature |
 | S4 | changed-lines re-review of #10302 at `1079448b` | glm-5.3, ubuntu0 (`c19-w15-s4-rereview-a5-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (S3.1–S3.7 PASS; two notes, no change) |
-| T2 | re-review of #10297 at `16781cde` | glm-5.3, ubuntu0 (`c19-w15-t2-rereview-agentos10297-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (T1–T9 PASS; four non-blocking notes, no change). Review record: comment 6543621247 |
+| T2 | re-review of #10297 at `16781cde` | glm-5.3, ubuntu0 (`c19-w15-t2-rereview-agentos10297-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE (T1–T9 PASS; two non-blocking notes, no change). Review record: comment 6543621247 |
 | V | census of every EDGAR acceptance-clock reader | glm-5.3-flash, ubuntu0 | NOT STARTED: ECONOMIC_POLICY, `C1` is not a complexity token |
 | V2 | the same census | glm-5.3-flash, ubuntu0, `C1_ROUTINE_BOUNDED`, 12:44Z to 13:05Z (`c19-w15-v2-census-clock-20261031`) | ACCEPT AS CENSUS, with the seat's rulings (FACTS, census V2). USAGE_RECEIPT_MISSING |
 
