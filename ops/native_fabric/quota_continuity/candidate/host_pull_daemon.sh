@@ -38,6 +38,27 @@
 # loaded, definitively service-not-found, or uncertain. Uncertain fails closed
 # (78) and is never treated as an absent label.
 #
+# The bootstrap effect consumes the installed plist by pathname, so the
+# reviewed identity of that plist is part of the effect admission and not a
+# later observation. The rendered digest is passed into the locked-effect
+# boundary, and under the publication lock, at the effect boundary, the
+# destination is proved through an O_NOFOLLOW descriptor: the descriptor and
+# the path must be the same device and inode, the file must be regular, owned
+# by the installing user, mode 0600, bounded, and hash to the reviewed
+# digest. A peer substitute, a mode change, a symlink or a deletion refuses
+# the effect: no launchctl call is issued, no plist byte is written, and
+# peer bytes, CURRENT, the backup and the marker are preserved with an
+# explicit EFFECT_UNKNOWN receipt.
+#
+# launchctl opens a pathname, so a proof and a later open are not the same
+# act. The proven inode is therefore sealed read-only for the consumption
+# window, which stops a peer from rewriting the reviewed bytes in place, and
+# both the pathname and the sealed bytes are re-proved immediately after
+# launchctl returns. The residual race is a peer that replaces the directory
+# entry inside that window; it is detected and reported as an uncertain
+# effect, never as a success. Peer bytes are never restored over and no
+# second bootstrap is ever issued.
+#
 # .publication.lock is held by the same process that runs bootout, plist
 # replacement, and bootstrap, from the moment the command is allowed until
 # that command returns. The parent does not run the command itself. If that
@@ -345,6 +366,65 @@ def perform_install(src, dest, fault):
     finally:
         os.close(dirfd)
 
+def bind_installed_plist(dest, expected_sha):
+    # Prove the identity of an installed plist through an O_NOFOLLOW
+    # descriptor and keep that descriptor open. A path check alone is TOCTOU
+    # and may describe the wrong inode. The descriptor, the path identity
+    # before and after the read, the owner, the mode, the bounded size and
+    # the rendered SHA are all proved here, so a peer substitute, a mode
+    # change, a symlink or a deletion is refused instead of described.
+    # The returned descriptor pins the proven inode: the caller can re-prove
+    # the same bytes after an effect and cannot be pointed at another file.
+    require_safe(dest, "installed plist")
+    if HEX.fullmatch(expected_sha) is None:
+        fail("installed plist expected digest")
+    fd = None
+    try:
+        before_path = lstat_nofollow(dest)
+        if (not stat.S_ISREG(before_path.st_mode)
+                or before_path.st_uid != os.geteuid()
+                or stat.S_IMODE(before_path.st_mode) != 0o600
+                or before_path.st_size > 1048576):
+            fail("installed plist identity")
+        fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        before_fd = os.fstat(fd)
+        if (not stat.S_ISREG(before_fd.st_mode)
+                or before_fd.st_uid != os.geteuid()
+                or stat.S_IMODE(before_fd.st_mode) != 0o600
+                or before_fd.st_dev != before_path.st_dev
+                or before_fd.st_ino != before_path.st_ino
+                or before_fd.st_size > 1048576):
+            fail("installed plist fd identity")
+        raw = bytearray()
+        while len(raw) <= 1048576:
+            chunk = os.read(fd, min(65536, 1048577 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
+        after_fd = os.fstat(fd)
+        after_path = lstat_nofollow(dest)
+        stable = (before_fd.st_dev == after_fd.st_dev == after_path.st_dev
+                  and before_fd.st_ino == after_fd.st_ino == after_path.st_ino
+                  and before_fd.st_size == after_fd.st_size == after_path.st_size
+                  and before_fd.st_mtime_ns == after_fd.st_mtime_ns
+                  and before_fd.st_ctime_ns == after_fd.st_ctime_ns
+                  and stat.S_ISREG(after_path.st_mode)
+                  and after_path.st_uid == os.geteuid()
+                  and stat.S_IMODE(after_path.st_mode) == 0o600)
+        if (not stable or len(raw) > 1048576
+                or hashlib.sha256(raw).hexdigest() != expected_sha):
+            fail("installed plist drift")
+        digest = hashlib.sha256(raw).hexdigest()
+    except OSError:
+        if fd is not None:
+            os.close(fd)
+        fail("installed plist unreadable")
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        raise
+    return fd, digest
+
 if cmd == "check-pin" or cmd == "check-advance":
     store, generation, expect, publisher, pin = sys.argv[2:7]
     owner_required = int(sys.argv[7])
@@ -537,35 +617,6 @@ elif cmd == "install-rendered":
     fault = sys.argv[4] if len(sys.argv) > 4 else ""
     perform_install(src, dest, fault)
 
-elif cmd == "atomic-restore":
-    src, dest = sys.argv[2:4]
-    raw = open(src, "rb").read()
-    parent = os.path.dirname(dest)
-    temporary = parent + "/.host-pull.restore." + str(os.getpid())
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    try:
-        os.write(fd, raw)
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(temporary, dest)
-    fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW)
-    try:
-        os.fsync(fd)
-        installed = os.read(fd, len(raw) + 1)
-    finally:
-        os.close(fd)
-    if installed != raw or stat.S_IMODE(os.lstat(dest).st_mode) != 0o600:
-        fail("restore readback")
-
-elif cmd == "atomic-remove":
-    dest = sys.argv[2]
-    if os.path.lexists(dest):
-        st = os.lstat(dest)
-        if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
-            fail("remove kind")
-        os.unlink(dest)
-
 elif cmd == "same-file":
     left, right = sys.argv[2:4]
     try:
@@ -714,12 +765,23 @@ elif cmd == "locked-effect":
     if kind == "install" and len(effect_args) != 3:
         fail("install args")
     purpose = ""
+    expected_sha = ""
+    bootstrap_launchctl = ""
+    bootstrap_domain = ""
+    bootstrap_dest = ""
     if kind == "bootstrap":
-        if len(effect_args) != 4:
+        # The bootstrap effect consumes the installed plist by pathname, so
+        # the reviewed digest of that plist is part of the admission, not a
+        # later observation. The purpose keeps the semantic distinction: a
+        # new bootstrap admits the rendered digest, a rollback bootstrap
+        # admits the captured preimage digest.
+        if len(effect_args) != 5:
             fail("bootstrap args")
-        purpose = effect_args[3]
+        bootstrap_launchctl, bootstrap_domain, bootstrap_dest, purpose, expected_sha = effect_args
         if purpose not in {"new", "rollback"}:
             fail("bootstrap purpose")
+        if HEX.fullmatch(expected_sha) is None:
+            fail("bootstrap expected digest")
     # Rollback restores the preimage after the selector has already moved.
     # It still holds this lock for the whole command. It does not require
     # CURRENT to name the generation being abandoned.
@@ -762,6 +824,65 @@ elif cmd == "locked-effect":
         fd = os.open(work + "/started", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         os.close(fd)
 
+    def note_reason(token):
+        # One reason token per admission attempt. The shell reads it to name
+        # the exact refusal instead of inferring one from the exit status.
+        # The first proven cause wins; an existing token is kept.
+        try:
+            fd = os.open(work + "/reason", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        except OSError:
+            return
+        try:
+            os.write(fd, token.encode("ascii") + b"\n")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+
+    def path_names_inode(path, fd, expected_mode):
+        # The path must still name the descriptor's inode. A replaced entry, a
+        # symlink, another owner or a changed mode is drift, not the proven
+        # file.
+        try:
+            st_path = os.lstat(path)
+            st_fd = os.fstat(fd)
+        except OSError:
+            return False
+        if stat.S_ISLNK(st_path.st_mode):
+            return False
+        return (stat.S_ISREG(st_path.st_mode)
+                and st_path.st_dev == st_fd.st_dev
+                and st_path.st_ino == st_fd.st_ino
+                and st_path.st_uid == os.geteuid()
+                and stat.S_IMODE(st_path.st_mode) == expected_mode)
+
+    def descriptor_still_proves(fd, expected_sha):
+        # Re-read the sealed descriptor. The bytes launchctl consumed must
+        # still be the reviewed bytes and not a peer's later rewrite.
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            raw = bytearray()
+            while len(raw) <= 1048576:
+                chunk = os.read(fd, min(65536, 1048577 - len(raw)))
+                if not chunk:
+                    break
+                raw.extend(chunk)
+            st_fd = os.fstat(fd)
+        except OSError:
+            return False
+        return (len(raw) <= 1048576
+                and stat.S_ISREG(st_fd.st_mode)
+                and stat.S_IMODE(st_fd.st_mode) == 0o400
+                and hashlib.sha256(raw).hexdigest() == expected_sha)
+
+    def unseal_inode(fd):
+        # Restore the reviewed 0600 mode only while it is still our own seal.
+        # A peer mode change inside the window is left untouched and reported.
+        try:
+            if stat.S_IMODE(os.fstat(fd).st_mode) == 0o400:
+                os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+
     def same_pid_still_running(launchctl, ps_bin, target, pid):
         if re.fullmatch(r"[1-9][0-9]*", pid or "") is None:
             return False
@@ -785,6 +906,7 @@ elif cmd == "locked-effect":
 
     # O_CLOEXEC keeps the lock on this process across the effect subprocess.
     # The open mode and flock match native_generation.publication_lock.
+    bootstrap_fd = None
     lock_fd = os.open(store + "/.publication.lock",
                       os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o600)
     try:
@@ -812,6 +934,38 @@ elif cmd == "locked-effect":
         # publication lock would fence a command the installer no longer owns.
         if not transaction_fence_held(fence):
             raise SystemExit(79)
+        # Pre-effect custody admission for the bootstrap effect. The
+        # destination is the artifact launchctl is about to consume by
+        # pathname, so its reviewed identity is proved here, under the
+        # publication lock, at the effect boundary, against the digest the
+        # caller rendered. A peer substitute, a mode change, a symlink or a
+        # deletion refuses the effect: no launchctl call is issued and not one
+        # plist byte is written.
+        if kind == "bootstrap":
+            try:
+                bootstrap_fd, _proved_digest = bind_installed_plist(bootstrap_dest, expected_sha)
+                # Seal the proven inode for the consumption window so a peer
+                # cannot rewrite the reviewed bytes in place, and re-prove the
+                # path against the descriptor at the last moment before the
+                # effect. launchctl consumes a pathname, so the residual race
+                # is a peer that replaces the directory entry inside that
+                # window; it is detected and reported, never restored over.
+                # A seal that cannot be applied leaves the content writable
+                # inside the window, so the path cannot be safely bound and
+                # the effect is refused instead of admitted.
+                try:
+                    os.fchmod(bootstrap_fd, 0o400)
+                except OSError:
+                    fail("installed plist seal refused")
+                if not path_names_inode(bootstrap_dest, bootstrap_fd, 0o400):
+                    fail("bootstrap path drift")
+            except BaseException:
+                note_reason("custody-unproven")
+                if bootstrap_fd is not None:
+                    unseal_inode(bootstrap_fd)
+                    os.close(bootstrap_fd)
+                    bootstrap_fd = None
+                raise
         mark_started()
         if kind == "bootout":
             launchctl, ps_bin, target, expected_pid = effect_args
@@ -826,12 +980,24 @@ elif cmd == "locked-effect":
                     raise SystemExit(76)
                 raise SystemExit(77)
         elif kind == "bootstrap":
-            launchctl, domain, dest, _purpose = effect_args
+            launchctl, domain, dest = bootstrap_launchctl, bootstrap_domain, bootstrap_dest
             require_safe(launchctl, "launchctl")
             require_safe(dest, "plist")
             if re.fullmatch(r"gui/[0-9]+", domain) is None:
                 fail("bootstrap domain")
-            proc = subprocess.run([launchctl, "bootstrap", domain, dest], check=False)
+            try:
+                proc = subprocess.run([launchctl, "bootstrap", domain, dest], check=False)
+                # The consumed pathname must still name the sealed inode and
+                # the sealed bytes must still be the reviewed bytes. A peer
+                # substitution inside the window is an uncertain effect, never
+                # a silent success.
+                drift = (not path_names_inode(dest, bootstrap_fd, 0o400)
+                         or not descriptor_still_proves(bootstrap_fd, expected_sha))
+            finally:
+                unseal_inode(bootstrap_fd)
+            if drift:
+                note_reason("custody-drift")
+                fail("bootstrap path drift")
             if proc.returncode != 0:
                 raise SystemExit(proc.returncode if proc.returncode != 76 else 1)
         else:
@@ -842,6 +1008,9 @@ elif cmd == "locked-effect":
         if enforce_generation:
             read_selected()
     finally:
+        if bootstrap_fd is not None:
+            unseal_inode(bootstrap_fd)
+            os.close(bootstrap_fd)
         os.close(lock_fd)
 
 elif cmd == "write-receipt":
@@ -960,49 +1129,8 @@ elif cmd == "verify-installed-plist":
     # check alone is TOCTOU and may describe the wrong inode. Check the fd,
     # path identity before/after, owner, mode, bounded size and rendered SHA.
     dest, expected_sha = sys.argv[2:4]
-    require_safe(dest, "installed plist")
-    if HEX.fullmatch(expected_sha) is None:
-        fail("installed plist expected digest")
-    try:
-        before_path = lstat_nofollow(dest)
-        if (not stat.S_ISREG(before_path.st_mode)
-                or before_path.st_uid != os.geteuid()
-                or stat.S_IMODE(before_path.st_mode) != 0o600
-                or before_path.st_size > 1048576):
-            fail("installed plist identity")
-        fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        try:
-            before_fd = os.fstat(fd)
-            if (not stat.S_ISREG(before_fd.st_mode)
-                    or before_fd.st_uid != os.geteuid()
-                    or stat.S_IMODE(before_fd.st_mode) != 0o600
-                    or before_fd.st_dev != before_path.st_dev
-                    or before_fd.st_ino != before_path.st_ino
-                    or before_fd.st_size > 1048576):
-                fail("installed plist fd identity")
-            raw = bytearray()
-            while len(raw) <= 1048576:
-                chunk = os.read(fd, min(65536, 1048577 - len(raw)))
-                if not chunk:
-                    break
-                raw.extend(chunk)
-            after_fd = os.fstat(fd)
-            after_path = lstat_nofollow(dest)
-            stable = (before_fd.st_dev == after_fd.st_dev == after_path.st_dev
-                      and before_fd.st_ino == after_fd.st_ino == after_path.st_ino
-                      and before_fd.st_size == after_fd.st_size == after_path.st_size
-                      and before_fd.st_mtime_ns == after_fd.st_mtime_ns
-                      and before_fd.st_ctime_ns == after_fd.st_ctime_ns
-                      and stat.S_ISREG(after_path.st_mode)
-                      and after_path.st_uid == os.geteuid()
-                      and stat.S_IMODE(after_path.st_mode) == 0o600)
-            if (not stable or len(raw) > 1048576
-                    or hashlib.sha256(raw).hexdigest() != expected_sha):
-                fail("installed plist drift")
-        finally:
-            os.close(fd)
-    except OSError:
-        fail("installed plist unreadable")
+    fd, _digest = bind_installed_plist(dest, expected_sha)
+    os.close(fd)
 
 elif cmd == "write-select-fence":
     store, prior, generation = sys.argv[2:5]
@@ -1497,6 +1625,19 @@ selector_moved_before_effect() {
     && grep -qx 'selector-moved' "$LOCKED_DIR/reason"
 }
 
+custody_refused_before_effect() {
+  # The installed plist could not be proven against the rendered digest at
+  # the effect boundary. No launchctl call was issued.
+  [ "${STOP_LOCKED:-0}" -eq 1 ] && [ -f "${LOCKED_DIR:-}/reason" ] \
+    && grep -qx 'custody-unproven' "$LOCKED_DIR/reason"
+}
+
+custody_drifted_during_effect() {
+  # The pathname or the sealed bytes drifted while launchctl could consume
+  # them. The effect is uncertain and is never reported as a success.
+  [ -f "${LOCKED_DIR:-}/reason" ] && grep -qx 'custody-drift' "$LOCKED_DIR/reason"
+}
+
 expected_argv() {
   printf '%s\n' /usr/bin/lockf -t 0 "$LOCK" /bin/bash "$PIN" --qualification-mode "$QUALIFICATION_MODE"
 }
@@ -1510,18 +1651,28 @@ argv_matches() {
 
 bootstrap_once() {
   local kind=$1
+  local expected_sha=""
   if [ "$kind" = "new" ]; then
     [ "$BOOTSTRAP_NEW" -eq 0 ] || die 78 "second bootstrap refused"
     BOOTSTRAP_NEW=1
     # run_locked sets BOOTSTRAP_STARTED only after proving the install holder.
+    # The rendered digest is the reviewed identity of the plist that is
+    # about to be consumed by launchctl. The bootstrap effect is admitted
+    # against that digest, not against a later observation of the pathname.
+    expected_sha="${RENDERED_SHA:-}"
   else
     [ "$BOOTSTRAP_ROLLBACK" -eq 0 ] || die 78 "second rollback bootstrap refused"
     BOOTSTRAP_ROLLBACK=1
     PHASE=ROLLING_BACK
+    # A rollback bootstrap may only consume the captured preimage.
+    expected_sha="${PRE_PLIST_SHA:-}"
+  fi
+  if ! printf '%s' "$expected_sha" | grep -Eq '^[0-9a-f]{64}$'; then
+    stop_uncertain BOOTSTRAP_CUSTODY "reviewed plist digest unavailable before bootstrap"
   fi
   # One bootstrap inside the lock holder. A holder death before the command
   # sets STOP_LOCKED so the caller does not issue another one.
-  HOLD_DURING_LOCK="" run_locked bootstrap "$LAUNCHCTL" "$DOMAIN" "$DEST_PLIST" "$kind"
+  HOLD_DURING_LOCK="" run_locked bootstrap "$LAUNCHCTL" "$DOMAIN" "$DEST_PLIST" "$kind" "$expected_sha"
   return $?
 }
 
@@ -2128,7 +2279,7 @@ case "$COMMAND" in
       fi
       # No bootout has occurred. The failed install may have replaced the
       # plist, or a peer may have changed it independently. Do NOT restore
-      # here: unconditional atomic-restore can overwrite the peer and
+      # here: an unconditional plist restore can overwrite the peer and
       # conceal its drift in the subsequent preimage check.
       # If saved class/PID/argv/plist/liveness are still proven, the old
       # bytes are already intact and need no write. Otherwise preserve
@@ -2161,11 +2312,20 @@ case "$COMMAND" in
       if selector_moved_before_effect; then
         recover_or_stop BOOTSTRAP_ADMIT "selector moved before bootstrap"
       fi
+      if custody_refused_before_effect; then
+        # The installed plist was not the reviewed artifact at the effect
+        # boundary. No bootstrap was issued. Peer bytes, CURRENT, the backup
+        # and the marker are preserved for reconciliation.
+        recover_or_stop BOOTSTRAP_CUSTODY "installed plist custody unproven before bootstrap"
+      fi
       recover_or_stop BOOTSTRAP_ADMIT "admission holder died before bootstrap"
     fi
     if [ "$new_rc" -ne 0 ]; then
       # Failed bootstrap is not exclusive ownership of the installed plist.
       # Do not overwrite a peer or issue an unverified rollback bootstrap.
+      if custody_drifted_during_effect; then
+        stop_uncertain BOOTSTRAP_CUSTODY "installed plist custody drifted during bootstrap"
+      fi
       stop_uncertain BOOTSTRAP "bootstrap failed"
     fi
     PHASE=BOOTSTRAPPED
