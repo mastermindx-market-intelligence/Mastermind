@@ -89,9 +89,19 @@ This source change therefore removes apply capability from the candidate
 sweep:
 
 - The stale-pack pass runs as a **never-apply inventory** only. Its argv is
-  built in exactly one place (`stale_pack_argv`), and that builder refuses to
-  emit any apply-capable token, so a later edit that re-adds one fails closed
-  instead of shipping.
+  built in exactly one place (`stale_pack_argv`) and is checked against a
+  strict **allowlist** — exactly
+  `[<interpreter>, <helper path>, '--json', '--min-age-minutes', <positive
+  integer minutes>]` — both where it is built and again at the boundary where
+  the argv is about to be executed. A denylist of apply-capable spellings is
+  not sufficient: the installed helper parses its arguments with a default
+  `argparse.ArgumentParser()`, so `allow_abbrev` is true and `--a`, `--ap`,
+  `--app` and `--appl` are each accepted as `--apply`. Any other argv shape,
+  any abbreviation of an apply-capable flag, any non-integer or non-positive
+  `--min-age-minutes`, and any option-like helper path are refused, so a later
+  edit that re-adds apply capability fails closed instead of shipping. A
+  refused invocation is recorded as a degraded pass (`stale_packs_rc` 78) and
+  never loses the receipt.
 - The **recurring telemetry is retained**: the pass still runs on every
   scheduled sweep and still reports its discovery receipt. No duplicate reaper
   and no second scheduler are introduced.

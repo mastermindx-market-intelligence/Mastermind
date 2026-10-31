@@ -247,26 +247,70 @@ def hold_unqualified_apply(out: dict, key: str) -> None:
 # re-arms the apply mode of this helper.
 STALE_PACK_HELPER = 'stale_pack_reaper.py'
 STALE_PACK_HOLD = 'HELD_UNQUALIFIED_STALE_PACK_HELPER'
+STALE_PACK_MIN_AGE_MINUTES = 120
+# The stale-pack pass may emit exactly ONE argv shape. A denylist of
+# apply-capable spellings cannot express that: the installed helper parses
+# its arguments with a default argparse.ArgumentParser(), so allow_abbrev is
+# True and every unambiguous PREFIX of a long option is accepted as that
+# option. '--a', '--ap', '--app' and '--appl' therefore all arm the helper's
+# --apply branch, and not one of them appears in a denylist of whole tokens.
+# The allowlist below is the only sound rule, so it is the rule.
 _APPLY_CAPABLE_TOKENS = frozenset({
     '--apply', '-a', '--force-apply', '--apply-now',
     '--cleanup', '--prune', '--delete',
 })
+# Long options whose argparse abbreviation would still arm the destructive
+# branch of the unenrolled helper.
+_ABBREVIABLE_DESTRUCTIVE_FLAGS = ('--apply', '--mode', '--action')
+_DESTRUCTIVE_VALUES = frozenset({'apply', 'cleanup', 'prune', 'delete'})
+# The only two options the stale-pack inventory may carry.
+_STALE_PACK_ALLOWED_OPTIONS = ('--json', '--min-age-minutes')
 
 
-def _is_apply_capable(token: str) -> bool:
+def _is_abbreviation_of(name: str, flags: tuple) -> bool:
+    """True when `name` is, abbreviates, or extends one of `flags`.
+
+    argparse accepts an unambiguous prefix of a long option, so '--ap' is
+    '--apply'. A spelling that extends the flag ('--apply-now') is the flag
+    plus a suffix and is equally destructive. Both directions are refused.
+    """
+    for flag in flags:
+        if name == flag or flag.startswith(name) or name.startswith(flag):
+            return True
+    return False
+
+
+def _is_apply_capable(token) -> bool:
     """True when an argv token could arm a helper's destructive mode.
 
     The incumbent spelling is '--apply'. The wider set is deliberate: this
     guard must keep an apply-capable invocation out of the candidate source
     even if a later edit renames the flag.
+
+    The prefix rule is not optional. The installed helper parses with a
+    default argparse.ArgumentParser(), so allow_abbrev is True: '--a',
+    '--ap', '--app' and '--appl' are each accepted as '--apply'. A denylist
+    of whole tokens misses every one of them, so the abbreviation relation
+    is part of the rule here.
     """
-    text = token.strip().lower()
-    if text in _APPLY_CAPABLE_TOKENS or text.startswith('--apply'):
+    if not isinstance(token, str):
+        # A token that is not a string cannot be cleared by any spelling rule.
         return True
-    if '=' in text:
-        name, _, value = text.partition('=')
-        return name in ('--mode', '--action') and value in (
-            'apply', 'cleanup', 'prune', 'delete')
+    text = token.strip().lower()
+    if not text:
+        return False
+    if text in _APPLY_CAPABLE_TOKENS:
+        return True
+    name, separator, value = text.partition('=')
+    if separator:
+        # '--mode=apply' and every argparse abbreviation of it.
+        return (value.strip() in _DESTRUCTIVE_VALUES
+                and _is_abbreviation_of(name, _ABBREVIABLE_DESTRUCTIVE_FLAGS))
+    if name.startswith('--'):
+        return _is_abbreviation_of(name, _ABBREVIABLE_DESTRUCTIVE_FLAGS)
+    if name.startswith('-') and len(name) > 1:
+        # A single-dash group: '-app' parses as '-a -p -p', and '-a' arms it.
+        return 'a' in name[1:2]
     return False
 
 
@@ -279,17 +323,95 @@ def _assert_not_apply_capable(argv: list) -> None:
             + repr(apply_capable))
 
 
-def stale_pack_argv(helper: Path, min_age_minutes: int = 120) -> list:
-    """The stale-pack pass argv, with no apply capability in it.
+def _assert_stale_pack_argv_allowed(argv) -> None:
+    """Strict ALLOWLIST over the stale-pack argv. Fail closed on anything else.
+
+    This is a pure function of the argv, so it can be enforced both where the
+    argv is built and again at the boundary where it is about to be executed.
+    It admits exactly one argv shape:
+
+        [<interpreter>, <helper path>, '--json', '--min-age-minutes', <minutes>]
+
+    Every other shape is refused, so an apply-capable token cannot enter
+    through an abbreviation ('--app'), through a second option, through a
+    non-integer or non-positive age, or through an option-like helper path.
+    """
+    if not isinstance(argv, (list, tuple)):
+        raise ValueError('stale-pack argv must be a sequence: ' + repr(argv))
+    tokens = list(argv)
+    if len(tokens) != 5:
+        raise ValueError(
+            'stale-pack argv must be exactly [interpreter, helper, --json, '
+            '--min-age-minutes, minutes]: ' + repr(tokens))
+    if tokens[0] != sys.executable:
+        raise ValueError('stale-pack argv must run under sys.executable: '
+                         + repr(tokens[0]))
+    helper_text = tokens[1]
+    if not isinstance(helper_text, str) or not helper_text:
+        raise ValueError('stale-pack helper path must be a non-empty string: '
+                         + repr(helper_text))
+    if helper_text.startswith('-'):
+        raise ValueError('stale-pack helper path must not be option-like: '
+                         + repr(helper_text))
+    if any(character in helper_text for character in ('\n', '\r', '\x00')):
+        raise ValueError(
+            'stale-pack helper path must not contain control characters: '
+            + repr(helper_text))
+    if tokens[2] != _STALE_PACK_ALLOWED_OPTIONS[0]:
+        raise ValueError('stale-pack argv must carry only --json: '
+                         + repr(tokens[2]))
+    if tokens[3] != _STALE_PACK_ALLOWED_OPTIONS[1]:
+        raise ValueError('stale-pack argv must carry only --min-age-minutes: '
+                         + repr(tokens[3]))
+    minutes_text = tokens[4]
+    if (not isinstance(minutes_text, str) or not minutes_text.isascii()
+            or not minutes_text.isdigit()):
+        raise ValueError(
+            'stale-pack --min-age-minutes must be a decimal integer: '
+            + repr(minutes_text))
+    if int(minutes_text) <= 0 or minutes_text != str(int(minutes_text)):
+        raise ValueError(
+            'stale-pack --min-age-minutes must be a positive integer: '
+            + repr(minutes_text))
+    for token in tokens:
+        if _is_apply_capable(token):
+            raise ValueError(
+                'stale-pack invocation must not be apply-capable: '
+                + repr(token))
+    # Only the two allowed options may look like options at all.
+    for index, token in enumerate(tokens):
+        if token.startswith('-') and index not in (2, 3):
+            raise ValueError(
+                'stale-pack argv may carry no other option token: '
+                + repr(token))
+
+
+def stale_pack_argv(helper: Path,
+                    min_age_minutes: int = STALE_PACK_MIN_AGE_MINUTES) -> list:
+    """The stale-pack pass argv: exactly one allowed never-apply shape.
 
     This is the single place the stale-pack invocation is formed. The
-    self-check below is what makes the guard fail closed: a later edit that
-    re-adds an apply-capable token raises here instead of shipping an
-    apply-capable invocation of an unqualified, unenrolled helper.
+    allowlist below is what makes the guard fail closed: a later edit that
+    re-adds an apply-capable token, an abbreviation of one, or any other
+    argv shape raises here instead of shipping an apply-capable invocation
+    of an unqualified, unenrolled helper.
     """
-    argv = [sys.executable, str(helper), '--json',
+    if type(min_age_minutes) is not int:
+        raise ValueError('min_age_minutes must be an int, not '
+                         + type(min_age_minutes).__name__)
+    if min_age_minutes <= 0:
+        raise ValueError('min_age_minutes must be positive: '
+                         + repr(min_age_minutes))
+    if not isinstance(helper, (str, os.PathLike)):
+        raise ValueError('helper must be a path-like, not '
+                         + type(helper).__name__)
+    helper_text = str(helper)
+    if helper_text.startswith('-'):
+        raise ValueError('helper path must not be option-like: '
+                         + repr(helper_text))
+    argv = [sys.executable, helper_text, '--json',
             '--min-age-minutes', str(min_age_minutes)]
-    _assert_not_apply_capable(argv)
+    _assert_stale_pack_argv_allowed(argv)
     return argv
 
 
@@ -300,11 +422,16 @@ def stale_pack_discovery_pass(out: dict, key: str = 'stale_packs',
     The inventory is retained so the recurring telemetry of this pass survives;
     the deletion capability is not. The hold is recorded on the receipt before
     the helper runs, so a pass that never returns still names the hold.
+
+    The allowlist is enforced a second time here, at the boundary where the
+    argv is about to be executed, so an edit that tampers with the built argv
+    after the builder's own check still fails closed before any child runs.
     """
     out[key + '_hold'] = STALE_PACK_HOLD
     out[key + '_effect_state'] = 'NOT_APPLIED'
-    guarded(out, key, stale_pack_argv(HERE / STALE_PACK_HELPER), timeout,
-            limit=limit)
+    argv = stale_pack_argv(HERE / STALE_PACK_HELPER, STALE_PACK_MIN_AGE_MINUTES)
+    _assert_stale_pack_argv_allowed(argv)
+    guarded(out, key, argv, timeout, limit=limit)
 
 
 
@@ -915,7 +1042,16 @@ def main() -> int:
         # recurring telemetry of the pass is kept; the deletion capability is not. The
         # receipt records HELD_UNQUALIFIED_STALE_PACK_HELPER / NOT_APPLIED, and the
         # sweep stays degraded while that hold is in force.
-        stale_pack_discovery_pass(out, 'stale_packs', 1800, limit=2000)
+        try:
+            stale_pack_discovery_pass(out, 'stale_packs', 1800, limit=2000)
+        except ValueError as exc:
+            # The argv allowlist refused the invocation. That fails closed for
+            # effects, and it must also keep the receipt: a refused pass is a
+            # degraded pass (rc 78, the incumbent refusal code), never a lost
+            # sweep and never a green heartbeat.
+            out['stale_packs'] = ('REFUSED ' + type(exc).__name__ + ': '
+                                  + str(exc)[:200])
+            out['stale_packs_rc'] = 78
 
         # pass 0.6 (Studio only): prune age-gated, ignored Terminal dependency/build
         # caches while keeping the worktrees, branch refs, dirty source and user
