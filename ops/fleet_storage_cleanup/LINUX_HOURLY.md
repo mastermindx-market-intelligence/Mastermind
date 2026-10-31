@@ -8,10 +8,23 @@ watcher lifecycle, worker queue, or Git authority. See `README.md` and issue #16
   MemAvailable/swap, optional **operator-supplied** configured Fabric floor,
   and shallow `~/lanes/wt` directory ages. It writes one JSONL heartbeat each run
   to `~/.local/state/mastermind/storage-cleanup/linux-hygiene.jsonl`.
-* When under pressure, `--apply-safe-caches` may use **package-manager cache
-  commands** (pip and uv; npm additionally in critical mode) only when their
-  usual local cache directory exists, no matching install process is observed,
-  and no previous cleanup effect is held unverified. Each manager invocation
+* **Current source-release HOLD: no package-manager purge is admitted.** A
+  checked pathname can be replaced between preflight and a third-party
+  manager's destructive open. No independently qualified inode-bound/namespace
+  handoff exists; the source `manager_effect_target_bound()` is intentionally
+  fail-closed and cannot be enabled by environment variables. Even when
+  `--apply-safe-caches` is selected under pressure, the original timer only
+  reports `HELD_UNBOUND_CACHE_TARGET`, `effect_state=NOT_APPLIED`, with a
+  degraded/nonzero completion; it never invokes pip, uv or npm to delete cache
+  data. Safe *telemetry* remains useful and the hourly timer stays enabled.
+  The historical manager-effect tests inject simulated future confinement
+  into hermetic mocks; they are **not** production effect authorization.
+  A real manager purge requires a new reviewed, end-to-end kernel-bound target
+  implementation and independent negative tests before this hold is lifted.
+* The previously designed package-manager cleanup workflow, **currently
+  unreachable from the production source**, uses pip and uv (npm additionally
+  in critical mode) only when local cache paths exist, no active package writer
+  (including `uvx`) is observed, and no previous effect is held unverified. Each manager invocation
   requires exact same-device root/cache before-and-after bytes and available
   inodes, and the durable PRE_EFFECT marker carries its exact preimage. Loss of
   device identity or postimage retains the EFFECT_UNVERIFIED hold. Before
@@ -80,11 +93,12 @@ other actual Fabric/source leases remain independent and authoritative.
 
 ## Pressure-specific action
 
-Calm: health/inode/memory/volume receipt; no destructive cleanup. Caution:
-safe package caches, protected stale-worktree candidate report. Critical:
-additional npm cache eviction after process check, alert incumbent Fleet owner
-for exact Git/PR/lease adjudication and for blocked Fabric admission. Never
-lower the host picker's storage reserve to make a warning disappear.
+Calm: health/inode/memory/volume receipt; no destructive cleanup.
+Caution/critical: pressure and protected stale-worktree candidate report;
+**package-manager eviction is HELD_UNBOUND_CACHE_TARGET and NOT_APPLIED** until
+the atomic target-confinement release gate is independently satisfied. Critical
+pressure alerts the existing Fleet owner for exact Git/PR/lease adjudication
+and blocked Fabric admission. Never lower the host picker's reserve.
 
 Rollback for an authorized operator is to disable the Linux timer, not to
 touch the existing M2 Mac sweepers. Routine runs must never self-disable.
