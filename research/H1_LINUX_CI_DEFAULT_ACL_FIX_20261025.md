@@ -261,7 +261,7 @@ original executor again returned78 without a model receipt. This establishes
 that the probe's bootstrap, request, capture-owner and compiler checks completed
 in the controlled Linux account. It does not identify the later failure.
 
-The current intermediate fixture uses a separately marked diagnostic program
+The historical 7e9ed86a intermediate fixture uses a separately marked diagnostic program
 for the positive provider case. It replaces only the outer bootstrap's final
 Exception reporting, preserves the original line mapping, and leaves every
 actual held module, source/custody guard and settlement rule unchanged. The
@@ -287,3 +287,29 @@ release eligible. Restore the original command path and prove actual original
 initializer1PASS plus provider23PASS, each zero-skip, before protected delivery.
 This new disposable test execution does not replay an old failed namespace or
 retrieve held historical raw logs; no real provider or credentials are used.
+
+## Restore the original command and make the private fixture executable
+
+The 7e9ed86a Linux diagnostic observed a nonzero `_execute` return at line894.
+That line is the enclosing `with lease, ExitStack()` statement: context unwind
+moves the return-event line there, so it does not identify the inner refusal.
+A CPython3.12 source-only probe compiled the unchanged `_execute` AST under
+synthetic premises and reproduced return-statement942 / unwind-line894 / code78
+when the executable guard is unavailable. This is a discriminator check, not
+proof that branch942 caused the hosted failure.
+
+The fixture has a separate source-backed execution mismatch. Docker's Moby
+`withMounts` defaults tmpfs to `noexec,nosuid,nodev` before merging explicit
+options ([upstream implementation](https://github.com/moby/moby/blob/master/daemon/oci_linux.go)).
+The published `yes` guard resides under the fixture HOME; its real Linux
+`os.access(..., X_OK)` check requires an executable mount as well as mode0555.
+The controlled private0700 UID/GID1555 HOME now explicitly uses
+`rw,exec,nosuid,nodev`; `/tmp` explicitly retains `rw,noexec,nosuid,nodev`.
+The nonroot principal, read-only source/root filesystem, no network, dropped
+capabilities and no-new-privileges boundary remain. No host mount is changed.
+
+The intermediate substitution is disabled (`_INTERMEDIATE_TERMINAL_DIAGNOSTIC`
+is False), restoring the original separately compiled executor command. This
+fixture correction still needs actual initializer1PASS and all23 provider
+cases PASS, zero skips/errors/failures, plus every required exact-head check.
+It neither relaxes the executable guard nor qualifies an old failed namespace.

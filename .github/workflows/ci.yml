@@ -144,8 +144,8 @@ jobs:
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
             --env MMX_H1_CONTROLLED_LINUX_FIXTURE=1 \
-            --tmpfs /tmp:rw,mode=1777 \
-            --tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
+            --tmpfs /home/mmx-h1-fixture:rw,exec,nosuid,nodev,uid=1555,gid=1555,mode=0700 \
             --mount "type=bind,src=${H1_CI_SOURCE},dst=/repo,readonly" \
             mastermind-h1-noacl:${{ github.sha }} \
             /bin/sh -eu -c '

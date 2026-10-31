@@ -923,7 +923,9 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     real=positive[0][1]
     assert real['if']=='matrix.index == 2' and not real.get('continue-on-error',False)
     assert all(value in real['run'] for value in ('--network=none','--cap-drop=ALL','--read-only',
-        '--tmpfs /home/mmx-h1-fixture:rw,uid=1555,gid=1555,mode=0700',
+        '--tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777',
+        '--tmpfs /home/mmx-h1-fixture:rw,exec,nosuid,nodev,uid=1555,gid=1555,mode=0700',
+        '--security-opt=no-new-privileges',
         'tests/h1_ci_fixture/Dockerfile','tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
         '/bin/sh -eu -c', '--junitxml=/tmp/h1-positive.xml',
         '--env MMX_H1_CONTROLLED_LINUX_FIXTURE=1',

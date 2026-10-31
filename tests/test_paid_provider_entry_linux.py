@@ -62,7 +62,7 @@ _FIXTURE_CANARY = b'0123456789abcdef0123456789abcdef'
 
 # Deliberately release-ineligible intermediate source diagnostic. Restore False
 # and qualify the unchanged original1+23 commands before protected release.
-_INTERMEDIATE_TERMINAL_DIAGNOSTIC = True
+_INTERMEDIATE_TERMINAL_DIAGNOSTIC = False
 
 
 def _fixture_output_namespace(lanes, log):

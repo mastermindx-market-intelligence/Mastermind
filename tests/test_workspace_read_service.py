@@ -136,6 +136,78 @@ def test_wrong_client_denied_before_cache_or_runtime():
     assert run(service(NoCache(), authorize=lambda p: False))["status"] == 403
 
 
+@pytest.mark.parametrize("owner_token", ["astra-meta-ceo", "fable-meta-ceo"])
+@pytest.mark.parametrize("root_count", [0, 1, 2])
+def test_programme_meta_ceo_mapping_reaches_exact_mission_join(
+    tmp_path, owner_token, root_count,
+):
+    """Real mapper/publication/join/reducer; supplied Fabric data is not live proof."""
+    from control_plane import chairman_control_room as compositor
+    from tests.test_mission_workspace import _inputs_v2
+
+    work_ref = "WS:EXECUTIVE-ECOSYSTEM-COMPLETION"
+    owners, clock, cache = cache_fixture(tmp_path)
+    doc = compositor.compose_control_room(
+        inbox=None, boot_packet=None, active_builds=None, bindings=None,
+        binding_problems=(), generated_at=STAMP,
+        agent_os_state={
+            "schema": "agent_os_state.v1", "generated_at": STAMP,
+            "workstreams": [{"key": "EXECUTIVE-ECOSYSTEM-COMPLETION",
+                "title": "Executive Ecosystem Completion", "status": "active",
+                "owner": owner_token}],
+        },
+        runtime_jobs=[{"job_id": root, "root_job_id": root,
+            "status": "COMPLETED", "workstream": work_ref}
+            for root in ["JOB-001", "JOB-002"][:root_count]],
+    )
+    rows = doc["autonomy"]["responsibilities"]
+    assert len(rows) == 1
+    assert rows[0]["accountable_seat"] == "ceo"
+    assert rows[0]["runtime_root_state"] == {
+        0: "UNKNOWN", 1: "RESOLVED", 2: "CONFLICT",
+    }[root_count]
+    with owners[0].state_lock:
+        owners[0].state_cache["doc"] = doc
+        ccr._publish_source_validity(owners[0], doc, tuple(clock), tuple(clock))
+
+    calls = []
+
+    def acquire(runtime, root, **kwargs):
+        calls.append(root)
+        # Reuse the existing frozen Fabric-v2 fixture, never author a
+        # responsibility or bypass the real Mission reducer's root join.
+        fabric = _inputs_v2()["fabric_view"]
+        fabric["generated_at"] = STAMP
+        fabric["root"].update(job_id=root, root_job_id=root)
+        fabric["runtime"]["acquisition"] = {
+            "generation": {"schema": "mastermind.runtime_read_observation.v1",
+                "state": "SAME", "source_identity": "c" * 64,
+                "before": 1, "after": 1},
+            "snapshot_digest": "d" * 64,
+        }
+        return fabric
+
+    provider = WorkspaceReadService(cache=cache, runtime=object(),
+        authorize=lambda principal: True, armed={}, runtime_identity={}, acquire=acquire)
+    request = frame()
+    request["selection"] = {"work_ref": work_ref, "root_job_id": "JOB-001"}
+    response = run(provider, request)
+    if root_count != 1:
+        assert response["status"] == 404
+        assert calls == []
+        return
+    assert response.get("ok") is True, response
+    result = response["result"]
+    assert result["schema"] == "mastermind.mission_workspace.v2"
+    assert result["program"]["work_ref"] == work_ref
+    assert result["principal"]["accountable_seat"] == "ceo"
+    assert result["mission"]["root_job_id"] == "JOB-001"
+    assert result["mission"]["runtime_root_state"] == "RESOLVED"
+    assert result["mission"]["root_job_candidates"] == ["JOB-001"]
+    assert result["execution"]["state"] == "COMPLETED"
+    assert calls == ["JOB-001"]
+
+
 def test_revocation_during_read_refuses_release(tmp_path):
     owners, clock, cache = cache_fixture(tmp_path)
     authorized = [True]
