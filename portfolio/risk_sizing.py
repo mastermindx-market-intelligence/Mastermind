@@ -43,9 +43,41 @@ def _load(rel: str):
         return None
 
 
-def _index() -> tuple[dict, dict]:
-    """{ticker: size_mult} from the macro standout board + the dispersion regime dict."""
+def _board_admissible(board: dict, asof: str | None) -> bool:
+    """True iff this standout board may inform a decision bounded at ``asof``.
+
+    ``site/factordata/us_standouts.json`` is a SINGLE CURRENT file that states the instant it
+    represents (``as_of``); there is no dated archive of past boards. So the only truthful reading
+    is whole-artifact: a board whose own ``as_of`` POST-DATES the decision cannot have been known
+    then, and must not silently re-size a historical book. ``asof=None`` (unbounded / live) admits
+    the board exactly as before — `asof` here is an ALREADY-RESOLVED binding boundary (the caller
+    decides; see ``portfolio.conviction.build``), never inferred from the wall clock.
+
+    A board missing ``as_of`` under a BOUND read is refused: absence of a date cannot prove
+    pre-boundary provenance, and guessing would be manufacturing history.
+    """
+    if asof is None:
+        return True
+    board_asof = str((board or {}).get("as_of") or "")[:10]
+    if not board_asof:
+        log.debug("risk_sizing: standout board has no as_of — inadmissible at asof=%s", asof)
+        return False
+    if board_asof > str(asof)[:10]:
+        log.debug("risk_sizing: standout board as_of=%s post-dates asof=%s — inert",
+                  board_asof, asof)
+        return False
+    return True
+
+
+def _index(asof: str | None = None) -> tuple[dict, dict]:
+    """{ticker: size_mult} from the macro standout board + the dispersion regime dict.
+
+    Bounded at ``asof``: a board that post-dates the decision (or carries no date to check)
+    contributes NOTHING — an empty lens, which degrades every name to the neutral 1.0 / gross 1.0
+    rather than laundering today's board as historical evidence."""
     w = _load("site/factordata/us_standouts.json") or {}
+    if not _board_admissible(w, asof):
+        return {}, {}
     mult: dict[str, float] = {}
     for sec in ("buy", "watch", "laggards"):
         for r in (w.get(sec) or []):
@@ -57,6 +89,7 @@ def _index() -> tuple[dict, dict]:
 
 
 _CACHE: dict = {}
+_ASOF_CACHE: dict[str, tuple[dict, dict]] = {}   # bounded reads, keyed by decision date
 
 
 def _ensure():
@@ -64,41 +97,58 @@ def _ensure():
         _CACHE["mult"], _CACHE["regime"] = _index()
 
 
+def _board(asof: str | None) -> tuple[dict, dict]:
+    """(size_mult map, dispersion regime) for the decision boundary ``asof``.
+
+    ``asof=None`` uses the pre-existing module cache untouched (so tests that seed ``_CACHE``
+    directly, and the unbounded path, behave exactly as before). A BOUND read gets its own cache
+    slot keyed on the date — without the key, a live build and a replay in one process would
+    silently share one board."""
+    if asof is None:
+        _ensure()
+        return _CACHE.get("mult") or {}, _CACHE.get("regime") or {}
+    key = str(asof)[:10]
+    if key not in _ASOF_CACHE:
+        _ASOF_CACHE[key] = _index(key)
+    return _ASOF_CACHE[key]
+
+
 def _clamp_mult(x: float) -> float:
     return float(min(_MULT_CAP, max(_MULT_FLOOR, x)))
 
 
-def vol_mult(ticker: str) -> float:
+def vol_mult(ticker: str, asof: str | None = None) -> float:
     """Per-name vol-managed size multiplier (clamped) from the EXACT-key board lookup; 1.0 when the
     board has no row for the name. This is the PRIMARY path. Off-board names are handled by the
     on-the-fly inverse-vol fallback inside apply() (NEW-SIZE-2) — vol_mult() itself stays a pure,
-    side-effect-free board reader so its semantics (and the existing golden tests) are unchanged."""
-    _ensure()
-    return _clamp_mult(_CACHE["mult"].get(ticker, 1.0))
+    side-effect-free board reader so its semantics (and the existing golden tests) are unchanged.
+
+    ``asof`` bounds WHICH board is read (see ``_board_admissible``); None is the unbounded read."""
+    return _clamp_mult(_board(asof)[0].get(ticker, 1.0))
 
 
-def on_board(ticker: str) -> bool:
-    """True iff the macro standout board carries a size_mult for this exact ticker key."""
-    _ensure()
-    return ticker in _CACHE["mult"]
+def on_board(ticker: str, asof: str | None = None) -> bool:
+    """True iff the standout board admissible at ``asof`` carries a size_mult for this exact ticker
+    key. A board inadmissible at that boundary puts EVERY name off-board, routing them to the
+    point-in-time inverse-vol fallback instead of a laundered current multiplier."""
+    return ticker in _board(asof)[0]
 
 
-def selection_gross() -> float:
+def selection_gross(asof: str | None = None) -> float:
     """The dispersion-regime gross dial for the whole book; 1.0 when absent. Only ever
     DE-grosses the long-only book (lean_out < 1); a favourable regime keeps full budget,
     it does not lever above it here."""
-    _ensure()
-    g = (_CACHE.get("regime") or {}).get("gross_mult")
+    g = (_board(asof)[1] or {}).get("gross_mult")
     return min(float(g), 1.0) if isinstance(g, (int, float)) else 1.0
 
 
-def regime_state() -> str | None:
-    _ensure()
-    return (_CACHE.get("regime") or {}).get("state")
+def regime_state(asof: str | None = None) -> str | None:
+    return (_board(asof)[1] or {}).get("state")
 
 
 def reset_cache() -> None:
     _CACHE.clear()
+    _ASOF_CACHE.clear()
 
 
 # ── NEW-SIZE-2: on-the-fly inverse-vol fallback for OFF-BOARD names ──────────────────────────────
@@ -113,14 +163,36 @@ def _default_price_series(ticker: str):
         return None
 
 
-def _realized_vol(series, lookback: int = 60) -> float | None:
+def _slice_at(series, asof: str | None):
+    """A date-indexed close series truncated at the decision boundary (observations AT or BEFORE
+    ``asof``). ``asof=None`` returns the series untouched — the unbounded / live read.
+
+    This is the one source in the sizing chain with genuine point-in-time evidence: the store hands
+    back a DATE-INDEXED series, so slicing it is a truthful restatement of what was observable,
+    not a guess. Mirrors the existing bot/phase2 idiom (``series[series.index <= asof]``). A series
+    with no usable index degrades to the untouched series rather than raising."""
+    if series is None or asof is None:
+        return series
+    try:
+        return series[series.index <= str(asof)[:10]]
+    except Exception:  # noqa: BLE001 — an unindexable series is left alone, never fabricated
+        return series
+
+
+def _realized_vol(series, lookback: int = 60, asof: str | None = None) -> float | None:
     """Trailing realized (std of daily log-ish pct-change) vol from a close series. Returns None when
     the series is absent or too short to trust (< _MIN_VOL_OBS returns) — the caller then degrades to
-    the neutral 1.0, matching the invariant (no price -> no lever, never a fabricated one)."""
+    the neutral 1.0, matching the invariant (no price -> no lever, never a fabricated one).
+
+    ``asof`` truncates the series FIRST, so the trailing window ends at the decision boundary rather
+    than at whatever the store happens to hold today."""
     if series is None:
         return None
     try:
-        s = series.dropna().astype(float)
+        s = _slice_at(series, asof)
+        if s is None:
+            return None
+        s = s.dropna().astype(float)
         if len(s) < 2:
             return None
         rets = s.pct_change().dropna()
@@ -135,7 +207,8 @@ def _realized_vol(series, lookback: int = 60) -> float | None:
 
 
 def _fallback_size_mults(off_board: list[dict],
-                         price_series_fn: Callable[[str], object]) -> dict[int, float]:
+                         price_series_fn: Callable[[str], object],
+                         asof: str | None = None) -> dict[int, float]:
     """Inverse-vol size multipliers for the OFF-BOARD names, keyed by id(position).
 
     Inverse-vol vs the book MEDIAN realized vol (a higher-vol name gets a <1 multiplier, a calmer
@@ -146,7 +219,7 @@ def _fallback_size_mults(off_board: list[dict],
     book's gross — it only shifts relative weight away from the wilder names."""
     vols: dict[int, float] = {}
     for p in off_board:
-        v = _realized_vol(price_series_fn(p.get("ticker", "")))
+        v = _realized_vol(price_series_fn(p.get("ticker", "")), asof=asof)
         if v is not None:
             vols[id(p)] = v
     if not vols:
@@ -189,7 +262,8 @@ def _emit_diag(positions: list, record: dict) -> None:
 
 
 def apply(positions: list[dict], budget: float, name_cap: float = 0.08,
-          price_series_fn: Callable[[str], object] | None = None) -> list[dict]:
+          price_series_fn: Callable[[str], object] | None = None,
+          asof: str | None = None) -> list[dict]:
     """Re-size positions by risk: weight_i *= vol_mult_i (board lookup, or inverse-vol fallback for
     off-board names), scale the total invested by the selection-gross dial (de-gross in a poor
     selection regime, holding more cash), renormalize to that target, cap per name. Mutates + returns
@@ -198,6 +272,13 @@ def apply(positions: list[dict], budget: float, name_cap: float = 0.08,
     `price_series_fn` (DI): an override loader `ticker -> close Series | None` for the off-board
     inverse-vol fallback; defaults to the vendored price store. Injected in tests so no live path is
     referenced at test time.
+
+    `asof` (optional) is the DECISION BOUNDARY and makes this stage point-in-time honest: the
+    standout board is admitted only if its own `as_of` is at/before it (else the board lens is inert
+    and every name takes the inverse-vol path), and every price series is truncated at it before the
+    realized-vol window is measured. `asof=None` is the unbounded read — byte-identical to the
+    pre-asof behaviour, which is also what the live daily run gets, since a board published today is
+    at/before today and a series truncated at today is the whole series.
     """
     if not positions or budget <= 0:
         return positions
@@ -206,13 +287,13 @@ def apply(positions: list[dict], budget: float, name_cap: float = 0.08,
     # NEW-SIZE-2 part (2): off-board names get an on-the-fly inverse-vol multiplier instead of a
     # silent neutral 1.0. Exact-key board lookup stays the PRIMARY path; the fallback only fills the
     # names the board doesn't cover.
-    off_board = [p for p in positions if not on_board(p.get("ticker", ""))]
-    fb = _fallback_size_mults(off_board, price_series_fn) if off_board else {}
+    off_board = [p for p in positions if not on_board(p.get("ticker", ""), asof)]
+    fb = _fallback_size_mults(off_board, price_series_fn, asof) if off_board else {}
 
     def _mult_for(p: dict) -> float:
         tkr = p.get("ticker", "")
-        if on_board(tkr):
-            return vol_mult(tkr)
+        if on_board(tkr, asof):
+            return vol_mult(tkr, asof)
         return fb.get(id(p), 1.0)          # off-board: inverse-vol estimate, or neutral 1.0 (no series)
 
     # NEW-SIZE-2 part (1): coverage diagnostic. If < half the book is on the board, the primary vol
@@ -225,7 +306,7 @@ def apply(positions: list[dict], budget: float, name_cap: float = 0.08,
             "kind": "board_coverage_low",
             "coverage": round(coverage, 3),
             "n_on_board": n_on, "n_total": n,
-            "n_fallback_estimated": len(fb),
+            "n_fallback_estimated": len(fb), "asof": asof,
             "note": ("primary vol lens (macro board) covers <50% of the book; off-board names sized "
                      "by on-the-fly inverse-vol fallback where a price series exists, else neutral"),
         })
@@ -271,7 +352,7 @@ def apply(positions: list[dict], budget: float, name_cap: float = 0.08,
     # cancelling the *0.7 (and it would erase ext_mult the same way). Renorm-down-only is the
     # invariant that lets every upstream subtract-only brake SURVIVE this stage.
     incoming_gross = sum(in_weights)
-    target = min(incoming_gross, budget) * selection_gross()
+    target = min(incoming_gross, budget) * selection_gross(asof)
     for p in positions:
         w = min(raw[id(p)] / tot * target, name_cap)      # per-name name_cap clamp preserved
         p["weight"] = round(w, 4)
