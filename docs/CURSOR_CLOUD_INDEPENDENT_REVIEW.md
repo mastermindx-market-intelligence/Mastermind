@@ -71,8 +71,10 @@ Return source-linked findings, BLOCKER/MAJOR/NONBLOCKING severity, exact
 file:line/reproduction, immutable head, commands and actual test receipts,
 source-only PASS / REQUEST_CHANGES / BLOCKED verdict, and reviewer-agent identity.
 Publish findings on THIS ORIGINAL PR and link the completed Cloud Agent.
-Do not claim formal GitHub non-author approval from a GitHub-author-account
-comment. State whether separate non-author formal approval remains owed.
+Do not claim formal GitHub non-author approval from an ordinary GitHub PR
+issue comment, whether posted by `cursor[bot]` or an author. Only a separately
+submitted GitHub pull-request review from a genuine non-author can count.
+State whether formal approval remains owed.
 ```
 
 This is manual commission transport, not a second runner, scheduler, provider
@@ -84,17 +86,20 @@ failover service, work queue, review registry or watcher.
 | --- | --- | --- |
 | Original `@cursor` PR comment, read back by URL/ID | Commission posted on frozen source | Cloud Agent launched or reviewed |
 | Legitimate Cursor bot `Taking a look!` and unique agent ID/link | Agent launch acknowledgement | Reviewer completion, formal review, deployment |
-| Completed Cursor agent report, exact-HEAD check, original PR result | Technical independent **source** assessment, subject to human/CEO adjudication | Non-author GitHub approval if posted by author account |
+| Completed Cursor agent report, exact-HEAD check, original PR issue-comment result | Technical independent **source** assessment, subject to human/CEO adjudication | A submitted GitHub PR review, regardless of whether the issue commenter is a bot or author |
 | Separate GitHub API **submitted review** at frozen SHA by genuine non-author with no unresolved blocker | Actual formal independent GitHub review gate | Protected merge or product acceptance |
 | Protected merge_group CI and protected merge SHA | Accepted source release | Installed/current runtime or webhook/Fabric/Slack production proof |
 
 If Cursor is slow or GitHub returns an ambiguous result, read the original
-comment, bot replies and Cloud Agent URL first. Never repost blindly. If a
-Cursor response uses a GitHub account that authored code in the PR, preserve
-the distinct agent analysis but mark **NON_AUTHOR_APPROVAL_NOT_PROVEN**. Worker
-identity, posting account identity, and GitHub formal-review identity are
-different. Branch-protection approval, when required, must come from a
-**separately authenticated non-author GitHub reviewer** on the current head.
+comment, bot replies and Cloud Agent URL first. Never repost blindly.
+Regardless of whether the GitHub issue-comment `user.login` is `cursor[bot]` or
+an author, preserve distinct Cloud Agent analysis but mark
+**NON_AUTHOR_APPROVAL_NOT_PROVEN** until an independently authenticated
+non-author has actually submitted a GitHub PR review on the current head.
+Read the agent-reported in-agent GitHub/MCP principal separately: it may be a
+source author even when `cursor[bot]` posted the issue comment. Posting
+account, Cloud Agent, in-agent principal, and formal reviewer are four
+different evidence fields, not interchangeable identities.
 
 On a changed head, stop and reconcile under REVIEW_RETURN review reuse / full
 rereview rules, never treat an old agent result as a current-head acceptance.
@@ -114,7 +119,22 @@ launched distinct
 [agent bc-03e22133-a364-4ec8-98c4-3db18becba0c](https://cursor.com/agents/bc-03e22133-a364-4ec8-98c4-3db18becba0c)
 and posted [source assessment #6389332447](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1515#issuecomment-6389332447).
 The reviewer reported REVIEW_PASS_SOURCE_ONLY and preserved merge/install HOLD.
-The posting GitHub identity also authored PR code, so the result explicitly
-recorded **NON_AUTHOR_APPROVAL_NOT_PROVEN**; that assessment never satisfied
-protected formal non-author approval, source merge, installation or real-path
-acceptance. Historical example only, not a verdict on any current head.
+The GitHub issue-comment API and the in-agent source report establish distinct
+identities rather than one interchangeable GitHub reviewer:
+
+| Historical identity / event | Verified value | Meaning |
+| --- | --- | --- |
+| GitHub issue-comment posting account (GitHub `user.login`) | `cursor[bot]` | Actual author of source assessment #6389332447; not a submitted PR review |
+| Cursor Cloud Agent identity | `bc-03e22133-a364-4ec8-98c4-3db18becba0c` | Independent source analysis agent, not a GitHub review principal |
+| Agent-reported authenticated GitHub/MCP principal | `chriswong6031-creator` | Inside-agent principal and PR source author, NOT the issue-comment posting account |
+| Formal non-author GitHub PR review from this Cursor source comment | `NOT_PROVEN` | The issue comment did not submit a formal non-author review at head `79b8bf321b580c325e97e8d33b2a5d0020a41140` |
+
+An ordinary PR issue comment, whether posted by a bot or an author, is never
+a submitted GitHub pull-request review. At the time of this Cursor source
+return there was no evidenced independent non-author `APPROVED` on its frozen
+head; therefore **NON_AUTHOR_APPROVAL_NOT_PROVEN** was the correct disposition.
+The later `MastermindX1` submitted `APPROVED` review is a distinct GitHub
+event on a different head, `5c7ea77f845fd075ebc89ebff4b75edf1548d9ce`
+(review #5719505484, 2026-10-30), not retroactive approval of the Cursor
+comment. This historical example is not a verdict on any current head or
+proof of installation or real-path acceptance.

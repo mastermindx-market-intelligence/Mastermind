@@ -139,11 +139,16 @@ The exact procedure and guarded `@cursor` packet are in
 4. **Identity-separated verdict.** An identified Cloud Agent's read-only analysis may
    count as an independent *technical/source-review assessment* if it is distinct
    from the builder and its exact-head evidence is independently adjudicated.
-   If its GitHub response is posted through a PR-author account, as occurred in
-   Mastermind #1515, this is **SOURCE-REVIEW-ONLY / NON_AUTHOR_APPROVAL_NOT_PROVEN**,
-   never formal independent `APPROVED`. A branch-protection non-author review still
-   requires a **genuine separate authenticated GitHub reviewer** and an actual submitted
-   review at the exact head; do not infer that from the Cursor run/model identity.
+   In Mastermind #1515, GitHub issue-comment `user.login` was `cursor[bot]`, while
+   the agent-reported authenticated GitHub/MCP principal was
+   `chriswong6031-creator`, a PR source author; the distinct Cursor Cloud Agent was
+   `bc-03e22133-a364-4ec8-98c4-3db18becba0c`. This is
+   **SOURCE-REVIEW-ONLY / NON_AUTHOR_APPROVAL_NOT_PROVEN**, never formal independent
+   `APPROVED`: an ordinary PR issue comment (bot- or author-posted) is never a
+   submitted formal GitHub PR review. A branch-protection non-author review still
+   requires a **genuine separate authenticated GitHub reviewer** and an actual
+   submitted review at the exact head; do not infer either from the issue-comment
+   `user.login`, the Cloud Agent identity, or its in-agent principal.
 5. **Ordinary release law persists.** Current-head CI, security findings, current-base
    integration, required formal GitHub approvals, protected merge queue and real
    production-path proof are separate gates. A Cursor technical PASS cannot close
