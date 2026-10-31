@@ -55,6 +55,23 @@ def validate_parallel_workflow(text: str) -> None:
     ):
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")
 
+    # Guard each hosted job's total wall-clock budget, not just pytest time.
+    # The merge queue gives all required checks 100 minutes. Shard zero uses
+    # additional Paper/Fabric qualifications and previously hit 45m at cleanup.
+    shard_timeout = shards.get("timeout-minutes")
+    gate_timeout = gate.get("timeout-minutes")
+    if (
+        type(shard_timeout) is not int
+        or not 45 <= shard_timeout <= 60
+        or type(gate_timeout) is not int
+        or not 1 <= gate_timeout <= 8
+        or gate_timeout > shard_timeout
+        or shard_timeout + gate_timeout > 100
+    ):
+        raise ci_pytest.PolicyError(
+            "parallel CI timeouts must be finite, bounded, and within merge queue budget"
+        )
+
     shard_steps = shards.get("steps", [])
     gate_steps = gate.get("steps", [])
     if not isinstance(shard_steps, list) or not isinstance(gate_steps, list):
