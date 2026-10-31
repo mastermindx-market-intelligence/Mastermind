@@ -77,7 +77,27 @@ The first two hypotheses explain many observed links without deception. The thir
 
 These recommendations are inference and potential experiments; no product capability, acquisition cost, creator revenue, conversion or compliance review has been measured for Mastermind here.
 
-## 5. Remaining evidence frontier; no unwarranted saturation claim
+## 5. Timestamp recovery from indexed post IDs — major mirror-recency correction
+
+**New technical finding:** Some third-party X timeline mirrors expose actual **status URLs** in the clickable "View Details" controls, even though the mirror itself displays misleading relative dates such as "4 days ago" against an archive that is months old. The underlying 19-digit X status ID is time-encoded under Twitter's Snowflake convention. Its documented original implementation uses `twepoch = 1288834974657` and shifts the milliseconds by 22 bits. Original [Twitter Snowflake source](https://raw.githubusercontent.com/twitter-archive/snowflake/snowflake-2010/src/main/scala/com/twitter/service/snowflake/IdWorker.scala) and [source repository](https://github.com/twitter-archive/snowflake/tree/snowflake-2010); the archived implementation is the origin of the formula, not proof every mirrored post is genuine.
+
+For an intact authentic status ID, derive **UTC event time** using `new Date(Number((BigInt(id) >> 22n) + 1288834974657n)).toISOString()`. **Use BigInt**, never JavaScript floating-point conversion before shifting, or 19-digit IDs lose integer precision.
+
+| Source context | Status ID recovered from indexed mirror hyperlink | Snowflake-derived UTC |
+| --- | --- | --- |
+| @EquitySpace1 quoted-post share | `2067674188501119385` | 2026-06-18T18:21:56.724Z |
+| @EquitySpace1 giveaway | `2067238294971437118` | 2026-06-17T13:29:51.608Z |
+| @EquityEdgeUK quoted brand post | `2067209075230728599` | 2026-06-17T11:33:45.079Z |
+| @EquitySpace1 signup contest | `2061840256765432136` | 2026-06-02T15:59:59.009Z |
+| @THE_SNR_SNIPER reply @Mecizoofx | `2092221373041033611` | 2026-08-25T12:03:41.583Z |
+
+Mirror records: [EquitySpace1 indexed timeline](https://ngntipkolamrenang.twstalker.com/EquitySpace1), [EquitySpace1 post June 18](https://ngntipkolamrenang.twstalker.com/EquitySpace1/status/2067674188501119385), [EquitySpace1 giveaway June 17](https://ngntipkolamrenang.twstalker.com/EquitySpace1/status/2067238294971437118), [underlying company post June 17](https://ngntipkolamrenang.twstalker.com/EquityEdgeUK/status/2067209075230728599), [EquitySpace1 older contest June 2](https://ngntipkolamrenang.twstalker.com/EquitySpace1/status/2061840256765432136), [THE_SNR_SNIPER indexed timeline](https://mobile.twstalker.com/THE_SNR_SNIPER), and [one public reply Aug 25](https://mobile.twstalker.com/THE_SNR_SNIPER/status/2092221373041033611). Some per-post mirror links **fail to open on retrieval** despite being exposed as target hyperlinks; preserve this verification limitation. The timestamp is derived from the referenced status ID, not authenticated against a live X API response.
+
+**Impact on this investigation:** a page labelled "4 days ago" cannot establish that content was posted during the current week; the above examples date to **June or August 2026**, outside the October 1–30 analysis window. This reduces false temporal edges, helps deduplicate mirrors by original status ID, and permits *bounded dated spot-checks* when links are available. **It still cannot measure post completeness, actual repost event times, private engagement, account ownership or 30-day frequency.**
+
+**Updated collection procedure:** store `source_page_url`, `target_status_url`, `status_id`, `derived_created_at_utc`, `observed_author_handle`, `target/quoted_original_id`, `event_type`, `retrieved_at`, `confidence`, and `is_in_scope_window`. Treat mirror claims of retweets/replies as **mirror-observed** unless directly authenticated. Filter dated IDs first; never treat a snapshot's relative labels as today's recency. Do not change the prior 181-edge relationship graph based on a one-page sample.
+
+## 6. Remaining evidence frontier; no unwarranted saturation claim
 
 **Priority A:** Obtain a **permitted**, original-post-ID/timestamped **30-day X export** for @EquitySpace1, @EquityEdgeUK, @Danieltrades, selected cross-brand outer-ring creators, and OpenMarket/Raw/Percept. Count unique original repost/reply/quote actions per ordered pair, posts per author denominator, reciprocity, cross-post synchronization, content similarity, and baseline non-promo activity. Archived indexed mirrors cannot yield comprehensive rates.
 
