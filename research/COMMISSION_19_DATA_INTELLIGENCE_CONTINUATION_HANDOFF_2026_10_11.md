@@ -1153,7 +1153,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
   - Line 586: "The `acceptanceDateTime` clock was wrong (below)."
   - Lines 591–596: "The submissions-JSON `acceptanceDateTime` J is NOT UTC. It is true UTC + |America/New_York offset| …", with its four receipts and the leak claim. Read live on 2026-10-31, all four filings agree with their SGML headers.
   - Line 615: A2's correction, as a description of how the clock behaves. It stands as the adopted rule for J < E.
-  - Lines 623–626 (r11 OPEN): the "upstream clock gap" at `collectors/edgar_earnings_8k.py:12`, and "a collector fix must remove the evaluator's A2 correction in the same change".
+  - Lines 623–625 (r11 OPEN): the "upstream clock gap" at `collectors/edgar_earnings_8k.py:12`, and "a collector fix must remove the evaluator's A2 correction in the same change". Line 626 (a `prior_filings` source supplies UTC or the raw JSON, never header ET) still holds.
   - Line 751: the same gap, routed again.
   - Line 916 (r16 lane A row): "…that value reads LATER than true UTC by the New York offset… correction `U = J + utcoffset_ET(J)`…". Lane A's census of readers stands; its premise does not.
   - Line 1012 (r16 U2): "A docstring-only relabel now. A normalizer that converts stored values would move WP31 cutoffs, so it is a design item." No relabel is needed: the label is accurate.
