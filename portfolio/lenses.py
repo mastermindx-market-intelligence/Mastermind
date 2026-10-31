@@ -209,11 +209,25 @@ def _flows_13f_dir(nb, ns):
 
 
 # ---------------- alt-data flow lens (Signal Intelligence Desk / political / congress / insider) ----------------
+_INTEL_FILES = ("site/intelligence/by_ticker.json", "data/intelligence/by_ticker.json")
+_NEWS_FILES = ("site/news/by_ticker.json", "data/news/by_ticker.json")
+
+
+def _first_tickers_file(rels) -> tuple:
+    """(rel, doc) of the first vendored file whose `tickers` map is non-empty, else (None, {}).
+    Same precedence as the `site… or data…` reads; returning the file too lets a lens say which
+    snapshot — and therefore which clocks — a row came from."""
+    for rel in rels:
+        doc = _load(rel) or {}
+        if isinstance(doc, dict) and doc.get("tickers"):
+            return rel, doc
+    return None, {}
+
+
 def _intelligence() -> dict:
     """The unified per-ticker News+Intelligence bundle (macro engine.intelligence) — one
     file, two facts per name ({news, alt}). Falls back to the standalone feeds when absent."""
-    return ((_load("site/intelligence/by_ticker.json") or {}).get("tickers")
-            or (_load("data/intelligence/by_ticker.json") or {}).get("tickers") or {})
+    return _first_tickers_file(_INTEL_FILES)[1].get("tickers") or {}
 
 
 def _altdata_by_ticker() -> dict:
@@ -299,9 +313,7 @@ def _altdata_row(t: str):
 def _news_by_ticker() -> dict:
     """Per-ticker news-flow substrate published by the macro engine
     (engine/news_signals). Tries the site contract, then the data store."""
-    return ((_load("site/news/by_ticker.json") or {}).get("tickers")
-            or (_load("data/news/by_ticker.json") or {}).get("tickers")
-            or {})
+    return _first_tickers_file(_NEWS_FILES)[1].get("tickers") or {}
 
 
 def _news_row(t: str):
@@ -310,9 +322,18 @@ def _news_row(t: str):
     CONTEXT-ONLY (display-only in the macro engine) — informs narrative/conviction,
     never drives size alone. None when the name has no news record."""
     # unified bundle's news sub-object first, else the standalone news feed
-    rec = (_intelligence().get(t.upper(), {}) or {}).get("news") or _news_by_ticker().get(t.upper())
+    urel, udoc = _first_tickers_file(_INTEL_FILES)
+    uni_news = ((udoc.get("tickers") or {}).get(t.upper(), {}) or {}).get("news")
+    nrel, ndoc = (urel, udoc) if uni_news else _first_tickers_file(_NEWS_FILES)
+    rec = uni_news or (ndoc.get("tickers") or {}).get(t.upper())
     if not rec:
         return None
+    # The snapshot's own clocks (news estate D2): a feed the producer RETAINED from a previous
+    # build is still shown, but flagged — its headlines are older than the build date says.
+    source_asof = ndoc.get("source_asof") if isinstance(ndoc.get("source_asof"), str) else None
+    retained_flag = ndoc.get("retained_from_previous_build")
+    retained_flag = retained_flag if isinstance(retained_flag, bool) else None   # null = not stated
+    retained = retained_flag is True
     n_recent = rec.get("n_recent") or 0
     lean = rec.get("sentiment_lean") or "neutral"
     n_pos = rec.get("n_pos") or 0
@@ -324,10 +345,15 @@ def _news_row(t: str):
     note = f"{n_recent} recent headlines · lean {lean}"
     if baskets:
         note += f" · {baskets[0]}"
+    if retained:
+        reason = ndoc.get("retained_reason")
+        note += " · retained from previous build" + (f" ({reason})" if isinstance(reason, str) and reason else "")
     return _row("news_flow", {
         "n_recent": n_recent, "sentiment_lean": lean, "n_pos": n_pos, "n_neg": n_neg,
-        "baskets": baskets, "sectors": sectors, "is_mag7": is_mag7},
-        "context", direction, note)
+        "baskets": baskets, "sectors": sectors, "is_mag7": is_mag7,
+        "source_asof": source_asof, "retained_from_previous_build": retained_flag,
+        "evidence_grade": "vendored_snapshot", "source_file": nrel},
+        "stale_retained" if retained else "context", direction, note)
 
 
 # ---------------- price / trend-confirmation lens (VALIDATED) ----------------

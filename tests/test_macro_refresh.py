@@ -972,3 +972,40 @@ def test_refresh_fetch_failure_returns_none(monkeypatch, tmp_path):
     monkeypatch.setattr(mr, "_run", fake_run)
     assert mr.refresh(log=lambda *_: None) is None
     assert not synced, "a failed fetch must not proceed to the R2 leg"
+
+
+# --- D2: report-only news/intelligence freshness anchors (news estate 2026-10-31) ---------------
+
+def test_news_freshness_anchors_are_report_only(monkeypatch, tmp_path):
+    """T8: news/intelligence clocks appear in anchors_report() but never move asof(), the
+    freeze decision or data_gaps — they are observation, not a trading gate."""
+    src = _make_checkout(tmp_path, {
+        "site/factordata/us_standouts.json": {"as_of": "2026-07-01"},
+        "data/regime/latest.json":           {"date": "2026-07-01"},
+        "site/sectordata/sector_cycles.json": {"meta": {"asOf": "2026-07-01"}},
+        "site/news/by_ticker.json":          {"asof": "2020-01-02",
+                                              "source_asof": "2020-01-01T23:00:00+00:00"},
+        "site/intelligence/by_ticker.json":  {"as_of": "2020-01-03",
+                                              "generated_utc": "2020-01-03T06:00:00+00:00"},
+    })
+    _patch_src(monkeypatch, src)
+    report = mr.anchors_report()
+    assert report["news_by_ticker"] == "2020-01-02"
+    assert report["news_by_ticker_source"] == "2020-01-01"
+    assert report["intelligence_by_ticker"] == "2020-01-03"
+    assert mr.asof() == "2026-07-01"                      # MIN ignores the report-only clocks
+    freeze, reasons = mr._compute_freeze(report, log=lambda *_: None)
+    assert not any(r.startswith(("news_", "intelligence_")) for r in reasons)
+    assert all(lbl in report for lbl in ("us_standouts", "regime_latest", "sector_cycles", "stockdata_spy"))
+
+    absent = _make_checkout(tmp_path / "absent", {
+        "site/factordata/us_standouts.json": {"as_of": "2026-07-01"},
+        "data/regime/latest.json":           {"date": "2026-07-01"},
+        "site/sectordata/sector_cycles.json": {"meta": {"asOf": "2026-07-01"}},
+    })
+    _patch_src(monkeypatch, absent)
+    rep2 = mr.anchors_report()
+    assert rep2["news_by_ticker"] is None and rep2["news_by_ticker_source"] is None
+    assert rep2["intelligence_by_ticker"] is None
+    gaps = mr._collect_data_gaps()
+    assert "site/news/by_ticker.json" not in gaps and "site/intelligence/by_ticker.json" not in gaps
