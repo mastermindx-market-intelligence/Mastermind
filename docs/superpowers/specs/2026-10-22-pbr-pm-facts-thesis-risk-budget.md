@@ -227,7 +227,7 @@ not entered in `config/contracts.yml`.
    record on another date → `CONTRADICTED`.
 5. A fact without a `period` → `UNVERIFIED` (reason `event_identity_absent`) when primary records exist. A fact with a period but
    no matched record → `UNVERIFIED` (reason `no_identity_matched_primary_record`). Neither case is `CONTRADICTED`.
-6. MU stays `CONTRADICTED`. The claimed catalyst and both fixture `external_facts` concern the fiscal Q4 2026 results release.
+6. MU stays `CONTRADICTED`. The claimed catalyst and both event-dated fixture `external_facts` concern the fiscal Q4 2026 results release.
    That identity (`period=FY2026-Q4`) is declared in the tests under §5 SR-1 rule (3). The why_now and exit_plan digests
    record no period label, and the falsifier digest records one in a different form (`Q4 FY2026`), so a single canonical
    label is declared for every component and both external facts rather than mixing label forms.
