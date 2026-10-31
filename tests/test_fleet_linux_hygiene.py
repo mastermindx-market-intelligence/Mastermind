@@ -12,6 +12,15 @@ spec.loader.exec_module(h)
 
 
 class FleetLinuxHygieneTests(unittest.TestCase):
+    def setUp(self):
+        # Historical manager settlement tests simulate a future *qualified*
+        # inode-bound effect handoff. Production code ALWAYS holds this gate
+        # closed; this mock does not run a real manager or authorize cleanup.
+        self._inert_effect_fixture = patch.object(
+            h, "manager_effect_target_bound", return_value=True)
+        self._inert_effect_fixture.start()
+        self.addCleanup(self._inert_effect_fixture.stop)
+
     def test_pressure_levels_and_enforced_reserve(self):
         self.assertEqual(h.classify(900, 800, 0.4), "CALM")
         self.assertEqual(h.classify(900, 180, 0.4), "CAUTION")
@@ -216,6 +225,75 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(__import__("json").loads(rows[0])["state"],
                              "DEFERRED_ALREADY_RUNNING")
+
+    def test_unbound_cache_target_refuses_after_injected_peer_path_swap(self):
+        """Peer symlink swap must not reach any manager or clear a hold.
+
+        This uses the REAL production (fail-closed) gate rather than the
+        simulated future confinement used by legacy manager-effect fixtures.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            home = Path(d)
+            cache = home / ".cache/pip"
+            cache.mkdir(parents=True)
+            original = home / ".cache/pip-approved-original"
+            outside = home / "outside"
+            outside.mkdir()
+            sentinel = outside / "keep"
+            sentinel.write_text("protected")
+            snapshot = {"state": "OK", "device": 1, "total_bytes": 1000000,
+                        "available_bytes": 300000, "inodes_total": 1000,
+                        "inodes_available": 500}
+            calls = [0]
+
+            def preimage_then_peer_redirect(_path):
+                calls[0] += 1
+                # At this point both pre-effect volume snapshots have been
+                # sampled. A peer can now swap the pathname before exec.
+                if calls[0] == 2:
+                    cache.rename(original)
+                    cache.symlink_to(outside, target_is_directory=True)
+                return dict(snapshot)
+
+            with patch.object(h, "manager_effect_target_bound", return_value=False), (
+                patch.object(h, "package_busy", return_value=False)
+            ), patch.object(h.shutil, "which", return_value="/usr/bin/python3"), (
+                patch.object(h, "volume", side_effect=preimage_then_peer_redirect)
+            ), patch.object(h.subprocess, "run", side_effect=AssertionError(
+                    "unbound destructive manager must never be called")):
+                result = h.cache_cleanup(home, home, "CAUTION")
+
+            self.assertEqual(calls[0], 2)
+            self.assertEqual(result[0]["state"], "HELD_UNBOUND_CACHE_TARGET")
+            self.assertEqual(result[0]["effect_state"], "NOT_APPLIED")
+            self.assertTrue(cache.is_symlink())
+            self.assertTrue(original.is_dir())
+            self.assertEqual(sentinel.read_text(), "protected")
+            self.assertFalse((home / h.HOLD).exists())
+
+    def test_unbound_cache_target_is_degraded_but_no_effect_hold_created(self):
+        """Never report a successful purge when no atomic manager target exists."""
+        good = {"state": "OK", "total_gib": 900, "free_gib": 180,
+                "inodes_free_fraction": 0.5, "device": 2,
+                "available_bytes": 180 * 1024**3, "inodes_available": 500}
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d)
+            with patch.object(h, "volume", return_value=good), patch.object(
+                h, "memory", return_value={"state": "OK"}
+            ), patch.object(
+                h, "reserve", return_value={"state": "CONFIGURED", "floor_gib": 75}
+            ), patch.object(
+                h, "candidates", return_value={"state": "OBSERVED_ONLY"}
+            ), patch.object(
+                h, "cache_cleanup", return_value=[
+                    {"state": "HELD_UNBOUND_CACHE_TARGET", "effect_state": "NOT_APPLIED"}]
+            ):
+                row = h.run(state, state, True)
+        self.assertEqual(row["mode"], "CAUTION")
+        self.assertEqual(row["cleanup"][0]["state"], "HELD_UNBOUND_CACHE_TARGET")
+        self.assertTrue(row["degraded"])
+        self.assertEqual(row["effect_hold"], "ABSENT")
+        self.assertEqual(row["attributable_reclaimed_bytes"], 0)
 
     def test_manager_argv_variants_are_detected_not_just_install_substrings(self):
         for arguments in (
