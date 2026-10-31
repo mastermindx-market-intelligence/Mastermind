@@ -66,9 +66,11 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # Three exact forward compositions preserve protected Qwen fresh-usage and
 # caller UTC narrowing. Qualify their accepted Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.
+# Former candidate remote_sub.sh SHA256 before the BASH_COMPAT=50 heredoc guard:
+# 09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'pick.py': '4008caca8c6a0e2145e7cb90965740ce24445e3300a8e3693d7a96130df236df',
-    'remote_sub.sh': '09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7',
+    'remote_sub.sh': 'c59ff8ab407b06212979514ae1e8fec67ed74ed85bee3ce689c655f76306a313',
     'remote_sub_helpers.py': '0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556',
 }
 

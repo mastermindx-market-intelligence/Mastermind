@@ -3,6 +3,49 @@
 # Packet content is transported by scp and read remotely; it is never argv.
 set -u
 
+# bash >=5.1 writes a heredoc/here-string below its pipe size (64 KiB) into a
+# pipe before the reader starts; on 2026-10-13 a 777-byte heredoc blocked there
+# forever on M2 (TERM then misreported ENOSPC). Level 50 restores temp-file
+# heredocs and is exported to local child bash; bash 3.2 ignores it.
+export BASH_COMPAT=50
+
+# Read-only heredoc transport proof: no reservation, lease, trap or worker launch.
+if [ "${1:-}" = "--selftest-heredoc" ]; then
+  selftest_out=$(mktemp "${TMPDIR:-/tmp}/remote_sub_heredoc.XXXXXX") || exit 70
+  selftest_doc=$(printf '%04096d' 0)
+  (
+    if [ -p /dev/stdin ]; then selftest_kind=pipe
+    elif [ -f /dev/stdin ]; then selftest_kind=file
+    else selftest_kind=other
+    fi
+    printf '%s %s\n' "$selftest_kind" "$(wc -c | tr -d ' ')" > "$selftest_out"
+  ) <<HEREDOC_SELFTEST &
+$selftest_doc
+HEREDOC_SELFTEST
+  selftest_pid=$!
+  selftest_ticks=0
+  while kill -0 "$selftest_pid" 2>/dev/null; do
+    if [ "$selftest_ticks" -ge 100 ]; then
+      kill -TERM "$selftest_pid" 2>/dev/null
+      wait "$selftest_pid" 2>/dev/null
+      rm -f "$selftest_out"
+      echo "HEREDOC_SELFTEST_FAIL reason=timeout bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+      exit 124
+    fi
+    sleep 0.1
+    selftest_ticks=$((selftest_ticks + 1))
+  done
+  wait "$selftest_pid" 2>/dev/null
+  selftest_result=$(cat "$selftest_out" 2>/dev/null)
+  rm -f "$selftest_out"
+  if [ "$selftest_result" = "file 4097" ]; then
+    echo "HEREDOC_SELFTEST_OK transport=file bytes=4097 bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}"
+    exit 0
+  fi
+  echo "HEREDOC_SELFTEST_FAIL reason=transport result=${selftest_result:-none} bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+  exit 1
+fi
+
 # Read/export only: enter before any reservation, lease, trap or worker launch.
 if [ "${1:-}" = "--collect-existing" ]; then
   shift

@@ -85,6 +85,13 @@ class PairedLauncherUpgrade(unittest.TestCase):
             # fixture; both the whole controller and whole old manifest bind it.
             controller = cls.built / 'native-code-stage/ext/remote_sub.sh'
             current = controller.read_bytes()
+            # Drop the later contiguous BASH_COMPAT=50 heredoc guard first;
+            # it postdates this pair and must invert to the exact prior bytes.
+            guard_start = current.find(b'# bash >=5.1 writes a heredoc')
+            guard_end = current.find(b'# Read/export only: enter before')
+            if current.count(b'export BASH_COMPAT=50') != 1 or not 0 < guard_start < guard_end:
+                raise AssertionError('historical fixture heredoc guard differs')
+            current = current[:guard_start] + current[guard_end:]
             if g.digest(current) != '09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7':
                 raise AssertionError('historical fixture current controller differs')
             fixed = (b'      ECONOMIC_SOURCE_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"\n'
