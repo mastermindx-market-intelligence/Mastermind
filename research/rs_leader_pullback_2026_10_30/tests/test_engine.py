@@ -69,6 +69,19 @@ class Bars(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_bars(b, Rules())
 
+    def test_naive_bar_utc_clock_refused_even_if_it_falls_on_rth_grid(self):
+        b = bar_rows(pattern())
+        b["timestamp_utc"] = b["timestamp_utc"].dt.tz_localize(None)
+        with self.assertRaisesRegex(ValueError, "timezone-qualified"):
+            validate_bars(b, Rules())
+
+    def test_explicit_offset_bar_clock_normalized(self):
+        b = bar_rows(pattern())
+        b["timestamp_utc"] = b["timestamp_utc"].map(
+            lambda x: x.tz_convert("America/New_York").isoformat())
+        actual = validate_bars(b, Rules())
+        self.assertEqual(actual.iloc[0].timestamp_utc.hour, 14)
+
     def test_duplicate_and_missing_intraday(self):
         b = bar_rows(pattern())
         with self.assertRaises(ValueError):
@@ -141,6 +154,18 @@ class Leaders(unittest.TestCase):
         p = leader_panel(d, m, Rules(min_universe=2, min_adv_dollars=1))
         self.assertEqual(p[days[-1]]["leaders"], set())
         self.assertLess(p[days[-1]]["coverage"], 0.95)
+
+    def test_nonblank_malformed_end_date_is_not_open_ended(self):
+        d, m, _ = make_daily()
+        m.loc[m.symbol == "A", "end_date"] = "2026-99-99"
+        with self.assertRaisesRegex(ValueError, "invalid PIT end date"):
+            leader_panel(d, m, Rules(min_universe=2, min_adv_dollars=1))
+
+    def test_reversed_membership_interval_refused(self):
+        d, m, _ = make_daily()
+        m.loc[m.symbol == "A", "end_date"] = "2026-01-01"
+        with self.assertRaisesRegex(ValueError, "membership interval"):
+            leader_panel(d, m, Rules(min_universe=2, min_adv_dollars=1))
 
     def test_delisted_membership_asof(self):
         d, m, days = make_daily()
@@ -219,6 +244,60 @@ class PivotExecution(unittest.TestCase):
         self.assertIsNone(r["metrics"]["pivot"]["win_rate"])
         self.assertEqual(r["metrics"]["pivot"]["censored"], 1)
 
+    def test_strict_completed_last_session_resolves_time_exit(self):
+        q = pattern()[:5] + [(100, 101, 99, 100.5)] * 8
+        sched = {DAY: (pd.Timestamp("2026-10-30T13:30:00Z"),
+                       pd.Timestamp("2026-10-30T20:00:00Z"))}
+        cfg = Rules(hold_sessions=1)
+        a = evaluate(bar_rows(q), leaders(), cfg, session_schedule=sched,
+                     prior_session_by_day={DAY: PREV}, require_complete_sessions=True)
+        event = a["events"]["pivot"][0]
+        self.assertEqual(event["exit_reason"], "TIME")
+        self.assertEqual(event["exit_bar_end_utc"], "2026-10-30T20:00:00+00:00")
+        next_day = date(2026, 11, 2)
+        sched[next_day] = (pd.Timestamp("2026-11-02T14:30:00Z"),
+                          pd.Timestamp("2026-11-02T21:00:00Z"))
+        six = bar_rows([(100,101,99,100.5)] *13, day="2026-11-02")
+        b = evaluate(pd.concat([bar_rows(q),six], ignore_index=True), leaders(), cfg,
+                     session_schedule=sched, prior_session_by_day={DAY:PREV, next_day:DAY},
+                     require_complete_sessions=True)
+        self.assertEqual(event, b["events"]["pivot"][0])
+
+    def test_five_session_owner_close_resolves_without_next_session(self):
+        first = date(2026, 10, 26)
+        previous = date(2026, 10, 23)
+        five = [date(2026, 10, 26+i) for i in range(5)]
+        owner_calendar = {}
+        previous_by_day = {}
+        bars = []
+        for i, dt in enumerate(five):
+            day = dt.isoformat()
+            data = (pattern()[:5] + [(100,101,99,100.5)]*8) if i == 0 else [(100,101,99,100.5)]*13
+            bars.append(bar_rows(data,day=day))
+            owner_calendar[dt] = (pd.Timestamp(day + "T13:30:00Z"),
+                                  pd.Timestamp(day + "T20:00:00Z"))
+            previous_by_day[dt] = previous if i == 0 else five[i-1]
+        eligible = {previous: {"leaders": {"A"}}}
+        eligible.update({dt: {"leaders": set()} for dt in five})
+        original = evaluate(pd.concat(bars, ignore_index=True),eligible, Rules(),
+            session_schedule=owner_calendar, prior_session_by_day=previous_by_day,
+            require_complete_sessions=True)["events"]["pivot"][0]
+        self.assertEqual(original["exit_reason"], "TIME")
+        self.assertEqual(original["exit_bar_end_utc"], "2026-10-30T20:00:00+00:00")
+        sixth = date(2026, 11, 2)
+        owner_calendar[sixth] = (pd.Timestamp("2026-11-02T14:30:00Z"),
+                                 pd.Timestamp("2026-11-02T21:00:00Z"))
+        previous_by_day[sixth] = five[-1]
+        result = evaluate(pd.concat(bars+[bar_rows([(100,101,99,100.5)]*13,day="2026-11-02")],
+                ignore_index=True),eligible,Rules(),session_schedule=owner_calendar,
+                prior_session_by_day=previous_by_day,require_complete_sessions=True)
+        self.assertEqual(original,result["events"]["pivot"][0])
+
+    def test_partial_trailing_session_does_not_mint_time_exit(self):
+        q = pattern()[:5] + [(100,101,99,100.5)]*7
+        result = evaluate(bar_rows(q),leaders(), Rules(hold_sessions=1))
+        self.assertEqual(result["events"]["pivot"][0]["exit_reason"],"CENSORED")
+
     def test_no_shaping_from_future_after_signal(self):
         q = pattern()
         one = evaluate(bar_rows(q), leaders(), Rules())["events"]["pivot"][0]
@@ -239,6 +318,23 @@ class Oscillator(unittest.TestCase):
         self.assertEqual(len(r["events"]["macd_rsi_proxy"]), 1)
         self.assertEqual(len(r["events"]["hybrid"]), 1)
         self.assertIn("16:00", r["events"]["macd_rsi_proxy"][0]["entry_bar_end_utc"])
+
+    def test_partial_indicator_export_does_not_fall_back_to_proxy(self):
+        b = self.b.drop(columns=["osc_slow"])
+        with self.assertRaisesRegex(ValueError, "partial supplied oscillator"):
+            evaluate(b, leaders(), Rules())
+
+    def test_corrupt_indicator_export_is_not_no_cross(self):
+        b = self.b.copy()
+        b.loc[3, "osc_fast"] = "bad"
+        with self.assertRaisesRegex(ValueError, "invalid supplied oscillator"):
+            evaluate(b, leaders(), Rules())
+
+    def test_supplied_null_warmup_is_observation_unavailable(self):
+        b = self.b.copy()
+        b.loc[0, "osc_fast"] = float("nan")
+        got = evaluate(b, leaders(), Rules())
+        self.assertGreater(got["diagnostics"]["macd_rsi_proxy"]["osc_unavailable"], 0)
 
     def test_supplied_boolean_strings_parsed_strictly(self):
         self.b["osc_oversold"] = ["false", "false", "true", "true", "false", "false"]
