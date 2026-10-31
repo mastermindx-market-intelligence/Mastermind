@@ -99,9 +99,24 @@ class Bars(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_bars(b, Rules())
 
-    def test_missing_current_market_day_prevents_stale_leader(self):
+    def test_prior_session_leader_works_before_current_close(self):
+        # Today's closing snapshot cannot be required for an intraday signal.
         r = evaluate(bar_rows(pattern()), {PREV: {"leaders": {"A"}}}, Rules())
+        self.assertEqual(len(r["events"]["pivot"]), 1)
+
+    def test_owner_prior_calendar_refuses_stale_last_known_snapshot(self):
+        old = date(2026, 10, 28)
+        r = evaluate(bar_rows(pattern()), {old: {"leaders": {"A"}}}, Rules(),
+                     prior_session_by_day={DAY: PREV})
         self.assertEqual(len(r["events"]["pivot"]), 0)
+
+    def test_strict_historical_evaluation_requires_prior_session_owner(self):
+        with self.assertRaisesRegex(ValueError, "prior session map"):
+            evaluate(bar_rows(pattern()), {PREV: {"leaders": {"A"}}}, Rules(),
+                     session_schedule={DAY: (
+                         pd.Timestamp('2026-10-30T13:30:00Z'),
+                         pd.Timestamp('2026-10-30T20:00:00Z'))},
+                     require_complete_sessions=True)
 
     def test_new_york_dst(self):
         b = pd.concat([bar_rows(pattern()[:2], day="2026-10-30"),
