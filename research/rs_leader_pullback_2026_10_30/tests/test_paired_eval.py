@@ -70,6 +70,25 @@ class PairedTests(unittest.TestCase):
         self.assertEqual(nonentry["candidate_r"], 0.0)
         self.assertAlmostEqual(nonentry["delta_r"], -.2)
 
+    def test_known_no_signal_cannot_be_marked_censored_to_drop_negative_control(self):
+        p, o = inputs()
+        mask = (o.policy == 'pivot') & (o.opportunity_id == 'op-001')
+        o.loc[mask, ['status','net_r','outcome_end_utc','outcome_known_at_utc']] = [
+            'CENSORED',None,'2026-10-06T16:30:00Z',None]
+        with self.assertRaisesRegex(ValueError, 'no-signal candidate must be NO_ENTRY'):
+            self.run_pair(p, o)
+
+    def test_censor_boundary_after_analysis_asof_must_refuse(self):
+        p, o = inputs(n=1)
+        candidate = (o.policy == 'pivot')
+        o.loc[candidate, ['status','net_r','outcome_end_utc','outcome_known_at_utc']] = [
+            'CENSORED',None,'2026-10-05T16:30:00Z',None]
+        baseline = (o.policy == 'leader_reference')
+        o.loc[baseline, 'outcome_end_utc'] = '2026-10-05T15:30:00Z'
+        o.loc[baseline, 'outcome_known_at_utc'] = '2026-10-05T15:31:00Z'
+        with self.assertRaisesRegex(ValueError, 'censoring boundary after analysis as-of'):
+            self.run_pair(p, o, analysis_asof_utc='2026-10-05T16:00:00Z')
+
     def test_censored_pair_excluded_but_counted(self):
         p, o = inputs()
         mask = (o.policy == "pivot") & (o.opportunity_id == "op-000")
@@ -82,6 +101,37 @@ class PairedTests(unittest.TestCase):
         self.assertEqual(v["candidate_censored"], 1)
         self.assertIsNone(a["paired_opportunities"][0]["delta_r"])
         self.assertIsNone(a["paired_opportunities"][0]["candidate_r"])
+
+    def test_missing_eligibility_keeps_original_predeclared_denominator(self):
+        p, o = inputs()
+        p['eligible'] = p['eligible'].astype(object)
+        p['signal'] = p['signal'].astype(object)
+        p.loc[0, ['eligible','signal']] = [None,None]
+        for row in o.index[o.opportunity_id == 'op-000']:
+            o.loc[row, ['status','net_r','outcome_end_utc','outcome_known_at_utc']] = ['UNAVAILABLE',None,None,None]
+        v = self.run_pair(p, o)
+        self.assertEqual(v['denominator']['all_predeclared'], 2)
+        self.assertEqual(v['denominator']['eligibility_unknown'], 1)
+        self.assertEqual(v['splits']['DEVELOPMENT']['paired_supported'], 1)
+
+    def test_known_eligible_unknown_indicator_keeps_signal_denominator(self):
+        p, o = inputs()
+        p['signal'] = p['signal'].astype(object)
+        p.loc[0, 'signal'] = None
+        for row in o.index[o.opportunity_id == 'op-000']:
+            o.loc[row, ['status','net_r','outcome_end_utc','outcome_known_at_utc']] = ['UNAVAILABLE',None,None,None]
+        v = self.run_pair(p, o)
+        self.assertEqual(v['denominator']['eligible'], 2)
+        self.assertEqual(v['splits']['DEVELOPMENT']['signal_unknown'], 1)
+        self.assertEqual(v['splits']['DEVELOPMENT']['paired_supported'], 1)
+
+    def test_unknown_eligibility_cannot_be_laundered_to_no_entry(self):
+        p, o = inputs()
+        p['eligible'] = p['eligible'].astype(object)
+        p['signal'] = p['signal'].astype(object)
+        p.loc[0, ['eligible','signal']] = [None,None]
+        with self.assertRaisesRegex(ValueError, 'unavailable eligibility'):
+            self.run_pair(p, o)
 
     def test_unavailable_pair_not_replaced_by_zero(self):
         p, o = inputs()
