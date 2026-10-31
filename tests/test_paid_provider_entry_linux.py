@@ -60,6 +60,10 @@ def _identity(info):
 
 _FIXTURE_CANARY = b'0123456789abcdef0123456789abcdef'
 
+# Deliberately release-ineligible intermediate source diagnostic. Restore False
+# and qualify the unchanged original1+23 commands before protected release.
+_INTERMEDIATE_TERMINAL_DIAGNOSTIC = True
+
 
 def _fixture_output_namespace(lanes, log):
     roots=(lanes,lanes/'ext',lanes/'ext/lanes',log.parent)
@@ -364,6 +368,41 @@ def _fixture_premodel_diagnostic(command,env,here,request):
         raise AssertionError('fixture premodel diagnostic refused') from None
 
 
+def _fixture_intermediate_command(command,here):
+    from tests.h1_terminal_diagnostic import build_variant
+    try:
+        argv=shlex.split(command);index=argv.index('-c')
+        if (index!=7 or len(argv)!=16 or argv[:2]!=['/usr/bin/env',
+                'FABRIC_CANONICAL_PAID_MODE=sealed-model-only-v1']
+                or argv[4:7]!=['-I','-S','-B']
+                or argv[9:11]!=['executor',str(here)]):raise ValueError()
+        capsule=Path(here).parent.parent.parent/'tmp'/(argv[12]+'.glm-cap.json')
+        if argv[2]!='GLM_REMOTE_CAPABILITY_FILE='+str(capsule):raise ValueError()
+        argv[index+1]=build_variant(argv[index+1],str(here))
+        variant=shlex.join(argv)
+        if len(variant.encode())+1>100000:raise ValueError()
+        return variant
+    except Exception:
+        raise AssertionError('INTERMEDIATE diagnostic shape refused') from None
+
+
+def _fixture_intermediate_failure(request,raw):
+    from tests.h1_terminal_diagnostic import read_record
+    try:fact=read_record(raw)
+    except Exception:fact=dict(scope='INTERMEDIATE_ONLY',event='REPORT_REFUSED')
+    try:
+        reporter=request.config.pluginmanager.getplugin('terminalreporter')
+        if reporter is not None:
+            with request.getfixturevalue('capsys').disabled():
+                reporter.write_line('\n::error file=tests/test_paid_provider_entry_linux.py,'
+                    'title=H1 INTERMEDIATE terminal diagnostic::'
+                    +json.dumps(fact,sort_keys=True,separators=(',',':')))
+    except Exception:pass
+    # Even a completely successful diagnostic variant cannot become original
+    # paid-program proof or make either mandatory workflow gate green.
+    raise AssertionError('INTERMEDIATE diagnostic cannot qualify original provider proof') from None
+
+
 @linux_fixture
 @pytest.mark.parametrize('failure',[None,'source-drift','expired','lost-response','truncated-response'])
 def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypatch,modules,record_property,request,failure):
@@ -410,11 +449,11 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
         capsule_raw=entry.canonical(capsule)
         packet=lanes/'tmp'/(run+'.txt');packet.write_bytes(body);packet.chmod(0o600)
         capsule_path=lanes/'tmp'/(run+'.glm-cap.json');capsule_path.write_bytes(capsule_raw);capsule_path.chmod(0o600)
-        # The exact normal compiler, no test prefix, callback or source patch
-        # is inserted into the generated executor/model startup programs.
+        # The ordinary compiler still builds the original command. Only the
+        # explicit release-ineligible INTERMEDIATE branch below may substitute
+        # a diagnostic test body; it can never qualify the original program.
         command=entry.executor_command(capsule_raw,support,here)
         assert len(command.encode())+1<=100000
-        record_property('actual_executor_command_utf8_nul',len(command.encode())+1)
         if failure=='source-drift':
             target=here/'paid_model_owner.py';target.chmod(0o755);target.write_bytes(target.read_bytes()+b'\n# changed fixture source\n');target.chmod(0o555)
         posts=[];intents=[];errors=[];launches=[]
@@ -474,6 +513,9 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
             # Separate read-only diagnostic, never a substitute for the
             # original compiled executor or either mandatory positive gate.
             _fixture_premodel_diagnostic(command,env,here,request)
+            if _INTERMEDIATE_TERMINAL_DIAGNOSTIC:
+                command=_fixture_intermediate_command(command,here)
+        record_property('actual_executor_command_utf8_nul',len(command.encode())+1)
         namespace=_fixture_output_namespace(lanes,log)
         executor=executor_identity=executed=None
         try:
@@ -484,6 +526,8 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
             assert executor_identity['parent_pid']==os.getpid() and executor_identity['pgid']==executor_identity['session_id']==executor.pid
             record_property('actual_executor_identity',json.dumps(executor_identity,sort_keys=True))
             executed=_communicate_fixture_executor(executor,executor_identity,settlement,timeout=70)
+            if failure is None and _INTERMEDIATE_TERMINAL_DIAGNOSTIC:
+                _fixture_intermediate_failure(request,executed.stdout)
             _fixture_model_settled(executor,executor_identity,receipt,lanes,run,namespace,
                                    prelaunch=failure in ('source-drift','expired'))
             settlement['safe']=True

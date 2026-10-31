@@ -252,3 +252,38 @@ selector. No wildcard, dynamic path, parameter or namespace value is emitted.
 The new source-only discriminator and its local surrogate-interpreter proof
 do not recover historical raw logs or qualify the declared Linux selector.
 Production payload/installer bytes and the100000 cap remain unchanged.
+
+
+## INTERMEDIATE terminal variant: release deliberately held
+
+The f7fcdcde Linux run reached the read-only probe's READY outcome, then the
+original executor again returned78 without a model receipt. This establishes
+that the probe's bootstrap, request, capture-owner and compiler checks completed
+in the controlled Linux account. It does not identify the later failure.
+
+The current intermediate fixture uses a separately marked diagnostic program
+for the positive provider case. It replaces only the outer bootstrap's final
+Exception reporting, preserves the original line mapping, and leaves every
+actual held module, source/custody guard and settlement rule unchanged. The
+exact exception object caught by that terminal handler supplies one fixed
+public module/function/line/type record. A narrow return trace supplies the
+real `remote_sub_exec._execute` nonzero return site only when the complete
+program exits nonzero without a terminal exception. It never samples an
+intentional handled exception and promotes it into a cause. An escaping
+terminal exception takes priority over a return observation.
+
+The record travels through a saved, noninheritable copy of the original output
+FD, so normal output redirection cannot erase it. Messages, locals, paths, argv
+and raw traceback text are never rendered. The strict bounded parser accepts
+only the fixed INTERMEDIATE_ONLY schema. The variant preserves the bounded
+original exit status; a completed variant is explicitly labeled diagnostic
+completion, never original-program success.
+
+The parent unconditionally fails the positive case after reporting this
+variant, including when the variant completes successfully or reporting fails.
+The original1+23 gates and workflow are unchanged and cannot become green from
+this intermediate run. No current revision with this diagnostic enabled is
+release eligible. Restore the original command path and prove actual original
+initializer1PASS plus provider23PASS, each zero-skip, before protected delivery.
+This new disposable test execution does not replay an old failed namespace or
+retrieve held historical raw logs; no real provider or credentials are used.

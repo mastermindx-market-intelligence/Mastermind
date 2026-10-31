@@ -219,6 +219,7 @@ _H1_OWNED['tests/test_paid_provider_entry_linux.py'] = {
         '_communicate_fixture_executor', '_fixture_model_settled',
         '_fixture_http_response', '_exclusive_home_fixture', '_source_stage',
         '_request_material', '_publish_support', '_fixture_premodel_diagnostic',
+        '_fixture_intermediate_command', '_fixture_intermediate_failure',
         'test_actual_compiled_c_executor_model_and_original_result',
         'test_compiled_fixture_data_assembles_against_real_wire_and_compilers',
         'test_retained_output_canary_discriminator_uses_owned_fixed_leaves',
