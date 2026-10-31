@@ -161,8 +161,28 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+
       - name: Run repository test shard
+        # Give best-effort upload an opportunity inside the 45-minute job.
+        # Slow setup or runner loss can still prevent artifact delivery.
+        timeout-minutes: 38
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
+
+      - name: Upload fixed test diagnostics
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fixed-diagnostics-${{ matrix.index }}
+          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
 
   # Branch protection requires exactly the stable context "test". Matrix
   # checks alone have dynamic names and are NOT a sufficient required check.

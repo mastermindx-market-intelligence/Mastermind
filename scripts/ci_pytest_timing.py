@@ -282,8 +282,9 @@ def _h1_metadata_is_safe(value):
 
 
 class ModuleTiming:
-    def __init__(self, reporter):
+    def __init__(self, reporter, diagnostics=None):
         self.reporter = reporter
+        self.diagnostics = diagnostics
         self.module = None
         self.cases_started = 0
         self.cases_finished = 0
@@ -295,6 +296,9 @@ class ModuleTiming:
         self.reporter.write_line("\nCI_MODULE " + json.dumps(
             {"event": event, "module": self.module, **fields}, sort_keys=True,
         ))
+        if self.diagnostics is not None:
+            try:self.diagnostics.progress_record(event,self.module,**fields)
+            except Exception:pass
 
     def _summarize(self):
         if self.module is not None:
@@ -305,6 +309,13 @@ class ModuleTiming:
             )
 
     def _h1_failure(self,nodeid,phase,*,error=None,crash=None):
+        if self.diagnostics is not None:
+            try:
+                value=self.diagnostics.failure_record(nodeid,phase,error=error,crash=crash)
+                if value is not None:
+                    self.reporter.write_line('\n::error title=CI fixed failure metadata::'
+                        +json.dumps(value,sort_keys=True,separators=(',',':')))
+            except Exception:pass
         try:
             try:value=_h1_failure_metadata(nodeid,phase,error=error,crash=crash)
             except Exception:
@@ -363,4 +374,12 @@ class ModuleTiming:
 def pytest_sessionstart(session):
     reporter = session.config.pluginmanager.getplugin("terminalreporter")
     if reporter is not None:
-        session.config.pluginmanager.register(ModuleTiming(reporter), "ci-module-timing")
+        diagnostics=None
+        if os.environ.get('MMX_CI_FIXED_DIAGNOSTICS_DIR'):
+            try:
+                from pathlib import Path
+                from scripts.ci_fixed_diagnostics import PublicCatalog,FixedDiagnostics
+                diagnostics=FixedDiagnostics(PublicCatalog(Path(__file__).resolve().parents[1]),
+                    os.environ['MMX_CI_FIXED_DIAGNOSTICS_DIR'])
+            except Exception:pass
+        session.config.pluginmanager.register(ModuleTiming(reporter,diagnostics), "ci-module-timing")
