@@ -111,6 +111,21 @@ def launch(cwd,model,prompt,system_prompt,mcp_config,turns,*,environ=None,accoun
             argv.extend(prepare_claude_hook(HERE, environ))
         scoped=dict(environ)
         scoped["ANTHROPIC_AUTH_TOKEN"]=key
+        # Claude Code validates custom --model IDs against its own model catalog,
+        # even when the Anthropic-compatible endpoint and native Fabric picker
+        # already allow the model. Register only the exact broker-bound model;
+        # never silently substitute a Claude alias or another provider model.
+        scoped["ANTHROPIC_CUSTOM_MODEL_OPTION"]=model
+        scoped["ANTHROPIC_MODEL"]=model
+        scoped["ANTHROPIC_DEFAULT_MODEL"]=model
+        for alias in (
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ):
+            scoped[alias]=model
         scoped.pop("GLM_SHIM_TOKEN",None)
         if exec_fn is not None:
             return exec_fn(argv,scoped)
