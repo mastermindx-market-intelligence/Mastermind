@@ -231,11 +231,11 @@ describe("explicit disclosure and list rendering", () => {
     expect(request.workRef).toBe("WS:ONE");
     expect(request.rootJobId).toBe("JOB-001");
     expect(request.signal).toBeInstanceOf(AbortSignal);
-    expect(screen.getByText(/Mission state: CURRENT/)).toBeTruthy();
+    expect(screen.getByText(/Mission state: Current/)).toBeTruthy();
     expect(
       screen.getAllByText(/Retained as of 2026-10-31T15:45:00Z/).length,
     ).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Catalogue freshness: CURRENT/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Catalogue freshness: Within source age limit/).length).toBeGreaterThan(0);
   });
 
   it("refreshes only on the explicit refresh control and aborts the prior read", async () => {
@@ -262,7 +262,7 @@ describe("explicit disclosure and list rendering", () => {
     const { rerender } = setup();
     rerender({ missionState: "HISTORICAL" });
     await show();
-    expect(screen.getByText(/Mission state: HISTORICAL/)).toBeTruthy();
+    expect(screen.getByText(/Mission state: Historical/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /JOB-004/ })).toBeTruthy();
   });
 
@@ -271,7 +271,7 @@ describe("explicit disclosure and list rendering", () => {
     rerender({ locale: "zh-CN" });
     fireEvent.click(screen.getByRole("button", { name: "显示保留的结果" }));
     await screen.findByText(/JOB-002/);
-    expect(screen.getByText(/任务状态: CURRENT/)).toBeTruthy();
+    expect(screen.getByText(/任务状态: 当前/)).toBeTruthy();
   });
 });
 
@@ -379,7 +379,7 @@ describe("exact result read through the existing renderer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to retained results" }));
     expect(screen.queryByText(/EXACT_RESULT_CARD/)).toBeNull();
     expect(screen.getByRole("button", { name: /JOB-002/ })).toBeTruthy();
-    expect((document.activeElement as HTMLElement).tagName).toBe("H4");
+    expect((document.activeElement as HTMLElement).tagName).toBe("H3");
   });
 
   it("returns from the detail with Escape and restores focus", async () => {
@@ -393,7 +393,7 @@ describe("exact result read through the existing renderer", () => {
     const region = screen.getByRole("region", { name: "Retained results" });
     fireEvent.keyDown(region, { key: "Escape" });
     expect(screen.queryByText(/EXACT_RESULT_CARD/)).toBeNull();
-    expect((document.activeElement as HTMLElement).tagName).toBe("H4");
+    expect((document.activeElement as HTMLElement).tagName).toBe("H3");
   });
 });
 

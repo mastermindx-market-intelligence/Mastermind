@@ -92,7 +92,8 @@ it("opens exact retained content without a CURRENT Mission or Mission result lin
   await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
   expect(read).not.toHaveBeenCalled();
   expect(section.textContent).toContain("2026-10-21");
-  expect(section.textContent?.toUpperCase()).toContain("STALE");
+  expect(section.textContent).toContain("Source age limit exceeded");
+  expect(section.textContent).toContain("Unchanged during this read");
   await user.click(within(section).getByRole("button", { name: new RegExp(selected.job_id) }));
   await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
   expect(read.mock.calls[0][0]).toMatchObject({

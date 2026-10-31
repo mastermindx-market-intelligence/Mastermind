@@ -38,6 +38,19 @@ const STATIC_ZH: Record<string, string> = {
   "Catalogue freshness": "目录新鲜度",
   "Historical navigation does not establish a current Mission.": "历史结果导航不证明任务处于当前状态。",
   "Mission state": "任务状态",
+  "Current": "当前",
+  "Partial": "部分可用",
+  "Historical": "历史状态",
+  "Not available": "不可用",
+  "Within source age limit": "来源处于时效范围内",
+  "Source age limit exceeded": "来源已超过时效限制",
+  "Source age not known": "来源时效未知",
+  "Unchanged during this read": "本次读取期间未发生变化",
+  "Planning": "规划",
+  "Work": "执行工作",
+  "Review": "审阅",
+  "Repair": "修复",
+  "Coordination": "协调",
   "Runtime observation": "运行时观测",
   "More retained results": "更多保留结果",
   "Index coverage": "索引覆盖范围",
@@ -66,7 +79,7 @@ export interface RetainedResultsProps {
   authGeneration: string | number;
   hostGeneration: string | number;
   locale: "en" | "zh-CN";
-  /** Actual current mission state, displayed verbatim. Reading never
+  /** Actual current mission state, displayed with a finite localized label. Reading never
    * requires CURRENT and never promotes a retained list to currentness. */
   missionState: string;
   readReferences: (request: {
@@ -291,6 +304,9 @@ export function RetainedResults({
 
   const readDocument = list.kind === "read" ? list.document : null;
   const refs = readDocument?.index?.refs ?? [];
+  const missionLabel = new Map([["CURRENT", "Current"], ["PARTIAL", "Partial"], ["HISTORICAL", "Historical"], ["UNAVAILABLE", "Not available"]]).get(missionState) ?? "Not available";
+  const catalogueLabel = readDocument ? ({CURRENT: "Within source age limit", STALE: "Source age limit exceeded", UNKNOWN: "Source age not known"} as const)[readDocument.catalogue.freshness] : "Source age not known";
+  const roleLabels = {plan: "Planning", work: "Work", review: "Review", repair: "Repair", aggregation: "Coordination"} as const;
 
   const renderReference = (ref: ResultReferenceRef) => (
                   <li
@@ -302,7 +318,7 @@ export function RetainedResults({
                       {t("Open retained result")} — {ref.job_id}
                     </button>
                     <small>
-                      {t("Role")}: {ref.orchestration_role}{" · "}
+                      {t("Role")}: {t(roleLabels[ref.orchestration_role])}{" · "}
                       {t("Validation")}: {t("Unvalidated")}
                       <details>
                         <summary>{t("Attempt")}</summary>
@@ -333,11 +349,11 @@ export function RetainedResults({
       </button>
       {open ? (
         <div id="retained-results-panel">
-          <h4 className="section-title" ref={listHeading} tabIndex={-1}>
+          <h3 className="section-title" ref={listHeading} tabIndex={-1}>
             {t("Retained result list")}
-          </h4>
+          </h3>
           <p className="muted">
-            {t("Mission state")}: {missionState}
+            {t("Mission state")}: {t(missionLabel)}
             {" · "}{t("Historical navigation does not establish a current Mission.")}
           </p>
           {readDocument && readDocument.availability === "AVAILABLE" ? (
@@ -345,8 +361,8 @@ export function RetainedResults({
               {t("Retained as of")}{" "}
               {readDocument.catalogue.generated_at ?? t("unknown")}
               {" · "}
-              {t("Catalogue freshness")}: {readDocument.catalogue.freshness}
-              {" · "}{t("Runtime observation")}: {readDocument.source_observation.state}
+              {t("Catalogue freshness")}: {t(catalogueLabel)}
+              {" · "}{t("Runtime observation")}: {t("Unchanged during this read")}
             </p>
           ) : null}
           <button className="button" onClick={refresh}>
