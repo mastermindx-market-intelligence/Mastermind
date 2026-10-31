@@ -81,6 +81,7 @@ from control_plane.session_truth_contract import (
     FINDING_SEVERITIES,
     RECEIPT_SCHEMA,
     SessionTruthContractError,
+    _validate_scope,
     semantic_hash,
 )
 from control_plane.session_truth_scope import select_session_truth_scope
@@ -416,8 +417,11 @@ def _validate_receipt(receipt: object) -> None:
         raise SessionTruthContractError(
             f"receipt.observations is missing plane(s): {', '.join(missing_planes)}"
         )
-    if not isinstance(receipt["scope"], Mapping):
-        raise SessionTruthContractError("receipt.scope must be an object")
+    # Reuse the authoritative input contract. A foreign/edited receipt must
+    # not pass a string as a workstream list and mint per-character cards.
+    # This is shape validation only: the existing receipt still owns identity
+    # binding, semantic hash, findings, and admission.
+    _validate_scope(receipt["scope"])
     if not isinstance(receipt["admission"], Mapping):
         raise SessionTruthContractError("receipt.admission must be an object")
     semantic = receipt["semantic_hash"]
