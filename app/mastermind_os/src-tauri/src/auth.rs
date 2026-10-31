@@ -69,6 +69,8 @@ pub struct AuthStatus {
 struct Token {
     value: String,
     expires: Instant,
+    // Derived from the exact validated Executive grant; stays in the native owner.
+    executive_send: bool,
 }
 struct Pending {
     state: String,
@@ -464,14 +466,17 @@ async fn read_json_body(mut response: reqwest::Response, cap: usize) -> Result<V
 }
 fn parse_token(value: Value, resource: Resource) -> Result<Token> {
     let object = value.as_object().ok_or("TOKEN_RESPONSE_INVALID")?;
-    if resource == Resource::Executive {
+    let executive_send = if resource == Resource::Executive {
         let scopes = object.get("scope").and_then(Value::as_str).ok_or("TOKEN_RESPONSE_INVALID")?;
         let mut scopes: Vec<_> = scopes.split_whitespace().collect();
         scopes.sort_unstable();
-        if scopes != ["mastermind.executive.intent.submit", "mastermind.executive.read"] {
+        if scopes != ["mastermind.executive.intent.submit", "mastermind.executive.read"] && scopes != ["mastermind.executive.read"] {
             return Err("TOKEN_RESPONSE_INVALID".into());
         }
-    }
+        scopes == ["mastermind.executive.intent.submit", "mastermind.executive.read"]
+    } else {
+        false
+    };
     let token = object
         .get("access_token")
         .and_then(Value::as_str)
@@ -495,6 +500,7 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
     Ok(Token {
         value: token.into(),
         expires: Instant::now() + Duration::from_secs(seconds),
+        executive_send,
     })
 }
 pub async fn callback(app: AppHandle, raw: String) {
@@ -1006,30 +1012,57 @@ fn executive_body(body: &Value) -> Result<Vec<u8>> {
     Ok(serialized)
 }
 async fn executive_post(app: AppHandle, path: &'static str, body: Value) -> Result<Value> {
-    let serialized = executive_body(&body)?;
     let state = app.state::<NativeAuth>();
+    executive_post_with_dispatch(&state, path, body, reqwest::RequestBuilder::send).await
+}
+
+// Production and tests share the authorization and transport-dispatch boundary.
+async fn executive_post_with_dispatch<D, F>(
+    state: &NativeAuth,
+    path: &'static str,
+    body: Value,
+    dispatch: D,
+) -> Result<Value>
+where
+    D: FnOnce(reqwest::RequestBuilder) -> F,
+    F: std::future::Future<Output = std::result::Result<reqwest::Response, reqwest::Error>>,
+{
     let (token, token_expires, generation) = {
         let inner = state.lock()?;
         let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
+        match path {
+            "/os/executive/context"
+            | "/os/executive/status"
+            | "/os/executive/session/context"
+            | "/os/executive/session/reply"
+            | "/os/executive/session/references" => {}
+            "/os/executive/submit" => {
+                if !token.executive_send {
+                    return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
+                }
+            }
+            _ => return Err("REQUEST_INVALID".into()),
+        }
         (
             token.value.clone(),
             token.expires,
             inner.executive_generation,
         )
     };
+    let serialized = executive_body(&body)?;
     let url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID".to_owned())?;
     if url.origin().ascii_serialization() != ORIGIN {
         return Err("REQUEST_INVALID".into());
     }
-    let response = state
+    let request = state
         .http
         .post(url)
         .bearer_auth(token)
         .header("Accept", "application/json")
         .header("Cache-Control", "no-store")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(serialized)
-        .send()
+        .body(serialized);
+    let response = dispatch(request)
         .await
         .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
     { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
@@ -1102,6 +1135,7 @@ mod tests {
         Token {
             value: value.into(),
             expires: Instant::now() + Duration::from_secs(60),
+            executive_send: false,
         }
     }
     #[test]
@@ -1248,6 +1282,7 @@ mod tests {
         i.acquisition = Some(Token {
             value: "secret".into(),
             expires: Instant::now() + Duration::from_secs(60),
+            executive_send: false,
         });
         let generation = i.generation;
         assert!(i.release_allowed(generation, Resource::Acquisition));
@@ -1464,11 +1499,11 @@ mod tests {
     }
     #[test]
     fn executive_scope_is_an_exact_set_and_never_accepts_duplicates() {
-        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read"] {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read", "mastermind.executive.read"] {
             assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
                 "expires_in":60, "scope":scope}), Resource::Executive).is_ok());
         }
-        for scope in [Value::Null, Value::String("mastermind.executive.read".into()),
+        for scope in [Value::Null, Value::String("mastermind.executive.intent.submit".into()),
             Value::String(format!("{EXECUTIVE_SCOPE} extra")), Value::String(format!("{EXECUTIVE_SCOPE} mastermind.executive.read"))] {
             assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
                 "expires_in":60, "scope":scope}), Resource::Executive).is_err());
@@ -1478,6 +1513,156 @@ mod tests {
     fn executive_request_cap_counts_actual_encoded_bytes() {
         assert!(executive_body(&serde_json::json!({"arguments":{"goal":"x".repeat(65_000)}})).is_ok());
         assert!(executive_body(&serde_json::json!({"arguments":{"goal":"é".repeat(33_000)}})).is_err());
+    }
+
+    fn parsed_native_executive_token(scope: &str) -> Token {
+        parse_token(serde_json::json!({
+            "access_token": "fixture-native-executive",
+            "token_type": "Bearer",
+            "expires_in": 60,
+            "scope": scope,
+        }), Resource::Executive).unwrap()
+    }
+
+    fn install_native_executive_token(inner: &mut Inner, scope: &str) {
+        let pending_state = inner.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = inner.consume(&callback_url(&pending_state)).unwrap();
+        inner.finish_exchange(pending.generation, pending.resource,
+            Ok(parsed_native_executive_token(scope)));
+    }
+
+    fn native_executive_state(scope: &str) -> NativeAuth {
+        let mut inner = at_executive_pending();
+        install_native_executive_token(&mut inner, scope);
+        let state = NativeAuth::new().unwrap();
+        *state.lock().unwrap() = inner;
+        state
+    }
+
+    fn native_fixture_response() -> reqwest::Response {
+        tauri::http::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"fixture":"native-dispatch"}"#.to_owned())
+            .unwrap()
+            .into()
+    }
+
+    fn native_post_spy(state: &NativeAuth, path: &'static str) -> (Result<Value>, usize) {
+        let calls = std::cell::Cell::new(0);
+        let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+            state, path, serde_json::json!({"arguments": {}}), |builder| {
+                calls.set(calls.get() + 1);
+                let request = builder.build().unwrap();
+                assert_eq!(request.method(), reqwest::Method::POST);
+                assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                std::future::ready(Ok(native_fixture_response()))
+            },
+        ));
+        (result, calls.get())
+    }
+
+    #[test]
+    fn native_executive_read_only_submit_never_dispatches() {
+        let state = native_executive_state("mastermind.executive.read");
+        assert!(state.lock().unwrap().executive_status().available);
+        let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+        assert_eq!(calls, 0, "READ-only token reached the transport dispatcher");
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+    }
+
+    #[test]
+    fn native_executive_read_only_observation_routes_dispatch() {
+        for path in [
+            "/os/executive/context",
+            "/os/executive/status",
+            "/os/executive/session/context",
+            "/os/executive/session/reply",
+            "/os/executive/session/references",
+        ] {
+            let state = native_executive_state("mastermind.executive.read");
+            let (result, calls) = native_post_spy(&state, path);
+            assert_eq!(calls, 1);
+            assert_eq!(result.unwrap(), serde_json::json!({"fixture":"native-dispatch"}));
+        }
+    }
+
+    #[test]
+    fn native_executive_exact_combined_grants_dispatch_submit() {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read"] {
+            let state = native_executive_state(scope);
+            let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+            assert_eq!(calls, 1);
+            assert_eq!(result.unwrap(), serde_json::json!({"fixture":"native-dispatch"}));
+        }
+    }
+
+    #[test]
+    fn native_executive_downgrade_does_not_keep_send_permission() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        assert_eq!(native_post_spy(&state, "/os/executive/submit").1, 1);
+        {
+            let mut inner = state.lock().unwrap();
+            inner.transaction(Resource::Executive).unwrap();
+            install_native_executive_token(&mut inner, "mastermind.executive.read");
+        }
+        let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+        assert_eq!(calls, 0, "new READ-only token inherited old SEND permission");
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+        assert_eq!(native_post_spy(&state, "/os/executive/context").1, 1);
+    }
+
+    #[test]
+    fn native_executive_missing_or_expired_token_never_dispatches() {
+        for expired in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            {
+                let mut inner = state.lock().unwrap();
+                if expired {
+                    inner.executive.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+                } else {
+                    inner.executive = None;
+                }
+            }
+            let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+            assert_eq!(calls, 0);
+            assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_REQUIRED");
+        }
+    }
+
+    #[test]
+    fn native_executive_unknown_route_never_dispatches() {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.read"] {
+            for path in ["/os/executive/not-enrolled", "/os/executive/session/send"] {
+                let state = native_executive_state(scope);
+                let (result, calls) = native_post_spy(&state, path);
+                assert_eq!(calls, 0);
+                assert_eq!(result.unwrap_err(), "REQUEST_INVALID");
+            }
+        }
+    }
+
+    #[test]
+    fn native_executive_signout_or_token_rotation_withholds_in_flight_reply() {
+        for signout in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let calls = std::cell::Cell::new(0);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, "/os/executive/submit", serde_json::json!({"arguments":{}}), |_| {
+                    calls.set(calls.get() + 1);
+                    let mut inner = state.lock().unwrap();
+                    if signout {
+                        inner.invalidate();
+                    } else {
+                        inner.transaction(Resource::Executive).unwrap();
+                        install_native_executive_token(&mut inner, "mastermind.executive.read");
+                    }
+                    std::future::ready(Ok(native_fixture_response()))
+                },
+            ));
+            assert_eq!(calls.get(), 1);
+            assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
+        }
     }
 
 }

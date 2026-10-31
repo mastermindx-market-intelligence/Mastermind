@@ -560,15 +560,67 @@ describe("optional Executive authentication in the existing web owner", () => {
     expect(e.client.getState()).toMatchObject({ status: "signed_in", acquisition: true, content: true });
     expect(e.client.executive!.available()).toBe(false);
   });
-  it.each([scopes.split(" ").reverse().join(" "), scopes + " admin", scopes + " mastermind.executive.read"])(
-    "accepts only the exact scope set from an Executive token response", async (returnedScope) => {
+  it.each([scopes.split(" ").reverse().join(" "), "mastermind.executive.read", "mastermind.executive.intent.submit", scopes + " admin", scopes + " mastermind.executive.read"])(
+    "accepts only the full or READ-only Executive scope set", async (returnedScope) => {
       const e = setup({ executiveResource: resource });
       e.fetcher.mockImplementation(async () => response({ token_type: "Bearer", access_token: "private-token", expires_in: 3600,
         scope: new URL(e.popup.location).searchParams.get("audience") === resource
           ? returnedScope : new URL(e.popup.location).searchParams.get("scope") }));
       await e.login();
-      expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" "));
+      expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" ") || returnedScope === "mastermind.executive.read");
     });
+  it("keeps READ-only Executive grants usable for observation but refuses SEND before fetch", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? "mastermind.executive.read"
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    expect(e.client.executive!.available()).toBe(true);
+    expect(e.client.executiveSession!.available()).toBe(true);
+    e.fetcher.mockClear();
+    const signal = new AbortController().signal;
+    await expect(e.client.executive!.submit({ operation_key: "readonly-denied" }, signal))
+      .rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    await expect(e.client.executiveSession!.send({
+      target_ref: "fabric_attempt:" + "a".repeat(64),
+      instruction: "continue", stop_condition: "finish",
+      operation_key: "session-continue-" + "b".repeat(64),
+    }, signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    e.fetcher.mockImplementation(async () => response({ ok: true }));
+    await e.client.executive!.context(signal);
+    await e.client.executive!.status({ intent_id: "read-only-status" }, signal);
+    await e.client.executiveSession!.reply({ operation_key: "read-only-result" }, signal);
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/context", ORIGIN + "/os/executive/status",
+      ORIGIN + "/os/executive/session/reply",
+    ]);
+  });
+  it("retains SEND only when the exact combined Executive scopes are granted, regardless of ordering", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? scopes.split(" ").reverse().join(" ")
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    e.fetcher.mockClear();
+    e.fetcher.mockImplementation(async () => response({ ok: true }));
+    const signal = new AbortController().signal;
+    await e.client.executive!.submit({ operation_key: "combined-grant" }, signal);
+    await e.client.executiveSession!.send({
+      target_ref: "fabric_attempt:" + "a".repeat(64),
+      instruction: "continue", stop_condition: "finish",
+      operation_key: "session-continue-" + "b".repeat(64),
+    }, signal);
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/submit", ORIGIN + "/os/executive/session/send",
+    ]);
+  });
   it("exposes only three fixed authenticated POST routes with exact bodies", async () => {
     const e = setup({ executiveResource: resource }); await e.login();
     e.fetcher.mockClear(); e.fetcher.mockResolvedValue(response({ ok: true }));
@@ -704,6 +756,29 @@ describe("fixed H2 direct-native authenticated routes",()=>{
   const resource="https://fixture-resource.mastermind-x.com/executive";
   const selection={work_ref:"WS:H2-FIXTURE",job_id:"JOB-123",attempt_id:null};
   const unavailable={schema:"mastermind.direct_native_result_response.v1",selection,availability:"UNAVAILABLE",reason_codes:["NOT_TERMINAL"],result:null,consumption:null};
+  it("refuses READ-only direct-native Event ACK before network while allowing result reads", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? "mastermind.executive.read"
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    expect(e.client.executive!.available()).toBe(true);
+    e.fetcher.mockClear();
+    e.fetcher.mockResolvedValue(response(unavailable));
+    const signal = new AbortController().signal;
+    await e.client.executive!.directNative!.read(selection, signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    await expect(e.client.executive!.directNative!.consume({
+      ...selection, attempt_id: "ATT-456", result_digest: "d".repeat(64),
+      operation_key: "mmos-readonly-ack-denied",
+    }, signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/direct-native/result",
+    ]);
+  });
   it("uses the existing executive bearer and exact direct bodies without automatic consumption",async()=>{
     const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
     e.fetcher.mockImplementation(async()=>response(unavailable));
