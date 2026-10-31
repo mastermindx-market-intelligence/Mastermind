@@ -139,7 +139,9 @@ def package_command(argv: bytes) -> bool:
         return False
     # A manager may be launched behind env/sudo/nice or another argv0
     # wrapper. Prefer a harmless skipped purge over missing a live writer.
-    managers = {"pip", "pip3", "pipx", "uv", "npm", "npm.cmd",
+    # uvx is the documented uv tool run alias and consumes the same uv cache.
+    # A live uvx process must inhibit the unattended uv cache clean.
+    managers = {"pip", "pip3", "pipx", "uv", "uvx", "npm", "npm.cmd",
                 "pnpm", "yarn", "npx", "corepack"}
     if any(os.path.basename(token) in managers or
            os.path.basename(token).startswith("pip3.")
