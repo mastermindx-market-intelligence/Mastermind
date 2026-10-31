@@ -434,3 +434,11 @@ def test_signed_http_joins_the_real_reference_producer_and_finalized_runtime(tmp
     assert calls[0]["operation"] == "result_references"
     assert set(calls[0]["selection"]) == {"work_ref", "root_job_id"}
     assert "mission_current" not in body and doc["generated_at"] == STAMP
+    # The same fresh-cache collection still supplies the stale programme row;
+    # no CURRENT Mission or catalogue refresh is needed to navigate to it.
+    collection = client.get("/workspace/programs/current",
+                            headers={"Authorization": "Bearer " + _workspace_token(rsa_key)})
+    assert collection.status_code == 200
+    observed = collection.json()
+    assert observed["availability"] == "AVAILABLE"
+    assert observed["control_room"]["autonomy"]["responsibilities"][0]["freshness"] == "stale"

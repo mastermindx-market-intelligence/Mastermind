@@ -37,7 +37,9 @@ it("opens exact retained content without a CURRENT Mission or Mission result lin
     root_job_candidates: [selected.root_job_id],
     root_job_ambiguous: false,
     runtime_root_state: "RESOLVED",
+    freshness: "stale",
   });
+  room.autonomy.responsibilities[0].validity.card.valid_for_ms = null;
   const pair = { work_ref: selected.work_ref, root_job_id: selected.root_job_id };
   const generation = structuredClone(result.source_observation.runtime!);
   const references = {
