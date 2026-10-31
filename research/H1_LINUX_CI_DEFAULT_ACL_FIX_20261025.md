@@ -208,3 +208,47 @@ prove the original initializer once and all 23 provider-module cases, each
 with zero skips/errors/failures, followed by all required checks and normal
 independent protected delivery. No installed generation or runtime is changed
 by this source repair.
+
+
+## Fresh pre-model discriminator after 22e96341 CI
+
+Run41231679937 at22e96341 passed the original controlled initializer gate,
+but the provider module reported return78, no timeout and an absent model
+receipt before final settlement refused. That fixed fact does not identify
+an ACL or another root cause. Shard0 and exact-head CodeQL passed; shard1
+also failed with no structured testcase detail or JUnit artifact. Preloading
+ordinary YAML locally reproduces a separate new unit-test order defect:
+the Root custody refusal correctly preserves an existing namespace, while
+the test incorrectly required emptiness. The corrected test compares all
+YAML keys and exact module objects immediately around the real refusal.
+It neither removes nor adopts an ambient module. Its hosted-cause status
+remains UNKNOWN until new qualified CI.
+
+The positive provider case now first runs a separate test-only diagnostic
+child with the original no-site flags and exact compiled bootstrap wrapped
+by a finite trace. It intercepts the exact held `_run_executor` call before
+its body and checks only request correlations, the real capture-owner
+source contract and real model-command compilation. It does not enter lane
+admission, create capture outputs, execute a model or consume provider
+intent. The original paid command is then executed separately without a
+prefix or source patch; the original1-node and complete23-node report gates
+remain unchanged. The diagnostic never qualifies either positive proof.
+
+Only an exact private stop after all checks and successful context unwind
+can report READY. A missing canonical mode, None/non-tuple/wrong compiler
+result, wrong-filename executor, early or wrong stop, suppressed/replaced
+stop and cleanup failure refuse. Bounded allowlisted exception facts retain
+a swallowed bootstrap failure without rendering its text. The strict parser
+also rejects semantically inconsistent READY records. Shape validation is
+not source authentication or a Python sandbox: the caller supplies the
+ordinary fixed compiler output over the held source.
+
+The existing bounded child owner limits acquisition, suppresses stderr and
+reaps its own child. A malformed result becomes the fixed CHILD_REFUSED fact;
+argv, source text, capability contents and acquisition exceptions are never
+rendered. The two already-existing preflight/artifact refusal prefixes join
+the finite enum, and the exact new Root-loader test has a static metadata
+selector. No wildcard, dynamic path, parameter or namespace value is emitted.
+The new source-only discriminator and its local surrogate-interpreter proof
+do not recover historical raw logs or qualify the declared Linux selector.
+Production payload/installer bytes and the100000 cap remain unchanged.

@@ -50,9 +50,11 @@ def test_case_parameters_and_unowned_modules_never_become_diagnostic_values():
     assert m._h1_failure_metadata(MODULE+'::'+CASE,PRIVATE) is None
 
 
-def test_new_provider_module_failure_is_fixed_metadata_without_private_values(tmp_path):
-    module='tests/test_paid_provider_entry_linux.py'
-    case='test_actual_compiled_c_executor_model_and_original_result'
+@pytest.mark.parametrize('module,case',[
+    ('tests/test_paid_provider_entry_linux.py','test_actual_compiled_c_executor_model_and_original_result'),
+    ('tests/test_paid_executor_held_yaml.py','test_root_loader_ast_constants_and_custody_preserved'),
+])
+def test_new_owned_module_failure_is_fixed_metadata_without_private_values(tmp_path,module,case):
     tests=tmp_path/'tests';tests.mkdir()
     (tmp_path/module).write_text('import pytest\n@pytest.mark.parametrize("value",['+repr(PRIVATE)+'])\n'
         'def '+case+'(value):\n raise OSError(13,value)\n')

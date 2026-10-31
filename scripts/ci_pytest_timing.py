@@ -218,7 +218,7 @@ _H1_OWNED['tests/test_paid_provider_entry_linux.py'] = {
         '_assert_fixture_outputs_private', '_fixture_executor_identity',
         '_communicate_fixture_executor', '_fixture_model_settled',
         '_fixture_http_response', '_exclusive_home_fixture', '_source_stage',
-        '_request_material', '_publish_support',
+        '_request_material', '_publish_support', '_fixture_premodel_diagnostic',
         'test_actual_compiled_c_executor_model_and_original_result',
         'test_compiled_fixture_data_assembles_against_real_wire_and_compilers',
         'test_retained_output_canary_discriminator_uses_owned_fixed_leaves',
@@ -231,6 +231,14 @@ _H1_OWNED['tests/test_paid_provider_entry_linux.py'] = {
         'observed_stat', 'stat_fixed', 'close_server', '__init__',
         '__getattr__', 'communicate', 'poll', 'terminate', 'log_message', 'do_POST',
     ),
+}
+
+
+# One exact new source test exposed by the composed full-suite failure. This
+# adds no dynamic path, traceback text, namespace value or parameter source.
+_H1_OWNED['tests/test_paid_executor_held_yaml.py'] = {
+    'cases': ('test_root_loader_ast_constants_and_custody_preserved',),
+    'functions': ('test_root_loader_ast_constants_and_custody_preserved',),
 }
 
 

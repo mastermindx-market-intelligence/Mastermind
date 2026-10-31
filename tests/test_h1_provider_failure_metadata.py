@@ -15,13 +15,15 @@ CASE='test_actual_compiled_c_executor_model_and_original_result'
 @pytest.mark.parametrize('raw,expected',[
     (b'REMOTE_SUB_ADMISSION_REFUSED {"private":"not-rendered"}\n','REMOTE_SUB_ADMISSION_REFUSED'),
     (b'CANONICAL_PAID_SUPPORT_REFUSED before_worker=1\n','CANONICAL_PAID_SUPPORT_REFUSED'),
+    (b'CANONICAL_PAID_PREFLIGHT_REFUSED before_worker=1\n','CANONICAL_PAID_PREFLIGHT_REFUSED'),
+    (b'CANONICAL_PAID_ARTIFACT_REFUSED before_worker=1\n','CANONICAL_PAID_ARTIFACT_REFUSED'),
     (b'REMOTE_SUB_ADMISSION_REFUSED_SUFFIX','UNKNOWN'),
     (b'unknown private text','UNKNOWN'),
     (b'REMOTE_SUB_ADMISSION_REFUSED '+m.CANARY,'UNKNOWN'),
     (b'REMOTE_SUB_ADMISSION_REFUSED \x1b[31msecret','UNKNOWN'),
     (b'REMOTE_SUB_ADMISSION_REFUSED \x9b31msecret','UNKNOWN'),
     (b'x'*(4*1024*1024+1),'UNKNOWN'),(None,'UNKNOWN'),
-],ids=['admission','support','suffix','unknown','canary','ansi','c1-control','oversize','absent'])
+],ids=['admission','support','preflight','artifact','suffix','unknown','canary','ansi','c1-control','oversize','absent'])
 def test_only_finite_exact_prefixes_can_be_reported(raw,expected):
     assert m.refusal_prefix(raw)==expected
 
@@ -79,3 +81,12 @@ def test_diagnostic_fault_cannot_replace_primary(monkeypatch):
     monkeypatch.setattr(m,'failure_state',fail)
     lines=[];m.failure_notice(request(lines),receipt_error(None),None,None)
     assert lines==[]
+
+
+@pytest.mark.parametrize('prefix', ['CANONICAL_PAID_PREFLIGHT_REFUSED', 'CANONICAL_PAID_ARTIFACT_REFUSED'])
+@pytest.mark.parametrize('suffix', [PRIVATE.encode(), m.CANARY, b'\x1b[31mPRIVATE', b'\x9b31mPRIVATE'])
+def test_new_fixed_prefixes_never_emit_suffixes(prefix, suffix):
+    raw=prefix.encode()+b' '+suffix
+    value=m.refusal_prefix(raw)
+    assert value==('UNKNOWN' if suffix!=PRIVATE.encode() else prefix)
+    assert PRIVATE not in value and '\x1b' not in value

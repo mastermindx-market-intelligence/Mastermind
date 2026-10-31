@@ -675,10 +675,15 @@ def test_root_loader_ast_constants_and_custody_preserved(runtime):
     here = Path(runtime.__file__).resolve().parent
     if here.stat().st_uid == 0:
         pytest.skip('runtime directory is root-owned on this host')
+    # Custody refusal must preserve any ambient namespace, including an empty one.
+    namespace_before = {name: sys.modules[name] for name in _yaml_names()}
     with pytest.raises(ValueError, match='paid_yaml_source_refused'):
         runtime.load_yaml()
     assert runtime._loaded is None
-    assert not _yaml_names()
+    namespace_after = {name: sys.modules[name] for name in _yaml_names()}
+    assert namespace_after.keys() == namespace_before.keys()
+    assert all(namespace_after[name] is module
+               for name, module in namespace_before.items())
 
 
 # ---------------------------------------------------------------------------

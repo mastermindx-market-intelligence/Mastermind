@@ -328,6 +328,42 @@ def _publish_support(stage,lanes):
     return lanes/'support-releases'/expected/'ext',manifest
 
 
+def _fixture_premodel_diagnostic(command,env,here,request):
+    """Fresh diagnostic variant only; never an executor/admission result."""
+    from tests.h1_bootstrap_diagnostic import build_probe,read_record
+    # This exact command came from the ordinary fixed compiler. Retain its
+    # interpreter/flags/args and replace only this separate diagnostic body.
+    # Explicit fixed exceptions keep pytest assertion rewriting from printing
+    # an argv or fixture-private path on a shape failure.
+    try:
+        argv=shlex.split(command);index=argv.index('-c')
+        if len(argv)!=index+9 or argv[:2]!=['/usr/bin/env',
+                'FABRIC_CANONICAL_PAID_MODE=sealed-model-only-v1']:raise ValueError()
+        capsule=Path(env['REMOTE_SUB_LANES'])/'tmp'/(argv[index+5]+'.glm-cap.json')
+        if (argv[2]!='GLM_REMOTE_CAPABILITY_FILE='+str(capsule)
+                or argv[index-3:index]!=['-I','-S','-B']
+                or argv[index+2:index+4]!=['executor',str(here)]):raise ValueError()
+        argv[index+1]=build_probe(argv[index+1],str(here))
+    except Exception:
+        raise AssertionError('fixture premodel diagnostic shape refused') from None
+    try:
+        raw=initializer._bounded_child(argv,env=env,timeout=20)
+        value=read_record(raw)
+    except Exception:
+        value=None
+    # Child acquisition/format failures have their own fixed fact. Never
+    # render raw bytes or the acquisition exception to obtain a diagnosis.
+    fact=value if value is not None else dict(outcome='CHILD_REFUSED')
+    reporter=request.config.pluginmanager.getplugin('terminalreporter')
+    if reporter is not None:
+        with request.getfixturevalue('capsys').disabled():
+            reporter.write_line('\n::notice file=tests/test_paid_provider_entry_linux.py,'
+                'title=H1 test-only premodel discriminator::'
+                +json.dumps(fact,sort_keys=True,separators=(',',':')))
+    if value is None or value['outcome']!='READY':
+        raise AssertionError('fixture premodel diagnostic refused') from None
+
+
 @linux_fixture
 @pytest.mark.parametrize('failure',[None,'source-drift','expired','lost-response','truncated-response'])
 def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypatch,modules,record_property,request,failure):
@@ -434,6 +470,10 @@ def test_actual_compiled_c_executor_model_and_original_result(tmp_path,monkeypat
         env=dict(PATH='/usr/bin:/bin',HOME=account.pw_dir,LANG='C.UTF-8',PYTHONDONTWRITEBYTECODE='1',
             REMOTE_SUB_LANES=str(lanes),POOL_LEASE_ID=lease['id'],POOL_ACCOUNT=p['paid_account'],LANE_REMOTE_HOST='ubuntu0',
             SUPPORT_DIGEST=here.parent.name,REMOTE_SUB_CHILD_TIMEOUT='35',REMOTE_SUB_COMMISSION_BUDGET_SECONDS='35')
+        if failure is None:
+            # Separate read-only diagnostic, never a substitute for the
+            # original compiled executor or either mandatory positive gate.
+            _fixture_premodel_diagnostic(command,env,here,request)
         namespace=_fixture_output_namespace(lanes,log)
         executor=executor_identity=executed=None
         try:
