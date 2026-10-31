@@ -334,14 +334,16 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             external = Path(d) / "external"
             external.mkdir()
             with patch.dict(h.os.environ, {"XDG_CACHE_HOME": str(external)}):
-                with patch.object(h.subprocess, "run", side_effect=AssertionError("redirected purge")):
+                with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.subprocess, "run", side_effect=AssertionError("redirected purge")):
                     result = h.cache_cleanup(base, base, "CAUTION")
             self.assertEqual(result[0]["state"], "SKIPPED_CUSTOM_CACHE_PATH")
             (base / ".cache/pip").rmdir()
             (base / ".cache").rmdir()
             (base / ".cache").symlink_to(external, target_is_directory=True)
             (external / "pip").mkdir()
-            with patch.object(h.subprocess, "run", side_effect=AssertionError("symlink purge")):
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.subprocess, "run", side_effect=AssertionError("symlink purge")):
                 result = h.cache_cleanup(base, base, "CAUTION")
             self.assertEqual(result[0]["state"], "SKIPPED_UNTRUSTED_CACHE_PATH")
             self.assertTrue((external / "pip").exists())
