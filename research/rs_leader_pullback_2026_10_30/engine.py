@@ -283,9 +283,18 @@ def _fill_trade(b: pd.DataFrame, entry_i: int, base_entry: float, stop: float,
     return record
 def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rules, *,
              session_schedule: dict[date, tuple[Any, Any]] | None = None,
-             require_complete_sessions: bool = False) -> dict[str, Any]:
+             require_complete_sessions: bool = False,
+             prior_session_by_day: dict[date, date] | None = None) -> dict[str, Any]:
+    if require_complete_sessions and prior_session_by_day is None:
+        raise ValueError("strict research requires exchange owner prior session map")
     b = validate_bars(bars, rules, session_schedule=session_schedule,
                       require_complete_sessions=require_complete_sessions)
+    if prior_session_by_day is not None:
+        if (not isinstance(prior_session_by_day, dict) or
+                any(type(day) is not date or type(prior) is not date or prior >= day
+                    for day, prior in prior_session_by_day.items()) or
+                set(b.session_date) - set(prior_session_by_day)):
+            raise ValueError("invalid/incomplete exchange owner prior session map")
     days = sorted(leaders)
     result = {k: [] for k in ("pivot", "macd_rsi_proxy", "hybrid")}
     diagnostics = {k: {"candidate_count": 0, "skipped_no_leader": 0,
@@ -296,9 +305,15 @@ def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rul
         eligible = []
         for i in range(n):
             day = g.iloc[i].session_date
+            # An intraday signal cannot require a CURRENT-day daily close.
+            # In strict research the supplied owner calendar identifies the
+            # true previous trading session, so missing past observations cannot
+            # silently fall back to an older stale leader ranking.
             j = bisect_left(days, day) - 1
-            eligible.append(j >= 0 and day in leaders and
-                            symbol in leaders[days[j]]["leaders"])
+            previous = (prior_session_by_day[day] if prior_session_by_day is not None
+                        else days[j] if j >= 0 else None)
+            eligible.append(previous in leaders and
+                            symbol in leaders[previous]["leaders"])
         cross = g.osc_cross.to_numpy(dtype=bool)
         candidates = {k: [] for k in result}
         red = 0
@@ -355,6 +370,9 @@ def evaluate(bars: pd.DataFrame, leaders: dict[date, dict[str, Any]], rules: Rul
             "session_calendar_status": ("OWNER_SUPPLIED_CONSISTENCY_ONLY" if session_schedule
                                         is not None else "NOT_OWNER_ATTESTED"),
             "historical_coverage_strict": bool(require_complete_sessions),
+            "leader_prior_session_status": ("OWNER_SUPPLIED_PREVIOUS_SESSION"
+                                             if prior_session_by_day is not None
+                                             else "MOST_RECENT_DAILY_UNQUALIFIED"),
             "analysis_type": "event_study_not_funded_portfolio",
             "osc_source": ("supplied_precomputed_columns" if
                            {"osc_fast", "osc_slow", "osc_oversold"}.issubset(b.columns)
