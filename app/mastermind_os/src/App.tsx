@@ -8,6 +8,7 @@ import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
+import { qualifyExecutiveOfficeSession, SESSION_TARGET_REF } from "./meta-ceo/session-context";
 import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
@@ -161,7 +162,7 @@ function isRetainedOperation(value: unknown): value is OperationPointer {
     (pointer.targetKey === null || typeof pointer.targetKey === "string");
 }
 const SESSION_OPERATION_KEY = /^session-continue-[0-9a-f]{64}$/;
-const SESSION_TARGET_REF = /^fabric_attempt:[0-9a-f]{64}$/;
+// SESSION_TARGET_REF belongs to the same closed native-session proof adapter.
 // Only a session message pointer is restored from the session-exclusive
 // namespace; launch pointers live in their own store and are never adopted.
 function sessionStoreHold(state: OperationState): boolean {
@@ -1393,7 +1394,6 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
-  const office = useOfficeProjection(authRevision, selection);
   const observedConversation = useObservedConversation(
     authRevision,
     selection,
@@ -1456,6 +1456,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
+  // Read-only exact-session association from the existing Executive owner.
+  // Unknown/legacy/DSH/Grok native sessions stay UNBOUND, not guessed.
+  const officeSession = qualifyExecutiveOfficeSession(
+    signedIn, selection, sessionBinding,
+  );
+  const office = useOfficeProjection(authRevision, selection, officeSession);
   const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
     const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
     const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
@@ -2030,6 +2036,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     authState?.acquisition,
     selection?.workRef,
     selection?.rootJobId,
+    officeSession.sessionRef,
+    officeSession.bindingGeneration,
   ]);
   useEffect(() => {
     let attached = true;
@@ -2256,6 +2264,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     selectionRefused,
     authRevision,
     authState?.acquisition,
+    officeSession.sessionRef,
+    officeSession.bindingGeneration,
   ]);
   const candidate = isDoc(mission) ? mission : null,
     d =
@@ -3281,7 +3291,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     content = (
       <>
         <MetaCeoOffice
-          key={JSON.stringify([authRevision, selection])}
+          key={JSON.stringify([authRevision, selection, officeSession.sessionRef, officeSession.bindingGeneration])}
           locale={locale}
           projection={office.projection}
           draft={office.draft}
