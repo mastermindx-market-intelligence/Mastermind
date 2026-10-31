@@ -76,6 +76,26 @@ The same older page also exposes a **2026-03-04** cumulative-payout brand post (
 
 The accompanying [March historical control CSV](2026-03_historical_campaign_control.csv) preserves seven original status IDs, including the March 4 separate announcement and author post. Preserve the October [14-event sample](2026-10-02_timestamped_campaign_sample.csv) separately. Their sum is **21 documented source events across purposively selected archival views**, not 21 unique people, completed follow actions, or authenticated native platform events.
 
+## Cross-brand promoter evidence (not ownership attribution)
+
+New public-source check of **some already timestamp-identified creator handles** shows the network can include *multi-provider* promoters, rather than an exclusive set of Equity Edge identities.
+
+- **@JadonsiiMichaab (in October 2 cohort):** [indexed public profile](https://www.twstalker.com/JadonsiiMichaab) declares a **Blue Guardian** partnership and a unique code `MICHAB`. This is self-disclosed commercial affiliation to another firm, separate from the sampled Equity Edge giveaway.
+- **@Wiser_Fx (in October 2 cohort):** [independently indexed @THE_SNR_SNIPER public feed](https://teapawt.org/THE_SNR_SNIPER) contains an **October 25 AquaFunded giveaway originated by @Wiser_Fx**, with AquaFunded and creator follow requirements. Its publication date is expressed by the mirror; an original status ID for this October 25 post was **not** recovered here.
+- **@MisauFx (in October 2 cohort):** [independently indexed @MusaY75397 repost archive](https://www.sotwe.com/MusaY75397?lang=en) reproduces @MisauFx promoting **AquaFunded** with attribution code `MISAU2020`. [Another indexed third-party feed](https://mobile.twstalker.com/Xau4real) includes the same account's Equity Edge giveaway and a separate AquaFunded contest. These search-visible excerpts were not independently recovered as original X post IDs, so do not assign precise relative dates or post counts to them.
+
+**Interpretation:** at least some creators who circulated the timed Equity Edge material also appear in competitor promotional circuits, a strong alternative to an **exclusive Equity Edge-owned creator cohort**. An agency could still coordinate campaigns for multiple brands, and the text is insufficient to determine whether any account is independent, contracted, personally owned or company-managed. Public creator affiliations are not administrator records. A promoted company's public **30% affiliate policy** is separate from specific creator participation and compensation.
+
+**@EquitySpace1 status check:** the checked company [affiliate](https://equityedge.io/affiliate) and [about](https://equityedge.io/about) pages describe the firm and its affiliate program but **do not establish administrator or employment identity for @EquitySpace1**. Indexed public promotional timelines show this account functioning as a required-follow and repeat amplifier. There remains **no verified first-party corporate control acknowledgment** in the inspected material. Absence from those two pages is not a comprehensive corporate-record search.
+
+### Causal sequence observed versus inferred
+
+- **March 10:** a brand-handle website announcement at **10:00 UTC**, followed by four source-visible co-follow giveaways from **14:52–17:27 UTC**; source mirrors show quoted original IDs.
+- **October 2:** two brand-handle source originals (one **September 30** discount offer; one **October 2** payout recap), followed by six source-visible co-follow creator posts (**13:41–16:25 UTC**), then six tag-participation posts from a **single** account (**16:44–16:54 UTC**).
+- **Observed:** public accounts deliberately use analogous follow/repost/quote instructions, and selected burst time windows are bounded by decoded original post IDs.
+- **Inferred:** a reusable launch/campaign-based creator distribution pattern. No causally identified manager, source of templates, internal planning meeting, cross-account login sharing, user conversion or paid agency has been established.
+- **MastermindX product lesson (not an instruction to emulate incentivized finance hype):** a disclosed campaign can coordinate independent creators around a useful product release or original analysis artifact. To test responsibly, compare *engaged qualified users and retained product adoption*, not giveaway reposts, and require original research, truthful affiliation disclosures and no manipulated trade recommendations. Prop-firm giveaway behavior is not a validated conversion-rate baseline for investing intelligence.
+
 ## Collection limitations and responsible use
 
 - This is a **purposively selected example**, selected from a single participant who engages in giveaways. **Selection bias is high**. Six creators and six tagged messages are not a numerator with a valid 30-day total-post denominator.
