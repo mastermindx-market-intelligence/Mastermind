@@ -226,6 +226,8 @@ def _owned_adapter(
             resource=resource,
             events=[],
             turns={},
+            # Mirror _GenerationState's per-turn retained-input capture map.
+            retained_plain_inputs={},
             turn_subordinates={},
             attention_inflight=False,
             attention_native_turn_id=None,

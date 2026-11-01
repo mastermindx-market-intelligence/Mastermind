@@ -163,6 +163,24 @@ MAX_RAW_TURN_PAGES = 128
 MAX_RAW_TURN_CUMULATIVE_FRAME_BYTES = 134_217_728
 RAW_TURN_TOTAL_TIMEOUT_SECONDS = 120.0
 
+# W3 retained plain-text input evidence: the exact production generation this
+# private extractor is qualified for. The installed company binary byte-matches
+# the official openai/codex rust-v0.159.2 release member, and Mastermind's own
+# provisioner pins CODEX_VERSION/CODEX_SHA256 to the same pair. The gate
+# re-reads the launched file fresh at extraction time and additionally requires
+# the existing requested AND attested binding to name the identical build.
+CONSUMPTION_EVIDENCE_PINNED_HARNESS_VERSION = "codex-cli 0.159.2"
+CONSUMPTION_EVIDENCE_PINNED_BINARY_DIGEST = (
+    "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
+)
+CONSUMPTION_EVIDENCE_UNAVAILABLE = "retained_plain_input_evidence_unavailable"
+CONSUMPTION_EVIDENCE_SHAPE = "single_plain_text/v1"
+CONSUMPTION_EVIDENCE_SCOPE = (
+    "retained-input acceptance only: proves one acknowledged native turn kept the"
+    " exact single plain-text input rendered at begin_turn; proves no model use,"
+    " no capsule consumption, and grants no authority"
+)
+
 
 def _attention_final_text(completion: Mapping[str, Any]) -> str | None:
     """Reduce one unique final agent message without exporting provider bytes."""
@@ -433,6 +451,46 @@ class _PendingAttentionRequest:
     opaque_ids: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class _RetainedPlainInputCapture:
+    """The immutable begin_turn digest of one plain-text turn input.
+
+    Digest and binding only: the rendered prompt is never retained here, and
+    the capture is written once, after the exact native turn is acknowledged.
+    """
+
+    epoch: SessionEpochRef
+    generation: ProcessGenerationRef
+    turn_id: str
+    native_turn_id: str
+    provider_session_id: str
+    input_digest: str
+    input_byte_length: int
+
+
+@dataclass(frozen=True)
+class RetainedPlainInputEvidence:
+    """Frozen digest-and-binding proof for one retained plain-text input.
+
+    ``scope`` is the entire claim: this evidence never attests model use,
+    capsule consumption, or any authority, and it never carries the retained
+    text itself.
+    """
+
+    attempt_id: str
+    session_epoch_id: str
+    process_generation_id: str
+    turn_id: str
+    provider_session_id: str
+    provider_native_turn_id: str
+    retained_input_digest: str
+    retained_input_byte_length: int
+    input_shape: str
+    harness_version: str
+    harness_binary_digest: str
+    scope: str
+
+
 @dataclass
 class _GenerationState:
     epoch: SessionEpochRef
@@ -459,6 +517,7 @@ class _GenerationState:
     skills_changed: bool = False
     accepted_skill_observation: "tuple[tuple[str, str, str | None, str], ...] | None" = None
     accepted_skill_observation_root: "str | None" = None
+    retained_plain_inputs: "dict[str, _RetainedPlainInputCapture]" = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -2748,7 +2807,11 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "no Executive-owned turn input loader was supplied",
             )
+        input_provider_session_id = state.provider_session_id
+        input_epoch = state.epoch
+        input_generation = state.generation
         prompt = self.turn_input_loader(turn)
+        retained_input_bytes: bytes | None = None
         if isinstance(prompt, str):
             if not prompt:
                 raise CodexAdapterError(
@@ -2774,6 +2837,12 @@ class CodexOperatorAdapter:
                         "attempt resource turn contract is invalid",
                     )
                 prompt += suffix
+            # The trusted rendering is frozen here as a digest only, before the
+            # provider is contacted; the raw text itself is never stored.
+            try:
+                retained_input_bytes = prompt.encode("utf-8")
+            except UnicodeEncodeError:
+                retained_input_bytes = None
             wire_input: list[dict[str, object]] = [{"type": "text", "text": prompt}]
         elif type(prompt) is CodexTurnInputEnvelope:
             wire_input = self._build_skill_envelope_wire(state, prompt)
@@ -2807,7 +2876,7 @@ class CodexOperatorAdapter:
             result = state.client.request(
                 "turn/start",
                 {
-                    "threadId": state.provider_session_id,
+                    "threadId": input_provider_session_id,
                     "input": wire_input,
                     "cwd": str(self.workspace_root),
                     "approvalPolicy": state.requested.approval_policy,
@@ -2857,6 +2926,18 @@ class CodexOperatorAdapter:
             visible_turns = set()
             state.visible_turns = visible_turns
         visible_turns.add(turn.turn_id)
+        if retained_input_bytes is not None:
+            # Acknowledged exact native turn: bind the frozen rendering digest
+            # to it once. A non-plain (skill envelope) input never captures.
+            state.retained_plain_inputs[turn.turn_id] = _RetainedPlainInputCapture(
+                epoch=input_epoch,
+                generation=input_generation,
+                turn_id=turn.turn_id,
+                native_turn_id=native_turn_id,
+                provider_session_id=input_provider_session_id,
+                input_digest=hashlib.sha256(retained_input_bytes).hexdigest(),
+                input_byte_length=len(retained_input_bytes),
+            )
         notifications = state.client.drain_notifications()
         self._ingest_turn_notifications(state, turn, notifications)
         return TurnStartObservation(
@@ -3553,6 +3634,158 @@ class CodexOperatorAdapter:
             canonical_result_json=result_text,
             canonical_result_digest=hashlib.sha256(encoded).hexdigest(),
             canonical_result_byte_length=len(encoded),
+        )
+
+    def collect_retained_plain_text_evidence(
+        self, turn: TurnRef
+    ) -> RetainedPlainInputEvidence:
+        """Prove one acknowledged native turn kept the exact begin_turn text.
+
+        Private evidence-only seam. There is deliberately no caller-supplied
+        expected text and no caller-supplied build attestation: the expected
+        digest is the immutable capture taken at ``begin_turn`` from the
+        trusted Executive rendering (``turn_input_loader`` plain string plus
+        the existing attempt-resource ``turn_prompt_suffix``), and the build
+        gate re-reads the launched binary fresh and requires the existing
+        requested AND attested binding to name the pinned production
+        generation. The retained row is read through the complete
+        :meth:`_read_native_turn_result` bounded traversal only. Every
+        unsupported build or input payload raises the single
+        ``CONSUMPTION_EVIDENCE_UNAVAILABLE`` constant. Existing identity and
+        traversal guards retain their failure taxonomy; none carries retained
+        text. The returned evidence is a frozen digest plus
+        source/turn binding with a truthful retained-input-only scope: it
+        proves no model use, no capsule consumption, and grants no authority.
+        """
+
+        state = self._generations.get(turn.process_generation_id)
+        if state is None:
+            raise CodexAdapterError(
+                AdapterFailureClass.SESSION_MISSING, "turn generation is missing"
+            )
+        self._assert_turn(state, turn)
+        native_turn = state.turns.get(turn.turn_id)
+        if not native_turn:
+            raise CodexAdapterError(
+                AdapterFailureClass.SESSION_MISSING, "native turn is missing"
+            )
+        def assert_build() -> None:
+            try:
+                matches_build = (
+                    state.requested.harness_version
+                    == state.attestation.harness_version
+                    == CONSUMPTION_EVIDENCE_PINNED_HARNESS_VERSION
+                    and state.requested.harness_binary_digest
+                    == state.attestation.harness_binary_digest
+                    == self.binary_digest
+                    == _sha256_file(self.binary_path)
+                    == CONSUMPTION_EVIDENCE_PINNED_BINARY_DIGEST
+                )
+            except OSError:
+                matches_build = False
+            if not matches_build:
+                raise CodexAdapterError(
+                    AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+                    CONSUMPTION_EVIDENCE_UNAVAILABLE,
+                )
+
+        assert_build()
+        capture = state.retained_plain_inputs.get(turn.turn_id)
+        if (
+            capture is None
+            or capture.epoch != state.epoch
+            or capture.generation != state.generation
+            or capture.turn_id != turn.turn_id
+            or capture.native_turn_id != native_turn
+            or capture.provider_session_id != state.provider_session_id
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                CONSUMPTION_EVIDENCE_UNAVAILABLE,
+            )
+        matches = self._read_native_turn_result(
+            state, native_turn, effect_unknown=True
+        )
+
+        def unavailable() -> CodexAdapterError:
+            return CodexAdapterError(
+                AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                CONSUMPTION_EVIDENCE_UNAVAILABLE,
+            )
+
+        # Collection can span multiple bounded pages. Reprove the same owner,
+        # turn capture, and build before returning any evidence.
+        self._assert_turn(state, turn)
+        if (
+            self._generations.get(turn.process_generation_id) is not state
+            or capture.epoch != state.epoch
+            or capture.generation != state.generation
+            or state.turns.get(turn.turn_id) != native_turn
+            or state.retained_plain_inputs.get(turn.turn_id) is not capture
+            or state.provider_session_id != capture.provider_session_id
+        ):
+            raise unavailable()
+        assert_build()
+        row = matches[0]
+        items = row.get("items")
+        if (
+            row.get("itemsView", "full") != "full"
+            or row.get("status") not in {"completed", "inProgress", "interrupted", "failed"}
+            or not isinstance(items, list)
+            or any(not isinstance(item, Mapping) for item in items)
+        ):
+            raise unavailable()
+        messages = [
+            item
+            for item in items
+            if isinstance(item, Mapping)
+            and str(item.get("type") or "") == "userMessage"
+        ]
+        if (
+            len(messages) != 1
+            or not isinstance(messages[0].get("id"), str)
+            or not messages[0]["id"]
+        ):
+            raise unavailable()
+        content = messages[0].get("content")
+        if not isinstance(content, list) or len(content) != 1:
+            # Missing, multisegment, or skill/mention/image input segments.
+            raise unavailable()
+        entry = content[0]
+        if (
+            not isinstance(entry, Mapping)
+            or str(entry.get("type") or "") != "text"
+            or not isinstance(entry.get("text"), str)
+        ):
+            raise unavailable()
+        elements = entry.get("text_elements", [])
+        if not isinstance(elements, list) or elements:
+            raise unavailable()
+        text = entry["text"]
+        if not text.strip():
+            raise unavailable()
+        try:
+            encoded = text.encode("utf-8")
+        except UnicodeEncodeError:
+            raise unavailable() from None
+        if (
+            hashlib.sha256(encoded).hexdigest() != capture.input_digest
+            or len(encoded) != capture.input_byte_length
+        ):
+            raise unavailable()
+        return RetainedPlainInputEvidence(
+            attempt_id=turn.attempt_id,
+            session_epoch_id=turn.session_epoch_id,
+            process_generation_id=turn.process_generation_id,
+            turn_id=turn.turn_id,
+            provider_session_id=state.provider_session_id,
+            provider_native_turn_id=native_turn,
+            retained_input_digest=capture.input_digest,
+            retained_input_byte_length=capture.input_byte_length,
+            input_shape=CONSUMPTION_EVIDENCE_SHAPE,
+            harness_version=state.attestation.harness_version or "",
+            harness_binary_digest=state.attestation.harness_binary_digest or "",
+            scope=CONSUMPTION_EVIDENCE_SCOPE,
         )
 
     def _observation(

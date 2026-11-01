@@ -87,9 +87,71 @@ def test_raw_method_is_hard_wired_to_closed_page_contract(tmp_path):
     try:
         with pytest.raises(JsonRpcError, match="identity"):
             client.request_raw_turn_page(thread_id="", native_turn_id="TURN-RAW")
+        with pytest.raises(JsonRpcError, match="identity"):
+            client.request_raw_turn_page(thread_id="THREAD", native_turn_id="")
         with pytest.raises(TypeError):
             client.request_raw_turn_page(  # type: ignore[call-arg]
                 thread_id="THREAD", native_turn_id="TURN-RAW", method="account/read"
+            )
+    finally:
+        client.close()
+
+
+def test_raw_turn_page_params_match_the_source_schema_contract(tmp_path):
+    """ThreadTurnsListParams has no turnId property; the client sends exactly
+    the closed schema contract (codex rust-v0.159.2, ff6aec96948b70d94983af2
+    641a6b67c94faeff5) and the exact native turn stays a local filter."""
+    client = _client(tmp_path)
+    sent = []
+    original_send = client._send
+    def send(payload, **kwargs):
+        if payload.get("method") == "thread/turns/list":
+            sent.append(payload.get("params"))
+        return original_send(payload, **kwargs)
+    client._send = send
+    try:
+        page = client.request_raw_turn_page(
+            thread_id="THREAD", native_turn_id="TURN-RAW"
+        )
+        assert page.consume()["data"][0]["id"] == "TURN-RAW"
+        with pytest.raises(JsonRpcError, match="already consumed"):
+            page.consume()
+    finally:
+        client.close()
+    assert sent == [
+        {"threadId": "THREAD", "itemsView": "full", "limit": 1,
+         "sortDirection": "desc"}
+    ]
+
+
+def test_raw_turn_page_cursor_extends_the_same_schema_contract(tmp_path):
+    client = _client(tmp_path)
+    sent = []
+    original_send = client._send
+    def send(payload, **kwargs):
+        if payload.get("method") == "thread/turns/list":
+            sent.append(payload.get("params"))
+        return original_send(payload, **kwargs)
+    client._send = send
+    try:
+        page = client.request_raw_turn_page(
+            thread_id="THREAD", native_turn_id="TURN-RAW", cursor="cursor-1"
+        )
+        assert page.consume()["data"][0]["id"] == "TURN-RAW"
+    finally:
+        client.close()
+    assert sent == [
+        {"threadId": "THREAD", "itemsView": "full", "limit": 1,
+         "sortDirection": "desc", "cursor": "cursor-1"}
+    ]
+
+
+def test_source_schema_fixture_refuses_the_removed_turn_id_param(tmp_path):
+    client = _client(tmp_path)
+    try:
+        with pytest.raises(JsonRpcError, match="turnId"):
+            client.request(
+                "thread/turns/list", {"threadId": "THREAD", "turnId": "TURN-RAW"}
             )
     finally:
         client.close()
