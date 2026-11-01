@@ -86,7 +86,11 @@ matches. Untouched incumbent pin drift retains its previous start behavior.
 
 Use the same account, bundle, original manifest and reviewed plan arguments with
 `--operation status`. This is a read-only observation distinguishing OLD,
-CONFIG_ONLY and COMPLETE; foreign or unsafe state is refused. A terminal result
+CONFIG_ONLY and COMPLETE; foreign or unsafe state is refused. OLD reports
+`NOT_APPLIED`, CONFIG_ONLY reports `PARTIAL` (the config has changed), and
+COMPLETE reports `APPLIED`. `receiptCommitted` separately identifies whether the
+durable terminal receipt exists; a complete pair with a lost receipt still needs
+same-transaction reconciliation before global successor execution. A terminal result
 paired with reverted bytes is refused, never replayed. Repeating `apply` against
 an existing transaction is refused. Missing/unreadable staging data is not proof
 that an effect never occurred.

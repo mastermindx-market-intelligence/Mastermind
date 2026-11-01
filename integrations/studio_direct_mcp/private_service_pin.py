@@ -396,7 +396,9 @@ def run(svc, args):
                 svc,
                 args,
                 plan,
-                "APPLIED" if observed == "COMPLETE" else "NOT_APPLIED",
+                {"OLD": "NOT_APPLIED", "CONFIG_ONLY": "PARTIAL", "COMPLETE": "APPLIED"}[
+                    observed
+                ],
                 observed,
                 receipt_committed=os.path.lexists(path / "result.json"),
             )

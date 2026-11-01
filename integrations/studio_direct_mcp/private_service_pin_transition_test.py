@@ -290,7 +290,10 @@ class PinTransitionTests(unittest.TestCase):
     def test_owned_config_only_reconcile_finishes_same_plan(self):
         self.fail_before_manifest()
         self.args.operation = "status"
-        self.assertEqual(self.invoke()["phase"], "CONFIG_ONLY")
+        partial = self.invoke()
+        self.assertEqual(partial["phase"], "CONFIG_ONLY")
+        self.assertEqual(partial["effect"], "PARTIAL")
+        self.assertFalse(partial["receiptCommitted"])
         self.args.operation = "reconcile"
         self.assertEqual(self.invoke()["effect"], "APPLIED")
 
