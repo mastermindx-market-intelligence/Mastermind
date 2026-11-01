@@ -22,6 +22,7 @@ import plistlib
 import stat
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -4642,6 +4643,208 @@ class TestFabricPoolPinMigration(unittest.TestCase):
         self.roots["manifest"].write_text(json.dumps(historic, sort_keys=True, indent=2))
         with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
             svc._read_manifest(self.roots["manifest"], self.account, self.label)
+
+    def test_crash_between_renames_reconciles_mixed_epoch_without_blind_retry(self):
+        """Process death after the config rename and before the manifest rename.
+
+        The same owner must detect that exact mixed epoch and restore the
+        pre-rename config. It must not finish the manifest commit.
+        """
+        entered = []
+
+        @contextmanager
+        def recording_mutex(account):
+            entered.append(account)
+            yield
+
+        def plant(config_bytes, manifest_bytes):
+            self.roots["config"].write_bytes(config_bytes)
+            self.roots["manifest"].write_bytes(manifest_bytes)
+
+        with mock.patch.object(svc, "_c2_lifecycle_mutex", recording_mutex):
+            # Manifest already at the target while config is still the source
+            # is not the crash window. Do not invent a repair.
+            plant(self.original_config_bytes, self.successor_manifest_bytes)
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                svc.cmd_fabric_pool_pin_migrate(self.args())
+            self.assertEqual(self.roots["config"].read_bytes(), self.original_config_bytes)
+            self.assertEqual(self.roots["manifest"].read_bytes(), self.successor_manifest_bytes)
+
+            # Forward crash residue: successor config, original manifest.
+            plant(self.successor_config_bytes, self.original_manifest_bytes)
+            before_lock = len(entered)
+            with self.assertRaisesRegex(SystemExit, "interrupted mixed-epoch"):
+                svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True))
+            self.assertEqual(len(entered), before_lock)
+            self.assertEqual(self.roots["config"].read_bytes(), self.successor_config_bytes)
+            self.assertEqual(self.roots["manifest"].read_bytes(), self.original_manifest_bytes)
+            with mock.patch.object(
+                svc, "_lifecycle_inspect", return_value={"state": "running"},
+            ):
+                with self.assertRaisesRegex(SystemExit, "stop exact seat"):
+                    svc.cmd_fabric_pool_pin_migrate(self.args())
+            self.assertEqual(self.roots["config"].read_bytes(), self.successor_config_bytes)
+            self.assertEqual(self.roots["manifest"].read_bytes(), self.original_manifest_bytes)
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+            receipt = json.loads(stdout.getvalue())
+            self.assertEqual(receipt["effect"], "RECONCILED")
+            self.assertFalse(receipt["manifestCommitted"])
+            self.assertFalse(receipt["serviceStarted"])
+            self.assertEqual(receipt["interrupted"], "config-renamed-manifest-original")
+            self.assert_original()
+            self.assertEqual(entered[-1], self.account)
+
+            # Rollback crash residue is the same window in the other direction:
+            # config already restored, manifest still the successor. Reconcile
+            # puts the successor config back and does not commit the original
+            # manifest.
+            with mock.patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+            plant(self.original_config_bytes, self.successor_manifest_bytes)
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+                self.assertEqual(
+                    svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True)), 0,
+                )
+            rolled = json.loads(stdout.getvalue())
+            self.assertEqual(rolled["effect"], "RECONCILED")
+            self.assertFalse(rolled["manifestCommitted"])
+            self.assertEqual(self.roots["config"].read_bytes(), self.successor_config_bytes)
+            self.assertEqual(self.roots["manifest"].read_bytes(), self.successor_manifest_bytes)
+
+
+class TestPublisherPinMigrateLifecycleInterleaving(unittest.TestCase):
+    """Real publisher writer must lose to the pin-migrate lifecycle mutex."""
+
+    def test_publisher_upgrade_cannot_write_while_pin_migrate_holds_seat_lock(self):
+        self.assertEqual(
+            svc.FLEET_V10_ENROLLED_ACCOUNTS, frozenset(("chatgpt1", "chatgpt3")),
+        )
+        self.assertTrue(
+            svc.FLEET_V10_ENROLLED_ACCOUNTS.issubset(svc.FABRIC_POOL_PIN_MIGRATION)
+        )
+        fixture = TestFleetV10PublisherCompatibility()
+        with fixture._installed_fleet_fixture("chatgpt1") as (args, roots, _cfg):
+            home = Path(os.environ["HOME"])
+            current = roots["state"]
+            while True:
+                if current.is_dir() and not current.is_symlink():
+                    current.chmod(0o700 if current == roots["state"] else 0o755)
+                if current == home:
+                    break
+                current = current.parent
+            pool = home / ".local" / "bin" / "pool"
+            pool.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+            pool.write_bytes(b"fixture-reviewed-native-bridge\n")
+            selected_sha = hashlib.sha256(pool.read_bytes()).hexdigest()
+            original_sha = "b" * 64
+            config = json.loads(roots["config"].read_text(encoding="utf-8"))
+            config["fleetStatus"]["fabricLauncherPath"] = str(pool)
+            config["fleetStatus"]["fabricLauncherSha256"] = original_sha
+            config_bytes = json.dumps(config, indent=2, sort_keys=True).encode("utf-8")
+            roots["config"].write_bytes(config_bytes)
+            manifest = json.loads(roots["manifest"].read_text(encoding="utf-8"))
+            manifest["configHash"] = hashlib.sha256(config_bytes).hexdigest()
+            manifest_bytes = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
+            roots["manifest"].write_bytes(manifest_bytes)
+            args.publisher_expected_manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+            loaded = json.loads(config_bytes)
+            successor_config = dict(loaded)
+            successor_config["fleetStatus"] = dict(
+                loaded["fleetStatus"], fabricLauncherSha256=selected_sha,
+            )
+            successor_config_bytes = json.dumps(
+                successor_config, indent=2, sort_keys=True,
+            ).encode("utf-8")
+            successor_manifest = dict(
+                json.loads(manifest_bytes),
+                configHash=hashlib.sha256(successor_config_bytes).hexdigest(),
+            )
+            successor_manifest_bytes = json.dumps(
+                successor_manifest, indent=2, sort_keys=True,
+            ).encode("utf-8")
+            sha = lambda raw: hashlib.sha256(raw).hexdigest()
+            pins = (
+                sha(manifest_bytes), sha(config_bytes),
+                sha(successor_manifest_bytes), sha(successor_config_bytes),
+                svc._canonical_json_sha256(successor_manifest),
+            )
+            pin_args = type("Args", (), {
+                "account": "chatgpt1",
+                "expected_manifest_sha256": pins[0],
+                "expected_target_manifest_sha256": pins[2],
+                "preflight_only": False,
+                "rollback": False,
+            })()
+            real_mutex = svc._c2_lifecycle_mutex
+            entered = threading.Event()
+            release = threading.Event()
+            paused = {"done": False}
+
+            @contextmanager
+            def pausing_mutex(account):
+                with real_mutex(account):
+                    if not paused["done"]:
+                        paused["done"] = True
+                        entered.set()
+                        if not release.wait(10):
+                            raise TimeoutError(
+                                "publisher did not finish while pin migrate held the lock"
+                            )
+                    yield
+
+            pin_box = {}
+
+            def run_pin():
+                buf = io.StringIO()
+                try:
+                    with mock.patch("sys.stdout", buf):
+                        pin_box["rc"] = svc.cmd_fabric_pool_pin_migrate(pin_args)
+                    pin_box["out"] = buf.getvalue()
+                except BaseException as exc:
+                    pin_box["exc"] = exc
+
+            def modules():
+                return tuple(sorted(
+                    (name, (roots["base"] / name).read_bytes())
+                    for name in svc.V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
+                ))
+
+            before_modules = modules()
+            before_config = roots["config"].read_bytes()
+            before_manifest = roots["manifest"].read_bytes()
+            publisher_error = ""
+            with mock.patch.object(svc, "FABRIC_POOL_ORIGINAL_SHA256", original_sha), \
+                 mock.patch.object(svc, "FABRIC_POOL_SELECTED_SHA256", selected_sha), \
+                 mock.patch.object(svc, "FABRIC_POOL_PIN_MIGRATION", {"chatgpt1": pins}), \
+                 mock.patch.object(svc, "_lifecycle_inspect", return_value=None), \
+                 mock.patch.object(svc, "_run", CmdRecorder()), \
+                 mock.patch.object(svc, "_c2_lifecycle_mutex", pausing_mutex):
+                worker = threading.Thread(target=run_pin, name="pin-migrate")
+                worker.start()
+                try:
+                    if not entered.wait(10):
+                        self.fail(f"pin migrate never held the lifecycle mutex: {pin_box}")
+                    try:
+                        svc.cmd_upgrade(args)
+                        publisher_error = "publisher completed without the lifecycle mutex"
+                    except SystemExit as exc:
+                        publisher_error = str(exc)
+                    self.assertEqual(roots["config"].read_bytes(), before_config)
+                    self.assertEqual(roots["manifest"].read_bytes(), before_manifest)
+                    self.assertEqual(modules(), before_modules)
+                    self.assertIn("lifecycle mutation already in progress", publisher_error)
+                finally:
+                    release.set()
+                    worker.join(30)
+            self.assertFalse(worker.is_alive(), pin_box)
+            self.assertNotIn("exc", pin_box, pin_box.get("exc"))
+            self.assertEqual(pin_box.get("rc"), 0, pin_box)
+            receipt = json.loads(pin_box["out"])
+            self.assertEqual(receipt["effect"], "APPLIED")
+            self.assertEqual(roots["config"].read_bytes(), successor_config_bytes)
+            self.assertEqual(roots["manifest"].read_bytes(), successor_manifest_bytes)
+            self.assertEqual(modules(), before_modules)
 
 
 class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):

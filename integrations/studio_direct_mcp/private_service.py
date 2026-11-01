@@ -1775,6 +1775,20 @@ def _commission_setting(args, roots: dict, prior: dict | None) -> str | None:
 def cmd_stage(args) -> int:
     account = args.account
     _validate_account_label(account)
+    state = _build_runtime_roots(account)["state"]
+    # Installed pool-pin seats share this config/manifest writer with
+    # pin-migrate. First install has no state directory and no lock inode.
+    # The fabric decorator still owns fabric-backend seats and is not nested.
+    if (account in FABRIC_POOL_PIN_MIGRATION
+            and not state.is_symlink() and state.is_dir()):
+        with _c2_lifecycle_mutex(account):
+            return _cmd_stage_body(args)
+    return _cmd_stage_body(args)
+
+
+def _cmd_stage_body(args) -> int:
+    account = args.account
+    _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     host = "127.0.0.1"
 
@@ -2667,12 +2681,137 @@ def _upgrade_c2_personal_git_timeout_only(
     return 0
 
 
+def _reconcile_interrupted_fabric_pool_pin(
+    *,
+    account: str,
+    label: str,
+    roots: dict,
+    config_path: Path,
+    manifest_path: Path,
+    pool_path: Path,
+    before_manifest_sha: str,
+    before_config_sha: str,
+    target_config_sha: str,
+    before_launcher_sha: str,
+    target_launcher_sha: str,
+    direction: str,
+    preflight_only: bool,
+) -> int:
+    """Restore one config rename that landed without its manifest commit.
+
+    This owner writes config first and the manifest second. Process death
+    between those renames leaves the reviewed target config beside the source
+    manifest. The in-process handler already restores that config; this is the
+    same restoration when the process is gone. It does not finish the manifest
+    write and it does not open a second transaction log.
+    """
+    def read_exact(path: Path, label_text: str) -> bytes:
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != _stable_regular_file_hash(path, label=label_text):
+            raise SystemExit(
+                "Fabric pool pin: EFFECT_UNKNOWN; mixed-epoch file changed while reading"
+            )
+        return raw
+
+    config_raw = read_exact(config_path, "installed config")
+    manifest_raw = read_exact(manifest_path, "installed manifest")
+    if (hashlib.sha256(config_raw).hexdigest() != target_config_sha
+            or hashlib.sha256(manifest_raw).hexdigest() != before_manifest_sha):
+        raise SystemExit(
+            "Fabric pool pin: EFFECT_UNKNOWN; interrupted pair is not the reviewed owner epoch"
+        )
+    try:
+        current = json.loads(config_raw)
+        manifest = json.loads(manifest_raw)
+    except (UnicodeError, ValueError) as exc:
+        raise SystemExit(
+            "Fabric pool pin: EFFECT_UNKNOWN; interrupted config/manifest unreadable"
+        ) from exc
+    status = current.get("fleetStatus") if type(current) is dict else None
+    if (type(current) is not dict or type(manifest) is not dict
+            or manifest.get("account") != account
+            or manifest.get("configHash") != before_config_sha
+            or current.get("accountLabel") != account
+            or type(status) is not dict
+            or status.get("enabled") is not True
+            or status.get("fabricLauncherPath") != str(pool_path)
+            or status.get("fabricLauncherSha256") != target_launcher_sha):
+        raise SystemExit(
+            "Fabric pool pin: EFFECT_UNKNOWN; interrupted config is not the reviewed launcher pin"
+        )
+    canonical_target = dict(
+        current,
+        fleetStatus=dict(status, fabricLauncherSha256=target_launcher_sha),
+    )
+    restored_config = dict(
+        current,
+        fleetStatus=dict(status, fabricLauncherSha256=before_launcher_sha),
+    )
+    target_bytes = json.dumps(canonical_target, indent=2, sort_keys=True).encode("utf-8")
+    restored_bytes = json.dumps(restored_config, indent=2, sort_keys=True).encode("utf-8")
+    if (target_bytes != config_raw
+            or hashlib.sha256(restored_bytes).hexdigest() != before_config_sha):
+        raise SystemExit(
+            "Fabric pool pin: EFFECT_UNKNOWN; interrupted pair is not the reviewed owner epoch"
+        )
+    if preflight_only:
+        raise SystemExit(
+            "Fabric pool pin: interrupted mixed-epoch config/manifest; "
+            "preflight does not write; same owner apply reconciles"
+        )
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+        raise SystemExit(
+            "Fabric pool pin: interrupted mixed-epoch config/manifest; "
+            "service is loaded; stop exact seat before reconciliation"
+        )
+    if (read_exact(config_path, "installed config") != config_raw
+            or read_exact(manifest_path, "installed manifest") != manifest_raw
+            or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
+        raise SystemExit(
+            "Fabric pool pin: EFFECT_UNKNOWN; mixed epoch changed before reconciliation"
+        )
+    try:
+        _atomic_write_bytes(config_path, restored_bytes)
+        verified = _verify_staged_install(
+            account, label, roots, require_runtime_seal=True,
+        )
+        if (verified.get("configHash") != before_config_sha
+                or config_path.read_bytes() != restored_bytes
+                or manifest_path.read_bytes() != manifest_raw
+                or _stable_regular_file_hash(config_path, label="installed config")
+                    != before_config_sha
+                or _stable_regular_file_hash(manifest_path, label="installed manifest")
+                    != before_manifest_sha
+                or _lifecycle_inspect(account, label, roots, require_positive=True)
+                    is not None):
+            raise RuntimeError("reconciliation unverified")
+    except BaseException as exc:
+        raise SystemExit(
+            "Fabric pool pin: EFFECT_UNKNOWN; interrupted config reconciliation "
+            "unverified; do not retry"
+        ) from exc
+    print(json.dumps({
+        "schema": "mastermind.studio_fabric_pool_pin_migration.v1",
+        "account": account,
+        "direction": direction,
+        "effect": "RECONCILED",
+        "preflight": False,
+        "interrupted": "config-renamed-manifest-original",
+        "originalManifestSha256": before_manifest_sha,
+        "restoredConfigSha256": before_config_sha,
+        "manifestCommitted": False,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
 
 def cmd_fabric_pool_pin_migrate(args) -> int:
     """One source-pinned stopped-seat CAS migration, forward or exact rollback.
 
     No provider, credential, grant, global wrapper or service lifecycle action.
     The same original Studio publication owner/lock serves both directions.
+    A crash between the config and manifest renames is reconciled here by
+    restoring the reviewed config. The manifest commit is not retried.
     """
     account = args.account
     _validate_account_label(account)
@@ -2720,10 +2859,32 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
         config_path, manifest_path = roots["config"], roots["manifest"]
         for dest in (config_path, manifest_path):
             _assert_dest_safe(dest)
-        if (_stable_regular_file_hash(manifest_path, label="installed manifest")
-                != before_manifest_sha
-                or _stable_regular_file_hash(config_path, label="installed config")
-                != before_config_sha):
+        pool_path = _user_root() / ".local" / "bin" / "pool"
+        manifest_sha = _stable_regular_file_hash(manifest_path, label="installed manifest")
+        config_sha = _stable_regular_file_hash(config_path, label="installed config")
+        # Config is renamed first. Death before the manifest rename leaves the
+        # reviewed target config beside the source manifest. Any other mix,
+        # including a committed manifest beside the source config, stays
+        # fail-closed and is not repaired by guessing.
+        if manifest_sha == before_manifest_sha and config_sha == target_config_sha:
+            return _reconcile_interrupted_fabric_pool_pin(
+                account=account, label=label, roots=roots,
+                config_path=config_path, manifest_path=manifest_path,
+                pool_path=pool_path,
+                before_manifest_sha=before_manifest_sha,
+                before_config_sha=before_config_sha,
+                target_config_sha=target_config_sha,
+                before_launcher_sha=before_launcher_sha,
+                target_launcher_sha=target_launcher_sha,
+                direction="restore-original" if reverse else "selected-native",
+                preflight_only=args.preflight_only,
+            )
+        if manifest_sha == target_manifest_sha and config_sha == before_config_sha:
+            raise SystemExit(
+                "Fabric pool pin: EFFECT_UNKNOWN; mixed epoch is not an interrupted "
+                "config rename; do not retry"
+            )
+        if manifest_sha != before_manifest_sha or config_sha != before_config_sha:
             raise SystemExit("Fabric pool pin: original sealed generation no longer matches")
         before_manifest = _verify_staged_install(
             account, label, roots, require_runtime_seal=True,
@@ -2932,6 +3093,21 @@ def cmd_upgrade(args) -> int:
             return _enroll_c2_business_closed_repositories(
                 args, node_abs, backend_abs, account, label, port, roots)
     if getattr(args, "publisher_only_fleet_v10", False) is True:
+        # chatgpt1 and chatgpt3 share config.json and manifest.json with
+        # fabric-pool-pin-migrate. Hold that seat's existing lifecycle mutex
+        # around the whole mutating publisher transaction. cmd_upgrade's fabric
+        # decorator does not already hold it: those seats are not fabric
+        # backend accounts. The helper must not acquire the mutex again.
+        # Read-only preflight does not write, matching pin-migrate preflight.
+        if (getattr(args, "publisher_preflight_only", False) is not True
+                and account in FLEET_V10_ENROLLED_ACCOUNTS):
+            if account not in FABRIC_POOL_PIN_MIGRATION:
+                raise SystemExit(
+                    "fleet publisher compatibility: enrolled seat is outside the lifecycle mutex"
+                )
+            with _c2_lifecycle_mutex(account):
+                return _upgrade_fleet_v10_publisher_only(
+                    args, source, node_abs, backend_abs, account, label, port, roots)
         return _upgrade_fleet_v10_publisher_only(
             args, source, node_abs, backend_abs, account, label, port, roots)
     # Legacy call sites carry mock objects with no new CLI attributes.
@@ -2939,6 +3115,23 @@ def cmd_upgrade(args) -> int:
     if (getattr(args, "publisher_preflight_only", False) is True
             or type(getattr(args, "publisher_expected_manifest_sha256", None)) is str):
         raise SystemExit("publisher preflight and CAS options require --publisher-only-fleet-v10")
+    # The generic installer is the remaining config/manifest writer on a pin
+    # seat. Fabric-backend accounts already hold this mutex via the outer
+    # decorator and are not in the pin set, so this does not lock twice.
+    # Seal, start, and stop keep their existing decorators.
+    if account in FABRIC_POOL_PIN_MIGRATION:
+        with _c2_lifecycle_mutex(account):
+            return _finish_generic_upgrade(
+                args, source, node_abs, backend_abs, account, label, host, port, roots,
+            )
+    return _finish_generic_upgrade(
+        args, source, node_abs, backend_abs, account, label, host, port, roots,
+    )
+
+
+def _finish_generic_upgrade(
+    args, source, node_abs, backend_abs, account, label, host, port, roots,
+) -> int:
     if _launchd_inspect(label) is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
     prior = _verify_staged_install(
