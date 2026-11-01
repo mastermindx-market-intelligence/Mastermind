@@ -1,0 +1,58 @@
+{
+  "schema_version": "ohf.retained-plain-input-source/v1",
+  "purpose": "Source-backed hermetic contract for the private retained plain-text input extractor. Shapes below were read from the pinned upstream schemas, not invented; tests serve and validate rows through this document only.",
+  "provenance": {
+    "repository": "openai/codex",
+    "release_tag": "rust-v0.159.2",
+    "commit": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "installed_binary_version": "codex-cli 0.159.2",
+    "installed_binary_sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704",
+    "schema_base": "codex-rs/app-server-protocol/schema/json/v2",
+    "schemas": {
+      "params": "ThreadTurnsListParams.json",
+      "response": "ThreadTurnsListResponse.json"
+    },
+    "retained_input_source": [
+      {
+        "path": "codex-rs/core/src/session/mod.rs",
+        "symbol": "record_user_prompt_and_emit_turn_item",
+        "line_hint": 4958,
+        "note": "persists the original user message into retained history after preparing it"
+      },
+      {
+        "path": "codex-rs/protocol/src/models.rs",
+        "symbol": "ResponseInputItem::from_user_input",
+        "line_hint": 2004,
+        "note": "moves UserInput::Text text into ContentItem::InputText unchanged"
+      }
+    ]
+  },
+  "thread_turns_list_params_properties": [
+    "cursor",
+    "itemsView",
+    "limit",
+    "sortDirection",
+    "threadId"
+  ],
+  "turn": {
+    "required": ["id", "items", "status"],
+    "items_view_default": "full"
+  },
+  "user_message_thread_item": {
+    "type_value": "userMessage",
+    "required": ["content", "id", "type"]
+  },
+  "text_user_input": {
+    "type_value": "text",
+    "required": ["text", "type"],
+    "text_elements_default": []
+  },
+  "unsupported_user_input_types": [
+    "image",
+    "localImage",
+    "audio",
+    "localAudio",
+    "skill",
+    "mention"
+  ]
+}
