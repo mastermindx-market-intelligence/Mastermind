@@ -234,7 +234,7 @@ def test_workflow_retains_job_limit_and_bounds_upload_opportunity():
     workflow=yaml.load(text,Loader=_WorkflowYAMLLoader);job=workflow['jobs']['pytest_shards']
     step=next(s for s in job['steps']if s.get('name')=='Run repository test shard')
     upload=next(s for s in job['steps']if s.get('name')=='Upload fixed test diagnostics')
-    assert job['timeout-minutes']==60 and step['timeout-minutes']==38
+    assert job['timeout-minutes']==60 and step['timeout-minutes']==45
     assert upload['if']=='always()' and upload['timeout-minutes']==2
     assert upload['uses']=='actions/upload-artifact@v4'
     assert upload['with']['path']=='${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json'

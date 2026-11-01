@@ -170,8 +170,11 @@ jobs:
 
       - name: Run repository test shard
         # Give best-effort upload an opportunity inside the 60-minute job.
+        # The prior 38-minute step timed out; its snapshot retained the final
+        # module summary. Observed setup was 175s and upload 1s; 45+2 leaves 13m
+        # for setup/cleanup opportunity, not a guaranteed future bound.
         # Slow setup or runner loss can still prevent artifact delivery.
-        timeout-minutes: 38
+        timeout-minutes: 45
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
 
       - name: Upload fixed test diagnostics
