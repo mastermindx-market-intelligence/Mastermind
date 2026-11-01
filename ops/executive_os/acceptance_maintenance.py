@@ -7,7 +7,10 @@ Only passing acceptance publishes an exact queued-root compatibility receipt.
 The v5-to-v7 mode retires one installed unstarted supersede_preproof_v1
 preparation whose source release has completed the offline v5->v6->v7
 transitions: it seals the Root upgrade evidence beside a fresh v7 working
-prestate instead of relabelling the selected v5 lineage.
+prestate instead of relabelling the selected v5 lineage. A normally installed
+prepared parent keeps its own recorded edge and may itself be superseded by
+the same installed selector, re-authenticating its whole sealed lineage down
+to the genuine original sixteen-origin preparation.
 """
 from __future__ import annotations
 
@@ -2144,7 +2147,165 @@ def _read_unstarted_migration_preparation(parent_sha, expected_digest, guard):
         raise MaintenanceError("prepared parent has unresolved partial publication")
     guard.check()
     return dict(descriptor=parent, material=material, source_control=source_control,
-                baseline=baseline, inventory=artifacts, canary=canary, directory=directory)
+                baseline=baseline, inventory=artifacts, canary=canary, directory=directory,
+                acceptance_absence=runtime.parent/'acceptance'/parent_sha)
+
+
+def _read_installed_migration_preparation(parent, expected_digest, directory, guard, chain):
+    """Authenticate one sealed unstarted normally installed prepared parent.
+
+    The exact nine-entry namespace and its own preparing marker admit no run
+    marker, acceptance leaf, carry receipt or partial state. The recorded
+    current-config digest and its whole raw preimage are checked first; then
+    the real immediate parent is authenticated through the same bounded walk
+    and the recorded config must be the exact normal-input derivation from
+    that parent's authenticated inherited source input and immediate selected
+    parent identity. An old held parent snapshot is therefore never mistaken
+    for the current installation, and an installed ancestor never claims the
+    original leaf's migration executor identity: the inherited material stays
+    the genuine unchanged leaf content whose executor only the terminal leaf
+    link proves.
+    """
+    if (digest(parent) != expected_digest
+            or {item.name for item in directory.iterdir()}
+                != set(_migration_bundle_names(parent))
+            or sealed_json(directory/'preparing.json')
+                != {'schema_version': SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR}):
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    installed_raw = sealed_bytes(directory/_INSTALLED_PARENT_CONTROL_NAME, _MAX_DOCUMENT_BYTES)
+    if hashlib.sha256(installed_raw).hexdigest() != parent['installed_parent_control_config_sha256']:
+        raise MaintenanceError("installed preparation source config differs")
+    inner = _read_prepared_migration_parent_link(
+        parent['superseded_unstarted_migration_preparation_sha'],
+        parent['superseded_migration_preparation_descriptor_sha256'], guard, chain)
+    if any(parent[key] != inner['descriptor'][key]
+           for key in _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS - {'schema_version', 'successor_sha'}):
+        raise MaintenanceError("prepared migration successor changed a frozen parent binding")
+    if installed_raw != _normal_installed_preparation_config(inner['source_control'],
+            parent['superseded_unstarted_migration_preparation_sha']):
+        raise MaintenanceError("installed preparation source config differs")
+    material = sealed_json(directory/_V5_TO_V7_EVIDENCE_NAME)
+    owner = _evidence_owner()
+    owner._validate_pinned_material(material)
+    if (material['schema_version'] != owner.SPENT_CTIME_MATERIAL_SCHEMA_VERSION
+            or digest(material) != parent['schema_upgrade_evidence_sha256']):
+        raise MaintenanceError("prepared parent does not pin its genuine sixteen-origin executor")
+    source_control = sealed_bytes(directory/_V5_TO_V7_SOURCE_CONTROL_NAME, _MAX_DOCUMENT_BYTES)
+    if hashlib.sha256(source_control).hexdigest() != parent['source_control_config_sha256']:
+        raise MaintenanceError("prepared parent source control preimage differs")
+    original_config = json.loads(source_control)
+    if original_config.get('proof_base_sha') != parent['superseded_unstarted_preproof_sha']:
+        raise MaintenanceError("prepared parent original selected release differs")
+    runtime = _runtime_owner_path(_canonical_root_path(original_config.get('runtime_root')), guard)
+    _require_runtime_acceptance_absent(runtime.parent/'acceptance'/parent['successor_sha'])
+    baseline = sealed_json(directory/'baseline.json')
+    artifacts = sealed_json(directory/'inventory.json')
+    canary = sealed_json(directory/'prior-secret-canary.json')
+    if (digest(baseline) != parent['baseline_sha256']
+            or digest(artifacts) != parent['inventory_sha256']
+            or digest(canary) != parent['prior_canary_sha256']
+            or sealed_backup_snapshot(directory/'prestate.sqlite3', parent['backup_sha256']) != baseline):
+        raise MaintenanceError("prepared parent sealed prestate differs")
+    if any(item.name.startswith('.preparing-'+parent['successor_sha']+'-')
+           for item in directory.parent.iterdir()):
+        raise MaintenanceError("prepared parent has unresolved partial publication")
+    guard.check()
+    return dict(descriptor=parent, material=material, source_control=source_control,
+                baseline=baseline, inventory=artifacts, canary=canary, directory=directory,
+                installed_control_raw=installed_raw,
+                acceptance_absence=runtime.parent/'acceptance'/parent['successor_sha'])
+
+
+def _read_prepared_migration_parent_link(parent_sha, expected_digest, guard, chain):
+    """Authenticate one link of the bounded prepared-parent walk.
+
+    The chain state is owned by the single walk that passes it down, so the
+    cycle and depth bounds use the existing budget and can never reset inside
+    a nested snapshot call. The context-local memo shares each authenticated
+    immutable document set across nested callbacks on one live guard; a hit
+    still re-proves the held namespace, the canonical descriptor preimage and
+    every retained identity before the value is reused.
+    """
+    if (not isinstance(parent_sha, str) or _SHA.fullmatch(parent_sha) is None
+            or not isinstance(expected_digest, str) or _DIGEST.fullmatch(expected_digest) is None):
+        raise MaintenanceError("prepared migration parent selector is invalid")
+    if parent_sha in chain:
+        raise MaintenanceError("prepared migration parent chain is cyclic")
+    if len(chain) >= _MAX_SUPERSEDE_DEPTH:
+        raise MaintenanceError("prepared migration parent chain is too deep")
+    directory = bundle_path(parent_sha)
+    guard.tree(directory)
+    held = guard.prepared_parents.get((parent_sha, expected_digest))
+    if held is not None:
+        descriptor = descriptor_for(parent_sha)
+        if (descriptor is None or digest(descriptor) != expected_digest
+                or descriptor['schema_version'] not in _MIGRATION_SCHEMAS):
+            raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+        # Cached payloads do not shorten the authenticated chain. Visit every
+        # immutable parent through this same path-local budget, retaining its
+        # live external absence and partial-publication checks without parsing
+        # the large inherited documents again.
+        if descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+            _read_prepared_migration_parent_link(
+                descriptor['superseded_unstarted_migration_preparation_sha'],
+                descriptor['superseded_migration_preparation_descriptor_sha256'],
+                guard, chain + (parent_sha,))
+        guard.tree(directory)
+        # Held identity cannot observe state outside the held namespace: the
+        # live acceptance absence of this link and any later partial
+        # publication beside it are re-proved on every memo hit.
+        _require_runtime_acceptance_absent(held['acceptance_absence'])
+        if any(item.name.startswith('.preparing-'+parent_sha+'-')
+               for item in directory.parent.iterdir()):
+            raise MaintenanceError("prepared parent has unresolved partial publication")
+        guard.check()
+        return held
+    parent = descriptor_for(parent_sha)
+    if parent is None:
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    if parent['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
+        value = _read_installed_migration_preparation(parent, expected_digest, directory,
+                                                      guard, chain + (parent_sha,))
+    elif parent['schema_version'] == SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7:
+        value = _read_unstarted_migration_preparation(parent_sha, expected_digest, guard)
+    else:
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    # Keep every original/ancestor absence live through the caller's final
+    # guard check, including an ancestor that changed during a later read.
+    guard.absent(value['acceptance_absence'])
+    guard.prepared_parents[(parent_sha, expected_digest)] = value
+    return value
+
+
+def _read_prepared_migration_parent(parent_sha, expected_digest, guard, *, installed=False,
+                                    successor_sha=None):
+    """Authenticate one intact prepared parent and its whole sealed lineage.
+
+    The installed selector continues through a normally installed prepared
+    parent to the genuine original sixteen-origin leaf; the uninstalled
+    selector keeps admitting exactly one original leaf and can never widen its
+    own issuance onto an installed parent. No link of the walk ever demands
+    that a historical ancestor is still the current installation.
+    """
+    if not isinstance(guard, _UnstartedPreproofGuard) or guard.closed:
+        raise MaintenanceError("prepared migration parent walk has no live retained custody")
+    if successor_sha is not None and (not isinstance(successor_sha, str)
+            or _SHA.fullmatch(successor_sha) is None):
+        raise MaintenanceError("prepared migration successor is invalid")
+    # A proposed or accepted successor is part of the same bounded lineage,
+    # even though only its ancestors are read by this helper.
+    chain = () if successor_sha is None else (successor_sha,)
+    parent = _read_prepared_migration_parent_link(parent_sha, expected_digest, guard, chain)
+    # The installed selector admits the genuine original sixteen-origin leaf
+    # (its accepted first installed epoch) and one already installed prepared
+    # parent (its bounded continuation); the uninstalled selector still admits
+    # exactly one original leaf and can never widen onto an installed parent.
+    admitted = ((SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7,
+                 SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR) if installed
+                else (SCHEMA_UNSTARTED_PREPROOF_V5_TO_V7,))
+    if parent['descriptor']['schema_version'] not in admitted:
+        raise MaintenanceError("prepared migration parent is not an intact unstarted preparation")
+    return parent
 
 
 def _prepared_migration_parent(descriptor, *, guard=None):
@@ -2161,8 +2322,10 @@ def _prepared_migration_parent(descriptor, *, guard=None):
     if parent_sha in {descriptor['successor_sha'], descriptor['predecessor_sha'],
                        descriptor['superseded_unstarted_preproof_sha']}:
         raise MaintenanceError("prepared migration successor is not a distinct outer edge")
-    parent = _read_unstarted_migration_preparation(parent_sha,
-        descriptor['superseded_migration_preparation_descriptor_sha256'], guard)
+    parent = _read_prepared_migration_parent(parent_sha,
+        descriptor['superseded_migration_preparation_descriptor_sha256'], guard,
+        installed=descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR,
+        successor_sha=descriptor['successor_sha'])
     if any(descriptor[key] != parent['descriptor'][key]
            for key in _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS - {'schema_version', 'successor_sha'}):
         raise MaintenanceError("prepared migration successor changed a frozen parent binding")
@@ -2267,8 +2430,9 @@ def _prepare_migration_preparation_successor(args):
         if worker.get('operator_harness_armed') is not False:
             raise MaintenanceError("prepared successor requires closed worker harness")
         with _ServiceAdmissionLock(config) as lock:
-            parent = _read_unstarted_migration_preparation(parent_sha,
-                args.superseded_migration_preparation_descriptor_sha256, guard)
+            parent = _read_prepared_migration_parent(parent_sha,
+                args.superseded_migration_preparation_descriptor_sha256, guard,
+                installed=bool(installed_parent), successor_sha=target)
             old = parent['descriptor']
             expected_config = (_normal_installed_preparation_config(parent['source_control'], parent_sha)
                                if installed_parent else parent['source_control'])
@@ -2581,11 +2745,19 @@ class _UnstartedPreproofGuard:
         self.namespaces = {}
         self.absences = {}
         self.aliases = {}
+        # Context-local memo of already authenticated prepared-parent links.
+        # It never holds authority: every hit re-proves the held namespace,
+        # the canonical descriptor preimage and all retained identities, and
+        # the memo dies with this guard.
+        self.prepared_parents = {}
+        self.closed = False
 
     def __enter__(self):
         return self
 
     def close(self):
+        self.closed = True
+        self.prepared_parents = {}
         nodes, self.nodes = self.nodes, {}
         for node in reversed(list(nodes.values())):
             os.close(node[0])
