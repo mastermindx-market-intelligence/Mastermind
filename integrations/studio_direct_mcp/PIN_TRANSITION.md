@@ -24,12 +24,21 @@ same protected source package. No gateway/backend bytes are replaced.
    controller/result carriers and receipts. This is consequence-scoped, not a
    demand that all Fabric workers be idle.
 2. Account for live work on each Studio seat before its normal stop. A loaded
-   gateway is not an idle gateway. The current ten configs omit `backendMode`;
-   their installed gateways default to **per-session** backends. Although tunnel
-   auth uses the same account principal, a connector's `list_sessions` and
-   `list_searches` cover its own frontend backend, not all other frontends.
-   `/readyz` busy/reclaimable counts are useful observations, not a global handle
-   inventory or a drain barrier. No hot reload or new drain/control plane is added.
+   gateway is not an idle gateway. The installed `private-tunnel-gateway`
+   wrappers (`fd4eb541…` / `225b1a59…`) normalize an absent `backendMode` to
+   **shared-account** before `startGateway`; that overrides the bare gateway's
+   default. Fixed private auth binds that seat's frontends to `tunnel:<account>`,
+   sharing one healthy `BackendOwner` and local Desktop Commander handle map.
+   The original local frontend's `list_sessions` and `list_searches` cover that
+   shared backend generation, not other accounts or separately selected remote
+   routes. `list_sessions` exposes active terminals, not retained completed
+   output; `list_searches` includes retained search entries, including complete
+   ones. Preserve known active/unknown operations and original result carriers,
+   including completed but unread results, before a normal gateway stop destroys
+   the shared backend. Reclaimable frontend shells can coexist with live shared
+   handles: neither `active == reclaimable` nor `busy == 0` proves backend
+   quiescence. `/readyz` counts are observations, not a drain barrier. No hot
+   reload or new drain/control plane is added.
    Historical C3 adoption retains 512 unresolved slots and generation bindings;
    it has no all-ingress fence. Bind any concrete conflict to the actually loaded
    gateway generation/PID and original known handle carrier. Neither an empty C2
