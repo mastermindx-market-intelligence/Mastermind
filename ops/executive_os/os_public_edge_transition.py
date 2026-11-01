@@ -18,7 +18,9 @@ from pathlib import Path
 import re
 import stat
 
-from ops.executive_os.os_public_edge import GET_ROUTES, HOST, POST_ROUTES, LEGACY_POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import (
+    GET_ROUTES, HOST, POST_ROUTES, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, asset_routes,
+)
 
 PLAN_SCHEMA = "mastermind.os_public_edge_transition.plan.v1"
 PREPARE_CHECK_SCHEMA = "mastermind.os_public_edge_transition.prepare_check.v1"
@@ -151,8 +153,14 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
         path += (0, "handle", 0, "routes")
     if len(inner) != 3:
         raise ValueError("OS edge transition inner route set refused")
-    expected = sorted(set(GET_ROUTES) | set(current_routes))
-    legacy = sorted(list(GET_ROUTES) + list(current_routes))
+    # Only complete historical/current profiles. The list forms retain the
+    # exact /os/ overlap with index.html; no other duplicate or subset qualifies.
+    expected = (
+        sorted(set(GET_ROUTES) | set(current_routes)),
+        sorted(list(GET_ROUTES) + list(current_routes)),
+        sorted(set(LEGACY_GET_ROUTES) | set(current_routes)),
+        sorted(list(LEGACY_GET_ROUTES) + list(current_routes)),
+    )
     get_path = None
     post_path = None
     methods = set()
@@ -180,7 +188,7 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
         methods.add(method[0])
         handlers = _branch_handlers(item["handle"])
         if method == ["GET"]:
-            if sorted(paths) not in (expected, legacy) or len(handlers) != 1:
+            if sorted(paths) not in expected or len(handlers) != 1:
                 raise ValueError("OS edge transition observed GET routes differ")
             get_path = path + (position, "match", 0, "path")
         else:

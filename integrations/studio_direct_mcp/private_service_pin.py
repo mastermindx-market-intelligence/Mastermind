@@ -124,9 +124,9 @@ def snapshot(svc, args, roots, binding):
     m = decode(m_raw)
     if digest(m_raw) != args.expected_manifest_sha256:
         fail("MANIFEST_CAS_REFUSED")
-    if not svc._valid_manifest(m, args.account, label):
+    if not svc._native_pin_manifest_valid(m, args.account, label):
         fail("PROFILE_REFUSED")
-    svc._verify_staged_install(args.account, label, roots)
+    svc._verify_native_pin_install(args.account, label, roots)
     f = c.get("fleetStatus")
     keys = {
         "enabled",
@@ -158,7 +158,7 @@ def snapshot(svc, args, roots, binding):
     c_post = svc._fabric_release_json(after)
     m_post = copy.deepcopy(m)
     m_post["configHash"] = digest(c_post)
-    if not svc._valid_manifest(m_post, args.account, label):
+    if not svc._native_pin_manifest_valid(m_post, args.account, label):
         fail("POST_PROFILE_REFUSED")
     m_post_raw = svc._fabric_release_json(m_post)
     plan = {
@@ -267,8 +267,8 @@ def read_transaction(svc, path, args, binding):
     if (
         new != expected
         or old.get("configHash") != plan["config_before"]
-        or not svc._valid_manifest(old, args.account, label)
-        or not svc._valid_manifest(new, args.account, label)
+        or not svc._native_pin_manifest_valid(old, args.account, label)
+        or not svc._native_pin_manifest_valid(new, args.account, label)
     ):
         fail("RETAINED_BYTES_REFUSED")
     intent = {"schema": SCHEMA, "planSha256": args.expected_plan_sha256}
@@ -298,7 +298,7 @@ def static_seal(svc, args, roots, raw, current):
     """Qualify the intentional manifest-last gap without accepting other drift."""
     before = decode(raw["manifest.before.json"])
     if current != "CONFIG_ONLY":
-        svc._verify_staged_install(
+        svc._verify_native_pin_install(
             args.account, "com.mastermind.studio-direct-private." + args.account, roots
         )
         return
