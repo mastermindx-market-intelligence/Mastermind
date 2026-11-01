@@ -30,12 +30,16 @@ def held_target(monkeypatch, request):
     system = Path(private.name) / "synthetic-system"
     root = system / "macro-sources" / ("b" * 40)
     artifact = root / "data/governance/agent_os_state.json"
-    artifact.parent.mkdir(parents=True)
+    # Prepare only fixture-created directories with real sealed modes regardless
+    # of process umask; never chmod an existing HOME or ancestor.
+    for directory in (system, root.parent, root, artifact.parent.parent, artifact.parent):
+        directory.mkdir(mode=0o755)
+        directory.chmod(0o755)
     original = b'{"schema":"fixture-only","generated_at":"2026-10-31T05:28:23Z"}\n'
     artifact.write_bytes(original)
     artifact.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
     real_lstat, real_fstat, real_open = Path.lstat, os.fstat, os.open
-    facts = SimpleNamespace(root=root, artifact=artifact, original=original,
+    facts = SimpleNamespace(root=root, base=Path(private.name), artifact=artifact, original=original,
                             bad_uid_inodes=set(), acl_inodes=set(), acl_calls=[],
                             artifact_fd=None, real_lstat=real_lstat)
 
@@ -149,3 +153,14 @@ def test_guard_rechecks_real_identity_and_bytes_after_yield(held_target, drift):
                 facts.artifact.chmod(stat.S_IRUSR | stat.S_IWUSR)
                 facts.artifact.write_bytes(facts.original.replace(b"fixture-only", b"changed-data"))
                 facts.artifact.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+
+
+def test_fixture_holds_a_private_tree_under_a_real_sealed_ancestry(held_target):
+    # os.stat remains real: these observations do not use synthetic UID facts.
+    facts = held_target
+    base_info = os.stat(facts.base)
+    assert stat.S_IMODE(base_info.st_mode) == stat.S_IRWXU
+    assert base_info.st_uid == os.getuid()
+    for path in (facts.base, *facts.base.parents):
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        assert mode & 0o022 == 0, f"real ancestor {path} is not sealed: {mode:#o}"
