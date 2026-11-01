@@ -16,7 +16,22 @@ pointers can be mutable and are not proof of historical producer bytes.
 
 Use the **actual protected source owner**, not a modified control launcher or a
 restaged gateway. The companion `private_service_pin.py` must be present in the
-same protected source package. No gateway/backend bytes are replaced.
+same protected source package. Run this native owner from the clean, full
+protected source checkout owned by the native-kit user (UID501 on this M2).
+The Root-owned installed Control SDK has different source custody; the native
+successor verifier requires its launcher source to be owned by its caller.
+Do not change ownership or copy an installed SDK to bypass that requirement.
+No gateway/backend bytes are replaced.
+
+The existing `fabric-design` and `fabric-read` seats retain their sealed
+`tailnet-gateway.mjs` launchers. Pin and normal start/stop/seal dispatch recognize
+only each account's exact original and pin-post canonical manifest states,
+source/module map and complete existing config/plist/runtime/dependency seal.
+Their argv remains exactly node, that seat's Tailnet launcher and its config.
+The private verifier stays private-only; no arbitrary argv/profile fallback or
+generic stage/upgrade admission is added. Both Tailnet wrappers fix backendMode
+to shared-account before starting the backend; neither this source fact nor a
+passing static seal clears retained results or proves runtime quiescence.
 
 ## Preconditions owned by the release operator
 

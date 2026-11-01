@@ -696,6 +696,20 @@ NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537
                  'private-tunnel-gateway.mjs': '225b1a592f5486c688efc6f5fc37184877a7e3e8022c2e831858c8989c6cca00',
                  'tailnet-gateway.mjs': '89a3d1c972a31ab62f19205439d6f09bc24f4d51783ebc2e1bea788bcd9d817c'}}
 
+# Retained sealed Tailnet seats, each with only its original and exact native
+# pool-pin postimage. These are profile selectors, never an argv fallback.
+_NATIVE_POOL_PIN_TAILNET_CANONICAL = {
+    "fabric-design": frozenset((
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
+    )),
+    "fabric-read": frozenset((
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
+    )),
+}
+
+
 def _pin_owner_module():
     import importlib.util
     path = Path(__file__).resolve().with_name("private_service_pin.py")
@@ -1277,6 +1291,7 @@ def _lifecycle_inspect(account: str, label: str, roots: dict, *,
     Paper cutover explicitly opts into stricter absence proof.
     """
     if (account not in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+            and account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL
             and account not in FABRIC_BACKEND_ACCOUNTS and not require_positive):
         return _launchd_inspect(label)
     subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
@@ -1790,6 +1805,61 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
 
     return manifest
+
+
+def _native_pin_manifest_valid(data, account: str, label: str) -> bool:
+    """Keep the private profile rules and close the two Tailnet state sets."""
+    if not _valid_manifest(data, account, label):
+        return False
+    if account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL:
+        return True
+    return (data["files"] == NATIVE_POOL_PIN_PREDECESSORS[account]
+            and _canonical_json_sha256(data)
+            in _NATIVE_POOL_PIN_TAILNET_CANONICAL[account])
+
+
+def _verify_native_pin_tailnet_install(account: str, label: str, roots: dict) -> dict:
+    """Read the complete existing seal for one exact preserved Tailnet seat.
+
+    The private verifier remains private-only. No argument, path or caller
+    selector can opt an arbitrary profile into this transport. Even stop/seal
+    callers must retain the complete reviewed runtime seal for these states.
+    """
+    manifest = _pin_owner_module().decode(_fabric_release_bytes(roots["manifest"]))
+    if (account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+            or not _native_pin_manifest_valid(manifest, account, label)):
+        raise SystemExit("not staged: preserved Tailnet profile differs")
+    for name, expected_hash in manifest["files"].items():
+        if hashlib.sha256(_fabric_release_bytes(roots["base"] / name)).hexdigest() != expected_hash:
+            raise SystemExit("not staged: preserved Tailnet module differs")
+    if hashlib.sha256(_fabric_release_bytes(roots["config"])).hexdigest() != manifest["configHash"]:
+        raise SystemExit("not staged: preserved Tailnet config differs")
+    plist_raw = _fabric_release_bytes(roots["plist"])
+    if hashlib.sha256(plist_raw).hexdigest() != manifest["plistHash"]:
+        raise SystemExit("not staged: preserved Tailnet plist differs")
+    node, backend = Path(manifest["node"]), Path(manifest["backend"])
+    if (_stable_regular_file_hash(node, label="Tailnet node") != manifest["nodeHash"]
+            or _stable_regular_file_hash(backend, label="Tailnet backend") != manifest["backendHash"]
+            or manifest["dependencyTreeHash"] is None
+            or _dependency_tree_hash(roots["node_modules"]) != manifest["dependencyTreeHash"]):
+        raise SystemExit("not staged: preserved Tailnet runtime differs")
+    plist = plistlib.loads(plist_raw)
+    gateway = roots["base"] / "tailnet-gateway.mjs"
+    expected_argv = _expected_argv(node, gateway, roots["config"])
+    if (not isinstance(plist, dict) or plist.get("Label") != label
+            or list(plist.get("ProgramArguments") or []) != expected_argv):
+        raise SystemExit("plist is not the exact preserved Tailnet install")
+    return manifest
+
+
+def _verify_native_pin_install(account: str, label: str, roots: dict, *,
+                               require_runtime_seal: bool = True) -> dict:
+    """Select only the two closed Tailnet owners; preserve private admission."""
+    if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL:
+        return _verify_native_pin_tailnet_install(account, label, roots)
+    if require_runtime_seal:
+        return _verify_staged_install(account, label, roots)
+    return _verify_staged_install(account, label, roots, require_runtime_seal=False)
 
 
 
@@ -3185,7 +3255,7 @@ def cmd_seal_runtime(args) -> int:
     roots = _build_runtime_roots(account)
     if _lifecycle_inspect(account, label, roots) is not None:
         raise SystemExit("refusing runtime seal while service is loaded; stop first")
-    manifest = _verify_staged_install(
+    manifest = _verify_native_pin_install(
         account, label, roots, require_runtime_seal=False
     )
     if manifest.get("version") != MANIFEST_VERSION:
@@ -3222,7 +3292,7 @@ def cmd_start(args) -> int:
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
 
-    _verify_staged_install(account, label, roots)
+    _verify_native_pin_install(account, label, roots)
     _pin_require_start(account, roots)
 
     info = _lifecycle_inspect(account, label, roots)
@@ -3284,7 +3354,7 @@ def cmd_stop(args) -> int:
         print(json.dumps({"stopped": True, "already": True, "account": account}))
         return 0
 
-    _verify_staged_install(
+    _verify_native_pin_install(
         account, label, roots, require_runtime_seal=False
     )
 
@@ -3304,8 +3374,11 @@ def cmd_stop(args) -> int:
                 return 1
             time.sleep(0.2)
     except SystemExit as exc:
-        if account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT) or account in FABRIC_BACKEND_ACCOUNTS:
-            subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper"
+        if (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+                or account in FABRIC_BACKEND_ACCOUNTS
+                or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL):
+            subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+                       else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
             raise SystemExit(f"{subject} stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
         raise
 
