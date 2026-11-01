@@ -157,7 +157,10 @@ def test_wrong_volume_object_and_closed_guard_cannot_supply_authority(filesystem
 @pytest.mark.parametrize("fault", ["nonroot", "nondarwin", "owner", "writable", "acl", "symlink"])
 def test_qualification_requires_literal_root_darwin_and_real_directory_custody(filesystem, monkeypatch, fault):
     f = filesystem
-    if fault == "nonroot": f.euid = os.geteuid() or 501
+    if fault == "nonroot":
+        f.euid = os.geteuid() or 501
+        # Even an anchor owned by that same unprivileged actor is not Root.
+        f.owner[f.anchor.stat().st_ino] = f.euid
     elif fault == "nondarwin": monkeypatch.setattr(origin, "sys", SimpleNamespace(platform="linux"))
     elif fault == "owner": f.owner[f.anchor.stat().st_ino] = os.geteuid() or 501
     elif fault == "writable": f.anchor.chmod(stat.S_IRWXU | stat.S_IRWXG)
