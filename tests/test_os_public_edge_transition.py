@@ -170,6 +170,39 @@ def test_retained_legacy_get_wrappers_upgrade_without_masking_the_profile():
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
 
 
+@pytest.mark.parametrize("index_overlap", [False, True])
+def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
+    # Public names from the sanitized91c1 diagnosis; contents are synthetic.
+    names = ["index.html", "assets/Inter-Variable-DiVDrmQJ.woff2",
+             "assets/Manrope-Variable-FzEoaBTQ.ttf", "assets/atelier-office-poIrp4_y.jpg",
+             "assets/index-B0ewcH8_.css", "assets/index-dP5lZ6yG.js",
+             "licenses/fonts/Inter-OFL.txt", "licenses/fonts/Manrope-FONTLOG.txt",
+             "licenses/fonts/Manrope-OFL.txt"]
+    def nine(paths):
+        return {"schema": "mastermind.os_assets.v1", "files": [
+            {"path": name, "byte_count": 1, "sha256": "a" * 64, "mime": mime}
+            for name, mime in os_asset_mimes(paths).items()]}
+    old = nine(names)
+    new = nine([name.replace("index-B0ewcH8_", "index-Br9E9bcG")
+                .replace("index-dP5lZ6yG", "index-Br9E9bcG") for name in names])
+    paths = (sorted(list(LEGACY_GET_ROUTES) + list(asset_routes(old))) if index_overlap
+             else sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(old))))
+    live = fullconfig(site=host_route(paths))
+    before = copy.deepcopy(live)
+    prepared = prepare_config(fullconfig=live, current_manifest=old,
+                              candidate_manifest=new, relay_port=49152)
+    final = final_config(fullconfig=live, current_manifest=old,
+                         candidate_manifest=new, relay_port=49152)
+    assert live == before
+    for value, expected_get in (
+        (prepared, sorted(set(GET_ROUTES) | set(asset_routes(old)) | set(asset_routes(new)))),
+        (final, sorted(set(GET_ROUTES) | set(asset_routes(new)))),
+    ):
+        expected = copy.deepcopy(before)
+        get_paths_of(expected)[:] = expected_get
+        assert value == expected
+
+
 def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():
     for old_posts in (LEGACY_POST_ROUTES, POST_ROUTES):
         observed = fullconfig()
