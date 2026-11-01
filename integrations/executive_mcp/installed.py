@@ -31,7 +31,7 @@ from integrations.executive_mcp.adapter import (
     ExecutiveMcpGateway, GatewayConfig, _open_readonly_runtime,
 )
 from integrations.executive_mcp.schemas import (
-    GatewayError, MODIFYING_TOOL, READ_TIMEOUT_SECONDS, ServerMode,
+    ERROR_CODES, GatewayError, MODIFYING_TOOL, READ_TIMEOUT_SECONDS, ServerMode,
     bound_document, bound_job_document, canonical_json, result_envelope,
     validate_tool_arguments,
 )
@@ -55,6 +55,201 @@ def _valid_sha(value: object) -> bool:
         and len(value) == 40
         and all(ch in "0123456789abcdef" for ch in value)
     )
+
+
+# ---------------------------------------------------------------------------
+# installed packet error diagnostics
+# ---------------------------------------------------------------------------
+
+#: Approved repository labels for diagnostic recognition. Other observation
+#: labels remain unclassified; no caller-supplied label enters the projection.
+_INSTALLED_DIAGNOSTIC_LABELS = (
+    "Mastermind source",
+    "Macro source",
+    "materialized Macro source",
+)
+
+#: Broad stage of a packet read in which a recognized refusal is authored.
+#: Deliberately coarse: the projection derives the stage from the refusal
+#: text alone and never claims exact pre/post checkpoint telemetry.
+_INSTALLED_DIAGNOSTIC_STAGES = (
+    "SOURCE",
+    "MACRO_PLAN",
+    "MATERIALIZATION",
+    "INNER_PACKET",
+    "PACKET_BINDING",
+    "POST_SEAL",
+    "UNKNOWN",
+)
+
+#: Immediate-cause class labels.  Class identity and the stdlib hierarchy
+#: only; ``__name__``, ``args``, ``str`` and ``repr`` never participate.
+_INSTALLED_DIAGNOSTIC_CAUSE_CLASSES = (
+    "NONE",
+    "GATEWAY_ERROR",
+    "PERMISSION_ERROR",
+    "TIMEOUT_ERROR",
+    "OS_ERROR",
+    "VALUE_ERROR",
+    "TYPE_ERROR",
+    "OTHER",
+)
+
+#: Source-authored tails of ``installed {label} <tail>`` refusal messages,
+#: each with the broad stage its family is observed in.  Every tail is
+#: copied verbatim from an existing GatewayError message expression in this
+#: module.
+_INSTALLED_DIAGNOSTIC_TAIL_STAGES: Mapping[str, str] = MappingProxyType({
+    "repository topology is unsafe": "SOURCE",
+    "observation failed": "SOURCE",
+    "HEAD is unavailable": "SOURCE",
+    "HEAD changed": "SOURCE",
+    "repository objects are incomplete": "SOURCE",
+    "worktree path set differs": "SOURCE",
+    "worktree bytes differ": "SOURCE",
+    "worktree observation failed": "SOURCE",
+    "admitted worktree omits read bytes": "SOURCE",
+    "admitted worktree is incomplete": "SOURCE",
+    "admitted worktree differs": "SOURCE",
+    "symlinks are unsupported": "SOURCE",
+    "tree is malformed": "SOURCE",
+    "tree is unsupported": "SOURCE",
+    "checkout is not clean": "SOURCE",
+    "content scope is invalid": "SOURCE",
+    "identity is ambiguous": "SOURCE",
+    "generation seal is unavailable": "SOURCE",
+    "generation seal failed": "SOURCE",
+    "exceeded its cumulative deadline": "SOURCE",
+})
+
+#: Exact non-templated refusal messages this module authors, each with its
+#: broad stage; the authored text itself is the category.  Refusals whose
+#: text coincides with a templated instantiation above inherit that mapping
+#: and are not repeated here.
+_INSTALLED_DIAGNOSTIC_EXACT_STAGES: Mapping[str, str] = MappingProxyType({
+    "installed Macro repository topology is unsafe": "SOURCE",
+    "installed Macro materialization plan is unavailable": "MACRO_PLAN",
+    "installed Macro path-list frontmatter is unsupported": "MACRO_PLAN",
+    "installed Macro materialization SHA differs": "MATERIALIZATION",
+    "installed Macro materialization failed": "MATERIALIZATION",
+    "installed Macro verified snapshot is unavailable": "MACRO_PLAN",
+    "installed boot-packet collector failed": "INNER_PACKET",
+    "installed boot-packet collector emitted invalid JSON": "INNER_PACKET",
+    "installed boot-packet collector emitted the wrong schema":
+        "INNER_PACKET",
+    "installed boot-packet collector exceeded its cumulative deadline":
+        "UNKNOWN",
+    "installed Context record unavailable": "INNER_PACKET",
+    "installed boot-packet roots changed": "PACKET_BINDING",
+    "installed boot-packet roots differ": "PACKET_BINDING",
+    "installed boot-packet SHA binding differs": "PACKET_BINDING",
+    "installed Macro source SHA changed": "SOURCE",
+    "installed Mastermind source SHA changed": "SOURCE",
+    "installed source changed during boot-packet read": "POST_SEAL",
+    "installed materialized Macro changed during boot-packet read":
+        "POST_SEAL",
+    "installed snapshot seal is unavailable": "SOURCE",
+    "installed repository topology is unsafe": "SOURCE",
+})
+
+#: Frozen recognition table: exact refusal text -> (stage, category).
+#: Templated refusals are instantiated with the approved labels only, so the
+#: table is a finite constant fixed at import time.
+_INSTALLED_DIAGNOSTIC_TABLE: Mapping[str, tuple[str, str]] = MappingProxyType({
+    **{
+        f"installed {label} {tail}": (stage, tail)
+        for label in _INSTALLED_DIAGNOSTIC_LABELS
+        for tail, stage in _INSTALLED_DIAGNOSTIC_TAIL_STAGES.items()
+    },
+    **{
+        message: (stage, message)
+        for message, stage in _INSTALLED_DIAGNOSTIC_EXACT_STAGES.items()
+    },
+})
+
+
+def _installed_diagnostic_message(error: BaseException) -> str | None:
+    """Return the exact authored refusal text, or ``None`` when unusable.
+
+    Only the exact GatewayError type and a plain string message are read.
+    Exception args and string-subclass hooks never participate.
+    """
+    if type(error) is not GatewayError:
+        return None
+    message = getattr(error, "message", None)
+    return message if type(message) is str else None
+
+
+def _installed_diagnostic_cause_class(cause: object) -> str:
+    """Classify the immediate cause only; never walk the cause chain."""
+    if cause is None:
+        return "NONE"
+    cause_type = type(cause)
+    if issubclass(cause_type, GatewayError):
+        return "GATEWAY_ERROR"
+    if issubclass(cause_type, PermissionError):
+        return "PERMISSION_ERROR"
+    if issubclass(cause_type, TimeoutError):
+        return "TIMEOUT_ERROR"
+    if issubclass(cause_type, OSError):
+        return "OS_ERROR"
+    if issubclass(cause_type, ValueError):
+        return "VALUE_ERROR"
+    if issubclass(cause_type, TypeError):
+        return "TYPE_ERROR"
+    return "OTHER"
+
+
+def installed_packet_error_diagnostic(
+    error: BaseException,
+) -> Mapping[str, str]:
+    """Project a raised error onto the bounded installed-packet vocabulary.
+
+    Pure observation of an already-raised exception.  The return value is an
+    ordinary mapping carrying exactly four finite fields: ``error_code``,
+    ``stage``, ``category`` and ``cause_class``.  Recognition is exact
+    membership against refusal messages this module authors; any other text
+    -- prefix, suffix, newline, path, token, case change or partial match --
+    stays ``UNKNOWN``/``UNCLASSIFIED`` and is never echoed.  The error is
+    not mutated, ``str()``/``repr()`` are never called, the cause chain is
+    not walked beyond the immediate cause, and no secondary exception is
+    raised; malformed or tampered input fails closed to finite values.
+    """
+    error_code = "internal_error"
+    stage = "UNKNOWN"
+    category = "UNCLASSIFIED"
+    cause_class = "NONE"
+    if type(error) is not GatewayError:
+        return {
+            "error_code": error_code, "stage": stage,
+            "category": category, "cause_class": cause_class,
+        }
+    try:
+        message = _installed_diagnostic_message(error)
+    except Exception:
+        message = None
+    if message is not None:
+        entry = _INSTALLED_DIAGNOSTIC_TABLE.get(message)
+        if entry is not None:
+            stage, category = entry
+    try:
+        code = getattr(error, "code", None)
+        if type(code) is str and code in ERROR_CODES:
+            error_code = code
+    except Exception:
+        error_code = "internal_error"
+    try:
+        cause_class = _installed_diagnostic_cause_class(
+            getattr(error, "__cause__", None)
+        )
+    except Exception:
+        cause_class = "NONE"
+    return {
+        "error_code": error_code,
+        "stage": stage,
+        "category": category,
+        "cause_class": cause_class,
+    }
 
 
 def _direct_git_directory(path: Path, *, label: str) -> Path | None:
