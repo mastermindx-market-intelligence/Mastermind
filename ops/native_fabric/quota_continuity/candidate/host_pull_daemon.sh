@@ -38,26 +38,14 @@
 # loaded, definitively service-not-found, or uncertain. Uncertain fails closed
 # (78) and is never treated as an absent label.
 #
-# The bootstrap effect consumes the installed plist by pathname, so the
-# reviewed identity of that plist is part of the effect admission and not a
-# later observation. The rendered digest is passed into the locked-effect
-# boundary, and under the publication lock, at the effect boundary, the
-# destination is proved through an O_NOFOLLOW descriptor: the descriptor and
-# the path must be the same device and inode, the file must be regular, owned
-# by the installing user, mode 0600, bounded, and hash to the reviewed
-# digest. A peer substitute, a mode change, a symlink or a deletion refuses
-# the effect: no launchctl call is issued, no plist byte is written, and
-# peer bytes, CURRENT, the backup and the marker are preserved with an
-# explicit EFFECT_UNKNOWN receipt.
-#
-# launchctl opens a pathname, so a proof and a later open are not the same
-# act. The proven inode is therefore sealed read-only for the consumption
-# window, which stops a peer from rewriting the reviewed bytes in place, and
-# both the pathname and the sealed bytes are re-proved immediately after
-# launchctl returns. The residual race is a peer that replaces the directory
-# entry inside that window; it is detected and reported as an uncertain
-# effect, never as a success. Peer bytes are never restored over and no
-# second bootstrap is ever issued.
+# A new or rollback bootstrap requires OS-enforced custody of the whole
+# pathname and leaf, bound to the exact bytes launchctl would reopen. This
+# candidate has no such mechanism. Hashes, mode bits, flock and receipts do
+# not provide it. install-agent therefore refuses BEFORE marker arm, backup,
+# selector advance, bootout or plist replacement whenever bootstrap is needed.
+# A fully verified already-running exact target needs no bootstrap and may
+# safely pair CURRENT through the existing guarded selector fast path.
+# The inner locked-effect bootstrap refusal remains defense in depth.
 #
 # .publication.lock is held by the same process that runs bootout, plist
 # replacement, and bootstrap, from the moment the command is allowed until
@@ -1566,6 +1554,14 @@ argv_matches() {
   [ "$want" = "$have" ]
 }
 
+require_bootstrap_custody_capability() {
+  # No supported custody capability is implemented by this candidate. Do not
+  # infer one from UID, pathname/descriptor hashes, chmod, locks or receipts.
+  # Called only after the verified already-running/no-bootstrap fast path,
+  # but before effects that could require a new OR recovery bootstrap.
+  die 78 "BOOTSTRAP_CUSTODY_UNPROVEN: OS-enforced whole-path and leaf custody and exact launchctl input bytes unavailable before install"
+}
+
 bootstrap_once() {
   local kind=$1
   local expected_sha=""
@@ -2091,6 +2087,10 @@ case "$COMMAND" in
         die 78 "launchctl state uncertain"
         ;;
     esac
+    # Every remaining flow needs a bootstrap (including recovery after a
+    # failed rebind). Refuse missing custody BEFORE marker/CAS/bootout/backup/
+    # plist install; keep an incumbent running and the selected pair intact.
+    require_bootstrap_custody_capability
     # The fence is re-checked after the old label was sampled and again after
     # any hold, before the marker exists. A helper that died in that window
     # cannot leave this process free to arm on the stale read.

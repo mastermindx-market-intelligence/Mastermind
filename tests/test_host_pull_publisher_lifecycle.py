@@ -335,9 +335,33 @@ def prepare(workspace, *, body=b"#!/bin/bash\nexit 91\n", select=True):
     }
 
 
+@pytest.fixture
+def downstream_lifecycle(workspace, monkeypatch):
+    """Exercise otherwise unreachable recovery contracts, never a runtime option.
+
+    Only explicitly marked historical effect/recovery tests use this local
+    source copy. The production capability gate is removed at its single
+    call site; the inner locked-effect bootstrap refusal remains intact.
+    Current zero-effect/fast-path/P0 tests use the unmodified real daemon.
+    """
+    source = DAEMON.read_text()
+    call = "    require_bootstrap_custody_capability\n"
+    assert source.count(call) == 1
+    daemon = _daemon_beside(workspace / "downstream-fixture", TEMPLATE.read_bytes())
+    daemon.write_text(source.replace(call, "    : # test-only downstream contract fixture\n", 1))
+    original_prepare = prepare
+
+    def prepare_downstream(*args, **kwargs):
+        ctx = original_prepare(*args, **kwargs)
+        ctx["downstream_daemon"] = daemon
+        return ctx
+
+    monkeypatch.setattr(sys.modules[__name__], "prepare", prepare_downstream)
+
+
 def base_args(ctx, **extra):
     args = [
-        "/bin/bash", str(extra.pop("daemon", DAEMON)), extra.pop("command", "install-agent"),
+        "/bin/bash", str(extra.pop("daemon", ctx.get("downstream_daemon", DAEMON))), extra.pop("command", "install-agent"),
         "--store", str(ctx["store"]),
         "--generation", ctx["release"].name,
         "--expect-current", extra.pop("expect", ctx["release"].name),
@@ -421,6 +445,7 @@ def test_bash_syntax_and_no_pidfile_race():
 
 @pytest.mark.parametrize("trailing_slash", [False, True])
 @pytest.mark.parametrize("preflight_repair", [False, True])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_stopped_publication_pins_only_verified_generation(
     workspace, trailing_slash, preflight_repair,
 ):
@@ -462,6 +487,7 @@ def test_stopped_publication_pins_only_verified_generation(
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_bootout_waits_for_old_pid_before_bootstrap_refusal(workspace):
     ctx = prepare(workspace)
     ctx["plist"].write_bytes(b"OLD-PLIST\n")
@@ -495,6 +521,7 @@ def test_bootout_waits_for_old_pid_before_bootstrap_refusal(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_bootstrap_failure_preserves_original_backup(workspace):
     daemon = DAEMON.read_text()
     assert daemon.count("$HERE/host_pull_launchd.plist.template") == 1
@@ -576,6 +603,7 @@ def test_unsigned_template_at_the_fixed_lookup_is_refused(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_bootstrap_failure_retains_candidate_and_is_not_green(workspace):
     ctx = prepare(workspace)
     original = b"OLD-PLIST\n"
@@ -604,6 +632,7 @@ def test_bootstrap_failure_retains_candidate_and_is_not_green(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_running_service_missing_preimage_refuses_before_mutation(workspace):
     ctx = prepare(workspace)
     (ctx["stub"] / "print-mode").write_text("running\n")
@@ -619,6 +648,7 @@ def test_running_service_missing_preimage_refuses_before_mutation(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_unverified_argv_never_bypasses_prebootstrap_custody_refusal(workspace):
     ctx = prepare(workspace)
     (ctx["stub"] / "print-style").write_text("notfound\n")
@@ -636,6 +666,7 @@ def test_unverified_argv_never_bypasses_prebootstrap_custody_refusal(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_failed_bootstrap_does_not_attempt_unowned_rollback(workspace):
     ctx = prepare(workspace)
     original = b"OLD-PLIST\n"
@@ -710,6 +741,7 @@ def test_uncertain_launchctl_or_ps_fails_closed(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_pid_that_does_not_exit_is_not_bootstrapped(workspace):
     ctx = prepare(workspace)
     original = b"OLD-PLIST\n"
@@ -816,6 +848,7 @@ def test_owner_and_mode_checks_fail_closed(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_publisher_verify_is_required(workspace):
     ctx = prepare(workspace)
     original = b"UNTOUCHED\n"
@@ -865,6 +898,7 @@ def test_program_override_and_user_launchagents_refused(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_term_before_mutation_and_during_wait_and_before_bootstrap(workspace):
     ctx = prepare(workspace)
     original = b"OLD-PLIST\n"
@@ -1064,6 +1098,7 @@ def receipt_body(ctx):
         ("pre-bootstrap-print", "EFFECT_UNKNOWN", 0, "launchctl state uncertain"),
     ],
 )
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_post_bootout_fault_injection(workspace, fault, outcome, bootstraps, snippet):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1112,6 +1147,7 @@ def test_launchctl_lookalikes_fail_closed(workspace, style):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_loaded_idle_is_booted_out_before_bootstrap_refusal(workspace):
     ctx = prepare(workspace)
     ctx["plist"].write_bytes(b"OLD-PLIST\n")
@@ -1128,6 +1164,7 @@ def test_loaded_idle_is_booted_out_before_bootstrap_refusal(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_publication_lock_blocks_select_during_bootout(workspace):
     ctx = prepare(workspace)
     arm_running(ctx, workspace)
@@ -1172,6 +1209,7 @@ def _release_hold(proc, hold):
     return proc
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_selector_move_before_bootout_does_not_bootout(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1194,6 +1232,7 @@ def test_selector_move_before_bootout_does_not_bootout(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_selector_move_before_plist_replace_holds_stopped_service(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1355,6 +1394,7 @@ def test_bootstrap_effect_return_79_before_started_refuses_with_pre_effect_proof
 
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_absent_label_holder_death_preserves_candidate(workspace):
     # Existing hermetic launcher helper only; no fake launchctl argv/stub edits,
     # external service, original collector or native release effect.
@@ -1409,6 +1449,7 @@ def test_absent_label_holder_death_preserves_candidate(workspace):
             proc.communicate(timeout=5)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_absent_label_selector_move_before_bootstrap_preserves_candidate(workspace):
     # New negative-path coverage reuses the existing accepted hermetic stub;
     # no launchctl argv/stub implementation change or real host effect.
@@ -1448,6 +1489,7 @@ def test_absent_label_selector_move_before_bootstrap_preserves_candidate(workspa
             proc.communicate(timeout=5)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_fresh_absent_plist_pre_bootstrap_error_writes_receipt_without_backup(workspace):
     ctx = prepare(workspace)
     assert not ctx["plist"].exists() and not ctx["backup"].exists()
@@ -1465,6 +1507,7 @@ def test_fresh_absent_plist_pre_bootstrap_error_writes_receipt_without_backup(wo
     assert "bootstrap " not in launch_log(ctx)
     assert_not_executed(ctx)
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_selector_move_before_bootstrap_preserves_unknown_mismatched_service(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1496,6 +1539,7 @@ def test_selector_move_before_bootstrap_preserves_unknown_mismatched_service(wor
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_bootout_nonzero_after_effect_is_effect_unknown(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1515,6 +1559,7 @@ def test_bootout_nonzero_after_effect_is_effect_unknown(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_bootout_nonzero_without_effect_is_no_effect(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1536,6 +1581,7 @@ def test_bootout_nonzero_without_effect_is_no_effect(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_holder_death_before_effect_allows_select_and_does_not_mutate(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1581,6 +1627,7 @@ def test_holder_death_before_effect_allows_select_and_does_not_mutate(workspace)
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_holder_death_during_bootout_does_not_mutate_again(workspace):
     """The in-flight bootout can finish after the holder dies. The parent
     must not issue a second bootout or a bootstrap, and the receipt is
@@ -1662,6 +1709,7 @@ def _wait_transaction_unlocked(ctx, timeout=3):
     raise AssertionError("transaction lock still held")
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_second_installer_makes_no_mutation_while_first_holds_transaction(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1706,6 +1754,7 @@ def test_second_installer_makes_no_mutation_while_first_holds_transaction(worksp
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_installer_crash_releases_mutex_and_next_fails_closed(workspace):
     ctx = prepare(workspace)
     original = arm_running(ctx, workspace)
@@ -1740,6 +1789,7 @@ def test_installer_crash_releases_mutex_and_next_fails_closed(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_outliving_child_does_not_keep_transaction_lock(workspace):
     """Inert /bin/bash fixture: a descendant outlives the installer.
 
@@ -1801,6 +1851,7 @@ def test_outliving_child_does_not_keep_transaction_lock(workspace):
                 pass
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_holder_death_before_arm_does_not_mutate_after_peer_install(workspace):
     """Kill only A's lock helper after the old label read and before arm.
 
@@ -1904,6 +1955,7 @@ def _wait_for(proc, path):
     assert path.exists()
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_advance_retains_selector_and_stopped_service_on_custody_refusal(workspace):
     """Selector CAS and the launchd pin move together, and only after the old pid is dead."""
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 7\n")
@@ -1995,6 +2047,7 @@ def test_advance_target_equal_to_current_is_refused(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_advance_refuses_while_publication_lock_is_held(workspace):
     ctx = prepare(workspace)
     selector = ctx["release"].name
@@ -2020,6 +2073,7 @@ def test_advance_refuses_while_publication_lock_is_held(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_advance_preserves_selector_when_rollback_argv_mismatches(workspace):
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 12\n")
     selector = ctx["release"]
@@ -2063,6 +2117,7 @@ def test_advance_preserves_selector_when_rollback_argv_mismatches(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_advance_no_effect_bootout_rolls_selector_back(workspace):
     ctx = prepare(workspace)
     selector = ctx["release"]
@@ -2087,6 +2142,7 @@ def test_advance_no_effect_bootout_rolls_selector_back(workspace):
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_advance_effect_unknown_does_not_roll_the_selector_back(workspace):
     ctx = prepare(workspace)
     selector = ctx["release"]
@@ -2202,6 +2258,7 @@ def _arm_old_collector(ctx):
     return original
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_advance_fsync_after_rename_rolls_back_only_the_proven_preimage(workspace):
     """A publisher error after CURRENT is renamed is not NO_EFFECT."""
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 21\n")
@@ -2231,6 +2288,7 @@ def test_advance_fsync_after_rename_rolls_back_only_the_proven_preimage(workspac
     assert_not_executed(ctx)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_advance_fsync_after_rename_keeps_unknown_when_service_is_unreadable(workspace):
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 23\n")
     selector = ctx["release"]
@@ -2264,6 +2322,7 @@ def test_advance_fsync_after_rename_keeps_unknown_when_service_is_unreadable(wor
     ("signal-term", "signal during select"),
     ("signal-hup", "signal during select"),
 ])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_signal_between_select_cas_and_ack_reconciles_current(workspace, mode, text):
     ctx = prepare(workspace, body=b"#!/bin/bash\nexit 25\n")
     selector = ctx["release"]
@@ -2341,6 +2400,7 @@ def test_committed_select_fence_cleanup_failure_is_effect_unknown(tmp_path, init
     (signal.SIGTERM, 143), (signal.SIGHUP, 129), (signal.SIGINT, 130),
 ])
 @pytest.mark.parametrize("drift", ["intact", "disappeared", "argv", "plist"])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_signal_after_ack_before_bootout_reproves_original_identity(
     workspace, sig, exit_code, drift,
 ):
@@ -2404,6 +2464,7 @@ def test_signal_after_ack_before_bootout_reproves_original_identity(
 
 
 @pytest.mark.parametrize("drift", ["argv", "plist"])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_bootout_nonzero_same_pid_with_identity_drift_is_unknown(workspace, drift):
     """Nonzero bootout + same live PID does not prove argv or plist continuity."""
     ctx = prepare(workspace)
@@ -2460,6 +2521,7 @@ def test_bootout_nonzero_same_pid_with_identity_drift_is_unknown(workspace, drif
 
 
 @pytest.mark.parametrize("drift", ["intact-absent", "became-loaded", "unreadable"])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_absent_prebootout_install_failure_requires_saved_service_state(
     workspace, drift,
 ):
@@ -2528,6 +2590,7 @@ def test_absent_prebootout_install_failure_requires_saved_service_state(
     (b"PRE-PEER-PLIST\n", None),
     (None, b"PEER-CREATED-PLIST\n"),
 ])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_install_before_replace_never_restores_over_peer_plist(workspace, initial, peer):
     """Pre-replace failure preserves concurrent peer creation/edit/deletion."""
     ctx = prepare(workspace)
@@ -2580,6 +2643,7 @@ def test_install_before_replace_never_restores_over_peer_plist(workspace, initia
 
 
 @pytest.mark.parametrize("post_failure_peer", [False, True])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_install_after_replace_failure_retains_own_or_peer_bytes_and_unknown(
     workspace, post_failure_peer,
 ):
@@ -2636,6 +2700,7 @@ def test_install_after_replace_failure_retains_own_or_peer_bytes_and_unknown(
             proc.communicate(timeout=5)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_install_failure_without_selector_still_refuses_unverified_plist(workspace):
     """No selector CAS does not excuse an unproven post-install plist effect."""
     ctx = prepare(workspace)
@@ -2661,6 +2726,7 @@ def test_install_failure_without_selector_still_refuses_unverified_plist(workspa
     (b"ORIGINAL-BEFORE-SIGNAL\n", "delete"),
     (None, "delete-and-create"),
 ])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_signal_after_plist_replace_preserves_peer_effects(
     workspace, original, action,
 ):
@@ -2741,6 +2807,7 @@ def test_source_has_no_unconditional_plist_restore_path():
 
 
 @pytest.mark.parametrize("action", ["edit", "delete", "delete-and-create"])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_holder_loss_after_install_preserves_peer_plist(workspace, action):
     """A dead transaction holder cannot rewrite peer plist after install."""
     ctx = prepare(workspace)
@@ -2803,6 +2870,7 @@ def test_holder_loss_after_install_preserves_peer_plist(workspace, action):
 
 
 @pytest.mark.parametrize("action", ["edit", "delete"])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_uncertain_prebootstrap_print_retains_peer_plist(workspace, action):
     """Uncertain launchctl print must not restore over later peer bytes."""
     ctx = prepare(workspace)
@@ -2847,6 +2915,7 @@ def test_uncertain_prebootstrap_print_retains_peer_plist(workspace, action):
 
 
 @pytest.mark.parametrize("action", ["edit", "delete"])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_postbootout_failed_install_never_restores_over_peer(workspace, action):
     """BOOTED recovery refuses another plist write or launchctl bootstrap."""
     ctx = prepare(workspace)
@@ -2896,6 +2965,7 @@ def test_postbootout_failed_install_never_restores_over_peer(workspace, action):
 
 @pytest.mark.parametrize(
     "action", ["edit", "delete", "byte-equal-symlink", "wrong-mode"])
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_prebootstrap_peer_mutation_refuses_the_bootstrap(workspace, action):
     """A peer that changes the installed plist before the effect gets no bootstrap.
 
@@ -2972,6 +3042,7 @@ def test_prebootstrap_peer_mutation_refuses_the_bootstrap(workspace, action):
             proc.communicate(timeout=5)
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_prebootstrap_custody_refuses_even_the_reviewed_plist(workspace):
     """A reviewed hash and 0600 mode cannot admit pathname consumption."""
     ctx = prepare(workspace)
@@ -3165,6 +3236,7 @@ def test_bootstrap_custody_admission_is_inside_the_locked_effect():
 
 
 
+@pytest.mark.usefixtures("downstream_lifecycle")
 def test_postbootstrap_pause_cannot_enable_unproven_bootstrap(workspace):
     """A hermetic post-effect pause cannot override the custody refusal."""
     ctx = prepare(workspace)
@@ -3296,3 +3368,76 @@ def test_advance_from_pairs_only_after_strict_disk_plist_identity(workspace, act
         else:
             assert ctx["plist"].is_symlink()
             assert peer_file.read_bytes() == admitted_target
+
+
+@pytest.mark.parametrize("service,advance", [
+    ("loaded-running", False), ("loaded-running", True),
+    ("absent", False), ("absent", True),
+])
+def test_preinstall_custody_refusal_has_zero_effects(workspace, service, advance):
+    """No trusted pathname/byte custody means no install effect, even with CAS."""
+    ctx = prepare(workspace)
+    original = b"INCUMBENT-PLIST-PREINSTALL\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    # Existing backup bytes must be untouched, not just an empty directory.
+    ctx["backup"].mkdir(mode=0o700)
+    (ctx["backup"] / "preserved-backup").write_bytes(b"SAVED-PREIMAGE\n")
+    before_backups = {p.name: p.read_bytes() for p in ctx["backup"].iterdir()}
+    before_selector = (ctx["store"] / "CURRENT.json").read_bytes()
+    before_inode = ctx["plist"].stat().st_ino
+    extra = {}
+    if advance:
+        target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 86\n")
+        extra = dict(generation=target.name, expect=ctx["release"].name,
+                     advance_from=ctx["release"].name)
+    # Count publisher CAS calls as well as checking exact CURRENT bytes.
+    wrapper_dir = workspace / "counted-publisher"
+    wrapper_dir.mkdir()
+    publisher = wrapper_dir / "native_generation.py"
+    publisher.write_text(PUBLISHER.read_text().replace(
+        "def select(store, generation, expected):\n",
+        "def select(store, generation, expected):\n"
+        "    with open(os.environ['STUB_STATE']+'/selector-calls','a') as counter:\n"
+        "        counter.write('select\\n')\n"))
+    extra["publisher"] = publisher
+    sleeper = subprocess.Popen(["/bin/sleep", "60"])
+    try:
+        if service == "loaded-running":
+            (ctx["stub"] / "print-mode").write_text("running\n")
+            (ctx["stub"] / "pid").write_text(str(sleeper.pid) + "\n")
+            (ctx["stub"] / "ps-alive").touch()
+            (ctx["stub"] / "argv").write_text("/bin/bash\n/old/ext/host_pull.sh\n")
+        # The fake owns only this disposable PID. A baseline bootout really
+        # stops it, so the test can detect harm beyond a command log.
+        launchctl = workspace / "bin" / "launchctl"
+        real_stub = workspace / "bin" / "launchctl-original"
+        launchctl.rename(real_stub)
+        launchctl.write_text("#!" + sys.executable + "\n" +
+            "import os,signal,sys\nfrom pathlib import Path\n"
+            "state=Path(os.environ['STUB_STATE'])\n"
+            "with (state/'effect-calls').open('a') as f: f.write(sys.argv[1]+'\\n')\n"
+            "if sys.argv[1]=='bootout': os.kill(" + str(sleeper.pid) + ",signal.SIGTERM)\n"
+            "os.execv(" + repr(str(real_stub)) + ",[" + repr(str(real_stub)) + ",*sys.argv[1:]])\n")
+        launchctl.chmod(0o755)
+        result = run(ctx, **extra)
+        assert result.returncode == 78, result.stderr
+        assert "BOOTSTRAP_CUSTODY_UNPROVEN" in result.stderr
+        # Gather every observable first so failure output identifies all
+        # earlier effects instead of stopping at the first dirty artifact.
+        effects = dict(
+            bootout=launch_log(ctx).count("bootout "),
+            bootstrap=launch_log(ctx).count("bootstrap "),
+            selector_calls=(ctx["stub"] / "selector-calls").exists(),
+            selector_changed=(ctx["store"] / "CURRENT.json").read_bytes() != before_selector,
+            plist_changed=ctx["plist"].read_bytes() != original or ctx["plist"].stat().st_ino != before_inode,
+            backup_changed={p.name: p.read_bytes() for p in ctx["backup"].iterdir()} != before_backups,
+            marker=(ctx["store"] / ".install-transaction.marker").exists(),
+            incumbent_dead=service == "loaded-running" and sleeper.poll() is not None,
+        )
+        assert not any(effects.values()), effects
+        assert stat.S_IMODE(ctx["plist"].stat().st_mode) == 0o600
+    finally:
+        if sleeper.poll() is None:
+            sleeper.terminate()
+        sleeper.wait(timeout=5)
