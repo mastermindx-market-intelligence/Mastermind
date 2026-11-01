@@ -36,24 +36,41 @@ The gateway file is `KEY=value` lines and must include `HERMES_GATEWAY_TOKEN`
 the runtime uses the gateway token as that password and still keeps it off
 argv.
 
-Provider env pointers, set in the operator environment, not in the unit file:
+**Native BYOK credential enrollment:** the supervisor reads provider-key names and
+`*_FILE` pointers from each role's private `mmsecretary.secrets.env` or
+`mmmeta.secrets.env` through the existing `load_secrets` owner. It does **not**
+read the operator's interactive shell environment for primary model keys. Never
+place real model keys directly in a systemd unit, on argv or in GitHub.
 
+In the Secretary's existing mode-0600 secrets file, alongside its distinct
+gateway/dashboard and own Slack bot credentials, add only:
+
+```text
+BYTEPLUS_MODELARK_API_KEY_FILE=/home/YOUR_OS_USERNAME/.config/hermes-runtime/credentials/modelark.key
 ```
-ZAI_API_KEY_FILE=$HOME/.config/hermes-runtime/credentials/zai.key
-BYTEPLUS_MODELARK_API_KEY_FILE=$HOME/.config/hermes-runtime/credentials/modelark.key
-MINIMAX_TOKEN_PLAN_KEY_FILE=$HOME/.config/hermes-runtime/credentials/minimax.key
-CURSOR_API_KEY_FILE=$HOME/.config/hermes-runtime/credentials/cursor.key
-HERMES_CURSOR_POOL_BASE_URL=https://<operator-supplied-cursor-pool>
-MASTERMIND_STEWARD_MCP_URL=https://<operator-supplied-steward>
-MASTERMIND_STEWARD_ACCESS_TOKEN_FILE=$HOME/.config/hermes-runtime/credentials/steward.token
+
+In the Meta-CEO's separate mode-0600 secrets file, add only:
+
+```text
+ZAI_API_KEY_FILE=/home/YOUR_OS_USERNAME/.config/hermes-runtime/credentials/zai.key
 ```
 
-`HERMES_CURSOR_POOL_BASE_URL` is not a secret. Until it is set, the Cursor
-pool stays on the disabled placeholder `https://cursor-pool.invalid/v1` and
-is last in every chain. Personal Coding Plan `/api/coding` URLs are refused.
+Replace `YOUR_OS_USERNAME` with the actual runtime user. These are **literal,
+absolute paths**, not shell expressions. Do not write `$HOME`, `~` or a
+relative path in a secrets-file value: the native secret reader does not expand
+them. The referenced key file must be regular, owned by the runtime user, mode
+0600, and not a symlink or hard link. A set `*_FILE` pointer is authoritative;
+empty, inaccessible or unsafe pointers fail closed rather than falling back
+to an inline key. Only the role's selected primary credential reaches its
+native model child; its sibling's provider credential is not forwarded.
 
-A set `*_FILE` pointer is the only source for that provider. A missing or
-mode-wrong file does not fall back to the matching env var.
+MiniMax, Cursor pool and Steward MCP credentials and endpoints remain separate
+future qualification routes. Their optional pointer names include
+`MINIMAX_TOKEN_PLAN_KEY_FILE`, `CURSOR_API_KEY_FILE` and
+`MASTERMIND_STEWARD_ACCESS_TOKEN_FILE`; none grants an active auxiliary,
+automatic fallback, enabled Steward MCP or computer-use tool. The disabled
+Cursor endpoint defaults to `https://cursor-pool.invalid/v1`. Personal
+Coding Plan `/api/coding` provider URLs are refused.
 
 Each always-on Hermes agent has its own systemd user unit and its own 0600
 secrets file. The Slack bot identity is per unit, not shared with Grok Secretary.

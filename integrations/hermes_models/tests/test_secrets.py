@@ -53,6 +53,30 @@ class SecretTests(unittest.TestCase):
             )
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_empty_or_relative_file_pointer_never_falls_back_to_inline_key(self):
+        spec = PROVIDERS["zai.glm-5.3"]
+        for pointer in ("", "relative.key"):
+            with self.subTest(pointer=pointer):
+                with self.assertRaises(CredentialUnavailable):
+                    load_credential(spec, {
+                        spec.credential_file_env: pointer,
+                        spec.credential_env: CANARY,
+                    })
+
+    def test_file_pointer_must_be_owned_by_runtime_user(self):
+        spec = PROVIDERS["zai.glm-5.3"]
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "not-ours.key"
+            path.write_text(CANARY + "\n", encoding="utf-8")
+            path.chmod(0o600)
+            wrong_uid = os.geteuid() + 1
+            with mock.patch(
+                "integrations.hermes_models.credentials.os.geteuid",
+                return_value=wrong_uid,
+            ):
+                with self.assertRaises(CredentialUnavailable):
+                    load_credential(spec, {spec.credential_file_env: str(path)})
+
     def test_secrets_are_never_logged(self):
         spec = PROVIDERS["byteplus-modelark.glm-5.3-flash"]
         stream = io.StringIO()

@@ -97,6 +97,18 @@ class NativeCredentialTests(unittest.TestCase):
             rt._model_child_env()
         self.assertEqual(exc.exception.code, "NATIVE_MODEL_CREDENTIAL_UNAVAILABLE")
 
+    def test_shell_only_key_cannot_bypass_role_private_secret_file(self) -> None:
+        # A systemd unit must not depend on the installing operator's shell.
+        rt = self._runtime()
+        from unittest import mock
+        with mock.patch.dict(os.environ, {
+            "BYTEPLUS_MODELARK_API_KEY": FAKE_BYTEPLUS,
+            "BYTEPLUS_MODELARK_API_KEY_FILE": "/tmp/not-authorized.key",
+        }):
+            with self.assertRaises(RuntimeRefusal) as exc:
+                rt._model_child_env()
+        self.assertEqual(exc.exception.code, "NATIVE_MODEL_CREDENTIAL_UNAVAILABLE")
+
     def test_mcp_enabled_or_config_drift_blocks_key_material(self) -> None:
         rt = self._runtime(extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n")
         cfg = rt.profile.hermes_home / "profiles" / rt.profile.role / "config.yaml"
