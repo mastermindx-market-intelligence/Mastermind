@@ -200,7 +200,8 @@ class ServiceRuntime:
             raw = path.read_bytes()
         except OSError:
             raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_UNAVAILABLE") from None
-        if raw == render_hermes_config(self.profile).encode("utf-8"):
+        if (self.profile.native_provider_id is None
+                and raw == render_hermes_config(self.profile).encode("utf-8")):
             return None
         # The built-in WP1 package remains independent for non-integrated
         # installs; this optional consumer is loaded only for the specific
@@ -211,10 +212,13 @@ class ServiceRuntime:
         if self.profile.extension_allowlist:
             raise RuntimeRefusal("NATIVE_EXTENSION_NOT_INSTALLED")
         from integrations.hermes_harness.native_byok import render_disarmed_native_byok
-        if raw not in {
-            render_disarmed_native_config(self.profile).encode("utf-8"),
-            render_disarmed_native_byok(self.profile).encode("utf-8"),
-        }:
+        allowed_native = {render_disarmed_native_byok(self.profile).encode("utf-8")}
+        # An explicit persisted selection cannot downgrade to a legacy or
+        # model-less config. Only selector-free historical profiles retain
+        # the earlier source-compatible config forms.
+        if self.profile.native_provider_id is None:
+            allowed_native.add(render_disarmed_native_config(self.profile).encode("utf-8"))
+        if raw not in allowed_native:
             raise RuntimeRefusal("RUNTIME_NATIVE_CONFIG_DRIFT")
         return {"mastermind_steward": tuple(ALLOWED_TOOLS)}
 

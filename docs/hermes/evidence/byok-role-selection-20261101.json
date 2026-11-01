@@ -1,6 +1,6 @@
 {
   "fixture_only": true,
-  "independent_review": "NOT_YET_RECEIVED",
+  "independent_review": "PR1917 Fabric review terminal admission-refused by host thermal guard; no review result; GitHub nonauthor requested",
   "live_runtime_started": false,
   "local_runtime_limitations": [
     "/proc/net/tcp absent on Darwin",
@@ -44,7 +44,7 @@
     },
     {
       "path": "integrations/hermes_harness/tests/test_native_model_selection.py",
-      "sha256": "a24e6959166b273503b972e3f32505ca8e391bc84f59d7a56e3d098cdabf0f89"
+      "sha256": "d1d1e18260e369b30c9c9bf0bb5a611540604bed5671b70ca0716a2e32f85a95"
     },
     {
       "path": "integrations/hermes_models/contract.py",
@@ -57,14 +57,24 @@
     {
       "path": "integrations/hermes_runtime/profile.py",
       "sha256": "7b3ed18775409a14d66bd655b330e5450afb9d14e47e72588174a902198b2419"
+    },
+    {
+      "path": "integrations/hermes_runtime/supervisor.py",
+      "sha256": "3ee0ebbf804fa240fd1b31e705f7dfb96692d0b7034260fc1091262b0199f3a1"
     }
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
+  "previous_head_linux_evidence": {
+    "does_not_qualify_current_postimage": true,
+    "harness_six_suites": "41343689059 SUCCESS Python3.12/3.13",
+    "head": "b54dc95ec02a5f591bf3fc3a5a1491de104be2ac",
+    "runtime": "41343689090 SUCCESS"
+  },
   "procedure_pin": "1f1b30d1352d2a975624e558bd9da097e4cba417",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-01T19:48:44.718048+00:00",
+  "recorded_at": "2026-11-01T19:53:04.365051+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -79,8 +89,8 @@
       "tests": 25
     },
     "hermes_harness": {
-      "passed": 44,
-      "tests": 44
+      "passed": 45,
+      "tests": 45
     },
     "hermes_models": {
       "passed": 22,
@@ -102,6 +112,12 @@
       "tests": 34
     }
   },
-  "source_manifest_sha256": "d4fbaf2fce9d0955c31bacabf155b2dc58ebcb0eaae32136659426525345ea85",
+  "review_refusal": {
+    "reason": "host_temperature_at_or_above_limit",
+    "response_sha256": "2d31cdc7325e4bfd050d10c337339cf619c6ae77d976836152c4ac0d2c8b29f7",
+    "retry_allowed": false,
+    "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
+  },
+  "source_manifest_sha256": "03a5d72e4de00e2db32f2acb2841c889d7045de91a6ab3a16cccd14cd6ca32f1",
   "test_host": "m2studio / macOS"
 }

@@ -143,6 +143,22 @@ class NativeModelSelectionTests(unittest.TestCase):
         installed.write_text(dump_profile(meta))
         self.assertFalse(_native_primary_present(home, "mmsecretary"))
 
+    def test_explicit_selection_cannot_downgrade_to_legacy_config(self):
+        from integrations.hermes_harness.native_mcp import render_disarmed_native_config
+        from integrations.hermes_runtime.hermes_config import render_hermes_config
+        selected = replace(self.profile, native_provider_id=DEEPSEEK)
+        native = selected.hermes_home / "profiles" / selected.role / "config.yaml"
+        native.parent.mkdir(parents=True)
+        runtime = ServiceRuntime(selected, load_secrets(self.secret), STUB)
+        for renderer in (render_disarmed_native_config, render_hermes_config):
+            with self.subTest(renderer=renderer.__name__):
+                native.write_text(renderer(selected))
+                native.chmod(0o600)
+                with self.assertRaises(RuntimeRefusal) as refused:
+                    runtime._model_child_env()
+                self.assertEqual(refused.exception.code, "RUNTIME_NATIVE_CONFIG_DRIFT")
+        self.assertEqual(runtime.child_starts, 0)
+
     def test_install_config_receipt_status_and_child_env_agree(self):
         upstream = self.root / "upstream-fixture"
         upstream.mkdir()
