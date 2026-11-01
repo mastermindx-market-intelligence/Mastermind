@@ -18,8 +18,8 @@ The user requested preservation in GitHub if the original investigation no longe
 6. [Interactive account network](account_network_interactive.html) — self-contained HTML visualization with relationship-type filters, node search and inspectable public source links. Download and open locally if GitHub displays HTML source.
 7. [Timestamped Equity Edge campaign bursts](2026-10-02_timestamped_campaign_investigation.md) — source-ID timing reconstruction, March and October bursts, cautious ownership analysis and an explicit 14-event October plus 7-event March dataset.
 8. [Creator economics extension](affiliate_distribution_extension_2026-10-30.md) — newly verified payout and ambassador mechanisms, a cross-brand creator candidate, and ownership boundaries.
-9. [Directed entity-edge JSON](interaccount_edges_first_pass.json) — 181 typed graph edges among 98 account/company/product nodes referencing 77 indexed sources; counts include required-follow ties, not individual user-follow events, with control unknown.
-10. [Structured historical evidence ledger](network_evidence_redacted.json) — 64 earlier observations referencing 55 public URLs, with publication warnings and direct WhatsApp contact link withheld.
+9. [Three-account affiliate reply-seeding and claim audit](affiliate_reply_seeding_claim_audit_2026-10-31.md) — SAGE, Sire Godson and MFE overlapping financial-X comparison replies, cross-brand promotion, official payout review vs reported-average distinction, and live affiliate-program term discrepancies. Public indexed snapshot evidence only, not owner attribution or a 30-day original-post sample.\n10. [Directed entity-edge JSON](interaccount_edges_first_pass.json) — 181 typed graph edges among 98 account/company/product nodes referencing 77 indexed sources; counts include required-follow ties, not individual user-follow events, with control unknown.
+11. [Structured historical evidence ledger](network_evidence_redacted.json) — 64 earlier observations referencing 55 public URLs, with publication warnings and direct WhatsApp contact link withheld.
 
 ## New verified creator-program economics
 
@@ -38,7 +38,7 @@ The user requested preservation in GitHub if the original investigation no longe
 
 **Unusual Whales:** named co-host/media personalities and direct compensation disclosure for a tastytrade marketing agreement. **TrendSpider:** founder personal account and an openly linked SignalStack product account. These provide controls for a legitimate managed account web.
 
-## Verification and limits
+**New October 31 research: creator reply-seeding and claim fidelity.** [Three-account audit](affiliate_reply_seeding_claim_audit_2026-10-31.md) documents self-declared affiliates @sage_089, @Sunshine_godson and @phantom_1x promoting Hola Prime in overlapping competitor-comparison threads, while also participating in other prop-firm ecosystems. Multiple indexed posts conflate the company's self-reported ~33m48s payout average with a Deloitte-reviewed rate; Hola Prime's own FAQ says the engagement was not an audit/assurance and the data covers eligible payout processing over a bounded five-month window. **No native post IDs/timestamps, verified management, payouts, bot classification or full activity baseline** for these new replies. Public indexed captures can yield stale relative dates; do not fold unverified snippets into the existing 181-edge graph.\n\n## Verification and limits
 
 - **Directly evidenced:** specific referral-bearing posts, indexed official promotional terms, same-domain and cross-domain URL reuse in the prior case, and external regulators' descriptions of other proven schemes.
 - **Not evidenced:** a shared ultimate legal owner of the original two major clusters; a sponsor contract for any named promotional beneficiary; control of the alleged bots by legitimate fintech firms; a direct promotional-payment link to @MichaelPBento.
