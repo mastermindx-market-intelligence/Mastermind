@@ -186,6 +186,67 @@ test('prepare opens only the host-pinned app and returns read-only when write sc
   assert.deepEqual(opens, [['/Applications/Paper.app', fileId]]);
 });
 
+test('prepare permits slow Dashboard preflight but bounds every status request', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const snap = '7'.repeat(64);
+  const calls = [];
+  let opened = false;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 70_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls.push({ action: args[1], timeout: options.timeout });
+      if (args[1] === 'status' && !opened) {
+        return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE', retry_allowed: false }) };
+      }
+      if (args[1] === 'status') {
+        return { stdout: JSON.stringify({
+          state: 'CONNECTED',
+          document: { identity: { kind: 'file-id', id: fileId }, snapshot_sha256: snap },
+        }) };
+      }
+      return { stdout: JSON.stringify({ write_schema: { accepted_for_write: false } }) };
+    }),
+    openFile: async (app, id) => {
+      assert.equal(app, '/Applications/Paper.app');
+      assert.equal(id, fileId);
+      opened = true;
+    },
+    sleep: async () => {},
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.value.state, 'PAPER_READY_READ_ONLY');
+  assert.equal(result.effectUnknown, false);
+  assert.equal(result.value.app_open_attempted, true);
+  assert.equal(result.value.write_qualified, false);
+  assert.deepEqual(calls.map((c) => c.action), ['status', 'status', 'catalog']);
+  assert.ok(calls.every((c) => c.timeout > 5_000 && c.timeout <= 15_000));
+});
+
+test('prepare timeout before file-open remains definite no-effect and never falls back', async () => {
+  let opens = 0;
+  let calls = 0;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 70_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls += 1;
+      assert.equal(args[1], 'status');
+      assert.ok(options.timeout > 5_000 && options.timeout <= 15_000);
+      const err = new Error('status preflight killed');
+      err.killed = true;
+      throw err;
+    }),
+    openFile: async () => { opens += 1; },
+    sleep: async () => {},
+  });
+  const result = await designer.call('paper_prepare', {
+    file_id: '01M2WGNCX9475G79JRKJTCM08P',
+  });
+  assert.equal(result.isError, true);
+  assert.equal(result.value.state, 'PAPER_LOCAL_TIMEOUT');
+  assert.equal(result.value.retry_allowed, false);
+  assert.equal(result.effectUnknown, false);
+  assert.equal(opens, 0);
+  assert.equal(calls, 1);
+});
+
 test('prepare refuses untrusted app identity and non-openable bridge failures before desktop effect', async () => {
   const fileId = '01M2WGNCX9475G79JRKJTCM08P';
   let opens = 0;

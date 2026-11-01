@@ -91,6 +91,13 @@ jobs:
           PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_direct*.py'
           PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_mcp_results.py'
 
+      # Exercise the guarded Paper Studio prepare action in hosted CI.
+      # These Node tests are not included in the canonical pytest shard plan.
+      - name: Verify Paper Studio prepare guard
+        if: matrix.index == 0
+        working-directory: integrations/studio_direct_mcp
+        run: node --test paper-design.test.mjs
+
       - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime
         if: matrix.index == 0
         working-directory: integrations/studio_direct_mcp

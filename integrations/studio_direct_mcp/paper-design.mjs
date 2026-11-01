@@ -11,7 +11,8 @@ const SNAPSHOT_RE = /^[0-9a-f]{64}$/;
 const PAPER_FILE_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const PREPARE_ATTEMPTS = 12;
 const PREPARE_POLL_MS = 250;
-const PREPARE_STATUS_TIMEOUT_MS = 5_000;
+const PREPARE_STATUS_TIMEOUT_MS = 15_000;
+const PREPARE_TOTAL_BUDGET_MS = 65_000;
 const PREPARE_OPENABLE_STATES = new Set(['UPSTREAM_UNAVAILABLE', 'DOCUMENT_UNAVAILABLE']);
 const MAX_ARGUMENT_BYTES = 1 << 19;
 const MAX_STDIO_BYTES = 12 * 1024 * 1024;
@@ -464,8 +465,16 @@ export function createPaperDesigner(config, dependencies = {}) {
           return localFailure(false, 'PAPER_INVALID_ARGUMENTS');
         }
         const fileId = input.file_id;
+        // Live Paper can require about 10 seconds to report DOCUMENT_UNAVAILABLE
+        // from the Dashboard. Keep a separate overall budget so a slow endpoint
+        // never turns the bounded 12-step post-open verification into a long wait.
+        const deadline = Date.now() + Math.min(resolved.commandTimeoutMs, PREPARE_TOTAL_BUDGET_MS);
+        const remaining = () => Math.max(0, deadline - Date.now());
         const prepareTimeoutMs = Math.min(resolved.commandTimeoutMs, PREPARE_STATUS_TIMEOUT_MS);
-        let observed = await dispatch('status', ['status'], { timeoutMs: prepareTimeoutMs });
+        const readStatus = () => dispatch('status', ['status'], {
+          timeoutMs: Math.min(prepareTimeoutMs, Math.max(1, remaining())),
+        });
+        let observed = await readStatus();
         let alreadyActive = !observed.isError && activeFileId(observed.value) === fileId;
         let openAttempted = false;
 
@@ -485,10 +494,12 @@ export function createPaperDesigner(config, dependencies = {}) {
             // The desktop transition can still have happened even when open(1) lost its reply.
             // Reconcile by observing the exact target file before deciding the outcome.
           }
-          for (let attempt = 0; attempt < PREPARE_ATTEMPTS; attempt += 1) {
-            observed = await dispatch('status', ['status'], { timeoutMs: prepareTimeoutMs });
+          for (let attempt = 0; attempt < PREPARE_ATTEMPTS && remaining() > 0; attempt += 1) {
+            observed = await readStatus();
             if (!observed.isError && activeFileId(observed.value) === fileId) break;
-            if (attempt + 1 < PREPARE_ATTEMPTS) await deps.sleep(PREPARE_POLL_MS);
+            if (attempt + 1 < PREPARE_ATTEMPTS && remaining() > 0) {
+              await deps.sleep(Math.min(PREPARE_POLL_MS, remaining()));
+            }
           }
         }
 
@@ -509,7 +520,9 @@ export function createPaperDesigner(config, dependencies = {}) {
           };
         }
 
-        const catalog = await dispatch('catalog', ['catalog'], { timeoutMs: prepareTimeoutMs });
+        const catalog = await dispatch('catalog', ['catalog'], {
+          timeoutMs: Math.min(prepareTimeoutMs, Math.max(1, remaining())),
+        });
         const acceptedForWrite = !catalog.isError && catalog.value?.write_schema?.accepted_for_write === true;
         return {
           value: {
