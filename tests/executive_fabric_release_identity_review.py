@@ -281,9 +281,12 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
+# PR #1907 cda1c53b / independent source-risk review 8696a4f4:
+# exact reviewed persistent-origin composition; same four complete tokens,
+# kinds and spellings across the two files. No new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '8a8e7e98b4563bf251c980aef81ebc8c47209ea73ec27f85e221e8f8eb754999',
-    "sites": ((101, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1739, 46, 49, 'int', '400'), (1739, 66, 69, 'int', '500')),
+    "sha256": 'b9ebc3d3898a623fcfb5de91a619f338260b8d66ba0e76884ac6a116f7533d49',
+    "sites": ((101, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1822, 46, 49, 'int', '400'), (1822, 66, 69, 'int', '500')),
 }
 
 
@@ -291,7 +294,7 @@ REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
 # This exact token is the Root config-directory permission mode, not a UID.
 # Source, path, AST location and complete token must all match; scanner unchanged.
 REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
-    "sha256": 'd667f7028932ff89502649543fa3699f6961e1df5a522a2ffb1fa91367376844',
+    "sha256": '1f316e19da3b2d4f362b64928c7ede1aee0b28301a71990455c138589d9cc402',
     "sites": ((347, 46, 51, 'int', '0o755'),),
 }
 
