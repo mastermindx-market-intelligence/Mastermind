@@ -20,6 +20,7 @@ from integrations.hermes_models.contract import (
     UPSTREAM_HERMES_SHA,
     ProviderSpec,
     provider,
+    native_provider,
 )
 
 
@@ -38,11 +39,14 @@ class ProfileRenderError(RuntimeError):
     """The qualification profile no longer matches the role contract."""
 
 
-def render_profile(profile_name: str) -> str:
+def render_profile(profile_name: str, *, native_provider_id: str | None = None) -> str:
     if profile_name not in PROFILE_PRIMARY:
         raise ProfileRenderError("unknown hermes profile")
     source = _load_qualification(profile_name)
-    primary = provider(PROFILE_PRIMARY[profile_name])
+    try:
+        primary = native_provider(profile_name, native_provider_id)
+    except (ValueError, KeyError):
+        raise ProfileRenderError("native model selection is unqualified") from None
     logical = source["model"]["default"]
     expected = {
         "mmmeta": "glm-5.3",

@@ -108,8 +108,17 @@ def write_composed_profile(
     secrets_file: Path,
     dest: Path,
     installed_native_only: bool = False,
+    native_provider_id: str | None = None,
 ) -> None:
     profile = compose_profile(role, state_dir=state_dir, secrets_file=secrets_file)
+    if native_provider_id is not None:
+        from integrations.hermes_models.contract import native_provider
+        from integrations.hermes_runtime.errors import RuntimeRefusal
+        try:
+            native_provider(role, native_provider_id)
+        except (ValueError, KeyError):
+            raise RuntimeRefusal("NATIVE_MODEL_SELECTION_UNQUALIFIED") from None
+        profile = replace(profile, native_provider_id=native_provider_id)
     if installed_native_only:
         # The shadow registry's Python names are not Hermes-native plugins.
         # Do not advertise nonexistent execution tools to the live service.

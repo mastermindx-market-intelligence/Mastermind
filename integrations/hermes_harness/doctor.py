@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
-from integrations.hermes_models.contract import PROFILE_PRIMARY, PROVIDERS, provider
+from integrations.hermes_models.contract import PROFILE_PRIMARY, PROVIDERS, provider, native_provider
 from integrations.hermes_models.credentials import CredentialUnavailable, load_credential
 from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
 from integrations.hermes_runtime.errors import RuntimeRefusal
@@ -115,13 +115,24 @@ def format_doctor(report: Mapping[str, object]) -> str:
 
 
 def _native_primary_present(home: Path, role: str) -> bool:
-    path = home / ".config" / "hermes-runtime" / f"{role}.secrets.env"
     try:
+        spec, path = _native_primary_source(home, role)
         secrets = load_secrets(path)
-        load_credential(provider(PROFILE_PRIMARY[role]), secrets.values)
-    except (RuntimeRefusal, CredentialUnavailable, OSError):
+        load_credential(spec, secrets.values)
+    except (RuntimeRefusal, CredentialUnavailable, OSError, ValueError, KeyError):
         return False
     return True
+
+
+def _native_primary_source(home: Path, role: str):
+    from integrations.hermes_runtime.profile import load_profile
+    installed = home / ".local" / "state" / f"hermes-runtime-{role}" / "current" / "profile.yaml"
+    if installed.exists() or installed.is_symlink():
+        profile = load_profile(installed)
+        if profile.role != role:
+            raise ValueError("installed role mismatch")
+        return native_provider(role, profile.native_provider_id), profile.secrets_file
+    return native_provider(role), home / ".config" / "hermes-runtime" / f"{role}.secrets.env"
 
 
 def _credential_present(env: Mapping[str, str], env_name: str, file_name: str) -> bool:
