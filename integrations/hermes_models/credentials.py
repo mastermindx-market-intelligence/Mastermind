@@ -33,7 +33,9 @@ def load_credential(spec: ProviderSpec, environ: Mapping[str, str]) -> str:
     """
 
     file_pointer = environ.get(spec.credential_file_env)
-    if file_pointer is not None and file_pointer != "":
+    # An explicitly set file pointer owns selection even when empty. Never
+    # silently fall back to an inline key after a malformed pointer.
+    if file_pointer is not None:
         return _load_file(file_pointer)
     value = environ.get(spec.credential_env, "")
     if not value:
@@ -45,7 +47,11 @@ def load_credential(spec: ProviderSpec, environ: Mapping[str, str]) -> str:
 
 
 def _load_file(path_text: str) -> str:
-    if "\x00" in path_text or "\n" in path_text or "\r" in path_text:
+    # systemd native roles load literal secrets-file values, not shell-expanded
+    # paths. Require an absolute pointer to avoid dependence on WorkingDirectory.
+    if not path_text or not os.path.isabs(path_text) or any(
+        ch in path_text for ch in ("\x00", "\n", "\r")
+    ):
         raise CredentialUnavailable("provider credential is unavailable")
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -57,6 +63,7 @@ def _load_file(path_text: str) -> str:
         if (
             not stat.S_ISREG(info.st_mode)
             or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.geteuid()
             or info.st_nlink != 1
         ):
             raise CredentialUnavailable("provider credential is unavailable")
