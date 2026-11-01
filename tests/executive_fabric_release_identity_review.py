@@ -281,11 +281,12 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
-# Installed-preparation continuation 027be0c0 / source-risk review b29273a0:
+# Installed-preparation continuation 027be0c0 / source-risk review b29273a0;
+# Macro-epoch composition f48d7421 / source-risk review bd9bba4b:
 # same three complete runtime tokens and unchanged original top-level ASTs;
 # only the reviewed digest and shifted lines change. No new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '1a7fed81a15bbebcd689b954b2cce1827de5afc2c90683281d32a6c77e9e7adc',
+    "sha256": 'f53e9401d28f1053d67a59d375f7380b86271f87278080f7dd972f3d8ff6f7f9',
     "sites": ((104, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1825, 46, 49, 'int', '400'), (1825, 66, 69, 'int', '500')),
 }
 
@@ -472,4 +473,12 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_host_readiness
 REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
     'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
     'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
+}
+
+# Exact independently reviewed official initialize observation byte bound.
+# This is a string-length cap, not a UID; only this full source hash and
+# Constant token qualify. Review: NORMALIZER_INDEPENDENT_REVIEW a057927b.
+REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
+    'sha256': 'e4a1e0f959df7f84b87de74e5d4deaaf89635975381d6d847803fdbf15a61536',
+    'sites': ((190, 46, 49, 'int', '512'),),
 }
