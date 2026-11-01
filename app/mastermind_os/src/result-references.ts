@@ -400,9 +400,8 @@ function decodeReferencesCatalogue(
     return value as unknown as ResultReferencesCatalogue;
   }
   // Orientation only: no mission-currentness or acceptance field exists here.
-  if (value.freshness === "UNKNOWN") {
-    if (value.generated_at !== null) return null;
-  } else if (!text(value.generated_at, 128)) return null;
+  // Timestamp and mapper freshness are independent source facts.
+  if (value.generated_at !== null && !text(value.generated_at, 128)) return null;
   return value as unknown as ResultReferencesCatalogue;
 }
 

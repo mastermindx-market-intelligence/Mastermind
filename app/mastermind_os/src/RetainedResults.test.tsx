@@ -536,3 +536,18 @@ it("keeps the first eight returned rows visible and exposes all remaining rows b
   disclosure.open = true; // jsdom does not implement native summary toggling.
   expect(screen.getAllByRole("button", {name: /Open retained result/})).toHaveLength(17);
 });
+
+it("opens a retained result when the catalogue as-of is known but source freshness is unknown", async () => {
+  const {readReferences, readResult, renderResult} = setup();
+  const body = availableBody();
+  body.catalogue.freshness = "UNKNOWN";
+  readReferences.mockResolvedValueOnce(body);
+  fireEvent.click(screen.getByRole("button", {name: "Show retained results"}));
+  const button = await screen.findByRole("button", {name: "Open retained result — JOB-002"});
+  expect(screen.getByText(/2026-10-31T15:45:00Z/)).toBeTruthy();
+  expect(screen.getByText(/Source age not known/)).toBeTruthy();
+  fireEvent.click(button);
+  await screen.findByText("EXACT_RESULT_CARD:work:JOB-002");
+  expect(readResult).toHaveBeenCalledTimes(1);
+  expect(renderResult).toHaveBeenCalledTimes(1);
+});

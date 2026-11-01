@@ -673,10 +673,10 @@ describe("catalogue rejections", () => {
     expect(decode({ catalogue: { generated_at: null, freshness: "FRESH" } })).toBeNull();
     expect(decode({ catalogue: { generated_at: 42, freshness: "CURRENT" } })).toBeNull();
     expect(decode({ catalogue: { generated_at: "", freshness: "CURRENT" } })).toBeNull();
-    expect(decode({ catalogue: { generated_at: null, freshness: "CURRENT" } })).toBeNull();
+    expect(decode({ catalogue: { generated_at: null, freshness: "CURRENT" } })).not.toBeNull();
     expect(
       decode({ catalogue: { generated_at: "2026-10-31T15:45:00Z", freshness: "UNKNOWN" } }),
-    ).toBeNull();
+    ).not.toBeNull();
     expect(decode({ catalogue: { generated_at: "x", freshness: "CURRENT", extra: 1 } })).toBeNull();
   });
 });
@@ -749,4 +749,19 @@ describe("selection normalization and the exact-selector join", () => {
     });
     expect(decodeResultEnvelope(foreign, exact)).toBeNull();
   });
+});
+
+
+describe("independent AVAILABLE catalogue source facts", () => {
+  for (const freshness of ["CURRENT", "STALE", "UNKNOWN"] as const) {
+    it.each([null, "2026-10-31T15:45:00Z"])(`${freshness} preserves source timestamp %s without coercion`, (generated_at) => {
+      const catalogue = {generated_at, freshness};
+      const result = decode({catalogue});
+      expect(result).not.toBeNull();
+      expect(result!.catalogue).toEqual(catalogue);
+      expect(result!.availability).toBe("AVAILABLE");
+      expect(result!.source_observation.state).toBe("SAME");
+      expect(result!.index!.refs).toEqual(INDEX.refs);
+    });
+  }
 });

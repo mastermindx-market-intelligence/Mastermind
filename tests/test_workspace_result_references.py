@@ -392,3 +392,21 @@ def test_validate_body_refuses_extra_field_or_mutation(tmp_path):
     bloated["source_observation"]["control_room"]["document_digest"] = "x" * 40_000
     with pytest.raises(ValueError):
         validate_body(bloated, SELECTION)
+
+
+@pytest.mark.parametrize("freshness", ["stale", "unknown"])
+@pytest.mark.parametrize("source_stamp", [None, "2026-09-20T00:00:00Z"])
+def test_noncurrent_root_preserves_independent_catalogue_source_facts(tmp_path, freshness, source_stamp):
+    def mutate(owners, clock):
+        doc = owners[0].state_cache["doc"]
+        doc["sources"]["agent_os_state_generated_at"] = source_stamp
+        row = doc["autonomy"]["responsibilities"][0]
+        row["freshness"] = freshness
+        row["validity"]["card"]["valid_for_ms"] = None
+        with owners[0].state_lock:
+            ccr._publish_source_validity(owners[0], doc, tuple(clock), tuple(clock))
+    body = read(tmp_path, mutate=mutate)["result"]
+    assert body["availability"] == "AVAILABLE"
+    assert body["catalogue"] == {"generated_at": source_stamp, "freshness": freshness.upper()}
+    assert body["source_observation"]["state"] == "SAME"
+    assert len(body["index"]["refs"]) == 1
