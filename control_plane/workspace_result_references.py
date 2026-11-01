@@ -2,8 +2,11 @@
 
 One actual bounded Fabric v3 acquisition per accepted frame, bracketed by
 the existing control-room cache snapshot pair exactly as the Mission v3
-route brackets it.  Sole-root admission stays with the existing
-``_join``/``_qualified`` guards before Runtime is ever touched; the SAME
+route brackets it.  Admission stays with the existing read-service guards
+before Runtime is ever touched — here through the bounded retained-root
+membership join, so a selected root is admitted only as an actual member
+of the paired publication's own candidate vector while every other route
+keeps the sole-root ``_join``/``_qualified`` admission unchanged; the SAME
 source observation stays with the existing ``_observation``; companion and
 index strict validation stays with the existing Mission workspace
 validators.  This module only joins those owners and translates every
@@ -12,9 +15,9 @@ index facts, a truncated partition, or a fabricated absence.
 
 Authentication and final permission remain the existing frame owner's
 unchanged responsibility; the producer neither authorizes nor re-checks
-the principal.  A missing or ambiguous sole root keeps refusing with the
-existing ``LookupError`` before acquisition, which the transport maps to
-the actual 404.
+the principal.  A missing, unlisted or malformed selection keeps refusing
+with the existing ``LookupError`` before acquisition, which the transport
+maps to the actual 404.
 """
 
 from __future__ import annotations
@@ -46,10 +49,11 @@ def read_result_references(owner, frame):
     """Handle one ``result_references`` frame for the existing frame owner.
 
     Returns ``{ok: True, result: BODY}`` — with an AVAILABLE body only when
-    the sole root was admitted from a fresh qualified cache bracket, one
-    actual bounded Fabric v3 acquisition finalized SAME survived the paired
-    after-bracket, and the actual index passed the existing strict
-    validators inside the frozen response budget.  Every other outcome is
+    the selected retained root was admitted from a fresh qualified cache
+    bracket, one actual bounded Fabric v3 acquisition finalized SAME
+    survived the paired after-bracket, and the actual index passed the
+    existing strict validators inside the frozen response budget.  Every
+    other outcome is
     the typed UNAVAILABLE body for exactly one closed reason code.
     """
     selected = frame_selection(frame)
@@ -61,7 +65,11 @@ def read_result_references(owner, frame):
 
 
 def _produce(owner, selected):
-    from control_plane.workspace_read_service import _join, _observation, _qualified
+    from control_plane.workspace_read_service import (
+        _observation,
+        _qualified_retained_root,
+        _retained_root_join,
+    )
     cache = getattr(owner, "cache", None)
     if not hasattr(cache, "snapshot"):
         raise _TypedUnavailable("SOURCE_UNAVAILABLE")
@@ -71,20 +79,21 @@ def _produce(owner, selected):
         raise
     except Exception:
         raise _TypedUnavailable("SOURCE_UNAVAILABLE") from None
-    # The existing sole-root guard refuses with LookupError before Runtime
-    # is touched; the frame owner preserves that actual 404.
-    _join(before.document, selected)
-    if not _qualified(before, selected):
+    # The existing retained-root membership guard refuses with LookupError
+    # before Runtime is touched; the frame owner preserves that actual 404.
+    before_row = _retained_root_join(before.document, selected)
+    if not _qualified_retained_root(before, selected):
         raise _TypedUnavailable("SOURCE_UNAVAILABLE")
-    companion = _acquire(owner, selected)
+    companion = _acquire(owner, selected,
+                         require_work_ref=before_row.get("runtime_root_state") == "CONFLICT")
     try:
         after = cache.snapshot()
     except _TypedUnavailable:
         raise
     except Exception:
         raise _TypedUnavailable("SOURCE_UNAVAILABLE") from None
-    row = _join(after.document, selected)
-    if not _qualified(after, selected):
+    row = _retained_root_join(after.document, selected)
+    if not _qualified_retained_root(after, selected):
         raise _TypedUnavailable("SOURCE_UNAVAILABLE")
     index = _finalized_index(companion, selected)
     # The canonical Fabric owner returns only after observation physical
@@ -112,18 +121,21 @@ def _produce(owner, selected):
     return body
 
 
-def _acquire(owner, selected):
+def _acquire(owner, selected, *, require_work_ref=False):
     """One actual bounded Fabric v3 acquisition through the existing seam."""
     acquire = getattr(owner, "_mission_v3_acquire", None)
-    if acquire is None:
+    canonical_acquire = acquire is None
+    if canonical_acquire:
         from control_plane.fabric_job_view import read_fabric_view_v3_from_runtime
         acquire = read_fabric_view_v3_from_runtime
     bounded = getattr(owner, "_bounded_runtime", None)
     runtime = owner.runtime
     observed_runtime = bounded(runtime) if bounded is not None else runtime
     try:
-        companion = acquire(observed_runtime, selected["root_job_id"],
-                            armed=owner.armed, runtime_identity=owner.runtime_identity)
+        kwargs = {"armed": owner.armed, "runtime_identity": owner.runtime_identity}
+        if require_work_ref:
+            kwargs["expected_work_ref"] = selected["work_ref"]
+        companion = acquire(observed_runtime, selected["root_job_id"], **kwargs)
     except _TypedUnavailable:
         raise
     except Exception:

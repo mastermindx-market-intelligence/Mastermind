@@ -14,6 +14,9 @@ import { Knowledge } from "./knowledge/Knowledge";
 import { ConversationWindow } from "./conversations/ConversationWindow";
 import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
 import { RetainedResults } from "./RetainedResults";
+import { RetainedRootChoice } from "./RetainedRootChoice";
+import { normalizeResultReferencesSelection } from "./result-references";
+import { parseDirectConsumeTarget } from "./direct-native-result";
 import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
 import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
 import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
@@ -160,6 +163,12 @@ type WorkState =
 function isRetainedOperation(value: unknown): value is OperationPointer {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const pointer = value as Record<string, unknown>;
+  if (pointer.kind === "consume") {
+    return Object.keys(pointer).length === 3 &&
+      Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
+      typeof pointer.operationKey === "string" && /^mmos-consume-[0-9a-f]{40}$/.test(pointer.operationKey) &&
+      typeof pointer.targetKey === "string" && parseDirectConsumeTarget(pointer.targetKey) !== null;
+  }
   return Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
     typeof pointer.operationKey === "string" && pointer.operationKey.length > 0 &&
     typeof pointer.kind === "string" && ["launch", "message", "stop"].includes(pointer.kind) &&
@@ -1292,6 +1301,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       reason: "SOURCE_READ_PENDING",
     }),
     [programRevision, setProgramRevision] = useState(0),
+    [programIndexEpoch, setProgramIndexEpoch] = useState(0),
+    [retainedRoot, setRetainedRoot] = useState<{
+      pair: MissionSelection;
+      index: ProgramIndex;
+      epoch: number;
+      authRevision: number;
+      host: MissionHost | undefined;
+      hostGeneration: string | number;
+      missionWorkRef: string | null;
+      candidates: string;
+    } | null>(null),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
@@ -2019,6 +2039,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           !controller.signal.aborted
         ) {
           setIndex(programsFromControlRoom(raw));
+          setProgramIndexEpoch(current);
           office.acceptPrograms(officeRead, observation);
         }
       })
@@ -3169,6 +3190,54 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     </button>
   );
   const retainedResultHost = window.MastermindMissionHost;
+  const retainedHostGeneration = retainedResultHost?.invalidationGeneration?.() ?? 0;
+  const retainedProgram = retainedRoot && index.state === "AVAILABLE"
+    ? index.programs.filter(p => p.workRef === retainedRoot.pair.workRef)
+    : [];
+  // This is a separate read-only choice, never the Mission/action selection.
+  // Every new Programs read invalidates it, including A-B-A source changes.
+  const currentRetainedRoot = retainedRoot &&
+    retainedRoot.index === index && retainedRoot.epoch === programIndexEpoch &&
+    retainedRoot.epoch === programRequest.current &&
+    retainedRoot.authRevision === authRevision &&
+    retainedRoot.host === retainedResultHost &&
+    retainedRoot.hostGeneration === retainedHostGeneration &&
+    retainedRoot.missionWorkRef === (selection?.workRef ?? null) &&
+    (!authState || authState.acquisition) && retainedProgram.length === 1 &&
+    retainedProgram[0].rootState === "CONFLICT" &&
+    retainedProgram[0].rootCandidates.length > 1 &&
+    retainedRoot.candidates === JSON.stringify(retainedProgram[0].rootCandidates) &&
+    retainedProgram[0].rootCandidates.includes(retainedRoot.pair.rootJobId)
+      ? retainedRoot : null;
+  useLayoutEffect(() => {
+    if (retainedRoot && !currentRetainedRoot) setRetainedRoot(null);
+  }, [retainedRoot, currentRetainedRoot]);
+  const chooseRetainedRoot = (pair: MissionSelection) => {
+    const normalized = normalizeResultReferencesSelection(pair);
+    if (!normalized || index.state !== "AVAILABLE" ||
+        programIndexEpoch !== programRequest.current ||
+        (authState && !authState.acquisition)) return;
+    const programmes = index.programs.filter(p => p.workRef === normalized.workRef);
+    if (programmes.length !== 1 || programmes[0].rootState !== "CONFLICT" ||
+        programmes[0].rootCandidates.length < 2 ||
+        !programmes[0].rootCandidates.includes(normalized.rootJobId)) return;
+    setRetainedRoot({ pair: normalized, index, epoch: programIndexEpoch,
+      authRevision, host: retainedResultHost, hostGeneration: retainedHostGeneration,
+      missionWorkRef: selection?.workRef ?? null,
+      candidates: JSON.stringify(programmes[0].rootCandidates) });
+  };
+  const selectedHistoryPanel = currentRetainedRoot && retainedResultHost?.readResultReferences &&
+    retainedResultHost.readResult ? <RetainedResults
+      key={JSON.stringify([authRevision, programIndexEpoch, retainedHostGeneration,
+        currentRetainedRoot.pair])}
+      selection={currentRetainedRoot.pair} authGeneration={authRevision}
+      hostGeneration={retainedHostGeneration} locale={locale}
+      missionState="UNAVAILABLE"
+      readReferences={retainedResultHost.readResultReferences}
+      readResult={retainedResultHost.readResult}
+      renderResult={(selected, document) =>
+        <ResultCard state={{ kind: "READY", selection: selected, document }} />}
+    /> : null;
   const retainedResultsPanel = selection && !directSelected &&
     retainedResultHost?.readResultReferences && retainedResultHost.readResult &&
     (!authState || authState.acquisition) ? (
@@ -3376,8 +3445,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ) : index.programs.length ? (
           <div className="programs">
             {index.programs.map((p) => (
+              <div key={p.workRef}>
               <button
-                key={p.workRef}
                 disabled={!p.rootJobId}
                 onClick={() => open(p.workRef, p.rootJobId)}
               >
@@ -3390,10 +3459,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                   {p.rootJobId
                     ? `Mission ${p.rootJobId}`
                     : p.rootState === "CONFLICT"
-                      ? `Root conflict: ${p.rootCandidates.join(", ") || "multiple responsibility rows"}`
+                      ? (locale === "zh-CN" ? "任务根存在冲突：当前任务仍未确定。" : "Root conflict: the current Mission stays unresolved.")
                       : "Root unknown; no mission was guessed"}
                 </small>
               </button>
+              {p.rootState === "CONFLICT" && p.rootCandidates.length > 1 ? <RetainedRootChoice workRef={p.workRef} rootCandidates={p.rootCandidates}
+                rootState={p.rootState} locale={locale}
+                selectedRootJobId={currentRetainedRoot?.pair.workRef === p.workRef
+                  ? currentRetainedRoot.pair.rootJobId : null}
+                onChooseRoot={chooseRetainedRoot} /> : null}
+              {currentRetainedRoot?.pair.workRef === p.workRef ? selectedHistoryPanel : null}
+              </div>
             ))}
           </div>
         ) : index.state === "AVAILABLE" ? (
