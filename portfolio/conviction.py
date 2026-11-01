@@ -60,6 +60,112 @@ def _load(rel: str):
         return None
 
 
+# ── INFORMATION TIME — the one rule every candidate source obeys ─────────────────────────────────
+# A source is admissible at decision boundary `asof` iff it can be SHOWN to represent a state at or
+# before `asof`. Three kinds of source, one rule:
+#
+#   * SELF-DATING SNAPSHOT (us_standouts / baskets / the Prophet index) — a single CURRENT file that
+#     states the instant it represents. Shown by its own `as_of`/`asof`; a file that post-dates the
+#     decision is inert. It is never mined row-by-row for "old enough" entries: the rows' state is
+#     recomputed at the file's own date, so that would import post-boundary judgment.
+#   * UNDATED CURRENT STATE (the open-thesis ledger, the intake queue, the Neural-Web context,
+#     sector cycles) — these represent NOW and keep no history: brain/ledger.close() rewrites a
+#     thesis's `status` in place, so "was this open on 2026-07-20" is unanswerable. Their information
+#     time is today, so a binding past boundary makes them explicitly inert rather than today's
+#     state in disguise.
+#   * DATE-ADDRESSABLE SERIES (the price store) — sliced at `<= asof` in portfolio/risk_sizing.
+#
+# WHEN DOES A BOUNDARY BIND? The CALLER declares it — `build(..., live=...)` — and it cannot be
+# inferred. The live daily run passes an `asof` too (bot/phase2: `asof = asof or regime["date"]`),
+# so "an asof was given" does not mean "replay"; neither does "the asof is before today", because
+# the Macro lanes publish on different cadences and a live artifact routinely post-dates the regime
+# date (the Prophet emit is stamped 2026-09-16 while the regime date is 2026-09-15). Guessing from
+# the wall clock would silently make live sources inert. So `live=True` (what phase2 passes) means
+# "use current evidence, `asof` is a label" and nothing below changes; the default `live=False`
+# means `asof` BINDS and every rule here applies.
+
+def _artifact_asof(d: dict | None) -> str | None:
+    """The date a self-dating artifact says it represents (`as_of` or `asof`), or None."""
+    if not isinstance(d, dict):
+        return None
+    v = d.get("as_of") or d.get("asof")
+    return str(v)[:10] if v else None
+
+
+def _snapshot_ok(d: dict | None, asof: str | None, what: str) -> bool:
+    """Admissibility of a SELF-DATING snapshot at boundary `asof`. Unbounded (`asof=None`) admits it
+    exactly as before. A bounded read requires a date that is present and at/before the boundary —
+    an undated artifact cannot prove pre-boundary provenance, and assuming would be manufacturing
+    history."""
+    if asof is None:
+        return True
+    art = _artifact_asof(d)
+    if not art:
+        log.debug("conviction: %s has no as_of — inadmissible at asof=%s", what, asof)
+        return False
+    if art > str(asof)[:10]:
+        log.debug("conviction: %s as_of=%s post-dates asof=%s — inert", what, art, asof)
+        return False
+    return True
+
+
+def _now_state_ok(asof: str | None) -> bool:
+    """Admissibility of UNDATED CURRENT STATE at boundary `asof`: true when the read is UNBOUNDED
+    (the state IS the boundary — the live build), false under a binding boundary, where no
+    point-in-time form of that state exists."""
+    return asof is None
+
+
+def _bound(fn, asof: str | None):
+    """Call a candidate source with the decision boundary — or zero-arg when there is none.
+
+    `asof=None` means "unbounded", and the unbounded path must be the pre-asof path exactly, so it
+    is called with the pre-asof signature. This also keeps every zero-argument source double in the
+    suite valid on that path."""
+    return fn(asof) if asof is not None else fn()
+
+
+def _information_time(asof: str | None, pit: str | None) -> dict:
+    """The build's honest information-time record: what the decision boundary was, whether it BOUND,
+    and which sources it admitted or refused. Rides out on `data_health` so a historical build that
+    produced a smaller book can say WHY instead of looking like a quiet disagreement. Never raises.
+
+    `asof` is the label the build was given; `pit` is the boundary that actually bound (None on a
+    live build, where every source is admitted exactly as before). Shape: ``{asof, bounded,
+    now_state_admissible, sources: {name: {admitted, artifact_asof, reason}}}`` — `reason` is None
+    when admitted."""
+    rec: dict = {"asof": asof, "bounded": pit is not None,
+                 "now_state_admissible": _now_state_ok(pit), "sources": {}}
+    def _snap(name: str, rel: str) -> None:
+        try:
+            d = _load(rel) or {}
+            art = _artifact_asof(d)
+            ok = _snapshot_ok(d, pit, name)
+            rec["sources"][name] = {
+                "admitted": ok, "artifact_asof": art,
+                "reason": None if ok else ("no_as_of" if not art else "post_dates_asof"),
+            }
+        except Exception:  # noqa: BLE001 — the record is diagnostic; never break a build
+            rec["sources"][name] = {"admitted": None, "artifact_asof": None, "reason": "error"}
+    try:
+        _snap("us_standouts", "site/factordata/us_standouts.json")
+        _snap("baskets", "site/basketdata/baskets.json")
+        try:
+            from portfolio import prophet_feed
+            rec["sources"]["prophet"] = prophet_feed.availability(pit)
+        except Exception:  # noqa: BLE001
+            rec["sources"]["prophet"] = {"available": None, "reason": "error"}
+        _now = _now_state_ok(pit)
+        for name in ("thesis_ledger", "intake_queue", "regime_seed", "neural_web_context"):
+            rec["sources"][name] = {
+                "admitted": _now, "artifact_asof": None,
+                "reason": None if _now else "current_only_source_at_past_boundary",
+            }
+    except Exception:  # noqa: BLE001
+        pass
+    return rec
+
+
 def _respect_standout_gate() -> bool:
     """Doctrine toggle (P-NEW-2): honour the standout board's own `gate_go` verdict. Default TRUE.
     A missing/unreadable doctrine key degrades to today's behaviour (respect the gate) — the gate
@@ -72,7 +178,7 @@ def _respect_standout_gate() -> bool:
         return True
 
 
-def _us_standouts(n: int = TOP_US) -> list[str]:
+def _us_standouts(n: int = TOP_US, asof: str | None = None) -> list[str]:
     """Top-N tickers from the us_stocks standout BUY board (already rank-ordered by alpha).
 
     RESPECTS THE BOARD'S OWN GATE (P-NEW-2): the dashboard publishes `gate_go` — its Phase-0 verdict
@@ -84,6 +190,8 @@ def _us_standouts(n: int = TOP_US) -> list[str]:
       * gate_go truthy         → today's behaviour, ingest;
       * gate_go explicitly False (and the doctrine toggle is on) → SKIP (never adds, only removes)."""
     d = _load("site/factordata/us_standouts.json") or {}
+    if not _snapshot_ok(d, asof, "us_standouts board"):
+        return []
     buy = d.get("buy") or d.get("standouts") or []
     gate_go = d.get("gate_go")
     if gate_go is False and _respect_standout_gate():
@@ -194,13 +302,15 @@ def _sector_of(t: str) -> str:
     return lenses._SECTOR_ETF.get(sec, sec)
 
 
-def _basket_top_picks(n: int = TOP_BASKET) -> list[str]:
+def _basket_top_picks(n: int = TOP_BASKET, asof: str | None = None) -> list[str]:
     """Top-N single-name picks across all thematic baskets, ranked by 20-day return.
 
     Union every basket's members, keep each name's best 20d return, take the top N. The
     extension veto at the gate handles parabolic momentum names, so a momentum-ranked feed
     is safe here."""
     d = _load("site/basketdata/baskets.json") or {}
+    if not _snapshot_ok(d, asof, "baskets"):
+        return []
     best: dict[str, float] = {}
     for b in (d.get("baskets") or []):
         for m in (b.get("members") or []):
@@ -299,7 +409,7 @@ def _basket_leaders(basket: dict, top_n: int, min_last: float) -> list[str]:
     return [sym for _, sym in scored[:max(0, int(top_n))]]
 
 
-def regime_seed() -> list[str]:
+def regime_seed(asof: str | None = None) -> list[str]:
     """The DERIVED leadership seed that replaces the dead `_SHORTLIST`.
 
     Sources (in priority order): the doctrine bottleneck-chain order-layer baskets, then the remaining
@@ -321,9 +431,17 @@ def regime_seed() -> list[str]:
     min_last = float(cfg.get("liquidity_min_last", 0.0) or 0.0)
 
     d = _load("site/basketdata/baskets.json") or {}
+    if not _snapshot_ok(d, asof, "baskets"):
+        return []
     baskets = d.get("baskets") or []
     by_id = {b.get("id"): b for b in baskets if isinstance(b, dict) and b.get("id")}
 
+    # The cycle read below is UNDATED CURRENT STATE, and under a binding past boundary it cannot be
+    # consumed. Refusing only the filter would SILENTLY WIDEN the historical seed (an absent cycle
+    # read makes the filter a no-op, i.e. more names), so the whole seed goes inert instead.
+    if not _now_state_ok(asof):
+        log.debug("conviction: regime_seed inert at asof=%s (sector cycles are current-only)", asof)
+        return []
     # cycle read (may be {} when stale/absent → filter becomes a no-op).
     try:
         from brain import regime_frame
@@ -367,12 +485,17 @@ def regime_seed() -> list[str]:
     return seed
 
 
-def universe() -> list[str]:
-    """The fed-in candidate universe: top us_stocks standouts ∪ top thematic-basket picks."""
-    return sorted(set(_us_standouts()) | set(_basket_top_picks()))
+def universe(asof: str | None = None) -> list[str]:
+    """The fed-in candidate universe: top us_stocks standouts ∪ top thematic-basket picks.
+
+    Both sources are self-dating snapshots; at a bound `asof` each contributes only if its own
+    `as_of` is at/before the decision (see `_snapshot_ok`)."""
+    if asof is None:                      # unbounded == the pre-asof call shape, exactly
+        return sorted(set(_us_standouts()) | set(_basket_top_picks()))
+    return sorted(set(_us_standouts(asof=asof)) | set(_basket_top_picks(asof=asof)))
 
 
-def nw_universe_scan() -> list[str]:
+def nw_universe_scan(asof: str | None = None) -> list[str]:
     """The Neural-Web WHOLE-UNIVERSE candidacy scan (P2 funnel, flag-gated + fail-soft).
 
     Below candidacy mode (nw_decision_mode() < "candidacy", the DEFAULT) this returns [] and has ZERO
@@ -386,6 +509,9 @@ def nw_universe_scan() -> list[str]:
     (the additive source simply contributes nothing — never raises into a build). Lazy import so the
     NW leaf is never loaded when the flag is off.
     """
+    if not _now_state_ok(asof):   # NW candidate_context is undated current state
+        log.debug("conviction: nw_universe_scan inert at asof=%s (context is current-only)", asof)
+        return []
     try:
         from brain import neural_web_context as nwc
         if not nwc._mode_ge(nwc.nw_decision_mode(), "candidacy"):
@@ -415,41 +541,57 @@ def nw_universe_scan() -> list[str]:
         return []
 
 
-def candidates() -> list[str]:
+def candidates(asof: str | None = None) -> list[str]:
     """Conviction candidate pool: the fed-in universe (top us_stocks + top basket picks)
     ∪ open ledger theses (Claude's proposals) ∪ the DERIVED regime seed (W2.3 — bottleneck-chain +
     cycle-favored basket leaders, replacing the dead hardcoded _SHORTLIST) ∪ the unified intake queue
     (radar / alt-data / briefing-corroborated + divergent names the buy board alone misses) ∪ the
     Neural-Web whole-universe candidacy scan (P2 — additive + flag-gated, [] unless NW decision mode
-    >= candidacy). The engine gate (build) filters this down — broad feed in, discipline at the gate."""
+    >= candidacy). The engine gate (build) filters this down — broad feed in, discipline at the gate.
+
+    `asof` (optional) is the DECISION BOUNDARY: every source above is admitted only if it can be
+    shown to represent a state at/before it (see the INFORMATION TIME block at the top of this
+    module). `asof=None` is the unbounded read and is byte-identical to the pre-asof behaviour.
+    Sources are subtract-only under a bound: a boundary can only ever REMOVE a source, never add
+    a name, so no gate invariant changes."""
+    # The open-thesis ledger and the intake queue are both UNDATED CURRENT STATE — brain/ledger's
+    # close() rewrites a thesis's `status` in place, so which theses were open at a past boundary is
+    # unrecoverable, and the queue keeps no history either. Under a bound they are inert.
+    proposed: set[str] = set()
+    fed_in: set[str] = set()
+    if _now_state_ok(asof):
+        try:
+            from brain import ledger
+            proposed = {t["subject"].upper() for t in ledger.all_theses()
+                        if t.get("status") == "open"}
+        except Exception:
+            proposed = set()
+        try:
+            from brain import intake
+            # only reasonably-corroborated names (score floor) so the gate isn't drowned in noise
+            fed_in = set(intake.tickers(limit=60, min_score=0.4))
+        except Exception:
+            fed_in = set()
+    else:
+        log.debug("conviction: thesis ledger + intake queue inert at asof=%s (both current-only)",
+                  asof)
     try:
-        from brain import ledger
-        proposed = {t["subject"].upper() for t in ledger.all_theses() if t.get("status") == "open"}
-    except Exception:
-        proposed = set()
-    try:
-        from brain import intake
-        # only reasonably-corroborated names (score floor) so the gate isn't drowned in noise
-        fed_in = set(intake.tickers(limit=60, min_score=0.4))
-    except Exception:
-        fed_in = set()
-    try:
-        seed = set(regime_seed())
+        seed = set(_bound(regime_seed, asof))
     except Exception:  # noqa: BLE001 — seed is additive; a failure degrades to the other sources
         seed = set()
     # P2: whole-universe NW candidacy passthrough. Byte-identical when off (nw_universe_scan() == [] →
     # `set() | ...` leaves the union unchanged), deduped by ticker (set union), and still subject to
     # the _MANUAL_EXCLUDE hold-out below like every other source.
-    nw_scan = set(nw_universe_scan())
+    nw_scan = set(_bound(nw_universe_scan, asof))
     # W8 §2.3: the US PROPHET feed — entry-endorsed trade plans (entry/trigger/invalidation
     # geometry, tier-gated upstream) as an ADDITIVE candidate source. Inert ([]) when the flag is
     # off / the artifact is absent or stale; the gate still decides like for every other source.
     try:
         from portfolio import prophet_feed
-        prophet = set(prophet_feed.candidate_tickers())
+        prophet = set(_bound(prophet_feed.candidate_tickers, asof))
     except Exception:  # noqa: BLE001 — additive source; a feed failure contributes nothing
         prophet = set()
-    return sorted((seed | set(universe()) | proposed | fed_in | nw_scan | prophet)
+    return sorted((seed | set(_bound(universe, asof)) | proposed | fed_in | nw_scan | prophet)
                   - _MANUAL_EXCLUDE)
 
 
@@ -465,15 +607,29 @@ def _entry_gate_enabled() -> bool:
 
 def build(budget: float, name_cap: float = 0.08,
           held: set | None = None, asof: str | None = None,
-          extra_candidates: list[str] | None = None) -> tuple[list[dict], list[dict]]:
+          extra_candidates: list[str] | None = None,
+          live: bool = False) -> tuple[list[dict], list[dict]]:
     """Return (sized_positions, rejected) where rejected contains every evaluated name
     that did NOT make the size gate, with the veto/bear detail that kept it out.
 
     `held` = tickers already open in the conviction book; they get priority in the sector cap
     (hysteresis) so a name isn't churned in/out across builds when a marginally-higher new name
-    appears. `asof` (additive, optional) stamps the W8 entry/context reports; `extra_candidates`
-    (additive, optional) carries watchlist promotions back into the pool. Sizing behaviour is
-    otherwise unchanged.
+    appears. `extra_candidates` (additive, optional) carries watchlist promotions back into the
+    pool.
+
+    `asof` is the DECISION BOUNDARY and, by default, it BINDS — it is no longer merely a stamp on
+    the W8 entry/context reports. Every upstream source is then admitted only if it can be shown to
+    represent a state at or before it, and the realized-vol window in `risk_sizing.apply` is
+    truncated at it, so replaying the same historical decision returns the same book (or the same
+    explicit inert sources) however much later the replay runs. See the INFORMATION TIME block at
+    the top of this module.
+
+    `live=True` declares the opposite contract: `asof` is a LABEL for the trading day being decided
+    and the build should use the best CURRENT evidence. That is what the daily run passes, and it
+    is byte-identical to the pre-asof behaviour. It has to be declared rather than inferred: the
+    live run supplies an `asof` as well, and that `asof` is routinely older than the artifacts it
+    must read (the Macro lanes publish on different cadences), so any wall-clock guess would
+    silently make the live Prophet feed and standout board inert.
     """
     held = {h.upper() for h in (held or set())}
     _w8 = _entry_gate_enabled()
@@ -485,7 +641,10 @@ def build(budget: float, name_cap: float = 0.08,
 
     # W8 §2.8: watchlist promotions union in HERE (not inside candidates(), whose zero-arg
     # signature is a monkeypatch surface for a dozen tests). Additive; the gate still decides.
-    _pool = list(candidates())
+    # Resolve the boundary ONCE: `_pit` is the asof that BINDS — None on a live build, where every
+    # information-time rule below is a no-op and behaviour is byte-identical to the pre-asof path.
+    _pit = None if live else asof
+    _pool = list(_bound(candidates, _pit))
     _promoted = {str(x).upper().strip() for x in (extra_candidates or []) if x}
     _pool = sorted(set(_pool) | (_promoted - _MANUAL_EXCLUDE))
     for t in _pool:
@@ -541,7 +700,7 @@ def build(budget: float, name_cap: float = 0.08,
             try:
                 from portfolio import context_gate as _ctxg
                 from portfolio import entry_engine as _eeng
-                entry_rep = _eeng.assess(t, as_of=asof)
+                entry_rep = _eeng.assess(t, as_of=asof, pit_asof=_pit)
                 ctx_rep = _ctxg.assess(
                     t, entry_verdict=entry_rep.get("verdict"),
                     entry_tier_ok=bool(entry_rep.get("metrics", {}).get("tier_fresh")
@@ -665,7 +824,7 @@ def build(budget: float, name_cap: float = 0.08,
                 try:
                     from portfolio import context_gate as _ctxg
                     from portfolio import entry_engine as _eeng
-                    _probe = _eeng.assess(t, as_of=asof)
+                    _probe = _eeng.assess(t, as_of=asof, pit_asof=_pit)
                     if _probe.get("verdict") == "base_turn":
                         _pctx = _ctxg.assess(t, entry_verdict="base_turn", as_of=asof)
                         if _pctx.get("verdict") != "blocked":
@@ -761,6 +920,9 @@ def build(budget: float, name_cap: float = 0.08,
         "action": ("NEW_ADDS_FROZEN — data feed degraded across the candidate universe; "
                    "holding existing book, refusing all new opens this build")
                   if _breaker_tripped else "ok",
+        # WHAT THIS BUILD WAS ALLOWED TO SEE. A source refused for post-dating the decision is
+        # reported, not silently dropped — a smaller historical book must be explainable.
+        "information_time": _information_time(asof, _pit),
     }
     if _breaker_tripped:
         # keep only names ALREADY in the book (a held name that still cleared the gate on its own real
@@ -817,7 +979,7 @@ def build(budget: float, name_cap: float = 0.08,
     # WHICH names are in. Additive + graceful (neutral until the macro field ships).
     try:
         from portfolio import risk_sizing
-        risk_sizing.apply(sized, budget, name_cap)
+        risk_sizing.apply(sized, budget, name_cap, asof=_pit)
     except Exception:  # noqa: BLE001 — additive, never breaks book construction
         pass
     # W2.2 GRADED EXTENSION BRAKE (subtract): applied AFTER vol-managed sizing so the renorm inside
