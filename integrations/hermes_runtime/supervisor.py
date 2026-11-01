@@ -160,10 +160,16 @@ class ServiceRuntime:
                 raise RuntimeRefusal("NATIVE_GATEWAY_PASSWORD_ALIAS_REFUSED")
             from integrations.hermes_harness.native_model_credential import primary_model_env
             model_keys = primary_model_env(self.profile, self.secrets.values)
-            if any(
-                value in {self.secrets.token, self.secrets.dashboard_password}
-                for value in model_keys.values()
-            ):
+            # Slack bot authority must not travel to the model-serving child
+            # under a different credential name, including dashboard Basic Auth
+            # (which the native Hermes child necessarily receives).
+            protected_values = {self.secrets.token, self.secrets.dashboard_password}
+            slack_bot_token = self.secrets.values.get("HERMES_SLACK_BOT_TOKEN", "")
+            if slack_bot_token:
+                if slack_bot_token in protected_values:
+                    raise RuntimeRefusal("NATIVE_SLACK_BOT_AUTH_ALIAS_REFUSED")
+                protected_values.add(slack_bot_token)
+            if any(value in protected_values for value in model_keys.values()):
                 raise RuntimeRefusal("NATIVE_MODEL_KEY_REUSE_REFUSED")
             env.update(model_keys)
         return env

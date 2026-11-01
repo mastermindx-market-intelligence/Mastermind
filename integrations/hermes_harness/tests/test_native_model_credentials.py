@@ -124,6 +124,46 @@ class NativeCredentialTests(unittest.TestCase):
             rt._model_child_env()
         self.assertEqual(exc.exception.code, "NATIVE_MODEL_KEY_REUSE_REFUSED")
 
+    def test_slack_bot_auth_must_not_alias_gateway_or_dashboard(self) -> None:
+        for label, slack_token in (
+            ("gateway", TOKEN),
+            ("dashboard", "distinct-dashboard-only-fixture-123456"),
+        ):
+            with self.subTest(alias=label):
+                rt = self._runtime(extras=(
+                    "BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n"
+                    "HERMES_SLACK_BOT_TOKEN=" + slack_token + "\n"
+                ))
+                with self.assertRaises(RuntimeRefusal) as exc:
+                    rt._model_child_env()
+                self.assertEqual(exc.exception.code, "NATIVE_SLACK_BOT_AUTH_ALIAS_REFUSED")
+
+    def test_model_key_must_not_alias_slack_bot_token_for_either_role(self) -> None:
+        for role, env_name, value in (
+            ("mmsecretary", "BYTEPLUS_MODELARK_API_KEY", FAKE_BYTEPLUS),
+            ("mmmeta", "ZAI_API_KEY", FAKE_ZAI),
+        ):
+            with self.subTest(role=role):
+                rt = self._runtime(role=role, extras=(
+                    env_name + "=" + value + "\n"
+                    "HERMES_SLACK_BOT_TOKEN=" + value + "\n"
+                ))
+                with self.assertRaises(RuntimeRefusal) as exc:
+                    rt._model_child_env()
+                self.assertEqual(exc.exception.code, "NATIVE_MODEL_KEY_REUSE_REFUSED")
+
+    def test_file_pointer_key_must_not_alias_slack_bot_token(self) -> None:
+        key_file = self.root / "model-key-reused-as-slack-token"
+        key_file.write_text(FAKE_BYTEPLUS + "\n", encoding="utf-8")
+        key_file.chmod(0o600)
+        rt = self._runtime(extras=(
+            "BYTEPLUS_MODELARK_API_KEY_FILE=" + str(key_file) + "\n"
+            "HERMES_SLACK_BOT_TOKEN=" + FAKE_BYTEPLUS + "\n"
+        ))
+        with self.assertRaises(RuntimeRefusal) as exc:
+            rt._model_child_env()
+        self.assertEqual(exc.exception.code, "NATIVE_MODEL_KEY_REUSE_REFUSED")
+
     def test_uninstalled_shadow_profile_cannot_request_key(self) -> None:
         p = compose_profile("mmsecretary", state_dir=self.state, secrets_file=self.secret)
         with self.assertRaises(RuntimeRefusal) as exc:

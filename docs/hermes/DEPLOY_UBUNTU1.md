@@ -173,8 +173,12 @@ the host operator must provision a *distinct*
 `HERMES_DASHBOARD_BASIC_AUTH_PASSWORD` rather than accepting the older
 `load_secrets` default that aliases it to `HERMES_GATEWAY_TOKEN`. The
 model provider key must also differ from both the dashboard password and
-gateway token. The BYOK child will refuse either alias; it never selects a
-replacement secret automatically. Actual values must be provisioned and
+gateway token. The agent's own `HERMES_SLACK_BOT_TOKEN` must also differ
+from the gateway token, dashboard password and primary model key: reusing a
+Slack bearer here could expose it to the model child under a different
+credential name. The BYOK child refuses each alias before process spawn;
+it never selects a replacement secret automatically. Never copy or reuse
+the incumbent Grok Secretary bot token. Actual values must be provisioned and
 rotated by the pre-existing credential owner, never recorded in GitHub or
 tool logs.
 
