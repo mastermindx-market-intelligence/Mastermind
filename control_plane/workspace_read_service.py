@@ -1447,6 +1447,8 @@ class WorkspaceReadService:
             worker = self._read_result
         elif operation == "mission_v3":
             worker = self._read_mission_v3
+        elif operation == "result_references":
+            worker = self._read_result_references
         else:
             return error("invalid_input", 400)
         task = asyncio.create_task(asyncio.to_thread(worker, frame))
@@ -1460,12 +1462,18 @@ class WorkspaceReadService:
             result = self._result_unavailable_body(
                 frame["selection"], _REASON_RESPONSE_OVER_BUDGET)
         except Exception:
-            if operation != "result":
+            if operation == "result_references":
+                # Unexpected retained-reference producer failure: a typed
+                # unavailable body, never an empty success assertion.
+                from control_plane.workspace_result_references import unavailable
+                result = unavailable(frame["selection"], "SOURCE_UNAVAILABLE")
+            elif operation != "result":
                 # Producer failure is a typed transport refusal; the adapter
                 # never manufactures a Mission body.
                 return error("source_unavailable", 503)
-            result = self._result_unavailable_body(
-                frame["selection"], _REASON_SOURCE_UNAVAILABLE)
+            else:
+                result = self._result_unavailable_body(
+                    frame["selection"], _REASON_SOURCE_UNAVAILABLE)
         try:
             if (self.authorize(frame["principal"]) is not True
                     or permission_stamp(self.authorize, frame["principal"]) != permission_before):
@@ -1473,6 +1481,11 @@ class WorkspaceReadService:
         except Exception:
             return error("access_denied", 403)
         return result
+
+    def _read_result_references(self, frame):
+        """Delegate the retained-result-reference read to the closed producer."""
+        from control_plane.workspace_result_references import read_result_references
+        return read_result_references(self, frame)
 
 
 class _ResultOverBudget(Exception):

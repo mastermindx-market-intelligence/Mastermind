@@ -856,6 +856,65 @@ pub async fn read_retained_activity(app: AppHandle, selection: RetainedActivityS
     Ok(value)
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResultReferencesSelection {
+    work_ref: String,
+    root_job_id: String,
+}
+impl ResultReferencesSelection {
+    fn validate(&self) -> Result<()> {
+        validate_workspace_pair(&self.work_ref, &self.root_job_id)
+    }
+}
+const RESULT_REFERENCES_PATH: &str = "/workspace/result-references/current";
+const RESULT_REFERENCES_SCHEMA: &str = "mastermind.workspace_result_references.v1";
+const RESULT_REFERENCES_CAP: usize = PLAN_RESPONSE_CAP;
+
+/// Same fixed public Workspace acquisition bearer, origin, no-store headers,
+/// 16KiB cap and owner-issued generation fence as retained activity. A 503
+/// must keep this route's closed typed schema; 401/403/404 and every other
+/// non-OK status keep the established refusal in bounded_json. Read-only:
+/// no consume, no ACK, no change to the frozen five-tuple Result read.
+#[tauri::command]
+pub async fn read_result_references(
+    app: AppHandle,
+    selection: ResultReferencesSelection,
+) -> Result<Value> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{RESULT_REFERENCES_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (inner.token(Resource::Acquisition)
+            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
+    };
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, RESULT_REFERENCES_CAP).await
+            .and_then(|value| typed_unavailable(value, RESULT_REFERENCES_SCHEMA, false))
+    } else {
+        bounded_json(response, RESULT_REFERENCES_CAP).await
+    };
+    // A completed HTTP request is not publication permission after identity rotation.
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(RESULT_REFERENCES_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host's strict DTO decoder removes unrecognized fields.
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_mission_v3(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     let mut url =
