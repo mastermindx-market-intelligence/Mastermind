@@ -77,3 +77,41 @@ The observed installed Executive source differs from protected master. At 2026-1
 ## 2026-10-24 carrier refresh (historical)
 
 This paragraph records `a1c213b2779539687de1fe9c64368d06b1e0e55c` only. At that refresh the branch had been rebased onto then-current master and did not contain `operator_continuation_sources`, so its three source-contract tests skipped while the module was absent. The Git-identity refusal lived on #656. #1676 was stacked and not yet merged. The retained historical focused count for that refresh is 37 passed / 3 missing-builder skips. Production HOLD already applied: delivery, ACK consumption, native resume, and release were not claimed. The integrated status above supersedes this absence and skip description.
+
+### W3 normal-path source composition (production HOLD)
+
+The normal Executive Control factory constructs the existing Operator Supervisor;
+no separate continuation runner is configured. On an adjacent cross-realm retry,
+the Supervisor reads immutable Attempt placements, the original strict-v2 root
+creation source and verified commission, then uses the existing Attempt-bound
+PREPARE/ACK port. The logical `EXECUTIVE-COO-CODEX-A` declaration remains disabled
+for Wake delivery and does not create a session or admit a worker. Execution still
+requires the real current Runtime binding, lease, fence, grant and released
+predecessor; unresolved operation effects refuse continuation.
+
+The first supported request is one nonempty UTF-8 plain-text input, with no skill
+or resource suffix, on the exact qualified Codex 0.159.2 binary. Unsupported known
+shapes and builds refuse before PREPARE or dispatch. The source-owned prompt
+contains the immutable canonical capsule exactly once. The comparison uses the
+SHA-256 and byte length of the complete rendered request, including its normal
+commission and output schema, rather than comparing a capsule hash to that render.
+
+Only a private host-owned validator may derive the closed continuation ACK. It
+requires one genuine completed parent native turn, the matching candidate/raw
+result artifact, the accepted retained-input evidence for that exact TurnRef and
+native session, unchanged original source facts, and the existing Runtime ACK
+transaction's current authority checks. It runs before the ordinary role seal;
+the post-seal actionable-writer refusal remains unchanged. Retained input alone
+is not the ACK threshold and is never relabelled proof of model use. The resulting
+ACK proves the capsule-specific delivery/comparison threshold only. A useful
+checkpoint action and result, consumption by the original parent, and W4's broader
+successor capabilities remain separate programme acceptance obligations.
+
+A lost ACK response is read back once on the same existing operation and exact
+Event; it is never retried or redispatched. ACK success followed by role-seal
+failure does not complete the Job. A restarted owner cannot reconstruct transient
+trusted input evidence by resending: cross-realm/prepared operations remain
+quarantined through the existing recovery path, while cancellation containment
+remains available. Durable proof recovery beyond this fail-closed limitation is
+not implemented here. All source checks use private Runtime databases and fake
+native observations; no native consumption or production usability is claimed.

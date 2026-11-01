@@ -1023,7 +1023,9 @@ class ExecutiveOperatorSupervisor:
             verified_commission = verify_commission_for_job(
                 self.runtime, job,
                 (None if self._workspace_identity_source is not None
-                 else Path(job.worktree).resolve(strict=True))
+                 else Path(job.worktree).resolve(strict=True)),
+                owner_workspace_identity=(requested.workspace
+                    if self._workspace_identity_source is not None else None),
             )
         except Exception as exc:
             raise ExecutiveOperatorSupervisorError(
@@ -1032,6 +1034,9 @@ class ExecutiveOperatorSupervisor:
         prompt_by_turn: dict[str, str] = {
             "pending": self._prompt(job, lease, verified_commission)
         }
+        from control_plane.operator_continuation_delivery import _continuation_for_claim
+        continuation = _continuation_for_claim(self.runtime, job, lease, requested,
+            verified_commission, prompt_by_turn["pending"])
 
         def load_turn(turn: Any) -> str:
             try:
@@ -1053,7 +1058,7 @@ class ExecutiveOperatorSupervisor:
         turn_operation = self._turn_operation_id(
             attempt_id,
             verified_commission,
-        )
+        ) if continuation is None else continuation.operation
         stop_operation = OperationId(f"ohf-op:stop:{attempt_id}")
         session: OperatorSessionReceipt | None = None
         try:
@@ -1062,6 +1067,8 @@ class ExecutiveOperatorSupervisor:
                 requested=requested,
                 operation_id=start_operation,
             )
+            if continuation is not None:
+                prompt_by_turn["pending"] = continuation.prepare(session)
 
             def bound_prompt(turn: Any) -> str:
                 value = prompt_by_turn.pop("pending")
@@ -1073,6 +1080,9 @@ class ExecutiveOperatorSupervisor:
                 session,
                 operation_id=turn_operation,
                 timeout_seconds=300.0,
+                **({"_before_role_seal": lambda receipt, raw:
+                    continuation.consume_before_seal(receipt, raw, adapter, session)}
+                    if continuation is not None else {}),
             )
             raw = adapter.observe_raw_role_result(turn.turn)
             if retain_native:
@@ -1278,6 +1288,11 @@ class ExecutiveOperatorSupervisor:
         self, attempt_id: str
     ) -> ReconcileReceipt:
         previous = self.runtime.attempts.get_attempt(attempt_id)
+        if previous is not None and previous.status is not AttemptStatus.CANCEL_REQUESTED:
+            from control_plane.operator_continuation_delivery import _continuation_recovery_held
+            if _continuation_recovery_held(self.runtime, previous):
+                return ReconcileReceipt(attempt_id=attempt_id, job_id=previous.job_id,
+                    status=ReconcileStatus.LIVE_QUARANTINED, process_was_live=False)
         if previous is None:
             raise ExecutiveOperatorSupervisorError(
                 "operator recovery Attempt disappeared"
