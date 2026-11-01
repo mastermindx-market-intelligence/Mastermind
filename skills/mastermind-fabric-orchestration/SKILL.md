@@ -36,3 +36,7 @@ Use the existing authenticated Executive/Fabric client actually supplied to this
 Load this core plus only the role supplied by the accepted assignment from references/meta-ceo.md, program-ceo.md, operator.md, worker.md or reviewer.md. Do not infer authoritative identity from a filename/model or clone parent transcripts. The existing launch/capability owner must project and prove actual child loading separately from file installation. Missing role content blocks new delegated modifying work, never diagnostics or reconciliation.
 
 Keep EFFECT_UNKNOWN on the original operation/carrier; do not resend, rebind, release or switch accounts to evade it. Return exact artifacts, actual validation, independent-review disposition and the next reserved decision. Installed files, loaded instructions, admitted execution, START, return and acceptance are separate evidence.
+
+## Graph methods and observed economics
+
+When selecting or revising delegation topology, load [references/graph-engineering.md](references/graph-engineering.md). It provides five optional methods and the validator-backed planning consumer; custom graphs keep the same incumbent constraints. Reserve review and integration first, and judge economics over the whole accepted outcome. These source tools provide advice and observed resource coverage; runtime admission and actual skill loading remain separate proofs.

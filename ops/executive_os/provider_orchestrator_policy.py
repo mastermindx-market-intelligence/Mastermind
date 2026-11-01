@@ -93,7 +93,15 @@ Leaf workers cannot fan out; only a separately admitted operator with the
 controller-issued child scope may request C0/C1 descendants.
 <!-- /mastermind-claude-fabric-entrypoint-v1 -->
 """
-ROLE_SHA256 = {'SKILL.md': '2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8', 'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240', 'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47', 'references/operator.md': '8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
+ROLE_SHA256 = {
+    'SKILL.md': '4a9b423970063f8c44414210fc3fcf051dd9ee4e21efb0644e2457cc5763967e',
+    'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240',
+    'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47',
+    'references/operator.md': '8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c',
+    'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924',
+    'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c',
+    'references/graph-engineering.md': '7d88ab8a016bc3fd64aaf84fff52d4e99490b453e5d601a1d968baabc30000fe',
+}
 
 POLICY_BODY = f"""{BEGIN}
 ## Mastermind CEO / orchestrator forward execution
