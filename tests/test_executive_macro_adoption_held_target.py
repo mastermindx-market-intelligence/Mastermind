@@ -10,6 +10,7 @@ import errno
 import os
 from pathlib import Path
 import stat
+import tempfile
 from types import SimpleNamespace
 
 import pytest
@@ -21,8 +22,12 @@ from ops.executive_os import macro_adoption as adoption
 
 
 @pytest.fixture
-def held_target(tmp_path, monkeypatch):
-    system = tmp_path.resolve() / "synthetic-system"
+def held_target(monkeypatch, request):
+    # Linux pytest temp roots live under world-writable /tmp. Keep real ancestor
+    # modes enforced by placing only this fixture beneath canonical private HOME.
+    private = tempfile.TemporaryDirectory(prefix=".mmos-held-target-", dir=Path.home().resolve(strict=True))
+    request.addfinalizer(private.cleanup)
+    system = Path(private.name) / "synthetic-system"
     root = system / "macro-sources" / ("b" * 40)
     artifact = root / "data/governance/agent_os_state.json"
     artifact.parent.mkdir(parents=True)
