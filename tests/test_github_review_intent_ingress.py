@@ -1452,3 +1452,77 @@ class TestAuthorBoundReadbackAndFinalEffectGuard:
                 expected_publisher=EXPECTED_PUBLISHER, before_post=lambda: None,
             )
         assert tx.submits == 0
+
+
+def test_external_github_source_contracts_are_publicly_exported():
+    assert "ExternalGitHubSourceFacts" in ing.__all__
+    assert "ExternalGitHubSourcePort" in ing.__all__
+    assert "ExternalCommentAdvisory" in ing.__all__
+
+
+def test_rendered_review_body_limit_refused_before_publisher():
+    _, admitted = _admitted_decision()
+    publications = FakePublications()
+    result = _publish(
+        admitted.decision, admitted.job_id,
+        results=FakeResults(_verified(job_id=admitted.job_id, summary="A" * 16000)),
+        publications=publications,
+    )
+    assert result.state is ing.PublishState.REFUSED
+    assert result.refusal == "REVIEW_BODY_OVER_BOUND"
+    assert publications.calls == []
+
+
+class _AdvisoryPulls(FakePullRequests):
+    def read_external_source(self, *, repository, pull_number):
+        return ing.ExternalGitHubSourceFacts(
+            repository=REPOSITORY, pull_number=PULL_NUMBER, head_sha=HEAD_SHA,
+            submitter_login="alice", submitter_id=314,
+        )
+
+
+def _external_result(job_id):
+    return _verified(
+        job_id=job_id, source_basis="EXTERNAL_GITHUB_SUBMITTER",
+        builder_worker_id="", source_github_submitter_login="alice",
+        source_github_submitter_id=314,
+    )
+
+
+def test_external_draft_without_a_sealed_advisory_does_not_publish():
+    _, admitted = _admitted_decision()
+    publications = FakePublications()
+    outcome = _publish(
+        admitted.decision, admitted.job_id,
+        results=FakeResults(_external_result(admitted.job_id)),
+        publications=publications,
+        pull_requests=_AdvisoryPulls(_pull_request(draft=True)),
+    )
+    assert outcome.refusal == "EXTERNAL_ADVISORY_UNBOUND"
+    assert publications.calls == []
+
+
+def test_final_guard_draft_requires_sealed_comment_advisory():
+    _, admitted = _admitted_decision()
+    pulls = _AdvisoryPulls(_pull_request(draft=True))
+    proof = ing.ExternalCommentAdvisory(submitter_user_id=314, submitter_login="alice")
+    with pytest.raises(ing.FinalPostRefusal, match="PULL_REQUEST_DRAFT"):
+        ing.FinalPullRequestCheck(
+            decision=admitted.decision, pull_requests=pulls, event="COMMENT",
+        )()
+    ing.FinalPullRequestCheck(
+        decision=admitted.decision, pull_requests=pulls, event="COMMENT",
+        advisory=proof,
+    )()
+    with pytest.raises(ing.FinalPostRefusal, match="EXTERNAL_ADVISORY_VERB_REFUSED"):
+        ing.FinalPullRequestCheck(
+            decision=admitted.decision, pull_requests=pulls,
+            event="REQUEST_CHANGES", advisory=proof,
+        )()
+    with pytest.raises(ing.FinalPostRefusal, match="EXTERNAL_SOURCE_DRIFT"):
+        ing.FinalPullRequestCheck(
+            decision=admitted.decision, pull_requests=pulls, event="COMMENT",
+            advisory=ing.ExternalCommentAdvisory(
+                submitter_user_id=315, submitter_login="alice",
+            ),
+        )()
