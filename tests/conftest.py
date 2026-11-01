@@ -325,6 +325,43 @@ def _isolate_book_state(_book_state_root, monkeypatch):
         pass
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "strict_book_dirs: run without the test-only book-dir bootstrap shim (W3-E14)",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _book_dir_bootstrap_shim(request, monkeypatch, tmp_path_factory):
+    """TEST-ONLY stand-in for the explicit bootstrap (E14): a book dir that is MISSING and lies
+    under this session's pytest basetemp is created on first check, so legacy tests that write
+    books into fresh tmp dirs keep working.  Never applies outside basetemp, and never to a test
+    marked ``strict_book_dirs`` (those exercise the production fail-closed behaviour)."""
+    if request.node.get_closest_marker("strict_book_dirs"):
+        return
+    try:
+        from portfolio import paper_account, self_directed
+    except ImportError:
+        return
+    base = tmp_path_factory.getbasetemp().resolve()
+    for mod in (paper_account, self_directed):
+        real = mod._check_book_dir
+
+        def _shim(data_dir, _real=real):
+            problem, exc = _real(data_dir)
+            if problem == "data_dir_missing":
+                try:
+                    Path(data_dir).resolve().relative_to(base)
+                except ValueError:
+                    return problem, exc
+                Path(data_dir).mkdir(parents=True, exist_ok=True)
+                return _real(data_dir)
+            return problem, exc
+
+        monkeypatch.setattr(mod, "_check_book_dir", _shim)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_bot_db(tmp_path, monkeypatch):
     """Isolate the system-of-record SQLite store (data_layer.store._DB) to a tmp file.
