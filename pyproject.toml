@@ -27,12 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    # pytest 9.2.0 reds five existing tests at teardown: FDCapture.snap() now
-    # calls os.fstat() while a test's os.fstat patch is still active, and
-    # monkeypatch.setattr() now reads the old value from __dict__, so repeated
-    # raising=False sets on starlette State undo into a second delete. Hold
-    # below 9.2 until those tests are made 9.2-safe; the gate locks pin 9.1.1.
-    "pytest>=8,<9.2",
+    "pytest>=8,<10",
     # The historical mcp>= floor is intentionally retired; the maintained v1
     # release below is exact so unrelated SDK movement cannot red hosted CI.
     # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.
