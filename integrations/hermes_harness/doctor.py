@@ -13,12 +13,17 @@ import subprocess
 from collections.abc import Mapping
 from pathlib import Path
 
-from integrations.hermes_models.contract import PROVIDERS
+from integrations.hermes_models.contract import PROFILE_PRIMARY, PROVIDERS, provider
+from integrations.hermes_models.credentials import CredentialUnavailable, load_credential
 from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
 from integrations.hermes_runtime.errors import RuntimeRefusal
 from integrations.hermes_runtime.secrets import load_secrets
 
 SCHEMA = "mastermind.hermes_harness.doctor.v1"
+# Primary native model keys originate in the role-private secrets file.
+_NATIVE_PRIMARY_ROLE_BY_ENV = {
+    provider(ident).credential_env: role for role, ident in PROFILE_PRIMARY.items()
+}
 M2STUDIO_MACHINE = "61f4e9d7-b202-4cda-85ed-36904689931e"
 
 _CREDENTIALS = (
@@ -56,7 +61,15 @@ def doctor(
     root = Path.home() if home is None else home
     missing: list[str] = []
     for env_name, file_name in _CREDENTIALS:
-        if not _credential_present(env, env_name, file_name):
+        native_role = _NATIVE_PRIMARY_ROLE_BY_ENV.get(env_name)
+        # A shell key can qualify an offline model test, but never a native
+        # systemd child. Report its actual receiving credential source here.
+        present = (
+            _native_primary_present(root, native_role)
+            if native_role is not None
+            else _credential_present(env, env_name, file_name)
+        )
+        if not present:
             missing.append(f"credential:{env_name}")
     for name in _SECRET_FILES:
         path = root / ".config" / "hermes-runtime" / name
@@ -99,6 +112,16 @@ def format_doctor(report: Mapping[str, object]) -> str:
     for item in rows:
         lines.append(f"- {item}")
     return "\n".join(lines) + "\n"
+
+
+def _native_primary_present(home: Path, role: str) -> bool:
+    path = home / ".config" / "hermes-runtime" / f"{role}.secrets.env"
+    try:
+        secrets = load_secrets(path)
+        load_credential(provider(PROFILE_PRIMARY[role]), secrets.values)
+    except (RuntimeRefusal, CredentialUnavailable, OSError):
+        return False
+    return True
 
 
 def _credential_present(env: Mapping[str, str], env_name: str, file_name: str) -> bool:
