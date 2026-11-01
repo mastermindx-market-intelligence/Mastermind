@@ -1,0 +1,30 @@
+{
+  "hash": "sha256",
+  "excludes": [
+    "evidence/validation_receipt.json",
+    "evidence/content_manifest.json"
+  ],
+  "files": {
+    "01_CENSUS_AND_AUDIT.md": "6a1a38a80d14e10e7d696e30ceefd4754ec4c51e930adbb382a49007a994a37a",
+    "02_OPEN_MASTERPLAN.md": "ac86d42592aff77504e4acb4a296e42feb7b2f1a4a994dde99be81524e948ab9",
+    "03_SYSTEM_AND_PRODUCT_DESIGN.md": "3de5c771fca03756bf59a5638dddeae4e9bd045c3ca0249091be970e4f8d40b9",
+    "04_ACCEPTANCE_AND_EVALUATION.md": "5a49163811ff6b691de25a4242994188999069dec958dc90d7b6726811151e3e",
+    "05_RESEARCH_AND_HARNESS_OPTIONS.md": "cab507d9615e0532164413bf4a2043f858f9add95eccf0bc5a2716f7978742e2",
+    "06_FABLE_RESOURCE_MAP_AND_KICKOFF.md": "7d6fbc9f156a55950699340d8569ef0e314649bd2a7e6ff60003485e4ef28d03",
+    "07_EVIDENCE_AND_HANDOFF.md": "d9e01229a218d5a4ab4ed9391f5373c8b531727f425168972504bbca6ef4098e",
+    "08_FABRIC_SOURCE_AUDIT_ADJUDICATION.md": "c1fbb866adc9d7fe92b65605f15202b4cbb3255d79bee76ab9e7a9c8c303a97b",
+    "FABLE_BRIEF.md": "c82d590eba4ee0bd43e027be6955b1aa57e6e6d3c354af22707376bfe8d3c387",
+    "README.md": "9402ee1155da73d219456de6709966a1b6aa073a24cbf952d2b1972b2bef70a4",
+    "evidence/candidate_files.json": "25853b67e44ca81d7efb09dc8d5dd53c30804b3234f5ce36d9afd594eb7017b0",
+    "evidence/check_snapshot.json": "516a4b4ba32a85dfebb29fe3a6bda1aa84368c3b34ed37bac7223bada99bcfcd",
+    "evidence/fabric_audit_receipt.json": "d081b11376deb2e325ae204545a05ad32b33c79a8170bb276d8bbf3bb30150b0",
+    "evidence/original_46_capabilities.json": "d10065ae65c21070352596ee761b9d823fb377e7d690580a1717e7d6d6686dbb",
+    "evidence/original_r2_obligations.json": "1d8c77135c263f4b9d93fdde67b87fb4e03d210957f1628b2f78ca60f255d6fe",
+    "evidence/pack_review_receipt.json": "3108c14fae2db079521e7eab8a3e85c92f5d47bc503987db3cc8f2985c9fc380",
+    "evidence/pr_snapshot.csv": "a36afd6c7c79f8a049a4085171c44fc6825ab6e32ee60ea889f86771046c875a",
+    "evidence/pr_snapshot.json": "043d8ba652a86f6bbfa8dbc0c8ed7234d13989718f877ce6a28e76f99dab2fc8",
+    "evidence/validator_negative_checks.json": "4240c09b520664fe242ec8c13de4d1cb5ea225383c1b0996c943cd0805c3e10c",
+    "evidence/workstream_snapshot.json": "39e19c8a17cd4685ccae2a7f090fd2edaf344550f9413c9d8918d8a1e11a599e",
+    "validate_pack.py": "137f9fad68ed355e388ce0cdc4edcc4b2fc04cfe42ba443b7231397d51f69768"
+  }
+}

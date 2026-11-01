@@ -1,0 +1,21 @@
+{
+  "observed_at_utc": "2026-10-31T06:25:43.779378+00:00",
+  "scope": "Static pack-validator negative fixtures only; no product qualification",
+  "result": "PASS",
+  "cases": [
+    {
+      "case": "broken-local-link",
+      "exit_code": 1,
+      "detected_errors": [
+        "Broken local link: README.md -> does-not-exist.md"
+      ]
+    },
+    {
+      "case": "missing-capability",
+      "exit_code": 1,
+      "detected_errors": [
+        "Original capability denominator differs from 46 stable IDs"
+      ]
+    }
+  ]
+}
