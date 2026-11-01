@@ -131,8 +131,8 @@ class NativeCredentialTests(unittest.TestCase):
         ):
             with self.subTest(alias=label):
                 rt = self._runtime(extras=(
-                    "BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\\n"
-                    "HERMES_SLACK_BOT_TOKEN=" + slack_token + "\\n"
+                    "BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n"
+                    "HERMES_SLACK_BOT_TOKEN=" + slack_token + "\n"
                 ))
                 with self.assertRaises(RuntimeRefusal) as exc:
                     rt._model_child_env()
@@ -145,8 +145,8 @@ class NativeCredentialTests(unittest.TestCase):
         ):
             with self.subTest(role=role):
                 rt = self._runtime(role=role, extras=(
-                    env_name + "=" + value + "\\n"
-                    "HERMES_SLACK_BOT_TOKEN=" + value + "\\n"
+                    env_name + "=" + value + "\n"
+                    "HERMES_SLACK_BOT_TOKEN=" + value + "\n"
                 ))
                 with self.assertRaises(RuntimeRefusal) as exc:
                     rt._model_child_env()
@@ -154,11 +154,11 @@ class NativeCredentialTests(unittest.TestCase):
 
     def test_file_pointer_key_must_not_alias_slack_bot_token(self) -> None:
         key_file = self.root / "model-key-reused-as-slack-token"
-        key_file.write_text(FAKE_BYTEPLUS + "\\n", encoding="utf-8")
+        key_file.write_text(FAKE_BYTEPLUS + "\n", encoding="utf-8")
         key_file.chmod(0o600)
         rt = self._runtime(extras=(
-            "BYTEPLUS_MODELARK_API_KEY_FILE=" + str(key_file) + "\\n"
-            "HERMES_SLACK_BOT_TOKEN=" + FAKE_BYTEPLUS + "\\n"
+            "BYTEPLUS_MODELARK_API_KEY_FILE=" + str(key_file) + "\n"
+            "HERMES_SLACK_BOT_TOKEN=" + FAKE_BYTEPLUS + "\n"
         ))
         with self.assertRaises(RuntimeRefusal) as exc:
             rt._model_child_env()
