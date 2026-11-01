@@ -67,7 +67,7 @@ class SecretTests(unittest.TestCase):
         spec = PROVIDERS["zai.glm-5.3"]
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "not-ours.key"
-            path.write_text(CANARY + "\\n", encoding="utf-8")
+            path.write_text(CANARY + "\n", encoding="utf-8")
             path.chmod(0o600)
             wrong_uid = os.geteuid() + 1
             with mock.patch(
