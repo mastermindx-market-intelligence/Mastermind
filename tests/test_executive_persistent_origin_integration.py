@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import json
 import pwd
+import shutil
 import stat
 import sys
 from types import SimpleNamespace
@@ -39,6 +40,7 @@ def tmp_path(filesystem):
 def device_epoch(monkeypatch, filesystem, tmp_path):
     """Change raw kernel-observation inputs, never receipts or validators."""
     real_stat, real_lstat, real_fstat, real_open = os.stat, os.lstat, os.fstat, os.open
+    real_scandir = os.scandir
     state = SimpleNamespace(device=real_stat(filesystem.anchor).st_dev, foreign={},
                             tracked=set(filesystem.owner))
 
@@ -67,16 +69,97 @@ def device_epoch(monkeypatch, filesystem, tmp_path):
             state.tracked.add(real_fstat(fd).st_ino)
         return fd
 
+    class ObservedEntry:
+        def __init__(self, entry, scoped):
+            self.entry, self.scoped = entry, scoped
+
+        def __getattr__(self, name):
+            return getattr(self.entry, name)
+
+        def __fspath__(self):
+            return os.fspath(self.entry)
+
+        def stat(self, *, follow_symlinks=True):
+            value = self.entry.stat(follow_symlinks=follow_symlinks)
+            if self.scoped:
+                state.tracked.add(value.st_ino)
+            return StatObservation(value)
+
+    class ObservedScandir:
+        def __init__(self, path):
+            self.entries = real_scandir(path)
+            self.scoped = (real_fstat(path).st_ino in state.tracked
+                           if isinstance(path, int)
+                           else Path(path).is_relative_to(tmp_path))
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return ObservedEntry(next(self.entries), self.scoped)
+
+        def close(self):
+            self.entries.close()
+
+        def __enter__(self):
+            self.entries.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.entries.__exit__(*args)
+
     monkeypatch.setattr(os, 'stat', lambda *a, **k: named(real_stat, *a, **k))
     monkeypatch.setattr(os, 'lstat', lambda *a, **k: named(real_lstat, *a, **k))
     monkeypatch.setattr(os, 'fstat', lambda *a, **k: StatObservation(real_fstat(*a, **k)))
     monkeypatch.setattr(os, 'open', opened)
+    # CPython's guarded rmtree compares cached DirEntry.stat against fstat.
+    # Give both acquisitions the same raw device observation; retain samestat
+    # and all actual inode, mode, symlink and byte checks unchanged.
+    monkeypatch.setattr(os, 'scandir', ObservedScandir)
     yield state
     # Restore raw observations before dependent real TemporaryDirectory cleanup.
     monkeypatch.setattr(os, 'stat', real_stat)
     monkeypatch.setattr(os, 'lstat', real_lstat)
     monkeypatch.setattr(os, 'fstat', real_fstat)
     monkeypatch.setattr(os, 'open', real_open)
+    monkeypatch.setattr(os, 'scandir', real_scandir)
+
+
+@pytest.mark.parametrize('changed_device', [False, True])
+def test_device_epoch_keeps_scandir_fd_identity_and_real_recursive_cleanup(
+        tmp_path, device_epoch, changed_device):
+    tree = tmp_path/'cleanup'
+    child = tree/'nested'
+    child.mkdir(parents=True, mode=0o700)
+    (child/'payload').write_bytes(b'actual nested fixture')
+    child.lstat()
+    if changed_device:
+        device_epoch.device += 100
+    with os.scandir(tree) as entries:
+        entry = next(entries)
+        fd = os.open(child, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            assert os.path.samestat(entry.stat(follow_symlinks=False), os.fstat(fd))
+            assert os.fspath(entry) == str(child)
+        finally:
+            os.close(fd)
+    shutil.rmtree(tree)
+    assert not tree.exists()
+
+
+def test_device_epoch_preserves_real_recursive_cleanup_symlink_refusal(
+        tmp_path, device_epoch):
+    target = tmp_path/'target'
+    target.mkdir(mode=0o700)
+    payload = target/'payload'
+    payload.write_bytes(b'preserve')
+    link = tmp_path/'link'
+    link.symlink_to(target, target_is_directory=True)
+    target.lstat(); link.lstat()
+    device_epoch.device += 100
+    with pytest.raises(OSError):
+        shutil.rmtree(link)
+    assert link.is_symlink() and payload.read_bytes() == b'preserve'
 
 
 @pytest.mark.parametrize('changed_device', [False, True])
