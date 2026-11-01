@@ -2,10 +2,11 @@
 # Platform: Darwin / arm64
 # Interpreter: CPython 3.12.13; isolated official pip-tools7.6.1
 # Source: pyproject.toml (extra "dev")
-# pyproject.toml sha256: 39bc85fcfac095a2c57788d42e6cf214472180898c1aca9ebf5c69ad30746b02
-# Header refreshed for the pytest>=8,<9.2 dev bound: a pip-tools7.6.1 re-run
-# with --reuse-hashes (Darwin/arm64, CPython 3.12) reproduced every pin, extra
-# and hash below byte-for-byte; pytest stays 9.1.1. Prior refresh: PyJWT 2.14.0.
+# pyproject.toml sha256: cef07e7a78f3a00cddb269c09f6b76232582eee27ced048f658a9287ff5c0c46
+# Header refreshed for the restored pytest>=8,<10 dev bound: a pip-tools7.6.1
+# re-run with --reuse-hashes (Darwin/arm64, CPython 3.12) reproduced every pin,
+# extra and hash below byte-for-byte; pytest stays 9.1.1. Prior refresh: the
+# pytest>=8,<9.2 hold.
 # Regenerate: pip-compile --quiet --generate-hashes --reuse-hashes --no-emit-index-url --no-emit-trusted-host --extra dev --output-file requirements/gate-macos-arm64-py312.lock pyproject.toml
 # Official default PyPI index used with isolated PIP_CONFIG_FILE=/dev/null.
 # pip-tools7.6.1 may retain a spurious --no-index command comment; no such flag was supplied.
