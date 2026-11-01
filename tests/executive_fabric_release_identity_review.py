@@ -473,3 +473,11 @@ REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
     'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
     'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
 }
+
+# Exact independently reviewed official initialize observation byte bound.
+# This is a string-length cap, not a UID; only this full source hash and
+# Constant token qualify. Review: NORMALIZER_INDEPENDENT_REVIEW a057927b.
+REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
+    'sha256': 'e4a1e0f959df7f84b87de74e5d4deaaf89635975381d6d847803fdbf15a61536',
+    'sites': ((190, 46, 49, 'int', '512'),),
+}
