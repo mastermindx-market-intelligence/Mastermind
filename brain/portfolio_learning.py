@@ -358,9 +358,10 @@ def _decision_exit(
 ) -> dict:
     """Bind a sell to its exact application transaction; use dates only for legacy fills."""
     try:
+        from bot import decision_rows
         from portfolio import registry
         path = registry.data_dir(book) / "decisions.jsonl"
-        rows = _read_jsonl(path)
+        rows = decision_rows.effective_rows(_read_jsonl(path))
         transaction = str(transaction_id or "")
         bound_fill_id = str(fill_id or "")
         if transaction:
