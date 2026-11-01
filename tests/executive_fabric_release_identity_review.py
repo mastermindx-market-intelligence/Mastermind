@@ -281,11 +281,12 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
-# Installed-preparation continuation 027be0c0 / source-risk review b29273a0:
+# Installed-preparation continuation 027be0c0 / source-risk review b29273a0;
+# Macro-epoch composition f48d7421 / source-risk review bd9bba4b:
 # same three complete runtime tokens and unchanged original top-level ASTs;
 # only the reviewed digest and shifted lines change. No new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '1a7fed81a15bbebcd689b954b2cce1827de5afc2c90683281d32a6c77e9e7adc',
+    "sha256": 'f53e9401d28f1053d67a59d375f7380b86271f87278080f7dd972f3d8ff6f7f9',
     "sites": ((104, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1825, 46, 49, 'int', '400'), (1825, 66, 69, 'int', '500')),
 }
 
