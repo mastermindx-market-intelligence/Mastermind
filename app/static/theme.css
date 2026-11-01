@@ -30,6 +30,11 @@
   --radius-sm: 8px; --radius-md: 11px; --radius-lg: 15px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
   --space-5: 20px; --space-6: 24px; --space-8: 32px;
+  /* G2 type scale — canonical DS names for the sizes the app already paints as
+     literals. Declared, NOT rebound: every existing font-size keeps its own value. */
+  --fs-micro: 10px; --fs-label: 9.5px; --fs-sm: 12.5px; --fs-body: 15px; --fs-md: 15px;
+  --fs-num-lg: 22px; --fs-h1: 24px; --fs-num-xl: 30px;
+  --fs-tile-label: 12px; --fs-tile-value: 20px; --fs-tile-tag: 9px; --fs-timing: 11px;
 }
 html {
   -webkit-text-size-adjust: 100%;
@@ -889,3 +894,133 @@ html[data-lang="zh"] .lang-toggle .zh-opt { color: #fff; }
   .mm-product-links a { min-height: 44px; }
   html body :where(input, select, textarea) { font-size: 16px; }
 }
+
+/* ── PBR B0 primitives (G2/G3/G4/G9) — spec §3/§8 ── */
+
+/* Visually hidden, still announced by assistive tech. */
+.mm-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* G3 unavailable — the WORD in the value slot. Muted, no number beside it, and
+   never distinguished by colour alone: it is a word where a figure would be. */
+.mm-unavail {
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: normal;
+  letter-spacing: 0;
+}
+/* Inside a big numeral the word must not compete with the figure it replaces. */
+.mm-perf-nav-value .mm-unavail,
+.mm-perf-stat-value .mm-unavail { font-size: .62em; }
+.mm-unavail-why {
+  display: block;
+  font-size: var(--fs-micro, 10px);
+  font-weight: 500;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* G4 overflow — the counted link out of a clipped list. */
+.mm-overflow {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 4px;
+  color: var(--link);
+  font-size: var(--fs-sm, 12.5px);
+  font-weight: 600;
+  text-decoration: none;
+}
+.mm-overflow:hover { text-decoration: underline; }
+.mm-overflow:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* G9 epistemic badge — carries the state as a WORD plus its own shape/border. */
+.mm-epi-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: var(--fs-label, 9.5px);
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  margin-left: 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: transparent;
+}
+/* Epistemic ink never rides --up: that variable flips red/green under ZH. */
+.mm-epi-badge.qualified {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+}
+.mm-epi-badge.provisional {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+/* Withheld reads as a dashed edge as well as a muted ink. */
+.mm-epi-badge.withheld { color: var(--muted); border-style: dashed; }
+.mm-epi-badge.unverified { color: var(--muted); }
+
+/* D-ACCT-1 — the account file exists but cannot be read, parsed or validated.
+   Glyph + word + the left rule are the non-colour cue; the warn tint only
+   reinforces them, so the state survives greyscale and a screen reader. */
+.mm-book-invalid {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--fs-sm, 12.5px);
+}
+.mm-book-invalid-glyph { font-size: 14px; line-height: 1; }
+.mm-book-invalid-ref {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--muted);
+  font-size: var(--fs-micro, 10px);
+  letter-spacing: .02em;
+}
+/* Evidence tier under the canonical cell: one reading sentence, then the validator's
+   own codes as quiet mono tokens (no colour carries meaning here). */
+.mm-book-invalid-reason { display: block; }
+.mm-book-invalid-problems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: baseline;
+  margin-top: 4px;
+}
+.mm-book-invalid-problems-label { color: var(--muted); }
+.mm-book-invalid-problem {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro, 10px);
+  color: var(--text);
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  overflow-wrap: anywhere;
+}
+.mm-book-invalid-more { color: var(--muted); font-size: var(--fs-micro, 10px); }
