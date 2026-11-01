@@ -41,7 +41,7 @@ SOURCE_DOCUMENT = (
     REPO_ROOT / "tests" / "fixtures" / "ohf_retained_input_source.json"
 )
 PROMPT = "Rendered Executive instruction: retain this exact plain input — W3 中文 marker."
-PINNED_VERSION = "codex-cli 0.159.2"
+PINNED_VERSION = "0.159.2"
 PINNED_BINARY = (
     "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 )
@@ -143,7 +143,7 @@ def test_pinned_constants_are_the_documented_production_generation():
     assert (
         adapter_module.CONSUMPTION_EVIDENCE_PINNED_HARNESS_VERSION
         == PINNED_VERSION
-        == document["provenance"]["installed_binary_version"]
+        == document["provenance"]["harness_semantic_version"]
     )
     assert (
         adapter_module.CONSUMPTION_EVIDENCE_PINNED_BINARY_DIGEST

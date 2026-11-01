@@ -6,6 +6,16 @@
     "release_tag": "rust-v0.159.2",
     "commit": "ff6aec96948b70d94983af2641a6b67c94faeff5",
     "installed_binary_version": "codex-cli 0.159.2",
+    "harness_semantic_version": "0.159.2",
+    "initialize_user_agent_source": {
+      "producer": "codex-rs/login/src/auth/default_client.rs:get_codex_user_agent",
+      "producer_sha256": "174e02e439013bf75cccdcfd36b9c23e31d9ee84835a0cc0b1f9d7a33391a064",
+      "caller": "codex-rs/app-server/src/request_processors/initialize_processor.rs",
+      "caller_sha256": "4535560b07ab10d1538acd461560a55c1bdf0c9b4049e72775d6b770421f117f",
+      "grammar": "{originator}/{build_version} ({os_type} {os_version}; {architecture}) {terminal} ({client_name}; {client_version})",
+      "qualified_context": ["mastermind-ohf", "p1b"],
+      "scope": "Public source grammar only; examples in tests are synthetic, not native captures"
+    },
     "installed_binary_sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704",
     "schema_base": "codex-rs/app-server-protocol/schema/json/v2",
     "schemas": {
