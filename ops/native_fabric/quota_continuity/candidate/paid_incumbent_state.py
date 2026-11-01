@@ -113,6 +113,9 @@ def _bind_host_reader(load):
             if kwargs.get(name) is not None and Path(kwargs[name])!=path:
                 raise ValueError('canonical_paid_validator_refused')
             kwargs[name]=path
+        # This selects the finite canonical contract. The source owner itself
+        # rederives and validates installed context plus the fresh observation.
+        kwargs['require_qualified_context']=True
         result=original(accounts,**kwargs)
         same_validator()
         return result

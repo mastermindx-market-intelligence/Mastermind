@@ -1,0 +1,107 @@
+{
+  "input": {
+    "account": {
+      "gid": 1000,
+      "home": "/home/ubuntu0",
+      "uid": 1000,
+      "user": "ubuntu0"
+    },
+    "custody": "HELD_NAMED_FULL9_ACL_CHECKED_NOT_APPROVAL",
+    "helper": {
+      "fingerprint": {
+        "gid": 1000,
+        "mode": 384,
+        "schema_version": "mastermind.paid_helper_private_data/v1",
+        "sha256": "13ca7eb12c800c366e244d7878d012ab423f24319fb323803f9ab36da3a3a546",
+        "size": 57,
+        "uid": 1000
+      },
+      "origin_identity": [
+        1,
+        2,
+        33152,
+        1000,
+        1000,
+        1,
+        57,
+        3,
+        4
+      ],
+      "path": "/home/ubuntu0/lanes/ext/.host_glm_token.sh"
+    },
+    "host_ref": "ubuntu0",
+    "schema_version": "mastermind.h1_initializer_input_acquisition/nosite_v1",
+    "selectors": {
+      "glm_config": "/home/ubuntu0/.glm/config.json",
+      "home": "/home/ubuntu0",
+      "launch_python": {
+        "path": "/usr/bin/python3",
+        "real_path": "/usr/bin/python3.12",
+        "sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f"
+      },
+      "startup_basis": "RETAINED_EXPECTATION_NOT_GETPATH_PROOF"
+    },
+    "transport_alias": "mmx-ubuntu0"
+  },
+  "output": {
+    "canonical_utf8": "{\"account\":{\"gid\":1000,\"home\":\"/home/ubuntu0\",\"uid\":1000,\"user\":\"ubuntu0\"},\"bootstrap_python\":{\"path\":\"/usr/bin/python3.12\",\"real_path\":\"/usr/bin/python3.12\",\"sha256\":\"e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f\"},\"host_env\":{\"gid\":1000,\"mode\":493,\"path\":\"/home/ubuntu0/lanes/ext/HOST_ENV.sh\",\"sha256\":\"c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0379b2f6\",\"size\":587,\"uid\":1000},\"host_ref\":\"ubuntu0\",\"initialization_contract\":\"paid-host-env-held-fd-token-data.v1\",\"initialized_context\":{\"glm_config\":\"/home/ubuntu0/.glm/config.json\",\"home\":\"/home/ubuntu0\"},\"lane_root\":\"/home/ubuntu0/lanes\",\"launch_python\":{\"path\":\"/usr/bin/python3\",\"real_path\":\"/usr/bin/python3.12\",\"sha256\":\"e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f\"},\"nested_helper\":{\"gid\":1000,\"mode\":384,\"path\":\"/home/ubuntu0/lanes/ext/.host_glm_token.sh\",\"sha256\":\"13ca7eb12c800c366e244d7878d012ab423f24319fb323803f9ab36da3a3a546\",\"size\":57,\"uid\":1000},\"purpose\":\"canonical-paid-qualification.v1\",\"schema_version\":\"mastermind.paid_initializer_commitment/v1\",\"startup\":{\"base_exec_prefix\":\"/usr\",\"base_prefix\":\"/usr\",\"exec_prefix\":\"/usr\",\"prefix\":\"/usr\",\"profile\":\"cpython-3.12-linux-root-prefix-nosite.v1\"},\"transport_alias\":\"mmx-ubuntu0\"}",
+    "commitment": {
+      "account": {
+        "gid": 1000,
+        "home": "/home/ubuntu0",
+        "uid": 1000,
+        "user": "ubuntu0"
+      },
+      "bootstrap_python": {
+        "path": "/usr/bin/python3.12",
+        "real_path": "/usr/bin/python3.12",
+        "sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f"
+      },
+      "host_env": {
+        "gid": 1000,
+        "mode": 493,
+        "path": "/home/ubuntu0/lanes/ext/HOST_ENV.sh",
+        "sha256": "c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0379b2f6",
+        "size": 587,
+        "uid": 1000
+      },
+      "host_ref": "ubuntu0",
+      "initialization_contract": "paid-host-env-held-fd-token-data.v1",
+      "initialized_context": {
+        "glm_config": "/home/ubuntu0/.glm/config.json",
+        "home": "/home/ubuntu0"
+      },
+      "lane_root": "/home/ubuntu0/lanes",
+      "launch_python": {
+        "path": "/usr/bin/python3",
+        "real_path": "/usr/bin/python3.12",
+        "sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f"
+      },
+      "nested_helper": {
+        "gid": 1000,
+        "mode": 384,
+        "path": "/home/ubuntu0/lanes/ext/.host_glm_token.sh",
+        "sha256": "13ca7eb12c800c366e244d7878d012ab423f24319fb323803f9ab36da3a3a546",
+        "size": 57,
+        "uid": 1000
+      },
+      "purpose": "canonical-paid-qualification.v1",
+      "schema_version": "mastermind.paid_initializer_commitment/v1",
+      "startup": {
+        "base_exec_prefix": "/usr",
+        "base_prefix": "/usr",
+        "exec_prefix": "/usr",
+        "prefix": "/usr",
+        "profile": "cpython-3.12-linux-root-prefix-nosite.v1"
+      },
+      "transport_alias": "mmx-ubuntu0"
+    },
+    "commitment_sha256": "9f5571a570255028b2f1a5e6630f30d33e4ba48322237b697aa6faefdeabe5bc",
+    "schema_version": "mastermind.h1_initializer_commitment_candidate/v1",
+    "status": "DATA_CANDIDATE_NOT_APPROVAL_NOT_QUALIFICATION"
+  },
+  "premise": "Actual assemble() and pinned peer codecs; assembly-only early-policy fixture. No acquisition, host or qualification.",
+  "source_commit": "dca50013",
+  "source_path": "tools/admin_inputs/h1_input_wrapper.py",
+  "source_sha256": "726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7"
+}

@@ -31,6 +31,9 @@ PRE_GROK_COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699
 GROK_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-grok-forward-20261023.patch"
 GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c830269b736"
 COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
+FINAL_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+H1_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-h1-provider-entry-forward.patch"
+H1_FORWARD_PATCH_SHA = "4be46626757b8654babb5140ffc757d0fa74de879a37240965737a0c874b2918"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
 PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
@@ -38,14 +41,18 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 95-file closure composes protected #1720/#1729 with Qwen source feedback
+# The 98-file closure composes protected #1720/#1729 with Qwen source feedback
 # and request UTC narrowing, extended by the reviewed Grok forward delta. This
 # candidate pin is a changed-risk review input, not reuse of an earlier review.
 # The Grok delta's source risk was independently reviewed at 3d864/25efd; this
 # comment records that review and invents no fresh approval.
 # Executor/donor/preimage pins stay exact.
-EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "6e4ec147a3f2d941ab835ea74d86ae7a5367d10dd092d1d47304d54739378c2e"
+def _current_native_count():
+    spec=importlib.util.spec_from_file_location('current_security_builder',NATIVE/'rollout/build_review_stage.py')
+    owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
+    return len(owner.BASE_FILES|owner.ADDITIONS)+1
+EXPECTED_NATIVE_FILES = _current_native_count()
+NATIVE_MANIFEST_SHA = "0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec"
 
 
 def _sha(raw):
@@ -94,8 +101,12 @@ def _composition(directory):
     assert _sha(GROK_FORWARD_PATCH.read_bytes()) == GROK_FORWARD_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(GROK_FORWARD_PATCH))
     donor_contract._git(directory, "apply", str(GROK_FORWARD_PATCH))
+    assert _sha(target.read_bytes()) == COMPOSED_SHA
+    assert _sha(H1_FORWARD_PATCH.read_bytes()) == H1_FORWARD_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(H1_FORWARD_PATCH))
+    donor_contract._git(directory, "apply", str(H1_FORWARD_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
-    assert _sha(composed) == COMPOSED_SHA
+    assert _sha(composed) == FINAL_COMPOSED_SHA
     assert target.read_bytes() == composed
     return composed
 
@@ -148,7 +159,7 @@ def native_stage(tmp_path_factory):
     assert len(manifest) == EXPECTED_NATIVE_FILES
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
-    assert manifest["ext/remote_sub_exec.py"] == COMPOSED_SHA
+    assert manifest["ext/remote_sub_exec.py"] == FINAL_COMPOSED_SHA
     return output
 
 
@@ -174,7 +185,7 @@ def _seam(stage, base):
         (ext.parent / "orch/fabric/pools.yaml").write_text(policy)
     (remote_ext.parent / "support-releases").mkdir(mode=0o700)
     files = json.loads((stage / "native-manifest.json").read_bytes())
-    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
+    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == FINAL_COMPOSED_SHA
     generation = owner.publish(stage / "native-code-stage", native_ext, files)
     store = native_ext.parent / owner.STORE_NAME
     owner.select(store, generation.name, None)
@@ -215,7 +226,7 @@ def _seam(stage, base):
     for name in names:
         assert _sha((published / name).read_bytes()) == manifest[name]
         assert (published / name).stat().st_mode & 0o777 == 0o555
-    assert _sha((published / "remote_sub_exec.py").read_bytes()) == COMPOSED_SHA
+    assert _sha((published / "remote_sub_exec.py").read_bytes()) == FINAL_COMPOSED_SHA
     assert (published / "lanes").resolve() == remote_ext / "lanes"
     assert (published / "active").resolve() == remote_ext / "active"
     assert published.stat().st_mode & 0o777 == 0o555
@@ -251,6 +262,11 @@ print("benign fixture workspace ready")
         donor_contract._git(fixture.alternate, "add", "scripts/worktree_sparse.py")
         donor_contract._git(fixture.alternate, "commit", "-qm", "benign owned-process mint fixture")
         head = donor_contract._git(fixture.alternate, "rev-parse", "HEAD")
+        # The integration seam needs a valid sparse CONE, not a compact
+        # sparse-index representation. Apple's Git emits expansion advice
+        # for the latter; the production no-stderr guard must remain strict.
+        # This is one allowed, disposable repository input before admission.
+        donor_contract._git(fixture.alternate,"sparse-checkout","reapply","--no-sparse-index")
         remote._MACRO_FABRIC_SPARSE_BLOB = donor_contract._blob(helper)
         remote._MACRO_PINNED_DONOR_COMMIT = head
         patcher.setenv("FABRIC_NEW_MACRO_COMMIT", head)
@@ -336,7 +352,7 @@ print("benign fixture workspace ready")
         assert (fixture.original / "preserve.txt").read_text() == "ORIGINAL UNCOMMITTED WORK\n"
         assert os.environ.get("HOME") == initial_home
     return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": len(files),
-            "support_files": 37, "executor_sha256": COMPOSED_SHA,
+            "support_files": 37, "executor_sha256": FINAL_COMPOSED_SHA,
             "fixture_native_digest": generation.name, "fixture_support_digest": support_digest,
             "mint_receipt_sha256": _sha(receipt.read_bytes()), "provider_started": False,
             "production_macro_helper_tested": False, "physical_lease_acquired": False}
@@ -349,7 +365,7 @@ def test_selected_native_support_executor_preserves_mint_and_outcome_binding(nat
     assert result.returncode == 0, result.stderr
     proof = json.loads(result.stdout)
     assert proof["status"] == "OFFLINE_COMPOSITION_SEAM_PASS"
-    assert proof["executor_sha256"] == COMPOSED_SHA
+    assert proof["executor_sha256"] == FINAL_COMPOSED_SHA
     assert proof["native_files"] == EXPECTED_NATIVE_FILES and proof["support_files"] == 37
     assert proof["provider_started"] is False
     assert proof["physical_lease_acquired"] is False

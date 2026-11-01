@@ -132,6 +132,105 @@ def _join(document, selection):
     return rows[0]
 
 
+#: Blocker 1 bounded-gather companion for the retained-root membership join:
+#: a published candidate vector is a small, bounded, deduplicated set of
+#: actual Runtime roots, so a longer vector is not a publication this reader
+#: admits.  It refuses instead of scanning, truncating or guessing.
+_RETAINED_ROOT_CANDIDATES_MAX = 50
+
+
+def _valid_retained_root_id(value):
+    """Use the frozen result-reader selector grammar for every candidate."""
+    from common.executive_workspace_contract import _check_job_id
+    return _check_job_id(value)
+
+
+def _retained_root_member(row, root):
+    """Strict membership of one selected root in one published CCR row.
+
+    Either the existing sole-RESOLVED singleton — exactly the row shape
+    :func:`_join` admits — or a bounded multi-root CONFLICT row whose genuine
+    published candidate vector actually contains the selected root.  The row
+    is inspected in place: no refresh, no promotion, no rewrite of its
+    published ``root_job_id``/``root_job_ambiguous``/``runtime_root_state``
+    facts, and no trust in the request beyond the frozen selector grammar.
+    """
+    if (row.get("root_job_id") == root
+            and row.get("root_job_candidates") == [root]
+            and row.get("root_job_ambiguous") is False
+            and row.get("runtime_root_state") == "RESOLVED"):
+        return True
+    if (row.get("root_job_id") is not None
+            or row.get("root_job_ambiguous") is not True
+            or row.get("runtime_root_state") != "CONFLICT"):
+        return False
+    candidates = row.get("root_job_candidates")
+    return (type(candidates) is list
+            and 2 <= len(candidates) <= _RETAINED_ROOT_CANDIDATES_MAX
+            and all(_valid_retained_root_id(candidate) for candidate in candidates)
+            and len(set(candidates)) == len(candidates)
+            and root in candidates)
+
+
+def _retained_root_join(document, selection):
+    """Bounded retained-root membership join for the two retained read routes.
+
+    The programs document legitimately carries rows with more than one actual
+    Runtime root (including terminal roots); :func:`_join` correctly refuses
+    those singleton-less shapes for every other route.  This join serves ONLY
+    the retained read paths (``result_references`` and the bounded role-result
+    read) and adds exactly one capability: the selected root must be an actual
+    member of the paired publication's own bounded candidate vector.  All other
+    identity law is the existing one — exactly one genuine work row and exactly
+    one responsibility row for the selection's ``work_ref`` — and a foreign,
+    unlisted, malformed or cross-workstream selection keeps refusing with the
+    same ``LookupError`` before Runtime is ever touched.
+    """
+    work_ref, root = selection["work_ref"], selection["root_job_id"]
+    work = document.get("work")
+    autonomy = document.get("autonomy")
+    responsibilities = autonomy.get("responsibilities") if type(autonomy) is dict else None
+    if type(work) is not list or type(responsibilities) is not list:
+        raise LookupError("selection_not_found")
+    works = [r for r in work if type(r) is dict and r.get("work_ref") == work_ref]
+    rows = [r for r in responsibilities if type(r) is dict and r.get("responsibility_ref") == work_ref]
+    if len(works) != 1 or len(rows) != 1:
+        raise LookupError("selection_not_found")
+    row = rows[0]
+    if type(root) is str and root and _retained_root_member(row, root):
+        if row.get("runtime_root_state") == "CONFLICT":
+            # Resolve only the named root-multiplicity ambiguity. Other
+            # published disagreements/refusals remain visible and unadmitted.
+            issues = autonomy.get("issues", [])
+            if (row.get("disagreements", []) != [] or type(issues) is not list
+                    or any(type(issue) is not dict or (
+                        issue.get("responsibility_ref") in (None, work_ref)
+                        and issue.get("code") != "runtime_root_missing")
+                           for issue in issues)
+                    or autonomy.get("source_failures", []) != []):
+                raise LookupError("selection_not_found")
+        return row
+    raise LookupError("selection_not_found")
+
+
+def _qualified_retained_root(snapshot, selected):
+    """Full-publication qualification plus strict retained-root membership.
+
+    Reuses the unchanged whole-document ``_qualified(snapshot, None)`` — the
+    selected row is never qualified on its own and no caller skip/bypass flag
+    exists — then joins the selection through :func:`_retained_root_join`,
+    which raises ``LookupError`` exactly as ``_join`` does.  A retained read
+    therefore proves the entire published Programmes row set, not merely its
+    own row.  This helper is not a Mission or currentness authority: the
+    Mission, plan, activity, dispatch and consume routes keep their existing
+    ``_join``/``_qualified`` sole-root admission unchanged.
+    """
+    if not _qualified(snapshot, None):
+        return False
+    _retained_root_join(snapshot.document, selected)
+    return True
+
+
 def _qualified_empty_programs(doc, validity):
     """An empty list needs positive canonical source evidence, not all([]).
 
@@ -1033,9 +1132,14 @@ class WorkspaceReadService:
         Runtime acquisition whose receipt finalizes only after the physical
         context close, pre-projection binding verification, the after-close
         CCR recheck, then projection through the shared Fabric owner and the
-        closed budget ladder.  Acquisition ``OVER_BUDGET`` never reaches the
-        projector.  Every refusal below is one typed unavailable body with
-        null result, null control_room and null runtime.
+        closed budget ladder.  Admission here is the bounded retained-root
+        membership join — the selected root must be an actual member of the
+        paired publication's own candidate vector, which is what lets a
+        multi-root CONFLICT row read any one of its listed roots while every
+        other route keeps the sole-root ``_join``.  Acquisition
+        ``OVER_BUDGET`` never reaches the projector.  Every refusal below is
+        one typed unavailable body with null result, null control_room and
+        null runtime.
         """
         selected = frame["selection"]
         try:
@@ -1043,10 +1147,10 @@ class WorkspaceReadService:
         except Exception:
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
         try:
-            _join(before.document, selected)
+            retained_row = _retained_root_join(before.document, selected)
         except LookupError:
             raise LookupError("selection_not_found") from None
-        if not _qualified(before, selected):
+        if not _qualified_retained_root(before, selected):
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
         try:
             snapshot, receipt = self._bounded_result_acquire(selected)
@@ -1065,7 +1169,11 @@ class WorkspaceReadService:
                 or before.publication != after.publication
                 or digest(before.document) != digest(after.document)):
             return self._result_unavailable_body(selected, _REASON_SOURCE_CHANGED)
-        if not _qualified(after, selected):
+        if not _qualified_retained_root(after, selected):
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        if (retained_row.get("runtime_root_state") == "CONFLICT"
+                and getattr(getattr(snapshot, "root_metadata", None), "work_ref", None)
+                != selected["work_ref"]):
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
         if not self._result_binding_verified(snapshot, receipt, selected):
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
@@ -1447,6 +1555,8 @@ class WorkspaceReadService:
             worker = self._read_result
         elif operation == "mission_v3":
             worker = self._read_mission_v3
+        elif operation == "result_references":
+            worker = self._read_result_references
         else:
             return error("invalid_input", 400)
         task = asyncio.create_task(asyncio.to_thread(worker, frame))
@@ -1460,12 +1570,18 @@ class WorkspaceReadService:
             result = self._result_unavailable_body(
                 frame["selection"], _REASON_RESPONSE_OVER_BUDGET)
         except Exception:
-            if operation != "result":
+            if operation == "result_references":
+                # Unexpected retained-reference producer failure: a typed
+                # unavailable body, never an empty success assertion.
+                from control_plane.workspace_result_references import unavailable
+                result = unavailable(frame["selection"], "SOURCE_UNAVAILABLE")
+            elif operation != "result":
                 # Producer failure is a typed transport refusal; the adapter
                 # never manufactures a Mission body.
                 return error("source_unavailable", 503)
-            result = self._result_unavailable_body(
-                frame["selection"], _REASON_SOURCE_UNAVAILABLE)
+            else:
+                result = self._result_unavailable_body(
+                    frame["selection"], _REASON_SOURCE_UNAVAILABLE)
         try:
             if (self.authorize(frame["principal"]) is not True
                     or permission_stamp(self.authorize, frame["principal"]) != permission_before):
@@ -1473,6 +1589,11 @@ class WorkspaceReadService:
         except Exception:
             return error("access_denied", 403)
         return result
+
+    def _read_result_references(self, frame):
+        """Delegate the retained-result-reference read to the closed producer."""
+        from control_plane.workspace_result_references import read_result_references
+        return read_result_references(self, frame)
 
 
 class _ResultOverBudget(Exception):

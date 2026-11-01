@@ -300,12 +300,10 @@ REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
 # literal sites (including two precise docstring account-name examples). No
 # caller identity, permission or runtime admission is granted; any source/token
 # drift exposes these sites to the unchanged guard again.
-REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe372eb5c3e292524957ba6b57d79cc5a9326e2563207cb1daa283a69f475',
-                                          'sites': ((120, 73, 76, 'int', '501'),
-                                                    (303, 78, 81, 'int', '450'),
-                                                    (398, 83, 86, 'int', '501'))},
- 'control_plane/paid_fabric_wire.py': {'sha256': '5315eb7578cf49c0c405d7d7ae3b52d6ad3056c47f9d8f440008297b52e3004c',
-                                       'sites': ((56, 35, 38, 'int', '501'),)},
+REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': 'd7fcc70d413c5445ee38c21dc1e19b584da12e2afb3eab02fcd39e9241f469ad',
+ 'sites': ((120, 73, 76, 'int', '501'), (305, 78, 81, 'int', '450'), (400, 83, 86, 'int', '501'))},
+ 'control_plane/paid_fabric_wire.py': {'sha256': '6c9c16eaa48fa7f5ac7cbd4eaa113b619a5bb1e3d65ef69ab55c6f0d839fc9c6',
+ 'sites': ((98, 35, 38, 'int', '501'),)},
  'control_plane/paid_model_execution_principal.py': {'sha256': 'a20a4115599d93cb8a9c5397a84a58624f9cd24bb5ee00e219add653f832e79c',
                                                      'sites': ((63, 18, 21, 'int', '512'),)},
  'control_plane/paid_model_terminal_evidence.py': {'sha256': '81eade4a8dc6739508d94292df5430a3bf6d0da016194990a2057ace6ced98ac',
@@ -316,8 +314,8 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                        (183, 34, 37, 'int', '501'))},
  'control_plane/worker_execution_contract.py': {'sha256': '07621e74ea343f2c0ad320a8f019e55365b14b1ad988e5d1145ba1d7c2344da2',
                                                 'sites': ((60, 33, 36, 'int', '512'),)},
- 'ops/executive_os/canonical_paid_actions.py': {'sha256': '957b4a04432ca5ebbb954f4fa76ab74e4d383f233a58449ffc3cf6c1294212c9',
-                                                'sites': ((56, 71, 74, 'int', '501'),)},
+ 'ops/executive_os/canonical_paid_actions.py': {'sha256': 'f12ddfb1365d3bdfd5a3bc4b90b9d21aac17e02e797dbad489b21acf211e282c',
+ 'sites': ((56, 71, 74, 'int', '501'),)},
  'ops/executive_os/canonical_paid_definition.py': {'sha256': 'a2009ce6c555d7de9bd6a9497871a33f1edb7d2bffe19f38ffbf91790f64349f',
                                                    'sites': ((17, 45, 57, 'str', '_mastermind_'),
                                                              (91, 18, 21, 'int', '501'),
@@ -352,11 +350,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                             (546, 48, 53, 'int', '0o660'),
                                                             (752, 53, 58, 'int', '0o755'),
                                                             (790, 84, 89, 'int', '0o755'))},
- 'ops/executive_os/canonical_paid_qualification.py': {'sha256': 'fedc7c3f892bcbbe4c8335641c83a7037d233ea69b44605a614bf310ce3e52b8',
-                                                      'sites': ((161, 48, 53, 'int', '0o755'),
-                                                                (610, 22, 27, 'int', '0o700'),
-                                                                (615, 22, 27, 'int', '0o755'),
-                                                                (624, 82, 87, 'int', '0o755'))},
+ 'ops/executive_os/canonical_paid_qualification.py': {'sha256': '9fe50017d44b9b9863ad08d2d85ea22c301f6975b7e91421379948dce7d7e1f4',
+ 'sites': ((162, 48, 53, 'int', '0o755'),
+           (613, 21, 26, 'int', '0o700'),
+           (631, 74, 79, 'int', '0o700'),
+           (643, 25, 30, 'int', '0o700'),
+           (653, 22, 27, 'int', '0o755'),
+           (661, 82, 87, 'int', '0o755'))},
  'ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py': {'sha256': '93267de79c92231f853fc16e03f939e8d52d3322d19a828a568ffcb5d7a7f867',
                                                                 'sites': ((1280,
                                                                            46,
@@ -417,28 +417,9 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                                         35,
                                                                         'int',
                                                                         '502'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': 'd2f5be14f345cf00b4bd4357d705713a24e373a7d1675229aab6202f0d500cad',
-                                                                             'sites': ((34,
-                                                                                        17,
-                                                                                        20,
-                                                                                        'int',
-                                                                                        '501'),
-                                                                                       (382,
-                                                                                        85,
-                                                                                        90,
-                                                                                        'int',
-                                                                                        '0o700'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': 'a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c',
-                                                                      'sites': ((138,
-                                                                                 32,
-                                                                                 37,
-                                                                                 'int',
-                                                                                 '0o700'),
-                                                                                (220,
-                                                                                 68,
-                                                                                 73,
-                                                                                 'int',
-                                                                                 '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': 'e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0', 'sites': ((34, 17, 20, 'int', '501'), (452, 85, 90, 'int', '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': '75bbacb052dcb9374245854e2e6b8681fa369e034000689df0d4f752bd1b6e3b',
+ 'sites': ((147, 32, 37, 'int', '0o700'), (230, 68, 73, 'int', '0o700'))},
  'scripts/executive_paid_fabric_shim.py': {'sha256': 'e80b95a09ce31153e7bff2ea7b85dd1eb8d8850d4d6029ec27250cd8f13228f1',
                                            'sites': ((43, 81, 84, 'int', '450'),)}})
 
@@ -471,6 +452,17 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
     'sites': ((3505, 39, 44, 'int', '0o711'), (3507, 43, 48, 'int', '0o700'), (3509, 39, 44, 'int', '0o755')),
 }
 
+# Input-mode bounds and exact ignored Linux symlink mode, never target authority.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': 'd203b1363cdc6f926d9542a2ecfb2ec6b24dd1da46c3fd1f527caea232132749',
+ 'sites': ((71, 35, 40, 'int', '0o777'), (216, 30, 35, 'int', '0o777'), (226, 33, 38, 'int', '0o777'))}
+
+# Exact reviewed recurring-readiness principal checks; no runtime admission.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_host_readiness.py'] = {'sha256': '115bad457d738af088ec4eed79ff56f56b0f154e56521e0093839daf087b9a66',
+ 'sites': ((454, 95, 98, 'int', '501'),
+           (456, 72, 75, 'int', '501'),
+           (807, 26, 29, 'int', '501'),
+           (811, 63, 66, 'int', '501'),
+           (857, 57, 60, 'int', '501'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.

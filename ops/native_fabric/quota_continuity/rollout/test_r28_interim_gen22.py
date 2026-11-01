@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -19,10 +20,16 @@ class R28InterimGen22Test(unittest.TestCase):
         self.assertNotIn("ext/host_pull_launchd.plist.template",manifest)
 
     def test_provenance_links_genuine_protected_git_source(self):
-        raw=(interim.REPO / interim.SRC).read_bytes()
+        # The historical R28 source is the genuine protected object. The
+        # current candidate already contains the separately qualified fuse.
+        raw=subprocess.check_output(['git','-C',str(interim.REPO),'show',
+            interim.PIN+':'+interim.SRC],timeout=15)
         self.assertEqual(hashlib.sha256(raw).hexdigest(),interim.R28)
         for _,new in interim.HUNKS:
             self.assertEqual(raw.count(new),1)
+        current=(interim.REPO/interim.SRC).read_bytes()
+        self.assertEqual(hashlib.sha256(current).hexdigest(),interim.FUSED)
+        self.assertNotEqual(raw,current)
 
     def test_exact_target_descriptor(self):
         proposed=interim.contract()

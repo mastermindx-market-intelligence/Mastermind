@@ -80,6 +80,7 @@ fn main() {
             auth::read_admitted_plan,
             auth::read_retained_activity,
             auth::read_result,
+            auth::read_result_references,
             auth::read_current_window,
             auth::executive_auth_status,
             auth::executive_context,

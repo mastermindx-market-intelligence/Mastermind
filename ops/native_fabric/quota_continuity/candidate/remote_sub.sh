@@ -1256,7 +1256,7 @@ SUPPORT_FILES=(
 )
 # The v2 executor imports this explicit sealed dependency only for bound roots.
 [ "$REMOTE_PHYSICAL_ROOT" = "-" ] || SUPPORT_FILES+=(artifact_delivery.py)
-[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py)
+[ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py)
 SUPPORT_MANIFEST="$LOG_DIR/${ID}.support.json"
 REMOTE_SUPPORT_SOURCE="$REMOTE_LANE_TRANSFER/tmp/$ID.support-src"
  # Retain the exact per-run manifest as the pre-task control-flow identity.
@@ -1525,6 +1525,9 @@ if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
   # frozen owner's interpreter precedence, preserving other host PATH order.
   HOST_ENV="$HOST_ENV; export PATH=$REMOTE_LANES_Q/venv/bin:\$PATH"
 fi
+# Only the explicit canonical model profile uses the qualified initializer.
+# Never source a mutable hook in this branch or fall back to the old shell.
+if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then HOST_ENV=:; fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   show_args "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "<launch: $REMOTE_PACKET -> $(basename "$REMOTE_PACKET")>"
@@ -1724,6 +1727,15 @@ if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
   REMOTE_LAUNCH_EXEC=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" \
     lane-root-launch-command "$LANE_ROOT_LAYOUT_TOKEN" "$ID") || exit 78
   REMOTE_OUTPUT_REDIRECT='>/dev/null 2>&1'
+fi
+if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
+  REMOTE_OUTPUT_SETUP=:
+  REMOTE_OUTPUT_REDIRECT='>/dev/null 2>&1'
+  REMOTE_LAUNCH_EXEC=$(commission_run canonical-entry-command "$REMOTE_SUB_PYTHON" \
+    -I -S -B "$HERE/paid_provider_entry.py" executor-command \
+    "$GLM_CAP_LOCAL" "$SUPPORT_MANIFEST" "$HERE") || {
+      RC=78; log 'CANONICAL_PAID_ENTRY_REFUSED before_launch=1'; exit "$RC";
+    }
 fi
 ADMISSION_FILE="$STATE_HERE/lanes/${ID}.admission"
 if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi

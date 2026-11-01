@@ -112,8 +112,81 @@ jobs:
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
+      # Supplementary fast discrimination for the three observed Linux
+      # initializer failures. A green matrix still requires every full shard.
+      - name: H1 initializer Linux fast preflight
+        if: matrix.index == 2
+        run: >-
+          python -m pytest -q --tb=short -p scripts.ci_pytest_timing
+          tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup
+          tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook
+          tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+          tests/test_paid_initializer_nosite.py
+          tests/test_paid_initializer_sysconfig.py
+          tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed
+          tests/test_paid_provider_entry_linux.py
+
+      # A hosted runner may inherit a POSIX default ACL on an account HOME
+      # ancestor. Its negative refusal is not a real positive initializer.
+      # Require the positive in an isolated non-root Linux account whose HOME
+      # has no ACL, with real /usr/bin/python3.12, real process and observer.
+      # This Docker environment has no provider/host credentials or network.
+      - name: H1 required real Linux no-ACL positive journey
+        if: matrix.index == 2
+        run: |
+          set -euo pipefail
+          H1_CI_SOURCE="$(mktemp -d "${RUNNER_TEMP}/h1-public-source.XXXXXX")"
+          # Only tracked public source enters the fixture. In particular,
+          # checkout Git metadata and its authentication config stay outside.
+          git archive --format=tar HEAD | tar -x -C "$H1_CI_SOURCE"
+          chmod 0555 "$H1_CI_SOURCE"
+          docker build --file tests/h1_ci_fixture/Dockerfile \
+            --tag mastermind-h1-noacl:${{ github.sha }} tests/h1_ci_fixture
+          docker run --rm --network=none --cap-drop=ALL \
+            --security-opt=no-new-privileges --read-only \
+            --env MMX_H1_CONTROLLED_LINUX_FIXTURE=1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
+            --tmpfs /home/mmx-h1-fixture:rw,exec,nosuid,nodev,uid=1555,gid=1555,mode=0700 \
+            --mount "type=bind,src=${H1_CI_SOURCE},dst=/repo,readonly" \
+            mastermind-h1-noacl:${{ github.sha }} \
+            /bin/sh -eu -c '
+              /usr/bin/python3.12 -B -m pytest -q --noconftest \
+                -p no:cacheprovider -p scripts.ci_pytest_timing --junitxml=/tmp/h1-positive.xml \
+                tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+              /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_positive.py /tmp/h1-positive.xml
+              echo "::notice title=H1 isolated initializer fixture proof::exact required node passed once; zero skipped, failures or errors; CI fixture only"
+              /usr/bin/python3.12 -B -m pytest -q --noconftest \
+                -p no:cacheprovider -p scripts.ci_pytest_timing --junitxml=/tmp/h1-provider-entry.xml \
+                tests/test_paid_provider_entry_linux.py
+              /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_provider_entry.py /tmp/h1-provider-entry.xml
+              echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
+            '
+
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+
       - name: Run repository test shard
+        # Give best-effort upload an opportunity inside the 60-minute job.
+        # The prior 38-minute step timed out; its snapshot retained the final
+        # module summary. Observed setup was 175s and upload 1s; 45+2 leaves 13m
+        # for setup/cleanup opportunity, not a guaranteed future bound.
+        # Slow setup or runner loss can still prevent artifact delivery.
+        timeout-minutes: 45
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
+
+      - name: Upload fixed test diagnostics
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-fixed-diagnostics-${{ matrix.index }}
+          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
 
   # Branch protection requires exactly the stable context "test". Matrix
   # checks alone have dynamic names and are NOT a sufficient required check.

@@ -5,9 +5,9 @@ This verifies that adding Qwen selection fixes does not silently revert it.
 No live generation, provider, account, bridge, lease or runner is touched.
 
 2026-10-22 release-composition extension: the builder first checks all nine
-exact protected overlay bases, then substitutes exactly the three
+exact protected overlay bases, then substitutes exactly the four
 previously-reviewed candidate-forward bytes. This file adds the closed
-three-name forward-map set check, absolute SHA-256 pinning for the four
+four-name forward-map set check, absolute SHA-256 pinning for the four
 protected Qwen files, symlinked-candidate and tampered-accepted-base
 negatives (typed mismatch, no completed manifest). Existing guarded runtime
 suites qualify freshness and caller UTC behavior separately. Every negative
@@ -33,11 +33,10 @@ NAMES = (
 )
 QWEN = ("bailian_keys.py", "lease_broker.py",
         "glm_host_account_probe.py", "glm_host_account_source.py")
-FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_helpers.py")
+FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
 BASE_ONLY_OVERLAY_NAMES = (
     "artifact_delivery.py", "fabric_operator_client.py",
-    "fabric_operator_contract.py", "native_remote.py", "remote_sub_exec.py",
-    "sub.sh",
+    "fabric_operator_contract.py", "native_remote.py", "sub.sh",
 )
 PROTECTED_QWEN_SOURCE_DIGESTS = {
     "bailian_keys.py":
@@ -48,6 +47,12 @@ PROTECTED_QWEN_SOURCE_DIGESTS = {
         "34501b394c24fffd13374894c2c375d2b123c28580ed02335c5e7e19a29d83ab",
     "lease_broker.py":
         "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
+}
+
+# Keep the exact historical Qwen map above. Only this reviewed restrictive
+# context-reader join advances; the other three Qwen payloads remain exact.
+REVIEWED_QWEN_FORWARD_DIGESTS = {
+    "glm_host_account_source.py": "cf2be3503d31d8b3f5d2098ebab5d6c2e61e46842468db73baf2f7d8f8b70855",
 }
 
 
@@ -68,7 +73,7 @@ def test_grok47_merged_source_digest_is_pinned():
     assert set(builder.GROK47_MERGED_SOURCE_DIGESTS) == set(NAMES)
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
-    assert len(manifest) == len(inventory["files"]) == 95
+    assert len(manifest) == len(inventory["files"]) == len(read_builder().BASE_FILES | read_builder().ADDITIONS) + 1
     for name in NAMES:
         path = GROK / name
         assert path.is_file() and not path.is_symlink()
@@ -99,7 +104,7 @@ def test_rebuild_staged_manifest_is_exact(tmp_path):
     for name in ("native-manifest.json", "native-source-inventory.json"):
         assert (stage / name).read_bytes() == (NATIVE / "rollout" / name).read_bytes()
     hashes = json.loads((stage / "native-manifest.json").read_text())
-    assert len(hashes) == 95
+    assert len(hashes) == len(read_builder().BASE_FILES | read_builder().ADDITIONS) + 1
     for path, digest_value in hashes.items():
         assert digest((stage / "native-code-stage" / path).read_bytes()) == digest_value
 
@@ -155,7 +160,7 @@ def test_published_paid_model_and_grok_controls_composed(tmp_path):
     assert result.returncode == 0, result.stderr
     manifest = json.loads((stage / "native-manifest.json").read_text())
     inventory = json.loads((stage / "native-source-inventory.json").read_text())
-    assert len(manifest) == len(inventory["files"]) == 95
+    assert len(manifest) == len(inventory["files"]) == len(read_builder().BASE_FILES | read_builder().ADDITIONS) + 1
     assert "qualified_pure_yaml" in inventory
     ext = stage / "native-code-stage/ext"
     for name in ("remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py"):
@@ -306,13 +311,13 @@ def test_builder_refuses_tampered_overlay_base_despite_valid_forward(tmp_path, n
     assert not (stage / "native-source-inventory.json").exists()
 
 
-def test_forward_map_is_the_closed_reviewed_three_name_set():
-    """The forward substitution is exactly three reviewed names over nine bases."""
+def test_forward_map_is_the_closed_reviewed_four_name_set():
+    """The forward substitution is exactly four reviewed names over nine bases."""
     builder = read_builder()
     forward = builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS
     merged = builder.GROK47_MERGED_SOURCE_DIGESTS
     assert len(merged) == 9 and set(merged) == set(NAMES)
-    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 3
+    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 4
     assert set(forward) < set(merged)
     assert set(merged) - set(forward) == set(BASE_ONLY_OVERLAY_NAMES)
     for name, value in sorted(forward.items()):
@@ -324,7 +329,7 @@ def test_forward_map_is_the_closed_reviewed_three_name_set():
         assert digest(candidate.read_bytes()) == value
 
 
-def test_protected_qwen_files_stay_byte_exact():
+def test_protected_qwen_files_and_exact_context_reader_forward():
     """The four protected Qwen files are pinned to absolute source digests."""
     builder = read_builder()
     assert set(PROTECTED_QWEN_SOURCE_DIGESTS) == set(QWEN)
@@ -333,7 +338,9 @@ def test_protected_qwen_files_stay_byte_exact():
     assert not set(PROTECTED_QWEN_SOURCE_DIGESTS) & set(builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS)
     manifest = json.loads((NATIVE / "rollout/native-manifest.json").read_text())
     inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_text())
-    for name, expected in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
+    assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py"}
+    for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
+        expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
         assert name in builder.BASE_FILES
         candidate = NATIVE / "candidate" / name
         assert candidate.is_file() and not candidate.is_symlink()
