@@ -1329,3 +1329,129 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
    - MERGED: Mastermind #1901 (`aefeaf61`, master push CI green), Macro #10297 (`9ab25923`) and #10259 (`8afb5dbf`). None has production proof beyond its land check; U6 is pending.
    - PROVEN_OUTCOME: the #10284 flake diagnosis and its released re-run, the #9569 classification, and lane W's independent review.
    - No W15 build has reached PRODUCTION_PROOF.
+
+#### r19 cycle 2026-11-01 03:55Z (seat dd5239a9, Opus 5.5) — wave 15 continued: r18 landed after an independent review, and its three notes are corrected here by name; the sweeper merged A5 (#10302), G (#10284) and the U5 pins (#10273), each land-checked; Read 2b ran once as a monitoring read (eligible 0 → 2, revisions reader clean), so U1(a) is parked by its own gate; the first render the U6 watcher caught was built from pre-fix code, so D27 is corrected and U6 still waits; #9569 stays parked
+
+**Review of r18**
+- Lane X (`c19-w15-x-review-r18-20261101`, glm-5.3, ubuntu1) was a fresh, non-authoring reviewer of Mastermind #1903 at head `4db0fa1a` (r18, lines 1202–1331).
+- Items X1–X8 all PASS. Verdict: APPROVE_WITH_NOTES, with three notes. The seat spot-checked the lines the return cites (1094, 1237, 1265, 1268, 1288, 1300, 1311, 1330); every quote matched.
+- The seat ruled all three notes non-blocking, so #1903 merged at the reviewed head. They are corrected below. The lane tree was removed after acceptance.
+
+**Corrections to r18 (§7.5)**
+1. **Line 1330.** "the #9569 classification" means the seat's diagnosis that #9569's red is inherited from main. The sweeper itself filed the failure `classification=unknown` (line 1237). Read it as "the seat's #9569 inherited-red diagnosis".
+2. **Lines 1265 and 1268.** Both watchers had a 12 h bound, and r18 gave no re-arm rule. What actually happened to each is in FACTS — watching, below. The rule from here is D31.
+3. **Line 1288.** The branch name `sol/mi-composer-n5-global-scope-20261017` is a custody clue, not a live receiver. The actor stays "branch owner or Chairman" (line 1311), and the ask was made once. Nothing else changes.
+4. **D27 (lines 1295–1298), the seat's own error.** "The first render that descends from `8afb5dbf`" was read by the seat's first U6 watcher as the render commit's ancestry. That is wrong; see FACTS — U6 and the corrected D27 below.
+
+**FACTS — merges**
+- **Mastermind #1903 (ledger r18)** merged 2026-11-01T02:12:54Z as `c0d038a1a8c2` through the merge queue. It was enqueued at 00:56:02Z with `--match-head-commit 4db0fa1a`; GraphQL readback showed `AWAITING_CHECKS`, position 3, and no auto-merge request.
+  - Land-check: the ledger blob `0bddc427` is identical at the reviewed head and at the merge.
+  - Runs on the merge passed: merge_group CI 41261378100, push CI 41264248725 and "Push on master" 41264248156. #1243 pointer: comment 6552214303.
+- **Macro #10302 (A5)** merged 2026-11-01T00:34:19Z as `e814af877a8b`.
+  - Land-check: the five paths (the prereg, `scripts/c19_wp31_{evaluate,runner,sources}.py` and `tests/test_c19_wp31_sources.py`) have identical blobs at the reviewed head and at the merge. The patch-line fingerprint did not change across the base syncs (D28).
+  - It landed before E (2026-11-16T00:00Z, prereg line 414). So A5 is in force, and the 2026-11-13 successor trigger (r18 line 1309) is moot.
+  - Macro main `integration-baseline` passed on `e814af87` (run 41257326781, 00:54:47Z).
+- **Macro #10284 (G)** merged 2026-11-01T01:37:12Z as `9b71392ed8a8`. Land-check: its three paths have identical blobs at the reviewed head and on main.
+- **Macro #10273 (U5, WP28 CS-leg pins)** merged 2026-11-01T03:19:08Z as `1937fd756eb2`.
+  - Land-check: `tests/test_c19_wp28_cs_leg_qualification.py` has blob `ca2d0e75` at the reviewed head `e84e06de`, the final head `7614f5a8` and the merge.
+  - `.github/ci/legacy-jobs.yml` changed blob because main edited the same file. Its own +/- lines are identical reviewed vs landed: hash `dd92617b832b7d29` for both merge-base `91b936c4` → `e84e06de` and parent `49b6910d` → `1937fd75`. That hash comes from local `git diff`, a different method from the watcher's API fingerprint, so it does not match r18's `b6370c086034`.
+  - Macro main `integration-baseline` passed on `1937fd75` (run 41268694420, 03:39:57Z). Main `ci` (run 41269222548) was still in progress at 03:44Z.
+- The sweeper merged all three Macro PRs; the seat merged none. Rung: MERGED for each. A5 and G first ran in Read 2b (below); that is a research read, not production proof.
+
+**FACTS — Read 2b (D17; one §5 monitoring read, counts only)**
+- **Tree.** The seat's WP31 read tree, sparse (`data/` excluded except `data/trial_ledger.jsonl`), moved from `1627e6d4` to Macro main `1e2eeeb01f06`. G `9b71392e`, A5 `e814af87` and PREREG_COMMIT `8e195093` are all ancestors.
+  - Since read 2, main changed seven WP31 files (+406/-45).
+  - Preflight: `tests/test_c19_wp31*.py` 233 passed (219 at read 2), Python 3.14.7.
+- **Headers.** Universe headers were re-read at 02:00:15Z (submissions: form, filing date, acceptance time and items only). No new release episode since read 2; the one new 8-K carried a non-release item only.
+- **Run.** Launched once at 02:00:28Z with read 2's command, writing `read2b.*` and `report_2b.json` to the durable WP31 directory. It ended rc=0 at 03:38:32Z (98 min), with empty stderr.
+- **Printed counts.**
+  - `episode_count=245`, `label_pending=1`, `exhibit_failures=245` (the known pre-2015 header-404 class, line 838), `eligible=2`, verdict `MONITORING`, look `monitoring`.
+  - Adapters: companyfacts 5 requests / 0 unavailable; index_headers 501; k_inputs 245 / 0 unavailable; submissions 10 / 0 shards missing / 0 unavailable.
+  - Revisions reader: attempts 1, transient failures 0, final failures 0.
+  - No `not_evaluable_detail` line. G prints one per NOT_EVALUABLE reason pair, so no episode was NOT_EVALUABLE.
+- **Reading.** Read 2 lost both live episodes to `pit_unrecoverable` after three reader attempts. At read 2b the reader succeeded on its first attempt and eligible went 0 → 2. That is consistent with H-T (a transient reader failure, line 881). It is not proof: one clean read is one observation.
+- **`study_stopped`** is not printed, so it is derived from source (`scripts/c19_wp31_stats.py` at `1e2eeeb0`):
+  - `classify_look` (lines 519–547): 2 eligible is far below the §5 minimum, no earlier read stopped the study, and there is no look 2, so rule (4) makes this read `monitoring`.
+  - The monitoring branch (lines 783–794) with no earlier stopped read returns `MONITORING` / `monitoring_descriptive_only` and `study_stopped=False`. That matches the printed verdict.
+- **Records.**
+  - The seat appended `{"read":"2b","look":"monitoring","study_stopped":false,…}` to `prior_reads.json` by hand at 03:40:30Z (4 entries, validated by `json.load`); the evaluator does not append.
+  - `exposure.jsonl` gained no row (its mtime is still read 2's end). That is expected: `gates.record_label_read` is first-read-wins per (issuer, q), and no new episode existed.
+  - No look was spent.
+
+**FACTS — U6: the first caught render does not count**
+- The first U6 watcher (`bo5apdrid`) exited at 01:37Z with `EVENT: u6_render` on render commit `ba66934345d4` (01:20:26Z, scope `all`). Its `crude_stocks.state` read `available`. **This is not production proof.**
+  - The render commit's message says `from=7f38ee6f42c0`. render.yml defines `from=` as the main SHA the run actually rendered.
+  - `merge-base --is-ancestor 8afb5dbf 7f38ee6f` is false, so pre-fix code built the page.
+  - The render commit descends from the fix only because the publish step pushes it on top of main. The watcher tested the render commit's ancestry, not the rendered tree's: the seat's error.
+- The pre-fix render `c7c025a93cd0` and `ba66934345d4` carry byte-identical `crude_stocks` blocks (`available`, the same observation time).
+- The engine diff (`engine/commodity_supply_context.py`, +8/-2) explains why. It adds a `zero_stock` branch and splits out `negative_stock`, so on valid data the old and new code emit the same block.
+- **D27, corrected.** "The first render that descends from `8afb5dbf`" means a render whose `from=` SHA descends from `8afb5dbf`.
+  - `available` on such a render proves that the fixed code is in production and that the valid path did not regress.
+  - It does not show the zero or negative refusal live. Those branches are proven by #10259's tests in CI only. No invalid data is made, and daily.yml is not dispatched, to exercise them.
+- **The replacement watcher** (`bmov4z8yb`, `$P/watch_u6_proof2.sh`, every 30 minutes, 12 h bound from about 01:40Z) keys on three things: `from=` ancestry, a scope of `all` or one that includes `markets`, and the render commit touching `site/commodities.html`.
+  - Dry run at 01:39Z: the negative control printed "`ba66934345d4` from=`7f38ee6f42c0` predates fix". The positive control, pointed at an older fix SHA (`063cc2fe`), hit `b4a4333cdd87`.
+  - Samples up to 03:41Z found no qualifying render.
+
+**FACTS — watching** (correction 2)
+- **Aggregate watcher** (`$P/watch_macro_agg.sh`), in order:
+  - `bxqp7qgpm` exited on `10302:MERGED`;
+  - `bue7khi8s` was re-armed at about 00:36Z over #10284, #10273 and #9569, and exited on `10284:MERGED`;
+  - `bz7xingxl` was re-armed at about 01:58Z over #10273 and #9569, and exited on `10273:MERGED` at 03:28Z, with no own-diff change across its run;
+  - `b0vrmdkvw` was re-armed at about 03:30Z over #9569 alone, with `ACK_RED=9569:d558d0e7`, a 60-minute interval and a 12 h bound.
+  - The script now takes `INTERVAL` (default 900 s). It does not read `mergeable`, so a conflict shows only at a seat read.
+- **U6 watcher.** `bo5apdrid` exited on the false positive above; `bmov4z8yb` replaced it.
+- **#1903 queue watcher.** `bsz3imkbt` exited on MERGED at 02:14Z.
+- **Housekeeping.** The r18 SSD worktree is clean at `4db0fa1a`, but `git worktree remove` refuses it: the external-storage policy locks it ("removable volume protection"). It is left in place; the seat does not override a storage-protection lock.
+
+**W15 lanes, continued**
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| X | independent review of Mastermind #1903 (r18) at `4db0fa1a` | glm-5.3, ubuntu1 (`c19-w15-x-review-r18-20261101`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (X1–X8 PASS). Three notes corrected in this section |
+
+**DECIDED**
+- **D29. Read 2b is recorded as a monitoring read, with `study_stopped=false` derived from source** (FACTS, above). No look was spent. The next evaluator run needs a new release episode in the universe headers. It is again one run, counts only, and it is never run in CI.
+- **D30. U1(a) is PARKED by its own gate.**
+  - The gate was frozen in the seat's spec before Read 2b printed:
+    - final failures ≥ 1 → build;
+    - final 0 and transient ≥ 1 → record, and park unless a later read repeats it;
+    - transient 0 → park.
+  - Read 2b printed attempts 1, transient 0, final 0. Nothing is built and no lane is commissioned.
+  - It re-opens only if a later read prints final failures ≥ 1, or transient failures on two reads.
+  - U1 (b) and (c) stay proposals for the event-workspace publisher's owner.
+- **D31. A watcher whose wait is still open is re-armed in the same cycle that it exits or reaches its bound, and each ledger cycle names the live handle.**
+  - A parked wait uses the 60-minute Class-M cadence.
+  - A watcher that keys on a derived fact (here, `from=` ancestry) gets a negative and a positive control before it is trusted.
+- **D27 is corrected as stated in FACTS — U6.** The rest of D27 stands: a natural render only, and a scoped finding (not a revert) if the state reads `invalid_zero_stock` or `invalid_negative_stock`.
+
+**UPGRADE PLAN**, deltas from r18:
+- **U1.** G has landed (#10284). (a) is PARKED (D30). (b) and (c) are unchanged, as proposals to the event-workspace publisher's owner.
+- **U5.** The pins have landed (#10273). Wiring the leg still waits for the #1258 F4 / CS-V2 W4+W6 release.
+- **U6.** The proof condition is corrected (D27, corrected). Still pending.
+- **U3 and U4** wait on #9569 (D25).
+- U2 and U7 are unchanged.
+
+**OPEN** (owner → next action)
+- **U6**, seat → when `bmov4z8yb` reports a qualifying render, read `crude_stocks.state` and record a scoped PRODUCTION_PROOF or a scoped finding (D27, corrected). If the watcher reaches its bound with the wait still open, re-arm it (D31).
+- **Macro #9569**, branch owner or Chairman → merge main ≥ `d9471d0e` into the branch (D25). Seat → none until the head moves; `b0vrmdkvw` reads it hourly.
+- **WP31**, seat → re-read the universe headers at a natural boundary. One evaluator run (D29) only when a new release episode exists.
+- **Macro main `ci` on `1937fd75`**, seat → read once at the next boundary. A red that touches #10273's files is a finding against that merge.
+- **Findings routed in r17** stand unchanged: the pg_profile UTC-date edge, the Atom `<updated>` clock, the ubuntu1 thermal-admission mismatch, and the WP31 docstring debt.
+- **Unchanged from r18:**
+  - the r16 owner findings;
+  - WP32 P3 free-tier 403 (human step);
+  - cold-compose 524 and `x-consumed-receipts`;
+  - P4–P7;
+  - the K1 Q2/Q3 residuals;
+  - WP18 UI;
+  - G10/G11;
+  - Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r19 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. `bmov4z8yb` owns the U6 render wait; `b0vrmdkvw` owns the #9569 wait. Both are re-armed under D31.
+3. U6 proof at the first render whose `from=` descends from `8afb5dbf`. A WP31 read only on a new release episode.
+4. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING.
+   - MERGED: Mastermind #1903 (`c0d038a1`, push CI green), Macro #10302 (`e814af87`), #10284 (`9b71392e`) and #10273 (`1937fd75`). Macro main `integration-baseline` is green on `e814af87` and `1937fd75`.
+   - PROVEN_OUTCOME: Read 2b's counts and its `study_stopped` derivation, U1(a)'s gate decision, the U6 false-positive diagnosis, and lane X's independent review.
+   - No W15 build has reached PRODUCTION_PROOF.
