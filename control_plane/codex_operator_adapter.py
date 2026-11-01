@@ -154,6 +154,52 @@ class CodexAdapterError(RuntimeError):
         self.effect_unknown = effect_unknown
 
 
+# Public-source-qualified initialize contract for the exact installed build.
+_QUALIFIED_APP_SERVER_VERSION = "0.159.2"
+_QUALIFIED_APP_SERVER_BINARY_DIGEST = (
+    "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
+)
+
+# ff6aec initialize_processor supplies the source-owned caller as originator
+# and suffix; login/auth/default_client formats build_version in this first
+# product/version position. CLI --version output is a different observation.
+_PINNED_INITIALIZE_CLIENT = ("mastermind-ohf", "p1b")
+
+
+@dataclass(frozen=True)
+class _InitializeVersionObservation:
+    raw_user_agent: str = field(repr=False)
+    harness_version: str
+
+
+def _initialize_version_observation(
+    raw_user_agent: object, binary_digest: str, *, client_context: tuple[str, str]
+) -> _InitializeVersionObservation:
+    if binary_digest != _QUALIFIED_APP_SERVER_BINARY_DIGEST:
+        # Preserve all previously qualified legacy raw-UA comparisons.
+        legacy = str(raw_user_agent or "").strip()
+        return _InitializeVersionObservation(legacy, legacy)
+    name, client_version = _PINNED_INITIALIZE_CLIENT
+    pattern = (
+        rf"{re.escape(name)}/{re.escape(_QUALIFIED_APP_SERVER_VERSION)} "
+        rf"\([^()\r\n]{{1,192}}\) [ -~]{{0,256}} "
+        rf"\({re.escape(name)}; {re.escape(client_version)}\)"
+    )
+    if (client_context != _PINNED_INITIALIZE_CLIENT
+            or type(raw_user_agent) is not str
+            or not 0 < len(raw_user_agent) <= 512
+            or any(not 32 <= ord(char) <= 126 for char in raw_user_agent)
+            or re.fullmatch(pattern, raw_user_agent) is None):
+        raise CodexAdapterError(
+            AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
+            "pinned initialize product/version or caller context is unavailable",
+            effect_unknown=True,
+        )
+    return _InitializeVersionObservation(
+        raw_user_agent, _QUALIFIED_APP_SERVER_VERSION
+    )
+
+
 ClientFactory = Callable[[list[str], Mapping[str, str], Path], AppServerClient]
 TurnInputLoader = Callable[[TurnRef], "str | CodexTurnInputEnvelope"]
 ProcessIdentityObserver = Callable[[int], ProcessIdentityObservation]
@@ -1340,11 +1386,16 @@ class CodexOperatorAdapter:
         launch_binary_digest: str,
         resource: _BoundAttemptResource | None = None,
     ) -> ObservedHarnessAttestation:
+        client_info = dict(_CLIENT_INFO)
+        client_context = (client_info.get("name"), client_info.get("version"))
         try:
             initialized = client.request(
                 "initialize",
-                {"clientInfo": _CLIENT_INFO, "capabilities": {"experimentalApi": True}},
+                {"clientInfo": client_info, "capabilities": {"experimentalApi": True}},
             )
+            # Freeze this raw observation before later RPCs can change a
+            # client-owned response object. It is not a semantic version.
+            raw_user_agent = initialized.get("userAgent")
             client.notify("initialized", {})
             account = parse_account_read(
                 client.request("account/read", {"refreshToken": False})
@@ -1364,7 +1415,18 @@ class CodexOperatorAdapter:
         except Exception as exc:
             raise _rpc_failure(exc, effect_unknown=True) from exc
 
-        actual_version = str(initialized.get("userAgent") or "").strip()
+        version_observation = _initialize_version_observation(
+            raw_user_agent, launch_binary_digest,
+            client_context=client_context,
+        )
+        # Existing direct canary/probe callers seal the complete raw UA. Keep
+        # their exact comparison after producer validation; normal Runtime
+        # profiles seal the legal semantic version instead.
+        actual_version = (
+            version_observation.raw_user_agent
+            if requested.harness_version == version_observation.raw_user_agent
+            else version_observation.harness_version
+        )
         if actual_version != requested.harness_version:
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
