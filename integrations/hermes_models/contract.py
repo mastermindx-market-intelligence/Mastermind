@@ -224,3 +224,29 @@ def chain_for(role_id: str, *, provider_id: str | None = None) -> tuple[Provider
         raise KeyError(f"provider {provider_id!r} is outside role {role_id!r}")
     # An explicit provider pin is one attempt. It does not walk the failover chain.
     return (provider(provider_id),)
+
+
+def native_provider_choices(profile_name: str) -> tuple[ProviderSpec, ...]:
+    """Configured options from the existing role catalog, not runtime admission.
+
+    No new route, fallback policy, account pool or endpoint is introduced.
+    Disabled providers remain unavailable even when listed as future alternatives.
+    """
+    roles = [role for name, role in ROLES.items()
+             if name in {"secretary", "meta-ceo"} and role.profile == profile_name]
+    if len(roles) != 1:
+        raise ValueError("native role is unqualified")
+    return tuple(provider(ident) for ident in roles[0].provider_ids
+                 if provider(ident).enabled_in_profile)
+
+
+def native_provider(profile_name: str, provider_id: str | None = None) -> ProviderSpec:
+    """Resolve one explicit role-eligible provider; never select a fallback."""
+    choices = native_provider_choices(profile_name)
+    selected = PROFILE_PRIMARY[profile_name] if provider_id is None else provider_id
+    if not isinstance(selected, str) or not selected:
+        raise ValueError("native model selection is unqualified")
+    for spec in choices:
+        if spec.provider_id == selected:
+            return spec
+    raise ValueError("native model selection is unqualified")

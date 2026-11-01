@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     install_p.add_argument("--systemd-user-dir", type=Path, required=True)
     install_p.add_argument("--secrets-file", type=Path, required=True)
     install_p.add_argument("--hermes-bin", type=Path, required=True)
+    install_p.add_argument("--model-provider", help="One existing role-eligible native provider id; no automatic fallback")
     source = install_p.add_mutually_exclusive_group(required=True)
     source.add_argument("--upstream-source", type=Path)
     source.add_argument("--fetch", action="store_true")
@@ -51,6 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     parity_p.add_argument("--posts", type=Path, required=True)
     parity_p.add_argument("--start", required=True)
     parity_p.add_argument("--end", required=True)
+
+    models_p = sub.add_parser("models", help="List source-configurable BYOK role choices without loading credentials")
+    models_p.add_argument("--role", choices=("mmsecretary", "mmmeta"), required=True)
 
     doctor_p = sub.add_parser("doctor")
     doctor_p.add_argument("--json", action="store_true")
@@ -80,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
             }
         elif args.command == "parity-check":
             payload = _parity(args.decisions, args.posts, args.start, args.end)
+        elif args.command == "models":
+            payload = _models(args.role)
         elif args.command == "doctor":
             report = doctor()
             if args.json:
@@ -103,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
 def _install(args: argparse.Namespace) -> dict:
     # Import on invocation: read-only shadow jobs must not depend on PyYAML.
     from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+    selected_provider = _install_selection(args)
     profile_path = args.state.parent / f"{args.role}.hermes-profile.yaml"
     write_composed_profile(
         args.role,
@@ -110,6 +117,7 @@ def _install(args: argparse.Namespace) -> dict:
         secrets_file=args.secrets_file,
         dest=profile_path,
         installed_native_only=True,
+        native_provider_id=selected_provider,
     )
     payload = runtime_install(
         profile_path=profile_path,
@@ -123,6 +131,8 @@ def _install(args: argparse.Namespace) -> dict:
     )
     home = args.state / "current" / "hermes-home"
     overlays = render_overlays()
+    from integrations.hermes_models.profile_config import render_profile
+    overlays[args.role] = render_profile(args.role, native_provider_id=selected_provider)
     _write(home / "provider-overlay.yaml", overlays[args.role])
     _write(home / "vision-overlay.yaml", overlays["vision"])
     payload["overlay_chain"] = list(overlay_chain(args.role))
@@ -133,7 +143,64 @@ def _install(args: argparse.Namespace) -> dict:
     payload["native_steward_connected"] = False
     payload["native_model_profile"] = "CONFIGURED_KEY_NAMES_ONLY"
     payload["provider_called"] = False
+    payload["native_model_selection"] = _model_selection(load_profile(args.state / "current" / "profile.yaml"))
     return payload
+
+
+def _install_selection(args: argparse.Namespace) -> str | None:
+    """Preserve an installed role choice on upgrade unless explicitly changed."""
+    from integrations.hermes_models.contract import native_provider
+    selected = getattr(args, "model_provider", None)
+    if (args.state / "install-manifest.json").is_file():
+        previous_path = args.state / "current" / "profile.yaml"
+        if not previous_path.is_file():
+            raise RuntimeRefusal("NATIVE_UPGRADE_PROFILE_MISSING")
+        previous = load_profile(previous_path)
+        if previous.role != args.role:
+            raise RuntimeRefusal("NATIVE_UPGRADE_ROLE_MISMATCH")
+        if selected is None:
+            selected = previous.native_provider_id
+    try:
+        native_provider(args.role, selected)
+    except (ValueError, KeyError):
+        raise RuntimeRefusal("NATIVE_MODEL_SELECTION_UNQUALIFIED") from None
+    return selected
+
+
+def _model_selection(profile) -> dict:
+    from integrations.hermes_models.contract import native_provider
+    try:
+        spec = native_provider(profile.role, profile.native_provider_id)
+    except (ValueError, KeyError):
+        raise RuntimeRefusal("NATIVE_MODEL_SELECTION_UNQUALIFIED") from None
+    return {
+        "provider_id": spec.provider_id,
+        "native_provider": spec.hermes_name,
+        "requested_model": spec.served_model,
+        "served_model_verified": False,
+        "credential_env": spec.credential_env,
+        "credential_file_env": spec.credential_file_env,
+        "automatic_fallback": False,
+        "provider_called": False,
+    }
+
+
+def _models(role: str) -> dict:
+    from integrations.hermes_models.contract import PROFILE_PRIMARY, native_provider_choices
+    return {
+        "role": role,
+        "default_provider_id": PROFILE_PRIMARY[role],
+        "choices": [{
+            "provider_id": spec.provider_id,
+            "native_provider": spec.hermes_name,
+            "requested_model": spec.served_model,
+            "credential_file_env": spec.credential_file_env,
+        } for spec in native_provider_choices(role)],
+        "selection_is_admission": False,
+        "automatic_fallback": False,
+        "provider_called": False,
+        "credentials_read": False,
+    }
 
 
 def _uninstall(state: Path, unit_dir: Path) -> dict:
@@ -154,10 +221,12 @@ def _status(state: Path) -> dict:
     profile_path = state / "current" / "profile.yaml"
     allowlist: list[str] = []
     role = ""
+    native_selection = None
     if profile_path.is_file():
         profile = load_profile(profile_path)
         allowlist = sorted(profile.tool_allowlist)
         role = profile.role
+        native_selection = _model_selection(profile)
     overlay = state / "current" / "hermes-home" / "provider-overlay.yaml"
     chain: list[str] = []
     if role in {"mmsecretary", "mmmeta"}:
@@ -171,6 +240,8 @@ def _status(state: Path) -> dict:
         "allowlist": allowlist,
         "overlay_present": overlay.is_file(),
         "overlay_chain": chain,
+        "native_model_selection": native_selection,
+        "provider_called": False,
         "vision_chain": list(overlay_chain("vision")),
         "secrets_recorded": False,
     }

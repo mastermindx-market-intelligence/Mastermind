@@ -233,11 +233,11 @@ class HarnessEndToEnd(unittest.TestCase):
     def test_install_status_uninstall_and_cli(self) -> None:
         os.chmod(STUB, 0o755)
         os.chmod(CTL, 0o755)
-        root = Path("/tmp/hermes-harness-install")
-        if root.exists():
-            shutil.rmtree(root)
-        root.mkdir()
-        self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        temporary = tempfile.TemporaryDirectory(prefix="hermes-harness-install-")
+        self.addCleanup(temporary.cleanup)
+        # Unique test custody; resolve macOS /tmp -> /private/tmp once so the
+        # exact EnvironmentFile assertion remains meaningful on every host.
+        root = Path(temporary.name).resolve()
         state = root / "state"
         unit = root / "config" / "systemd" / "user"
         unit.mkdir(parents=True)

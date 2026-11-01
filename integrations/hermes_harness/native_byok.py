@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from integrations.hermes_harness.native_mcp import render_disarmed_native_config
 from integrations.hermes_models.contract import (
-    API_MODE, PROFILE_PRIMARY, PROVIDERS, MODELARK_CONTRACT, provider,
+    API_MODE, PROFILE_PRIMARY, PROVIDERS, MODELARK_CONTRACT, native_provider,
 )
 from integrations.hermes_models.profile_config import render_profile
 from integrations.hermes_runtime.errors import RuntimeRefusal
@@ -57,7 +57,9 @@ def render_disarmed_native_byok(profile: RuntimeProfile) -> str:
         raise RuntimeRefusal("NATIVE_BYOK_EXTENSION_NOT_INSTALLED")
     try:
         native = _load_unique_yaml(render_disarmed_native_config(profile).encode("utf-8"))
-        overlay = _load_unique_yaml(render_profile(profile.role).encode("utf-8"))
+        overlay = _load_unique_yaml(render_profile(
+            profile.role, native_provider_id=profile.native_provider_id,
+        ).encode("utf-8"))
     except RuntimeRefusal:
         raise
     except (OSError, RuntimeError, ValueError, UnicodeError):
@@ -74,7 +76,10 @@ def render_disarmed_native_byok(profile: RuntimeProfile) -> str:
         or overlay["toolsets"] != native["toolsets"]
     ):
         raise RuntimeRefusal("NATIVE_BYOK_TOOLSET_DRIFT")
-    primary = provider(PROFILE_PRIMARY[profile.role])
+    try:
+        primary = native_provider(profile.role, profile.native_provider_id)
+    except (ValueError, KeyError):
+        raise RuntimeRefusal("NATIVE_MODEL_SELECTION_UNQUALIFIED") from None
     required_model = {
         "provider": primary.hermes_name,
         "default": primary.served_model,

@@ -115,6 +115,43 @@ Ids and credentials doctor still reports until they are provided:
 - Fabric live submit stays off.
 - A pinned upstream checkout is attested only after `install --fetch` writes `upstream_attested: true`.
 
+## Explicit native BYOK model selection
+
+List the choices already present in the reviewed role catalog without opening
+any credential or calling a provider:
+
+```sh
+python3 integrations/hermes_harness/hermesctl models --role mmsecretary
+python3 integrations/hermes_harness/hermesctl models --role mmmeta
+```
+
+Secretary can select `byteplus-modelark.glm-5.3-flash` (the existing default)
+or `byteplus-modelark.deepseek-v4.1-flash`. Meta-CEO currently selects
+`zai.glm-5.3`. This is a source-qualified configuration list, not proof of
+live provider availability or permission to spend. Adding another provider
+requires its existing role/catalog qualification; an arbitrary model name,
+custom URL, cross-role model or disabled Cursor route is refused.
+
+Pass one explicit `--model-provider <provider-id>` to the existing `install`
+command below. The choice is persisted in the role's existing `profile.yaml`
+and consumed by its native config, matching provider overlay, scoped key
+loader and install/status receipts. No separate preference database, provider
+router, fallback chain or secret store is introduced. `status` distinguishes
+`requested_model` from `served_model_verified: false`.
+
+An upgrade with no `--model-provider` preserves the installed selection. A
+corrupt, missing or wrong-role previous profile fails closed rather than
+resetting the model. This is an installation-time setting, **not hot
+switching**: do not change an occupied role or unresolved turn. A model or
+account change never replays an earlier denied, rate-limited or uncertain
+operation. Existing source review, credential enrollment and runtime gates
+still control first launch. The installed systemd network policy remains
+loopback-only and is not relaxed by selecting a model.
+
+The doctor now checks the selected provider and actual private credential
+file referenced by an installed role profile, rather than treating an
+operator shell key or a different role's config as native readiness.
+
 ## Install
 
 From the repo root, as the operator user on ubuntu1:

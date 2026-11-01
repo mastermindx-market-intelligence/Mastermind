@@ -36,5 +36,9 @@ jobs:
         run: python -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
       - name: Compile the harness and the five packages
         run: python -m compileall -q integrations/hermes_harness integrations/hermes_runtime integrations/hermes_models integrations/hermes_steward integrations/hermes_delegate integrations/hermes_secretary
-      - name: Run the offline end-to-end harness
-        run: python -m unittest discover -v -s integrations/hermes_harness/tests -p 'test_*.py'
+      - name: Run the offline harness and all five dependency contracts
+        run: |
+          set -eu
+          for package in hermes_models hermes_harness hermes_runtime hermes_steward hermes_delegate hermes_secretary; do
+            python -m unittest discover -v -s "integrations/$package/tests" -p 'test_*.py'
+          done

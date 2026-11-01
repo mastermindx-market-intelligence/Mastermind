@@ -59,6 +59,7 @@ class RuntimeProfile:
     model_default: str
     source_path: Path
     service_name: str
+    native_provider_id: str | None = None
 
     @property
     def hermes_allowlist(self) -> frozenset[str]:
@@ -105,6 +106,8 @@ def dump_profile(profile: RuntimeProfile) -> str:
         "model:",
         f"  provider: {profile.model_provider}",
         f"  default: {profile.model_default}",
+        *([f"  native_provider_id: {profile.native_provider_id}"]
+          if profile.native_provider_id is not None else []),
         f"secrets_file: {profile.secrets_file}",
         "gateway:",
         f"  host: {profile.gateway_host}",
@@ -177,7 +180,8 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
     model = config.get("model")
     provider = ""
     default = ""
-    if not isinstance(model, dict) or set(model) - {"provider", "default"}:
+    native_id = None
+    if not isinstance(model, dict) or set(model) - {"provider", "default", "native_provider_id"}:
         issues.add("UNQUALIFIED_MODEL_ROUTE")
     else:
         provider = model.get("provider")
@@ -188,6 +192,15 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
             provider = ""
         if not isinstance(default, str):
             default = ""
+        if "native_provider_id" in model:
+            native_id = model["native_provider_id"]
+            from integrations.hermes_models.contract import native_provider
+            try:
+                if not isinstance(native_id, str):
+                    raise ValueError("invalid native selector")
+                native_provider(role, native_id)
+            except (ValueError, KeyError):
+                issues.add("UNQUALIFIED_NATIVE_MODEL_SELECTION")
 
     allow, allow_issues = _allowlist(config.get("tool_allowlist"))
     issues.update(allow_issues)
@@ -287,6 +300,7 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
         model_default=default,
         source_path=source_path,
         service_name=f"hermes-runtime-{role}",
+        native_provider_id=native_id,
     )
 
 
