@@ -28,10 +28,15 @@ def filesystem(monkeypatch):
         state = SimpleNamespace(anchor=anchor, base=base, euid=0, owner={}, device={},
                                 fd_device={}, acl=set(), opened=set(), fail_open=None,
                                 fail_fstat=False)
+        # Only the fixture anchor/prefixes model Root custody. Other real
+        # source-fixture files retain their actual owner/group observations.
+        anchor_inodes = {path.lstat().st_ino for path in [*anchor.parents, anchor]}
+        state.owner.update({inode: 0 for inode in anchor_inodes})
 
         def facts(info):
             values = {key: getattr(info, key) for key in dir(info) if key.startswith("st_")}
-            values.update(st_uid=state.owner.get(info.st_ino, 0), st_gid=0,
+            values.update(st_uid=state.owner.get(info.st_ino, info.st_uid),
+                          st_gid=0 if info.st_ino in anchor_inodes else info.st_gid,
                           st_dev=state.device.get(info.st_ino, info.st_dev))
             return SimpleNamespace(**values)
 

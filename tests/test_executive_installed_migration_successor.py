@@ -14,6 +14,14 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from tests.test_executive_persistent_origin import filesystem
+
+
+@pytest.fixture(autouse=True)
+def _current_data_anchor_fixture(filesystem):
+    """Explicit raw Root/Darwin facts; real held anchor predicates execute."""
+    yield filesystem
+
 from ops.executive_os import acceptance_maintenance as m
 from ops.executive_os import prepare_control_successor as producer
 from tests import test_executive_acceptance_v5_to_v7 as fixtures

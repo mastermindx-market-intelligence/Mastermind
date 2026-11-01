@@ -604,8 +604,10 @@ def _validate_v5_to_v7_carry_history(descriptor: dict, receipt: dict,
         derived = getattr(verified_copy, "origin_identities", None)
         if not isinstance(derived, dict) or set(derived) != {"database", "manifest"}:
             raise MaintenanceError("qualified proof backup origin is invalid")
-        if {key: _v5_to_v7_origin_record(derived[key])
-                for key in ("database", "manifest")} != origins:
+        observed_origins = {key: _v5_to_v7_origin_record(derived[key])
+                            for key in ("database", "manifest")}
+        if any(not retained._persistent_record_matches(origins[key], observed_origins[key])
+               for key in ("database", "manifest")):
             raise MaintenanceError("qualified proof backup origin drifted from the sealed run")
         verification = dict(_json_data(verified_copy.verification))
         # Only the two explicit copy-address fields are renormalized to the
@@ -877,6 +879,82 @@ def verify_inventory(baseline: dict) -> None:
             content["nlink"] = info.st_nlink
         if {"uid":info.st_uid,"gid":info.st_gid,"mode":stat.S_IMODE(info.st_mode),**content} != expected:
             raise MaintenanceError("preserved artifact changed")
+
+
+def _migration_inventory_matches(evidence, baseline: dict, roots: list[Path] | None = None) -> bool:
+    """Reobserve a complete inventory through actual held migration evidence.
+
+    The generic producer/verifier stay strict. Only historical directory
+    device observations are compared across time, under the current anchor;
+    every current file/link/directory is constrained even when A equals B.
+    """
+    from ops.executive_os.persistent_origin import _same_value
+    evidence.check()
+    if roots is not None:
+        paths = []
+        for root in roots:
+            root = root.resolve(strict=True)
+            paths.extend([root, *sorted(root.rglob('*'))])
+    else:
+        # Active acceptance adds new proof artifacts; preserve every admitted
+        # preimage without freezing its later namespace.
+        paths = [Path(name) for name in baseline]
+    observed = {}
+    for path in paths:
+        info = path.lstat()
+        evidence._require_current_path(path, info)
+        if stat.S_ISDIR(info.st_mode):
+            content = {'directory': True, 'device': info.st_dev, 'inode': info.st_ino}
+        elif stat.S_ISLNK(info.st_mode):
+            content = {'link': os.readlink(path)}
+        elif stat.S_ISREG(info.st_mode):
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+                         | getattr(os, 'O_CLOEXEC', 0))
+            try:
+                held = os.fstat(fd)
+                if _identity(held) != _identity(info):
+                    raise MaintenanceError('preserved file changed during acquisition')
+                evidence._require_current_path(path, held)
+                hashed = hashlib.sha256()
+                offset = 0
+                while offset < held.st_size:
+                    block = os.pread(fd, min(1024*1024, held.st_size-offset), offset)
+                    if not block:
+                        raise MaintenanceError('preserved file was truncated')
+                    hashed.update(block)
+                    offset += len(block)
+                if _identity(os.fstat(fd)) != _identity(held):
+                    raise MaintenanceError('preserved file changed during read')
+                evidence._require_current_path(path, held)
+                content = {'sha256': hashed.hexdigest()}
+            finally:
+                os.close(fd)
+        else:
+            raise MaintenanceError('preserved artifact became a special file')
+        if has_macos_acl(path, expected_identity=info, allow_symlink=stat.S_ISLNK(info.st_mode)):
+            raise MaintenanceError('preserved artifact gained an ACL')
+        evidence._require_current_path(path, info)
+        if _identity(path.lstat()) != _identity(info):
+            raise MaintenanceError('preserved artifact changed during observation')
+        if not stat.S_ISDIR(info.st_mode):
+            content['nlink'] = info.st_nlink
+        observed[str(path)] = {'uid': info.st_uid, 'gid': info.st_gid,
+                               'mode': stat.S_IMODE(info.st_mode), **content}
+    if set(observed) != set(baseline):
+        return False
+    devices = {value['device'] for value in baseline.values()
+               if value.get('directory') is True}
+    if (len(devices) != 1 or any(type(device) is not int or device <= 0 for device in devices)):
+        raise MaintenanceError("preserved inventory historical device cohort differs")
+    for name, expected in baseline.items():
+        current = observed[name]
+        if expected.get('directory') is True:
+            if not evidence._persistent_record_matches(expected, current):
+                return False
+        elif not _same_value(expected, current):
+            return False
+    evidence.check()
+    return True
 
 def write_sealed(path: Path, value: dict, *, public: bool = False) -> None:
     data = (json.dumps(value, sort_keys=True, indent=2, allow_nan=False)+"\n").encode()
@@ -1479,7 +1557,7 @@ def _v5_preflight_runtime(selected_sha: str, selected: dict, database: Path, gua
             raise MaintenanceError("selected verification copy changed during decoding")
         guard.check()
 
-def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
+def terminal_assignment(config: dict, job: Any, attempt: Any, *, _evidence=None) -> dict:
     """Read the existing control-owned revocation receipt; grant no new effect."""
     import pwd
     from ops.executive_os.autonomy_control import _root_json, CONTROL_USER, HostControlError
@@ -1521,17 +1599,21 @@ def terminal_assignment(config: dict, job: Any, attempt: Any) -> dict:
         identity = dict(path=name, device=info.st_dev, inode=info.st_ino,
                         uid=info.st_uid, gid=info.st_gid, mode=stat.S_IMODE(info.st_mode),
                         mtime_ns=info.st_mtime_ns)
+        if _evidence is not None:
+            _evidence._require_current_path(target, info)
+        matches = (value["paths"][key]["after"] == identity if _evidence is None
+                   else _evidence._persistent_record_matches(value["paths"][key]["after"], identity))
         if (not stat.S_ISDIR(info.st_mode) or info.st_uid != control_uid
                 or stat.S_IMODE(info.st_mode) != 0o700
                 or has_macos_acl(target, expected_identity=info)
-                or value["paths"][key]["after"] != identity):
+                or not matches):
             raise MaintenanceError("terminal assignment filesystem identity drifted")
     return {"assignment_seal_sha256": hashlib.sha256(raw).hexdigest()}
 
 
 def terminal_carry_fields(
     runtime: Any, root: Any, config: dict, before: dict, predecessor: str,
-    successor: str | None = None,
+    successor: str | None = None, *, _evidence=None,
 ) -> tuple[Any, dict]:
     """Qualify one inert failed planner using existing Runtime evidence owners."""
     from control_plane.executive_runtime import RuntimeProofError
@@ -1626,7 +1708,8 @@ def terminal_carry_fields(
     if len(quotas) != 1 or quotas[0]["status"] != "AVAILABLE" or quotas[0]["held_attempt_id"] is not None:
         raise MaintenanceError("terminal carry requires available predecessor proof capacity")
     fields = {
-        **material, **terminal_assignment(config, job, attempt),
+        **material, **(terminal_assignment(config, job, attempt) if _evidence is None
+                      else terminal_assignment(config, job, attempt, _evidence=_evidence)),
         "template_proof_job_id": proof.job_id, "template_proof_job_sha256": digest(proof.to_dict()),
         "terminal_job_id": job.job_id, "terminal_attempt_id": attempt.attempt_id,
         "terminal_marker_event_id": marker["event_id"], "terminal_marker_event_sha256": digest(marker),
@@ -2233,7 +2316,7 @@ def _prepare_migration_preparation_successor(args):
                 roots.append(Path(config['runtime_root']).parent.parent/'canary-fixtures')
                 source_inventory = sealed_json(bundle_path(old['superseded_unstarted_preproof_sha'])/'inventory.json')
                 if (_v5_to_v7_working_inventory(source_inventory, evidence.inventory_additions, roots)
-                        != parent['inventory'] or inventory(roots) != parent['inventory']
+                        != parent['inventory'] or not _migration_inventory_matches(evidence, parent['inventory'], roots)
                         or json.loads(Path(config['secret_canary_receipt_path']).read_text()) != parent['canary']):
                     raise MaintenanceError("prepared successor inventory or canary differs")
                 validate_prior_carry_binding(descriptor)
@@ -3042,16 +3125,20 @@ def _requalify_unstarted_preproof_v5_to_v7(descriptor, config, database, before,
     if root is None:
         raise MaintenanceError("terminal carry root disappeared")
     _proof, fields = terminal_carry_fields(
-        runtime, root, config, current, descriptor['predecessor_sha'], descriptor['successor_sha'])
+        runtime, root, config, current, descriptor['predecessor_sha'], descriptor['successor_sha'],
+        **({'_evidence': evidence} if descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS else {}))
     if any(descriptor[key] != value for key, value in fields.items()):
         raise MaintenanceError("terminal carry semantic evidence changed")
     if snapshot(database, immutable=True) != current:
         raise MaintenanceError("maintenance live baseline changed during terminal validation")
-    verify_inventory(artifacts)
+    if descriptor['schema_version'] not in _PREPARED_MIGRATION_SCHEMAS:
+        verify_inventory(artifacts)
     roots = [Path(config[key]) for key in
              ('proof_workspace_root', 'worker_runs_root', 'receipts_root', 'backup_root')]
     roots.append(Path(config['runtime_root']).parent.parent / 'canary-fixtures')
-    if inventory(roots) != artifacts:
+    if (not _migration_inventory_matches(evidence, artifacts, roots)
+            if descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS
+            else inventory(roots) != artifacts):
         raise MaintenanceError("maintenance live inventory changed before publication")
     if {entry.name for entry in directory.iterdir()} != set(_migration_bundle_names(descriptor)):
         raise MaintenanceError("v5-to-v7 preparation bundle is not the closed working namespace")
@@ -3874,7 +3961,10 @@ class Maintenance:
             _v5_to_v7_projection_digests(initial, self.database)
             additions = _v5_to_v7_working_inventory(source_inventory,
                                                     initial.inventory_additions, roots)
-            if additions != self.inventory or inventory(roots) != additions:
+            if (additions != self.inventory or
+                    (not _migration_inventory_matches(initial, additions, roots)
+                     if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS
+                     else inventory(roots) != additions)):
                 raise MaintenanceError("schema upgrade inventory additions drifted")
             validate_prior_carry_binding(self.descriptor)
             _requalify_unstarted_preproof_v5_to_v7(
@@ -3975,7 +4065,15 @@ class Maintenance:
 
     def verify(self, proof_ids: list[str]) -> None:
         verify_preserved(self.before,snapshot(self.database),self.descriptor,proof_ids)
-        verify_inventory(self.inventory)
+        if self.descriptor['schema_version'] in _PREPARED_MIGRATION_SCHEMAS:
+            material = sealed_json(self.bundle/_V5_TO_V7_EVIDENCE_NAME)
+            with _evidence_owner().open_retained_v5_to_v7_evidence(
+                    Path(self.config['runtime_root']), _v5_to_v7_tool_release(material),
+                    pinned_material=material) as retained:
+                if not _migration_inventory_matches(retained, self.inventory):
+                    raise MaintenanceError('preserved artifact changed')
+        else:
+            verify_inventory(self.inventory)
 
     def finish(self, proof_ids: list[str], summary: Path) -> None:
         self.verify(proof_ids)
@@ -4148,6 +4246,8 @@ class Maintenance:
                         raise MaintenanceError("prepared parent custody is not held through finish")
                     _prepared_migration_parent(self.descriptor, guard=_prepared_guard)
                     _prepared_guard.check()
+                    if not _migration_inventory_matches(retained, self.inventory):
+                        raise MaintenanceError('preserved artifact changed before finish')
                 write_sealed(restore_path, restore_evidence)
                 retained.check()
                 if _observe() != observed:
@@ -4155,6 +4255,8 @@ class Maintenance:
                 if _prepared_guard is not None:
                     _prepared_migration_parent(self.descriptor, guard=_prepared_guard)
                     _prepared_guard.check()
+                    if not _migration_inventory_matches(retained, self.inventory):
+                        raise MaintenanceError('preserved artifact changed before carry')
                 write_sealed(self.bundle/"carry-forward.json",dict(
                     schema_version=self.descriptor["schema_version"],passed=True,baseline_preserved=True,
                     descriptor_sha256=digest(self.descriptor),
