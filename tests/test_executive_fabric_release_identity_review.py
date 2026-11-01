@@ -20,7 +20,9 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
             'ops/executive_os/acceptance.py', 'ops/executive_os/bootstrap-host.sh'} else
         ['_mastermind_executive_mcp', '_mastermind_exec', '_mastermind_exec',
          '_mastermind_worker', '0o644', '_mastermind_worker'] if path ==
-        'ops/executive_os/autonomy_control.py' else [])
+        'ops/executive_os/autonomy_control.py' else
+        ['_mastermind_operator_canary', '0o700'] if path ==
+        'control_plane/codex_operator_adapter.py' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 
