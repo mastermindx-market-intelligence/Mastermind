@@ -462,6 +462,20 @@ def claude_main(args: list[str]) -> int:
     if rc == 0 and fields["kind"] != "success":
         rc = 1
     fields["command_rc"] = rc
+    # A Claude SDK model-catalog notice is not a provider rejection. On the
+    # *verified* max-turns terminal subtype only, put the typed cause ahead of
+    # result text on the worker's stdout (the Fabric result-read surface).
+    # Preserve the original result text and rebind stdout_sha256 to the exact
+    # emitted bytes so the incumbent provider/process receipt still validates.
+    terminal = ("PROVIDER_TERMINAL kind=" + fields["kind"] + " rc=" + str(rc)
+                if fields["kind"] != "success" else "")
+    if (rc != 0 and fields["kind"] == "turn_limit"
+            and fields.get("cli_subtype") == "error_max_turns"
+            and fields.get("cli_terminal_reason") == "max_turns"):
+        display = terminal + "\n" + display
+        fields["stdout_sha256"] = digest(display.encode("utf-8"))
+    if terminal:
+        print(terminal, file=sys.stderr, flush=True)
     sys.stdout.write(display)
     sys.stdout.flush()
     target = os.environ.get("POOL_OUTCOME_FILE")
@@ -478,8 +492,6 @@ def claude_main(args: list[str]) -> int:
             write_new(Path(target), value)
         except (OSError, ValueError):
             print("PROVIDER_OUTCOME_UNAVAILABLE", file=sys.stderr)
-    if fields["kind"] != "success":
-        print("PROVIDER_TERMINAL kind=" + fields["kind"] + " rc=" + str(rc), file=sys.stderr)
     # Preserve incumbent best-effort local usage ledger. The controller's
     # strict terminal ledger remains authoritative; no acceptance is inferred.
     try:
