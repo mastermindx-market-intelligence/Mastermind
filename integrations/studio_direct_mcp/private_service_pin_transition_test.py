@@ -500,5 +500,50 @@ class PinTransitionTests(unittest.TestCase):
                     self.fail("changed native binding admitted")
 
 
+from private_service_backend_release_test import BackendReleaseFixture
+
+
+class EnrolledFabricInstallerLockTests(BackendReleaseFixture, unittest.TestCase):
+    def installer_args(self):
+        manifest = json.loads(self.before[self.roots["manifest"]])
+        return SimpleNamespace(
+            account=self.account,
+            port=manifest["port"],
+            source=manifest["source"],
+            node=manifest["node"],
+            backend=manifest["backend"],
+            fabric_only=True,
+            modern_fabric_protocol=None,
+            enable_repository_workspaces=False,
+            os_commission_config_sha256=None,
+        )
+
+    def invoke_enrolled(self, operation):
+        self.assertIn(self.account, svc.FABRIC_BACKEND_ACCOUNTS)
+        self.assertNotIn(self.account, svc.NATIVE_POOL_PIN_ACCOUNTS)
+        self.assertEqual(
+            svc.FABRIC_BACKEND_ACCOUNTS & svc.NATIVE_POOL_PIN_ACCOUNTS, set()
+        )
+        real = svc.fcntl.flock
+        acquired = []
+
+        def flock(fd, mode):
+            value = real(fd, mode)
+            if mode & svc.fcntl.LOCK_EX:
+                acquired.append(fd)
+            return value
+
+        with mock.patch.object(svc.fcntl, "flock", side_effect=flock):
+            result = self.capture(lambda: operation(self.installer_args()))
+        self.assertEqual(len(acquired), 1)
+        self.assertTrue(result.get("staged") or result.get("upgraded"))
+
+    def test_real_enrolled_fabric_stage_uses_one_lock(self):
+        self.invoke_enrolled(svc.cmd_stage)
+
+    def test_real_enrolled_fabric_upgrade_uses_one_lock(self):
+        self.invoke_enrolled(svc.cmd_upgrade)
+
+
 if __name__ == "__main__":
     unittest.main()
