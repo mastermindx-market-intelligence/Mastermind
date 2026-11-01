@@ -1198,3 +1198,134 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
    - MERGED: Mastermind #1898 (`7e7beb3f`) and #1246 (`840377bc8bda`), with master push CI green on both. Neither has production proof beyond its land check.
    - PROVEN_OUTCOME: the clock refutation (live reads), the U2, U5 and V2 judgments, and the independent reviews.
    - No W15 build has reached PRODUCTION_PROOF.
+
+#### r18 cycle 2026-11-01 00:19Z (seat dd5239a9, Opus 5.5) — wave 15 continued: r17 landed after an independent review, and its three notes are corrected here by name; the sweeper merged Macro #10297 (Agent OS records) and #10259 (the WP26 zero-stock guard); the #8125 note is posted and U6 waits on a natural render; #10284's runner-flake red was released by one re-run of its failed jobs; #9569 is parked behind an inherited red that the sweeper will never re-sync
+
+**Review of r17**
+- Lane W (`c19-w15-w-review-r17-20261031`, glm-5.3, ubuntu0) was a fresh, non-authoring reviewer of Mastermind #1901 at head `b23ad4d8` (r17, lines 1055–1200).
+- Items W1–W8 all PASS. Verdict: APPROVE_WITH_NOTES, with three notes. The seat ruled all three non-blocking, so #1901 merged at the reviewed head. The notes are corrected below.
+
+**Corrections to r17 (§7.5)**
+1. **Line 1094.** "A5 governs J ≥ E" should read "A5 would govern J ≥ E once it merges before E". A5 (Macro #10302) was unmerged when r17 was written. r17 lines 1082, 1139–1141 and 1172 already state that it is conditional.
+2. **Lines 794, 825 and 853.** These carry "EDGAR clock gap" forward from r12, r13 and r14.
+   - They name the item only; they do not state A2's premise.
+   - r17 line 1142 closes the item, so these three lines are history, superseded by 1142, and not current OPEN items.
+   - They were missing from r17's §7.5 list and are added to it here.
+3. **Line 1199.** "PROVEN_OUTCOME: … the U2, U5 and V2 judgments" means the seat's judgments of those returns. It does not mean U2's design was validated: r17 line 1121 marks U2's design SUPERSEDED IN SUBSTANCE (D23).
+
+**FACTS — merges**
+- **Mastermind #1901 (ledger r17)** merged 2026-10-31T14:34:47Z as `aefeaf619fc4`, confirmed by GraphQL readback (`merged`, `mergeCommit`). The master push runs on it passed: CI 41210792809 and CodeQL 41210789639. #1243 pointer: comment 6544826736. The review worktree was removed after the merge.
+- **Macro #10297** (Agent OS: the 10-31 seat takeover, the W15 wave and `DSC:EDGAR-SUBMISSIONS-ACCEPTANCE-DATETIME-IS-TRUE-UTC`) merged 2026-10-31T23:45:06Z as `9ab25923f554`. This closes r16's Agent OS item.
+- **Macro #10259** (WP26 zero-stock guard, D14) merged 2026-10-31T23:50:55Z as `8afb5dbf90bd`.
+- Both Macro PRs were merged by the sweeper identity `chriswong6031-creator`; the seat merged neither. Readback by GraphQL at 2026-11-01T00:02Z.
+
+**FACTS — why green Macro PRs sat unmerged** (sweeper run log, `merge-on-green` run 41214647799, and `scripts/merge_on_green.py` on main)
+- Main commit `97623101eb79` changed the CI check definitions, and the sweeper then marked every older green "proof stale". Two more changes followed: `92881169bb88` (cited by the 22:33Z sweep) and `fa06210782d5` (Macro #10248, 23:20Z; cited by the 23:39Z sweep).
+- For a stale-proof PR the sweeper merges main into the head, labels it `merge-refresh-in-flight` and lets fresh CI decide. PR CI has 8 global slots; the 22:33Z sweep logged 0 free, so older PRs wait.
+- `ci-authority/codex/merge-queue-pilot` FAILURE is a standing inactive context. It makes a PR UNSTABLE, not BLOCKED, and is not the hold.
+- This is the sweeper working as designed. The seat does not update Macro branches by hand or touch their labels.
+
+**FACTS — #9569 is parked**
+- Head `d558d0e7` is a pure base sync onto main `d467c360`; the PR's own diff is unchanged. CI run 41209506106 failed:
+  - `ci-pack-0`, step "validate and run legacy CI pack", 14:22:19–15:35:31Z;
+  - `ci-gate`, step "enforce semantic verdict", downstream of ci-pack-0.
+- **Cause: inherited from main, not #9569's diff.** The sweeper's refusal comment (Macro #9569 comment 6545483067) names one failing test, `tests/test_fif_a34_pack_proof_ledger.py::test_a34_ledger_is_fresh`. It compares the committed FIF A34 ledger with a fresh build.
+  - Main at `d467c360` carried a stale A34 ledger (PK09 gold calibration tests went from 41 to 45). Main fixed it at `d9471d0e` (Macro #10314, 15:29Z), and `merge-base --is-ancestor` shows `d9471d0e` is not in #9569's head.
+  - #9569's own files (`app/integrated_answer.py`, `tests/test_integrated_answer_v0.py`) touch none of the ledger's inputs. It is not a disk-fill. There is nothing in its diff to repair, and a re-run of the same tree would fail the same test.
+- **Why the sweeper will not re-sync it** (`merge-on-green` run 41248484800, 22:34:39Z):
+  - The semantic gate treats a failure as inherited only when it can reproduce it on the exact base. For #9569 that check did not settle ("exact-base runner budget expired; original timed_out outcome; descendant settlement unknown").
+  - So it filed the failure `classification=unknown; outcome=failed` and labeled the PR `merge-blocked`.
+  - Every later sweep stops at "an earlier semantic step did not pass; no new marker (already labeled …)". The base-inherited-red refresh (`merge_on_green.py` around line 7006) is never reached for a semantically failed head.
+  - Only a head move clears that label, and nothing in the sweeper will move this head.
+- If the red recurs at a head that contains `d9471d0e`, it is a new finding.
+
+**FACTS — #10284: a runner flake, released by one re-run**
+- Head `b09990de` was a sweeper base sync onto main `83a77d85` (own diff unchanged). CI run 41251141302 failed in `ci-pack-0` ("validate and run legacy CI pack", 23:14–23:28Z), with `ci-gate` failing downstream. Refusal comment 6550587421 (23:28:59Z).
+- **Cause: runner infrastructure.**
+  - All 8 semantic units read `classification=unknown; outcome=infrastructure_blocked; failure signature=None`.
+  - One unit carries the root cause: phase `browser_setup`, outcome `timed_out`, an apt `update` child that never settled. Installation and browser are both `never_started` (`scripts/ci_browser_native_setup.py`).
+  - After that unsettled timeout, `run_ci_pack.py` (around line 5535) marks every later job in the pack "original command settlement unknown; no reuse, restoration or replay permitted". That withholds in-pack restoration and base replay; it does not forbid a fresh run.
+  - #10284's own files (`scripts/c19_wp31_evaluate.py`, `scripts/c19_wp31_production.py`, `tests/test_c19_wp31_production.py`) do not touch browser setup.
+- **Why the sweeper could not excuse it.** `scripts/ci_authority_paths.py` counts `scripts/**`, `.github/ci/**` and `.github/workflows/**` (among others) as CI authority paths. So #10284 records `authority_changed=true`, and `merge_on_green.py:1742` refuses to let candidate-era classification excuse an authority-changing PR's red. The checks must be physically green. The sweeper labeled it `merge-blocked`.
+- **Release path.** `merge_on_green.py` does not skip `merge-blocked` PRs: when the checks are clean and no recorded hold exists, it clears the stale label at the merge stage (around line 7350). Its refusal text says "re-run the failed job". For a runner flake that is the documented path. For #9569 it is not, because #9569's tree carries main's stale ledger.
+- **Pre-re-run checks (23:46Z).** Job ci-pack-0 (124685310053, hosted runner, `ubuntu-latest`), 825 log lines:
+  - zero hits for `No space left`, `ENOSPC` or `Errno 28`, so it is not a disk-fill;
+  - the step "unrun-brain-gateway — install Brain browser" ran 23:18:28.62Z to 23:28:28.62Z and was killed at exactly its 10-minute budget;
+  - the unit's own test groups had passed just before (390 passed, then 38 passed);
+  - the other 12 ci-packs passed on separate runners.
+- **Act.** Run 41251141302 had concluded, so nothing was in flight. The seat ran `gh run rerun 41251141302 --failed` (rc=0, 23:47:06Z), re-running ci-pack-0 and ci-gate on the same head.
+- **Outcome.** Attempt 2 concluded `success` at 23:57:44Z. The sweeper removed `merge-blocked` (labels now `merge-on-green` only) and at 23:58:45Z merged main into the head, giving `75419f58`. Own diff unchanged. Fresh CI at `75419f58` decides the merge. Rung: CI, not MERGED.
+
+**FACTS — #10273 and #10302**
+- **#10273.** At 22:28Z the sweeper merged main `4da475ea` into it (head `e84e06de` → `04fc616f`). Main had edited `.github/ci/legacy-jobs.yml`, which #10273 also edits, so that file's blob changed. #10273's own +/- lines in it hash `b6370c086034` at both heads, and its test file blob (`ca2d0e75`) is unchanged. Own diff unchanged, so no re-review. A later sweep re-synced it again; the 00:02Z read shows head `8dc309a2` with no red.
+- **#10302 (A5).** At 23:45:15Z the sweeper merged main into it (head `99397073`, label `merge-refresh-in-flight`). Own diff unchanged. Fresh CI decides the merge. Deadline unchanged: before 2026-11-16T00:00Z.
+- **Exposure.** By path, #10302 (`scripts/c19_wp31_*.py`) and #10273 (`.github/ci/legacy-jobs.yml`) are authority-changing too, so a runner flake on their fresh CI would park them the way it parked #10284. #9569 is not authority-changing by path; its block is semantic.
+
+**FACTS — watching**
+- One aggregate watcher (`$P/watch_macro_agg.sh`) replaces r17's per-PR watchers. It reads every open C19 Macro PR in one GraphQL call every 15 minutes, with a 12 h bound. It exits on MERGED, CLOSED, a red not already recorded at that head, or a change in a PR's own diff.
+- **Fingerprint repair.** It first fingerprinted each PR's files by path:blob. That gave a false own-diff change on #10273 (22:28Z, above), because main's edit changed the blob while the PR's lines stayed the same. It now hashes each file's +/- patch lines from the PR files API, with a blob fallback when no patch is returned. An empty or failed read logs and retries; it no longer counts as a change.
+- After the two merges it covers #10302, #10284, #10273 and #9569, with #9569's red at `d558d0e7` recorded as known.
+- A second fetch-only watcher (`$P/watch_u6_proof.sh`, every 30 minutes, 12 h bound) waits for the U6 render (below).
+
+**FACTS — #10259 follow-ups**
+- **#8125 note** (D14: "a note goes on #8125 at merge"): posted as Macro #8125 comment 6550932577. It is source-linked and asks for no action. The draft keeps its lease on `scripts/build_commodities.py`, which #10259 did not touch.
+- **U6 production proof: PENDING; rung MERGED.**
+  - *Surface.* The oil supply context reaches production in `site/commodities.html`: `build_commodities._oil_supply_read` (:434), then `vm["supply"]` (:532), then `_decision_workspace` (:1739–1741), then `commodity_decision_workspace._physical_view`, then `source_dependencies.crude_stocks`.
+  - `data/commodity/latest.json` and `complex_latest.json` do not carry it; both were last committed 2026-10-21.
+  - *Positive control.* The last pre-merge render (engine-render, `c7c025a93cd0`, 2026-10-31T23:22:51Z) has one `crude_stocks` block with `state: "available"` and `observation_at` 2026-10-23. So the extractor finds the field.
+  - *Proof condition.* The first `site/commodities.html` commit on main that descends from `8afb5dbf` still reads `available`, not `invalid_zero_stock` or `invalid_negative_stock` (`engine/commodity_supply_context.py:433`).
+  - Producers: engine-render, commodity-sentinel (cron every 30 minutes, best-effort), closing-bell, and daily.yml. No workflow is dispatched to manufacture the render.
+
+**W15 lanes, continued**
+
+| Lane | Scope | Route | Verdict |
+|---|---|---|---|
+| W | independent review of Mastermind #1901 (r17) at `b23ad4d8` | glm-5.3, ubuntu0 (`c19-w15-w-review-r17-20261031`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (W1–W8 PASS). Three notes corrected in this section |
+
+**DECIDED**
+- **D25. #9569 is PARKED. The seat does not release it by hand.**
+  - The seat's standing constraints bar updating a Macro branch by hand and removing `merge-blocked`. A hand update would also start CI outside the sweeper's 8-slot accounting.
+  - Release needs someone with authority over the branch (`sol/mi-composer-n5-global-scope-20261017`) to merge main at or after `d9471d0e` into it. The seat asked the Chairman once, in its 2026-10-31 23Z report, and does not ask again.
+  - U3 waits on it. Nothing else does.
+- **D26. A runner-flake red on an authority-changing C19 PR is released by one re-run of the failed jobs, on the same concluded run.**
+  - Preconditions: the run has concluded (nothing in flight), the log shows no disk-fill, and the failing step lies outside the PR's own files.
+  - A second equivalent failure bans a third re-run (L.4); diagnose the failing path instead.
+  - Applied once, to #10284 (above). It applies equally to #10302 and #10273 if their fresh CI flakes.
+  - It never applies to a semantic red like #9569's: re-running an unchanged tree re-reads the same stale input.
+- **D27. U6 is proven on `site/commodities.html`, by the first render that descends from `8afb5dbf`, and only by a natural render.**
+  - Proof: `source_dependencies.crude_stocks.state` reads `available`, matched against the pre-merge positive control.
+  - If it reads `invalid_zero_stock` or `invalid_negative_stock`, that is a scoped finding to the commodity owner, not a revert. The guard is doing its job on a store that reports zero or negative stock.
+  - daily.yml is never dispatched for this.
+- **D28. A base sync that leaves a PR's patch-line fingerprint unchanged needs no re-review.** An accepted review holds until the PR's own +/- lines change (check once). The fingerprint is the watcher's, above.
+- **Retraction (§7.5).** The seat earlier said that the sweeper's next base sync onto main at or after `d9471d0e` should clear #9569's red. That is wrong: the sweeper never re-syncs a semantically failed head (FACTS, #9569).
+
+**UPGRADE PLAN**, deltas from r17:
+- U6's proof surface and proof condition are now fixed (D27).
+- U1(a) and Read 2b wait on #10284's merge; U3 waits on #9569 (D25).
+- U2, U4, U5 and U7 are unchanged.
+
+**OPEN** (owner → next action)
+- **Macro #10284 (G)**, sweeper → merge on concluded green at `75419f58`. Seat → land-check against fresh main, re-read the universe headers, then Read 2b (one evaluator run, counts only, D17), then consider U1(a).
+- **Macro #10302 (A5)**, sweeper → merge on concluded green before 2026-11-16T00:00Z. Seat → land-check, then a #1243 post. If it is still unmerged on 2026-11-13, the seat writes a successor amendment with a later E for fresh independent review. It does not merge by hand. A runner flake gets D26.
+- **Macro #10273**, sweeper → merge on concluded green. Seat → land-check.
+- **Macro #9569**, branch owner or Chairman → merge main ≥ `d9471d0e` into the branch (D25). Seat → none until the head moves; then the watcher reads the new CI.
+- **U6**, seat → when the first post-`8afb5dbf` render lands, read `crude_stocks.state` and record PRODUCTION_PROOF or a scoped finding (D27).
+- **Findings routed in r17** stand unchanged: the pg_profile UTC-date edge, the Atom `<updated>` clock, the ubuntu1 thermal-admission mismatch, and the WP31 docstring debt.
+- **Unchanged from r17:**
+  - the r16 owner findings;
+  - WP32 P3 free-tier 403 (human step);
+  - cold-compose 524 and `x-consumed-receipts`;
+  - P4–P7;
+  - the K1 Q2/Q3 residuals;
+  - WP18 UI;
+  - G10/G11;
+  - Linear MAS-263 and Executive OAuth (human /mcp).
+
+**NEXT**
+1. Carry this r18 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+2. The aggregate watcher owns the waits on #10302, #10284, #10273 and #9569; the U6 watcher owns the render wait. Land-check each merge against fresh main.
+3. Read 2b after #10284 lands. U6 proof at the first post-fix render.
+4. Seat end state for this cycle: DURABLE_EXECUTION_RUNNING.
+   - MERGED: Mastermind #1901 (`aefeaf61`, master push CI green), Macro #10297 (`9ab25923`) and #10259 (`8afb5dbf`). None has production proof beyond its land check; U6 is pending.
+   - PROVEN_OUTCOME: the #10284 flake diagnosis and its released re-run, the #9569 classification, and lane W's independent review.
+   - No W15 build has reached PRODUCTION_PROOF.
