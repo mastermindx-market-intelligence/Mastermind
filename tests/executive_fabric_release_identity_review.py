@@ -516,3 +516,17 @@ REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
     'sha256': 'f6b94b81eec07354bf74ae6d589e76b43255604006b11cf7a7712a02fe513379',
     'sites': ((190, 46, 49, 'int', '512'),),
 }
+
+# Frozen Portfolio mmtask source restored as reviewable data (P7.T5).
+# These are text display bounds, never UIDs. The payload's 500 Constant follows
+# an em dash, so its strictly opt-in site uses Python UTF-8 byte columns and
+# complete typed-Constant qualification. All legacy ASCII records are unchanged.
+REVIEWED_FILES['integrations/session_bridge/mmtask_restore/payload/mmtask'] = {
+    'sha256': '711ba4f46c80e518d99167877738db9e92182b78bf7b4e3052bcfee79316d54a',
+    'sites': ((659, 93, 96, 'int', '400'),),
+    'utf8_sites': ((214, 135, 138, 'int', '500'),),
+}
+REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
+    'sha256': '9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336',
+    'sites': ((556, 93, 96, 'int', '400'),),
+}

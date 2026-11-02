@@ -279,6 +279,35 @@ def reviewed_literal_spans(path: str, source: str):
                     or lines[line-1][start:end] != spelling):
                 return ()
             spans.append((line, start, end, kind))
+        # Explicit exact-file UTF-8 byte sites only. Legacy ASCII sites above
+        # retain their existing behavior. A byte slice alone cannot bless a
+        # substring/string: require the complete, typed Python Constant too.
+        utf8_sites = file_review.get('utf8_sites', ())
+        if utf8_sites:
+            try:
+                literals = [node for node in ast.walk(ast.parse(source))
+                            if isinstance(node, ast.Constant)]
+                for line, start, end, kind, spelling in utf8_sites:
+                    if (any(type(value) is not int for value in (line, start, end))
+                            or kind != 'int' or type(spelling) is not str
+                            or not 1 <= line <= len(lines) or not 0 <= start < end):
+                        return ()
+                    raw_line = lines[line - 1].encode('utf-8')
+                    prefix = raw_line[:start].decode('utf-8')
+                    value = raw_line[start:end].decode('utf-8')
+                    suffix = raw_line[end:].decode('utf-8')
+                    if value != spelling or end > len(raw_line):
+                        return ()
+                    matches = [node for node in literals
+                        if (node.lineno, node.end_lineno, node.col_offset,
+                            node.end_col_offset) == (line, line, start, end)
+                        and type(node.value) is int and node.value == int(spelling, 0)
+                        and ast.get_source_segment(source, node) == spelling]
+                    if len(matches) != 1:
+                        return ()
+                    spans.append((line, len(prefix), len(prefix) + len(value), kind))
+            except (SyntaxError, ValueError, TypeError, UnicodeError):
+                return ()
         return tuple(sorted(spans))
     modes = REVIEWED_PRIVATE_MODE_SOURCES.get(path)
     if modes is not None:
