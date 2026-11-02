@@ -40,6 +40,24 @@ and merge decisions follow the currently authorized role and operation, not a
 historical session name. Independent review and source/release protections still apply.
 These role descriptions do not themselves grant authority.
 
+
+### Cross-account independent GitHub reviews
+
+For ChatGPT Web routing, a historically named MastermindX GitHub reviewer
+login is a **preferred placement**, not an exclusive gate, unless a current explicit
+exact-seat instruction, repository rule or binding permission genuinely requires it.
+Any already-connected, authorized MastermindX account may submit the formal native PR
+review when the actual account is independent of the target changes: it has not authored,
+committed, co-authored or substantively contributed to those changes. Identify the real
+login/user ID; census commits, trailers, prior reviews and target-diff provenance;
+pin/recheck the exact head and CI; submit one attributable review and verify its ID.
+Merging an unrelated base PR or opening a closed, unmerged cross-reference is not,
+by itself, target-PR authorship. Do not self-approve, impersonate a requested login,
+duplicate an in-flight or submitted review, or change accounts/carriers to evade an
+actual safety/auth/permission denial or unresolved effect. The review must still be
+adversarial; source/CI evidence never proves live production acceptance. Apply
+[REVIEW_RETURN](docs/sol_skills/REVIEW_RETURN.md) and the repository's review gates.
+
 ### Durable plan and cold continuation for assigned principals
 
 For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
