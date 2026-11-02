@@ -677,8 +677,11 @@ renderSafety(); renderAllocation();
     dom = _run(tmp_path, scenario, lang)["dom"]
     safety = dom["safety"]["html"]
     assert word in safety and ref in safety
+    # Probe the digits outside the canonical cell's own hex ref, so a re-pinned SHA16 can't
+    # false-fail the numeric checks.
+    rest = safety.replace(ref, "").replace(SHA16, "")
     for bad in ("79", "SAFETY / 100", "安全度 / 100", "4 positions", "4 个持仓", "-5.7"):
-        assert bad not in safety, bad
+        assert bad not in rest, bad
     for seg in ("seg-lead", "seg-conv", "seg-cash"):
         assert dom[seg]["display"] == "none", seg
     unavailable = "Unavailable" if lang == "en" else "不可用"
@@ -692,6 +695,11 @@ def test_t12_invalid_cell_has_no_coloured_edge_rule():
     block = css[css.index(".mm-book-invalid {"):]
     block = block[:block.index("}")]
     assert "border-left" not in block and "border-inline-start" not in block
+    # Moving the stripe to another edge, an inset shadow or a pseudo-element rail is the same
+    # accent (design law 2026-10-18).
+    assert not re.search(r"border-(right|top|bottom|inline-end|block)", block)
+    assert "box-shadow" not in block
+    assert not re.search(r"\.mm-book-invalid::?(before|after)", css)
     assert "border: 1px solid var(--line)" in block
 
 
