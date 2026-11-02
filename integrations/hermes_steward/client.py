@@ -24,9 +24,13 @@ from integrations.business_mcp_auth.contracts import (
 from integrations.mastermind_secretary_mcp.schemas import (
     GROUNDING_STATES,
     MAX_REQUEST_BYTES,
+    MAX_RESPONSE_BYTES,
     TOOL_SPECS,
     GatewayError,
     canonical_json,
+    error_envelope,
+    result_envelope,
+    validate_result_data,
     validate_tool_arguments,
 )
 
@@ -295,6 +299,83 @@ class StewardReadClient:
             "ok": True,
             "forwarded": True,
             "data": forwarded,
+            "error": None,
+        }
+
+    def read_grounded(
+        self,
+        tool: str,
+        arguments: object = None,
+        *,
+        authorization: object = None,
+    ) -> dict[str, Any]:
+        """One authenticated Steward read, verified before model-facing use.
+
+        The historical read() API intentionally passes the receiving owner's
+        document through. This strict consumer retains that API unchanged but
+        refuses forged tool/subject identity, ungrounded facts, extra keys and
+        malformed envelopes. It reuses the existing Secretary schema; no
+        second authority, transport, or source cache is established.
+        """
+        response = self.read(tool, arguments, authorization=authorization)
+        if response["ok"] is not True:
+            return response
+
+        raw = response["data"]
+        try:
+            if not isinstance(raw, Mapping) or _byte_budget_exceeded(raw, MAX_RESPONSE_BYTES):
+                raise GatewayError("RESPONSE_REFUSED")
+            if raw.get("ok") is False:
+                error = raw.get("error")
+                if not isinstance(error, Mapping) or not isinstance(error.get("code"), str):
+                    raise GatewayError("RESPONSE_REFUSED")
+                expected = error_envelope(tool, error["code"])
+            elif raw.get("ok") is True:
+                data = raw.get("data")
+                validated = validate_result_data(data)
+                flat = [
+                    {"subject_ref": subject["subject_ref"], **fact}
+                    for subject in validated["subjects"]
+                    for fact in subject["facts"]
+                ]
+                required_ref = (
+                    arguments.get("responsibility_ref")
+                    if isinstance(arguments, Mapping) and "responsibility_ref" in arguments
+                    else None
+                )
+                expected = result_envelope(
+                    tool,
+                    data={
+                        "state": validated["state"],
+                        "facts": flat,
+                        "reason_codes": validated["reason_codes"],
+                    },
+                    expected_subject_ref=required_ref,
+                )
+            else:
+                raise GatewayError("RESPONSE_REFUSED")
+            if canonical_json(raw) != canonical_json(expected):
+                raise GatewayError("RESPONSE_REFUSED")
+        except (GatewayError, TypeError, ValueError, OverflowError, RecursionError):
+            _log_refusal("UPSTREAM_INVALID", tool)
+            return _refusal("UPSTREAM_INVALID", tool)
+
+        if expected["ok"] is False:
+            code = expected["error"]["code"]
+            return {
+                "schema": RESULT_SCHEMA,
+                "tool": tool,
+                "ok": False,
+                "forwarded": True,
+                "data": None,
+                "error": {"code": code, "message": code},
+            }
+        return {
+            "schema": RESULT_SCHEMA,
+            "tool": tool,
+            "ok": True,
+            "forwarded": True,
+            "data": expected,
             "error": None,
         }
 

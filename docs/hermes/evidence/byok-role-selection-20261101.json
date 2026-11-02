@@ -33,6 +33,35 @@
     "sampling": "at most 250ms readiness poll; configured RSS high-water interval unchanged",
     "unready": "503 starting, backend_ready=false, even if child_running=true"
   },
+  "company_grounding_consumer": {
+    "auth_owner": "integrations.business_mcp_auth.claims",
+    "authorized_company_call_proven": false,
+    "company_completion_proven": false,
+    "fail_closed": "bad envelope, wrong tool, forged subject, missing predicate, wrong owner, oversized response, changed auth discard data",
+    "function": "integrations.hermes_steward.brief.responsibility_brief",
+    "local_test_evidence": {
+      "existing_secretary_grounding_pytest": "Selected 3 files exit0 on space-free temporary QA copy",
+      "hermes_harness_unittest": "49/49 PASS on space-free temporary QA copy",
+      "real_company_network_or_model_inference": "NOT_RUN",
+      "steward_unittest": "45/45 PASS"
+    },
+    "native_mcp_enabled": false,
+    "new_scheduler_or_queue": false,
+    "schema": "mastermind.hermes_steward_brief.v1",
+    "scope": "ONE_EXACT_RESPONSIBILITY_SOURCE_ONLY",
+    "secret_values_in_source": false,
+    "source_facts": "preserved without model inference, with owner/source_ref/observed_at/freshness",
+    "source_methods": [
+      "get_responsibility",
+      "get_current_runtime",
+      "explain_blocker"
+    ],
+    "strict_receiver": "StewardReadClient.read_grounded",
+    "tool_owner": "integrations.hermes_steward.client.StewardReadClient",
+    "unknown_handling": "UNKNOWN is not NO_ATTENTION or completion; PARTIAL explicitly missing coverage",
+    "upstream_contract": "mastermind.secretary_grounding_mcp_result.v2",
+    "upstream_owner": "integrations.mastermind_secretary_mcp.schemas"
+  },
   "fixture_only": true,
   "independent_review": "Historical independent #1885 reviewer returned REQUEST_CHANGES (Slack receipt, not GitHub review); new exact #1917 head still awaits a new nonauthor review",
   "live_runtime_started": false,
@@ -113,21 +142,41 @@
     {
       "path": "integrations/hermes_runtime/tests/test_gateway_supervisor.py",
       "sha256": "91a9802b1e5d9e91dbd9dc564d27d2d9ae2936e7d5b343abe7e299f57777c448"
+    },
+    {
+      "path": "integrations/hermes_steward/README.md",
+      "sha256": "7a40ca4a8637df392ac1ab72e8c7529fdb5cc8034a2266f9a4f2dd5da9ad5406"
+    },
+    {
+      "path": "integrations/hermes_steward/brief.py",
+      "sha256": "f2bd3b5336243914de7458ab5206bd30312b7c026a318c5811896cca4b93fa3a"
+    },
+    {
+      "path": "integrations/hermes_steward/client.py",
+      "sha256": "ced88bcda918f75591af4ef44ccf9395f305381438729f37b2fd33d9bc4cca79"
+    },
+    {
+      "path": "integrations/hermes_steward/tests/test_brief.py",
+      "sha256": "3feb4a105f979dad7abfe42e5cb6cd29b6fea02fce56e96c99aee8492f384cc9"
+    },
+    {
+      "path": "integrations/hermes_steward/tests/test_client_grounded.py",
+      "sha256": "e40151bcdadc5c2348590ae41fd453d24d96140dbf82f78a8f7c081b977a5254"
     }
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
   "previous_head_linux_evidence": {
-    "does_not_qualify_current_postimage": true,
-    "harness": "41376905493 SUCCESS Python 3.12/3.13",
-    "head": "2646523dbbe799edc3757197505652c2e810d9a6",
-    "repo_ci": "41376905507 IN_PROGRESS at initial check",
-    "runtime": "41376905381 SUCCESS Python 3.12/3.13"
+    "broad_repo_ci": "41378586771 IN_PROGRESS last observed",
+    "does_not_qualify_new_postimage": true,
+    "head": "a2d4a97cfc6dbc2551bfb9d734ec230da494e996",
+    "hermes_harness": "41378586779 SUCCESS",
+    "hermes_runtime": "41378586869 SUCCESS"
   },
   "procedure_pin": "19cb00cfed26b68f0a8a5cdc0f2f1a9463a3feec",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-02T02:35:18.185951+00:00",
+  "recorded_at": "2026-11-02T03:10:53.619370+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -161,8 +210,8 @@
       "tests": 51
     },
     "hermes_steward": {
-      "passed": 34,
-      "tests": 34
+      "passed": 45,
+      "tests": 45
     }
   },
   "review_findings": {
@@ -183,6 +232,6 @@
     "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
   },
   "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
-  "source_manifest_sha256": "6c23f699bec2ca663cbf655eebfc52965317a21796f9eff701e1664432e3312c",
+  "source_manifest_sha256": "3405ca148b5568c9fdc1b9bd6c907e9aaa7088b9a012673b4bbc554138a33311",
   "test_host": "m2studio / macOS"
 }
