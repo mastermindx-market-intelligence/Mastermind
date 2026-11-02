@@ -75,10 +75,14 @@ function setup(
         digest: () => options.digest ?? Promise.resolve(new ArrayBuffer(32)),
       },
     } as unknown as Crypto,
-    addEventListener: ((_type: string, fn: (e: MessageEvent) => void) =>
-      messages.add(fn)) as unknown as typeof window.addEventListener,
-    removeEventListener: ((_type: string, fn: (e: MessageEvent) => void) =>
-      messages.delete(fn)) as unknown as typeof window.removeEventListener,
+    // This harness counts only transient PKCE callback listeners. Persistent
+    // cross-tab storage observers have a separate dedicated test fixture.
+    addEventListener: ((type: string, fn: (e: MessageEvent) => void) => {
+      if (type === "message") messages.add(fn);
+    }) as unknown as typeof window.addEventListener,
+    removeEventListener: ((type: string, fn: (e: MessageEvent) => void) => {
+      if (type === "message") messages.delete(fn);
+    }) as unknown as typeof window.removeEventListener,
   });
   const callback = (
     override: Record<string, unknown> = {},
@@ -112,6 +116,7 @@ function setup(
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  localStorage.clear(); sessionStorage.clear();
   history.replaceState(null, "", "/os/");
   Object.defineProperty(window, "opener", { value: null, configurable: true });
 });
@@ -240,6 +245,53 @@ describe("browser public PKCE", () => {
     await pending;
     expect(e.client.getState().reason).toBe("TRANSACTION_EXPIRED");
     expect(e.messages.size).toBe(0);
+  });
+  it("broadcasts logout across tabs even when the storage marker hits quota", async () => {
+    class TestChannel {
+      static peers = new Set<TestChannel>();
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      constructor(readonly name: string) { TestChannel.peers.add(this); }
+      postMessage(value: unknown) {
+        for (const peer of TestChannel.peers) {
+          if (peer !== this && peer.name === this.name) {
+            peer.onmessage?.({ data: value } as MessageEvent);
+          }
+        }
+      }
+      close() { TestChannel.peers.delete(this); }
+    }
+    vi.stubGlobal("BroadcastChannel", TestChannel);
+    try {
+      const peer = setup();
+      await peer.login();
+      expect(peer.client.getState().acquisition).toBe(true);
+      const sender = setup();
+      const oldSet = Storage.prototype.setItem;
+      const quota = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function(this: Storage, key, value) {
+        if (key.startsWith("mastermind-os-auth-logout-v1:")) {
+          throw new DOMException("Storage quota exhausted", "QuotaExceededError");
+        }
+        oldSet.call(this, key, value);
+      });
+      try { await sender.client.signOut(); }
+      finally { quota.mockRestore(); }
+      expect(localStorage.getItem("mastermind-os-auth-logout-v1:fixture-public-client")).toBeNull();
+      expect(peer.client.getState()).toMatchObject({
+        status: "signed_out", reason: "USER_SIGNED_OUT", acquisition: false, content: false,
+      });
+      await expect(peer.client.readPrograms({signal:new AbortController().signal}))
+        .rejects.toThrow("TOKEN_REQUIRED");
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("clears an explicit logout marker only after a new successful interactive login", async () => {
+    const e=setup();
+    await e.login();
+    await e.client.signOut();
+    expect(localStorage.getItem("mastermind-os-auth-logout-v1:fixture-public-client")).toBe("1");
+    e.popup.closed=false;
+    await e.login();
+    expect(e.client.getState()).toMatchObject({status:"signed_in",acquisition:true});
+    expect(localStorage.getItem("mastermind-os-auth-logout-v1:fixture-public-client")).toBeNull();
   });
   it("keeps acquisition usable when content is refused", async () => {
     const e = setup();

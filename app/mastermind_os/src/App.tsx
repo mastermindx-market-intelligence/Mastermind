@@ -6,6 +6,9 @@ import type {
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
+} from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
@@ -1396,6 +1399,16 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     previousAuth = useRef<string | null>(
       authState ? JSON.stringify(authState) : null,
     ),
+    previousAuthState = useRef<AuthState | null>(authState),
+    passiveExpiryHold = useRef(false),
+    // App already owns presentation state. These text-only snapshots survive
+    // an unmount during passive expiry, never a new principal or sign-out.
+    [retainedComposerDrafts, setRetainedComposerDrafts] = useState({ launch: "", session: "" }),
+    retainedComposerRef = useRef(retainedComposerDrafts),
+    retainedComposerScope = useRef<string | null>(null),
+    previousLiveComposerScope = useRef<string | null>(null),
+    hasUnsentUserText = useRef(false),
+    authRevisionRef = useRef(authRevision),
     previousHostGeneration = useRef(
       window.MastermindMissionHost?.invalidationGeneration?.() ?? 0,
     ),
@@ -1440,6 +1453,16 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     selection,
     authState?.content,
   );
+  authRevisionRef.current = authRevision;
+  retainedComposerRef.current = retainedComposerDrafts;
+  // The currently authenticated command scope is checked below, after the
+  // qualified host identity has been read. Off-view Office text is inspected
+  // independently of whether its component is mounted.
+  const updateRetainedComposer = (kind: "launch" | "session", text: string) => {
+    const next = { ...retainedComposerRef.current, [kind]: text };
+    retainedComposerRef.current = next;
+    setRetainedComposerDrafts(next);
+  };
   // Separately mounted session capability: never the launch route, never
   // multiplexed through whichever screen happens to be current.
   const sessionBinding = completeExecutiveSessionBinding(
@@ -1490,6 +1513,30 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const signedIn = authState?.status === "signed_in";
   const ownerContext =
     signedIn && commandBinding ? readOwnerContext(commandBinding.port) : null;
+  const liveComposerScope = ownerContext ? JSON.stringify([
+    ownerContext.principalScope, ownerContext.generation,
+    selection?.workRef, selection?.rootJobId, authRevision,
+  ]) : null;
+  // The App-level text snapshots are usable only by their originating
+  // selection/owner epoch, even when a mounted leaf is later replaced.
+  const presentedComposerDrafts = liveComposerScope &&
+    retainedComposerScope.current === liveComposerScope
+      ? retainedComposerDrafts : { launch: "", session: "" };
+  hasUnsentUserText.current = Boolean(office.draft.text ||
+    observedConversation.hasUnsentDraft() ||
+    (signedIn ? presentedComposerDrafts.launch || presentedComposerDrafts.session
+      : retainedComposerDrafts.launch || retainedComposerDrafts.session));
+  useEffect(() => {
+    if (!signedIn || !liveComposerScope) return;
+    if (previousLiveComposerScope.current !== null &&
+        previousLiveComposerScope.current !== liveComposerScope) {
+      const blank = { launch: "", session: "" };
+      retainedComposerRef.current = blank;
+      retainedComposerScope.current = null;
+      setRetainedComposerDrafts(blank);
+    }
+    previousLiveComposerScope.current = liveComposerScope;
+  }, [signedIn, liveComposerScope]);
   // The session owner context and host-projected target stay fenced on the
   // live signed-in state; the binding itself is read once per render above.
   const sessionOwner =
@@ -1590,6 +1637,13 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     (commandRefusal.kind === "launch" ||
       (sessionExact && commandRefusal.sessionKey === commandView?.session?.sessionKey))
     ? commandRefusal : null;
+  // A retained command pointer is an effect-reconciliation obligation.
+  // Automatic OAuth navigation must not tear down an unresolved UI owner.
+  useEffect(() => registerUnsavedNavigationHold(() =>
+    pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
+    (passiveExpiryHold.current && hasUnsentUserText.current)
+  ), [heldKind, recoverInFlight]);
+
   useEffect(() => {
     setCommandRefusal(null);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
@@ -1797,13 +1851,38 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           generation === previousHostGeneration.current
         )
           return;
+        const before = previousAuthState.current;
+        // Losing a token without acquiring another credential is passive
+        // expiry only on the browser client (never infer this for native).
+        // An explicit/cross-tab logout always clears, even with a dirty draft.
+        const passiveLoss = !native && before !== null &&
+          ((before.acquisition && !state.acquisition) ||
+           (before.content && !state.content)) &&
+          (!state.acquisition || before.acquisition) &&
+          (!state.content || before.content) &&
+          state.reason !== "USER_SIGNED_OUT" &&
+          !explicitLogoutRecorded() &&
+          (!canNavigateForAutomaticSignIn() || hasUnsentUserText.current);
         previousAuth.current = serialized;
+        previousAuthState.current = state;
         previousHostGeneration.current = generation;
         // Invalidate old surface presentation at notification time while the
         // App-owned pending/unknown action continues to retain its own result.
         controlRoomAuthEpoch.current += 1;
-        office.invalidateAuth();
-        observedConversation.invalidateAuth();
+        if (passiveLoss && hasUnsentUserText.current)
+          passiveExpiryHold.current = true;
+        else if (state.status === "signing_in" || state.acquisition ||
+                 state.content || state.reason === "USER_SIGNED_OUT" ||
+                 explicitLogoutRecorded())
+          passiveExpiryHold.current = false;
+        if (!passiveLoss) {
+          const blank = { launch: "", session: "" };
+          retainedComposerRef.current = blank;
+          retainedComposerScope.current = null;
+          setRetainedComposerDrafts(blank);
+        }
+        office.invalidateAuth(passiveLoss);
+        observedConversation.invalidateAuth(passiveLoss);
         commandSlot.current?.controller.invalidate();
         const pending = pendingCommand.current;
         if (pending) {
@@ -2871,7 +2950,19 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     </div>
   ) : null;
   const commandPanel =
-    canLaunch && commandView && launchDraftDismissed ? (
+    !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
+      <section className="card" aria-label="Retained Launch draft">
+        <h2>Unsent launch goal</h2>
+        <p className="muted">Your session expired. Copy or discard this local draft before signing in again. Commands are disabled.</p>
+        <label htmlFor="retained-launch-goal">Goal</label>
+        <textarea id="retained-launch-goal" value={retainedComposerDrafts.launch}
+          onChange={event => updateRetainedComposer("launch", event.target.value)}
+          rows={4} />
+        <button type="button" onClick={() => updateRetainedComposer("launch", "")}>
+          Discard launch goal
+        </button>
+      </section>
+    ) : canLaunch && commandView && launchDraftDismissed ? (
       <section className="card">
         <div className="section-title">
           <h2>Launch Orchestrator</h2>
@@ -2897,6 +2988,21 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           ])}
           projects={commandView.projects}
           profiles={commandView.profiles}
+          initialDraft={presentedComposerDrafts.launch}
+          onDraftChange={text => {
+            const liveBinding = completeOrchestratorCommandBinding(
+              window.MastermindMissionHost?.commandBinding);
+            const liveOwner = liveBinding ? readOwnerContext(liveBinding.port) : null;
+            if (authRevisionRef.current === authRevision &&
+                window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+                liveBinding === commandBinding &&
+                liveOwner?.principalScope === ownerContext?.principalScope &&
+                liveOwner?.generation === ownerContext?.generation)
+            {
+              retainedComposerScope.current = liveComposerScope;
+              updateRetainedComposer("launch", text);
+            }
+          }}
           unavailableReason={
             canLaunch
               ? undefined
@@ -2929,6 +3035,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               pendingCommand.current?.kind === "launch" ||
               heldKind === "launch"
             ) return;
+            updateRetainedComposer("launch", "");
             setLaunchDraftDismissed(true);
             routeHeading.current?.focus();
           }}
@@ -3023,7 +3130,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       } : undefined}
     />
   ) : null;
-  const sessionPanel = sessionBinding ? (
+  const sessionPanel = !signedIn && passiveExpiryHold.current &&
+    retainedComposerDrafts.session ? (
+    <section className="card" aria-label="Retained Session draft">
+      <h2>Unsent session message</h2>
+      <p className="muted">Authentication expired. Copy or discard this local draft; sending is disabled until sign-in.</p>
+      <label htmlFor="retained-session-message">Message</label>
+      <textarea id="retained-session-message" value={retainedComposerDrafts.session}
+        onChange={event => updateRetainedComposer("session", event.target.value)}
+        rows={4} />
+      <button type="button" onClick={() => updateRetainedComposer("session", "")}>
+        Discard session message
+      </button>
+    </section>
+  ) : sessionBinding ? (
     sessionContinuationPanel
   ) : commandBinding ? (
     sessionExact && commandView?.session ? (
@@ -3037,6 +3157,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           coverage={commandView.session.coverage}
           turnBusy={commandView.session.turnBusy}
           sending={heldKind === "message" && commandBusy}
+          initialDraft={presentedComposerDrafts.session}
+          onDraftChange={text => {
+            const liveBinding = completeOrchestratorCommandBinding(
+              window.MastermindMissionHost?.commandBinding);
+            const liveView = liveBinding ? readCommandView(liveBinding) : null;
+            if (authRevisionRef.current === authRevision &&
+                window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
+                liveBinding === commandBinding &&
+                liveView?.session?.sessionKey === commandView.session?.sessionKey)
+            {
+              retainedComposerScope.current = liveComposerScope;
+              updateRetainedComposer("session", text);
+            }
+          }}
           unavailableReason={commandView.session.unavailableReason}
           error={currentRefusal && currentRefusal.kind !== "launch"
             ? currentRefusal.reason : commandView.session.error}
@@ -3367,6 +3501,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           qualifiedAnswer={presentedSessionAnswer}
           onQualifiedAnswerCommitted={answerView.acknowledgeRender}
           notesPresentation="collapsed"
+          retainUnsentOnExpiry={passiveExpiryHold.current && authState?.content === false}
           projection={observedConversation.projection}
           draft={observedConversation.draft}
           onDraftChange={observedConversation.changeDraft}
@@ -3386,7 +3521,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         >
           Refresh observed window
         </button>
-        {!sessionBinding && sessionPanel}
+        {(!signedIn && retainedComposerDrafts.session) || !sessionBinding
+          ? sessionPanel : null}
       </>
     );
   else if (active === "Knowledge")
@@ -3892,6 +4028,19 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             ) : null}
           </div>
         </header>
+        {!native && authState && authState.status === "signed_out" &&
+         passiveExpiryHold.current && hasUnsentUserText.current ? (
+          <section className="notice" aria-label="Unsent work protected">
+            <p>Authentication expired. Unsent work is retained only in this tab. Copy or finish it before signing in again.</p>
+            <button type="button" onClick={() => {
+              office.changeDraft("");
+              observedConversation.discardDraft();
+              updateRetainedComposer("launch", "");
+              updateRetainedComposer("session", "");
+              passiveExpiryHold.current = false;
+            }}>Discard all unsent work</button>
+          </section>
+        ) : null}
         {active !== "Control Room" && !directRoute ? (
           <div className="notice" role="status">{visibleNotice}</div>
         ) : null}
