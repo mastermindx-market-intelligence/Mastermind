@@ -299,25 +299,28 @@ a UI-focus operation; its source description reflects the implementation. Active
 focus is reported as unknown rather than guessed. Its conservative existing
 annotation and workspace confirmation policy are unchanged in this source slice.
 
-### Immutable v18 Paper bridge — guarded release pending
+### Immutable v19 Paper bridge — guarded release pending
 
 A reviewer reproduced three **source-only v17** read-boundary defects: an unsafe
 read annotation could still dispatch, an unreviewed optional reader argument could be
 forwarded, and numeric `1` could be mistaken for Boolean `true` on safety hints.
 No live Paper design was altered by this diagnosis.
 
-The corrected v18 bridge (SHA-256
-`48ad9043494447ebafb1b8f7c987ddbb8845a8d5cb5a136443a8e6841a18b6c5`)
+The corrected v19 bridge (SHA-256
+`2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae`)
 validates read schemas/inputs before dispatch, including the implicit `get_basic_info`
-used for status, guarded reads and `paper_prepare`. The older v17 digest remains
+used for status, guarded reads and `paper_prepare`. After a mutation it
+requalifies the live snapshot getter before verification. Unsafe post-write
+drift returns `EFFECT_UNKNOWN` without a second Paper tool call or effect replay.
+v18 was an intermediate source-only candidate, never deployed. The older v17/v18 digests remain
 pinned in `runtime_stage.py` for immutable audit of already staged v17 bundles,
 **not** as permission to activate them. Never mutate the old staged generation,
 relabel its source, or treat a previous v17 scratch receipt as v18 acceptance.
 
 Release in order: original #1925 protected queue and merge; #1935 current-base
-integration and merge; then #1942 **fresh v18 exact-head CI, independent review,
+integration and merge; then #1942 **fresh v19 exact-head CI, independent review,
 and protected merge-group qualification**. Only the authorized original host
-installer/custody owner may stage v18 as a new generation, verify the same-label
+installer/custody owner may stage v19 as a new generation, verify the same-label
 source-to-process and manifest bindings, and cut over the intended Paper seat.
 This document is not permission to deploy, restart, change credentials, or
 overwrite existing Paper runtime state. The previous Ryan v13 client is the

@@ -81,6 +81,10 @@ REVIEWED_GENERATIONS = {
     "v18": {
         "bridge.py": "48ad9043494447ebafb1b8f7c987ddbb8845a8d5cb5a136443a8e6841a18b6c5",
     },
+    # Post-edit verifier must also qualify its snapshot getter; no retry.
+    "v19": {
+        "bridge.py": "2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae",
+    },
 }
 
 

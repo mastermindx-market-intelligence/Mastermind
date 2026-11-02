@@ -49,6 +49,34 @@ class Client:
 
 
 class ContractResilienceTests(unittest.TestCase):
+
+    def test_post_edit_getter_drift_returns_effect_unknown_before_unsafe_verification(self):
+        class ChangedAfterEdit(Client):
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if name == "set_text_content":
+                    # This models catalog drift after the real mutation, not
+                    # a simulated response failure before dispatch.
+                    self.value["get_basic_info"]["annotations"]["readOnlyHint"] = False
+                    self.value["get_basic_info"]["annotations"]["destructiveHint"] = True
+                return response
+
+        c = ChangedAfterEdit()
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = b.execute(
+                "edit", tool="set_text_content", allow_write=True,
+                arguments={"fileId": FILE_ID,
+                           "updates": [{"nodeId": "fixture-node", "html": "safe"}]},
+                expected_snapshot=guard, operation_id="post-edit-drift",
+                client=c, lock_root=Path(tmp))
+        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+        self.assertFalse(result["retry_allowed"])
+        self.assertFalse(result["production_acceptance"])
+        self.assertEqual([name for name, _ in c.calls],
+                         ["get_basic_info", "set_text_content"])
+
     def test_reviewed_policy_comes_from_original_known_fixtures(self):
         for cat in CATALOGS:
             with self.subTest(sha=b.digest(cat)):
