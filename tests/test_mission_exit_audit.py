@@ -102,7 +102,10 @@ def test_true_packet_only_ready_for_adjudication_not_automatically_approved():
     lambda d: d["mission"].update(requires=["source_implementation", "source_implementation"]),
     lambda d: d["mission"].update(requires=["new_unknown_gate"]),
     lambda d: d["worker"].update(scope="magic"),
+    lambda d: d["worker"].update(scope=[]),
     lambda d: d["worker"].update(state="SUCCESS"),
+    lambda d: d["worker"].update(state={}),
+    lambda d: d["effect"].update(**{"class": []}),
     lambda d: d["worker"].update(exit_code=True),
     lambda d: d["source"].update(head="branch-name"),
     lambda d: d["effect"].update(action_id=None),
@@ -127,3 +130,13 @@ def test_cli_negative_exit_without_secret_echo(tmp_path, capsys):
     emitted = capsys.readouterr().out
     assert "sensitive_token" not in emitted
     assert json.loads(emitted)["disposition"] == "INPUT_UNVERIFIED"
+
+
+def test_cli_unhashable_enum_is_typed_input_error(tmp_path, capsys):
+    data = snapshot()
+    data["worker"]["scope"] = []
+    file = tmp_path / "packet.json"
+    file.write_text(json.dumps(data), encoding="utf-8")
+    assert main([str(file)]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result == {"schema": OUTPUT_SCHEMA, "disposition": "INPUT_UNVERIFIED", "error": "invalid_or_unreadable_snapshot"}

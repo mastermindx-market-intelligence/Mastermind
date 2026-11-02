@@ -94,9 +94,12 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
         raise InvalidSnapshot("mission.requires must be a nonempty list of known proof gates")
     if len(set(req)) != len(req) or any(x not in REQUIREMENTS for x in req):
         raise InvalidSnapshot("duplicate or unsupported proof requirement")
-    if worker.get("scope") not in VALID_SCOPES or worker.get("state") not in VALID_RUN_STATES:
+    worker_scope, worker_state = worker.get("scope"), worker.get("state")
+    if (not isinstance(worker_scope, str) or worker_scope not in VALID_SCOPES
+            or not isinstance(worker_state, str) or worker_state not in VALID_RUN_STATES):
         raise InvalidSnapshot("unknown worker scope/state")
-    if effect.get("class") not in VALID_EFFECTS:
+    effect_class = effect.get("class")
+    if not isinstance(effect_class, str) or effect_class not in VALID_EFFECTS:
         raise InvalidSnapshot("unknown effect class")
     if effect["class"] != "NONE":
         if not _ref(effect.get("action_id")) or not _ref(effect.get("carrier")):
