@@ -1,0 +1,206 @@
+"""Deterministic no-network execution and confinement tests for native canary."""
+from __future__ import annotations
+
+from pathlib import Path
+import os
+import tempfile
+import unittest
+from unittest import mock
+
+from integrations.hermes_harness.native_turn_runner import (
+    _capture_bounded_child, _private_child_environment,
+    assert_role_service_cgroup, run_native_canary,
+)
+from integrations.hermes_harness.stack import compose_profile
+from integrations.hermes_runtime.errors import RuntimeRefusal
+
+
+def _fake_script(mode="good"):
+    return '''#!/usr/bin/env python3
+import json
+import re
+import sys
+import time
+mode = MODE_TOKEN
+if mode == "sleep":
+    time.sleep(3)
+    sys.exit(0)
+if mode == "oversize":
+    sys.stdout.write("x" * 70000)
+    sys.stdout.flush()
+    sys.exit(0)
+if mode == "malformed":
+    sys.stdout.write("not-json\\n")
+    sys.stderr.write("\\nsession_id: session-source-test\\n")
+    sys.exit(0)
+role = sys.argv[sys.argv.index("-p") + 1]
+marker = re.search(r"MMX-CANARY-[A-F0-9]{32}", sys.stdin.read()).group(0)
+model = "glm-5.3" if role == "mmmeta" else "glm-5-3-flash-260828"
+events = [
+    {"type": "system", "subtype": "init", "model": model, "session_id": "session-source-test"},
+    {"type": "text", "text": marker},
+    {"type": "result", "exit_code": 0, "text": marker, "session_id": "session-source-test",
+     "tokens": {"input": 19, "output": 14, "total": 33}},
+]
+for event in events:
+    sys.stdout.write(json.dumps(event) + "\\n")
+sys.stdout.flush()
+sys.stderr.write("\\nsession_id: session-source-test\\n")
+if mode == "private_stderr":
+    sys.stderr.write("Authorization: PRIVATE_SECRET_SENTINEL\\n")
+'''.replace("MODE_TOKEN", repr(mode))
+
+
+class CgroupAndEnvironmentTests(unittest.TestCase):
+    def test_exact_service_cgroup_matches(self):
+        assert_role_service_cgroup(
+            "mmsecretary",
+            raw="0::/user.slice/user-1000.slice/user@1000.service/app.slice/hermes-runtime-mmsecretary.service\n",
+        )
+        assert_role_service_cgroup(
+            "mmmeta",
+            raw="0::/user.slice/hermes-runtime-mmmeta.service/child.slice\n",
+        )
+
+    def test_wrong_or_forged_cgroup_refuses(self):
+        bad = [
+            "0::/user.slice/hermes-runtime-mmmeta.service\n",
+            "0::/user.slice/hermes-runtime-mmsecretary.service-fake\n",
+            "0::/unrelated/sol-shell.scope\n",
+            "0::/user.slice/hermes-runtime-mmsecretary.service.extra\n",
+            "",
+        ]
+        for raw in bad:
+            with self.subTest(raw=raw):
+                with self.assertRaises(RuntimeRefusal) as cm:
+                    assert_role_service_cgroup("mmsecretary", raw=raw)
+                self.assertEqual(cm.exception.code, "NATIVE_CANARY_CGROUP_UNQUALIFIED")
+
+    def test_external_proxy_and_extraneous_bearers_refuse(self):
+        with tempfile.TemporaryDirectory() as raw:
+            profile = compose_profile(
+                "mmsecretary", state_dir=Path(raw) / "state",
+                secrets_file=Path(raw) / "secret.env", hermes_home=Path(raw) / "home",
+            )
+            env = {
+                "HERMES_HOME": str(profile.hermes_home),
+                "BYTEPLUS_MODELARK_API_KEY": "synthetic-not-live",
+                "HTTPS_PROXY": "http://127.0.0.1:18651",
+                "NO_PROXY": "127.0.0.1,localhost",
+            }
+            self.assertEqual(_private_child_environment(profile, env), env)
+            for key, value in [
+                ("HTTPS_PROXY", "http://evil.example:18651"),
+                ("HTTPS_PROXY", "http://127.0.0.1:99999"),
+                ("NO_PROXY", "*"),
+                ("HERMES_GATEWAY_TOKEN", "PRIVATE-NOT-LIVE"),
+                ("HERMES_SLACK_BOT_TOKEN", "PRIVATE-NOT-LIVE"),
+                ("HTTP_PROXY", "http://127.0.0.1:1234"),
+            ]:
+                bad = {**env, key: value}
+                with self.subTest(key=key, value=value):
+                    with self.assertRaises(RuntimeRefusal):
+                        _private_child_environment(profile, bad)
+
+
+class SyntheticRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="hermes-native-canary-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.home = self.root / "hermeshome"
+        self.home.mkdir()
+        self.bin = self.root / "fake-hermes"
+        self.profile = compose_profile(
+            "mmsecretary", state_dir=self.root / "state",
+            secrets_file=self.root / "role.secrets.env", hermes_home=self.home,
+        )
+        self.child_env = {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "LANG": "C",
+            "HOME": str(self.home),
+            "HERMES_HOME": str(self.home),
+            "BYTEPLUS_MODELARK_API_KEY": "SOURCE_ONLY_PRIVATE_FIXTURE_KEY",
+            "HTTPS_PROXY": "http://127.0.0.1:18651",
+            "NO_PROXY": "127.0.0.1,localhost",
+        }
+
+    def _write(self, mode="good"):
+        self.bin.write_text(_fake_script(mode), encoding="utf-8")
+        self.bin.chmod(0o700)
+
+    def _run(self, **kwargs):
+        with mock.patch(
+            "integrations.hermes_harness.native_turn_runner.assert_role_service_cgroup",
+            return_value=None,
+        ):
+            return run_native_canary(
+                self.profile, hermes_bin=self.bin, model_child_env=self.child_env,
+                timeout_seconds=kwargs.get("timeout_seconds", 5.0),
+            )
+
+    def test_valid_fake_child_observed_without_live_claim(self):
+        self._write()
+        receipt = self._run()
+        self.assertEqual(receipt["status"], "PASS_CHILD_OUTPUT_OBSERVATION_ONLY")
+        self.assertEqual(receipt["issue_codes"], [])
+        self.assertTrue(receipt["host_service_cgroup_membership_observed"])
+        self.assertFalse(receipt["provider_authentication_verified"])
+        self.assertFalse(receipt["provider_tls_verified"])
+        self.assertFalse(receipt["bpf_network_deny_verified"])
+        self.assertFalse(receipt["live_slack_delivery_verified"])
+        self.assertFalse(receipt["role_bot_slack_delivery_verified"]
+                         if "role_bot_slack_delivery_verified" in receipt else False)
+        self.assertNotIn("SOURCE_ONLY_PRIVATE_FIXTURE_KEY", str(receipt))
+
+    def test_malformed_json_is_blocked_not_a_canary(self):
+        self._write("malformed")
+        receipt = self._run()
+        self.assertEqual(receipt["status"], "BLOCKED")
+        self.assertIn("STREAM_INVALID", receipt["issue_codes"])
+
+    def test_stderr_secret_is_not_returned(self):
+        self._write("private_stderr")
+        receipt = self._run()
+        self.assertEqual(receipt["status"], "BLOCKED")
+        self.assertNotIn("PRIVATE_SECRET_SENTINEL", str(receipt))
+        self.assertIn("SESSION_STDERR_MISMATCH", receipt["issue_codes"])
+
+    def test_large_output_kills_child_without_unbounded_capture(self):
+        self._write("oversize")
+        with self.assertRaises(RuntimeRefusal) as cm:
+            self._run()
+        self.assertEqual(cm.exception.code, "NATIVE_CANARY_OUTPUT_TOO_LARGE")
+
+    def test_timeout_kills_child_without_implicit_retry(self):
+        self._write("sleep")
+        with self.assertRaises(RuntimeRefusal) as cm:
+            self._run(timeout_seconds=0.2)
+        self.assertEqual(cm.exception.code, "NATIVE_CANARY_TIMEOUT")
+
+    def test_cgroup_refuses_before_child_spawn(self):
+        self._write()
+        with mock.patch(
+            "integrations.hermes_harness.native_turn_runner.assert_role_service_cgroup",
+            side_effect=RuntimeRefusal("NATIVE_CANARY_CGROUP_UNQUALIFIED"),
+        ):
+            with mock.patch(
+                "integrations.hermes_harness.native_turn_runner._capture_bounded_child",
+                side_effect=AssertionError("child must not be spawned"),
+            ) as proc:
+                with self.assertRaises(RuntimeRefusal) as cm:
+                    run_native_canary(
+                        self.profile, hermes_bin=self.bin,
+                        model_child_env=self.child_env,
+                    )
+                self.assertEqual(cm.exception.code, "NATIVE_CANARY_CGROUP_UNQUALIFIED")
+                proc.assert_not_called()
+
+    def test_without_hermes_binary_refuses(self):
+        with self.assertRaises(RuntimeRefusal) as cm:
+            self._run()
+        self.assertEqual(cm.exception.code, "NATIVE_CANARY_PROFILE_UNQUALIFIED")
+
+
+if __name__ == "__main__":
+    unittest.main()
