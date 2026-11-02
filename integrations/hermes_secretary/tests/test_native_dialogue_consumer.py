@@ -186,8 +186,13 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.model.prompts, [])
 
     async def test_non_ceo_request_refused_before_inference(self):
+        # The schema itself refuses COO-origin CONTINUE. Supply a genuine
+        # *valid* worker PROGRESS frame with the original key instead to prove
+        # this consumer cannot promote other canonical messages into orders.
         msg = _request()
-        msg["actor_ref"] = {"kind": "executive_surface", "seat": "coo", "reasoning_surface": "claude"}
+        msg["message_type"] = "PROGRESS"
+        msg["actor_ref"] = ACTOR
+        msg["body"] = {"stage": "working", "completed": "none", "next": "hold"}
         msg.pop("fingerprint")
         self.service.items[0]["message"] = build_message_v2(msg)
         with self.assertRaises(ConsumerRefusal) as cm:
