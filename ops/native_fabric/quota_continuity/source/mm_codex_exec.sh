@@ -104,6 +104,16 @@ cleanup_codex_home() {
 trap cleanup_codex_home EXIT
 export MINIMAX_API_KEY="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.minimax/config.json")))["api_key"])')"
 
+# This is checked only after the original MiniMax slot is acquired.
+# M3.1 Flash must never silently use a pay-as-you-go API key.
+case "$MODEL" in
+  MiniMax-M3.1-Flash|minimax-m3.1-flash)
+    case "$MINIMAX_API_KEY" in
+      sk-cp-*) ;;
+      *) echo "MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED" >&2; exit 78 ;;
+    esac ;;
+esac
+
 if [ ! -f "$PROMPT_FILE" ]; then
   echo "mm_codex_exec: prompt file not found: $PROMPT_FILE" >&2
   exit 2
