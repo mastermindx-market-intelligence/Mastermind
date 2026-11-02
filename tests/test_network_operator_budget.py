@@ -8,6 +8,9 @@ from pathlib import Path
 import sqlite3
 import sys
 import types
+import io
+import tarfile
+import subprocess
 
 import pytest
 
@@ -16,6 +19,43 @@ SOURCE = ROOT / "ops/native_fabric/quota_continuity/source"
 CANDIDATE = ROOT / "ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py"
 NETWORK = "01a12a2a-d7e1-77b1-9262-ab593179dd13"
 DENIAL = "network_paid_dispatch_budget_unqualified"
+PROPOSAL = ROOT / 'integrations/session_bridge/network_budget_admission'
+
+
+@pytest.fixture(scope='module', autouse=True)
+def materialized_proposal(tmp_path_factory):
+    """Apply exact reviewed deltas only in a disposable source/build copy."""
+    global SOURCE, CANDIDATE
+    manifest = json.loads((PROPOSAL / 'manifest.json').read_text())
+    tree = tmp_path_factory.mktemp('network-prospective-source')
+    quota = 'ops/native_fabric/quota_continuity'
+    provenance = json.loads((ROOT / quota / 'candidate/paid_pyyaml_provenance.json').read_text())
+    archive = subprocess.check_output(['git', '-C', str(ROOT), 'archive', manifest['base'],
+        quota, 'ops/native_fabric/grok47/overlay', provenance['lock_path']])
+    with tarfile.open(fileobj=io.BytesIO(archive)) as source:
+        source.extractall(tree, filter='data')
+    for target, row in manifest['files'].items():
+        original = tree / row['base_source']
+        assert hashlib.sha256(original.read_bytes()).hexdigest() == row['preimage_sha256']
+        destination = tree / target
+        if target != row['base_source']:
+            assert not destination.exists()
+            destination.write_bytes(original.read_bytes())
+        patch = PROPOSAL / row['patch']
+        assert hashlib.sha256(patch.read_bytes()).hexdigest() == row['patch_sha256']
+        subprocess.run(['git', 'apply', '--check', str(patch)], cwd=tree, check=True)
+        subprocess.run(['git', 'apply', str(patch)], cwd=tree, check=True)
+        assert hashlib.sha256(destination.read_bytes()).hexdigest() == row['postimage_sha256']
+    SOURCE = tree / quota / 'source'
+    CANDIDATE = tree / quota / 'candidate/fabric_operator_owner.py'
+    # The unchanged builder verifies original preimages and writes only this copy.
+    subprocess.run([sys.executable, str(tree / quota / 'rollout/build_review_stage.py'),
+                    '--output', str(tree / quota / 'rollout')], cwd=tree, check=True)
+    baseline = json.loads((ROOT / quota / 'rollout/native-manifest.json').read_text())
+    staged = json.loads((tree / quota / 'rollout/native-manifest.json').read_text())
+    assert len(baseline) == len(staged) == 102
+    assert sorted(k for k in set(baseline) | set(staged) if baseline.get(k) != staged.get(k)) == ['ext/fabric_operator_owner.py', 'ext/fabric_task.py']
+    return tree
 
 
 def load_owner(path):
@@ -269,8 +309,69 @@ def test_only_exact_network_owner_deadline_sites_are_qualified():
     from tests.executive_identity_review import reviewed_literal_spans
     path = 'ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py'
     source = CANDIDATE.read_text()
-    assert len(reviewed_literal_spans(path, source)) == 2
-    assert scan(source, path=path) == []
-    assert scan(source + '\n# source drift\n', path=path) == ['660', '660']
-    assert '457' in scan(source + '\npeer_uid = 457\n', path=path)
-    assert scan(source, path='control_plane/foreign_network_owner.py') == ['660', '660']
+    # Explicit prospective review DATA only, never active production exemptions.
+    from tests.executive_fabric_release_identity_review import REVIEWED_FILES
+    manifest = json.loads((PROPOSAL / 'manifest.json').read_text())
+    record = manifest['prospective_identity_review']
+    old_record = REVIEWED_FILES.get(path)
+    assert old_record is None
+    REVIEWED_FILES[path] = {'sha256': record['sha256'], 'sites': tuple(tuple(row) for row in record['sites'])}
+    try:
+        assert len(reviewed_literal_spans(path, source)) == 2
+        assert scan(source, path=path) == []
+        assert scan(source + '\n# source drift\n', path=path) == ['660', '660']
+        assert '457' in scan(source + '\npeer_uid = 457\n', path=path)
+        assert scan(source, path='control_plane/foreign_network_owner.py') == ['660', '660']
+    finally:
+        del REVIEWED_FILES[path]
+
+
+
+def test_prospective_fixture_data_assembles_with_unchanged_real_compilers(materialized_proposal, tmp_path, monkeypatch):
+    from tests import test_paid_provider_entry_linux as actual
+    monkeypatch.setattr(actual, 'ROOT', materialized_proposal)
+    actual.test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_path, monkeypatch)
+
+
+def test_prior_reservation_survives_but_later_start_stays_held(modules, tmp_path, monkeypatch):
+    old, new = modules
+    owner, cap, request = seed(old, tmp_path)
+    owner.reserve(cap['token'], request)
+    with owner.transaction() as connection:
+        assert new.validate_child_admission(connection, request['run_id'], NETWORK, now=1000.)['root'] == NETWORK
+    packet = owner.here / 'state/remote_sub' / (request['run_id'] + '.operator-packet')
+    packet.write_text(request['packet'] + old.CHILD_SUFFIX)
+    before_rows, before_packet = rows(owner), packet.read_bytes()
+    api = manual_api(monkeypatch, owner.here)
+    monkeypatch.setitem(api.os.environ, 'FABRIC_OPERATOR_CHILD_ID', request['run_id'])
+    reached = []
+    def forbidden(*args, **kwargs):
+        reached.append(True)
+        raise AssertionError('New paid start must stay held')
+    monkeypatch.setattr(api.pick, 'format_pick', forbidden)
+    monkeypatch.setattr(api.subprocess, 'run', forbidden)
+    with pytest.raises(api.FabricTaskError, match='^NETWORK_PAID_DISPATCH_BUDGET_UNQUALIFIED$'):
+        api.request(request['run_id'], request['task_class'], cwd='~', packet=packet,
+                    stdin_bytes=None, root_id=NETWORK, parent_run_id=request['parent'],
+                    task_complexity=request['task_complexity'])
+    assert not reached and rows(owner) == before_rows and packet.read_bytes() == before_packet
+    assert list(packet.parent.iterdir()) == [packet]
+    assert new.OperatorOwner(here=owner.here, clock=lambda:1000.).describe(cap['token'])['child_budget_remaining'] == 1
+
+
+def test_actual_materialized_manual_bytes_retain_only_inherited_d8_findings(materialized_proposal):
+    import difflib
+    from tests.test_executive_a2_identity_review import scan
+    from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
+    manifest = json.loads((PROPOSAL / 'manifest.json').read_text())
+    path = 'ops/native_fabric/quota_continuity/candidate/fabric_task.py'
+    original = (ROOT / path).read_text()
+    prospective = (materialized_proposal / path).read_text()
+    assert hashlib.sha256(prospective.encode()).hexdigest() == manifest['files'][path]['postimage_sha256']
+    assert hashlib.sha256(original.encode()).hexdigest() == manifest['files'][path]['preimage_sha256']
+    assert scan(prospective, path=path) == scan(original, path=path)
+    diff = 'diff --git a/' + path + ' b/' + path + '\n' + ''.join(difflib.unified_diff(original.splitlines(keepends=True), prospective.splitlines(keepends=True), fromfile='a/' + path, tofile='b/' + path, n=0))
+    assert _scan_added_identity_diff(diff, source_postimages={path: prospective}) == []
+    dirty = prospective + '\npeer_uid = 457\n'
+    assert hashlib.sha256(dirty.encode()).hexdigest() != manifest['files'][path]['postimage_sha256']
+    assert '457' in scan(dirty, path=path)
