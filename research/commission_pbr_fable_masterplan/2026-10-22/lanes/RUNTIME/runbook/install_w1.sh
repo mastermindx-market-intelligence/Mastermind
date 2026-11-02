@@ -82,14 +82,15 @@ load() {
 # events-filter and stops the step, as before. Dropped rows are recorded in logs/unparsed_rows.log.
 EVT_PREFILTER='
 import sys, re, json, datetime
-thr = float(sys.argv[1]); log = open(sys.argv[2], "a"); dropped = kept_bad = 0
-pat = re.compile(r"^\{\"ts\":\"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+sys.stdin.reconfigure(errors="surrogateescape"); sys.stdout.reconfigure(errors="surrogateescape")  # rev 3.3: non-UTF-8 bytes pass through unchanged; such a row counts as unparsed
+thr = float(sys.argv[1]); log = open(sys.argv[2], "a", errors="backslashreplace"); dropped = kept_bad = 0
+pat = re.compile(r"^\{\"ts\":\"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)\+00:00\"")  # rev 3.3: the host writes +00:00 only; any other suffix is not a trusted prefix
 for line in sys.stdin:
     s = line.strip()
     if not s:
         continue
     try:
-        json.loads(s)
+        s.encode("utf-8"); json.loads(s)  # UnicodeEncodeError (a surrogate-escaped byte) is a ValueError: the row is unparsed
         sys.stdout.write(line)
         continue
     except ValueError:
@@ -106,7 +107,7 @@ for line in sys.stdin:
     sys.stdout.write(line)
 print(json.dumps({"events_prefilter": {"threshold_epoch": thr, "dropped_before_threshold": dropped, "kept_unparsed": kept_bad}}), file=sys.stderr)
 '
-events_tail() {  # events_tail <out>: fresh 20000-line run_events tail, extra.flags dropped; unparsed rows before the threshold dropped (D-EVT-1)
+events_tail() {  # events_tail <out>: fresh 20000-line run_events tail, extra.flags dropped; unparsed rows before the threshold dropped (D-EVT-1; rev 3.3 hardening)
   local thr
   if [ -s "$EV/gates/process_active_enter.txt" ]; then thr=$(tr -d @ < "$EV/gates/process_active_enter.txt")
   else thr=$(( $(epoch "${DAY}T00:00") - 172800 )); fi
