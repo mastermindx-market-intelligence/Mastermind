@@ -7944,6 +7944,7 @@ class ExecutiveControlService:
             if not self._is_bound_coo_root(root):
                 continue
             prestart_ready = False
+            has_existing_child = False
             if (
                 root.status is JobStatus.QUEUED
                 and root.attempt_count == 0
@@ -7958,6 +7959,7 @@ class ExecutiveControlService:
                         "SELECT 1 FROM attempts WHERE job_id=? LIMIT 1",
                         (root.job_id,),
                     ).fetchone()
+                has_existing_child = child is not None
                 if child is None and attempt is None:
                     try:
                         if not self._maintenance_workspace_pending(root):
@@ -7982,12 +7984,12 @@ class ExecutiveControlService:
                 continue
             if first_reconciling_root is None:
                 return root.job_id
-            # A prior independent opportunity cannot permanently hide A.
-            # B must be a freshly qualified prestart, not just an eligible
-            # RUNNING/CHECKPOINTED root with no actionable work.
+            # Alternate a bounded opportunity with A's original reconciliation.
+            # B can continue after creating its planner child; an idle status
+            # by itself does not qualify unrelated work for this exception.
             if previous_root_id not in (None, first_reconciling_root):
                 return first_reconciling_root
-            if prestart_ready:
+            if prestart_ready or has_existing_child:
                 return root.job_id
         return first_reconciling_root
 

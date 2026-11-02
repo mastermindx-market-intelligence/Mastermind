@@ -161,8 +161,10 @@ def test_independent_ready_root_is_not_starved_by_unresolved_other_root(tmp_path
             marker = seed.runtime.jobs.pending_cycle_dispatch_effect_unknown(a)
             assert marker is not None and marker["dispatch_command_id"] == exact_command
             await seed.close()
+            finish_gate = asyncio.Event()
             running, _ = _service(tmp_path, config=dataclasses.replace(
-                config, coo_tick_interval_seconds=1.0), finish_gate=asyncio.Event())
+                config, coo_tick_interval_seconds=1.0,
+                shutdown_grace_seconds=3.0), finish_gate=finish_gate)
             await running.start()
             try:
                 assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(a) == marker
@@ -194,16 +196,21 @@ def test_independent_ready_root_is_not_starved_by_unresolved_other_root(tmp_path
                     return await actual_cycle(root_id)
 
                 running._run_coo_cycle = bounded_cycle
-                assert await _until(lambda: len(observed) >= 2, timeout=5.0), {
+                assert await _until(lambda: len(observed) >= 3, timeout=8.0), {
                     "last_error": running._coo_last_error,
                     "last_tick": running._coo_last_tick_at,
                     "selected": observed,
                 }
-                assert observed[:2] == [b, a]
+                assert observed[:3] == [b, a, b]
                 assert _children(running, b)
+                assert await _until(
+                    lambda: any(child.attempt_count > 0 for child in _children(running, b)),
+                    timeout=4.0,
+                ), "B must progress beyond planner creation on its second tick"
                 assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(a) == marker
                 assert running.service_state == "READY"
             finally:
+                finish_gate.set()
                 await running.close()
     asyncio.run(exercise())
 
