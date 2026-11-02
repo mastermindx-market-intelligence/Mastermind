@@ -1249,24 +1249,27 @@ def test_secret_stderr_and_replaced_bound_evidence_never_succeed(
     tmp_path: Path,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
-    (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
-    adapter = _adapter(tmp_path, binary)
-
-    async def secret_stderr() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
-
-    secret_receipt = asyncio.run(secret_stderr())
-    assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
-    assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
-
-    # The launch-attestation test above uses this same FIFO: a fixed 0.2s
-    # process sleep is not a lifecycle barrier on a loaded CI runner. Keep
-    # the *actual fixture process* alive through PID identity attestation and
-    # the bound-evidence path replacement. Do not relax the identity guard.
+    # All four negative controls require a live attested child. The fixture's
+    # fixed 0.2s sleep (and immediate secret-stderr exit) cannot ensure /proc
+    # visibility on loaded CI. Reuse the suite's FIFO release barrier; do not
+    # weaken the production identity inspector or relax any invalid-result gate.
     gate = tmp_path / "launch-release"
     os.mkfifo(gate, 0o600)
     gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
     try:
+        (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
+        adapter = _adapter(tmp_path, binary)
+
+        async def secret_stderr() -> CollectionReceipt:
+            ref = await adapter.start(_workspace_and_spec(tmp_path))
+            # Exit only after the real fixture process has been identity-attested.
+            assert os.write(gate_fd, b"release\n") == len(b"release\n")
+            return await adapter.collect_result(ref)
+
+        secret_receipt = asyncio.run(secret_stderr())
+        assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
+        assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
+
         for label in ("stdout_path", "stderr_path", "result_path"):
             (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
             replacing_adapter = _adapter(tmp_path, binary)
@@ -1290,7 +1293,6 @@ def test_secret_stderr_and_replaced_bound_evidence_never_succeed(
             assert victim.read_text(encoding="utf-8") == "victim-data"
     finally:
         os.close(gate_fd)
-
 
 def test_post_parse_git_rejection_leaves_bound_result_empty(tmp_path: Path) -> None:
     binary = _fixture_claude_binary(tmp_path)
