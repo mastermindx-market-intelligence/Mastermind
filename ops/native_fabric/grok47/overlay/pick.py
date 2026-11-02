@@ -1566,13 +1566,7 @@ def _selection_model(pool: str, task_class: str,
     # Preserve the exact caller-authorized Grok Build version. A default
     # upgrade must never relabel a historical explicitly pinned 4.6 job.
     pinned = ((pool == "grok" and model in ("grok-4.6", "grok-4.7"))
-              or (pool == "cursor" and model == "cursor-grok-4.6-high")
-              or (pool == "minimax" and str(model or "").casefold() in
-                  {"minimax-m3", "minimax-m3.1-flash"}))
-    if pool == "minimax" and pinned:
-        # Preserve the provider-native spelling; no arbitrary model aliases.
-        model = ("MiniMax-M3.1-Flash" if str(model).casefold() ==
-                 "minimax-m3.1-flash" else "MiniMax-M3")
+              or (pool == "cursor" and model == "cursor-grok-4.6-high"))
     model = (model if pinned else None) or spec.get("default_model") or _default_model(pool, task_class)
     if pool == "bailian" and task_class.lower() == "review":
         model = spec.get("review_model") or "qwen3.8-max"
@@ -1929,12 +1923,9 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
     qwen_candidate_model = None
     if host is not None:
         try:
-            # A MiniMax/Grok model pin is never a GLM account-model hint.
-            glm_models = {str(value).casefold() for value in _glm_models(load_pools()).values()}
-            glm_pin = (requested_model if str(requested_model or "").casefold()
-                       in glm_models else None)
-            glm_candidate_model = _selection_model(
-                "glm", task_class, load_pools(), needs, model=glm_pin)[0]
+            glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
+                model=(requested_model if requested_model not in
+                       ("cursor-grok-4.6-high", "grok-4.6", "grok-4.7") else None))[0]
             qwen_candidate_model = _selection_model("bailian", task_class, load_pools(), needs)[0]
             routes = _eligible_host_routes(
                 host, glm_model=glm_candidate_model,
@@ -2014,10 +2005,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
         # This exact high-effort alias was observed in the authenticated Cursor
         # catalog. Capability/host, economic, quality and independence gates
         # below are still required; catalog presence is not worker admission.
-    minimax_pin = explicit_model in {"minimax-m3", "minimax-m3.1-flash"}
-    if minimax_pin and forced != "minimax":
-        return "NONE reason=exact MiniMax model requires minimax pool"
-    if explicit_model and not native_alias and not grok_pin and not minimax_pin:
+    if explicit_model and not native_alias and not grok_pin:
         models = {str(value).casefold() for value in _glm_models(doc).values()}
         full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
         if explicit_model not in models:
@@ -2048,7 +2036,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             return "NONE reason=go_short_capability_only_for_c0_c1"
         if host_modes is not None and forced not in host_modes:
             return f"NONE reason=pool {forced} has no eligible mode on requested host"
-        selected_model = (explicit_model or None) if forced in ("glm", "grok", "minimax") or native_alias else None
+        selected_model = (explicit_model or None) if forced in ("glm", "grok") or native_alias else None
         ok, reason = policy_allows(forced, tc, doc, model=selected_model)
         if not ok:
             return f"NONE reason={reason}"
