@@ -119,6 +119,27 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         self.assertIn("isolation:shared_slack_user_id", report["core_text_missing"])
         self.assertIn("isolation:shared_egress_proxy", report["core_text_missing"])
 
+    def test_shared_model_credential_rejected_without_leaking_key(self):
+        key = self._key_file("shared-provider.key", FAKE_MODELARK)
+        self._write_role("mmsecretary", (
+            f"BYTEPLUS_MODELARK_API_KEY_FILE={key}\\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\\n"
+            "HERMES_SLACK_BOT_TOKEN=secretary-distinct-slack-token-123456\\n"
+        ))
+        self._write_role("mmmeta", (
+            f"ZAI_API_KEY_FILE={key}\\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\\n"
+            "HERMES_SLACK_BOT_TOKEN=meta-distinct-slack-token-123456\\n"
+        ), gateway="test-meta-gateway-distinct-123456",
+           dashboard="test-meta-dashboard-distinct-123456")
+        outcome = self._doctor()
+        self.assertIn("isolation:shared_model_credential", outcome["core_text_missing"])
+        self.assertNotIn(FAKE_MODELARK, str(outcome))
+
     def test_incumbent_grok_peer_id_cannot_be_reused(self):
         self._write_role("mmsecretary", (
             "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
