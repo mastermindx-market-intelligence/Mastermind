@@ -89,6 +89,19 @@ def test_review_guide_preserves_identity_and_no_denial_failover():
     )
 
 
+def test_native_and_web_fabric_skill_sources_discover_the_shared_review_guide():
+    """Source packaging is a prerequisite, not installed/fresh-load proof."""
+    for p in (
+        "skills/mastermind-fabric-delegate/SKILL.md",
+        "skills/mastermind-claude-fabric-delegation/SKILL.md",
+        "integrations/studio_direct_mcp/fabric_plugin_source/skills/use-subagent-fabric/SKILL.md",
+    ):
+        skill = _read(p)
+        assert GUIDE in skill, f"{p}: the review procedure would be undiscoverable"
+        assert "not" in skill.lower() and "GitHub" in skill
+        assert "Slack Dot" in skill
+
+
 def test_source_only_prevents_false_installed_and_live_claims():
     guide = _read(GUIDE)
     assert "not a deployed service" in guide

@@ -7,6 +7,10 @@ description: Use for an assigned M2 Claude CEO/orchestrator that needs to send b
 
 This is an invocation guide, **not** a new tool, root, entitlement, account, queue, lease, or authentication grant. Apply protected Mastermind source law and the actual session's permissions. Never use Claude Agent/Task, raw SSH, direct provider CLIs, copied credentials or an invented Fabric identity as a fallback for a refused or missing Fabric grant.
 
+## Independent PR review: shared session-side guide
+
+Before requesting a distinct PR/source review, load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the verified protected Mastermind source. It describes the existing Fabric-versus-separately-qualified Dot decision and exact PR/author/worker/formal-GitHub identity fences. Never reassign a denied, active or uncertain same-scope review through another provider, carrier or Slack Dot; a technical verdict does not submit a formal non-author GitHub approval. This source pointer is not proof of live Claude skill installation or a fresh authenticated session.
+
 ## First 30 seconds: choose the existing entrypoint
 
 1. From the **current assigned session's trusted binding**, identify the original `root`, your **actual immediate parent** (the current Claude coordinator's admitted run/session binding) and a new unique `run_id` for *one* child. Preserve the original root on every descendant. A filesystem path, model label, project name or prior conversation is **not** an identity. If root/parent cannot be verified, return `FABRIC_IDENTITY_UNVERIFIED` without dispatch.

@@ -9,6 +9,10 @@ metadata:
 
 Native Codex `spawn_agent`/full-history forks are **not** external Fabric workers; a parent Sol model may be inherited. The existing Fabric is a separate, shared provider/host pool. Prefer it for independently checkable leaf labor when existing admission and current shell/sandbox allow; keep actual coordinator judgment with the parent. Do not start another orchestrator or separate queue.
 
+## Independent PR review: one portable source contract
+
+When the assigned Codex session needs an independent PR/source reviewer, load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the *same verified protected Mastermind pin* before considering a new child. Use this native adapter only with real original root/parent, reviewer-versus-author separation and no existing same-scope review/uncertain effects. A separate Slack Dot technical assessment is manual transport only when independently eligible, never a fallback for an explicitly denied Fabric review. Neither a paid Fabric PASS nor a Dot verdict is a submitted non-author GitHub PR review. Source skill update does not prove fresh provider-home installation.
+
 ## Select the lawful execution path
 
 1. Use the installed M2 shell adapter below directly for new ordinary paid Fabric work when this session's existing shell/network permissions permit it. Executive MCP/plugin, company Mission, RuntimeBinding and idle Wake are optional integrations, not prerequisites for this path.
