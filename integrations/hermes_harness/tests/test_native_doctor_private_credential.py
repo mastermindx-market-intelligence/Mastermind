@@ -25,11 +25,11 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         self.directory = self.home / ".config" / "hermes-runtime"
         self.directory.mkdir(parents=True)
 
-    def _write_role(self, role: str, extra: str = ""):
+    def _write_role(self, role: str, extra: str = "", *, gateway: str = GATEWAY, dashboard: str = DASHBOARD):
         path = self.directory / f"{role}.secrets.env"
         path.write_text(
-            "HERMES_GATEWAY_TOKEN=" + GATEWAY + "\n"
-            "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + DASHBOARD + "\n"
+            "HERMES_GATEWAY_TOKEN=" + gateway + "\n"
+            "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + dashboard + "\n"
             + extra,
             encoding="utf-8",
         )
@@ -73,6 +73,121 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         self.assertIn("grant:executive_admission", outcome["missing"])
         self.assertNotIn(FAKE_ZAI, str(outcome))
         self.assertNotIn(FAKE_MODELARK, str(outcome))
+
+    def test_core_text_configuration_can_qualify_without_optional_grants(self):
+        modelark = self._key_file("modelark.key", FAKE_MODELARK)
+        zai = self._key_file("zai.key", FAKE_ZAI)
+        self._write_role("mmsecretary", (
+            f"BYTEPLUS_MODELARK_API_KEY_FILE={modelark}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\n"
+            "HERMES_SLACK_BOT_TOKEN=test-secretary-slack-token-only-123456\n"
+        ))
+        self._write_role("mmmeta", (
+            f"ZAI_API_KEY_FILE={zai}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
+            "HERMES_SLACK_BOT_TOKEN=test-meta-slack-token-only-123456\n"
+        ), gateway="test-meta-gateway-token-123456",
+           dashboard="test-meta-dashboard-token-123456")
+        report = self._doctor()
+        self.assertEqual(report["core_text_missing"], [])
+        self.assertEqual(report["core_text_status"], "CONFIG_READY_NOT_LIVE_PROVEN")
+        self.assertEqual(report["status"], "MISSING")
+        self.assertIn("grant:executive_admission", report["missing"])
+        self.assertFalse(report["native_egress_host_policy_verified"])
+        self.assertFalse(report["provider_authenticated"])
+        self.assertFalse(report["slack_roundtrip_verified"])
+
+    def test_core_text_rejects_shared_roles_even_if_each_proxy_url_is_valid(self):
+        self._write_role("mmsecretary", (
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=USHAREDBOT001\n"
+            "HERMES_SLACK_BOT_TOKEN=shared-token-fixture-123456\n"
+        ))
+        self._write_role("mmmeta", (
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=USHAREDBOT001\n"
+            "HERMES_SLACK_BOT_TOKEN=shared-token-fixture-123456\n"
+        ))
+        report = self._doctor()
+        self.assertIn("isolation:shared_gateway_token", report["core_text_missing"])
+        self.assertIn("isolation:shared_slack_user_id", report["core_text_missing"])
+        self.assertIn("isolation:shared_egress_proxy", report["core_text_missing"])
+
+    def test_shared_model_credential_rejected_without_leaking_key(self):
+        key = self._key_file("shared-provider.key", FAKE_MODELARK)
+        self._write_role("mmsecretary", (
+            f"BYTEPLUS_MODELARK_API_KEY_FILE={key}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\n"
+            "HERMES_SLACK_BOT_TOKEN=secretary-distinct-slack-token-123456\n"
+        ))
+        self._write_role("mmmeta", (
+            f"ZAI_API_KEY_FILE={key}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
+            "HERMES_SLACK_BOT_TOKEN=meta-distinct-slack-token-123456\n"
+        ), gateway="test-meta-gateway-distinct-123456",
+           dashboard="test-meta-dashboard-distinct-123456")
+        outcome = self._doctor()
+        self.assertIn("isolation:shared_model_credential", outcome["core_text_missing"])
+        self.assertNotIn(FAKE_MODELARK, str(outcome))
+
+    def test_incumbent_grok_peer_id_cannot_be_reused(self):
+        self._write_role("mmsecretary", (
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=U0BTCHX8HMF\n"
+            "HERMES_SLACK_BOT_TOKEN=secretary-fake-separate-credential-123456\n"
+        ))
+        self._write_role("mmmeta", (
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
+            "HERMES_SLACK_BOT_TOKEN=metaceo-fake-separate-credential-123456\n"
+        ), gateway="test-meta-gateway-distinct-123456",
+           dashboard="test-meta-dashboard-distinct-123456")
+        report = self._doctor()
+        self.assertIn("isolation:incumbent_peer_user_id:mmsecretary",
+                      report["core_text_missing"])
+        self.assertNotIn("U0BTCHX8HMF", str(report))
+
+    def test_cli_core_only_exit_is_configuration_only_not_global_ready(self):
+        import contextlib
+        import io
+        import json
+        from unittest import mock
+        from integrations.hermes_harness.cli import main
+
+        core = {
+            "schema": "mastermind.hermes_harness.doctor.v1",
+            "status": "MISSING",
+            "missing": ["grant:executive_admission", "id:DOT_BOT_USER_IDS"],
+            "core_text_status": "CONFIG_READY_NOT_LIVE_PROVEN",
+            "core_text_missing": [],
+            "core_text_missing_count": 0,
+        }
+        with mock.patch("integrations.hermes_harness.cli.doctor", return_value=core):
+            sink = io.StringIO()
+            with contextlib.redirect_stdout(sink):
+                self.assertEqual(main(["doctor", "--core-text-config-only", "--json"]), 0)
+            observed = json.loads(sink.getvalue())
+            self.assertEqual(observed["status"], "MISSING")
+            self.assertEqual(observed["core_text_status"], "CONFIG_READY_NOT_LIVE_PROVEN")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["doctor", "--json"]), 2)
+
+        core["core_text_status"] = "CONFIG_MISSING"
+        with mock.patch("integrations.hermes_harness.cli.doctor", return_value=core):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["doctor", "--core-text-config-only"]), 2)
 
     def test_bad_pointer_is_not_covered_by_inline_provider_key(self):
         self._write_role(

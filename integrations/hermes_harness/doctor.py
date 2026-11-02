@@ -17,6 +17,7 @@ from integrations.hermes_models.contract import PROFILE_PRIMARY, PROVIDERS, prov
 from integrations.hermes_models.credentials import CredentialUnavailable, load_credential
 from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
 from integrations.hermes_runtime.errors import RuntimeRefusal
+from integrations.hermes_runtime.egress import native_egress_child_env
 from integrations.hermes_runtime.secrets import load_secrets
 
 SCHEMA = "mastermind.hermes_harness.doctor.v1"
@@ -75,6 +76,22 @@ def doctor(
         path = root / ".config" / "hermes-runtime" / name
         if not _gateway_file_ok(path):
             missing.append(f"credential_file:{name}")
+    role_private = {}
+    model_keys_by_role = {}
+    # Check the actual selected role-private systemd file, never ambient
+    # HTTP(S)_PROXY or an unrelated role/user secrets file.
+    for role in PROFILE_PRIMARY:
+        try:
+            _spec, secrets_path = _native_primary_source(root, role)
+            secrets = load_secrets(secrets_path)
+            role_private[role] = secrets
+            try:
+                model_keys_by_role[role] = load_credential(_spec, secrets.values)
+            except CredentialUnavailable:
+                pass  # The existing primary-key presence gate reports this.
+            native_egress_child_env(role, secrets.values)
+        except (RuntimeRefusal, OSError, ValueError, KeyError):
+            missing.append(f"network_proxy:{role}")
     for name in _ENDPOINTS:
         if not env.get(name, "").strip():
             missing.append(f"endpoint:{name}")
@@ -86,13 +103,58 @@ def doctor(
     if not manager:
         missing.append("grant:ubuntu1_systemd_user_manager")
     missing.extend(_agent_identity_gaps(root, roster_path=roster_path))
+    incumbent_ids = _incumbent_peer_user_ids(roster_path)
+    for role, secrets in role_private.items():
+        if secrets.values.get("HERMES_SLACK_BOT_USER_ID", "") in incumbent_ids:
+            missing.append(f"isolation:incumbent_peer_user_id:{role}")
+    # Each role needs independently revocable credentials, separate Slack
+    # identity, and its own policy-enforced egress proxy. Never log values.
+    for role, secrets in role_private.items():
+        if secrets.dashboard_password == secrets.token:
+            missing.append(f"isolation:gateway_dashboard_alias:{role}")
+    if (len(model_keys_by_role) == len(PROFILE_PRIMARY)
+            and len(set(model_keys_by_role.values())) != len(model_keys_by_role)):
+        missing.append("isolation:shared_model_credential")
+    if len(role_private) == len(PROFILE_PRIMARY):
+        secretary = role_private["mmsecretary"]
+        meta = role_private["mmmeta"]
+        for key, left, right in (
+            ("gateway_token", secretary.token, meta.token),
+            ("dashboard_password", secretary.dashboard_password, meta.dashboard_password),
+            ("slack_bot_token", secretary.values.get("HERMES_SLACK_BOT_TOKEN", ""),
+             meta.values.get("HERMES_SLACK_BOT_TOKEN", "")),
+            ("slack_user_id", secretary.values.get("HERMES_SLACK_BOT_USER_ID", ""),
+             meta.values.get("HERMES_SLACK_BOT_USER_ID", "")),
+            ("egress_proxy", secretary.values.get("HERMES_NATIVE_HTTPS_PROXY", ""),
+             meta.values.get("HERMES_NATIVE_HTTPS_PROXY", "")),
+        ):
+            if left and right and left == right:
+                missing.append(f"isolation:shared_{key}")
     missing.append("id:DOT_BOT_USER_IDS")
     missing = sorted(set(missing))
+    # The core text/Slack role does not require Mac actuation, Cursor,
+    # vision or unarmed Steward/Fabric. Its configuration can qualify
+    # independently, but must never be reported as provider/Slack LIVE.
+    core_ids = {
+        "credential:BYTEPLUS_MODELARK_API_KEY", "credential:ZAI_API_KEY",
+        "grant:pinned_upstream_checkout", "grant:ubuntu1_systemd_user_manager",
+    }
+    core_prefixes = (
+        "credential_file:mm", "network_proxy:mm", "credential:hermes-",
+        "id:hermes-", "config:hermes_agents:", "isolation:",
+    )
+    core_missing = sorted(v for v in missing if v in core_ids or v.startswith(core_prefixes))
     return {
         "schema": SCHEMA,
         "status": "MISSING" if missing else "READY",
         "missing": missing,
         "missing_count": len(missing),
+        "core_text_status": "CONFIG_MISSING" if core_missing else "CONFIG_READY_NOT_LIVE_PROVEN",
+        "core_text_missing": core_missing,
+        "core_text_missing_count": len(core_missing),
+        "native_egress_host_policy_verified": False,
+        "provider_authenticated": False,
+        "slack_roundtrip_verified": False,
         "m2studio_machine_id": M2STUDIO_MACHINE,
         "pinned_sha": PINNED_UPSTREAM_SHA,
         "provider_env_names": sorted({spec.credential_env for spec in PROVIDERS.values()}),
@@ -107,11 +169,30 @@ def format_doctor(report: Mapping[str, object]) -> str:
         f"schema: {report.get('schema')}",
         f"status: {report.get('status')}",
         f"missing_count: {len(rows)}",
+        f"core_text_status: {report.get('core_text_status')}",
+        f"core_text_missing_count: {report.get('core_text_missing_count')}",
         "missing:",
     ]
     for item in rows:
         lines.append(f"- {item}")
     return "\n".join(lines) + "\n"
+
+
+def _incumbent_peer_user_ids(roster_path: Path | None) -> frozenset[str]:
+    """Known live peer identities from the same canonical roster, never values in output."""
+    path = roster_path or (Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return frozenset()
+    if not isinstance(data, dict) or not isinstance(data.get("peers"), list):
+        return frozenset()
+    return frozenset(
+        peer["user_id"] for peer in data["peers"]
+        if isinstance(peer, dict)
+        and isinstance(peer.get("user_id"), str)
+        and peer["user_id"].startswith("U")
+    )
 
 
 def _native_primary_present(home: Path, role: str) -> bool:

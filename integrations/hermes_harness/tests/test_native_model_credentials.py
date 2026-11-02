@@ -34,13 +34,18 @@ class NativeCredentialTests(unittest.TestCase):
         self.home = self.root / "hermes-home"
         self.home.mkdir(mode=0o700)
 
-    def _runtime(self, role="mmsecretary", extras="", dashboard_password="distinct-dashboard-only-fixture-123456"):
+    def _runtime(self, role="mmsecretary", extras="", dashboard_password="distinct-dashboard-only-fixture-123456", include_proxy=True):
         dashboard_line = (
             "" if dashboard_password is None
             else "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + dashboard_password + "\n"
         )
+        egress = (
+            f"HERMES_NATIVE_EGRESS_ROLE={role}\n"
+            f"HERMES_NATIVE_HTTPS_PROXY=http://{'127.0.0.2' if role == 'mmsecretary' else '127.0.0.3'}:{18651 if role == 'mmsecretary' else 18652}\n"
+            if include_proxy else ""
+        )
         self.secret.write_text(
-            "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + dashboard_line + extras,
+            "HERMES_GATEWAY_TOKEN=" + TOKEN + "\n" + dashboard_line + egress + extras,
             encoding="utf-8",
         )
         self.secret.chmod(0o600)
@@ -73,6 +78,10 @@ class NativeCredentialTests(unittest.TestCase):
         self.assertNotIn(TOKEN, native.values())
         self.assertNotIn(FAKE_ZAI, native.values())
         self.assertEqual(native["HERMES_SLACK_BOT_USER_ID"], "UPROJECTBOT001")
+        self.assertEqual(native["HTTPS_PROXY"], "http://127.0.0.2:18651")
+        self.assertNotIn("HTTP_PROXY", native)
+        self.assertNotIn("ALL_PROXY", native)
+        self.assertNotIn("HERMES_NATIVE_HTTPS_PROXY", native)
 
     def test_meta_ceo_key_is_disjoint_from_secretary(self) -> None:
         rt = self._runtime(role="mmmeta", extras=(
@@ -98,6 +107,17 @@ class NativeCredentialTests(unittest.TestCase):
         with self.assertRaises(RuntimeRefusal) as exc:
             rt._model_child_env()
         self.assertEqual(exc.exception.code, "NATIVE_MODEL_CREDENTIAL_UNAVAILABLE")
+
+    def test_missing_role_private_proxy_refuses_even_if_shell_has_proxy(self) -> None:
+        rt = self._runtime(
+            extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n"
+                   "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n",
+            include_proxy=False,
+        )
+        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.2:18651"}):
+            with self.assertRaises(RuntimeRefusal) as exc:
+                rt._model_child_env()
+        self.assertEqual(exc.exception.code, "NATIVE_EGRESS_PROXY_NOT_ENROLLED")
 
     def test_shell_only_key_cannot_bypass_role_private_secret_file(self) -> None:
         # A systemd unit must not depend on the installing operator's shell.

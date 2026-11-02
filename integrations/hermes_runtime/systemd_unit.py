@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .constants import CONFIG_EXIT, PINNED_UPSTREAM_SHA
 from .errors import RuntimeRefusal
+from .egress import ROLE_PROXY_HOST
 from .profile import RuntimeProfile
 
 _UNSAFE = set(" \n\r\t\"'`$")
@@ -49,6 +50,9 @@ def render_user_unit(
             raise RuntimeRefusal("UNSAFE_PATH")
         if label == "python" and not value:
             raise RuntimeRefusal("UNSAFE_PATH")
+    proxy_host = ROLE_PROXY_HOST.get(profile.role)
+    if proxy_host is None:
+        raise RuntimeRefusal("NATIVE_EGRESS_ROLE_REFUSED")
     state = str(profile.state_dir)
     secrets = str(profile.secrets_file)
     if any(ch in secrets for ch in _UNSAFE) or not secrets.startswith("/"):
@@ -83,8 +87,7 @@ ReadWritePaths={state}
 UMask=0077
 RestrictAddressFamilies=AF_UNIX AF_INET
 IPAddressDeny=any
-IPAddressAllow=localhost
-RestrictSUIDSGID=true
+# Backend health and gateway stay at 127.0.0.1. No blanket localhost\n# alias: it would expose the sibling role's 127.0.0.x proxy endpoint.\nIPAddressAllow=127.0.0.1/32\nIPAddressAllow={proxy_host}/32\nRestrictSUIDSGID=true
 LockPersonality=true
 MemoryAccounting=true
 

@@ -64,6 +64,118 @@ empty, inaccessible or unsafe pointers fail closed rather than falling back
 to an inline key. Only the role's selected primary credential reaches its
 native model child; its sibling's provider credential is not forwarded.
 
+## Native HTTPS egress — mandatory, not automatically provisioned
+
+Native BYOK source is no longer permitted to spawn a model child without a
+role-private, canonical localhost HTTPS CONNECT proxy setting. Keep
+`IPAddressDeny=any`, role-specific `IPAddressAllow=127.0.0.1/32` plus\n`IPAddressAllow=127.0.0.2/32` for Secretary or\n`IPAddressAllow=127.0.0.3/32` for Meta-CEO, and
+`RestrictAddressFamilies=AF_UNIX AF_INET` in both units. No direct public
+egress, `IPAddressAllow=any`, arbitrary proxy hostname, embedded proxy
+credential, inherited shell proxy, shared proxy endpoint, or role substitution
+is allowed.
+
+The **existing private 0600 Secretary** file additionally needs these
+operator-provisioned settings (port shown as an example only):
+
+```text
+HERMES_NATIVE_EGRESS_ROLE=mmsecretary
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651
+```
+
+The **separate private 0600 Meta-CEO** file needs its own intended role and
+a different proxy endpoint (example port only):
+
+```text
+HERMES_NATIVE_EGRESS_ROLE=mmmeta
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652
+```
+
+`integrations.hermes_runtime.egress.native_egress_child_env` validates these
+two fields from that role's private secrets, never the interactive shell, and
+passes only `HTTPS_PROXY` plus a fixed localhost `NO_PROXY` to the native
+model child. Empty, external, noncanonical, URL-credentialed, privileged-port,
+wrong-role and unqualified settings refuse before the child starts. ModelArk
+and Z.AI keys remain independently loaded from the previously reviewed
+credential pointers; neither key is forwarded to the proxy by this module.
+
+**Pinned donor source-level proxy contract:** at
+`NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`,
+`agent/process_bootstrap.py::_get_proxy_from_env` selects `HTTPS_PROXY`
+ahead of `HTTP_PROXY` and `ALL_PROXY`. `build_keepalive_http_client`
+passes the selected value to the OpenAI-wire `httpx.Client(proxy=...,
+verify=...)`, and `agent/agent_runtime_helpers.py` creates primary
+OpenAI-compatible model clients through that helper. This confirms the
+**intended source transport** honors the injected proxy, rather than relying
+on ambient shell proxy discovery; it still does not prove the installed
+binary, proxy listener, hostname allowlist, TLS peer or remote inference.
+
+**Critical cross-role isolation:** `IPAddressAllow=localhost` was
+originally broad (`127.0.0.0/8` and `::1/128`) and allowed either role
+to connect to a sibling proxy on a different localhost port. The updated
+unit now permits only **its own** 127.0.0.2/32 or 127.0.0.3/32 proxy
+address, plus 127.0.0.1/32 for the existing native Hermes gateway. The
+proxy must actually bind the selected role IP (not 0.0.0.0 or 127.0.0.1),
+and the host must prove that effective parent/system/user slice rules do
+not add a broader localhost allowance.
+
+systemd notes that cgroup eBPF-based `IPAddressAllow/Deny` can be silently
+ineffective on unsupported kernels, delegation layouts or container
+managers. `systemd --user` unit text, local `/api/health` 200 and
+`systemctl show` values are **not enforcement proof**. Before using either
+provider credential, separately test **from each actual running unit cgroup**:
+own proxy permitted, sibling proxy forbidden, unauthorized 127/8
+destination forbidden, direct public 443 forbidden, and only the intended
+host:443 CONNECT allowed by the operator-owned proxy. Test both
+directions, including negative results, and retain the host-bound receipts.
+Without proven enforcement, STOP production qualification; do not assume
+that different IP aliases by themselves provide isolation.
+
+**The proxy process is not created, installed or certified by this repository.**
+A currently authorized host network owner must separately provide and
+validate an existing compatible role-specific loopback HTTP CONNECT proxy
+that enforces the Secretary's exact commercial ModelArk destination
+`ark.ap-southeast.bytepluses.com:443` and the Meta-CEO's exact Z.AI
+destination `api.z.ai:443`, with TLS validation by the native model
+client. Deny all other destinations, including unrestricted tunneling; never
+use the proxy as a backdoor for Slack, general browsing, Fabric, or a second
+authority plane. It must not be accessible across role boundaries without
+the required host-side policy. Verify the installed Linux systemd cgroup
+actually enforces the network rules and the pinned native HTTP client honors
+the explicit HTTPS proxy. These are real-host canaries, not source-test claims.
+
+`hermesctl doctor` reports missing per-role proxy setup under
+`network_proxy:mmsecretary` / `network_proxy:mmmeta`, refuses shared
+bot/gateway/proxy identity and incumbent Grok Secretary bot-ID reuse as core
+readiness, and returns `core_text_status=CONFIG_READY_NOT_LIVE_PROVEN`
+only when its core configuration prerequisites are satisfied. It continues
+reporting optional Mac computer-use, future Fabric/Steward and Dot-account gaps
+independently; its overall status/exit behavior remains fail-closed.
+
+To qualify **only the two core text-bot configuration prerequisites** without
+requiring unrelated Mac/Fabric/vision features, use:
+
+```sh
+python3 integrations/hermes_harness/hermesctl doctor --core-text-config-only --json
+```
+
+This explicitly scoped command exits zero only for `CONFIG_READY_NOT_LIVE_PROVEN`.
+The JSON still says `status: MISSING` when future/optional capabilities are
+missing; it does not permit Slack send, model inference, Executive admission,
+host deployment, arbitrary traffic or proxy installation. Unscoped
+`hermesctl doctor` keeps the previous conservative full-readiness exit status.
+No doctor, local HTTP 200, proxy URL or selected model constitutes a live
+authenticated inference receipt.
+
+For actual acceptance, obtain authenticated pinned Hermes structured
+one-shot output through `chat -Q --query-file - --format stream-json` inside
+the approved service/network confinement, validate it using
+`integrations.hermes_harness.native_turn_evidence` from the companion
+stacked PR, prove remote TLS/provider usage and blocked destinations,
+then observe an authorized exact-parent thread reply from each distinct
+role bot through the existing Agent Dialogue owner. Keep the incumbent Grok
+Secretary operating until independent review, protected release and rollback
+proof are complete.
+
 MiniMax, Cursor pool and Steward MCP credentials and endpoints remain separate
 future qualification routes. Their optional pointer names include
 `MINIMAX_TOKEN_PLAN_KEY_FILE`, `CURSOR_API_KEY_FILE` and
@@ -194,7 +306,7 @@ from `--fetch`.
 - `hermes-runtime-mmsecretary.service` and `hermes-runtime-mmmeta.service` in the user unit directory
 - a `default.target.wants` symlink for each
 - loopback ports `127.0.0.1:8765` (Secretary) and `127.0.0.1:8865` (Meta-CEO)
-- `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, `IPAddressAllow=localhost`
+- `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, only\n  role-specific host-prefix `IPAddressAllow` rules (no blanket `localhost` 127/8)
 - `EnvironmentFile=` pointing at that unit's 0600 secrets file, and no secret bytes in the unit
 - provider overlay `provider-overlay.yaml` and `vision-overlay.yaml` under the role's `hermes-home`
 

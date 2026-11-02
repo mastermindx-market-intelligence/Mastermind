@@ -396,6 +396,8 @@ _CLEAN_MISSING = [
     "id:DOT_BOT_USER_IDS",
     "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
     "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
+    "network_proxy:mmmeta",
+    "network_proxy:mmsecretary",
 ]
 
 

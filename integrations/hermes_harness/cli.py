@@ -58,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
 
     doctor_p = sub.add_parser("doctor")
     doctor_p.add_argument("--json", action="store_true")
+    doctor_p.add_argument(
+        "--core-text-config-only", action="store_true",
+        help="Exit 0 only when core BYOK role setup is source-configured; NOT a provider, egress or Slack live canary",
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -92,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(report, sort_keys=True))
             else:
                 print(format_doctor(report), end="")
+            if args.core_text_config_only:
+                # Deliberately permits staged core-only install planning without
+                # requiring future Mac/Fabric grants; *not* serving authority.
+                return 0 if report["core_text_status"] == "CONFIG_READY_NOT_LIVE_PROVEN" else 2
             return 0 if report["status"] == "READY" else 2
         else:
             raise RuntimeRefusal("COMMAND_INVALID")
