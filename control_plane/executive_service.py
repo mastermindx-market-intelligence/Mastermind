@@ -144,6 +144,10 @@ _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _BACKUP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.sqlite3$")
 _PROOF_WORKSPACE_RE = re.compile(r"^proof-([0-9a-f]{32})$")
 _COO_ROOT_SCAN_LIMIT = 64
+# A cycle outcome that proves the root could not act on its own work. The
+# serialized worker stays free after such an outcome, so the root that still
+# holds an unresolved dispatch effect may take its own reconciliation turn.
+_COO_NO_PROGRESS_ACTIONS = frozenset({"NO_ACTION", "NO_NEW_WORK", "BLOCKED"})
 _COO_ACTIVE_ATTEMPT_STATUSES = frozenset(
     {
         AttemptStatus.CLAIMED,
@@ -7905,17 +7909,25 @@ class ExecutiveControlService:
             if not already_owned:
                 self._coo_action_tasks.discard(task)
 
-    def _next_bound_coo_root(
-        self, *, prestart_refusals: dict[str, Exception] | None = None
-    ) -> str | None:
-        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+    def _read_pending_coo_effect(
+        self, root_job_id: str
+    ) -> tuple[dict[str, Any] | None, Exception | None]:
+        """Read one root's unresolved dispatch effect without mutating it.
 
-        Only a QUEUED root with no child or Attempt history may be deferred.
-        Existing work and ambiguous effects retain their reconciliation path.
-        No persistent exclusion, new queue or retry state is introduced.
+        A root whose effect state cannot be read is reported with its error so
+        the caller can fail closed for that root alone instead of guessing.
         """
-        if self.config.coo_foreground_only:
-            return None
+        runtime = self._require_runtime()
+        try:
+            return (
+                runtime.jobs.pending_cycle_dispatch_effect_unknown(root_job_id),
+                None,
+            )
+        except StateConflict as exc:
+            return None, exc
+
+    def _bound_coo_root_candidates(self) -> list[str]:
+        """List the bounded, in-scope COO root candidates in priority order."""
         runtime = self._require_runtime()
         with runtime.store.read() as connection:
             rows = connection.execute(
@@ -7931,8 +7943,64 @@ class ExecutiveControlService:
             ).fetchall()
         if len(rows) > _COO_ROOT_SCAN_LIMIT:
             raise ServiceError("bounded COO root scan limit was exceeded")
-        for row in rows:
-            root = runtime.jobs.get_job(str(row["job_id"]))
+        return [str(row["job_id"]) for row in rows]
+
+    def _first_unresolved_effect_root(self) -> str | None:
+        """Return the first bound root that still holds an unresolved effect.
+
+        That root keeps its own lawful reconciliation carrier. The lookup is
+        read-only and never clears, retries or transfers the effect.
+        """
+        runtime = self._require_runtime()
+        for root_job_id in self._bound_coo_root_candidates():
+            root = runtime.jobs.get_job(root_job_id)
+            if root is None:
+                continue
+            # Terminal history survives source/profile rotation. Validate its
+            # canonical block before asking whether it could dispatch now.
+            if runtime.jobs.validated_cycle_block(root.job_id) is not None:
+                continue
+            if not self._is_bound_coo_root(root):
+                continue
+            pending_effect, effect_error = self._read_pending_coo_effect(root.job_id)
+            if effect_error is not None or pending_effect is not None:
+                return root.job_id
+        return None
+
+    def _deferred_effect_turn_allowed(self, outcome_action: str) -> bool:
+        """True when the root holding an unresolved effect may take its turn.
+
+        The turn is allowed only when the selected root proved that it cannot
+        act, and only while the serialized worker is free. A live dispatch
+        stays with its own root, so the deferred root is never reconciled
+        behind a running worker.
+        """
+        if outcome_action not in _COO_NO_PROGRESS_ACTIONS:
+            return False
+        return not any(
+            not task.done() for task in self._dispatch_tasks.values()
+        )
+
+    def _next_bound_coo_root(
+        self, *, prestart_refusals: dict[str, Exception] | None = None
+    ) -> str | None:
+        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+
+        Only a QUEUED root with no child or Attempt history may be deferred.
+        Existing work and ambiguous effects retain their reconciliation path.
+        A root that still carries an unresolved exact dispatch effect keeps its
+        own reconciliation carrier, so it is skipped while any other bound
+        root is free of that effect. Its own turn is restored by the tick when
+        the selected root proves that it cannot act.
+        No persistent exclusion, new queue or retry state is introduced.
+        """
+        if self.config.coo_foreground_only:
+            return None
+        runtime = self._require_runtime()
+        deferred_root_id: str | None = None
+        first_eligible_root_id: str | None = None
+        for root_job_id in self._bound_coo_root_candidates():
+            root = runtime.jobs.get_job(root_job_id)
             if root is None:
                 continue
             # Terminal history survives source/profile rotation. Validate its
@@ -7960,11 +8028,39 @@ class ExecutiveControlService:
                         if not self._maintenance_workspace_pending(root):
                             self._require_initial_coo_workspace(root)
                     except (OSError, ServiceError, StateConflict) as exc:
-                        if prestart_refusals is not None:
+                        if (
+                            prestart_refusals is not None
+                            and first_eligible_root_id is None
+                        ):
                             prestart_refusals[root.job_id] = exc
                         continue
-            return root.job_id
-        return None
+            if first_eligible_root_id is None:
+                first_eligible_root_id = root.job_id
+            pending_effect, effect_error = self._read_pending_coo_effect(root.job_id)
+            if effect_error is not None:
+                # Fail closed for this root alone. An unreadable effect state
+                # is never treated as "no effect", and it never aborts another
+                # root's selection. The refusal receipt keeps it visible.
+                try:
+                    self._record_coo_tick_refusal(root.job_id, effect_error)
+                except Exception:
+                    # The unreadable state stays the reason truth. A
+                    # receipt-write defect must not select a root anyway.
+                    pass
+                continue
+            if pending_effect is None:
+                # This root carries no unresolved effect of its own, so it may
+                # act without waiting for another root's reconciliation.
+                return root.job_id
+            # This root stays on its own reconciliation carrier. Its unknown
+            # effect does not fence an unrelated root that is free of it.
+            if deferred_root_id is None:
+                deferred_root_id = root.job_id
+        # No root is free of an unresolved effect. The deferred root keeps its
+        # lawful same-root reconciliation path instead of being dropped.
+        if deferred_root_id is not None:
+            return deferred_root_id
+        return first_eligible_root_id
 
     def _live_bound_coo_root_id(self) -> str | None:
         """Return the one bound COO root owning every live service finisher."""
@@ -8080,7 +8176,20 @@ class ExecutiveControlService:
                 # root that has not yet been selected for any action.
                 root_id = selected_root_id
                 if root_id is not None:
-                    await self._run_coo_cycle(root_id)
+                    outcome = await self._run_coo_cycle(root_id)
+                    # A root that proved it cannot act must not starve the root
+                    # that still holds an unresolved dispatch effect. When the
+                    # serialized worker is free, that root takes its own lawful
+                    # reconciliation turn now. No effect is cleared, retried or
+                    # transferred, and the tick still starts no second dispatch.
+                    if self._deferred_effect_turn_allowed(outcome.action):
+                        deferred_root_id = self._first_unresolved_effect_root()
+                        if (
+                            deferred_root_id is not None
+                            and deferred_root_id != root_id
+                        ):
+                            root_id = deferred_root_id
+                            await self._run_coo_cycle(root_id)
                 elif prestart_refusals:
                     self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
                         timespec="seconds"
