@@ -26,17 +26,23 @@ BASES = {
     "pick.py": NATIVE / "quota_continuity/candidate/pick.py",
     "sub.sh": NATIVE / "grok47/overlay/sub.sh",
     "mm_codex_exec.sh": NATIVE / "quota_continuity/candidate/mm_codex_exec.sh",
+    "host_pick.py": NATIVE / "quota_continuity/source/host_pick.py",
+    "placement_view.py": NATIVE / "quota_continuity/source/placement_view.py",
 }
 PATCH = NATIVE / "patches/minimax_m31_flash_generation24.patch"
 PREIMAGE_SHA256 = {
     "pick.py": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
     "sub.sh": "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
     "mm_codex_exec.sh": "0c31ceaa0467e4eb82f5220adb59328677e28e48a9ea7786a09bb0d78f1919f4",
+    "host_pick.py": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
+    "placement_view.py": "315519caa4644f9b6a431153556c5ce2080f921ce9ec4b0ddbff172517e3feb3",
 }
 CANDIDATE_SHA256 = {
-    "pick.py": "dc1e22321e3abafd4c8a9de6898ee3f5d891f36bdc86e9fdcd3dbbd3d6344fb7",
+    "pick.py": "e5e962cd306bfc27e53eb1db50b3a908c8c7d72323dbfb3db5eeaafa2ef47ede",
     "sub.sh": "45ef4e9f5dda022ea60fd8d2b3311a2f983ea6659e382b96412df92f089d43ce",
     "mm_codex_exec.sh": "b77b36c5aab464ed31988ac90ce09c90f74794a12f8344311a92f2d4de3a94cb",
+    "host_pick.py": "8e76d4276e4b77b55ea6845de2f0e8d44509cc2e799a1f5818516c09cb161682",
+    "placement_view.py": "51b46fb6160b35fc06b6e18a2e8d1e5a68da043f57882be74b64aef4c9373b88",
 }
 
 
