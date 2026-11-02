@@ -608,6 +608,14 @@ pub async fn callback(app: AppHandle, raw: String) {
     }
 }
 
+// Auth0 can report a revoked/expired/rotated grant on any of these exact
+// statuses; never keep a permanent ambiguous Keychain marker for a definitive
+// invalid_grant. Other errors or malformed responses remain ambiguous.
+fn terminal_invalid_grant(status: u16, body: &Value) -> bool {
+    matches!(status, 400 | 401 | 403) &&
+    body.get("error").and_then(Value::as_str) == Some("invalid_grant")
+}
+
 /// Resume an existing, per-resource rotating Auth0 grant. No credential is
 /// exposed through a Tauri command. The per-resource Tokio lock prevents
 /// concurrent replay, including timer expiry racing with a workspace read.
@@ -645,11 +653,26 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
             ("client_id", client.as_str()),
             ("refresh_token", old.as_str()),
         ])
-        .send().await.map_err(|_| "REFRESH_OUTCOME_UNCONFIRMED")?;
+        .send().await;
+    let response = match response {
+        Ok(response) => response,
+        Err(error) if error.is_connect() => {
+            // reqwest classified the failure as a pre-transmission connection
+            // error: Auth0 never received this grant. Permit an online retry,
+            // but only after deleting our *exact* Keychain pending item.
+            let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+            let inner = state.lock()?;
+            if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+            crate::native_refresh::rollback_untransmitted(&client, resource.audience(), &old)?;
+            return Err("NETWORK_UNAVAILABLE".into());
+        }
+        Err(_) => return Err("REFRESH_OUTCOME_UNCONFIRMED".into()),
+    };
     if !response.status().is_success() {
-        let invalid_grant = if response.status().as_u16() == 400 {
+        let status = response.status().as_u16();
+        let invalid_grant = if matches!(status, 400 | 401 | 403) {
             read_json_body(response, 32768).await.ok().is_some_and(|body|
-                body.get("error").and_then(Value::as_str) == Some("invalid_grant"))
+                terminal_invalid_grant(status, &body))
         } else { false };
         if invalid_grant {
             let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
@@ -1994,6 +2017,23 @@ mod retained_activity_selection_tests {
         assert!(expires.duration_since(at) < Duration::from_secs(45));
         assert_eq!(native_refresh_deadline(now + Duration::from_secs(3), now),
             now + Duration::from_secs(10));
+    }
+
+    #[test]
+    fn auth0_revocation_terminal_status_is_exactly_scoped() {
+        let invalid = serde_json::json!({"error": "invalid_grant"});
+        for status in [400, 401, 403] {
+            assert!(terminal_invalid_grant(status, &invalid));
+        }
+        for status in [200, 404, 408, 409, 429, 500, 502, 503] {
+            assert!(!terminal_invalid_grant(status, &invalid));
+        }
+        for error in ["temporarily_unavailable", "invalid_client", "login_required"] {
+            assert!(!terminal_invalid_grant(403, &serde_json::json!({"error": error})));
+        }
+        assert!(!terminal_invalid_grant(403, &serde_json::json!({})));
+        assert!(!terminal_invalid_grant(403, &serde_json::json!({"error": null})));
+        assert!(!terminal_invalid_grant(403, &serde_json::json!(["invalid_grant"])));
     }
 
     #[test]

@@ -27,6 +27,14 @@ pub(crate) fn valid_successor(previous: &str, next: &str) -> bool {
     valid_refresh(next) && next != previous
 }
 #[cfg(target_os = "macos")]
+fn rotation_marker(previous: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"mastermind.os.rotation.v1\0");
+    hasher.update(previous.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+#[cfg(target_os = "macos")]
 pub(crate) fn load(client_id: &str, audience: &str) -> Result<Option<String>, &'static str> {
     use security_framework::passwords::get_generic_password;
     // A pending refresh may have reached Auth0 before a crash or network loss.
@@ -61,10 +69,7 @@ pub(crate) fn begin_rotation(client_id: &str, audience: &str, old: &str) -> Resu
     // add-only operation: a duplicate is an existing owner, not a retry grant.
     let original = load(client_id, audience)?.ok_or("AUTHENTICATION_REQUIRED")?;
     if original != old { return Err("REFRESH_TOKEN_CHANGED"); }
-    let mut h = Sha256::new();
-    h.update(b"mastermind.os.rotation.v1\0");
-    h.update(old.as_bytes());
-    let marker = format!("{:x}", h.finalize());
+    let marker = rotation_marker(old);
     let keychain = SecKeychain::default().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
     keychain.add_generic_password(
         SERVICE,
@@ -81,14 +86,61 @@ pub(crate) fn begin_rotation(client_id: &str, audience: &str, old: &str) -> Resu
     }
     Ok(())
 }
+/// Only a definitively pre-transmission connect error may release the marker.
+/// A timeout or a lost response may already have rotated the token at Auth0.
+#[cfg(target_os = "macos")]
+pub(crate) fn rollback_untransmitted(client_id: &str, audience: &str, old: &str) -> Result<(), &'static str> {
+    use security_framework::os::macos::keychain::SecKeychain;
+    use security_framework::passwords::get_generic_password;
+    let keychain = SecKeychain::default().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+    let (marker, item) = keychain.find_generic_password(
+        SERVICE, &format!("{}:pending", account(client_id, audience)),
+    ).map_err(|_| "REFRESH_OUTCOME_UNCONFIRMED")?;
+    if marker.as_ref() != rotation_marker(old).as_bytes() {
+        return Err("REFRESH_OUTCOME_UNCONFIRMED");
+    }
+    let current = get_generic_password(SERVICE, &account(client_id, audience))
+        .map_err(|_| "REFRESH_OUTCOME_UNCONFIRMED")?;
+    if current.as_slice() != old.as_bytes() {
+        return Err("REFRESH_TOKEN_CHANGED");
+    }
+    drop(marker);
+    // This item reference binds deletion to the original Keychain item, not
+    // a new pending item that another process could add after a sign-out.
+    item.delete();
+    if pending_exists(client_id, audience)? { return Err("KEYCHAIN_DELETE_FAILED"); }
+    Ok(())
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn rollback_untransmitted(_: &str, _: &str, _: &str) -> Result<(), &'static str> {
+    Err("KEYCHAIN_UNSUPPORTED")
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn finish_rotation(client_id: &str, audience: &str, previous: &str, next: &str) -> Result<(), &'static str> {
-    if !pending_exists(client_id, audience)? { return Err("REFRESH_OUTCOME_UNCONFIRMED"); }
+    use security_framework::os::macos::keychain::SecKeychain;
     if !valid_successor(previous, next) { return Err("REFRESH_TOKEN_NOT_ROTATED"); }
-    save(client_id, audience, next)?;
-    use security_framework::passwords::delete_generic_password;
-    delete_generic_password(SERVICE, &format!("{}:pending", account(client_id, audience)))
-        .map_err(|_| "KEYCHAIN_DELETE_FAILED")
+    let keychain = SecKeychain::default().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+    let (marker, pending_item) = keychain.find_generic_password(
+        SERVICE, &format!("{}:pending", account(client_id, audience)),
+    ).map_err(|_| "REFRESH_OUTCOME_UNCONFIRMED")?;
+    if marker.as_ref() != rotation_marker(previous).as_bytes() {
+        return Err("REFRESH_OUTCOME_UNCONFIRMED");
+    }
+    // Never re-create an item removed by a concurrent sign-out or replace a
+    // newly signed-in user's credential. Unlike set_generic_password(), this
+    // mutates ONLY the exact Keychain item found before the update.
+    let (old_value, mut credential_item) = keychain.find_generic_password(
+        SERVICE, &account(client_id, audience),
+    ).map_err(|_| "REFRESH_TOKEN_CHANGED")?;
+    if old_value.as_ref() != previous.as_bytes() { return Err("REFRESH_TOKEN_CHANGED"); }
+    drop(old_value);
+    credential_item.set_password(next.as_bytes()).map_err(|_| "KEYCHAIN_WRITE_FAILED")?;
+    drop(marker);
+    pending_item.delete();
+    // A failed or concurrent replacement of the pending item remains blocked.
+    if pending_exists(client_id, audience)? { return Err("KEYCHAIN_DELETE_FAILED"); }
+    Ok(())
 }
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn begin_rotation(_: &str, _: &str, _: &str) -> Result<(), &'static str> {
@@ -214,6 +266,27 @@ mod tests {
         assert_eq!(load(&client, &audience).expect("rotated read"), Some(successor.to_owned()));
         delete(&client, &audience).expect("teardown");
         assert_eq!(load(&client, &audience).expect("absence"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "synthetic macOS Keychain preconnect rollback only on an unlocked test host"]
+    fn native_keychain_definite_preconnect_failure_preserves_grant_canary() {
+        let client = format!("mmos-synthetic-offline-reopen-{}", std::process::id());
+        let audience = format!("https://fixture.invalid/preconnect/{}", std::process::id());
+        let old = "synthetic-preconnect-retry-grant-not-a-credential";
+        let successor = "synthetic-preconnect-successor-not-a-credential";
+        struct Cleanup(String, String);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = super::delete(&self.0, &self.1); } }
+        let _cleanup = Cleanup(client.clone(), audience.clone());
+        save(&client, &audience, old).expect("seed");
+        begin_rotation(&client, &audience, old).expect("first claim");
+        assert_eq!(load(&client, &audience).unwrap_err(), "REFRESH_OUTCOME_UNCONFIRMED");
+        rollback_untransmitted(&client, &audience, old).expect("proven preconnect rollback");
+        assert_eq!(load(&client, &audience).expect("restored"), Some(old.to_owned()));
+        begin_rotation(&client, &audience, old).expect("online restart claim");
+        finish_rotation(&client, &audience, old, successor).expect("rotate on recovered network");
+        assert_eq!(load(&client, &audience).expect("successor"), Some(successor.to_owned()));
     }
 
     #[test]
