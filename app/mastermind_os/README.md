@@ -96,3 +96,31 @@ installation, registration, or release is performed by these checks.
 Approved design references remain #702's workspace and #704's consumer freeze.
 The header uses the existing facts/buttons and the content uses existing cards,
 state labels and typography; no additional design system was introduced.
+
+
+## Native Keychain refresh-token persistence candidate (not installed)
+
+The macOS Tauri native client has a separate opt-in Auth0 refresh-token
+candidate, compiled only with `MM_NATIVE_REFRESH_ENABLED=1` **after**
+the existing native public Auth0 client and the Workspace acquisition/content
+APIs have been verified to permit `offline_access`, rotating refresh tokens,
+and the intended expiration/revocation policy. With the option absent, the
+protected native behavior is unchanged: in-memory access tokens only.
+
+In the candidate, the native credential owner stores individual rotating
+refresh tokens by client/audience in macOS Keychain; access tokens are never
+stored in React or Keychain. Native reads and startup restore per-resource
+credentials without requiring the login popup after normal application restart.
+Only the acquisition and content grants participate. Executive SEND authority
+does not acquire offline renewal by default. The owner serializes refreshes
+per resource and records a Keychain pending marker before a rotating exchange;
+a crash or unknown response refuses replay and requires explicit sign-in.
+Sign-out invalidates the generation and deletes both credentials and markers,
+returning an error if deletion could not be confirmed.
+
+**Limitations:** This is source code pending native macOS build/test, independent
+security review, configured tenant/client readback, signed installed-app restart
+and Keychain access-control acceptance. Keychain locked/refused, token revocation,
+absolute/inactivity expiration, ambiguous token rotation, or damaged credentials
+can still require interactive sign-in. Never represent the candidate as a
+permanent or irrevocable Auth0 login.
