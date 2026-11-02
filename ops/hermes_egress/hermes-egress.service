@@ -3,7 +3,10 @@
 # 127/8 loopback listeners, not a Hermes bot or model-serving process.
 [Unit]
 Description=Mastermind Hermes role-isolated vendor CONNECT proxy
-After=network-online.target
+# Stop an incompatible stock proxy before starting this fixed-vendor proxy.
+# Root operator admission and persistent masking are specified in README.md.
+After=network-online.target squid.service
+Conflicts=squid.service
 Wants=network-online.target
 
 [Service]

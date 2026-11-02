@@ -14,6 +14,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 CONF = ROOT / "ops" / "hermes_egress" / "squid.conf"
 UNIT = ROOT / "ops" / "hermes_egress" / "hermes-egress.service"
+RUNBOOK = ROOT / "ops" / "hermes_egress" / "README.md"
 
 
 class FixedRoleProxyPolicy(unittest.TestCase):
@@ -50,13 +51,61 @@ class FixedRoleProxyPolicy(unittest.TestCase):
         ]
         self.assertEqual(self.rules, expected)
         self.assertEqual(self.active.count("acl tls_only port 443"), 1)
-        self.assertEqual(self.active.count("acl secretary_vendor dstdomain ark.ap-southeast.bytepluses.com"), 1)
-        self.assertEqual(self.active.count("acl meta_vendor dstdomain api.z.ai"), 1)
+        self.assertEqual(self.active.count("acl secretary_vendor dstdomain -n ark.ap-southeast.bytepluses.com"), 1)
+        self.assertEqual(self.active.count("acl meta_vendor dstdomain -n api.z.ai"), 1)
         self.assertEqual(self.active.count("acl secretary_socket myportname hermes_secretary"), 1)
         self.assertEqual(self.active.count("acl meta_socket myportname hermes_meta"), 1)
         self.assertFalse(any(x.startswith("http_access allow all") for x in self.active))
         self.assertFalse(any("dstdomain ." in x for x in self.active))
         self.assertFalse(any("allow localhost" in x for x in self.active))
+
+    def test_vendor_acls_never_fall_back_to_reverse_dns(self):
+        # An IP-literal CONNECT must not become a vendor hostname through
+        # attacker-controlled PTR records. Every dstdomain ACL needs -n.
+        vendor_acls = [line.split() for line in self.active
+                       if line.startswith("acl ") and " dstdomain " in line]
+        self.assertEqual(vendor_acls, [
+            ["acl", "secretary_vendor", "dstdomain", "-n", "ark.ap-southeast.bytepluses.com"],
+            ["acl", "meta_vendor", "dstdomain", "-n", "api.z.ai"],
+        ])
+
+    def test_stock_proxy_is_a_conflicting_ordered_unit(self):
+        # Conflicts without ordering need not stop the stock proxy before
+        # starting this one; both the conflict and After dependency matter.
+        sections = {}
+        section = None
+        for raw in self.unit.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+            elif "=" in line:
+                key, value = line.split("=", 1)
+                sections.setdefault(section, {}).setdefault(key, []).append(value)
+        unit = sections["Unit"]
+        self.assertEqual(unit.get("Conflicts"), ["squid.service"])
+        self.assertEqual(unit.get("After"), ["network-online.target squid.service"])
+        self.assertNotIn("squid.service", " ".join(unit.get("Wants", [])))
+        self.assertNotIn("squid.service", " ".join(unit.get("Requires", [])))
+
+    def test_operator_stops_and_masks_stock_before_custom_activation(self):
+        runbook = RUNBOOK.read_text(encoding="utf-8")
+        blocks = re.findall(r"```sh\n(.*?)```", runbook, re.DOTALL)
+        activation = [block for block in blocks
+                      if "sudo systemctl enable --now hermes-egress.service" in block]
+        self.assertEqual(len(activation), 1)
+        commands = [line.strip() for line in activation[0].splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")]
+        stop = "sudo systemctl disable --now squid.service && sudo systemctl mask squid.service"
+        self.assertIn("set -eu", commands)
+        self.assertIn(stop, commands)
+        self.assertLess(commands.index(stop),
+                        commands.index("sudo systemctl enable --now hermes-egress.service"))
+        self.assertIn("127.0.0.1:3128", runbook)
+        self.assertIn("any other non-gateway loopback listener", runbook)
+        self.assertIn("PTR record", runbook)
+        self.assertIn("do not stop it without its owner's authorization", runbook)
 
     def test_internal_destinations_rejected_before_either_allow(self):
         forbidden = next(x for x in self.active if x.startswith("acl forbidden_dst dst "))

@@ -15,8 +15,10 @@ side before enabling any real bot.
 | `hermes-runtime-mmmeta.service` | `127.0.0.3:18652` | `api.z.ai:443` |
 
 The Squid config defines two `http_port` listeners in one process, gates
-access by `myportname`, exact `dstdomain` host (without a leading dot),
-method CONNECT and destination port 443. It denies non-CONNECT, all other
+access by `myportname`, exact `dstdomain -n` host (without a leading dot),
+method CONNECT and destination port 443. The `-n` flag prevents an IP-literal
+CONNECT target from matching a vendor hostname through a reverse-DNS/PTR
+lookup. An attacker-controlled PTR record is not a vendor identity. It denies non-CONNECT, all other
 ports, private/loopback destinations and every unmatched request. There
 are **no generic allow-lists, wildcard domains, open forward HTTP
 requests, TLS interception, CA injection or bearer token handling** in
@@ -34,8 +36,18 @@ proxy sockets.
 The network and release owner must first reconcile all of these:
 approved GitHub exact-head checks and independent review on #1917,
 #1952 and #1961, plus this host proxy config; no unapproved duplicate
-proxy process; Ubuntu1's actual systemd user-unit cgroup/eBPF support,
-and all parent slice `IPAddressAllow` policies.
+proxy process; independently verified cgroup/eBPF enforcement on the actual
+host and all parent slice `IPAddressAllow` policies. The Ubuntu1 user manager
+was observed not to enforce its IP firewall; a root-managed system service
+running the role unprivileged needs separate qualification (see #1966).
+Do not activate either model on the strength of unit text or parser success.
+
+Ubuntu package installation can start the stock `squid.service`, whose
+localhost proxy can bypass the intended vendor restriction. Inventory its
+users and ownership first: **do not stop it without its owner's authorization**.
+If another product depends on it, hold this host cutover until the network
+owner supplies a separate, verified boundary. The commands below apply only
+to the authorized dedicated Hermes host, not to an arbitrary shared proxy.
 
 After authorization, the *intended* host operator sequence—not an instruction
 to execute from this source review—is:
@@ -43,6 +55,9 @@ to execute from this source review—is:
 ```sh
 # Work from the reviewed, released checkout on Ubuntu1.
 # Requires sudo/admin and has production host effects; do NOT run until approved.
+set -eu
+# Reconcile any existing stock-proxy consumers before the authorized cutover.
+sudo systemctl disable --now squid.service && sudo systemctl mask squid.service
 sudo install -m 0644 ops/hermes_egress/squid.conf /etc/squid/hermes-byok.conf
 sudo install -m 0644 ops/hermes_egress/hermes-egress.service /etc/systemd/system/hermes-egress.service
 sudo squid -k parse -f /etc/squid/hermes-byok.conf
@@ -58,6 +73,15 @@ unrelated proxy or expose port 3128/other public interfaces. If the host
 has an existing company-approved proxy that can enforce the identical
 contract, reconcile it first instead of blindly adding this unit.
 
+The custom unit also declares `Conflicts=squid.service` and orders itself
+`After=squid.service`: starting the custom unit cannot legitimately leave
+the conflicting stock unit running. The persistent mask protects against
+subsequent distro-service activation. Neither declaration proves that port
+3128 (or another arbitrary proxy) is absent: inspect actual listening sockets,
+process ownership and config, and run the negative probes below after
+installation and on any relevant service/package change. Never unmask the
+stock proxy while relying on Hermes' shared 127.0.0.1 gateway allowance.
+
 ## Actual acceptance falsifiers
 
 The operator must collect timestamps, unit/cgroup IDs and destination
@@ -72,7 +96,9 @@ Ubuntu shell:
 2. A CONNECT to the **other role's** allowed vendor/port through the
    own proxy must be forbidden; all non-CONNECT methods, unwanted
    domains, subdomains, IP literals, private/link-local destinations,
-   and alternate ports must be denied.
+   and alternate ports must be denied. The IP-literal negative case must
+   include a controlled PTR record naming an allowed vendor; an ordinary
+   IP address with no matching PTR does not exercise the former bypass.
 3. Trying the **sibling proxy socket itself** from within the role's
    cgroup must be denied. Check the other proxy really is listening
    first, or a connection-refused result may be a false positive.
@@ -85,6 +111,13 @@ Ubuntu shell:
    configuration or wildcard listener. Verify logs disclose only
    CONNECT host/port/time, never tokens. Preserve ability to disable
    this unit and return both role services to blocked state.
+6. From **each actual role cgroup**, a CONNECT through `127.0.0.1:3128`
+   and through **any other non-gateway loopback listener** must fail to
+   establish an external tunnel. Confirm the stock unit is stopped and
+   masked, inventory all listeners, and verify their ownership and protocol.
+   A permitted 127.0.0.1/32 address permits every port on that address; the
+   absence of a broad forwarding service is a mandatory host condition,
+   not something this address filter or a successful vendor call proves.
 
 **Source tests are not those receipts.** CI runs static ACL tests plus
 the distro Squid parser; it never binds sockets or sends network requests.
@@ -100,10 +133,16 @@ the two confined bot units **unable to reach vendor models** while
 preserving their state/credentials:
 `sudo systemctl stop hermes-egress.service`.
 Do not replace this with an unrestricted network exception or share keys.
+Keep the stock proxy masked during fail-closed rollback; restoring a shared
+stock service requires a separate owner-approved plan with both Hermes
+roles stopped and their network exposure reconciled.
 Any model call whose reply is missing remains effect-unknown until its
 original operation is reconciled; do not replay it just because a proxy
 or service was restarted.
 
-Sources: https://www.squid-cache.org/Doc/config/http_access/ and
+Sources: https://www.squid-cache.org/Doc/config/acl/ ;
+https://www.squid-cache.org/Doc/config/http_access/ and
 https://www.squid-cache.org/Doc/config/http_port/ ; systemd
 https://www.freedesktop.org/software/systemd/man/257/systemd.resource-control.html .
+
+Unit conflict/ordering: https://www.freedesktop.org/software/systemd/man/257/systemd.unit.html .
