@@ -7,6 +7,10 @@ description: Use when an attended ChatGPT Web or Codex session needs bounded ext
 
 Use the connected **Mastermind Subagent Fabric** tools for independently checkable leaf work. Keep coordinator judgment and acceptance with the parent. Native Codex forks are not external Fabric workers and can inherit the parent model. Do not substitute native Sol labor, create another orchestrator, or rebuild routing, queues, credentials or run state.
 
+## Independent PR review: source-linked session route
+
+For an independent PR/source review, read `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` at the verified protected Mastermind revision before commissioning. Check exact PR head and the active review owner. Only an independently admitted Fabric reviewer may receive a new run; a separately authorized Slack Dot can provide manual technical review when genuinely eligible, but never as a workaround for a safety/permission denial, `retry_allowed=false` or `EFFECT_UNKNOWN`. Neither a Fabric result nor a Slack Dot verdict is a submitted non-author GitHub review. Installation of this plugin/skill and live reviewer START still need separate proof.
+
 ## Choose an admitted path
 
 Load the current protected Mastermind procedures once at unfamiliar mission entry; reuse the compatible pin. Use an actually armed/admitted Executive route when appropriate. A read-only Executive connection or QUEUED intent is not dispatch. An existing Executive operation never becomes a new manual request.

@@ -7,6 +7,13 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # R2 AEAD source candidate: the existing Control UID remains fixed at this
+    # single exact site. Independent source acceptance remains a release gate;
+    # these static test pins do not establish it or grant a new identity.
+    "ops/executive_os/control_aead_profile.py": {
+        "sha256": "08595b2ecf5b4d5841a85532062e01cd560ae1afe4af3adfe4c7e6eaf22eb2b0",
+        "sites": ((277, 124, 127, "int", "450"),),
+    },
     # Existing ten-minute telemetry age, not a UID. Full reviewed source and
     # exact token only; drift exposes the source to ordinary D8 again.
     "research/fabric_bailian_host_eligibility_20261015/candidate/glm_host_account_readiness.py": {
@@ -281,11 +288,12 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
-# Installed-preparation continuation 027be0c0 / source-risk review b29273a0:
+# Installed-preparation continuation 027be0c0 / source-risk review b29273a0;
+# Macro-epoch composition f48d7421 / source-risk review bd9bba4b:
 # same three complete runtime tokens and unchanged original top-level ASTs;
 # only the reviewed digest and shifted lines change. No new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '1a7fed81a15bbebcd689b954b2cce1827de5afc2c90683281d32a6c77e9e7adc',
+    "sha256": 'f53e9401d28f1053d67a59d375f7380b86271f87278080f7dd972f3d8ff6f7f9',
     "sites": ((104, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1825, 46, 49, 'int', '400'), (1825, 66, 69, 'int', '500')),
 }
 
@@ -432,12 +440,15 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': 'd7fcc
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
+# The bounded admission probe catches TimeoutExpired and returns a failed
+# read. That handler is six lines above the later sites, so those line
+# numbers moved. The same four literals stay exact whole tokens.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'dbd0462bce4d33c049e18673638c0fff60f6525b5bf3611527bc5cb029b790a6',
+    'sha256': 'deea6a99f70c0583ffeec82d3b8ef3e80ddcedc9742e4c4e2458abb07e89bbc2',
     'sites': ((335, 24, 27, 'int', '501'),
-              (6551, 35, 37, 'int', '80'),
-              (6552, 50, 55, 'int', '0o755'),
-              (7089, 41, 46, 'int', '0o644')),
+              (6557, 35, 37, 'int', '80'),
+              (6558, 50, 55, 'int', '0o755'),
+              (7095, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
