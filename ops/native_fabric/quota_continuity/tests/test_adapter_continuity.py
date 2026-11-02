@@ -54,6 +54,7 @@ class Adapter(unittest.TestCase):
             pool='healthy' if quota_circuit.pool_blocked(self.br,'minimax') else 'minimax'
             return f'POOL={pool} MODEL=fixture-model HOST=fixture MODE={pool}'
         for target,attr,value in ((api.pick,'format_pick',route),
+                (api,'_route_with_deadline',lambda tc,options,*rest:route(tc,**options)),
                 (api.pick,'launch_policy',lambda *a,**k:{'allowed':True}),
                 (api.subprocess,'run',self.transport)):
             p=patch.object(target,attr,side_effect=value);p.start();self.addCleanup(p.stop)

@@ -132,6 +132,105 @@ def _join(document, selection):
     return rows[0]
 
 
+#: Blocker 1 bounded-gather companion for the retained-root membership join:
+#: a published candidate vector is a small, bounded, deduplicated set of
+#: actual Runtime roots, so a longer vector is not a publication this reader
+#: admits.  It refuses instead of scanning, truncating or guessing.
+_RETAINED_ROOT_CANDIDATES_MAX = 50
+
+
+def _valid_retained_root_id(value):
+    """Use the frozen result-reader selector grammar for every candidate."""
+    from common.executive_workspace_contract import _check_job_id
+    return _check_job_id(value)
+
+
+def _retained_root_member(row, root):
+    """Strict membership of one selected root in one published CCR row.
+
+    Either the existing sole-RESOLVED singleton — exactly the row shape
+    :func:`_join` admits — or a bounded multi-root CONFLICT row whose genuine
+    published candidate vector actually contains the selected root.  The row
+    is inspected in place: no refresh, no promotion, no rewrite of its
+    published ``root_job_id``/``root_job_ambiguous``/``runtime_root_state``
+    facts, and no trust in the request beyond the frozen selector grammar.
+    """
+    if (row.get("root_job_id") == root
+            and row.get("root_job_candidates") == [root]
+            and row.get("root_job_ambiguous") is False
+            and row.get("runtime_root_state") == "RESOLVED"):
+        return True
+    if (row.get("root_job_id") is not None
+            or row.get("root_job_ambiguous") is not True
+            or row.get("runtime_root_state") != "CONFLICT"):
+        return False
+    candidates = row.get("root_job_candidates")
+    return (type(candidates) is list
+            and 2 <= len(candidates) <= _RETAINED_ROOT_CANDIDATES_MAX
+            and all(_valid_retained_root_id(candidate) for candidate in candidates)
+            and len(set(candidates)) == len(candidates)
+            and root in candidates)
+
+
+def _retained_root_join(document, selection):
+    """Bounded retained-root membership join for the two retained read routes.
+
+    The programs document legitimately carries rows with more than one actual
+    Runtime root (including terminal roots); :func:`_join` correctly refuses
+    those singleton-less shapes for every other route.  This join serves ONLY
+    the retained read paths (``result_references`` and the bounded role-result
+    read) and adds exactly one capability: the selected root must be an actual
+    member of the paired publication's own bounded candidate vector.  All other
+    identity law is the existing one — exactly one genuine work row and exactly
+    one responsibility row for the selection's ``work_ref`` — and a foreign,
+    unlisted, malformed or cross-workstream selection keeps refusing with the
+    same ``LookupError`` before Runtime is ever touched.
+    """
+    work_ref, root = selection["work_ref"], selection["root_job_id"]
+    work = document.get("work")
+    autonomy = document.get("autonomy")
+    responsibilities = autonomy.get("responsibilities") if type(autonomy) is dict else None
+    if type(work) is not list or type(responsibilities) is not list:
+        raise LookupError("selection_not_found")
+    works = [r for r in work if type(r) is dict and r.get("work_ref") == work_ref]
+    rows = [r for r in responsibilities if type(r) is dict and r.get("responsibility_ref") == work_ref]
+    if len(works) != 1 or len(rows) != 1:
+        raise LookupError("selection_not_found")
+    row = rows[0]
+    if type(root) is str and root and _retained_root_member(row, root):
+        if row.get("runtime_root_state") == "CONFLICT":
+            # Resolve only the named root-multiplicity ambiguity. Other
+            # published disagreements/refusals remain visible and unadmitted.
+            issues = autonomy.get("issues", [])
+            if (row.get("disagreements", []) != [] or type(issues) is not list
+                    or any(type(issue) is not dict or (
+                        issue.get("responsibility_ref") in (None, work_ref)
+                        and issue.get("code") != "runtime_root_missing")
+                           for issue in issues)
+                    or autonomy.get("source_failures", []) != []):
+                raise LookupError("selection_not_found")
+        return row
+    raise LookupError("selection_not_found")
+
+
+def _qualified_retained_root(snapshot, selected):
+    """Full-publication qualification plus strict retained-root membership.
+
+    Reuses the unchanged whole-document ``_qualified(snapshot, None)`` — the
+    selected row is never qualified on its own and no caller skip/bypass flag
+    exists — then joins the selection through :func:`_retained_root_join`,
+    which raises ``LookupError`` exactly as ``_join`` does.  A retained read
+    therefore proves the entire published Programmes row set, not merely its
+    own row.  This helper is not a Mission or currentness authority: the
+    Mission, plan, activity, dispatch and consume routes keep their existing
+    ``_join``/``_qualified`` sole-root admission unchanged.
+    """
+    if not _qualified(snapshot, None):
+        return False
+    _retained_root_join(snapshot.document, selected)
+    return True
+
+
 def _qualified_empty_programs(doc, validity):
     """An empty list needs positive canonical source evidence, not all([]).
 
@@ -398,7 +497,7 @@ class WorkspaceReadService:
                  mission_v3_compose=None, work_acquire=None, work_compose=None,
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
-                 product_acceptance_observe=None):
+                 product_acceptance_observe=None, activity_membership=None):
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -446,6 +545,11 @@ class WorkspaceReadService:
             raise ValueError("acceptance read composition requires callable readers")
         self._product_acceptance_read = product_acceptance_read
         self._product_acceptance_observe = product_acceptance_observe
+        # Only the installed COO source may supply principal/workstream
+        # membership. General Workspace sign-in is insufficient for OHF data.
+        if activity_membership is not None and not callable(activity_membership):
+            raise ValueError("activity membership owner must be callable")
+        self._activity_membership = activity_membership
 
     async def _handle_original_acceptance_frame(self, frame):
         from common.product_acceptance_acquisition_contract import mission_frame
@@ -762,6 +866,173 @@ class WorkspaceReadService:
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
 
+    def _activity_membership_marker(self, principal, selected, *, original_owner=None):
+        """Re-read the incumbent installed COO principal/workstream owner.
+
+        This is NOT a native Fabric-run grant. It covers only original
+        Executive Runtime Attempt evidence inside the COO-enrolled workstream
+        and the exact currently selected Control Room root. No caller-supplied
+        authority, machine owner, TTL or new permission registry is accepted.
+        """
+        from control_plane.coo_principal_mandate import AuthorityFact, PrincipalFact
+        from common.executive_workspace_contract import RESOURCE, SCOPE
+        owner = original_owner if original_owner is not None else self._activity_membership
+        if not callable(owner):
+            raise PermissionError("activity source not installed")
+        try:
+            value = owner(principal, selected["work_ref"])
+            if type(value) is not tuple or len(value) != 3:
+                raise ValueError("wrong COO source")
+            row, fact, authority = value
+            if (type(row) is not dict or type(fact) is not PrincipalFact
+                    or type(authority) is not AuthorityFact
+                    or row.get("enabled") is not True
+                    or row.get("work_ref") != selected["work_ref"]
+                    or authority.work_ref != selected["work_ref"]
+                    or authority.live_source_or_lease_conflict is not False
+                    or type(row.get("principal_binding_digest")) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", row["principal_binding_digest"]) is None
+                    or fact.principal_binding_digest != row["principal_binding_digest"]
+                    or type(authority.authority_generation_digest) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", authority.authority_generation_digest) is None):
+                raise ValueError("COO source unresolved")
+            expected = {
+                "issuer_digest": fact.issuer_digest,
+                "subject_digest": fact.subject_digest, "client_ref": fact.client_ref,
+                "resource": RESOURCE, "scopes": [SCOPE],
+            }
+            if (type(principal) is not dict or set(principal) != set(expected) | {"policy_id"}
+                    or type(principal["policy_id"]) is not str
+                    or not 1 <= len(principal["policy_id"]) <= 256
+                    or {k: principal[k] for k in expected} != expected):
+                raise ValueError("cross-principal source")
+            # The source owner's digest and the entire validated installed
+            # mission row are reobserved on release; no made-up grant digest.
+            return (digest(row), fact.principal_binding_digest,
+                    authority.authority_generation_digest,
+                    authority.mission_authority_ref)
+        except Exception:
+            raise PermissionError("activity source unavailable") from None
+
+    def _read_retained_activity(self, frame):
+        """One original bounded Runtime observation under the current CCR root.
+
+        The caller first establishes the original issuer/COO principal
+        membership and rechecks it after this synchronous read has closed.
+        Never returns the raw typed Job, Attempt or Event source to the App.
+        """
+        from common import executive_workspace_activity_contract as activity
+        from control_plane.executive_runtime import RuntimeRoleResultOverBudget
+        from control_plane.operator_activity_projection import (
+            project_retained_operator_activity, ActivityProjectionRefusal,
+        )
+        selected = activity.selection(frame["selection"])
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+        _join(before.document, selected)  # 404 before Runtime for foreign root
+        try:
+            if not _qualified(before, selected):
+                return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+            bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+            with bounded.observe_bounded_read() as observation:
+                source = observation.read_retained_operator_activity_bounded(
+                    selected["root_job_id"], selected["job_id"], selected["attempt_id"]
+                )
+            receipt = observation.receipt  # physical close first
+            if source.root_metadata.work_ref != selected["work_ref"]:
+                return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+            after = self.cache.snapshot()
+            if (before.owner is not after.owner
+                    or before.instance != after.instance
+                    or before.publication != after.publication
+                    or digest(before.document) != digest(after.document)
+                    or digest(_plan_validity_identity(before.validity)) !=
+                       digest(_plan_validity_identity(after.validity))
+                    or digest(before.currentness) != digest(after.currentness)):
+                return activity.unavailable(selected, "SOURCE_CHANGED")
+            if not _qualified(after, selected):
+                return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+            view = project_retained_operator_activity(
+                source, receipt, **selected,
+            )
+            observation_doc = self._result_observation(before, after, selected, receipt)
+            observation_doc["schema"] = activity.OBSERVATION_SCHEMA
+            body = {
+                "schema": activity.BODY_SCHEMA, "selection": selected,
+                "availability": "AVAILABLE", "reason_codes": [],
+                "source_observation": observation_doc, "activity": view,
+            }
+            try:
+                bounded_canonical({"ok": True, "result": body},
+                                  limit=activity.MAX_RESPONSE_BYTES - 1)
+            except (TypeError, ValueError):
+                return activity.unavailable(selected, "RESPONSE_OVER_BUDGET")
+            return {"ok": True, "result": body}
+        except RuntimeRoleResultOverBudget:
+            return activity.unavailable(selected, "OVER_BUDGET")
+        except ActivityProjectionRefusal as exc:
+            if exc.code == "SOURCE_CHANGED":
+                return activity.unavailable(selected, "SOURCE_CHANGED")
+            return activity.unavailable(selected,
+                                        "OVER_BUDGET" if exc.code == "SOURCE_OVER_BUDGET"
+                                        else "SOURCE_UNAVAILABLE")
+        except LookupError:
+            raise
+        except Exception:
+            return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+
+    async def handle_activity_from_original_coo(self, frame, installed_source):
+        """Trusted COO factory supplies its original installed reader per request.
+
+        No changes to the immutable installed launcher or a global authority.
+        Ordinary standalone Workspace frames without that source remain denied.
+        """
+        from ops.executive_os.coo_principal_host import CooInstalledSource
+        if type(installed_source) is not CooInstalledSource:
+            return error("access_denied", 403)
+        return await self._handle_activity_frame(
+            frame, original_owner=installed_source.for_workspace_read_principal,
+        )
+
+    async def _handle_activity_frame(self, frame, *, original_owner=None):
+        from common import executive_workspace_activity_contract as activity
+        try:
+            activity.validate_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        principal, selected = frame["principal"], frame["selection"]
+        try:
+            if self.authorize(principal) is not True:
+                return error("access_denied", 403)
+            stamp = permission_stamp(self.authorize, principal)
+            if stamp is None:
+                return error("access_denied", 403)
+            source_reader = original_owner if original_owner is not None else self._activity_membership
+            stored_source_reader = self._activity_membership
+            before = self._activity_membership_marker(principal, selected, original_owner=source_reader)
+        except Exception:
+            # Missing installed COO grants do not downgrade to global viewer
+            # permission or a raw Runtime read.
+            return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_retained_activity, frame))
+        try:
+            response = await await_owned(task)
+        except LookupError:
+            response = error("selection_not_found", 404)
+        except Exception:
+            response = activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+        try:
+            if (self.authorize(principal) is not True
+                    or permission_stamp(self.authorize, principal) != stamp
+                    or self._activity_membership is not stored_source_reader
+                    or self._activity_membership_marker(principal, selected, original_owner=source_reader) != before):
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        return response
+
     def _read_admitted_plan(self, frame):
         """One owner read, physical close, policy/CCR bracket, then pure display."""
         from control_plane.executive_runtime import (
@@ -861,9 +1132,14 @@ class WorkspaceReadService:
         Runtime acquisition whose receipt finalizes only after the physical
         context close, pre-projection binding verification, the after-close
         CCR recheck, then projection through the shared Fabric owner and the
-        closed budget ladder.  Acquisition ``OVER_BUDGET`` never reaches the
-        projector.  Every refusal below is one typed unavailable body with
-        null result, null control_room and null runtime.
+        closed budget ladder.  Admission here is the bounded retained-root
+        membership join — the selected root must be an actual member of the
+        paired publication's own candidate vector, which is what lets a
+        multi-root CONFLICT row read any one of its listed roots while every
+        other route keeps the sole-root ``_join``.  Acquisition
+        ``OVER_BUDGET`` never reaches the projector.  Every refusal below is
+        one typed unavailable body with null result, null control_room and
+        null runtime.
         """
         selected = frame["selection"]
         try:
@@ -871,10 +1147,10 @@ class WorkspaceReadService:
         except Exception:
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
         try:
-            _join(before.document, selected)
+            retained_row = _retained_root_join(before.document, selected)
         except LookupError:
             raise LookupError("selection_not_found") from None
-        if not _qualified(before, selected):
+        if not _qualified_retained_root(before, selected):
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
         try:
             snapshot, receipt = self._bounded_result_acquire(selected)
@@ -893,7 +1169,11 @@ class WorkspaceReadService:
                 or before.publication != after.publication
                 or digest(before.document) != digest(after.document)):
             return self._result_unavailable_body(selected, _REASON_SOURCE_CHANGED)
-        if not _qualified(after, selected):
+        if not _qualified_retained_root(after, selected):
+            return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
+        if (retained_row.get("runtime_root_state") == "CONFLICT"
+                and getattr(getattr(snapshot, "root_metadata", None), "work_ref", None)
+                != selected["work_ref"]):
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
         if not self._result_binding_verified(snapshot, receipt, selected):
             return self._result_unavailable_body(selected, _REASON_SOURCE_UNAVAILABLE)
@@ -1160,6 +1440,9 @@ class WorkspaceReadService:
             return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
+        from common.executive_workspace_activity_contract import FRAME_SCHEMA as ACTIVITY_FRAME_SCHEMA
+        if isinstance(frame, dict) and frame.get("schema") == ACTIVITY_FRAME_SCHEMA:
+            return await self._handle_activity_frame(frame)
         # v2 frames take the closed v2 validation path; v1 frames keep their
         # existing envelope.  The two are mutually exclusive — never both.
         if isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
@@ -1272,6 +1555,8 @@ class WorkspaceReadService:
             worker = self._read_result
         elif operation == "mission_v3":
             worker = self._read_mission_v3
+        elif operation == "result_references":
+            worker = self._read_result_references
         else:
             return error("invalid_input", 400)
         task = asyncio.create_task(asyncio.to_thread(worker, frame))
@@ -1285,12 +1570,18 @@ class WorkspaceReadService:
             result = self._result_unavailable_body(
                 frame["selection"], _REASON_RESPONSE_OVER_BUDGET)
         except Exception:
-            if operation != "result":
+            if operation == "result_references":
+                # Unexpected retained-reference producer failure: a typed
+                # unavailable body, never an empty success assertion.
+                from control_plane.workspace_result_references import unavailable
+                result = unavailable(frame["selection"], "SOURCE_UNAVAILABLE")
+            elif operation != "result":
                 # Producer failure is a typed transport refusal; the adapter
                 # never manufactures a Mission body.
                 return error("source_unavailable", 503)
-            result = self._result_unavailable_body(
-                frame["selection"], _REASON_SOURCE_UNAVAILABLE)
+            else:
+                result = self._result_unavailable_body(
+                    frame["selection"], _REASON_SOURCE_UNAVAILABLE)
         try:
             if (self.authorize(frame["principal"]) is not True
                     or permission_stamp(self.authorize, frame["principal"]) != permission_before):
@@ -1298,6 +1589,11 @@ class WorkspaceReadService:
         except Exception:
             return error("access_denied", 403)
         return result
+
+    def _read_result_references(self, frame):
+        """Delegate the retained-result-reference read to the closed producer."""
+        from control_plane.workspace_result_references import read_result_references
+        return read_result_references(self, frame)
 
 
 class _ResultOverBudget(Exception):
@@ -1335,7 +1631,7 @@ class _WorkRefusal(Exception):
 def workspace_provider_factory(*, control_room, authorize, armed, runtime_identity, bounded_runtime=None,
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
-                               product_acceptance_observe=None):
+                               product_acceptance_observe=None, activity_membership=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1358,5 +1654,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     product_acceptance_owner_target=product_acceptance_owner_target,
                                     product_acceptance_owner_guard=product_acceptance_owner_guard,
                                     product_acceptance_read=product_acceptance_read,
-                                    product_acceptance_observe=product_acceptance_observe)
+                                    product_acceptance_observe=product_acceptance_observe,
+                                    activity_membership=activity_membership)
     return provide

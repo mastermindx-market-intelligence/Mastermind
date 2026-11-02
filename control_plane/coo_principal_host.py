@@ -116,6 +116,16 @@ class CooHostProvider:
             _refuse()
         self.source, self.workspace = source, workspace
 
+    async def read_workspace_retained_activity(self, frame):
+        """Delegate one *read-only* original Executive OHF observation.
+
+        The installed COO provider already owns this source and its existing
+        Workspace reader. No new grant registry, new host or action token.
+        """
+        from common.executive_workspace_activity_contract import validate_frame
+        validate_frame(frame)
+        return await self.workspace.handle_activity_from_original_coo(frame, self.source)
+
     def facts(self, frame):
         validate_facts_frame(frame)
         before = self.source.for_principal(frame["principal"], frame["work_ref"])

@@ -266,6 +266,42 @@ class ProductionFiniteStagingHost(owner.ProductionCeoSubmitHost):
         return tx.transaction_id
 
 
+_WORKSPACE_KEYS = frozenset({'workspace_acquisition', 'workspace_resource_policy',
+    'workspace_control_room'})
+
+
+def control_boot_smoke(control):
+    """Static, inert refusal of a staged Control composition that cannot boot.
+
+    The real ``load_control_config`` still runs the candidate as the Control
+    user inside ``validate_candidates``; the boot itself is proven by
+    ``tests/test_attended_control_staging.py::test_staged_candidate_boots_with_zero_tcp_listeners``.
+    A legacy ``{"port": int}`` stanza here would otherwise only surface on the
+    Control user's next start; refusing it before the marker keeps TCP off the
+    workspace Control Room forever.
+    """
+    from scripts.executive_os_phase1c import (ServiceError,
+        _CEO_INGRESS_APP_CONFIG_KEYS, validate_workspace_control_room)
+    workspace = _WORKSPACE_KEYS
+    if (set(control) & workspace
+            and (not workspace <= set(control)
+                or not _CEO_INGRESS_APP_CONFIG_KEYS <= set(control))):
+        raise ValueError('staged Control composition cannot boot: '
+            'workspace acquisition requires its policy, Control Room and installed App peer')
+    if 'workspace_control_room' in control:
+        control_uid = control.get('control_uid')
+        if type(control_uid) is not int:
+            raise ValueError('staged Control composition cannot boot: '
+                'workspace Control Room requires an integer control_uid')
+        try:
+            validate_workspace_control_room(control['workspace_control_room'],
+                control_uid=control_uid)
+        except ServiceError as exc:
+            raise ValueError('staged Control composition cannot boot: '
+                + str(exc)) from None
+    return None
+
+
 def execute_staging(host, expected_sha, expected_control_sha256):
     owner.require_root_privilege(host.effective_uid())
     host.require_transaction_absent()
@@ -273,6 +309,7 @@ def execute_staging(host, expected_sha, expected_control_sha256):
     if prior.control_sha256 != expected_control_sha256:
         raise ValueError('exact current Control preimage required')
     proposed = candidate(prior, host.read_delta())
+    control_boot_smoke(proposed.control)
     if proposed.control_bytes == prior.control_bytes:
         return None
     tx = owner.TransactionContext(host.new_transaction_id(), expected_sha, prior, proposed, None)

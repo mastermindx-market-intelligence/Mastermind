@@ -1,4 +1,48 @@
+## Paper 0.5.18 exact-catalog compatibility candidate - 2026-11-01
+
+The M2 Paper Desktop has two installations: /Applications/Paper.app v0.5.11
+and the intended ~/Applications/Paper.app v0.5.18. A graceful transition to
+the latter restored a direct paper_inspect CONNECTED response for explicit
+MASTERMIND PAGES file 01M2WGNCX9475G79JRKJTCM08P. This is a connection
+receipt, not a live write or restart-resilience acceptance result.
+
+The captured 0.5.18 41-tool full catalog is retained as
+tests/fixtures/paper_desktop/16e6b_full_catalog.json; its canonical SHA-256 is
+16e6b93f0c51a1574ba8acee4df732052898707a04731d3817530971a88fdefd.
+Compared to accepted 37-tool 1b9aff..., no names were removed; the four new
+resource tools archive_resources, create_folder, move_resources and
+unarchive_resources stay uncallable. Ten existing descriptors changed,
+including rich HTML set_text_content (updates[].html replaces
+updates[].textContent), get_jsx styling default, and optional resource
+parameters. The guarded successor bridge 0.1.6 admits this exact full-catalog
+digest and refuses obsolete text-edit payloads before dispatch, retaining
+all file/snapshot/operation/unknown-effect constraints. Historical catalog
+receipts remain accepted. Any future descriptor drift fails closed.
+
+This is a source-only candidate, not a live activation. Immutable
+runtime_stage.py v15 is proposed as a new hash-pinned generation; do not alter
+v2-v14. After an independent non-author review, accepted source release, and
+installer-controlled seat replacement with original manifest/seat identity,
+prove on the same direct carrier: accepted live schema, exact scratch-file read
+and prepare, a bounded guarded edit using updates[].html, same-file post-read,
+screenshot, and reconnect without duplicate clients. Never manually repin the
+installed v13 bridge or claim deployment from green synthetic tests.
+
 # Paper.design integration - bounded local and web design capability
+
+## Guarded file/page administration candidate (2026-10-22; NOT installed)
+
+### Paper 0.5.15 exact-catalog compatibility candidate (stacked successor, not active)
+
+Read-only inspection of M1 Paper Desktop 0.5.15 observed upstream catalog SHA-256 `f3483e001d4f07f5a49144ca52a4f9e14ba046e35546dda05d6cd37c9d2b4728` with exactly 37 tools. Compared with Paper 0.5.14, only `get_jsx` changed: its default styling format became `inline-styles`, with enum ordering `inline-styles,tailwind` and a corresponding description change. All other 36 descriptors, including file and page operations, were identical.
+
+The stacked v14 bridge admits only the two reviewed complete-catalog digests and retains server identity, source file guards, operation IDs, write permission, and fail-closed drift handling. JSX readers should provide an explicit `format` if the default matters. V13 remains immutable and usable for M2; staging v14 does not select any live runtime or update a workspace plugin. Paper 0.5.15 still has no native whole-page transfer/deletion method.
+
+
+Current exact Paper 0.5.14 catalog includes `list_resources`, `create_file`, `rename_resource`, `arrange_pages`, and `update_pages`, which the prior v12 bridge intentionally blocked. The bounded candidate admits `list_resources` as read and `arrange_pages`/`update_pages` as guarded edits. It adds `create_file`/`rename_resource` to the existing modifying `paper_edit` action so the already-published five-tool MCP surface remains unchanged; internally these receive extra file-management validation. It preserves full-catalog SHA pin, existing file snapshot, operation id, desktop mutex, no replay and unknown-effect rules. In this candidate, create_file requires either `cloneFileId` (copy entire file) or `sourceFileId` (guarded context for creating an empty file), plus a name; `sourceFileId` is a bridge-only guard and is never forwarded to Paper. Renaming accepts only exact Paper file IDs, never arbitrary folders. An observed create-file response is explicitly `RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION` until the returned new file ID is separately read and checked; neither a clone nor a successful response means a cross-file page migration occurred.
+
+**Crucial limitation:** Paper's reviewed 37-tool MCP schema does not expose a native move-page-between-files, delete-page, or delete-file operation. The candidate **does not** delete originals or reconstruct pages from JSX and claim a lossless transfer. For the 63-page MASTERMIND PAGES cleanup, make a source inventory, create destinations and whole-file preservation clones, verify every destination's ID and contents, then move a page only through a subsequently verified lossless vendor operation or explicit attended Paper UI transaction with source/destination readback. Preserve original pages pending verification, with no speculative deletion or raw database edits. This candidate pins immutable v13 bridge source separately from the installed v12 runtime. The existing MCP five-tool surface remains unchanged; action-description refresh may still be necessary for individual ChatGPT seats. v13 staging alone is not activation, an Executive grant, a scratch-file canary, or production acceptance. No current Paper pages have been moved or deleted.
+
 
 ## Mission and frozen boundary
 
@@ -180,7 +224,7 @@ this cohort as `corrupt manifest` before any effect; inspection established that
 pointer is retained provenance, not a safe instruction to restage its current bytes.
 
 The canonical private installer owns the bounded `paper-runtime-upgrade` operation.
-It recognizes only the reviewed C2 account and exact installed file digests, verifies
+The C2 Personal case recognizes that reviewed account and exact installed file digests, verifies
 the existing node/backend/dependency seal and plist, and requires a caller-supplied
 compare-and-swap digest of the current manifest. Admission is restricted to the
 canonical digests of the reviewed original manifest and its planned v12 successor;
@@ -230,6 +274,54 @@ to edit JSON manually. The transaction reconciles observed bytes before rollback
 an unknown effect requires reconciliation through this same owner before restart
 or replay. Existing Paper
 snapshot, file-writer, operation-id and no-cross-carrier-replay rules still apply.
+
+### C4 exact-cohort qualification — 2026-10-18
+
+The C4 installation uses account `chatgpt4`, port `45024` and launchd label
+`com.mastermind.studio-direct-private.chatgpt4`. A read-only host census verified all
+eleven installed module hashes, the Node/backend hashes, plist, the two-pass
+dependency seal, and the original non-Paper configuration. Although its eleven
+module bytes equal the reviewed C2 bundle, its manifest, configuration and dependency
+pins are independent. The new C4 predicate admits only its original manifest and the
+planned v12 successor. Existing C2 account eligibility and pins are preserved.
+
+This proposal composes incumbent PR #1603 at
+`12fe3d9a7f5ed7deff75b1e8c9101227a92d0aa8` in an isolated source branch; it does not
+modify that source branch or adopt a C2 live rollout. Review found that the existing
+C2 Business compatibility updater can write the same manifest as the Paper updater.
+Its modifying dispatch now takes the same account lifecycle mutex across validation,
+writes and recovery. The genuine Business read-only preflight remains lock-free,
+and its account, source, module, capability and manifest admission rules are unchanged.
+
+Source `0ef1aa2c1900ee5b0141c2e6357dac20187de3e2` passed all **148** installer tests.
+Ten new tests exercise the actual C4 command paths, including ambiguous service
+absence, both pre-commit and post-commit uncertain effects, safe rollback, lifecycle
+contention and replay refusal. Four sibling-writer tests prove mutual exclusion at
+real configuration/module write boundaries and during recovery. Both public command
+intents independently pass real preflight in the same sealed fixture before re-entry;
+the mutex itself is not mocked.
+
+Protected master then advanced to `d5cce731a23588ddbf4df806bd9e8dcfa5eecf24`
+(PR #1604), which adds a separately admitted C2 Personal publisher operation.
+Integrated source `b442c550dde1fe4136f93806516b108b0ef20590` preserves that protected
+operation and its admission rules. Both C2 compatibility applies take their existing
+account lifecycle mutex, while genuine read-only preflights stay lock-free.
+The integrated suite passes **153** tests, including two new Personal publisher
+contention/recovery cases. This does not select or apply either C2 publisher operation.
+
+The real C4 `--preflight-only` invocation then returned `NOT_APPLIED`, preserving
+configuration, manifest and plist bytes and creating no lifecycle lock. It proposes
+original manifest `849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071`
+to target `5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9`.
+The immutable v12 runtime was already present and passed the protected verifier.
+
+Evidence is retained in
+[the C4 verification directory](verification/paper-c4-runtime-20261018/verification.json).
+These receipts prove source tests and read-only planning. Live selection follows the
+existing accepted-release stop / Paper upgrade / start sequence above with the exact
+C4 account and freshly observed manifest. Acceptance still requires a new gateway
+generation, the qualified catalog, exact-file preparation, and a requested guarded
+edit with visual readback on the same Studio Direct carrier.
 
 ### Paper release-version compatibility ruling — 2026-09-30
 
@@ -539,3 +631,30 @@ then repeat the same Paper inspection canary.
 
 These two account/client ceremonies are the remaining native-human gates; they are
 not reasons to create additional Paper user accounts or another MCP gateway.
+
+### C4 composition with protected Fabric release
+
+The C4 proposal integrates protected master `89cf2399c47da20c0c23826266e52984f88c27e7`.
+Its installer code at `7347c319db18c86b4f6f6dc5a0714e0aebca56c3` retains the dedicated
+Fabric owner and its stage/upgrade/seal/start/stop decorators. The shared mutex admits
+the union of the qualified Paper accounts and that exact Fabric account; the separate
+decorator predicates prevent double acquisition. Dedicated Paper inspections still
+request positive service-state evidence, while generic C2 Business behavior is preserved.
+
+The combined installer and backend-release suites pass 162 tests. A fresh actual C4
+preflight with this installer remains `NOT_APPLIED`: installed configuration, manifest,
+plist and lock existence are unchanged. See `paper-c4-integrated-preflight.json` and the
+current integration entry in `verification.json`. No Fabric runtime action was performed.
+
+The current Portfolio mission adopts the exact inherited #1603 source
+`12fe3d9a7f5ed7deff75b1e8c9101227a92d0aa8` into the owned #1611 composition, including
+the independently reviewed shared-writer lock correction. Normal acceptance of the
+combined source dispositions that inherited component; the original branch remains
+untouched. A protected-commit comparison must establish what landed. C2 runtime
+selection and publisher operations retain their separate release and live-proof scope.
+
+The C4 stop/select/start operator must remain available after C4 stops. Use the existing
+accepted installer from an independently authorized local or RDC host installation
+context, checking each stage before the next. A command launched through the C4 backend
+itself is not a qualified self-cutover mechanism. The subsequent Paper prepare/edit and
+visual readback remain on Studio Direct C4.

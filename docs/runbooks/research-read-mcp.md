@@ -44,7 +44,14 @@ with these eight required fields:
   lowercase commit identity, not necessarily the reader release commit.
 - `max_age_seconds`, `max_reuse_seconds`, `corpus_byte_budget`,
   `image_admission_bytes`, and `refresh_interval_seconds`: the existing
-  `SelectedReadOptions` limits; byte admission limits are not RSS guarantees.
+  `SelectedReadOptions` limits. The current deployment ceilings are
+  `corpus_byte_budget` 256MiB and `image_admission_bytes` 1536MiB; the defaults
+  remain 32MiB and 256MiB. Byte admission is finite allocation, not RSS,
+  host-memory or client qualification: admission counts accepted bytes and
+  promises no resident-set outcome. The 1536MiB image ceiling is sized so the
+  retained 256MiB corpus admission, four new 256MiB image allocations, and the
+  catalog reserve fit within it. No dynamic pool, oversubscription or new
+  policy/control plane is introduced.
 - `writer_protocol_qualified`: strictly JSON `true`, issued only after actual
   all-writer settlement and protocol qualification. Configuration cannot prove it.
 - `valid_until`: integer Unix seconds, strictly future and at most 24 hours from

@@ -14,7 +14,9 @@ The helper owns only:
 /Library/Application Support/MastermindPortfolioProjector/config/oauth-client-secret
 ```
 
-The root/config directories are root-owned mode `0750`; the non-secret config is mode `0640`; the secret file is mode `0600`. Existing, symlinked, wrong-owner, wrong-mode or otherwise ambiguous state is a refusal. Enrollment is create-once and never overwrites or blindly retries an uncertain write.
+The root/config directories are `root:wheel` (UID/GID `0:0`) mode `0750`; the non-secret config is mode `0640`; the secret file is mode `0600`. Existing, symlinked, wrong-owner, wrong-group, wrong-mode or otherwise ambiguous state is a refusal. Enrollment is create-once and never overwrites or blindly retries an uncertain write.
+
+On macOS, `/Library/Application Support` is commonly `root:admin`. A new child directory can inherit its `admin` group even under `sudo`. The helper corrects the group **only on the directory inode it just created**, using a no-follow directory descriptor, then verifies exact `root:wheel 0750` ownership/mode. It never changes an existing mismatched directory, its children, or any credential file.
 
 ## Administrator ceremony
 
@@ -31,6 +33,12 @@ sudo python3 -m ops.linear_projector.host_enrollment verify --expected-client-id
 `enroll` reads exactly one bounded secret line from stdin and disables terminal echo while reading from a native TTY. The Linear client secret must be entered only into that hidden native prompt. **Never paste or transcribe the secret into ChatGPT, Slack, GitHub, Linear descriptions/comments, Agent OS, shell command arguments, environment variables, screenshots, logs, notes or checked-in files.**
 
 `verify` validates directory/config/secret metadata and the expected non-secret client ID. It never reads or emits the secret contents. Its correlation hash is SHA-256 of the non-secret client ID only; it is not authentication.
+
+## If `prepare` refuses on an existing directory
+
+`REFUSED: PROJECTOR_HOST_PERMISSIONS_REFUSED` can mean a previous, partially completed `prepare` left an existing `root:admin 0750` directory. **Do not repeatedly enroll or overwrite credentials.** An administrator must inspect the exact projector directory and children using metadata-only tools before any repair. Only when the directory is conclusively a root-owned, empty `0750` projector directory, with no config or credential files, may the administrator make a **non-recursive group-only** correction to `wheel` and run `prepare` once more. Recheck the source helper's exact permission contract afterwards. If any directory contains unknown files, ACLs or an enrolled credential, stop and reconcile rather than changing permissions, deleting files, or performing a second enrollment.
+
+The `LINEAR_PROJECTOR_HOST_PREPARED` receipt proves only prepared directories. It is **not** a credential, OAuth app, authorized token or app-attributed canary.
 
 ## Exact non-secret receipts
 

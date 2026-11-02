@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,56 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PREP = ROOT / "ops" / "executive_os" / "prepare-a2-agent-relay-host.sh"
+
+
+def test_fixed_socket_permission_mode_is_pinned_and_not_an_identity_value():
+    source = PREP.read_text(encoding="utf-8")
+    assert source.count("PARENT_DIRECTORY_PERMISSION_MODE=710") == 1
+    assert source.count(
+        'preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"'
+    ) == 2
+    assert source.count(
+        'ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"'
+    ) == 2
+    for unapproved in ("700", "750", "770", "777"):
+        assert f"PARENT_DIRECTORY_PERMISSION_MODE={unapproved}" not in source
+
+
+def test_enrollment_gate_requires_exact_prepared_socket_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from ops.executive_os import a2_agent_relay_enrollment as enrollment
+    import os
+
+    socket = tmp_path / "runtime" / "agent-relay.sock"
+    monkeypatch.setattr(enrollment, "SOCKET_PATH", socket)
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid())
+    monkeypatch.setattr(enrollment, "RELAY_GID", os.getgid())
+    assert not enrollment._socket_parent_prepared()
+
+    socket.parent.mkdir()
+    socket.parent.chmod(0o710)
+    # macOS may inherit the parent group rather than the invoking process gid.
+    monkeypatch.setattr(enrollment, "RELAY_GID", socket.parent.stat().st_gid)
+    assert enrollment._socket_parent_prepared()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            enrollment.c1_enrollment.c1_runtime,
+            "_path_has_acl",
+            lambda *_args, **_kwargs: True,
+        )
+        assert not enrollment._socket_parent_prepared()
+    socket.parent.chmod(0o770)
+    assert not enrollment._socket_parent_prepared()
+    socket.parent.chmod(0o710)
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid() + 1)
+    assert not enrollment._socket_parent_prepared()
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid())
+    socket.parent.rmdir()
+    target = tmp_path / "elsewhere"
+    target.mkdir(mode=0o710)
+    socket.parent.symlink_to(target, target_is_directory=True)
+    assert not enrollment._socket_parent_prepared()
 
 
 def test_refuses_non_macos_before_any_host_preparation(tmp_path: Path):
@@ -116,6 +167,7 @@ def _fake_host_script(tmp_path: Path) -> tuple[Path, Path, dict[str, Path]]:
     state_path = tmp_path / "state.json"
     system_root = tmp_path / "Library" / "Application Support" / "MastermindExecutive"
     runtime_root = tmp_path / "var" / "db" / "mastermind-agent-relay"
+    socket_root = tmp_path / "var" / "db" / "mastermind-agent-relay" / "socket"
     plist_path = tmp_path / "Library" / "LaunchDaemons" / "com.mastermind.executive.agent-relay.plist"
     release_root = system_root / "releases" / ("a" * 40)
     release_root.mkdir(parents=True)
@@ -304,7 +356,7 @@ elif format_string == "%u:%g":
 elif format_string == "%Lp":
     print(mode)
 elif format_string == "%Sp":
-    print("drwx------")
+    print("drwx------+" if os.environ.get("A2_FAKE_ACL_PATH") == sys.argv[-1] else "drwx------")
 else:
     raise SystemExit(64)
 """.format(python=sys.executable),
@@ -392,11 +444,14 @@ print('{"status":"A2_DISABLE_PREPARED"}')
         "/usr/bin/plutil": str(fake_bin / "forbidden-effect"),
         "/usr/bin/sudo": str(fake_bin / "forbidden-effect"),
         "/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist": str(plist_path),
+        "/var/db/mastermind-agent-relay/socket": str(socket_root),
         "/var/db/mastermind-agent-relay": str(runtime_root),
         "/Library/Application Support/MastermindExecutive": str(system_root),
     }
-    for original, replacement in replacements.items():
-        source = source.replace(original, replacement)
+    # One-pass replacement keeps nested socket paths from being rewritten
+    # twice when a synthetic target itself contains a mapped parent suffix.
+    pattern = re.compile("|".join(re.escape(key) for key in sorted(replacements, key=len, reverse=True)))
+    source = pattern.sub(lambda match: replacements[match.group(0)], source)
     _write_executable(artifact, source)
     return artifact, state_path, {
         "config": system_root / "config",
@@ -404,6 +459,7 @@ print('{"status":"A2_DISABLE_PREPARED"}')
         "plist": plist_path,
         "release": release_root,
         "runtime": runtime_root,
+        "socket": socket_root,
         "system": system_root,
     }
 
@@ -441,6 +497,7 @@ def test_prepares_exact_identity_directories_and_disabled_unloaded_relay_idempot
         (paths["config"], "0:0:755"),
         (paths["runtime"], "0:0:711"),
         (paths["home"], "457:457:700"),
+        (paths["socket"], "457:457:710"),
     ):
         assert path.is_dir()
         assert state_after_first["metadata"][str(path)] == metadata
@@ -454,6 +511,172 @@ def test_prepares_exact_identity_directories_and_disabled_unloaded_relay_idempot
 
     assert second.returncode == 0, second.stderr
     assert json.loads(state_path.read_text(encoding="utf-8")) == state_after_first
+
+
+@pytest.mark.parametrize("foreign", ["symlink", "uid", "mode", "acl"])
+def test_socket_parent_refuses_untrusted_existing_directory_before_identity_changes(
+    foreign, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    target = paths["socket"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if foreign == "symlink":
+        stable = tmp_path / "foreign-socket-parent"
+        stable.mkdir()
+        target.symlink_to(stable, target_is_directory=True)
+    else:
+        target.mkdir()
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["metadata"][str(target)] = (
+            "450:457:710" if foreign == "uid" else "457:457:777"
+        )
+        state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    original = state_path.read_bytes()
+    if foreign == "acl":
+        monkeypatch.setenv("A2_FAKE_ACL_PATH", str(target))
+
+    result = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode == 65
+    assert (
+        "existing prerequisite directory differs" in result.stderr
+        or "existing prerequisite directory has a filesystem ACL" in result.stderr
+    )
+    assert state_path.read_bytes() == original
+    assert not Path(str(state_path) + ".effects").exists()
+
+
+def _seed_fake_enrolled_host(state_path: Path, paths: dict[str, Path]) -> None:
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    for name, metadata in (
+        ("agent-relay.token", "457:457:400"),
+        ("agent-relay.json", "457:457:400"),
+    ):
+        path = paths["config"] / name
+        path.write_text("INERT-TEST-METADATA-ONLY", encoding="utf-8")
+        state["metadata"][str(path)] = metadata
+    plist = paths["plist"]
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    plist.write_text("INERT-TEST-PLIST", encoding="utf-8")
+    state["metadata"][str(plist)] = "0:0:644"
+    state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+
+
+def test_enrolled_host_socket_preparation_recreates_only_persistent_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    base = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+    first = subprocess.run(base, check=False, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    _seed_fake_enrolled_host(state_path, paths)
+    original_effects = Path(str(state_path) + ".effects").read_bytes()
+    paths["socket"].rmdir()
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+    before["metadata"].pop(str(paths["socket"]))
+    state_path.write_text(json.dumps(before, sort_keys=True), encoding="utf-8")
+    upgraded = subprocess.run(
+        base + ["--ensure-enrolled-socket-parent"],
+        check=False, capture_output=True, text=True,
+    )
+    assert upgraded.returncode == 0, upgraded.stderr
+    assert paths["socket"].is_dir()
+    after = json.loads(state_path.read_text(encoding="utf-8"))
+    assert after["metadata"].pop(str(paths["socket"])) == "457:457:710"
+    assert after == before
+    assert Path(str(state_path) + ".effects").read_bytes() == original_effects
+    again = subprocess.run(
+        base + ["--ensure-enrolled-socket-parent"],
+        check=False, capture_output=True, text=True,
+    )
+    assert again.returncode == 0, again.stderr
+    assert Path(str(state_path) + ".effects").read_bytes() == original_effects
+
+
+@pytest.mark.parametrize("foreign", ["symlink", "uid", "mode", "acl"])
+def test_enrolled_socket_repair_fails_closed_on_foreign_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, foreign: str,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    base = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+    first = subprocess.run(base, check=False, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    _seed_fake_enrolled_host(state_path, paths)
+    if foreign == "symlink":
+        paths["socket"].rmdir()
+        outside = tmp_path / "unrelated"
+        outside.mkdir()
+        paths["socket"].symlink_to(outside, target_is_directory=True)
+    else:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["metadata"][str(paths["socket"])] = (
+            "450:457:710" if foreign == "uid" else "457:457:777"
+        )
+        state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    before = state_path.read_bytes()
+    if foreign == "acl":
+        monkeypatch.setenv("A2_FAKE_ACL_PATH", str(paths["socket"]))
+    original_effects = Path(str(state_path) + ".effects").read_bytes()
+    result = subprocess.run(
+        base + ["--ensure-enrolled-socket-parent"],
+        check=False, capture_output=True, text=True,
+    )
+    assert result.returncode == 65
+    assert state_path.read_bytes() == before
+    assert Path(str(state_path) + ".effects").read_bytes() == original_effects
+
+
+def test_persistent_parent_survives_simulated_var_run_reboot_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import shutil
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    result = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert paths["socket"].is_dir()
+    assert str(paths["socket"]).startswith(str(tmp_path / "var" / "db"))
+    volatile = tmp_path / "var" / "run"
+    volatile.mkdir(parents=True, exist_ok=True)
+    (volatile / "reboot-cleared").touch()
+    shutil.rmtree(volatile)
+    assert paths["socket"].is_dir()
+    assert json.loads(state_path.read_text())["metadata"][str(paths["socket"])] == "457:457:710"
+
+
+def test_socket_parent_is_recreated_in_unenrolled_host_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    command = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+    assert subprocess.run(command, check=False, capture_output=True).returncode == 0
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+    assert before["metadata"][str(paths["socket"])] == "457:457:710"
+
+    # The volatile socket parent can disappear. Re-entry on an un-enrolled
+    # host restores only the expected directory, without repeating disable.
+    paths["socket"].rmdir()
+    before["metadata"].pop(str(paths["socket"]))
+    state_path.write_text(json.dumps(before, sort_keys=True), encoding="utf-8")
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    after = json.loads(state_path.read_text(encoding="utf-8"))
+    assert after["metadata"][str(paths["socket"])] == "457:457:710"
+    assert after["relay_disabled"] is True
+    assert Path(str(state_path) + ".effects").read_text().splitlines() == [
+        "disable system/com.mastermind.executive.agent-relay"
+    ]
 
 
 def test_idempotent_preparation_accepts_native_is_hidden_attribute_spelling(

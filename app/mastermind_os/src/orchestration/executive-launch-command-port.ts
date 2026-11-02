@@ -26,10 +26,12 @@ const DEPARTMENT_RE = /^[a-z][a-z0-9._-]{1,63}$/;
 const WORKSTREAM_RE = /^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/;
 const JOB_RE = /^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$/;
 const KEY_RE = /^[a-z0-9][a-z0-9-]{2,95}$/;
-const PROFILES = new Set(["research_only", "bounded_code_change"]);
+const PROFILES = new Set(["research_only", "bounded_code_change", "native_research_only"]);
+const DIRECT_RECEIPT_SCHEMA = "mastermind.ceo_direct_native_receipt.v1";
 const RECEIPT_SCHEMAS = new Set([
   "mastermind.ceo_intent_receipt.v1",
   "mastermind.ceo_intent_receipt.v2",
+  DIRECT_RECEIPT_SCHEMA,
 ]);
 // Closed, source-qualified V2/V3 E1 contracts; other versions remain unknown.
 const E1_SERVER_VERSIONS = new Set(["1.2.0", "1.4.0", "1.5.0"]);
@@ -84,6 +86,11 @@ export interface ExecutiveLaunchViewSource {
 }
 
 export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
+  private readonly directJobs = new Set<string>();
+  isDirectSelection(selection: {workRef:string;rootJobId:string}): boolean {
+    const owner=this.owner();
+    return !!owner && this.directJobs.has(JSON.stringify([owner.principalScope,owner.generation,selection.workRef,selection.rootJobId]));
+  }
   constructor(
     private readonly config: LaunchBindingConfig,
     private readonly client: ExecutiveToolClient,
@@ -199,8 +206,9 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     const validation = this.config.validation;
     const writeCount = writePaths?.length ?? 0;
     const validationCount = validationEntries(validation);
-    if (form.profileRef === "research_only") {
+    if (form.profileRef === "research_only" || form.profileRef === "native_research_only") {
       if (writeCount > 0 || validationCount > 0) return null;
+      if (form.profileRef === "native_research_only" && this.config.attemptLimit !== 1) return null;
     } else {
       if (writeCount < 1 || validationCount < 1) return null;
       if (!writePaths || !validWritePaths(writePaths)) return null;
@@ -323,11 +331,21 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (!schemaOk || data.accepted !== true || data.dispatched !== false) {
       return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
+    if (data.schema === DIRECT_RECEIPT_SCHEMA && !validDirectReceipt(data, pointer.targetKey)) {
+      return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
+    }
     if (typeof data.job_id !== "string") {
       return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (!JOB_RE.test(data.job_id)) {
       return this._receipt(pointer, "unknown", "UNKNOWN_RECEIPT");
+    }
+    if(data.schema===DIRECT_RECEIPT_SCHEMA) {
+      const owner=this.owner();
+      if(owner) {
+        if(this.directJobs.size>=64)this.directJobs.delete(this.directJobs.values().next().value!);
+        this.directJobs.add(JSON.stringify([owner.principalScope,owner.generation,pointer.targetKey,data.job_id]));
+      }
     }
     return this._receipt(pointer, "accepted", "ACCEPTED", {
       workRef: pointer.targetKey,
@@ -418,12 +436,18 @@ export function createExecutiveLaunchBinding(
   config: LaunchBindingConfig,
   client: ExecutiveToolClient,
   viewSource: ExecutiveLaunchViewSource,
+  direct?: { port: FiniteCommandPort; capability: Omit<NonNullable<OrchestratorCommandBinding["directNative"]>, "isDirectSelection"> },
 ): OrchestratorCommandBinding {
   const port = new ExecutiveLaunchCommandPort(config, client, () =>
     viewSource.context(),
   );
   return {
-    port,
+    port: direct ? {
+      context: () => port.context(),
+      prepare: (intent) => (intent.kind === "consume" ? direct.port : port).prepare(intent),
+      submit: (pointer, intent, signal) => (pointer.kind === "consume" ? direct.port : port).submit(pointer, intent, signal),
+      readOperation: (pointer, signal) => (pointer.kind === "consume" ? direct.port : port).readOperation(pointer, signal),
+    } : port,
     store: viewSource.store,
     getView(): OrchestratorCommandView {
       const session = viewSource.getSession();
@@ -437,6 +461,7 @@ export function createExecutiveLaunchBinding(
     makeLaunchIntent: (form) => port.makeLaunchIntent(form),
     makeMessageIntent: () => null,
     makeStopIntent: () => null,
+    ...(direct ? { directNative: {...direct.capability,isDirectSelection:(selection)=>port.isDirectSelection(selection)} } : {}),
   };
 }
 
@@ -466,6 +491,24 @@ function formFromPayload(payload: Readonly<Record<string, unknown>>): LaunchForm
     projectRef: payload.department,
     profileRef: payload.execution_profile,
   };
+}
+
+/** Direct admission is distinct from execution and from a COO role result. */
+function validDirectReceipt(value: Record<string, unknown>, workRef: string): boolean {
+  if (!hasExactKeys(value, ["schema", "intent_id", "fingerprint", "job_id", "status", "accepted",
+    "duplicate", "dispatched", "authority", "grounding", "created_at_ms", "work_ref"]) ||
+      value.work_ref !== workRef || typeof value.duplicate !== "boolean" ||
+      typeof value.fingerprint !== "string" || !/^[0-9a-f]{64}$/.test(value.fingerprint) ||
+      !Number.isSafeInteger(value.created_at_ms) || Number(value.created_at_ms) < 0 ||
+      typeof value.status !== "string" || !["QUEUED", "RUNNING", "CHECKPOINTED", "RATE_LIMITED",
+        "FAILED", "LOST", "CANCEL_REQUESTED", "COMPLETED", "CANCELLED"].includes(value.status) ||
+      !isPlainObject(value.grounding) || !isPlainObject(value.authority)) return false;
+  const authority = value.authority;
+  return hasExactKeys(authority, ["requested", "policy_sha256", "authority_level"]) &&
+    authority.authority_level === "A0" && typeof authority.policy_sha256 === "string" &&
+    /^[0-9a-f]{64}$/.test(authority.policy_sha256) &&
+    Array.isArray(authority.requested) && authority.requested.length === 2 &&
+    authority.requested[0] === "READ" && authority.requested[1] === "RESEARCH";
 }
 
 function listedChoice(choices: readonly LaunchChoice[], ref: string): boolean {

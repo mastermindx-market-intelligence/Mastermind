@@ -29,11 +29,13 @@ class OwnedWrapperOutcome(unittest.TestCase):
 
     def setUp(self):
         fixtures.Preflight.setUp(self)
-        for name in ('remote_sub_exec.py', 'pick.py'):
+        for name in ('remote_sub_exec.py', 'pick.py', 'commission_deadline.py'):
             shutil.copyfile(ROOT / 'candidate' / name, self.ext / name)
         for name in ('lane_runtime.py', 'native_remote.py',
                      'fabric_client_projection.py', 'yes'):
             shutil.copyfile(ROOT / 'source' / name, self.ext / name)
+        # The staged executor and owned-process implementation are one closure.
+        shutil.copyfile(ROOT / 'candidate/lane_runtime.py', self.ext / 'lane_runtime.py')
         (self.ext / 'yes').chmod(0o700)
         (self.ext / 'lanes').mkdir()
         # The receipt contract is independent of ambient CI/host load. Supply

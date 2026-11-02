@@ -30,8 +30,8 @@ class SelectedReadOptions:
         # Upper bounds are the current deployment proposal, not an RSS promise.
         for value, maximum in ((self.max_age_seconds, 3600),
                                (self.max_reuse_seconds, 300),
-                               (self.corpus_byte_budget, 192 * 1024 * 1024),
-                               (self.image_admission_bytes, 768 * 1024 * 1024)):
+                               (self.corpus_byte_budget, 256 * 1024 * 1024),
+                               (self.image_admission_bytes, 1536 * 1024 * 1024)):
             if type(value) is not int or not 0 < value <= maximum:
                 raise ContractViolation("SOURCE_UNAVAILABLE")
         if (type(self.refresh_interval_seconds) is not int

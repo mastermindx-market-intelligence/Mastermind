@@ -60,6 +60,33 @@ Commit still requires exact expected local HEAD; push still requires a clean wor
 
 Acquisition is honestly modifying and non-auto-retryable. Its open-world annotation accounts for the existing Git owner's possible retrieval of missing objects from the already-bound canonical origin. Discovery remains non-network. A failed or unqualified return after allocation may have started is `EFFECT_UNKNOWN`; it is not ordinary `NOT_APPLIED`. Only a versioned matching pre-construction repository/storage refusal establishes no allocation effect. Reconcile the same repository/operation through the existing owner before any retry or other effect; a new operation ID does not clear uncertainty.
 
+## Reviewed protected-base integration
+
+The existing commit tool also supports an optional closed `merge` object:
+
+```json
+{
+  "repository": "mastermind",
+  "operation_id": "<existing-operation>",
+  "expected_head_sha": "<exact-current-owned-head>",
+  "message": "Integrate the reviewed protected base",
+  "merge": {
+    "expected_protected_base_sha": "<qualified-protected-base>",
+    "expected_tree_sha": "<reviewed-prepared-tree>"
+  }
+}
+```
+
+Both merge fields are exact lowercase 40-character object IDs. They do not select a repository path, branch, remote, or fetch operation. The installed host fixes the local tracking ref by the existing repository alias: Mastermind and Terminal use `refs/remotes/origin/master`; Macro uses `refs/remotes/origin/main`. This is a local snapshot check. The normal source owner must separately make the qualified protected base available; matching a local tracking ref does not establish the latest remote state.
+
+Prepare and review the resolved candidate in the original operation's workspace. The publisher derives its tree using the existing private index, verifies the supplied tree and protected-base snapshot, and creates exactly two ordered parents: the expected owned HEAD, then the qualified protected base. It verifies the new commit's tree and parents and rechecks the protected snapshot before the existing compare-and-swap of the owned branch. A stale HEAD, mismatched tree, changed protected snapshot, duplicate parent, already-contained base, or unrelated history refuses before that branch update. The same-tree case is allowed when the missing ancestry is the intended change.
+
+Omitting `merge` retains the ordinary single-parent commit contract. A `MERGE_HEAD` file alone does not select this mode. Push remains the separate, existing clean-workspace and same-branch operation. Existing uncertain-effect and index-reconciliation rules still apply; the merge option provides no alternate publisher or permission to retry an uncertain publication.
+
+Source tests exercise this capability in disposable Git repositories. Real use requires the accepted implementation to be installed through the existing service owner and the intended client's advertised tool schema to include the nested fields. A candidate checkout or a manually added argument is not evidence of installed support.
+
+For an already enrolled fleet-v0.1.10 account, the existing `private_service.py` publisher compatibility migration recognizes the exact sealed index-sync predecessor pair (`d8f7f771…` publisher and `9c4c20dd…` workspace adapter) under its existing closed repository configuration. It replaces only those two modules with the reviewed merge-capable pair, preserves the original configuration bytes, and retains the gateway, fleet/Paper modules, dependency seal, Node/backend identity and permissions. Its historical legacy/index-sync transitions keep their original target pins; a mixed or unrecognized predecessor pair refuses. Qualify the intended account's exact manifest with the existing read-only preflight, then use the same stopped-service, manifest-CAS transaction after source acceptance and active-operation reconciliation. The installer does not start a service or refresh the client's action schema. Failure after manifest commit remains `EFFECT_UNKNOWN`; it gives no automatic retry authority.
+
 ## Workbench boundary
 
 Restoring the existing Workbench C3 tunnel restores only that channel's existing project/lease/allowed paths. It does not make the channel a general Macro/Terminal editor. Do not retarget an account-global root while other conversations may use it, modify the lease to create source authority, or replay a project action through Studio after uncertain Workbench delivery.
