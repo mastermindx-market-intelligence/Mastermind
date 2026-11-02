@@ -168,6 +168,14 @@ class ServiceRuntime:
                 "child_starts": self.child_starts,
                 "child_running": running,
                 "backend_ready": backend_ready,
+                # A verified pinned local HTTP health response is NOT a
+                # provider-authenticated text turn or a Slack role delivery.
+                # Until an authorized host attaches canonical proof, expose
+                # those capabilities explicitly as unverified at all times.
+                "provider_authenticated": False,
+                "native_model_turn_verified": False,
+                "network_egress_policy_verified": False,
+                "slack_roundtrip_verified": False,
                 "child_pid": self.child_pid,
                 "memory_high_water_kib": 0 if self.memory is None else self.memory.high_water,
                 "loopback": True,
