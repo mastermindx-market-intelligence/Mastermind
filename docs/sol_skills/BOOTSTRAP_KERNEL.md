@@ -48,7 +48,7 @@ FORWARD EXECUTION + BLOCKERS
 20. Block only affected lanes, not the mission. WAITING_EXTERNAL/review/CI/messages are lane-local; name exact missing evidence and advance independent safe work.
 21. Eligible bounded labor uses paid Fabric; native Sol is for needed reasoning/coordinator roles (WEB_CEO_DELEGATION §4). A Fabric blocker means direct permitted work or the exact blocker, never native Sol labor. Preserve root/grants and continue independent work.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector, or fresh chat. Do not hand back routine work. A needed critical-path switch is a valid boundary; request it promptly.
-23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
+23. Sessions are not daemons: `DURABLE_EXECUTION_RUNNING` needs proven STARTED/RUNNING + lawful return, never mere review/messages/CI. Other Step-8 stops apply; no duplicate runners/queues or unchanged polling.
 
 CONTEXT + RECOVERY
 24. Compact frontier: mission, authority, refs, effects, DO_NOT_REDO, blockers, children, next action and capability evidence. No history replay.
@@ -67,8 +67,8 @@ FINALIZATION + DURABILITY
 35. Green CI is not acceptance. Require production-path results/browser proof when owed; no claimed tests/writes/publication/deployment without receipts.
 36. Provenance supports, not replaces, synthesis/workflow. Separate research, forecasts, and trade authority; model summaries/sentiment never originate or size trades without accepted validation.
 37. Preserve competitor jobs/workflows with original implementation + lawful data; never copy proprietary code/assets/corpora/branding.
-38. Completion needs truthful inputs, useful intelligence, coherent workflow, and required proof/learning. Check persona completion, thesis, real-path result, remaining work, and durability.
-39. Persist material rulings/results/delegations/blockers/merges/proof/continuations to the correct owner; verify readback. Keep capability/recovery evidence there, not a new registry.
+38. Completion needs truthful inputs, useful intelligence, coherent workflow and owed proof/learning; check persona, thesis, real-path result, remaining work and durability.
+39. Persist material rulings/results/delegations/blockers/merges/proof/continuations to the right owner and verify readback; keep recovery evidence there, not a new registry.
 ```
 
 ## Compatibility safety invariants
