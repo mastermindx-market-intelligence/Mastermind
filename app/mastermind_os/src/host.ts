@@ -27,6 +27,7 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import { decodeResultReferencesEnvelope, type ResultReferencesDocument } from "./result-references";
 import { decodeWorkDocument, type WorkDocument } from "./work";
 import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
 import {
@@ -85,6 +86,11 @@ export interface RawClient {
     resultEnvelopeDigest: string;
     signal: AbortSignal;
   }): Promise<unknown>;
+  readResultReferences?(request: {
+    workRef: string;
+    rootJobId: string;
+    signal: AbortSignal;
+  }): Promise<unknown>;
   readCurrentWindow(request: { signal: AbortSignal }): Promise<unknown>;
 }
 /**
@@ -117,6 +123,10 @@ export interface MissionHost {
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
+  /** Typed retained-result reference index read; same two-field selection grammar. */
+  readResultReferences?: (
+    request: { workRef: string; rootJobId: string; signal: AbortSignal },
+  ) => Promise<ResultReferencesDocument>;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
   }) => Promise<WindowDocument>;
@@ -327,6 +337,29 @@ export function bindMissionHost(
       if (!result) throw new Error("MISSION_V3_RESPONSE_INVALID");
       return result;
     },
+    async readResultReferences({ workRef, rootJobId, signal }) {
+      const selection = normalizeWorkspaceSelection({ workRef, rootJobId });
+      if (!selection) throw new Error("SELECTION_INVALID");
+      const started = epoch;
+      check(signal, started);
+      if (!client.readResultReferences)
+        throw new Error("RESULT_REFERENCES_UNAVAILABLE");
+      const raw = await client.readResultReferences({
+        workRef: selection.workRef,
+        rootJobId: selection.rootJobId,
+        signal,
+      });
+      check(signal, started);
+      // The fixed HTTP body (never a private socket frame) is fully decoded
+      // by the closed result-references decoder. The typed allowed 503
+      // unavailable document is a valid decoded outcome, not an error.
+      const decoded = decodeResultReferencesEnvelope(raw, {
+        workRef: selection.workRef,
+        rootJobId: selection.rootJobId,
+      });
+      if (!decoded) throw new Error("RESULT_REFERENCES_RESPONSE_INVALID");
+      return decoded;
+    },
     async readResult({
       workRef,
       rootJobId,
@@ -467,6 +500,7 @@ export async function createNativeClient(
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_result"
+      | "read_result_references"
       | "read_current_window",
     signal: AbortSignal,
     args?: Record<string, unknown>,
@@ -591,6 +625,13 @@ export async function createNativeClient(
           attempt_id: attemptId,
           result_envelope_digest: resultEnvelopeDigest,
         },
+      });
+    },
+    readResultReferences: ({ workRef, rootJobId, signal }) => {
+      if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_result_references", signal, {
+        selection: { work_ref: workRef, root_job_id: rootJobId },
       });
     },
     readCurrentWindow: ({ signal }) => read("read_current_window", signal),

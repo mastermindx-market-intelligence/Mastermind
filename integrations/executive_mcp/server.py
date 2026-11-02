@@ -563,6 +563,7 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/operator/activity/current",
             ))
@@ -572,6 +573,7 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/operator/activity/current",
             ))
@@ -1310,6 +1312,7 @@ def _build_profile_mcp_app(
                              "/workspace/mission/v3/current",
                              "/workspace/mission/v4/current",
                              "/workspace/result/current",
+                             "/workspace/result-references/current",
                              "/workspace/plan/current",
                              "/workspace/operator/activity/current"))
     if content_app is not None:

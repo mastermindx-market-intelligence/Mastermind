@@ -4298,6 +4298,9 @@ def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
         st_ino=73,
     )
     ledger = []
+    # Do not patch process-global os.fstat/open/close: pytest and Path use them.
+    # The production module resolves its own os binding, so isolate its test seam.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(host, "_config_root_safe", lambda: ledger.append("root"))
     monkeypatch.setattr(
         host, "_transaction_present", lambda: ledger.append("marker") or True
@@ -4397,6 +4400,8 @@ def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
     for host in (first, second):
         monkeypatch.setattr(host, "_config_root_safe", lambda: None)
         monkeypatch.setattr(host, "_transaction_present", lambda: True)
+    # os.fstat is used by pytest internals; patch only this owner's module binding.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
     monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
     monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)

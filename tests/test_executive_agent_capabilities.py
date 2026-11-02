@@ -995,6 +995,7 @@ def test_bounded_policy_source_capability_missing_path_keeps_resolve_exception(t
     with pytest.raises(FileNotFoundError):
         ExecutionCapabilityRegistry.load(tmp_path / "missing-capabilities.json")
 
+
 def test_checked_in_provider_free_acp_profile_uses_exact_workspace_read_grant():
     from control_plane.executive_agent_capabilities import (
         ACP_EXECUTION_SURFACE,

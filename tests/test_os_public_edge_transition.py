@@ -8,7 +8,9 @@ import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os import os_public_edge_transition as module
-from ops.executive_os.os_public_edge import GET_ROUTES, HOST, POST_ROUTES, LEGACY_POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import (
+    GET_ROUTES, HOST, POST_ROUTES, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, asset_routes,
+)
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
     preparation_complete, restart_diagnostic, stage_transition,
@@ -85,6 +87,120 @@ def get_paths_of(config):
 
 def post_paths_of(config):
     return inner_of(config)[1]["match"][0]["path"]
+
+
+def test_legacy_get_profile_is_the_exact_historical_eight():
+    assert LEGACY_GET_ROUTES == (
+        "/os/", "/os/auth/callback", "/workspace/programs/current",
+        "/workspace/work/current", "/workspace/mission/current",
+        "/workspace/mission/v3/current", "/workspace/result/current",
+        "/workspace/window/current",
+    )
+
+
+@pytest.mark.parametrize("fixed", [LEGACY_GET_ROUTES, GET_ROUTES])
+@pytest.mark.parametrize("index_overlap", [False, True])
+@pytest.mark.parametrize("posts", [LEGACY_POST_ROUTES, POST_ROUTES])
+def test_complete_get_profiles_upgrade_only_os_path_lists(fixed, index_overlap, posts):
+    paths = (sorted(list(fixed) + list(asset_routes(OLD))) if index_overlap
+             else sorted(set(fixed) | set(asset_routes(OLD))))
+    live = fullconfig(site=host_route(paths))
+    post_paths_of(live)[:] = list(posts)
+    before = copy.deepcopy(live)
+    planned, prepared, final = transition_values(live)
+    assert live == before
+    for value, expected_get in (
+        (prepared, sorted(set(GET_ROUTES) | set(asset_routes(OLD)) | set(asset_routes(NEW)))),
+        (final, sorted(set(GET_ROUTES) | set(asset_routes(NEW)))),
+    ):
+        expected = copy.deepcopy(before)
+        get_paths_of(expected)[:] = expected_get
+        post_paths_of(expected)[:] = list(POST_ROUTES)
+        assert value == expected
+    assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
+    assert planned["bindings"]["observed_fullconfig_sha256"] == module._sha256(before)
+
+
+@pytest.mark.parametrize("mask", range(1, 7))
+def test_partial_new_get_profiles_refuse(mask):
+    additions = ("/workspace/result-references/current", "/workspace/plan/current",
+                 "/workspace/operator/activity/current")
+    paths = set(LEGACY_GET_ROUTES) | set(asset_routes(OLD))
+    paths.update(path for bit, path in enumerate(additions) if mask & (1 << bit))
+    live = fullconfig(site=host_route(sorted(paths)))
+    with pytest.raises(ValueError, match="observed GET routes differ"):
+        transition_values(live)
+
+
+@pytest.mark.parametrize("fault", ["missing-old", "extra", "wildcard", "wrong-assets",
+                                   "duplicate-fixed", "duplicate-asset", "excess-os"])
+def test_legacy_get_profile_never_admits_extras_or_missing_members(fault):
+    paths = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(OLD)))
+    if fault == "missing-old": paths.remove("/workspace/window/current")
+    elif fault == "extra": paths.append("/workspace/extra/current")
+    elif fault == "wildcard": paths.append("/workspace/*")
+    elif fault == "wrong-assets": paths = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(NEW)))
+    elif fault == "duplicate-fixed": paths.append("/workspace/window/current")
+    elif fault == "duplicate-asset": paths.append("/os/assets/index-DrspFhr6.css")
+    else: paths.extend(["/os/", "/os/"])
+    live = fullconfig(site=host_route(paths))
+    with pytest.raises(ValueError, match="observed GET routes differ"):
+        transition_values(live)
+
+
+def test_retained_legacy_get_wrappers_upgrade_without_masking_the_profile():
+    route = copy.deepcopy(RETAINED_CADDY_ROUTE)
+    branches = route["handle"][0]["routes"][0]["handle"][0]["routes"]
+    # Keep the genuine eight fixed paths, adapter wrappers, group, headers,
+    # legacy POST profile and body limit; substitute only qualified test assets.
+    branches[0]["match"][0]["path"] = sorted(list(LEGACY_GET_ROUTES) + list(asset_routes(OLD)))
+    live = fullconfig(site=route)
+    before = copy.deepcopy(live)
+    planned, prepared, final = transition_values(live)
+    assert live == before
+    for value, expected_get in (
+        (prepared, sorted(set(GET_ROUTES) | set(asset_routes(OLD)) | set(asset_routes(NEW)))),
+        (final, sorted(set(GET_ROUTES) | set(asset_routes(NEW)))),
+    ):
+        expected = copy.deepcopy(before)
+        target = site_of(expected)["handle"][0]["routes"][0]["handle"][0]["routes"]
+        target[0]["match"][0]["path"] = expected_get
+        target[1]["match"][0]["path"] = list(POST_ROUTES)
+        assert value == expected
+    assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
+
+
+@pytest.mark.parametrize("index_overlap", [False, True])
+def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
+    # Public names from the sanitized91c1 diagnosis; contents are synthetic.
+    names = ["index.html", "assets/Inter-Variable-DiVDrmQJ.woff2",
+             "assets/Manrope-Variable-FzEoaBTQ.ttf", "assets/atelier-office-poIrp4_y.jpg",
+             "assets/index-B0ewcH8_.css", "assets/index-dP5lZ6yG.js",
+             "licenses/fonts/Inter-OFL.txt", "licenses/fonts/Manrope-FONTLOG.txt",
+             "licenses/fonts/Manrope-OFL.txt"]
+    def nine(paths):
+        return {"schema": "mastermind.os_assets.v1", "files": [
+            {"path": name, "byte_count": 1, "sha256": "a" * 64, "mime": mime}
+            for name, mime in os_asset_mimes(paths).items()]}
+    old = nine(names)
+    new = nine([name.replace("index-B0ewcH8_", "index-Br9E9bcG")
+                .replace("index-dP5lZ6yG", "index-Br9E9bcG") for name in names])
+    paths = (sorted(list(LEGACY_GET_ROUTES) + list(asset_routes(old))) if index_overlap
+             else sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(old))))
+    live = fullconfig(site=host_route(paths))
+    before = copy.deepcopy(live)
+    prepared = prepare_config(fullconfig=live, current_manifest=old,
+                              candidate_manifest=new, relay_port=49152)
+    final = final_config(fullconfig=live, current_manifest=old,
+                         candidate_manifest=new, relay_port=49152)
+    assert live == before
+    for value, expected_get in (
+        (prepared, sorted(set(GET_ROUTES) | set(asset_routes(old)) | set(asset_routes(new)))),
+        (final, sorted(set(GET_ROUTES) | set(asset_routes(new)))),
+    ):
+        expected = copy.deepcopy(before)
+        get_paths_of(expected)[:] = expected_get
+        assert value == expected
 
 
 def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():

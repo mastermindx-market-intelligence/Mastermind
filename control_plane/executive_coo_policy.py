@@ -138,9 +138,7 @@ class CooCyclePolicy:
             raise CooCyclePolicyError(f"COO cycle policy is unavailable: {exc}") from exc
         if len(raw) > _MAX_COO_POLICY_SOURCE_BYTES:
             raise CooCyclePolicyError("COO cycle policy source exceeds byte limit")
-        values = _extract_block(
-            raw, "coo_cycle_policy" if version == 1 else "coo_hierarchy_policy"
-        )
+        values = _extract_block(raw, "coo_cycle_policy" if version == 1 else "coo_hierarchy_policy")
         scalars = _EXPECTED_SCALARS if version == 1 else _HIERARCHY_SCALARS
         expected_keys = set(_EXPECTED_SCALARS) | {"allowed_child_cost_classes"}
         if set(values) != expected_keys:

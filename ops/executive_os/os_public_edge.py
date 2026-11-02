@@ -21,10 +21,19 @@ POST_ROUTES = LEGACY_POST_ROUTES + (
     "/os/executive/session/reply",
     "/os/executive/session/references",
 )
+# Exact historical GET profile at the installed91c1 edge. This is accepted
+# only as a transition preimage; prepare/final still emit current GET_ROUTES.
+LEGACY_GET_ROUTES = (
+    "/os/", "/os/auth/callback", "/workspace/programs/current",
+    "/workspace/work/current", "/workspace/mission/current",
+    "/workspace/mission/v3/current", "/workspace/result/current",
+    "/workspace/window/current",
+)
 GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
     "/workspace/work/current", "/workspace/mission/current",
     "/workspace/mission/v3/current", "/workspace/result/current",
+    "/workspace/result-references/current",
     "/workspace/plan/current",
     "/workspace/operator/activity/current",
     "/workspace/window/current",

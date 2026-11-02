@@ -617,8 +617,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const token = tokens.executive, ticket = executiveGeneration;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
-    // Observational Executive access must never originate a SEND HTTP request.
-    if ((route === "submit" || route === "session/send") && token.executiveSend !== true)
+    // READ-only may observe but must never originate a SEND or Event ACK effect.
+    if ((route === "submit" || route === "session/send" || route === "direct-native/consume") &&
+      token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
     const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || direct) ? arguments_ : { arguments: arguments_ });
@@ -839,6 +840,26 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         {
           cap: RESULT_HTTP_BODY_BYTES,
           typedUnavailableSchema: "mastermind.workspace_role_result.v1",
+        },
+      );
+    },
+    readResultReferences: ({ workRef, rootJobId, signal }) => {
+      if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      // Fixed retained-result reference read: the same Acquisition READ
+      // token, origin, permission and 16KiB cap as the retained Result
+      // route; the typed allowed 503 unavailable body carries this route's
+      // own closed schema. No extra selector, cursor or arbitrary URL.
+      return read(
+        "acquisition",
+        `${ORIGIN}/workspace/result-references/current?${new URLSearchParams({
+          work_ref: workRef,
+          root_job_id: rootJobId,
+        })}`,
+        signal,
+        {
+          cap: 16_384,
+          typedUnavailableSchema: "mastermind.workspace_result_references.v1",
         },
       );
     },

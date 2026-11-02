@@ -514,7 +514,7 @@ def test_bounded_policy_source_coo_exact_limit_preserves_raw_digest(
     requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
     original_parse = policy_module._extract_block
 
-    def parse_after_close(value, block="coo_cycle_policy"):
+    def parse_after_close(value, block):
         assert len(handles) == 1 and handles[0].closed
         return original_parse(value, block)
 

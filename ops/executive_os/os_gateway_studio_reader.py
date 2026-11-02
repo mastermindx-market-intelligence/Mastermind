@@ -18,8 +18,9 @@ trusting a pathname:
   benign timestamp churn cannot conceal rename/delete/attribute changes;
 * identities, ACLs and named/held descriptor bindings are rechecked before and
   after reads, with prefix watch duplicates retained through final disposal;
-* every refusal is the fixed, non-echo ``StudioObservationError``
-  (``gateway_studio_invalid``); no errno, path, or content is ever echoed.
+* every refusal has fixed public text ``gateway_studio_invalid``; bounded
+  internal traceback notes contain only finite tags/fields/kernel bits/errno,
+  never external paths, payloads or arbitrary exception text.
 
 The fixed observed uid is enforced on every observed object. The group id and
 the home location are qualified caller data and carry no authority claim.
@@ -34,6 +35,7 @@ import os
 import posixpath
 import pwd
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PurePath
 from typing import Callable, NoReturn
@@ -119,6 +121,81 @@ class StudioObservationError(RuntimeError):
 
 def _refuse() -> NoReturn:
     raise StudioObservationError() from None
+
+
+_DIAGNOSTIC_PHASES = frozenset({"prefix_check", "cleanup_before", "cleanup_fd",
+    "cleanup_after", "cleanup_guard", "observation"})
+_DIAGNOSTIC_OBJECTS = frozenset({"prefix_guard", "prefix_directory", "vnode_queue",
+    "ordinary_fd", "watch_fd", "body"})
+_DIAGNOSTIC_REASONS = frozenset({"refused", "closed", "custody_changed",
+    "inheritable", "vnode_event", "monitor_io", "close_failed", "additional_failures"})
+
+
+def _note_failure(error: StudioObservationError, phase: str, object_class: str,
+                  reason: str, *, fields: tuple[str, ...] = (),
+                  event_flags: int | None = None, event_fflags: int | None = None,
+                  error_number: int | None = None) -> None:
+    """Finite internal traceback data; never an exception message, path or value.
+
+    Public error text remains fixed. Notes survive the existing owner exception
+    chain and contain only closed tags, field names, kernel masks and errno.
+    """
+    if (phase not in _DIAGNOSTIC_PHASES or object_class not in _DIAGNOSTIC_OBJECTS
+            or reason not in _DIAGNOSTIC_REASONS or type(fields) is not tuple
+            or any(type(name) is not str or name not in _IDENTITY_FIELDS for name in fields)
+            or len(fields) > len(_IDENTITY_FIELDS)):
+        raise ValueError("invalid internal diagnostic") from None
+    for value, limit in ((event_flags, 0xffff), (event_fflags, 0xffffffff),
+                         (error_number, 4095)):
+        if value is not None and (type(value) is not int or not 0 <= value <= limit):
+            raise ValueError("invalid internal diagnostic") from None
+    notes = getattr(error, "__notes__", [])
+    if len(notes) >= 8:
+        return
+    if len(notes) == 7:
+        reason, fields = "additional_failures", ()
+        event_flags = event_fflags = error_number = None
+    error.add_note(json.dumps({"phase": phase, "object_class": object_class,
+        "reason": reason, "fields": list(fields), "event_flags": event_flags,
+        "event_fflags": event_fflags, "errno": error_number}, sort_keys=True))
+
+
+def _safe_errno(error: BaseException) -> int | None:
+    value = error.errno if isinstance(error, OSError) else None
+    return value if type(value) is int and 0 <= value <= 4095 else None
+
+
+def _merge_failure(target: StudioObservationError, source: BaseException) -> None:
+    # Only our closed diagnostic notes cross the boundary. Never stringify or
+    # chain arbitrary exceptions (OSError.filename can contain external paths).
+    if type(source) is StudioObservationError:
+        for note in getattr(source, "__notes__", ())[:8]:
+            if type(note) is not str or len(note) > 1024:
+                continue
+            try:
+                record = json.loads(note)
+                if set(record) != {"phase", "object_class", "reason", "fields",
+                                   "event_flags", "event_fflags", "errno"}:
+                    continue
+                _note_failure(target, record["phase"], record["object_class"],
+                    record["reason"], fields=tuple(record["fields"]),
+                    event_flags=record["event_flags"], event_fflags=record["event_fflags"],
+                    error_number=record["errno"])
+            except (ValueError, TypeError, KeyError):
+                continue
+
+
+def _dispose_walk(walk: "_Walk") -> None:
+    # Called only by the observation's finally: preserve its already-sanitized
+    # primary refusal and attach cleanup evidence instead of replacing it.
+    active = sys.exc_info()[1]
+    try:
+        walk.close_all()
+    except StudioObservationError as cleanup:
+        if type(active) is not StudioObservationError:
+            raise
+        _note_failure(active, "observation", "body", "refused")
+        _merge_failure(active, cleanup)
 
 
 @dataclass(frozen=True)
@@ -407,7 +484,11 @@ def _make_dispatch_dir_policy(
 
 
 _PREFIX_DIRECTORY_LIMIT = 512
-_DIRECTORY_CUSTODY_FIELDS = _IDENTITY_FIELDS[:-2]
+# Only explicitly watched, nonenumerated traversal prefixes use this projection.
+# Child entries alter directory nlink/size/timestamps without replacing the
+# selected directory. Its held+named object/custody and vnode history remain
+# exact; registration/ACL brackets and every strict namespace still use all9.
+_DIRECTORY_CUSTODY_FIELDS = _IDENTITY_FIELDS[:5]
 
 
 def _require_directory_custody(pre: os.stat_result, post: os.stat_result) -> None:
@@ -474,39 +555,72 @@ class _PrefixMutationGuard:
 
     def check(self) -> None:
         if self._closed:
-            _refuse()
+            error = StudioObservationError()
+            _note_failure(error, "prefix_check", "prefix_guard", "closed")
+            raise error from None
+        object_class = "vnode_queue"
         try:
             if self._queue.fileno() < 0:
-                _refuse()
+                error = StudioObservationError()
+                _note_failure(error, "prefix_check", "vnode_queue", "closed")
+                raise error from None
             for fd, expected in self._held.values():
-                _require_directory_custody(expected, os.fstat(fd))
+                object_class = "prefix_directory"
+                current = os.fstat(fd)
+                try:
+                    _require_directory_custody(expected, current)
+                except StudioObservationError as error:
+                    _note_failure(error, "prefix_check", object_class, "custody_changed",
+                        fields=tuple(name for name in _DIRECTORY_CUSTODY_FIELDS
+                                     if getattr(expected, name) != getattr(current, name)))
+                    raise
                 if os.get_inheritable(fd):
-                    _refuse()
+                    error = StudioObservationError()
+                    _note_failure(error, "prefix_check", object_class, "inheritable")
+                    raise error from None
             # Vnode events coalesce their subscribed bits per registration;
             # a single returned event suffices to refuse, so no finite-buffer
             # truncation can turn a nonempty result into an accepted snapshot.
-            if self._queue.control(None, 1, 0):
-                _refuse()
-        except (OSError, ValueError):
-            _refuse()
+            object_class = "vnode_queue"
+            events = self._queue.control(None, 1, 0)
+            if events:
+                error = StudioObservationError()
+                # Unknown/malformed events still refuse; their arbitrary fields
+                # are never formatted, coerced to strings or used as paths.
+                flags = getattr(events[0], "flags", None)
+                fflags = getattr(events[0], "fflags", None)
+                _note_failure(error, "prefix_check", object_class, "vnode_event",
+                    event_flags=flags if type(flags) is int and 0 <= flags <= 0xffff else None,
+                    event_fflags=fflags if type(fflags) is int and 0 <= fflags <= 0xffffffff else None)
+                raise error from None
+        except (OSError, ValueError) as cause:
+            error = StudioObservationError()
+            _note_failure(error, "prefix_check", object_class, "monitor_io",
+                          error_number=_safe_errno(cause))
+            raise error from None
 
     def close(self) -> None:
         if self._closed:
             return
         self._closed = True
+        failure = StudioObservationError()
         failed = False
         for fd, _ in self._held.values():
             try:
                 os.close(fd)
-            except OSError:
+            except BaseException as cause:
                 failed = True
+                _note_failure(failure, "cleanup_guard", "watch_fd", "close_failed",
+                              error_number=_safe_errno(cause))
         self._held.clear()
         try:
             self._queue.close()
-        except (OSError, ValueError):
+        except BaseException as cause:
             failed = True
+            _note_failure(failure, "cleanup_guard", "vnode_queue", "close_failed",
+                          error_number=_safe_errno(cause))
         if failed:
-            _refuse()
+            raise failure from None
 
 
 class _Walk:
@@ -647,25 +761,42 @@ class _Walk:
             self._paths.pop(fd, None)
 
     def close_all(self) -> None:
+        failure = StudioObservationError()
         failed = False
         try:
             self._prefix_guard.check()
-        except BaseException:
+        except BaseException as cause:
             failed = True
+            _note_failure(failure, "cleanup_before", "prefix_guard", "refused",
+                          error_number=_safe_errno(cause))
+            _merge_failure(failure, cause)
         for fd in reversed(self._fds):
             try:
                 os.close(fd)
-            except OSError:
+            except BaseException as cause:
                 failed = True
+                _note_failure(failure, "cleanup_fd", "ordinary_fd", "close_failed",
+                              error_number=_safe_errno(cause))
         self._fds.clear()
+        self._bindings.clear()
+        self._paths.clear()
         try:
             self._prefix_guard.check()
-        except BaseException:
+        except BaseException as cause:
             failed = True
+            _note_failure(failure, "cleanup_after", "prefix_guard", "refused",
+                          error_number=_safe_errno(cause))
+            _merge_failure(failure, cause)
         finally:
-            self._prefix_guard.close()
+            try:
+                self._prefix_guard.close()
+            except BaseException as cause:
+                failed = True
+                _note_failure(failure, "cleanup_guard", "prefix_guard", "close_failed",
+                              error_number=_safe_errno(cause))
+                _merge_failure(failure, cause)
         if failed:
-            _refuse()
+            raise failure from None
 
     def open_root(self) -> tuple[int, os.stat_result]:
         """Anchor the traversal at ``/`` with the root-prefix directory policy."""
@@ -1384,4 +1515,4 @@ def observe_studio_files(
     except Exception:
         raise StudioObservationError() from None
     finally:
-        walk.close_all()
+        _dispose_walk(walk)

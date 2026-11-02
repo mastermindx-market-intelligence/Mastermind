@@ -1556,11 +1556,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
-            or hashlib.sha256(source.encode()).hexdigest() !=
-            # Exact static hash of the composed Bridge (attention, authorized
-            # policies, reference cursor) on the current readside socket
-            # selector. The reviewed serve_installed_control AST above
-            # remains byte-identical and is independently checked below.
+            or reviewed_source_sha !=
             'c4b87d037656f10a05b2fef9da0df7f752b9ce4b5ceb608930ba6e2a61d953f0'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)

@@ -27,6 +27,10 @@ import os
 import re
 import secrets
 import sqlite3
+
+from control_plane.operator_continuation import (
+    ContinuationAck, OperatorContinuation, OperatorContinuationDraft,
+)
 import threading
 from types import MappingProxyType
 from abc import ABC, abstractmethod
@@ -27468,6 +27472,528 @@ class BoundedDirectResultSnapshot:
     consumption: dict[str, Any]
 
 
+def _current_harness_binding_source_from_snapshot(
+    store: RuntimeStore,
+    connection: sqlite3.Connection | _BoundedRoleResultLoader,
+    token: str,
+) -> ActiveOperatorBindingFacts:
+    """Validate one admitted writer through the canonical snapshot reader.
+
+    Runtime owners call this private helper after snapshot custody checks or
+    through their existing private bounded loader. The store supplies the
+    original lease clock at its unchanged short-circuit validation point.
+    """
+
+    rows = connection.execute(
+        """
+            SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
+                   j.status AS job_status,j.owner_seat,j.orchestration_role,
+                   j.parent_job_id,j.root_job_id,j.orchestration_provenance_json,
+                   j.orchestration_provenance_digest,j.plan_attempt_id,j.plan_digest,
+                   j.plan_step_id,j.repair_round,j.supersedes_job_id,
+                   j.requested_authorities_json AS job_requested_authorities_json,
+                   j.allowed_write_paths_json AS job_allowed_write_paths_json,
+                   j.validation_commands_json AS job_validation_commands_json,
+                   j.authority_policy_hash AS job_authority_policy_hash,
+                   w.provider AS worker_provider,w.account_label AS worker_account_label,
+                   q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
+                   q.provider AS quota_provider,q.status AS quota_status,
+                   q.held_attempt_id,q.fence_counter AS quota_fence_counter,
+                   e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
+                   e.provider_session_id AS epoch_provider_session,
+                   g.process_generation_id,g.worker_id AS generation_worker,
+                   g.generation_number,g.provider_session_id AS generation_provider_session,
+                   g.pid AS generation_pid,g.pgid AS generation_pgid,
+                   g.process_start_identity AS generation_process_start_identity,
+                   g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
+                   g.observed_attestation_digest
+            FROM main.attempts a
+            JOIN main.jobs j ON j.job_id=a.job_id
+            JOIN main.workers w ON w.worker_id=a.worker_id
+            JOIN main.worker_quota_classes q
+              ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
+            LEFT JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
+              AND e.state='CURRENT'
+            LEFT JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
+              AND g.executive_writer_held=1
+            WHERE a.attempt_id=?
+            """,
+        (token,),
+    ).fetchall()
+    cardinality = connection.execute(
+        """
+            SELECT
+              (SELECT COUNT(*) FROM main.jobs WHERE current_attempt_id=?) AS current_jobs,
+              (SELECT COUNT(*) FROM main.harness_session_epochs
+                 WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
+              (SELECT COUNT(*) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
+              (SELECT MAX(g.generation_number) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
+            """,
+        (token, token, token, token),
+    ).fetchone()
+    if len(rows) != 1 or cardinality is None:
+        raise StateConflict("runtime binding source cardinality is not exact")
+    row = rows[0]
+    accepted_statuses = {
+        AttemptStatus.RUNNING.value: JobStatus.RUNNING.value,
+        AttemptStatus.CHECKPOINTED.value: JobStatus.CHECKPOINTED.value,
+        AttemptStatus.CANCEL_REQUESTED.value: JobStatus.CANCEL_REQUESTED.value,
+    }
+    expected_job_status = accepted_statuses.get(str(row["status"]))
+    if (
+        int(cardinality["current_jobs"]) != 1
+        or int(cardinality["current_epochs"]) != 1
+        or int(cardinality["held_writers"]) != 1
+        or cardinality["current_epoch_max_generation"] is None
+        or row["job_current_attempt_id"] != token
+        or expected_job_status is None
+        or row["job_status"] != expected_job_status
+        or row["lease_token"] is None
+        or int(row["lease_expires_at_ms"]) <= store.now_ms()
+        or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+        or row["orchestration_role"] not in _ORCHESTRATION_ROLES
+        or row["quota_worker_id"] != row["worker_id"]
+        or row["quota_quota_class"] != row["quota_class"]
+        or row["quota_provider"] != row["worker_provider"]
+        or row["quota_status"] != WorkerStatus.BUSY.value
+        or row["held_attempt_id"] != token
+        or int(row["quota_fence_counter"]) != int(row["fence_generation"])
+        or row["session_epoch_id"] is None
+        or row["process_generation_id"] is None
+        or row["epoch_state"] != SessionEpochState.CURRENT.value
+        or row["epoch_worker"] != row["worker_id"]
+        or row["generation_worker"] != row["worker_id"]
+        or not row["executive_writer_held"]
+        or row["ended_at_ms"] is not None
+        or not row["epoch_provider_session"]
+        or row["generation_provider_session"] != row["epoch_provider_session"]
+        or int(row["generation_number"])
+        != int(cardinality["current_epoch_max_generation"])
+        or not row["observed_attestation_digest"]
+    ):
+        raise StateConflict(
+            "runtime binding source is not one current actionable OHF writer"
+        )
+
+    try:
+        placement = _load_canonical_digest_pair(
+            row["placement_snapshot_json"],
+            row["placement_snapshot_digest"],
+            name="runtime binding placement snapshot",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding placement evidence is invalid: {exc}"
+        ) from exc
+    if (
+        not isinstance(placement, dict)
+        or placement.get("worker_id") != row["worker_id"]
+        or placement.get("quota_class") != row["quota_class"]
+        or placement.get("provider") != row["worker_provider"]
+        or placement.get("account_label") != row["worker_account_label"]
+    ):
+        raise StateConflict("runtime binding placement evidence drifted")
+
+    try:
+        grant = _load_canonical_digest_pair(
+            row["effective_grant_json"],
+            row["effective_grant_digest"],
+            name="runtime binding effective grant",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding effective grant evidence is invalid: {exc}"
+        ) from exc
+    try:
+        job_authorities = _strict_canonical_json_loads(
+            str(row["job_requested_authorities_json"]),
+            name="runtime binding Job requested authorities",
+        )
+        job_write_paths = _strict_canonical_json_loads(
+            str(row["job_allowed_write_paths_json"]),
+            name="runtime binding Job allowed write paths",
+        )
+        job_validation_argv = _strict_canonical_json_loads(
+            str(row["job_validation_commands_json"]),
+            name="runtime binding Job validation commands",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding effective grant Job evidence is invalid: {exc}"
+        ) from exc
+    grant_keys = {
+        "schema_version",
+        "authorities",
+        "write_paths",
+        "validation_argv",
+        "policy_sha",
+        "job_id",
+        "role",
+    }
+    if (
+        not isinstance(grant, dict)
+        or set(grant) != grant_keys
+        or grant.get("schema_version") != "mastermind.executive_effective_grant/v1"
+        or grant.get("job_id") != row["job_id"]
+        or grant.get("role") != row["orchestration_role"]
+        or grant.get("policy_sha") != row["authority_policy_hash"]
+        or row["job_authority_policy_hash"] != row["authority_policy_hash"]
+        or not _runtime_binding_ordered_unique_strings(
+            job_authorities, require_nonempty=True
+        )
+        or not _runtime_binding_ordered_unique_strings(
+            job_write_paths, require_nonempty=False
+        )
+        or not _runtime_binding_validation_argv(job_validation_argv)
+        or not _runtime_binding_ordered_unique_strings(
+            grant.get("authorities"), require_nonempty=True
+        )
+        or not _runtime_binding_ordered_unique_strings(
+            grant.get("write_paths"), require_nonempty=False
+        )
+        or not _runtime_binding_validation_argv(grant.get("validation_argv"))
+        or any(item not in job_authorities for item in grant["authorities"])
+        or any(item not in job_write_paths for item in grant["write_paths"])
+        or any(item not in job_validation_argv for item in grant["validation_argv"])
+    ):
+        raise StateConflict("runtime binding effective grant evidence drifted")
+    if row["orchestration_role"] in {"plan", "aggregation"} and (
+        grant["authorities"] != ["READ"]
+        or grant["write_paths"]
+        or grant["validation_argv"]
+    ):
+        raise StateConflict(
+            "runtime binding effective grant role semantics drifted"
+        )
+    if row["orchestration_role"] == "review" and (
+        grant["authorities"] != job_authorities
+        or any(item not in {"READ", "RUN_TESTS"} for item in job_authorities)
+        or "READ" not in job_authorities
+        or job_write_paths
+        or grant["write_paths"]
+        or grant["validation_argv"] != job_validation_argv
+        or bool(grant["validation_argv"]) != ("RUN_TESTS" in grant["authorities"])
+    ):
+        raise StateConflict(
+            "runtime binding effective grant role semantics drifted"
+        )
+
+    creation_events = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='JOB_CREATED' AND job_id=?
+               ORDER BY event_id""",
+        (row["job_id"],),
+    ).fetchall()
+    if len(creation_events) != 1:
+        raise StateConflict("runtime binding Job creation cardinality is not exact")
+    creation_event = creation_events[0]
+    try:
+        job_role, job_provenance, job_provenance_digest = (
+            _decode_orchestration_job_fields(row)
+        )
+        creation_payload = _strict_canonical_json_loads(
+            str(creation_event["payload_json"]),
+            name="runtime binding JOB_CREATED payload",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding Job creation evidence is invalid: {exc}"
+        ) from exc
+    expected_creation_actor = (
+        "operator" if job_role in {"aggregation", "plan"} else "coo"
+    )
+    if (
+        not isinstance(job_provenance, dict)
+        or not isinstance(creation_payload, dict)
+        or creation_event["sequence"] != 1
+        or creation_event["actor"] != expected_creation_actor
+        or creation_event["aggregate_type"] != "job"
+        or creation_event["aggregate_id"] != row["job_id"]
+        or creation_event["job_id"] != row["job_id"]
+        or creation_event["attempt_id"] is not None
+        or creation_event["worker_id"] is not None
+        or creation_event["quota_class"] is not None
+        or creation_event["command_id"] != job_provenance.get("command_id")
+        or not isinstance(creation_payload.get("owner_seat"), str)
+        or creation_payload.get("owner_seat") != row["owner_seat"]
+        or creation_payload.get("orchestration_role") != job_role
+        or creation_payload.get("orchestration_provenance_digest")
+        != job_provenance_digest
+    ):
+        raise StateConflict("runtime binding Job creation evidence drifted")
+
+    admissions = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+        (row["process_generation_id"],),
+    ).fetchall()
+    decisions = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='OHF_LAUNCH_DECISION'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+        (row["process_generation_id"],),
+    ).fetchall()
+    seals = connection.execute(
+        """SELECT 1 FROM main.events
+               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
+        (token,),
+    ).fetchall()
+    if seals:
+        retained_job = connection.execute(
+            "SELECT * FROM main.jobs WHERE job_id=?", (row["job_id"],)
+        ).fetchone()
+        retained_attempt = connection.execute(
+            "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
+        ).fetchone()
+        if (len(seals) != 1 or retained_job is None or retained_attempt is None
+                or not _interactive_tx5_admitted(retained_job)
+                or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
+                != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+            raise StateConflict("runtime binding source is not a retained native writer")
+        retained_seal = _validated_interactive_active_plan_seal(
+            connection, attempt_row=retained_attempt, job_row=retained_job)
+        if retained_seal["process_generation_id"] != row["process_generation_id"]:
+            raise StateConflict("runtime binding retained native generation changed")
+    if len(admissions) != 1 or len(decisions) != 1:
+        raise StateConflict(
+            "runtime binding source lacks one active work admission"
+        )
+    admission_event = admissions[0]
+    admission = _strict_canonical_json_loads(
+        str(admission_event["payload_json"]), name="runtime binding work admission"
+    )
+    decision = _strict_canonical_json_loads(
+        str(decisions[0]["payload_json"]), name="runtime binding launch decision"
+    )
+    admission_keys = {
+        "schema_version",
+        "job_id",
+        "attempt_id",
+        "worker_id",
+        "quota_class",
+        "orchestration_role",
+        "process_generation_id",
+        "provider_session_id",
+        "tx3_applied_command_id",
+        "observed_attestation_digest",
+        "principal_observation",
+        "principal_observation_digest",
+        "execution_principal_snapshot_digest",
+        "placement_snapshot_digest",
+        "effective_grant_digest",
+        "policy_sha",
+        "launch_decision",
+    }
+    immutable_digests = (
+        "observed_attestation_digest",
+        "principal_observation_digest",
+        "execution_principal_snapshot_digest",
+        "placement_snapshot_digest",
+        "effective_grant_digest",
+        "policy_sha",
+    )
+    decision_event = decisions[0]
+    tx3: sqlite3.Row | None = None
+    tx3_payload: Any = None
+    tx3_intent: sqlite3.Row | None = None
+    tx3_intent_payload: Any = None
+    expected_tx3_command_id: str | None = None
+    expected_tx3_applied: dict[str, Any] | None = None
+    expected_tx3_intent: dict[str, Any] | None = None
+    try:
+        generation_number = int(row["generation_number"])
+        if generation_number == 1:
+            expected_tx3_applied = {
+                "operation_kind": OperationKind.START_SESSION.value,
+                "provider_session_id": row["epoch_provider_session"],
+                "process_generation_id": row["process_generation_id"],
+            }
+            expected_tx3_intent = {
+                "schema_version": "mastermind.operator_harness_intent/v1",
+                "operation_kind": OperationKind.START_SESSION.value,
+                "attempt_id": token,
+                "session_epoch_id": row["session_epoch_id"],
+                "process_generation_id": row["process_generation_id"],
+                "worker_id": row["worker_id"],
+                "provider_session_id": None,
+            }
+        elif generation_number == 2:
+            expected_tx3_applied = {
+                "operation_kind": OperationKind.RESUME_SESSION.value,
+                "provider_session_id": row["epoch_provider_session"],
+                "process_generation_id": row["process_generation_id"],
+            }
+            expected_tx3_intent = {
+                "operation_kind": OperationKind.RESUME_SESSION.value,
+                "attempt_id": token,
+                "session_epoch_id": row["session_epoch_id"],
+                "process_generation_id": row["process_generation_id"],
+                "worker_id": row["worker_id"],
+                "provider_session_id": row["epoch_provider_session"],
+            }
+        from control_plane.native_desktop_parent import (
+            has_existing_parent, validated_enrollment_receipts,
+        )
+        if has_existing_parent(connection, token):
+            _, _, expected_tx3_intent, expected_tx3_applied = validated_enrollment_receipts(
+                connection, row, str(row["process_generation_id"]))
+        if expected_tx3_applied is not None and expected_tx3_intent is not None:
+            tx3_rows = connection.execute(
+                """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                (
+                    OperationReceiptKind.APPLIED.value,
+                    token,
+                    expected_tx3_applied["operation_kind"],
+                    row["process_generation_id"],
+                ),
+            ).fetchall()
+            tx3_intent_rows = connection.execute(
+                """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                (
+                    OperationReceiptKind.INTENT.value,
+                    token,
+                    expected_tx3_intent["operation_kind"],
+                    row["process_generation_id"],
+                ),
+            ).fetchall()
+            tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
+            tx3_intent = tx3_intent_rows[0] if len(tx3_intent_rows) == 1 else None
+        if tx3 is not None and tx3_intent is not None:
+            tx3_payload = _strict_canonical_json_loads(
+                str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
+            )
+            operation_id = OperationId(str(tx3["aggregate_id"]))
+            expected_tx3_command_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            tx3_intent_payload = _strict_canonical_json_loads(
+                str(tx3_intent["payload_json"]),
+                name="runtime binding TX-3 INTENT",
+            )
+    except (StateConflict, TypeError, ValueError) as exc:
+        raise StateConflict(
+            f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
+        ) from exc
+    if (
+        tx3 is None
+        or expected_tx3_applied is None
+        or expected_tx3_intent is None
+        or tx3["event_type"] != OperationReceiptKind.APPLIED.value
+        or tx3["command_id"] != expected_tx3_command_id
+        or tx3["command_id"] != admission.get("tx3_applied_command_id")
+        or tx3["actor"] != "supervisor"
+        or tx3["aggregate_type"] != "operator_operation"
+        or tx3["job_id"] != row["job_id"]
+        or tx3["attempt_id"] != token
+        or tx3["worker_id"] != row["worker_id"]
+        or tx3["quota_class"] != row["quota_class"]
+        or tx3_payload != expected_tx3_applied
+        or tx3_intent is None
+        or tx3_intent["event_type"] != OperationReceiptKind.INTENT.value
+        or tx3_intent["command_id"] != tx3["aggregate_id"]
+        or tx3_intent["actor"] != "supervisor"
+        or tx3_intent["aggregate_type"] != "operator_operation"
+        or tx3_intent["aggregate_id"] != tx3["aggregate_id"]
+        or tx3_intent["job_id"] != row["job_id"]
+        or tx3_intent["attempt_id"] != token
+        or tx3_intent["worker_id"] != row["worker_id"]
+        or tx3_intent["quota_class"] != row["quota_class"]
+        or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
+        or int(tx3["event_id"]) >= int(decision_event["event_id"])
+        or int(decision_event["event_id"]) >= int(admission_event["event_id"])
+        or tx3_intent_payload != expected_tx3_intent
+    ):
+        raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
+    observation = _validated_admission_principal(row, admission)
+    if (
+        set(admission) != admission_keys
+        or admission_event["command_id"]
+        != f"ohf-work-admit:{row['process_generation_id']}"
+        or admission_event["actor"] != "supervisor"
+        or admission_event["aggregate_type"] != "process_generation"
+        or admission_event["aggregate_id"] != row["process_generation_id"]
+        or admission_event["job_id"] != row["job_id"]
+        or admission_event["attempt_id"] != token
+        or admission_event["worker_id"] != row["worker_id"]
+        or admission_event["quota_class"] != row["quota_class"]
+        or admission.get("schema_version")
+        != "mastermind.orchestration_work_admission/v1"
+        or admission.get("job_id") != row["job_id"]
+        or admission.get("attempt_id") != token
+        or admission.get("worker_id") != row["worker_id"]
+        or admission.get("quota_class") != row["quota_class"]
+        or admission.get("orchestration_role") != row["orchestration_role"]
+        or admission.get("process_generation_id") != row["process_generation_id"]
+        or admission.get("provider_session_id") != row["epoch_provider_session"]
+        or admission.get("observed_attestation_digest")
+        != row["observed_attestation_digest"]
+        or admission.get("placement_snapshot_digest")
+        != row["placement_snapshot_digest"]
+        or admission.get("effective_grant_digest") != row["effective_grant_digest"]
+        or any(
+            not isinstance(admission.get(field), str)
+            or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
+            for field in immutable_digests
+        )
+        or admission.get("launch_decision") != LaunchDecision.ALLOW.value
+        or decision_event["actor"] != "supervisor"
+        or decision_event["aggregate_type"] != "process_generation"
+        or decision_event["aggregate_id"] != row["process_generation_id"]
+        or decision_event["job_id"] != row["job_id"]
+        or decision_event["attempt_id"] != token
+        or decision_event["worker_id"] != row["worker_id"]
+        or decision_event["quota_class"] != row["quota_class"]
+        or decision
+        != {
+            "decision": LaunchDecision.ALLOW.value,
+            "attestation_digest": row["observed_attestation_digest"],
+        }
+        or observation["process_generation_id"] != row["process_generation_id"]
+        or observation["provider_session_id"] != row["epoch_provider_session"]
+        or base_process_identity(observation["process_identity"])
+        != {
+            "pid": row["generation_pid"],
+            "pgid": row["generation_pgid"],
+            "process_start_identity": row["generation_process_start_identity"],
+            "boot_id": row["generation_boot_id"],
+        }
+    ):
+        raise StateConflict("runtime binding admission evidence drifted")
+    return ActiveOperatorBindingFacts(
+        attempt_id=token,
+        session_epoch_id=str(row["session_epoch_id"]),
+        generation_number=int(row["generation_number"]),
+        provider_session_id=str(row["epoch_provider_session"]),
+        provider=str(placement["provider"]),
+        account_label=str(placement["account_label"]),
+        owner_seat=str(row["owner_seat"]),
+        job_id=str(row["job_id"]),
+        worker_id=str(row["worker_id"]),
+        process_generation_id=str(row["process_generation_id"]),
+        pid=int(row["generation_pid"]),
+        pgid=int(row["generation_pgid"]),
+        process_start_identity=str(row["generation_process_start_identity"]),
+        boot_id=str(row["generation_boot_id"]),
+        admitted_unique_id=observation["process_identity"].get("unique_id"),
+        admitted_pidversion=observation["process_identity"].get("pidversion"),
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class Runtime:
     store: RuntimeStore
@@ -28431,6 +28957,271 @@ class Runtime:
             requested_profile_digest=str(row["requested_execution_profile_digest"]),
             observed_attestation_digest=str(row["observed_attestation_digest"]),
         )
+
+    def _continuation_current_facts(
+        self, connection: sqlite3.Connection, *, attempt_id: str,
+        fence_generation: int, lease_token: str, draft: "OperatorContinuationDraft",
+    ) -> ActiveOperatorBindingFacts:
+        """Recheck runtime-derived draft material inside the PREPARE/ACK transaction.
+
+        External references remain bounded source-compiler inputs, not grants.
+        This method never terminalizes, requeues, selects a realm, or dispatches.
+        """
+        target = self.operator_harness._leased(
+            connection, attempt_id=attempt_id, fence_generation=fence_generation,
+            lease_token=lease_token, timestamp=self.store.now_ms(),
+            statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+        )
+        facts = self.current_harness_binding_source(attempt_id, connection=connection)
+        source = connection.execute(
+            "SELECT * FROM attempts WHERE attempt_id=?", (draft.source_attempt_id,)
+        ).fetchone()
+        job = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (target["job_id"],)
+        ).fetchone()
+        if (
+            source is None or job is None
+            or source["job_id"] != target["job_id"]
+            or source["status"] not in {"RATE_LIMITED", "FAILED", "LOST", "COMPLETED", "CANCELLED"}
+            or source["finished_at_ms"] is None
+            or int(source["attempt_number"]) >= int(target["attempt_number"])
+            or draft.target_attempt_id != attempt_id
+            or draft.job_id != target["job_id"]
+            or draft.root_job_id != (job["root_job_id"] or job["job_id"])
+            or draft.target_seat != facts.owner_seat
+            or draft.effective_grant_digest != target["effective_grant_digest"]
+        ):
+            raise StateConflict("continuation source/target identity or authority drifted")
+        # Reuse durable owner observations; absence of death/release is not clearance.
+        if connection.execute(
+            """SELECT 1 FROM process_generations g
+               JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+               WHERE e.attempt_id=? LIMIT 1""",
+            (source["attempt_id"],),
+        ).fetchone() is None:
+            raise StateConflict("continuation predecessor process evidence is missing")
+        unsafe_generation = connection.execute(
+            """SELECT 1 FROM process_generations g
+               JOIN harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+               WHERE e.attempt_id=? AND
+                 (g.ended_at_ms IS NULL OR g.executive_writer_held!=0
+                  OR g.provider_writer_state IS NOT 'RELEASED') LIMIT 1""",
+            (source["attempt_id"],),
+        ).fetchone()
+        if unsafe_generation is not None:
+            raise StateConflict("continuation predecessor process/writer is not released")
+        # The current owner has no accepted RECONCILED operation receipt writer.
+        # Do not infer clearance from a later observation, terminal status or empty diff.
+        if connection.execute(
+            """SELECT 1 FROM events WHERE event_type='OPERATOR_OPERATION_EFFECT_UNKNOWN'
+               AND attempt_id IN (?,?) LIMIT 1""",
+            (source["attempt_id"], attempt_id),
+        ).fetchone() is not None:
+            raise StateConflict("continuation has an unreconciled operation effect")
+        try:
+            placement = _load_canonical_digest_pair(
+                source["placement_snapshot_json"], source["placement_snapshot_digest"],
+                name="continuation predecessor placement",
+            )
+            checkpoint = (
+                None if source["checkpoint_json"] is None else
+                _strict_canonical_json_loads(source["checkpoint_json"], name="continuation checkpoint")
+            )
+        except PersistenceError as exc:
+            raise StateConflict("continuation source evidence is invalid") from exc
+        if (
+            not isinstance(placement, dict)
+            or placement.get("worker_id") != source["worker_id"]
+            or placement.get("quota_class") != source["quota_class"]
+            or not isinstance(placement.get("provider"), str) or not placement["provider"]
+            or not isinstance(placement.get("account_label"), str) or not placement["account_label"]
+            or (placement["provider"], placement["account_label"]) == (facts.provider, facts.account_label)
+        ):
+            raise StateConflict("continuation lacks a distinct accepted predecessor realm")
+        if checkpoint is not None:
+            if not isinstance(checkpoint, dict):
+                raise StateConflict("continuation checkpoint is not an object")
+            keys = ("summary", "completed_steps", "current_state", "artifacts",
+                    "next_actions", "errors", "verdict")
+            checkpoint = {key: checkpoint[key] for key in keys if key in checkpoint}
+        next_actions = [] if checkpoint is None else checkpoint.get("next_actions") or []
+        errors = [] if checkpoint is None else checkpoint.get("errors") or []
+        if not isinstance(next_actions, list) or not isinstance(errors, list):
+            raise StateConflict("continuation checkpoint lists are invalid")
+        next_action = str(next_actions[0] if next_actions else "").strip()
+        next_action = (next_action or f"Continue job {job['job_id']}: {job['objective']}")[:512]
+        unknowns = tuple((str(item or "").strip() or "unknown")[:512] for item in errors[:16])
+        receipt = {
+            "attempt_id": source["attempt_id"], "status": source["status"], "terminal": True,
+            "worker_id": source["worker_id"], "quota_class": source["quota_class"],
+            "checkpoint_sequence": source["checkpoint_sequence"],
+        }
+        material = draft.to_dict()
+        if (material["prior_attempt_receipt"] != receipt
+                or material["checkpoint"] != checkpoint
+                or draft.next_action != next_action or draft.known_unknowns != unknowns):
+            raise StateConflict("continuation draft does not match current source material")
+        return facts
+
+    def _continuation_event(
+        self, connection: sqlite3.Connection, *, command_id: str, event_type: str,
+        facts: ActiveOperatorBindingFacts,
+    ) -> sqlite3.Row | None:
+        """Require one exact Event owner; do not reinterpret a command collision."""
+        rows = connection.execute(
+            "SELECT * FROM events WHERE command_id=? OR (event_type=? AND attempt_id=?)",
+            (command_id, event_type, facts.attempt_id),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise StateConflict("continuation Event cardinality conflicts")
+        row = rows[0]
+        if (row["command_id"] != command_id or row["event_type"] != event_type
+                or row["actor"] != "supervisor" or row["aggregate_type"] != "attempt"
+                or row["aggregate_id"] != facts.attempt_id or row["attempt_id"] != facts.attempt_id
+                or row["job_id"] != facts.job_id or row["worker_id"] != facts.worker_id
+                or row["quota_class"] != self._continuation_quota_class(connection, facts.attempt_id)):
+            raise StateConflict("continuation Event ownership conflicts")
+        return row
+
+    @staticmethod
+    def _continuation_prepared_payload(capsule: "OperatorContinuation", facts: ActiveOperatorBindingFacts) -> dict[str, Any]:
+        return {
+            "schema_version": "mastermind.operator_continuation_prepared/v1",
+            "source_attempt_id": capsule.source_attempt_id,
+            "target_attempt_id": capsule.target_attempt_id,
+            "capsule_id": capsule.capsule_id,
+            "capsule_semantic_digest": capsule.semantic_digest,
+            "provider_session_id": facts.provider_session_id,
+            "session_epoch_id": facts.session_epoch_id,
+            "capsule": capsule.to_dict(),
+        }
+
+    def _continuation_from_event(
+        self, row: sqlite3.Row, facts: ActiveOperatorBindingFacts,
+    ) -> "OperatorContinuation":
+        from datetime import datetime, timezone
+        from control_plane.operator_continuation import OperatorContinuationError, validate_continuation
+        try:
+            payload = _strict_canonical_json_loads(row["payload_json"], name="prepared continuation Event")
+            if not isinstance(payload, dict) or "capsule" not in payload:
+                raise StateConflict("prepared continuation Event has no capsule")
+            capsule = validate_continuation(payload["capsule"])
+            timestamp = datetime.fromtimestamp(row["created_at_ms"] / 1000, timezone.utc)
+            stamp = timestamp.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+            if (payload != self._continuation_prepared_payload(capsule, facts)
+                    or capsule.generated_at != stamp):
+                raise StateConflict("prepared continuation binding or timestamp drifted")
+            return capsule
+        except (OperatorContinuationError, PersistenceError, TypeError, ValueError) as exc:
+            raise StateConflict("prepared continuation Event is invalid") from exc
+
+    def prepare_operator_continuation(
+        self, attempt_id: str, *, fence_generation: int, lease_token: str,
+        draft: "OperatorContinuationDraft",
+    ) -> "OperatorContinuation":
+        """Persist one immutable capsule in Events, under the exact target lease.
+
+        No provider work or source/realm transition is performed here. The source
+        compiler and existing lifecycle/admission owners remain prerequisites.
+        """
+        from datetime import datetime, timezone
+        from control_plane.operator_continuation import (
+            OperatorContinuationDraft, OperatorContinuationError, finalize_continuation,
+        )
+        try:
+            if not isinstance(draft, OperatorContinuationDraft):
+                raise StateConflict("continuation preparation requires a typed semantic draft")
+            draft = OperatorContinuationDraft.from_dict(draft.to_dict())
+            with self.store.transaction() as connection:
+                facts = self._continuation_current_facts(
+                    connection, attempt_id=attempt_id, fence_generation=fence_generation,
+                    lease_token=lease_token, draft=draft,
+                )
+                command = f"operator-continuation:prepare:{attempt_id}"
+                row = self._continuation_event(
+                    connection, command_id=command, event_type="OPERATOR_CONTINUATION_PREPARED", facts=facts,
+                )
+                if row is not None:
+                    capsule = self._continuation_from_event(row, facts)
+                    if capsule.draft.to_dict() != draft.to_dict():
+                        raise StateConflict("target Attempt already prepared different semantic material")
+                    return capsule
+                now = self.store.now_ms()
+                stamp = datetime.fromtimestamp(now / 1000, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                capsule = finalize_continuation(draft, generated_at=stamp)
+                self.store.append_event(
+                    connection, aggregate_type="attempt", aggregate_id=attempt_id,
+                    event_type="OPERATOR_CONTINUATION_PREPARED", command_id=command,
+                    actor="supervisor", job_id=facts.job_id, attempt_id=attempt_id,
+                    worker_id=facts.worker_id, quota_class=self._continuation_quota_class(connection, attempt_id),
+                    payload=self._continuation_prepared_payload(capsule, facts), timestamp_ms=now,
+                )
+                return capsule
+        except OperatorContinuationError as exc:
+            raise StateConflict("continuation semantic material is invalid") from exc
+
+    @staticmethod
+    def _continuation_quota_class(connection: sqlite3.Connection, attempt_id: str) -> str:
+        """Read the already-fenced Attempt's existing quota identity."""
+        return str(connection.execute("SELECT quota_class FROM attempts WHERE attempt_id=?", (attempt_id,)).fetchone()[0])
+
+    def acknowledge_operator_continuation(
+        self, attempt_id: str, *, fence_generation: int, lease_token: str,
+        ack: "ContinuationAck",
+    ) -> None:
+        """Append exact consumption evidence; never complete a Job or Wake."""
+        from control_plane.operator_continuation import (
+            OperatorContinuationError, validate_continuation_ack,
+        )
+        try:
+            ack = validate_continuation_ack(ack)
+            if ack.target_attempt_id != attempt_id:
+                raise StateConflict("continuation ACK names a different Attempt")
+            with self.store.transaction() as connection:
+                self.operator_harness._leased(
+                    connection, attempt_id=attempt_id, fence_generation=fence_generation,
+                    lease_token=lease_token, timestamp=self.store.now_ms(),
+                    statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+                )
+                facts = self.current_harness_binding_source(attempt_id, connection=connection)
+                prepared_command = f"operator-continuation:prepare:{attempt_id}"
+                prepared = self._continuation_event(
+                    connection, command_id=prepared_command,
+                    event_type="OPERATOR_CONTINUATION_PREPARED", facts=facts,
+                )
+                if prepared is None:
+                    raise StateConflict("continuation ACK has no prepared capsule")
+                capsule = self._continuation_from_event(prepared, facts)
+                self._continuation_current_facts(
+                    connection, attempt_id=attempt_id, fence_generation=fence_generation,
+                    lease_token=lease_token, draft=capsule.draft,
+                )
+                ack = validate_continuation_ack(ack, capsule=capsule, provider_session_id=facts.provider_session_id)
+                command = f"operator-continuation:ack:{attempt_id}"
+                payload = {
+                    "schema_version": "mastermind.operator_continuation_acknowledged/v1",
+                    "prepared_command_id": prepared_command,
+                    "session_epoch_id": facts.session_epoch_id, "ack": ack.to_dict(),
+                }
+                previous = self._continuation_event(
+                    connection, command_id=command, event_type="OPERATOR_CONTINUATION_ACKNOWLEDGED", facts=facts,
+                )
+                if previous is not None:
+                    if (_strict_canonical_json_loads(previous["payload_json"], name="continuation ACK Event") != payload
+                            or previous["event_id"] <= prepared["event_id"]):
+                        raise StateConflict("continuation ACK Event conflicts")
+                    return
+                self.store.append_event(
+                    connection, aggregate_type="attempt", aggregate_id=attempt_id,
+                    event_type="OPERATOR_CONTINUATION_ACKNOWLEDGED", command_id=command,
+                    actor="supervisor", job_id=facts.job_id, attempt_id=attempt_id,
+                    worker_id=facts.worker_id, quota_class=self._continuation_quota_class(connection, attempt_id),
+                    payload=payload,
+                )
+        except (OperatorContinuationError, PersistenceError) as exc:
+            raise StateConflict("continuation acknowledgement is invalid") from exc
 
     def current_harness_binding_source(
         self,
