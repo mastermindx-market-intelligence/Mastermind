@@ -1,7 +1,17 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { canNavigateForAutomaticSignIn, registerUnsavedNavigationHold } from "./auth-navigation-guard";
+import { canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold } from "./auth-navigation-guard";
 
 describe("ephemeral auth navigation protection", () => {
+  it("never treats an explicit sign-out marker as passive token expiry", () => {
+    const key = "mastermind-os-auth-logout-v1:synthetic-app";
+    localStorage.removeItem(key);
+    expect(explicitLogoutRecorded()).toBe(false);
+    try {
+      localStorage.setItem(key, "1");
+      expect(explicitLogoutRecorded()).toBe(true);
+    } finally { localStorage.removeItem(key); }
+  });
   it("allows unattended SSO only while all mounted UI owners are safe", () => {
     expect(canNavigateForAutomaticSignIn()).toBe(true);
     let dirty = false;

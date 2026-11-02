@@ -39,10 +39,12 @@ export function useObservedConversation(authGeneration: number, selection: Missi
       publishDrafts(appendDraftSource(latestDrafts.current, context, expectedRevision, source)),
     undoSource: (identity: string, expectedRevision: number) => canEdit() &&
       publishDrafts(undoDraftSource(latestDrafts.current, context, expectedRevision, identity)),
-    invalidateAuth: () => {
-      const next = current.current.authGeneration + 1;
+    invalidateAuth: (preserveUnsentOnPassiveExpiry = false) => {
+      const old = current.current.authGeneration, next = old + 1;
       clear(); current.current = { ...current.current, authGeneration: next };
-      publishDrafts(alignDrafts(latestDrafts.current, next));
+      const previous = latestDrafts.current;
+      publishDrafts(preserveUnsentOnPassiveExpiry && previous.authGeneration === old
+        ? { ...previous, authGeneration: next } : alignDrafts(previous, next));
     },
     begin: () => { clear(); return captureObservedConversation(current.current); },
     accept: (pending: ReturnType<typeof captureObservedConversation>, mission: Missionv3Document | null, window: WindowDocument | null) => {

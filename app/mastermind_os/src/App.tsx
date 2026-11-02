@@ -6,7 +6,9 @@ import type {
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { registerUnsavedNavigationHold } from "./auth-navigation-guard";
+import {
+  canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
+} from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
@@ -1379,6 +1381,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     previousAuth = useRef<string | null>(
       authState ? JSON.stringify(authState) : null,
     ),
+    previousAuthState = useRef<AuthState | null>(authState),
+    passiveExpiryHold = useRef(false),
     previousHostGeneration = useRef(
       window.MastermindMissionHost?.invalidationGeneration?.() ?? 0,
     ),
@@ -1572,7 +1576,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   // A retained command pointer is an effect-reconciliation obligation.
   // Automatic OAuth navigation must not tear down an unresolved UI owner.
   useEffect(() => registerUnsavedNavigationHold(() =>
-    pendingCommand.current !== null || heldKind !== null || recoverInFlight
+    pendingCommand.current !== null || heldKind !== null || recoverInFlight ||
+    passiveExpiryHold.current
   ), [heldKind, recoverInFlight]);
 
   useEffect(() => {
@@ -1782,10 +1787,25 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           generation === previousHostGeneration.current
         )
           return;
+        const before = previousAuthState.current;
+        // Losing a token without acquiring another credential is passive
+        // expiry only on the browser client (never infer this for native).
+        // An explicit/cross-tab logout always clears, even with a dirty draft.
+        const passiveLoss = !native && before !== null &&
+          ((before.acquisition && !state.acquisition) ||
+           (before.content && !state.content)) &&
+          (!state.acquisition || before.acquisition) &&
+          (!state.content || before.content) &&
+          !explicitLogoutRecorded() && !canNavigateForAutomaticSignIn();
         previousAuth.current = serialized;
+        previousAuthState.current = state;
         previousHostGeneration.current = generation;
-        office.invalidateAuth();
-        observedConversation.invalidateAuth();
+        if (passiveLoss) passiveExpiryHold.current = true;
+        else if (state.status === "signing_in" || state.acquisition ||
+                 state.content || explicitLogoutRecorded())
+          passiveExpiryHold.current = false;
+        office.invalidateAuth(passiveLoss);
+        observedConversation.invalidateAuth(passiveLoss);
         commandSlot.current?.controller.invalidate();
         const pending = pendingCommand.current;
         if (pending) {

@@ -91,3 +91,44 @@ explicitly sign in or reopen the page to resume an eligible Auth0 session.
 No draft text, access token or refresh token enters localStorage or the new
 navigation guard. Separate per-resource Content and Executive persistence
 remains blocked on tenant/first-party architecture qualification.
+
+## 2026-11-02: passive expiry with unsent draft — corrected real-browser falsifier
+
+The first local draft-navigation guard **FAILED** its real Chrome canary: a
+short-lived Auth0 grant expired while `office-direction` held a private unsent
+note. The app invalidated the auth generation and cleared the React draft
+*before* the top-level redirect guard could protect it. This negative proof
+is preserved; green isolated UI tests had missed it. The original remote PR
+head was not advanced with that failing candidate.
+
+The correction splits loss of an expiring browser credential (a **one-way**
+loss of an acquisition/content grant, no newly gained resource) from explicit
+logout, new login or a native identity boundary. Expiry still invalidates all
+qualified program/source data, pending authorizations, and effects, and the
+state truthfully becomes `signed_out`; the existing in-memory **user-authored
+unsent draft only** is advanced to the next local presentation epoch. The
+original UI-owner and root expiry guards then defer automatic full-page SSO
+navigation while that page has unsent work. An interactive login or any
+explicit/cross-tab logout always clears the retained draft, even on the same
+public state, and the sign-out marker blocks hidden restoration.
+
+**Real Chrome against exact production CSP, synthetic intercepted Auth0**:
+one initial top-level `prompt=none` PKCE authorization and one token exchange;
+a synthetic 7-second acquisition grant; after >8 seconds the app reported
+`signed_out` with acquisition/content false, still displayed the *exact*
+synthetic unsent Office direction, and had **no second top-level redirect**
+(redirect and exchange counts both remained 1). A separate real-Chrome run
+also invoked the actual owner `signOut()`: the textarea became empty,
+prior-login hint disappeared, the explicit logout marker became `1`, and
+state stayed signed_out. Both real-browser canaries returned rc0 with zero
+page errors. These tests do not use a real Auth0 user/tenant or prove
+per-resource renewal after expiry; an active draft takes precedence over
+unattended reauthentication. The user can explicitly sign in again after
+saving/copying a draft, or reload after it is safely finished.
+
+Source typecheck and full Vitest: 98 files, **1,998 passed, one skipped**;
+production Vite build PASS (advisory bundle-size warning). New React tests
+exercise passive expiry retention, sign-in privacy boundary, explicit logout
+and navigation-hold behavior. Browser content/audience persistence still
+requires actual tenant/first-party confirmation and separate security review.
+No browser draft, refresh token or bearer is written to persistent storage.
