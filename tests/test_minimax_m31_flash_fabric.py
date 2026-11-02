@@ -39,7 +39,7 @@ PREIMAGE_SHA256 = {
 }
 CANDIDATE_SHA256 = {
     "pick.py": "bdc8f9ea6484735ef6a9d3b6d94b1d9d30f6bd9079360b8e02928cf0469d5e47",
-    "sub.sh": "45ef4e9f5dda022ea60fd8d2b3311a2f983ea6659e382b96412df92f089d43ce",
+    "sub.sh": "9c3db528939245bfaef8c0cb96f10fc529b14b2fb258ce4fb5c3752ad6cbf536",
     "mm_codex_exec.sh": "b77b36c5aab464ed31988ac90ce09c90f74794a12f8344311a92f2d4de3a94cb",
     "host_pick.py": "8e76d4276e4b77b55ea6845de2f0e8d44509cc2e799a1f5818516c09cb161682",
     "placement_view.py": "51b46fb6160b35fc06b6e18a2e8d1e5a68da043f57882be74b64aef4c9373b88",
