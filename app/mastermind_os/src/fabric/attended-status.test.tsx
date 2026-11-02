@@ -2,15 +2,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { bindMissionHost, type AuthState, type RawClient } from "../host";
-import { attendedSelection, decodeAttendedStatus } from "./attended-status";
+import { attendedSelection, decodeAttendedStatus, type AttendedStatus } from "./attended-status";
 import { AttendedFabricInspector } from "./AttendedFabricInspector";
 
 afterEach(cleanup);
 const selected = { rootId: "source-root", runId: "source-run" };
-const raw = () => ({ schema: "mastermind.fabric_task_status.v1", run_id: "source-run", root_id: "source-root", parent_run_id: "source-root",
+const raw = (): AttendedStatus => ({ schema: "mastermind.fabric_task_status.v1", run_id: "source-run", root_id: "source-root", parent_run_id: "source-root",
   state: "TERMINAL", rc: 0, signal: "ok", result_available: true, result_bytes: 3672, accepted: false, accepted_by: null,
   acceptance_state: "NOT_ACCEPTED", acceptance_reason: "NO_OUTCOME" });
-function client(read = vi.fn(async () => raw())) {
+function client(read: () => Promise<AttendedStatus> = vi.fn(async () => raw())) {
   let state: AuthState = { status: "signed_in", acquisition: true, content: false, reason: null }, gen = 0;
   const listeners: Array<(s: AuthState) => void> = [];
   const c: RawClient = { getState: () => state, invalidationGeneration: () => gen,
@@ -89,13 +89,13 @@ describe("direct Fabric status-only boundary", () => {
     expect(a.read).toHaveBeenCalledTimes(1);
   });
   it("distinguishes missing retained bytes from an accepted terminal result", async () => {
-    const missing = client(vi.fn(async () => ({ ...raw(), result_available: false, result_bytes: null,
+    const missing = client(vi.fn(async (): Promise<AttendedStatus> => ({ ...raw(), result_available: false, result_bytes: null,
       accepted: null, acceptance_state: "UNVERIFIED" })));
     const first = render(<AttendedFabricInspector host={bindMissionHost(missing.c)} />); enter();
     fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
     await waitFor(() => expect(screen.getByText(/Exit 0: retained result unavailable/)).toBeTruthy());
     first.unmount();
-    const accepted = client(vi.fn(async () => ({ ...raw(), accepted: true, accepted_by: "reviewer",
+    const accepted = client(vi.fn(async (): Promise<AttendedStatus> => ({ ...raw(), accepted: true, accepted_by: "reviewer",
       acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" })));
     render(<AttendedFabricInspector host={bindMissionHost(accepted.c)} />); enter();
     fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
