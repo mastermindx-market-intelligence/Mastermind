@@ -104,8 +104,16 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: false",
         ),
         (
-            "working-directory: integrations/studio_direct_mcp",
-            "working-directory: integrations/wrong_mcp",
+            # Target the *required Fabric gate*, not whichever earlier
+            # independent Studio/ Paper qualification step shares its cwd.
+            # Otherwise a new legitimate preflight silently redirects this
+            # regression to the wrong tool and produces a false failure.
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n"
+            "        if: matrix.index == 0\n"
+            "        working-directory: integrations/studio_direct_mcp",
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n"
+            "        if: matrix.index == 0\n"
+            "        working-directory: integrations/wrong_mcp",
         ),
         (
             "gateway-shared-backend.test.mjs ",
