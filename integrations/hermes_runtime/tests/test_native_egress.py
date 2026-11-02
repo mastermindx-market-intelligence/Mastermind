@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -9,6 +12,8 @@ from integrations.hermes_runtime.egress import (
     PROXY_ENV_NAME, ROLE_ENV_NAME, native_egress_child_env,
 )
 from integrations.hermes_runtime.errors import RuntimeRefusal
+from integrations.hermes_runtime.systemd_unit import render_user_unit
+from integrations.hermes_harness.stack import compose_profile
 
 
 class NativeEgressTests(unittest.TestCase):
@@ -71,6 +76,33 @@ class NativeEgressTests(unittest.TestCase):
                 with self.assertRaises(RuntimeRefusal):
                     native_egress_child_env("mmsecretary", {
                         ROLE_ENV_NAME: "mmsecretary", PROXY_ENV_NAME: value})
+
+    def test_two_units_allow_only_their_own_proxy_address(self):
+        with tempfile.TemporaryDirectory() as root:
+            sources = {}
+            for role in ("mmsecretary", "mmmeta"):
+                profile = compose_profile(
+                    role,
+                    state_dir=Path(root) / (role + "-state"),
+                    secrets_file=Path(root) / (role + ".secrets.env"),
+                    hermes_home=Path(root) / (role + "-home"),
+                )
+                unit = render_user_unit(
+                    profile, python_executable=sys.executable,
+                    repo_root=Path(__file__).resolve().parents[3],
+                )
+                sources[role] = unit
+                allow = [line for line in unit.splitlines()
+                         if line.startswith("IPAddressAllow=")]
+                self.assertEqual(len(allow), 2)
+                self.assertIn("IPAddressAllow=127.0.0.1/32", allow)
+                self.assertIn("IPAddressDeny=any", unit)
+                self.assertNotIn("IPAddressAllow=localhost", unit)
+            self.assertIn("IPAddressAllow=127.0.0.2/32", sources["mmsecretary"])
+            self.assertNotIn("IPAddressAllow=127.0.0.3/32", sources["mmsecretary"])
+            self.assertIn("IPAddressAllow=127.0.0.3/32", sources["mmmeta"])
+            self.assertNotIn("IPAddressAllow=127.0.0.2/32", sources["mmmeta"])
+            self.assertNotEqual(sources["mmmeta"], sources["mmsecretary"])
 
     def test_refusal_never_echoes_private_url(self):
         raw = "http://username:PRIVATE_SECRET_SENTINEL@evil.example:1234"
