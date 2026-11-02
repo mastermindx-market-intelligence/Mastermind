@@ -137,6 +137,29 @@ class GatewaySupervisorTests(unittest.TestCase):
                 finally:
                     runtime.stop()
 
+    def test_http_200_from_wrong_or_unidentified_backend_is_unready(self) -> None:
+        # A healthy-looking local HTTP listener is not Hermes source identity.
+        # Unpinned binaries, malformed JSON, and oversized bodies fail closed.
+        for mode in ("wrong-commit", "missing-commit", "bad-json", "oversized"):
+            with self.subTest(mode=mode):
+                runtime = self._start(stub_mode=mode)
+                try:
+                    deadline = time.time() + 4
+                    while time.time() < deadline and runtime.child_pid is None:
+                        time.sleep(0.02)
+                    self.assertIsNotNone(runtime.child_pid)
+                    time.sleep(0.2)
+                    code, body = http_get(
+                        f"http://127.0.0.1:{runtime.gateway.port}/api/health", TOKEN,
+                    )
+                    payload = json.loads(body)
+                    self.assertEqual(code, 503)
+                    self.assertTrue(payload["child_running"])
+                    self.assertFalse(payload["backend_ready"])
+                    self.assertEqual(payload["status"], "starting")
+                finally:
+                    runtime.stop()
+
     def test_backend_probe_is_loopback_only_and_refuses_invalid_ports(self) -> None:
         for port in (0, -1, True, 65536, "7000", None):
             with self.subTest(port=port):
@@ -208,7 +231,8 @@ class GatewaySupervisorTests(unittest.TestCase):
         )
         profile = load_profile(profile_path, hermes_home=home)
         ready = root / "ready.json"
-        extra = {"HERMES_STUB_TOOLS": str(CENSUS), "HERMES_STUB_READY": str(ready)}
+        extra = {"HERMES_STUB_TOOLS": str(CENSUS), "HERMES_STUB_READY": str(ready),
+                 "HERMES_STUB_COMMIT": PINNED_UPSTREAM_SHA}
         if stub_mode:
             extra["HERMES_STUB_MODE"] = stub_mode
             extra["HERMES_STUB_COUNT"] = str(root / "count")

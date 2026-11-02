@@ -46,7 +46,19 @@ def main() -> int:
                     code = 503 if mode == "unhealthy" else 200
                     if self.path != "/api/health":
                         code = 404
-                    body = b'{"status":"ok"}' if code == 200 else b'{"status":"unavailable"}'
+                    if code != 200:
+                        body = b'{"status":"unavailable"}'
+                    elif mode == "bad-json":
+                        body = b'{"ok":'
+                    elif mode == "missing-commit":
+                        body = b'{"ok":true}'
+                    else:
+                        commit = ("f" * 40 if mode == "wrong-commit"
+                                  else os.environ.get("HERMES_STUB_COMMIT", ""))
+                        payload = {"ok": True, "commit": commit, "auth_required": False}
+                        if mode == "oversized":
+                            payload["padding"] = "a" * 5000
+                        body = json.dumps(payload).encode("utf-8")
                     self.send_response(code)
                     self.send_header("Content-Length", str(len(body)))
                     self.end_headers()

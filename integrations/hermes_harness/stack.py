@@ -93,6 +93,7 @@ def boot_stack(
         extra_child_env={
             "HERMES_STUB_TOOLS": str(tools_fixture or CENSUS),
             "HERMES_STUB_READY": str(ready_path),
+            "HERMES_STUB_COMMIT": PINNED_UPSTREAM_SHA,
         },
     )
     runtime.start()

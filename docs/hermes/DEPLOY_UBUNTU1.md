@@ -300,13 +300,25 @@ with urllib.request.urlopen(request, timeout=5) as response:
 PY
 ```
 
-Expect `200` from health **only after** both the pinned child process is
-running and its separate `127.0.0.1` backend returns HTTP `200` to
-`GET /api/health`. A live PID with an absent or failing backend is reported as
-`503` / `starting` (`backend_ready: false`), not a healthy agent; a crash-loop
-is `503` / `failed`. Readiness uses a bounded loopback-only, keyless probe,
-which does not perform a model completion or prove an authenticated provider,
-company tools, Executive admission, Slack delivery, or long-running acceptance.
+Expect `200` from health **only after** the pinned child process is
+running and its separate `127.0.0.1` backend responds to `GET /api/health`
+with HTTP `200`, a JSON object containing `"ok": true`, and a `commit`
+exactly equal to the protected Hermes donor pin
+`1c0cd667746d3395fe9e1b6c74f8f85952486f18`. This is the pinned
+donor's published lightweight health identity contract in
+`hermes_cli/web_routers/status.py` (the public route is listed in
+`hermes_cli/dashboard_auth/public_paths.py`). A live PID with an absent,
+nonresponsive, wrong-version, unstamped, malformed, oversized, or non-200
+backend reports `503` / `starting` (`backend_ready: false`), not a healthy
+agent; a crash-loop is `503` / `failed`. If this stays at 503, check that
+the **actual executable** invoked by the systemd unit carries the pinned
+donor provenance; copying a pinned source tree alongside a different binary
+does not make that binary trusted. Do not relax the check to accept any HTTP 200.
+The probe is loopback-only, credential-free, capped at 4 KiB and configured
+with a 250ms socket timeout. Matching a public SHA is a provenance
+cross-check, **not cryptographic attestation of the port owner**, nor proof
+of a model completion, company tools, Executive admission, Slack delivery
+or long-running acceptance.
 The gateway token stays in the Python process and is not printed. Unauthenticated
 health is `401`.
 

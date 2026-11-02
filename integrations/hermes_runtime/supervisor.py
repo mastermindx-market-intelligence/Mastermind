@@ -6,6 +6,7 @@ This loop is the inner one the acceptance test can kill without a host bus.
 from __future__ import annotations
 
 import http.client
+import json
 import os
 from pathlib import Path
 import signal
@@ -14,7 +15,7 @@ import subprocess
 import threading
 import time
 
-from .constants import HEALTH_SCHEMA, LOOPBACK_HOST
+from .constants import HEALTH_SCHEMA, LOOPBACK_HOST, PINNED_UPSTREAM_SHA
 from .hermes_config import render_hermes_config
 from .errors import RuntimeRefusal
 from .gateway import Gateway, reserve_loopback_port
@@ -27,17 +28,31 @@ _UNSAFE = set(" \n\r\t\"'`$")
 
 
 def _backend_health_ready(port: int) -> bool:
-    """Probe only the child's local HTTP readiness, never its PID as proof.
+    """Check native Hermes health identity, not only a local HTTP status.
 
-    No secret, redirect, public IP, or caller-controlled host is transmitted.
+    Pinned Hermes /api/health includes ok and its booted Git commit. A
+    different/unstamped executable or another loopback server returning 200
+    must never be promoted to healthy, even if the child PID is still alive.
+    No credential, redirect, public interface or model call is used.
     """
     if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
         return False
     conn = http.client.HTTPConnection(LOOPBACK_HOST, port, timeout=0.25)
     try:
         conn.request("GET", "/api/health")
-        return conn.getresponse().status == 200
-    except (OSError, http.client.HTTPException):
+        response = conn.getresponse()
+        if response.status != 200:
+            return False
+        body = response.read(4097)
+        if len(body) > 4096:
+            return False
+        identity = json.loads(body.decode("utf-8", errors="strict"))
+        return (
+            type(identity) is dict
+            and identity.get("ok") is True
+            and identity.get("commit") == PINNED_UPSTREAM_SHA
+        )
+    except (OSError, http.client.HTTPException, ValueError):
         return False
     finally:
         conn.close()

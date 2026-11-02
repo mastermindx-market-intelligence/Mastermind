@@ -1,12 +1,27 @@
 {
   "backend_readiness_fix": {
     "contract": "gateway health 200 requires live child AND localhost backend GET /api/health HTTP200",
+    "identity_limitations": "Public commit is a provenance check, not cryptographic process attestation; real model inference remains unverified",
+    "identity_required": "200 HTTP alone cannot qualify backend; require JSON ok is true and commit equals exact pinned Hermes SHA",
+    "local_suites_current": {
+      "hermes_delegate": "25/25 PASS",
+      "hermes_harness": "49/49 PASS",
+      "hermes_models": "22/22 PASS",
+      "hermes_runtime": "29/34 macOS, same 4 Linux-only failures plus one /proc error",
+      "hermes_secretary": "51/51 PASS",
+      "hermes_steward": "34/34 PASS"
+    },
     "mock_server": "local fixture only: responsive, unhealthy and silent-child cases",
+    "native_upstream_identity_source": "NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18 hermes_cli/web_routers/status.py and dashboard_auth/public_paths.py",
     "negative_cases": [
       "running child without listener remains 503",
       "running child returning 503 remains 503",
       "invalid backend port never probed",
-      "startup with 5-second memory sampling no longer times out waiting for HTTP readiness"
+      "startup with 5-second memory sampling no longer times out waiting for HTTP readiness",
+      "HTTP 200 with wrong upstream commit rejected as backend_ready=false",
+      "HTTP 200 with missing commit rejected",
+      "HTTP 200 with malformed JSON rejected",
+      "HTTP 200 with response body larger than 4KiB rejected"
     ],
     "no_hermes_process_started": true,
     "no_live_provider_called": true,
@@ -45,7 +60,7 @@
     },
     {
       "path": "docs/hermes/DEPLOY_UBUNTU1.md",
-      "sha256": "f9e2e0e6b7406c892e407f16f73fc087e5fc2f2b1b45b32da2046cb10eb05dcf"
+      "sha256": "b0f91076aaa3d7871fc431f29f85c702977b68d7d1565bf5b45640666e14c22d"
     },
     {
       "path": "integrations/hermes_harness/cli.py",
@@ -65,7 +80,7 @@
     },
     {
       "path": "integrations/hermes_harness/stack.py",
-      "sha256": "63372f137f6cdf207bb9f37b7be44331995a394c80d5ccdad643ea6c62822d71"
+      "sha256": "a0521d73dbfdfd623caae69cbe88071b217fc03cd05c3d8d6793ea096df356dd"
     },
     {
       "path": "integrations/hermes_harness/tests/test_e2e.py",
@@ -89,31 +104,30 @@
     },
     {
       "path": "integrations/hermes_runtime/supervisor.py",
-      "sha256": "b3c9eb27c9dc29d9b4aaf63aebe0960ccf456f699c10723582bb5b003bf3102e"
+      "sha256": "c45fb511a7cf632885fb24b6e9fb3170bd894720e4c788f89fa6ac84f1dbdfee"
     },
     {
       "path": "integrations/hermes_runtime/tests/fixtures/hermes_stub.py",
-      "sha256": "52ba063042e0ebc256b6ea964bf98f7f0438f77007103ebfdd5b6d60401a5cd4"
+      "sha256": "c46d0419d14b61e0cf8fefedcde1b9760388fcd931122d557e39e09284c51c11"
     },
     {
       "path": "integrations/hermes_runtime/tests/test_gateway_supervisor.py",
-      "sha256": "92acddd813e999372ee9c7171d2f8803c681504fc397f1410b74807204771722"
+      "sha256": "91a9802b1e5d9e91dbd9dc564d27d2d9ae2936e7d5b343abe7e299f57777c448"
     }
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
   "previous_head_linux_evidence": {
-    "diagnostic": "exactly one positive test asserted health 200 immediately after start; backend-aware startup correctly returns 503 until ready",
     "does_not_qualify_current_postimage": true,
-    "harness": "41376706940 FAILURE 3.12/3.13",
-    "head": "63cadb4272a24ea1c8c5593f07deec4009cd01ab",
-    "repair": "test_loopback_only_binding_requires_auth now waits for authenticated backend-ready state, without weakening negative false-green tests",
-    "runtime": "41376706957 FAILURE 3.12/3.13"
+    "harness": "41376905493 SUCCESS Python 3.12/3.13",
+    "head": "2646523dbbe799edc3757197505652c2e810d9a6",
+    "repo_ci": "41376905507 IN_PROGRESS at initial check",
+    "runtime": "41376905381 SUCCESS Python 3.12/3.13"
   },
-  "procedure_pin": "1f1b30d1352d2a975624e558bd9da097e4cba417",
+  "procedure_pin": "19cb00cfed26b68f0a8a5cdc0f2f1a9463a3feec",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-02T02:16:39.619578+00:00",
+  "recorded_at": "2026-11-02T02:35:18.185951+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -139,8 +153,8 @@
       "errors": 1,
       "failures": 4,
       "linux_validation_required": true,
-      "passed": 28,
-      "tests": 33
+      "passed": 29,
+      "tests": 34
     },
     "hermes_secretary": {
       "passed": 51,
@@ -169,6 +183,6 @@
     "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
   },
   "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
-  "source_manifest_sha256": "0564d790cab13a5078dc7608ec932c3504a1ef6915783c804ab418ce2151b287",
+  "source_manifest_sha256": "6c23f699bec2ca663cbf655eebfc52965317a21796f9eff701e1664432e3312c",
   "test_host": "m2studio / macOS"
 }
