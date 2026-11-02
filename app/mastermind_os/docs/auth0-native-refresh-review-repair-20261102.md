@@ -52,8 +52,9 @@ and is integrated into the original existing Draft PR branch only after exact-he
 Exact real native Auth0 public-client registration, allowed callback, per-API
 `offline_access` and rotating refresh grants, installed signed app Keychain
 identity/ACL, locked-device/sleep/offline/revocation/idle/real-login journey,
-independent **new-head** non-author security approval, required CI and
-normal reviewed deployment. Browser Content and Executive persistence are
+required CI and the normal protected deployment. The Chairman's 2026-11-02
+completion instruction waives discretionary independent-review holds; it does
+not replace actual tenant, signed-app or authenticated journey evidence. Browser Content and Executive persistence are
 separate first-party architecture/tenant qualifications. Never represent
 this as a guaranteed never-expiring or irrevocable session.
 
@@ -89,8 +90,16 @@ prove fixture credential/marker absence on success. The after-lookup case
 first proves a delayed overwrite is refused, then replaces both items through
 explicit signout/login and proves the newer rotation survives stale cleanup.
 
-The initial worker patch did not compile on the Mac and is not independently
-accepted as returned. The parent-corrected candidate requires actual locked
-default-OFF and flag-ON Mac checks and these synthetic canaries. Real tenant
-configuration, installed-app identity and authenticated restart remain
-separate from synthetic source qualification.
+The initial worker patch did not compile on the Mac; the parent corrected it
+before qualification. Immutable source `3d66c02b5139b69e2b5ec3aa8a35ecd8f5acf6e3`
+passed the actual M2 native frontend build and all four locked Rust gates:
+default-OFF check/test and flag-ON check/test, each using `--all-targets`.
+Each test configuration passed 68 ordinary tests (48 app, 6 local report,
+14 update-verifier), with seven synthetic Keychain tests explicitly ignored.
+The three stale-cleanup canaries above were then separately invoked on the
+same immutable source and all passed, including explicit fixture cleanup.
+Evidence logs: `/tmp/mmos-native-c4-repaired-qualification-20261102.log` and
+`/tmp/mmos-native-c4-synthetic-canaries-20261102.log` on the M2 host. No real
+native client or Executive resource was configured for these runs.
+Real tenant configuration, installed-app identity and authenticated restart
+remain separate from synthetic source qualification.

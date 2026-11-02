@@ -15,6 +15,7 @@ export interface LaunchForm {
   goal: string;
   projectRef: string;
   profileRef: string;
+  frontierModelAlias?: string;
 }
 
 /** Explicit terminal outcome of one dispatched launch. */
@@ -51,6 +52,7 @@ export interface LaunchOrchestratorProps {
   locale?: "en" | "zh-CN";
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
+  frontierModels?: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
   submitting: boolean;
   /** A retained operation or unreadable store prevents a new submission. */
@@ -106,6 +108,7 @@ export function LaunchOrchestrator({
   locale = "en",
   projects,
   profiles,
+  frontierModels,
   submitting,
   blocked = false,
   unavailableReason,
@@ -119,11 +122,13 @@ export function LaunchOrchestrator({
   const goalId = `${formId}-goal`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
+  const frontierId = `${formId}-frontier`;
 
   // Draft state — preserved across error and rerender
   const [draftGoal, setDraftGoal] = useState(initialDraft);
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
+  const [draftFrontier, setDraftFrontier] = useState("");
 
   // In-flight launch owned by this component: armed synchronously when
   // onSubmit is dispatched, resolved only by its correlated completion.
@@ -182,6 +187,16 @@ export function LaunchOrchestrator({
       : "No profiles are currently available."
     : selectedProfileChoice.unavailableReason;
 
+  const frontierRequired = selectedProfile !== "native_research_only" &&
+    (frontierModels !== undefined || draftFrontier !== "");
+  const selectedFrontier = draftFrontier ||
+    frontierModels?.find((choice) => !choice.unavailableReason)?.ref ||
+    frontierModels?.[0]?.ref || "";
+  const frontierChoice = frontierModels?.find((choice) => choice.ref === selectedFrontier);
+  const frontierError = frontierRequired
+    ? (!frontierChoice ? (locale === "zh-CN" ? "请选择可用的 CEO 以继续。" : "Select an available CEO choice to continue.") : frontierChoice.unavailableReason)
+    : undefined;
+
   const goalBytes = utf8ByteLength(draftGoal);
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
   const goalBlank = draftGoal.trim().length === 0;
@@ -192,6 +207,7 @@ export function LaunchOrchestrator({
     !launchPending &&
     !projectStale &&
     !profileStale &&
+    !frontierError &&
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
@@ -209,6 +225,7 @@ export function LaunchOrchestrator({
           goal: draftGoal,
           projectRef: selectedProject,
           profileRef: selectedProfile,
+          ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
         },
         (outcome) => {
           try {
@@ -333,6 +350,29 @@ export function LaunchOrchestrator({
               {locale === "zh-CN" ? "直接运行一个只读任务，不创建规划或子任务。" : "Run one read-only task directly, without planning or child tasks."}
             </p> : null}
           </div>
+
+          {frontierRequired && (
+            <div className="form-field">
+              <label htmlFor={frontierId}>{locale === "zh-CN" ? "指定 CEO" : "Requested CEO"}</label>
+              <select
+                id={frontierId}
+                value={selectedFrontier}
+                onChange={(e) => setDraftFrontier(e.target.value)}
+                disabled={launchPending}
+                aria-invalid={!!frontierError}
+                aria-describedby={frontierError ? `${frontierId}-error` : `${frontierId}-help`}
+              >
+                {!frontierChoice && <option value={selectedFrontier} disabled>{locale === "zh-CN" ? "CEO 选项不可用" : "CEO choice unavailable"}</option>}
+                {frontierModels?.map((choice) => (
+                  <option key={choice.ref} value={choice.ref} disabled={!!choice.unavailableReason}>
+                    {choice.unavailableReason ? `${choice.label} — ${choice.unavailableReason}` : choice.label}
+                  </option>
+                ))}
+              </select>
+              <p id={`${frontierId}-help`}>{locale === "zh-CN" ? "记录此项目指定的 CEO。" : "Records your requested CEO for this project."}</p>
+              {frontierError && <p id={`${frontierId}-error`} className="field-error" role="alert">{frontierError}</p>}
+            </div>
+          )}
 
           {/* Error message */}
           {error && (
