@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import redirect_stdout
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -44,6 +45,12 @@ class OperatorReloadTests(unittest.TestCase):
             secrets_file=self.secrets_file,
             hermes_home=self.state / "current" / "hermes-home",
         )
+        self.native_config = (
+            self.release / "hermes-home" / "profiles" / self.profile.role / "config.yaml"
+        )
+        self.native_config.parent.mkdir(parents=True)
+        self.native_config.write_text("synthetic qualified native config for test\n", encoding="utf-8")
+        self.native_config.chmod(0o600)
         self._write_install_files()
 
     def _write_install_files(self, *, role=None, release=None, upstream_attested=True):
@@ -62,6 +69,8 @@ class OperatorReloadTests(unittest.TestCase):
             "status": "RELEASE_WRITTEN",
             "role": self.profile.role,
             "sha": PINNED_UPSTREAM_SHA,
+            "profile_sha256": hashlib.sha256((self.release / "profile.yaml").read_bytes()).hexdigest(),
+            "hermes_config_sha256": hashlib.sha256(self.native_config.read_bytes()).hexdigest(),
         }), encoding="utf-8")
 
     def _mocks(self, *, status="PASS_CHILD_OUTPUT_OBSERVATION_ONLY"):
@@ -188,6 +197,25 @@ class OperatorReloadTests(unittest.TestCase):
                     cli._canary(self.profile_path, self.hermes)
                 self.assertEqual(err.exception.code, "CANARY_INSTALL_NOT_ATTESTED")
         self.assertEqual(cgroup.call_count, 3)
+        git.assert_not_called()
+        load.assert_not_called()
+        runtime.assert_not_called()
+        canary.assert_not_called()
+
+    def test_modified_installed_profile_or_native_config_refused_without_credentials(self):
+        _, git, load, runtime, canary = self._mocks()
+        original_profile = (self.release / "profile.yaml").read_bytes()
+        original_config = self.native_config.read_bytes()
+        for path, original in (
+            (self.release / "profile.yaml", original_profile),
+            (self.native_config, original_config),
+        ):
+            with self.subTest(path=str(path)):
+                path.write_bytes(original + b"unauthorized-edit")
+                with self.assertRaises(RuntimeRefusal) as cm:
+                    cli._canary(self.profile_path, self.hermes)
+                self.assertEqual(cm.exception.code, "CANARY_INSTALL_NOT_ATTESTED")
+                path.write_bytes(original)
         git.assert_not_called()
         load.assert_not_called()
         runtime.assert_not_called()
