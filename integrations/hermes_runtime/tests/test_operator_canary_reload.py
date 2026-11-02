@@ -77,7 +77,12 @@ class OperatorReloadTests(unittest.TestCase):
         ))
         load = stack.enter_context(mock.patch.object(cli, "load_secrets", return_value=object()))
         runtime = stack.enter_context(mock.patch.object(cli, "ServiceRuntime"))
-        env = {"HERMES_HOME": str(self.profile.hermes_home)}
+        env = {
+            "HERMES_HOME": str(self.profile.hermes_home),
+            "HERMES_DASHBOARD_BASIC_AUTH_USERNAME": "runtime-user-fixture",
+            "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD": "DASHBOARD_PRIVATE_SENTINEL",
+            "HERMES_SLACK_BOT_USER_ID": "UPROJECTBOT001",
+        }
         runtime.return_value._model_child_env.return_value = env
         canary = stack.enter_context(mock.patch(
             "integrations.hermes_harness.native_turn_runner.run_native_canary",
