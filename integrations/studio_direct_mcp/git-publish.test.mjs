@@ -499,7 +499,7 @@ test('an unrelated porcelain ref cannot clear an ambiguous admitted push', async
           pushCount += 1;
           const error = new Error('test-only wrong-ref remote rejection');
           error.code = 1;
-          error.stdout = `!\\t${f.head}:refs/heads/unrelated\\t[remote rejected] (failed)\\n`;
+          error.stdout = ['!', `${f.head}:refs/heads/unrelated`, '[remote rejected] (failed)'].join(String.fromCharCode(9)) + String.fromCharCode(10);
           error.stderr = '';
           throw error;
         }
