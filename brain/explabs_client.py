@@ -43,7 +43,7 @@ class Completion:
     output_tokens: int
     cost_usd: float | None
     provider: str | None
-    is_byok: bool
+    is_byok: bool | None
     request_id: str | None
     account_slot: str | None = None
 
@@ -58,8 +58,9 @@ def chat_completion(
     model: str | None = None,
     client: httpx.Client | None = None,
     api_key: str | None = None,
+    max_tokens: int | None = None,
 ) -> httpx.Response:
-    """Send exactly model + messages, with no sampling overrides.
+    """Send model + messages, optionally with a bounded output-token cap.
 
     Injecting an httpx Client allows fully offline tests. The production base
     URL is fixed to avoid leaking the gateway key to an accidental override.
@@ -73,6 +74,13 @@ def chat_completion(
     if not isinstance(selected_model, str) or not selected_model.strip():
         raise ExperientialError("explabs_invalid_model")
     body = {"model": selected_model, "messages": messages}
+    if max_tokens is not None:
+        if type(max_tokens) is not int or not 1 <= max_tokens <= 32768:
+            raise ExperientialError("explabs_invalid_max_tokens")
+        # The gateway enforces the daily key spend cap against worst-case
+        # output budget, not only the tokens actually generated. The minimal
+        # catalog/smoke wire call keeps its two-field body by default.
+        body["max_tokens"] = max_tokens
     post = client.post if client is not None else httpx.post
     try:
         response = post(
@@ -110,13 +118,17 @@ def complete(
     model: str | None = None,
     client: httpx.Client | None = None,
     api_key: str | None = None,
+    max_tokens: int | None = None,
 ) -> Completion:
     """Return text and gateway-reported usage, without changing sampling."""
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": user})
-    response = chat_completion(messages, model=model, client=client, api_key=api_key)
+    response = chat_completion(
+        messages, model=model, client=client, api_key=api_key,
+        max_tokens=max_tokens,
+    )
     try:
         data: dict[str, Any] = response.json()
         msg = data["choices"][0]["message"]
@@ -131,6 +143,10 @@ def complete(
         if cost is not None and (not math.isfinite(cost) or cost < 0):
             raise ValueError("invalid_gateway_cost")
         provider = data.get("provider") or response.headers.get("x-gateway-provider")
+        raw_lane = usage.get("is_byok")
+        if not isinstance(raw_lane, bool):
+            raw_lane = data.get("is_byok")
+        is_byok = raw_lane if isinstance(raw_lane, bool) else None
         return Completion(
             text=content,
             model=str(data.get("model") or model or os.environ.get("EXPLABS_MODEL") or DEFAULT_MODEL),
@@ -138,7 +154,7 @@ def complete(
             output_tokens=int(usage.get("completion_tokens") or 0),
             cost_usd=cost,
             provider=str(provider) if provider else None,
-            is_byok=usage.get("is_byok") is True or data.get("is_byok") is True,
+            is_byok=is_byok,
             request_id=response.headers.get("x-request-id"),
         )
     except (KeyError, IndexError, TypeError, ValueError):

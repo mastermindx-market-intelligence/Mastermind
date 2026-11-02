@@ -25,7 +25,7 @@ def _env(monkeypatch):
     monkeypatch.setenv("EXPLABS_API_KEY_2", "fake-key-b")
 
 
-def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_gets=None):
+def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_gets=None, expected_max_tokens=1500):
     calls = []
     orgs = orgs or {"fake-key-a": ("id-a", "org-a"), "fake-key-b": ("id-b", "org-b")}
     remaining = remaining or {"fake-key-a": 5.0, "fake-key-b": 5.0}
@@ -58,6 +58,7 @@ def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_ge
         assert json.loads(request.content) == {
             "model": "deepseek-v4.1-flash",
             "messages": [{"role": "user", "content": "one independent task"}],
+            "max_tokens": expected_max_tokens,
         }
         calls.append(key)
         if response is not None:
@@ -605,3 +606,68 @@ def test_brain_client_denies_uncapped_b_before_inference(monkeypatch):
     assert result is None
     assert reason == "explabs_pool_initial_verification_required"
     assert calls == []
+
+
+def test_brain_client_honors_requested_output_ceiling(monkeypatch):
+    """Mastermind's existing max_tokens now reaches the provider request."""
+    _env(monkeypatch)
+    monkeypatch.setenv("BOT_LLM_BACKEND", "explabs")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    http, calls = _transport(
+        expected_max_tokens=384,
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    monkeypatch.setattr(explabs_pool, "_POOL", explabs_pool.AccountPool(http_client=http))
+    from brain import cost_guard
+    monkeypatch.setattr(cost_guard, "record", lambda *a, **kw: None)
+    assert client.call_model("", "one independent task", max_tokens=384) == ("OK", None)
+    assert calls == ["fake-key-b"]
+
+
+def test_invalid_output_ceiling_does_not_quarantine_account(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    seen_gets = []
+    http, calls = _transport(
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+        seen_gets=seen_gets,
+    )
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="invalid_max_tokens"):
+        pool.complete("", "one independent task", max_tokens=0)
+    assert calls == [] and seen_gets == []
+    assert pool.status()["2"]["blocked"] is None
+    assert pool.complete("", "one independent task").text == "OK"
+
+
+def test_missing_billing_lane_flag_holds_account_even_with_zero_cost(monkeypatch):
+    """A zero USD cost with unknown BYOK status is not funding proof."""
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+
+    def response(key, count):
+        return httpx.Response(200, json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 4, "cost": 0.0},
+            # Deliberately absent is_byok: can never infer platform funding.
+        })
+
+    http, calls = _transport(
+        response=response,
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    pool = explabs_pool.AccountPool(http_client=http)
+    served = pool.complete("", "one independent task")
+    assert served.text == "OK"
+    assert served.is_byok is None
+    assert pool.status()["2"]["blocked"] == "explabs_unknown_funding_lane"
+    with pytest.raises(explabs_client.ExperientialError, match="no_eligible_account"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-b"]

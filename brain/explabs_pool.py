@@ -294,10 +294,15 @@ class AccountPool:
         eligible.sort(key=lambda item: (item[0], item[1], item[2]))
         return eligible[0][3]
 
-    def complete(self, system: str, user: str) -> gateway.Completion:
+    def complete(
+        self, system: str, user: str, *, max_tokens: int = 1500
+    ) -> gateway.Completion:
         """One selection, one dispatch, one result. Never retry or cross-account replay."""
         if not available():
             raise gateway.ExperientialError("explabs_pool_disabled")
+        if type(max_tokens) is not int or not 1 <= max_tokens <= 32768:
+            # Local malformed budget must not quarantine a healthy account.
+            raise gateway.ExperientialError("explabs_invalid_max_tokens")
         accounts = _configs()
         model = os.environ.get("EXPLABS_MODEL") or gateway.DEFAULT_MODEL
         with self._lock:
@@ -319,6 +324,7 @@ class AccountPool:
                 system, user, model=model,
                 client=self._client,
                 api_key=account.key,
+                max_tokens=max_tokens,
             )
         except gateway.ExperientialError as exc:
             with self._lock:
@@ -338,10 +344,12 @@ class AccountPool:
                 # absent), the response may already be served and must be
                 # attributed, but never admit another request on that slot
                 # until a separate billing-path reconciliation is done.
-                if reply.is_byok:
+                if reply.is_byok is True:
                     state.blocked = "explabs_unexpected_byok"
                 elif reply.cost_usd is None:
                     state.blocked = "explabs_missing_gateway_cost"
+                elif reply.is_byok is not False:
+                    state.blocked = "explabs_unknown_funding_lane"
                 else:
                     total_tokens = reply.input_tokens + reply.output_tokens
                     if total_tokens > 0:
@@ -382,5 +390,5 @@ class AccountPool:
 _POOL = AccountPool()
 
 
-def complete(system: str, user: str) -> gateway.Completion:
-    return _POOL.complete(system, user)
+def complete(system: str, user: str, *, max_tokens: int = 1500) -> gateway.Completion:
+    return _POOL.complete(system, user, max_tokens=max_tokens)

@@ -81,7 +81,7 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
         if not explabs_pool.available():
             return None, "explabs_unavailable"
         try:
-            reply = explabs_pool.complete(system, user)
+            reply = explabs_pool.complete(system, user, max_tokens=max_tokens)
             # Account for observed usage even if a served reply contains no text.
             # Reuse the existing cost ledger; never estimate a gateway charge.
             try:

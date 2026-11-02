@@ -85,7 +85,7 @@ def test_explicit_backend_records_reported_cost(monkeypatch):
     monkeypatch.setattr(
         explabs_pool,
         "complete",
-        lambda system, user: explabs_client.Completion(
+        lambda system, user, *, max_tokens=1500: explabs_client.Completion(
             text="OK",
             model="deepseek-v4.1-flash",
             input_tokens=7,
@@ -113,3 +113,42 @@ def test_explicit_backend_records_reported_cost(monkeypatch):
 def test_default_remains_unmodified(monkeypatch):
     monkeypatch.delenv("BOT_LLM_BACKEND", raising=False)
     assert client.backend() == "waterfall"
+
+
+@pytest.mark.parametrize("invalid", [0, -1, 32769, 1.5, "1500", True])
+def test_bounded_gateway_rejects_invalid_max_tokens_before_request(monkeypatch, invalid):
+    monkeypatch.setenv("EXPLABS_API_KEY", "fake-key")
+    monkeypatch.setenv("EXPLABS_BASE_URL", explabs_client.BASE_URL)
+    calls = []
+
+    def capture(request):
+        calls.append(request)
+        raise AssertionError("invalid client max_tokens must not dispatch")
+
+    with httpx.Client(transport=httpx.MockTransport(capture)) as transport:
+        with pytest.raises(explabs_client.ExperientialError, match="invalid_max_tokens"):
+            explabs_client.complete("", "Hello", client=transport, max_tokens=invalid)
+    assert calls == []
+
+
+def test_explicit_max_tokens_limits_gateway_worst_case_without_sampling(monkeypatch):
+    monkeypatch.setenv("EXPLABS_API_KEY", "fake-key")
+    monkeypatch.setenv("EXPLABS_BASE_URL", explabs_client.BASE_URL)
+    payloads = []
+
+    def capture(request):
+        payloads.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "cost": 0},
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(capture)) as transport:
+        answer = explabs_client.complete("", "Hello", client=transport, max_tokens=256)
+    assert answer.text == "OK"
+    assert payloads == [{
+        "model": "deepseek-v4.1-flash",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "max_tokens": 256,
+    }]
