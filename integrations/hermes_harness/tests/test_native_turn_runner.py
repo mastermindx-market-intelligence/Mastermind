@@ -85,12 +85,14 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
             env = {
                 "HERMES_HOME": str(profile.hermes_home),
                 "BYTEPLUS_MODELARK_API_KEY": "synthetic-not-live",
-                "HTTPS_PROXY": "http://127.0.0.1:18651",
+                "HTTPS_PROXY": "http://127.0.0.2:18651",
                 "NO_PROXY": "127.0.0.1,localhost",
             }
             self.assertEqual(_private_child_environment(profile, env), env)
             for key, value in [
                 ("HTTPS_PROXY", "http://evil.example:18651"),
+                ("HTTPS_PROXY", "http://127.0.0.1:18651"),
+                ("HTTPS_PROXY", "http://127.0.0.3:18651"),
                 ("HTTPS_PROXY", "http://127.0.0.1:99999"),
                 ("NO_PROXY", "*"),
                 ("HERMES_GATEWAY_TOKEN", "PRIVATE-NOT-LIVE"),
@@ -124,7 +126,7 @@ class SyntheticRunnerTests(unittest.TestCase):
             "HOME": str(self.home),
             "HERMES_HOME": str(self.home),
             "BYTEPLUS_MODELARK_API_KEY": "SOURCE_ONLY_PRIVATE_FIXTURE_KEY",
-            "HTTPS_PROXY": "http://127.0.0.1:18651",
+            "HTTPS_PROXY": "http://127.0.0.2:18651",
             "NO_PROXY": "127.0.0.1,localhost",
         }
 
@@ -162,7 +164,7 @@ class SyntheticRunnerTests(unittest.TestCase):
         )
         self.child_env.pop("BYTEPLUS_MODELARK_API_KEY")
         self.child_env["ZAI_API_KEY"] = "SOURCE_ONLY_META_PROVIDER_FIXTURE"
-        self.child_env["HTTPS_PROXY"] = "http://127.0.0.1:18652"
+        self.child_env["HTTPS_PROXY"] = "http://127.0.0.3:18652"
         self._write()
         receipt = self._run()
         self.assertEqual(receipt["status"], "PASS_CHILD_OUTPUT_OBSERVATION_ONLY")
