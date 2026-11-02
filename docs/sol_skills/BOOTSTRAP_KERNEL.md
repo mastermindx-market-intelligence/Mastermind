@@ -45,7 +45,7 @@ FORWARD EXECUTION + BLOCKERS
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless source/authority/dependency/behavior/evidence changed. Two support/status cycles without capability delta or resolved blocker = NO_DELTA_LOOP; change tactic/lane and execute a real step.
 20. Block the affected lane, not the mission. WAITING_EXTERNAL/review/CI/messages are lane-local. Name the action and actual missing evidence, not a department; advance independent safe scope.
-21. Eligible bounded labor uses paid Fabric; native Sol is for needed reasoning/coordinator roles (WEB_CEO_DELEGATION §4). A Fabric blocker means direct permitted work or that exact blocker, never native Sol labor. Preserve root and actual grants/limits; continue independent work.
+21. Eligible bounded labor: paid Fabric; native Sol for reasoning/coordinators (WEB_CEO_DELEGATION §4). Fabric block: do permitted work or name exact blocker, never native Sol labor. Keep root/grants; continue safe work. Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector, or fresh chat. Do not hand back routine work. A needed critical-path switch is a valid boundary; request it promptly.
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 
@@ -69,6 +69,10 @@ FINALIZATION + DURABILITY
 38. Completion needs truthful inputs, useful intelligence, coherent workflow, and required proof/learning. Check persona completion, thesis, real-path result, remaining work, and durability.
 39. Persist material rulings/results/delegations/blockers/merges/proof/continuations to the correct owner; verify readback. Keep capability/recovery evidence there, not a new registry.
 ```
+
+## Cross-session review discoverability
+
+The approved Project bootstrap remains compact. Assigned Web/Codex/Claude/Grok sessions needing an independent PR or source review must load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the same accepted protected repository revision, discover their actual Fabric tools, and preserve existing review/effect identity before deciding a route. Where independently authorized and eligible, a separate read-only Dot reviewer can be addressed through the existing Slack channel, but delivery is not START and Slack technical findings are not formal GitHub approval. An explicit refused/uncertain effect cannot be rerouted via another provider, host, account or Dot. This source pointer is not proof the live shared ChatGPT Project instructions have been edited or freshly loaded.
 
 ## Compatibility safety invariants
 

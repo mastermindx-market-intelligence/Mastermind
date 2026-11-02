@@ -142,6 +142,10 @@ universal procedure owner. Read it before creating or relying on a temporary wat
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
 
+### Independent-review routing across sessions
+
+For independent PR/source review, load [the single shared session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) and check actual admitted Fabric tool/root/effect evidence. A separately authorized Dot can receive one source-bound Slack technical-review assignment when genuinely eligible; no duplicate or refused-operation workaround, fictional START, or formal GitHub approval inferred from a Slack result. Existing Executive/GitHub authority remains controlling.
+
 ## Agent OS — the organizational knowledge plane
 
 Durable org memory — workstreams (`WS-*`), decisions (`DEC-*`), discoveries (`DSC-*`),
