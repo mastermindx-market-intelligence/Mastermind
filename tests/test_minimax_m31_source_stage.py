@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROLLOUT = ROOT / "ops/native_fabric/quota_continuity/rollout"
 PATCHES = ROOT / "ops/native_fabric/patches"
 PREDECESSOR = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
-CANDIDATE = "5522b68a16fe7a013065d4f12738023dd3842b37b1f056f1fd34ef3d8effdd37"
+CANDIDATE = "c66e4744ca788c081cdffc0ed52e559b6261b9914e806abbae28986edb6db7d4"
 
 
 class MiniMaxM31SourceStage(unittest.TestCase):
