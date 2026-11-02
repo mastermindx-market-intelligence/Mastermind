@@ -85,6 +85,13 @@ class TurnEvidenceTests(unittest.TestCase):
         arr = sample_events(); arr[-1]["exit_code"] = 1
         self.assertIn("RESULT_NOT_COMPLETE", execute(arr)["issue_codes"])
 
+    def test_boolean_exit_is_not_a_successful_native_result(self):
+        arr = sample_events()
+        arr[-1]["exit_code"] = False
+        result = execute(arr)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertIn("RESULT_NOT_COMPLETE", result["issue_codes"])
+
     def test_model_error_fails(self):
         arr = sample_events(); arr[-1]["error"] = "PROVIDER_KEY_MISSING_SECRET_SENTINEL"
         result = execute(arr)
