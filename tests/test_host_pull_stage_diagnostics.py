@@ -52,6 +52,16 @@ def physical():
             'lease_legacy_lanes=0\nlease_unlocked_lanes=0\ntools=claude,python3\n')
 
 
+
+def staged(physical_output='',readiness_output='',physical_rc=0,readiness_rc=0):
+    # Real transport order: physical bytes between physical markers, optional
+    # provider bytes only between readiness markers.
+    return (PREFIX+'PHYSICAL_BEGIN\n'+physical_output+
+            PREFIX+f'PHYSICAL_EXIT {physical_rc}\n'+
+            PREFIX+'READINESS_BEGIN\n'+readiness_output+
+            PREFIX+f'READINESS_EXIT {readiness_rc}\n')
+
+
 def write(backend, tmp_path, monkeypatch, output, rc):
     directory = tmp_path/'observations';directory.mkdir(mode=0o700, exist_ok=True)
     with monkeypatch.context() as m:
@@ -68,18 +78,113 @@ def test_success_retains_physical_and_account_observation(backend,tmp_path,monke
              'transport_alias':'fixture-alias','mode':'glm','config_scope':'launcher_glm_config.v1',
              'validator_sha256':hashlib.sha256(b'inert validator').hexdigest(),
              'observed_at':1000,'status':'known','accounts':{'fixture-account':True}}
-    value=write(backend,tmp_path,monkeypatch,framed()+physical()+
-                'glm_local_account_readiness='+json.dumps(account)+'\n',0)
+    value=write(backend,tmp_path,monkeypatch,staged(physical(), 'glm_local_account_readiness='+json.dumps(account)+'\n'),0)
     assert value['reachable'] is True and value['error'] is None
     assert value['load1']==0.5 and value['ncpu']==8 and value['active_lanes']==0
     assert value['glm_local_account_readiness']==account
     assert value['probe_diagnostic']['framing']=='COMPLETE'
 
 
+
+def test_optional_failure_preserves_validated_physical_but_never_admits_account(
+        backend,tmp_path,monkeypatch):
+    # An optional command can fail after printing a plausible 'known' result.
+    # The actual physical shell return is zero; readiness remains UNKNOWN.
+    untrusted='glm_local_account_readiness={"status":"known","accounts":{"x":true}}\n'
+    value=write(backend,tmp_path,monkeypatch,staged(physical(), untrusted, readiness_rc=1),0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert 'glm_local_account_readiness' not in value
+    assert 'bailian_local_account_readiness' not in value
+    assert value['probe_diagnostic']['framing']=='COMPLETE'
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_ZERO','exit_status':0}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_NONZERO','exit_status':1}
+
+
+def test_successful_readiness_cannot_salvage_missing_physical_metrics(
+        backend,tmp_path,monkeypatch):
+    value=write(backend,tmp_path,monkeypatch,staged('ncpu=8\n'),0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+    assert 'ncpu' not in value and 'glm_local_account_readiness' not in value
+
+
+def test_no_eligible_validators_preserves_plain_physical_observation(
+        backend,tmp_path,monkeypatch):
+    value=write(backend,tmp_path,monkeypatch,staged(physical()),0)
+    assert value['reachable'] is True
+    assert value['probe_diagnostic']['optional_readiness']['exit_status']==0
+    assert 'glm_local_account_readiness' not in value
+    assert 'bailian_local_account_readiness' not in value
+
+
+def test_readiness_cannot_inject_or_replace_physical_metrics(backend,tmp_path,monkeypatch):
+    fake='load1=9999\nncpu=4096\nactive_lanes=0\n'
+    value=write(backend,tmp_path,monkeypatch,staged(physical(),fake,readiness_rc=1),0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert value['probe_diagnostic']['optional_readiness']['state']=='RETURNED_NONZERO'
+
+
+def test_readiness_cannot_rescue_incomplete_physical_even_when_stage_zero(
+        backend,tmp_path,monkeypatch):
+    fake='load1=0.5\nncpu=8\n'
+    value=write(backend,tmp_path,monkeypatch,staged('ts=1000\n',fake),0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+    assert 'load1' not in value and 'ncpu' not in value
+
+
+def test_metrics_outside_physical_frame_do_not_authorize_host(backend,tmp_path,monkeypatch):
+    value=write(backend,tmp_path,monkeypatch,framed()+physical(),0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+
+
+@pytest.mark.parametrize('invalid',[
+    physical().replace('load1=0.5','load1=nan'),
+    physical().replace('ncpu=8','ncpu=0'),
+    physical().replace('ncpu=8','ncpu=8\nncpu=8'),
+    physical().replace('load1=0.5','load1=0.5\nload1=0.7')])
+def test_mandatory_physical_metrics_are_finite_unique_and_positive(
+        backend,tmp_path,monkeypatch,invalid):
+    value=write(backend,tmp_path,monkeypatch,staged(invalid),0)
+    assert value['reachable'] is False and value['error']=='bad_probe_output'
+
+
+
+def test_integrated_parent_physical_failure_with_optional_success_remains_unreachable(
+        backend,tmp_path,monkeypatch):
+    # Preserve the parent F1 regression with real stage-ordered physical bytes.
+    value=write(backend,tmp_path,monkeypatch,
+                staged(physical(),physical_rc=1),1)
+    assert value['reachable'] is False and value['error']=='probe_exit_1'
+    assert 'load1' not in value
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_NONZERO','exit_status':1}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_ZERO','exit_status':0}
+
+
+def test_integrated_parent_complete_forged_envelope_never_survives_failed_readiness(
+        backend,tmp_path,monkeypatch):
+    # This stronger parent fixture has an otherwise fully valid observation.
+    forged={'schema':'mastermind.glm_local_account_readiness.v1',
+            'host':'fixture-host','transport_alias':'fixture-alias','mode':'glm',
+            'config_scope':'launcher_glm_config.v1',
+            'validator_sha256':hashlib.sha256(b'inert validator').hexdigest(),
+            'status':'known','accounts':{'fixture-account':True}}
+    value=write(backend,tmp_path,monkeypatch,
+                staged(physical(),'glm_local_account_readiness='+
+                       json.dumps(forged)+'\n',readiness_rc=1),0)
+    assert value['reachable'] is True and value['error'] is None
+    assert value['load1']==0.5 and value['ncpu']==8
+    assert 'glm_local_account_readiness' not in value
+    assert value['probe_diagnostic']['framing']=='COMPLETE'
+    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_ZERO','exit_status':0}
+    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_NONZERO','exit_status':1}
+
+
+
 @pytest.mark.parametrize('rc,error',[(1,'probe_exit_1'),(78,'probe_exit_78'),
                                    (128,'probe_timeout'),(255,'ssh_unreachable')])
 def test_nonzero_remains_unavailable_even_with_complete_physical(backend,tmp_path,monkeypatch,rc,error):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=rc)+physical(),rc)
+    value=write(backend,tmp_path,monkeypatch,staged(physical(),readiness_rc=rc),rc)
     assert value['reachable'] is False and value['error']==error
     assert 'load1' not in value and 'tools' not in value
     assert value['probe_diagnostic']['transport']['exit_status']==rc
@@ -121,8 +226,7 @@ def test_invalid_transport_status_is_bounded_unknown(backend,tmp_path,monkeypatc
 
 
 def test_failure_diagnostic_never_copies_arbitrary_output(backend,tmp_path,monkeypatch):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=1)+physical()+SECRET+'\n'+
-                'stderr='+SECRET+'\n',1)
+    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET+'\n'+'stderr='+SECRET+'\n',readiness_rc=1),1)
     assert SECRET not in json.dumps(value)
     assert set(value)=={'host','ts','reachable','error','probe_diagnostic'}
     diagnostic=value['probe_diagnostic']
@@ -152,38 +256,35 @@ def test_actual_shell_wrapper_preserves_context_and_physical_status(tmp_path,phy
     assert result.stderr==''
 
 
-def test_physical_failure_with_optional_success_remains_unreachable(
-    backend, tmp_path, monkeypatch
-):
-    value=write(backend,tmp_path,monkeypatch,framed(physical=1)+physical(),1)
-    assert value['reachable'] is False and value['error']=='probe_exit_1'
-    assert 'load1' not in value
-    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_NONZERO','exit_status':1}
-    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_ZERO','exit_status':0}
 
-
-def test_optional_readiness_failure_is_not_physical_failure_or_accepted_account(
-    backend, tmp_path, monkeypatch
-):
-    # A forged known account in optional stdout must not survive optional rc=1.
-    forged={'schema':'mastermind.glm_local_account_readiness.v1',
-            'host':'fixture-host','transport_alias':'fixture-alias','mode':'glm',
-            'config_scope':'launcher_glm_config.v1',
-            'validator_sha256':hashlib.sha256(b'inert validator').hexdigest(),
-            'status':'known','accounts':{'fixture-account':True}}
-    value=write(backend,tmp_path,monkeypatch,
-                framed(readiness=1)+physical()+
-                'glm_local_account_readiness='+json.dumps(forged)+'\n',0)
-    assert value['reachable'] is True and value['error'] is None
-    assert value['load1']==0.5 and value['ncpu']==8
-    assert 'glm_local_account_readiness' not in value
-    assert value['probe_diagnostic']['framing']=='COMPLETE'
-    assert value['probe_diagnostic']['physical']=={'state':'RETURNED_ZERO','exit_status':0}
-    assert value['probe_diagnostic']['optional_readiness']=={'state':'RETURNED_NONZERO','exit_status':1}
-
+@pytest.mark.parametrize('first_rc,second_rc,expected_rc,second_ran',[
+    (0,0,0,True), (1,0,1,False), (0,78,78,True)])
+def test_optional_multi_validator_failure_cannot_be_masked_by_later_success(
+        tmp_path,first_rc,second_rc,expected_rc,second_ran):
+    # Generated GLM and Bailian commands are separate newline-delimited
+    # processes in the ORIGINAL single remote probe. No provider/network runs.
+    source=(SOURCE/'host_pull.sh').read_text()
+    start=source.index('    probe="printf')
+    end=source.index('\n    OUT=$(run_probe',start)
+    assignment=source[start:end]
+    body='PRESERVED=fixture; printf "load1=0.5\\nncpu=8\\n"; (exit 0)'
+    first=f'test "$PRESERVED" = fixture; printf "first_validator=known\\n"; (exit {first_rc})'
+    second=f'printf "second_validator=known\\n"; (exit {second_rc})'
+    env={'PATH':'','HOME':str(tmp_path)}
+    build='probe='+shlex.quote(body)+'\nglm_probe='+shlex.quote(first+'\n'+second)+'\n'+assignment+'\nprintf "%s" "$probe"'
+    generated=subprocess.run(['/bin/bash','--noprofile','--norc','-c',build],env=env,
+                             capture_output=True,text=True,check=True,timeout=8).stdout
+    result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',generated],env=env,
+                          capture_output=True,text=True,timeout=8)
+    assert result.returncode==0, result.stderr  # physical success unaffected
+    assert PREFIX+'PHYSICAL_EXIT 0' in result.stdout
+    assert PREFIX+f'READINESS_EXIT {expected_rc}' in result.stdout
+    assert 'first_validator=known' in result.stdout
+    assert ('second_validator=known' in result.stdout) is second_ran
+    assert result.stderr==''
 
 def test_own_return_retains_diagnostic_without_shared_state_reread(backend,tmp_path,monkeypatch,capsys):
-    value=write(backend,tmp_path,monkeypatch,framed(readiness=1)+physical()+SECRET,1)
+    value=write(backend,tmp_path,monkeypatch,staged(physical()+SECRET+'\n',physical_rc=1,readiness_rc=1),1)
     response=capsys.readouterr().out.strip()
     prefix,encoded=response.split(' probe_diagnostic=',1)
     assert prefix=='reachable=false error=probe_exit_1'
@@ -505,6 +606,53 @@ perl(){ printf 'INERT_TRANSPORT\\n'; };
                           env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
     assert result.returncode==0 and result.stdout=='DETACHED_RESULT\n'
     assert sentinel.read_text()==SECRET and sorted(p.name for p in state.iterdir())==['daemon-existing.json']
+
+
+@pytest.mark.parametrize(('selected', 'sidepass'), [('ubuntu2', False), ('ubuntu0', True)])
+def test_b12_physical_only_scoped_host_never_probes_unselected_ubuntu0(
+    tmp_path, selected, sidepass,
+):
+    # The actual Bash parser and one-pass control flow execute; local shell
+    # functions replace ALL external probes and state changes.
+    here=tmp_path/'collector';here.mkdir()
+    (here/'host_pull_probe.template').write_text('INERT_TEMPLATE')
+    (here/'host_pull_backend.py').write_text('INERT_BACKEND')
+    record=tmp_path/'observed-probes'
+    source=(SOURCE/'host_pull.sh').read_text()
+    source=source.replace('HERE="$(cd "$(dirname "$0")" && pwd)"',
+                          'HERE='+shlex.quote(str(here)),1)
+    marker='\nwhile true; do\n  pass_once'
+    assert source.count(marker)==1
+    spy="""run_probe(){
+      if [ "$#" -ge 4 ]; then marker="$4"; else marker=""; fi
+      printf 'RUN:%s:%s\\n' "$2" "$marker" >> RECORD_PATH
+      printf 'INERT_FRAME\\n'
+      return 0
+    };
+    """.replace('RECORD_PATH',shlex.quote(str(record)))
+    source=source.replace(marker,'\n'+spy+marker,1)
+    stubs="""mkdir(){ /bin/mkdir "$@"; };
+    date(){ if [ "$1" = "+%s" ]; then printf '1000'; else printf 'INERT_DATE'; fi; };
+    python3(){
+      if [ "$1" = "-c" ]; then printf "'inert_runtime'"; return 0; fi
+      case "$3" in
+        read-hosts) printf '%s|0|mmx-%s|/inert|0\\n' 'HOST' 'HOST';;
+        write-state) printf 'INERT_STATE';;
+        physical-diagnostic-prepare) printf 'mmx-ubuntu0\\nINERT_DIAGNOSTIC';;
+        physical-diagnostic-result) while IFS= read -r _line; do :; done; printf 'INERT_DONE';;
+        *) return 97;;
+      esac
+    };
+    """.replace('HOST',selected)
+    cmd=['/bin/bash','--noprofile','--norc','-c',stubs+source,'fixture',
+         '--once','--qualification-mode','physical-only','--host',selected]
+    result=subprocess.run(cmd,env={'PATH':'','HOME':str(tmp_path)},
+                          capture_output=True,text=True)
+    assert result.returncode==0,(result.stdout,result.stderr)
+    calls=record.read_text().splitlines()
+    assert calls[0]=='RUN:mmx-'+selected+':'
+    assert (calls[1:]==['RUN:mmx-ubuntu0:fixed-physical-diagnostic']
+            if sidepass else calls[1:]==[])
 
 
 @pytest.mark.parametrize('defect',['symlink','changed','oversize'])

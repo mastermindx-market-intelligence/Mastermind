@@ -20,10 +20,11 @@ TEMPLATE = CANDIDATE / "host_pull_launchd.plist.template"
 PUBLISHER = ROOT / "ops/native_fabric/quota_continuity/rollout/native_generation.py"
 MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manifest.json"
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
-HOST_PULL_SHA = "ed43522f51bd95256be30fac980b0e833a6f486917ffc0e9e64078ad7e6f9d9a"
+HOST_PULL_SHA = "7fb95f2e08f8ff03501b5d41b54f224577d5e842a2db105b4de93a758e179a12"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
+    "--qualification-mode", "__QUALIFICATION_MODE__",
 ]
 HISTORICAL_ALLOWLIST = (
     'or parts[1] in {"yes", "host_pull_probe.template",\n'
@@ -103,8 +104,8 @@ def test_template_program_arguments_are_immutable():
 def test_manifest_enrolls_the_pair_without_an_installed_preimage():
     manifest = json.loads(MANIFEST_PATH.read_text())
     inventory = json.loads(INVENTORY_PATH.read_text())
-    assert len(manifest) == len(inventory["files"]) == 97
-    assert inventory["native_code_files"] == 97
+    assert len(manifest) == len(inventory["files"]) == 100
+    assert inventory["native_code_files"] == 100
     assert inventory["baseline_code_files"] == 75
     for path in (DAEMON, TEMPLATE):
         raw = path.read_bytes()
@@ -120,7 +121,7 @@ def test_manifest_enrolls_the_pair_without_an_installed_preimage():
     host = inventory["files"]["ext/host_pull.sh"]
     assert host["sha256"] == HOST_PULL_SHA
     assert host["installed_preimage_sha256"] == HOST_PULL_PREIMAGE
-    assert host["bytes"] == 12150
+    assert host["bytes"] == 14658
     assert manifest["ext/host_pull.sh"] == HOST_PULL_SHA
     assert not (CANDIDATE / "launchd").exists()
     daemon = DAEMON.read_text()

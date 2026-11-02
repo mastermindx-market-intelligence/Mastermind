@@ -39,6 +39,7 @@ from ops.executive_os import autonomy_control as owner
 from ops.executive_os import canonical_paid_definition as base
 from ops.executive_os import canonical_paid_qualification as qual
 from ops.executive_os import release_manifest as manifest_owner
+from tests.paid_initializer_fixtures import commitment,witness,module as initializer_module
 
 SHA = 'b' * 40
 TREE = 'c' * 40
@@ -259,7 +260,17 @@ def observation_document(request):
               'sha256': digest_raw(b'mechanical-python'),
               'team_identifier': None, 'size': 12345, 'device': 1, 'inode': 42,
               'mode': 0o100555, 'uid': 0, 'gid': 0, 'mtime_ns': 1}
-    return {'schema': 'mastermind.paid_host_observation/v1', 'request': request,
+    pre=witness(request)
+    c=request['initializer_commitment']
+    if c['initialization_contract']==initializer_module.NESTED_CONTRACT:
+        from ops.native_fabric.quota_continuity.candidate import paid_initializer_nested_data as nested
+        helper=c['nested_helper']
+        pre.update(snapshot_sha256=nested.TRANSFORMED_SHA256,
+            nested_inputs=dict(schema_version=nested.INPUTS_SCHEMA,initialization_contract=nested.CONTRACT,legacy_outer_sha256=nested.LEGACY_SHA256,transformed_outer_sha256=nested.TRANSFORMED_SHA256,helper=dict(schema_version='mastermind.paid_helper_private_data/v1',**{k:v for k,v in helper.items() if k!='path'})),
+            helper_origin_identity=[1,43,0o100600,helper['uid'],helper['gid'],1,helper['size'],100,100])
+        pre['host_env_identity'][6]=c['host_env']['size']
+    return {'schema': 'mastermind.paid_host_observation/v2', 'request': request,
+            'pre_execution':pre,
             'binary': binary, 'worker_uid': 501, 'worker_gid': 20,
             'worker_user': 'chriswong',
             'boot_id': str(uuid.UUID(int=0x12345678123456781234567812345678)),
@@ -269,7 +280,7 @@ def observation_document(request):
             'context_identity': {
                 'profile': 'canonical-paid-physical-owner.v1',
                 'host_env_path': lane + '/ext/HOST_ENV.sh',
-                'host_env_sha256': digest_raw(b'HOST_ENV'),
+                'host_env_sha256': c['host_env']['sha256'],
                 'kernel_executable': request['python_path'], 'lane_root': lane}}
 
 
@@ -393,6 +404,11 @@ def env(tmp_path, monkeypatch, request):
     monkeypatch.setattr(qual, '_resolve_rename_swap',
                         lambda: make_swap(swap_calls, fail))
     loaded = load_qualifier_module(release / QUALIFIER_EXT)
+    def selected_initializer(expected):
+        raw=files[QUALIFIER_EXT+'/paid_initializer.py']
+        assert digest_raw(raw)==expected
+        return initializer_module,raw
+    monkeypatch.setattr(loaded,'_initializer_module',selected_initializer)
     monkeypatch.setattr(loaded, '_transport_principal', lambda: {
         'uid': 501, 'gid': 20, 'user': 'chriswong', 'home': '/Users/chriswong'})
     snapshot = {'sources': {name: {'sha256': digest, 'identity': (1, 2)}
@@ -467,13 +483,18 @@ def capture_root(tmp_path):
 def run_publish(env, tmp_path, **overrides):
     kwargs = dict(QUALIFY_KWARGS)
     kwargs['capture_root'] = capture_root(tmp_path)
+    c=commitment(host=HOST_KEY,alias=ALIAS,python=PYTHON_PATH,capture=kwargs['capture_root'],uid=501,gid=20,user='chriswong',home='/Users/chriswong',binary_sha=digest_raw(b'mechanical-python'),hook_sha=digest_raw(b'HOST_ENV'))
+    raw=initializer_module.canonical(c)
+    kwargs.update(initializer_raw=raw,expected_initializer_sha256=digest_raw(raw))
     kwargs.update(overrides)
     return qual.qualify_and_publish(SHA, CONTROL_SHA, env.aggregate, **kwargs)
 
 
 
 def probe_request(env, tmp_path):
-    return {'schema': 'mastermind.paid_host_probe_request/v1',
+    c=commitment(host=HOST_KEY,alias=ALIAS,python=PYTHON_PATH,capture=capture_root(tmp_path),uid=501,gid=20,user='chriswong',home='/Users/chriswong',binary_sha=digest_raw(b'mechanical-python'),hook_sha=digest_raw(b'HOST_ENV'))
+    return {'schema': 'mastermind.paid_host_probe_request/v2',
+            'initializer_commitment':c,'initializer_commitment_sha256':digest_raw(initializer_module.canonical(c)),
             'host_ref': HOST_KEY, 'transport_alias': ALIAS, 'nonce': 'n' * 64,
             'python_path': PYTHON_PATH, 'capture_root': capture_root(tmp_path),
             'release_sha': SHA,
@@ -677,7 +698,8 @@ def test_signature_has_no_caller_boolean_or_factory_surface():
     assert set(parameters) == {
         'expected_release_sha', 'expected_control_sha256',
         'expected_definition_sha256', 'transport_host', 'python_path',
-        'capture_root', 'worker_id', 'quota_class', 'account_label'}
+        'capture_root', 'worker_id', 'quota_class', 'account_label',
+        'initializer_raw','expected_initializer_sha256'}
 
 
 
@@ -820,17 +842,17 @@ def test_registry_and_alias_drift_refused(env, tmp_path, monkeypatch):
         return raw, child
 
     monkeypatch.setattr(env.loaded, '_owned_transport', drifting_transport)
-    with pytest.raises(qual.CanonicalPaidQualificationRefused):
+    with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):
         run_publish(env, tmp_path)
     assert env.counts == {'qualify': 1, 'consume': 1}
-    assert not env.staging.exists()
+    assert set(os.listdir(env.staging))=={'qualification-intent.json'}
     monkeypatch.setattr(env.loaded, '_owned_transport', env.real_transport)
     monkeypatch.setattr(env.loaded, '_snapshot',
                         lambda hosts_path, host_ref, expected: dict(
                             env.snapshot, alias='other-alias'))
     with pytest.raises(qual.CanonicalPaidQualificationRefused):
         run_publish(env, tmp_path)
-    assert env.counts == {'qualify': 2, 'consume': 2}
+    assert env.counts == {'qualify': 1, 'consume': 1}
 
 
 
@@ -955,7 +977,7 @@ def test_partial_stage_failure_retains_residue_as_unknown(env, tmp_path, monkeyp
     with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):
         run_publish(env, tmp_path)
     assert env.staging.exists() and env.destination.is_dir()
-    assert set(os.listdir(env.staging)) == {'bindings.json'}
+    assert set(os.listdir(env.staging)) == {'qualification-intent.json'}
     assert not (env.staging / (base.PAID_LABEL + '.plist')).exists()
     assert ((env.destination / 'profile.json').read_bytes()
             == env.original['profile.json'])
@@ -1017,7 +1039,7 @@ def test_forged_observation_cannot_pass_real_opaque_consume(env, tmp_path):
                    release_sha=SHA,
                    source_manifest_sha256=request['source_manifest_sha256'],
                    preimage_sha256=env.aggregate,
-                   expected_sources=dict(request['sources_sha256']))
+                   expected_sources=dict(request['sources_sha256']),initializer_commitment=request['initializer_commitment'])
     with pytest.raises(env.loaded.QualificationRefused):
         consume(observation_document(request), **binding)
     observed = env.loaded.qualify_paid_host(python_path=PYTHON_PATH,
@@ -1089,3 +1111,87 @@ def test_no_cleanup_or_replay_after_unknown(env, tmp_path):
     with pytest.raises(qual.CanonicalPaidQualificationRefused):
         run_publish(env, tmp_path)
     assert set(os.listdir(env.staging)) == staging_names
+
+
+def test_missing_expected_initializer_refuses_before_reservation_or_transport(env,tmp_path):
+    with pytest.raises(qual.CanonicalPaidQualificationRefused):
+        run_publish(env,tmp_path,initializer_raw=None,expected_initializer_sha256=None)
+    assert env.counts=={'qualify':0,'consume':0} and not env.staging.exists()
+
+
+def test_initializer_transport_loss_keeps_original_reservation_and_refuses_replay(env,tmp_path,monkeypatch):
+    def lose(request,principal):
+        assert set(os.listdir(env.staging))=={'qualification-intent.json'}
+        intent=json.loads((env.staging/'qualification-intent.json').read_bytes())
+        assert intent['binding']['initializer_commitment']==request['initializer_commitment']
+        raise OSError('inert original transport return loss')
+    monkeypatch.setattr(env.loaded,'_owned_transport',lose)
+    with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):run_publish(env,tmp_path)
+    original=(env.staging/'qualification-intent.json').read_bytes()
+    assert env.counts=={'qualify':1,'consume':0}
+    with pytest.raises(qual.CanonicalPaidQualificationRefused):run_publish(env,tmp_path)
+    assert env.counts=={'qualify':1,'consume':0}
+    assert (env.staging/'qualification-intent.json').read_bytes()==original
+    assert not env.swap_calls
+
+
+def test_reserved_identity_is_checked_before_initializer_transport(env,tmp_path,monkeypatch):
+    def refuse_reservation(_reservation):
+        raise ValueError('inert reservation changed before initializer')
+    monkeypatch.setattr(qual,'_check_reservation',refuse_reservation)
+    with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):run_publish(env,tmp_path)
+    assert env.counts=={'qualify':0,'consume':0}
+    assert (env.staging/'qualification-intent.json').exists()
+    assert not env.swap_calls
+
+
+def test_new_nested_contract_real_root_publication_and_wire(env,tmp_path):
+    """Real Root owner/opaque qualifier/decoder; only host/transport are fixtures."""
+    from ops.native_fabric.quota_continuity.candidate import paid_initializer_nested_data as nested
+    from control_plane.paid_fabric_wire import require_paid_source, PaidWireRefused
+    import copy
+    capture='/Users/chriswong/lanes/ext/lanes'
+    c=commitment(host=HOST_KEY,alias=ALIAS,python=PYTHON_PATH,capture=capture,uid=501,gid=20,user='chriswong',home='/Users/chriswong',binary_sha=digest_raw(b'mechanical-python'),hook_sha=nested.LEGACY_SHA256)
+    c.update(initialization_contract=nested.CONTRACT,nested_helper=dict(path='/Users/chriswong/lanes/ext/.host_glm_token.sh',sha256='d'*64,size=57,uid=501,gid=20,mode=0o600))
+    c['host_env']['size']=len(nested._ORIGINAL)
+    c['initialized_context']['glm_config']='/Users/chriswong/.glm/config.json'
+    raw=initializer_module.canonical(c)
+    result=run_publish(env,tmp_path,capture_root=capture,initializer_raw=raw,expected_initializer_sha256=digest_raw(raw))
+    assert env.counts=={'qualify':1,'consume':1}
+    artifacts={name:(env.destination/name).read_bytes() for name in base.FILES}
+    verified=qual.verify_qualified_artifacts(artifacts)
+    binding=verified['bindings'][0];physical=binding['physical_binding'];source=binding['source_config']
+    assert require_paid_source(physical,source)==physical
+    q=source['qualification'];assert q['initializer_commitment']==c
+    assert set(q['qualifier_sources_sha256'])==qual.QUALIFIER_SOURCE_NAMES and len(qual.QUALIFIER_SOURCE_NAMES)==8
+    assert q['host_env_sha256']==nested.LEGACY_SHA256
+    for change in ('missing_peer','legacy_contract','helper_path'):
+        bad=copy.deepcopy(source)
+        if change=='missing_peer':bad['qualification']['qualifier_sources_sha256'].pop('paid_initializer_nested_data.py')
+        elif change=='legacy_contract':bad['qualification']['initializer_commitment']['initialization_contract']=initializer_module.CONTRACT
+        else:bad['qualification']['initializer_commitment']['nested_helper']['path']='/arbitrary/helper'
+        bad['qualification']['initializer_commitment_sha256']=contract.digest(bad['qualification']['initializer_commitment'])
+        badphysical={k:v for k,v in bad.items() if k not in ('schema_version','capacity_capability_id')}
+        badphysical.update(schema_version=qual.PHYSICAL_DOC_SCHEMA,worker_source_config_digest=contract.digest(bad))
+        with pytest.raises(PaidWireRefused):require_paid_source(badphysical,bad)
+    with pytest.raises(qual.CanonicalPaidQualificationRefused):
+        run_publish(env,tmp_path,capture_root=capture,initializer_raw=raw,expected_initializer_sha256=digest_raw(raw))
+    assert env.counts=={'qualify':1,'consume':1}
+
+
+@pytest.mark.parametrize('source_count',[5,6,7,8])
+def test_retained_legacy_source_shapes_stay_closed_data(env,tmp_path,source_count):
+    """Historical DATA readability is not a new Root qualification grant."""
+    from control_plane.paid_fabric_wire import require_paid_source,PaidWireRefused
+    row=json.loads(v2_artifacts(env,tmp_path)['bindings.json'])['bindings'][0]
+    source=row['source_config'];q=source['qualification']
+    if source_count<8:q['qualifier_sources_sha256'].pop('paid_initializer_nested_data.py')
+    if source_count<7:q['qualifier_sources_sha256'].pop('paid_initializer_token_data.py')
+    if source_count==5:
+        q['qualifier_sources_sha256'].pop('paid_initializer.py')
+        q.pop('initializer_commitment');q.pop('initializer_commitment_sha256')
+    physical={k:v for k,v in source.items() if k not in ('schema_version','capacity_capability_id')}
+    physical.update(schema_version=qual.PHYSICAL_DOC_SCHEMA,worker_source_config_digest=contract.digest(source))
+    if source_count==7:
+        with pytest.raises(PaidWireRefused):require_paid_source(physical,source)
+    else:assert require_paid_source(physical,source)==physical
