@@ -182,6 +182,13 @@ class HermesCanonicalTurnConsumer:
                 or any(ord(ch) < 32 and ch not in "\n\t" for ch in answer)):
             raise ConsumerRefusal("MODEL_REPLY_UNQUALIFIED")
         await self._require_current_role("ROLE_CHANGED_DURING_MODEL_TURN")
+        # The model inference was an awaited external boundary. The host may
+        # have replaced the native writer or exact parent while it ran. Re-read
+        # the frozen binding *before* entering the existing send path; that
+        # writer will do its own read/READY/COMMIT checks afterward.
+        _, _, post_inference_identity = await self.reply_writer._resolve(probe)
+        if post_inference_identity != _identity:
+            raise ConsumerRefusal("BINDING_CHANGED_DURING_MODEL_TURN")
         # The writer reruns its own exact source/resolver checks and owner-side
         # READY/COMMIT fence after awaited model inference. It handles duplicate
         # and effect-unknown results without a second logical send.
