@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from brain import client, explabs_client
+from brain import client, explabs_client, explabs_pool
 
 
 def test_minimal_wire_body_auth_and_exact_model(monkeypatch):
@@ -81,8 +81,9 @@ def test_http_error_is_sanitized(monkeypatch, status, code):
 def test_explicit_backend_records_reported_cost(monkeypatch):
     monkeypatch.setenv("BOT_LLM_BACKEND", "explabs")
     monkeypatch.setenv("EXPLABS_API_KEY", "example-not-a-real-key")
+    monkeypatch.setattr(explabs_pool, "available", lambda: True)
     monkeypatch.setattr(
-        explabs_client,
+        explabs_pool,
         "complete",
         lambda system, user: explabs_client.Completion(
             text="OK",
@@ -93,6 +94,7 @@ def test_explicit_backend_records_reported_cost(monkeypatch):
             provider="experiential_cloud",
             is_byok=False,
             request_id="fixture",
+            account_slot="1",
         ),
     )
     from brain import cost_guard
@@ -105,6 +107,7 @@ def test_explicit_backend_records_reported_cost(monkeypatch):
     assert len(received) == 1
     assert received[0][0][1] == pytest.approx(0.000004)
     assert received[0][1]["model"] == "deepseek-v4.1-flash"
+    assert received[0][1]["key_id"] == "explabs_account_1"
 
 
 def test_default_remains_unmodified(monkeypatch):

@@ -62,8 +62,8 @@ def available() -> bool:
     if selected == "api":
         return api_available()
     if selected == "explabs":
-        from brain import explabs_client
-        return explabs_client.available()
+        from brain import explabs_pool
+        return explabs_pool.available()
     return False
 
 
@@ -77,13 +77,12 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     selected = backend()
 
     if selected == "explabs":
-        from brain import explabs_client
-        if not explabs_client.available():
+        from brain import explabs_client, explabs_pool
+        if not explabs_pool.available():
             return None, "explabs_unavailable"
         try:
-            reply = explabs_client.complete(system, user)
-            if not reply.text:
-                return None, "explabs_empty_reply"
+            reply = explabs_pool.complete(system, user)
+            # Account for observed usage even if a served reply contains no text.
             # Reuse the existing cost ledger; never estimate a gateway charge.
             try:
                 from brain import cost_guard as _cg
@@ -95,9 +94,12 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
                     model=reply.model,
                     input_tokens=reply.input_tokens,
                     output_tokens=reply.output_tokens,
+                    key_id=f"explabs_account_{reply.account_slot}" if reply.account_slot else None,
                 )
             except Exception:
                 pass
+            if not reply.text:
+                return None, "explabs_empty_reply"
             return reply.text, None
         except explabs_client.ExperientialError as exc:
             return None, str(exc)

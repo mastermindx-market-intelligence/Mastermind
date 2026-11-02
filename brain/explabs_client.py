@@ -6,6 +6,7 @@ on errors. Gateway usage.cost is already in USD.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -18,7 +19,20 @@ DEFAULT_MODEL = "deepseek-v4.1-flash"
 
 
 class ExperientialError(RuntimeError):
-    """Sanitized, credential-free gateway failure."""
+    """Sanitized, credential-free gateway failure and typed admission outcome."""
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        status: int | None = None,
+        code: str | None = None,
+        retry_after: int | None = None,
+    ) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.code = code
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True)
@@ -31,6 +45,7 @@ class Completion:
     provider: str | None
     is_byok: bool
     request_id: str | None
+    account_slot: str | None = None
 
 
 def available() -> bool:
@@ -42,13 +57,14 @@ def chat_completion(
     *,
     model: str | None = None,
     client: httpx.Client | None = None,
+    api_key: str | None = None,
 ) -> httpx.Response:
     """Send exactly model + messages, with no sampling overrides.
 
     Injecting an httpx Client allows fully offline tests. The production base
     URL is fixed to avoid leaking the gateway key to an accidental override.
     """
-    key = os.environ.get("EXPLABS_API_KEY")
+    key = api_key if api_key is not None else os.environ.get("EXPLABS_API_KEY")
     if not key:
         raise ExperientialError("explabs_missing_key")
     if (os.environ.get("EXPLABS_BASE_URL") or BASE_URL).rstrip("/") != BASE_URL:
@@ -76,7 +92,14 @@ def chat_completion(
             code = None
         if not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", code):
             code = "unknown"
-        raise ExperientialError(f"explabs_http_{response.status_code}:{code}")
+        raw_retry = response.headers.get("retry-after")
+        retry_after = int(raw_retry) if raw_retry and raw_retry.isdecimal() else None
+        raise ExperientialError(
+            f"explabs_http_{response.status_code}:{code}",
+            status=response.status_code,
+            code=code,
+            retry_after=min(retry_after, 3600) if retry_after is not None else None,
+        )
     return response
 
 
@@ -86,13 +109,14 @@ def complete(
     *,
     model: str | None = None,
     client: httpx.Client | None = None,
+    api_key: str | None = None,
 ) -> Completion:
     """Return text and gateway-reported usage, without changing sampling."""
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": user})
-    response = chat_completion(messages, model=model, client=client)
+    response = chat_completion(messages, model=model, client=client, api_key=api_key)
     try:
         data: dict[str, Any] = response.json()
         msg = data["choices"][0]["message"]
@@ -104,6 +128,8 @@ def complete(
             raise ValueError("unsupported_usage")
         raw_cost = usage.get("cost")
         cost = float(raw_cost) if type(raw_cost) in (int, float) else None
+        if cost is not None and (not math.isfinite(cost) or cost < 0):
+            raise ValueError("invalid_gateway_cost")
         provider = data.get("provider") or response.headers.get("x-gateway-provider")
         return Completion(
             text=content,
@@ -112,7 +138,7 @@ def complete(
             output_tokens=int(usage.get("completion_tokens") or 0),
             cost_usd=cost,
             provider=str(provider) if provider else None,
-            is_byok=data.get("is_byok") is True or usage.get("is_byok") is True,
+            is_byok=usage.get("is_byok") is True or data.get("is_byok") is True,
             request_id=response.headers.get("x-request-id"),
         )
     except (KeyError, IndexError, TypeError, ValueError):

@@ -1,0 +1,287 @@
+"""Offline two-organization isolation, capacity, cost and no-replay tests."""
+import json
+
+import httpx
+import pytest
+
+from brain import client, explabs_client, explabs_pool
+
+
+def _env(monkeypatch):
+    monkeypatch.setenv("EXPLABS_POOL_ENABLED", "1")
+    monkeypatch.setenv("EXPLABS_BASE_URL", explabs_client.BASE_URL)
+    monkeypatch.setenv("EXPLABS_MODEL", "deepseek-v4.1-flash")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "1")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ORG_SLUG", "org-a")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_MAX_INFLIGHT", "2")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_DAILY_CAP_USD", "10")
+    monkeypatch.setenv("EXPLABS_API_KEY", "fake-key-a")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_ENABLED", "1")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_ORG_SLUG", "org-b")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_MAX_INFLIGHT", "2")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "10")
+    monkeypatch.setenv("EXPLABS_API_KEY_2", "fake-key-b")
+
+
+def _transport(*, response=None, orgs=None, remaining=None):
+    calls = []
+    orgs = orgs or {"fake-key-a": ("id-a", "org-a"), "fake-key-b": ("id-b", "org-b")}
+    remaining = remaining or {"fake-key-a": 5.0, "fake-key-b": 5.0}
+
+    def serve(request):
+        key = request.headers["Authorization"].removeprefix("Bearer ")
+        assert key in orgs
+        path = request.url.path
+        if request.method == "GET":
+            if path == "/api/whoami":
+                oid, slug = orgs[key]
+                return httpx.Response(200, json={"org_id": oid, "org_slug": slug})
+            if path == "/v1/models":
+                return httpx.Response(
+                    200, json={"data": [{"id": "deepseek-v4.1-flash"}]},
+                )
+            if path == "/api/v1/key":
+                return httpx.Response(
+                    200, json={"data": {"limit": 10.0, "limit_remaining": remaining[key]}},
+                )
+            if path == "/api/v1/credits":
+                return httpx.Response(
+                    200, json={"data": {"total_credits": 20, "total_usage": 3}},
+                )
+            raise AssertionError(f"unexpected GET path: {path}")
+        assert request.method == "POST" and path == "/v1/chat/completions"
+        assert json.loads(request.content) == {
+            "model": "deepseek-v4.1-flash",
+            "messages": [{"role": "user", "content": "one independent task"}],
+        }
+        calls.append(key)
+        if response is not None:
+            custom = response(key, len(calls))
+            if custom is not None:
+                return custom
+        return httpx.Response(200, json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 10,
+                      "cost": 0.0001, "is_byok": False},
+            "provider": "experiential_cloud",
+        })
+    return httpx.Client(transport=httpx.MockTransport(serve)), calls
+
+
+def test_pool_disabled_by_default_even_with_a_key(monkeypatch):
+    monkeypatch.setenv("EXPLABS_API_KEY", "fake-key-a")
+    monkeypatch.delenv("EXPLABS_POOL_ENABLED", raising=False)
+    assert explabs_pool.available() is False
+    monkeypatch.setenv("BOT_LLM_BACKEND", "explabs")
+    assert client.available() is False
+
+
+def test_missing_second_key_rejects_without_any_network(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.delenv("EXPLABS_API_KEY_2")
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
+        pool.complete("", "one independent task")
+    assert calls == []
+
+
+def test_two_verified_orgs_alternate_when_equal(monkeypatch):
+    _env(monkeypatch)
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    a = pool.complete("", "one independent task")
+    b = pool.complete("", "one independent task")
+    assert (a.account_slot, b.account_slot) == ("1", "2")
+    assert calls == ["fake-key-a", "fake-key-b"]
+    assert a.cost_usd == pytest.approx(0.0001)
+    assert pool.status()["1"]["verified"] is True
+    assert pool.status()["2"]["verified"] is True
+
+
+def test_both_keys_must_be_different_organizations(monkeypatch):
+    _env(monkeypatch)
+    http, calls = _transport(orgs={
+        "fake-key-a": ("same-id", "org-a"),
+        "fake-key-b": ("same-id", "org-b"),
+    })
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_duplicate_org"):
+        pool.complete("", "one independent task")
+    assert calls == []
+
+
+def test_org_identity_mismatch_blocks_initial_dispatch(monkeypatch):
+    _env(monkeypatch)
+    http, calls = _transport(orgs={
+        "fake-key-a": ("id-a", "other-org"),
+        "fake-key-b": ("id-b", "org-b"),
+    })
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_initial_verification_required"):
+        pool.complete("", "one independent task")
+    assert calls == []
+    assert pool.status()["1"]["blocked"] == "explabs_pool_org_mismatch"
+
+
+def test_key_daily_limit_holds_account_before_dispatch(monkeypatch):
+    _env(monkeypatch)
+    http, calls = _transport(remaining={"fake-key-a": 0.0, "fake-key-b": 5.0})
+    pool = explabs_pool.AccountPool(http_client=http)
+    result = pool.complete("", "one independent task")
+    assert result.account_slot == "2"
+    assert calls == ["fake-key-b"]
+
+
+def test_concurrent_inflight_favors_less_busy_account(monkeypatch):
+    _env(monkeypatch)
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    # Local reservation in one worker. Cross-host reservations belong to
+    # the existing shared capacity owner, not this Brain adapter.
+    pool._health["1"].inflight = 1
+    result = pool.complete("", "one independent task")
+    assert result.account_slot == "2"
+    assert calls == ["fake-key-b"]
+
+
+def test_measured_cost_preference_uses_real_usage_not_assumed_free(monkeypatch):
+    _env(monkeypatch)
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    pool._health["1"].unit_cost_per_1k_tokens = 0.001
+    pool._health["2"].unit_cost_per_1k_tokens = 0.050
+    result = pool.complete("", "one independent task")
+    assert result.account_slot == "1"
+    assert calls == ["fake-key-a"]
+
+
+def test_403_is_terminal_for_that_attempt_new_task_may_use_other(monkeypatch):
+    _env(monkeypatch)
+    def answer(key, count):
+        if key == "fake-key-a":
+            return httpx.Response(
+                403, json={"error": {"code": "model_not_granted",
+                                     "message": "secret provider text"}},
+            )
+        return None
+    http, calls = _transport(response=answer)
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError) as error:
+        pool.complete("", "one independent task")
+    assert error.value.status == 403
+    assert error.value.code == "model_not_granted"
+    assert "secret provider text" not in str(error.value)
+    assert calls == ["fake-key-a"]  # No attempt-level fallback
+    result = pool.complete("", "one independent task")  # Distinct new request
+    assert result.account_slot == "2"
+    assert calls == ["fake-key-a", "fake-key-b"]
+    assert pool.status()["1"]["blocked"] is not None
+
+
+def test_429_cooldown_does_not_replay_request(monkeypatch):
+    _env(monkeypatch)
+    def answer(key, count):
+        if key == "fake-key-a":
+            return httpx.Response(
+                429,
+                json={"error": {"code": "rate_limit_exceeded"}},
+                headers={"Retry-After": "42"},
+            )
+        return None
+    http, calls = _transport(response=answer)
+    pool = explabs_pool.AccountPool(http_client=http, clock=lambda: 100.0)
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_http_429"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]
+    assert pool.status()["1"]["cooldown"] is True
+    result = pool.complete("", "one independent task")
+    assert result.account_slot == "2"
+    assert calls == ["fake-key-a", "fake-key-b"]
+
+
+def test_unknown_dispatch_result_holds_account_until_reconciled(monkeypatch):
+    _env(monkeypatch)
+    def answer(key, count):
+        if key == "fake-key-a":
+            raise httpx.ReadTimeout("not a confirmed no-effect result")
+        return None
+    http, calls = _transport(response=answer)
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_transport_error"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]
+    assert pool.status()["1"]["blocked"] == "explabs_transport_error"
+    result = pool.complete("", "one independent task")
+    assert result.account_slot == "2"
+    assert len(calls) == 2
+
+
+def test_local_model_backend_does_not_call_unconfigured_pool(monkeypatch):
+    monkeypatch.setenv("BOT_LLM_BACKEND", "explabs")
+    monkeypatch.delenv("EXPLABS_POOL_ENABLED", raising=False)
+    assert client.call_model("", "one independent task") == (None, "explabs_unavailable")
+
+
+def test_daily_spend_policy_is_required_before_selection(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.delenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD")
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert explabs_pool.available() is False
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
+        pool.complete("", "one independent task")
+    assert calls == []
+
+
+def test_gateway_enforced_daily_key_cap_must_match_policy(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_DAILY_CAP_USD", "5")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "5")
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="initial_verification_required"):
+        pool.complete("", "one independent task")
+    assert calls == []
+    assert pool.status()["1"]["blocked"] == "explabs_pool_gateway_cap_not_verified"
+    assert pool.status()["2"]["blocked"] == "explabs_pool_gateway_cap_not_verified"
+
+
+def test_missing_eligibility_cannot_migrate_original_attempt(monkeypatch):
+    _env(monkeypatch)
+    def answer(key, count):
+        if key == "fake-key-a":
+            return httpx.Response(402, json={"error": {"code": "card_required"}})
+        return None
+    http, calls = _transport(response=answer)
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_http_402"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]
+    assert pool.status()["1"]["blocked"] == "explabs_http_402:card_required"
+
+
+def test_credentials_cannot_change_under_a_live_pool(monkeypatch):
+    _env(monkeypatch)
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    pool.complete("", "one independent task")
+    monkeypatch.setenv("EXPLABS_API_KEY_2", "fake-key-rotated")
+    with pytest.raises(explabs_client.ExperientialError, match="key_rotation_requires_restart"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]
+
+
+def test_verified_organization_identity_is_sticky(monkeypatch):
+    _env(monkeypatch)
+    orgs = {"fake-key-a": ("id-a", "org-a"), "fake-key-b": ("id-b", "org-b")}
+    http, calls = _transport(orgs=orgs)
+    now = [100.0]
+    pool = explabs_pool.AccountPool(http_client=http, clock=lambda: now[0])
+    pool.complete("", "one independent task")
+    orgs["fake-key-b"] = ("unexpected-new-org", "org-b")
+    now[0] += 65
+    with pytest.raises(explabs_client.ExperientialError, match="org_identity_changed"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]
