@@ -217,8 +217,28 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.model.on_infer = lambda: setattr(self.resolver, "binding",
                                                dataclasses.replace(self.resolver.binding,
                                                                    binding_generation=2))
-        with self.assertRaises(BridgeError):
+        with self.assertRaises(ConsumerRefusal) as cm:
             await self.run_turn()
+        self.assertEqual(cm.exception.code, "BINDING_CHANGED_DURING_MODEL_TURN")
+        self.assertEqual(self.send_count(), 0)
+
+    async def test_role_resolver_error_is_redacted_before_inference(self):
+        def broken(_session):
+            raise RuntimeError("SECRET_PRIVATE_HOST_BINDING_DETAIL")
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(current=broken).run(operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "ROLE_BINDING_UNAVAILABLE")
+        self.assertNotIn("PRIVATE_HOST", str(cm.exception))
+        self.assertEqual(self.model.prompts, [])
+
+    async def test_secret_in_original_request_refused_before_inference(self):
+        self.service.items[0]["message"] = _request(
+            body={"instruction": "api_key=DO_NOT_EGRESS_THIS_VALUE",
+                  "stop_condition": "Return receipt.", "scope_change": False})
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.run_turn()
+        self.assertEqual(cm.exception.code, "CANONICAL_PROMPT_SECRET_REFUSED")
+        self.assertEqual(self.model.prompts, [])
         self.assertEqual(self.send_count(), 0)
 
     async def test_model_failure_does_not_expose_error_or_post(self):
