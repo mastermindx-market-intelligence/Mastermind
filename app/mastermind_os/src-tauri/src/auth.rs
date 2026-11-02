@@ -7,7 +7,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     sync::Mutex,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -72,6 +72,8 @@ pub struct AuthStatus {
 struct Token {
     value: String,
     expires: Instant,
+    // A sleeping Mac need not advance Instant. Check actual wall expiry too.
+    wall_expires: SystemTime,
     // Derived from the exact validated Executive grant; stays in the native owner.
     executive_send: bool,
 }
@@ -123,7 +125,7 @@ impl Inner {
             Resource::Content => self.content.as_ref(),
             Resource::Executive => self.executive.as_ref().filter(|_| self.executive_resource.is_some()),
         }
-        .filter(|t| t.expires > Instant::now())
+        .filter(|t| t.expires > Instant::now() && t.wall_expires > SystemTime::now())
     }
     fn status(&self) -> AuthStatus {
         let acquisition = self.token(Resource::Acquisition).is_some();
@@ -548,6 +550,7 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
     Ok(Token {
         value: token.into(),
         expires: Instant::now() + Duration::from_secs(seconds),
+        wall_expires: SystemTime::now() + Duration::from_secs(seconds),
         executive_send,
     })
 }
@@ -592,7 +595,7 @@ pub async fn callback(app: AppHandle, raw: String) {
         }),
         Err(_) => Err("TOKEN_EXCHANGE_FAILED".into()),
     };
-    let expires = token.as_ref().ok().map(|token| token.expires);
+    let expiry = token.as_ref().ok().map(|token| (token.expires, token.wall_expires));
     let mut inner = match state.lock() {
         Ok(i) => i,
         Err(_) => return,
@@ -600,8 +603,8 @@ pub async fn callback(app: AppHandle, raw: String) {
     let next = inner.finish_exchange(pending.generation, pending.resource, token);
     drop(inner);
     emit(&app);
-    if let Some(expires) = expires {
-        schedule_expiration(app.clone(), pending.resource, expires, pending.generation);
+    if let Some((expires, wall_expires)) = expiry {
+        schedule_expiration(app.clone(), pending.resource, expires, wall_expires, pending.generation);
     }
     if let Some(url) = next {
         let _ = open_transaction(&app, url, pending.generation);
@@ -631,7 +634,8 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
     let (client, generation) = {
         let inner = state.lock()?;
         if inner.token(resource).is_some_and(|t|
-            t.expires > Instant::now() + Duration::from_secs(45)) { return Ok(()); }
+            t.expires > Instant::now() + Duration::from_secs(45) &&
+            t.wall_expires > SystemTime::now() + Duration::from_secs(45)) { return Ok(()); }
         (inner.client_id.clone().ok_or("NATIVE_CLIENT_ID_MISSING")?, inner.generation)
     };
     let old = {
@@ -697,6 +701,7 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
         .filter(|s| crate::native_refresh::valid_refresh(s))
         .ok_or("REFRESH_OUTCOME_UNCONFIRMED")?;
     let expires = access.expires;
+    let wall_expires = access.wall_expires;
     {
         let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
         let mut inner = state.lock()?;
@@ -710,7 +715,7 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
         inner.reason = None;
     }
     emit(app);
-    schedule_expiration(app.clone(), resource, expires, generation);
+    schedule_expiration(app.clone(), resource, expires, wall_expires, generation);
     Ok(())
 }
 
@@ -738,12 +743,21 @@ fn native_refresh_deadline(expires: Instant, now: Instant) -> Instant {
     let floor = now + Duration::from_secs(10);
     if early < floor { floor } else { early }
 }
-fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, generation: u64) {
+fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wall_expires: SystemTime, generation: u64) {
     tauri::async_runtime::spawn(async move {
         let target = if resource.persistent() {
             native_refresh_deadline(expires, Instant::now())
         } else { expires };
-        tokio::time::sleep_until(tokio::time::Instant::from_std(target)).await;
+        let wall_target = if resource.persistent() {
+            wall_expires.checked_sub(Duration::from_secs(35)).unwrap_or(wall_expires)
+        } else { wall_expires };
+        // Wake/sleep-safe periodic deadline observation. Monotonic-only Tokio
+        // timers can remain behind the real Auth0 expiry after laptop sleep.
+        loop {
+            let now = Instant::now();
+            if now >= target || SystemTime::now() >= wall_target { break; }
+            tokio::time::sleep((target - now).min(Duration::from_secs(30))).await;
+        }
         let unchanged = app.state::<NativeAuth>().lock().is_ok_and(|inner|
             inner.generation == generation);
         if !unchanged { return; }
@@ -1432,9 +1446,22 @@ mod tests {
         Token {
             value: value.into(),
             expires: Instant::now() + Duration::from_secs(60),
+            wall_expires: SystemTime::now() + Duration::from_secs(60),
             executive_send: false,
         }
     }
+    #[test]
+    fn native_token_wall_expiry_fences_sleep_without_waiting_for_instant() {
+        let mut inner = inner();
+        let mut access = token("synthetic-but-private");
+        assert!(access.expires > Instant::now());
+        access.wall_expires = SystemTime::now() - Duration::from_secs(1);
+        inner.acquisition = Some(access);
+        assert!(inner.token(Resource::Acquisition).is_none());
+        assert!(!inner.status().acquisition);
+        assert_eq!(inner.status().status, "signed_out");
+    }
+
     #[test]
     fn actual_transaction_completion_keeps_resources_separate() {
         let mut i = inner();
@@ -1581,6 +1608,7 @@ mod tests {
         i.acquisition = Some(Token {
             value: "secret".into(),
             expires: Instant::now() + Duration::from_secs(60),
+            wall_expires: SystemTime::now() + Duration::from_secs(60),
             executive_send: false,
         });
         let generation = i.generation;
