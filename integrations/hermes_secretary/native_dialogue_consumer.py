@@ -143,7 +143,11 @@ class HermesCanonicalTurnConsumer:
         previously_replied = [msg for _, msg in records
                               if msg.get("message_key") == _reply_key(operation_key)]
         if previously_replied:
-            if len(previously_replied) != 1:
+            if (len(previously_replied) != 1
+                    or previously_replied[0].get("message_type") != "PROGRESS"
+                    or previously_replied[0].get("reply_to_message_key") != binding.request_message_key
+                    or previously_replied[0].get("actor_ref") != context["actor_ref"]
+                    or previously_replied[0].get("body", {}).get("stage") != "message_reply"):
                 raise ConsumerRefusal("REPLY_RECONCILIATION_CONFLICT")
             return {
                 "status": "ALREADY_REPLIED_CANONICALLY",
