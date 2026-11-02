@@ -466,6 +466,29 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_host_readiness
            (807, 26, 29, 'int', '501'),
            (811, 63, 66, 'int', '501'),
            (857, 57, 60, 'int', '501'))}
+# #1515 source-pin alignment candidate on unchanged app.py blob.
+# Eight exact action refusal statuses manually inspected; independent current-
+# head re-review remains required before protected release. These are HTTP response statuses,
+# not account/UID/GID values. Any changed byte/site restores ordinary D8.
+REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
+    'sha256': 'ff72b9f6d5165cd07bc41052fc322da84e02eef2e3041f58e7569de4f37bfb50',
+    'sites': ((135, 58, 61, 'int', '409'),),
+}
+# Current-base composition keeps the original action-handler AST unchanged.
+# These eight sites retain the same exact HTTP status literals.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
+    'sha256': 'de6f82cd7861cd79d90bc058c2753f5912a20e47c4ff992201962d8abdc78f31',
+    'sites': (
+        (762, 71, 74, 'int', '400'),
+        (773, 71, 74, 'int', '403'),
+        (781, 71, 74, 'int', '400'),
+        (787, 79, 82, 'int', '400'),
+        (796, 71, 74, 'int', '400'),
+        (806, 71, 74, 'int', '403'),
+        (811, 76, 79, 'int', '503'),
+        (817, 71, 74, 'int', '403'),
+    ),
+}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.

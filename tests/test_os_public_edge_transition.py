@@ -10,6 +10,7 @@ from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os import os_public_edge_transition as module
 from ops.executive_os.os_public_edge import (
     GET_ROUTES, HOST, POST_ROUTES, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, asset_routes,
+    INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES,
 )
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
@@ -98,9 +99,14 @@ def test_legacy_get_profile_is_the_exact_historical_eight():
     )
 
 
-@pytest.mark.parametrize("fixed", [LEGACY_GET_ROUTES, GET_ROUTES])
+@pytest.mark.parametrize("fixed,posts", [
+    (LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
+    (LEGACY_GET_ROUTES, INCUMBENT_POST_ROUTES),
+    (INCUMBENT_GET_ROUTES, LEGACY_POST_ROUTES),
+    (INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES),
+    (GET_ROUTES, POST_ROUTES),
+])
 @pytest.mark.parametrize("index_overlap", [False, True])
-@pytest.mark.parametrize("posts", [LEGACY_POST_ROUTES, POST_ROUTES])
 def test_complete_get_profiles_upgrade_only_os_path_lists(fixed, index_overlap, posts):
     paths = (sorted(list(fixed) + list(asset_routes(OLD))) if index_overlap
              else sorted(set(fixed) | set(asset_routes(OLD))))
@@ -188,6 +194,7 @@ def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
     paths = (sorted(list(LEGACY_GET_ROUTES) + list(asset_routes(old))) if index_overlap
              else sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(old))))
     live = fullconfig(site=host_route(paths))
+    post_paths_of(live)[:] = list(INCUMBENT_POST_ROUTES)
     before = copy.deepcopy(live)
     prepared = prepare_config(fullconfig=live, current_manifest=old,
                               candidate_manifest=new, relay_port=49152)
@@ -200,12 +207,14 @@ def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
     ):
         expected = copy.deepcopy(before)
         get_paths_of(expected)[:] = expected_get
+        post_paths_of(expected)[:] = list(POST_ROUTES)
         assert value == expected
 
 
 def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():
-    for old_posts in (LEGACY_POST_ROUTES, POST_ROUTES):
+    for old_posts in (LEGACY_POST_ROUTES, INCUMBENT_POST_ROUTES):
         observed = fullconfig()
+        get_paths_of(observed)[:] = sorted(set(INCUMBENT_GET_ROUTES) | set(asset_routes(OLD)))
         post_paths_of(observed)[:] = list(old_posts)
         before = copy.deepcopy(observed)
         planned, prepare, final = transition_values(observed)
@@ -258,6 +267,58 @@ def sealed(tmp_path):
     os.chmod(parent, 0o700)
     yield parent
     os.chmod(parent, 0o700)
+
+
+
+def incumbent_public_edge():
+    """Old deployed Caddy profile, not a second publication authority."""
+    config = fullconfig()
+    inner = inner_of(config)
+    inner[0]["match"][0]["path"] = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(OLD)))
+    inner[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
+    return config
+
+
+def test_exact_incumbent_edge_gains_only_qualified_control_room_routes():
+    observed = incumbent_public_edge()
+    before = copy.deepcopy(observed)
+    args = dict(fullconfig=observed, current_manifest=OLD,
+                candidate_manifest=NEW, relay_port=49152)
+    receipt = plan(old_source=OLD_SHA, new_source=NEW_SHA, **args)
+    prepared, finished = prepare_config(**args), final_config(**args)
+    assert observed == before  # pure plan; no update to installed Caddy
+    assert receipt["get_routes"]["fixed"] == list(GET_ROUTES)
+    assert receipt["post_routes"] == list(POST_ROUTES)
+    for config in (prepared, finished):
+        get, post, terminal = inner_of(config)
+        paths = get["match"][0]["path"]
+        assert set(GET_ROUTES) <= set(paths)
+        assert post["match"][0] == {"method": ["POST"], "path": list(POST_ROUTES)}
+        assert post["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert terminal == {"handle": [{"handler": "static_response", "abort": True}]}
+        assert "/workspace/control-room/delete-all" not in paths
+        assert "/workspace/control-room/delete-all" not in post["match"][0]["path"]
+    assert set(asset_routes(OLD)) <= set(inner_of(prepared)[0]["match"][0]["path"])
+    assert set(asset_routes(OLD)) - set(asset_routes(NEW)) <= (
+        set(inner_of(prepared)[0]["match"][0]["path"]) -
+        set(inner_of(finished)[0]["match"][0]["path"]))
+
+
+@pytest.mark.parametrize("damage", ["new_get_old_post", "old_get_new_post", "foreign_get", "foreign_post"])
+def test_incumbent_edge_refuses_mixed_or_widened_profiles(damage):
+    observed = incumbent_public_edge()
+    get, post, _ = inner_of(observed)
+    if damage == "new_get_old_post":
+        get["match"][0]["path"] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    elif damage == "old_get_new_post":
+        post["match"][0]["path"] = list(POST_ROUTES)
+    elif damage == "foreign_get":
+        get["match"][0]["path"].append("/workspace/control-room/owner-admin")
+    else:
+        post["match"][0]["path"].append("/workspace/control-room/owner-admin")
+    with pytest.raises(ValueError, match="(profile|routes differ|route differs)"):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=observed,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
 
 
 def test_plan_binds_exact_routes_and_flags():
@@ -646,7 +707,7 @@ def test_retained_caddy_adapter_topology_is_accepted():
     route = copy.deepcopy(RETAINED_CADDY_ROUTE)
     # Retain the real adapter wrappers, groups, headers and 64KB body limit;
     # substitute only the manifest paths for this deterministic fixture.
-    route["handle"][0]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = sorted(list(GET_ROUTES) + list(asset_routes(OLD)))
+    route["handle"][0]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = sorted(list(LEGACY_GET_ROUTES) + list(asset_routes(OLD)))
     live = fullconfig(site=route)
     planned = prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
     assert planned != live
