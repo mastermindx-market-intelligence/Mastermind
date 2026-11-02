@@ -678,7 +678,7 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
         let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
         let mut inner = state.lock()?;
         if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
-        crate::native_refresh::finish_rotation(&client, resource.audience(), next)?;
+        crate::native_refresh::finish_rotation(&client, resource.audience(), &old, next)?;
         match resource {
             Resource::Acquisition => inner.acquisition = Some(access),
             Resource::Content => inner.content = Some(access),

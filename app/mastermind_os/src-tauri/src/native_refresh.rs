@@ -22,6 +22,10 @@ pub(crate) fn account(client_id: &str, audience: &str) -> String {
 pub(crate) fn valid_refresh(value: &str) -> bool {
     (16..=4096).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_graphic())
 }
+/// A rotating grant must never return the same token as its predecessor.
+pub(crate) fn valid_successor(previous: &str, next: &str) -> bool {
+    valid_refresh(next) && next != previous
+}
 #[cfg(target_os = "macos")]
 pub(crate) fn load(client_id: &str, audience: &str) -> Result<Option<String>, &'static str> {
     use security_framework::passwords::get_generic_password;
@@ -62,8 +66,9 @@ pub(crate) fn begin_rotation(client_id: &str, audience: &str, old: &str) -> Resu
         .map_err(|_| "KEYCHAIN_WRITE_FAILED")
 }
 #[cfg(target_os = "macos")]
-pub(crate) fn finish_rotation(client_id: &str, audience: &str, next: &str) -> Result<(), &'static str> {
+pub(crate) fn finish_rotation(client_id: &str, audience: &str, previous: &str, next: &str) -> Result<(), &'static str> {
     if !pending_exists(client_id, audience)? { return Err("REFRESH_OUTCOME_UNCONFIRMED"); }
+    if !valid_successor(previous, next) { return Err("REFRESH_TOKEN_NOT_ROTATED"); }
     save(client_id, audience, next)?;
     use security_framework::passwords::delete_generic_password;
     delete_generic_password(SERVICE, &format!("{}:pending", account(client_id, audience)))
@@ -74,7 +79,7 @@ pub(crate) fn begin_rotation(_: &str, _: &str, _: &str) -> Result<(), &'static s
     Err("KEYCHAIN_UNSUPPORTED")
 }
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn finish_rotation(_: &str, _: &str, _: &str) -> Result<(), &'static str> {
+pub(crate) fn finish_rotation(_: &str, _: &str, _: &str, _: &str) -> Result<(), &'static str> {
     Err("KEYCHAIN_UNSUPPORTED")
 }
 #[cfg(target_os = "macos")]
@@ -133,5 +138,13 @@ mod tests {
         assert!(valid_refresh(&"x".repeat(16)));
         assert!(valid_refresh(&"x".repeat(4096)));
         assert!(!valid_refresh(&"x".repeat(4097)));
+    }
+    #[test]
+    fn rotation_successor_must_be_new_and_opaque() {
+        let first = "a".repeat(64);
+        assert!(valid_successor(&first, &"b".repeat(64)));
+        assert!(!valid_successor(&first, &first));
+        assert!(!valid_successor(&first, "bad token with whitespace"));
+        assert!(!valid_successor(&first, "short"));
     }
 }
