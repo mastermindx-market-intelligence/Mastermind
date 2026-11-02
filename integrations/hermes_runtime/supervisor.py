@@ -5,12 +5,14 @@ This loop is the inner one the acceptance test can kill without a host bus.
 """
 from __future__ import annotations
 
+import http.client
 import os
 from pathlib import Path
 import signal
 import stat
 import subprocess
 import threading
+import time
 
 from .constants import HEALTH_SCHEMA, LOOPBACK_HOST
 from .hermes_config import render_hermes_config
@@ -22,6 +24,23 @@ from .registry import assert_registered_tools_exact, extension_tools_for
 from .secrets import Secrets, child_env
 
 _UNSAFE = set(" \n\r\t\"'`$")
+
+
+def _backend_health_ready(port: int) -> bool:
+    """Probe only the child's local HTTP readiness, never its PID as proof.
+
+    No secret, redirect, public IP, or caller-controlled host is transmitted.
+    """
+    if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
+        return False
+    conn = http.client.HTTPConnection(LOOPBACK_HOST, port, timeout=0.25)
+    try:
+        conn.request("GET", "/api/health")
+        return conn.getresponse().status == 200
+    except (OSError, http.client.HTTPException):
+        return False
+    finally:
+        conn.close()
 
 
 def _safe_path(path: Path) -> str:
@@ -73,6 +92,7 @@ class ServiceRuntime:
         self.restart_count = 0
         self.child_starts = 0
         self.child_pid: int | None = None
+        self._backend_ready = False
         self.failed = False
         self.refusal_code = ""
         self.gateway: Gateway | None = None
@@ -115,10 +135,13 @@ class ServiceRuntime:
         with self._lock:
             child = self._child
             running = child is not None and child.poll() is None
+            backend_ready = running and self._backend_ready
             if self.failed:
                 status = "failed"
-            elif running:
+            elif backend_ready:
                 status = "ok"
+            elif running:
+                status = "starting"
             else:
                 status = "restarting"
             payload = {
@@ -129,6 +152,7 @@ class ServiceRuntime:
                 "restart_count": self.restart_count,
                 "child_starts": self.child_starts,
                 "child_running": running,
+                "backend_ready": backend_ready,
                 "child_pid": self.child_pid,
                 "memory_high_water_kib": 0 if self.memory is None else self.memory.high_water,
                 "loopback": True,
@@ -291,6 +315,7 @@ class ServiceRuntime:
         with self._lock:
             self._child = None
             self.child_pid = None
+            self._backend_ready = False
 
     def _loop(self) -> None:
         assert self.memory is not None
@@ -330,20 +355,33 @@ class ServiceRuntime:
             with self._lock:
                 self._child = proc
                 self.child_pid = proc.pid
+                self._backend_ready = False
+            next_memory_sample = 0.0
+            poll_sec = min(0.25, self.profile.memory_sample_interval_sec)
             while not self._stop.is_set() and proc.poll() is None:
-                rss = read_rss_kib(proc.pid)
-                if rss is not None:
-                    self.memory.record(proc.pid, rss)
-                self._stop.wait(self.profile.memory_sample_interval_sec)
+                backend_ready = _backend_health_ready(port)
+                with self._lock:
+                    if self._child is proc:
+                        self._backend_ready = backend_ready
+                now = time.monotonic()
+                if now >= next_memory_sample:
+                    rss = read_rss_kib(proc.pid)
+                    if rss is not None:
+                        self.memory.record(proc.pid, rss)
+                    next_memory_sample = now + self.profile.memory_sample_interval_sec
+                self._stop.wait(poll_sec)
             if self._stop.is_set():
                 _terminate(proc)
                 with self._lock:
                     self._child = None
+                    self.child_pid = None
+                    self._backend_ready = False
                 return
             _reap(proc)
             with self._lock:
                 self._child = None
                 self.child_pid = None
+                self._backend_ready = False
                 self.restart_count += 1
             if self.child_starts >= self.profile.start_limit_burst:
                 self.failed = True

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import sys
+import threading
 import time
 
 
@@ -30,9 +32,31 @@ def main() -> int:
         if host != "127.0.0.1":
             sys.stderr.write("NON_LOOPBACK\n")
             return 2
-        if os.environ.get("HERMES_STUB_MODE") == "exit":
+        mode = os.environ.get("HERMES_STUB_MODE")
+        if mode == "exit":
             _count()
             return 1
+        if mode != "silent":
+            port = int(_flag(args, "--port"))
+            if not 1024 <= port <= 65535:
+                return 2
+
+            class Health(BaseHTTPRequestHandler):
+                def do_GET(self) -> None:  # noqa: N802
+                    code = 503 if mode == "unhealthy" else 200
+                    if self.path != "/api/health":
+                        code = 404
+                    body = b'{"status":"ok"}' if code == 200 else b'{"status":"unavailable"}'
+                    self.send_response(code)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+                def log_message(self, *args) -> None:
+                    pass
+
+            httpd = HTTPServer(("127.0.0.1", port), Health)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
         ready = os.environ.get("HERMES_STUB_READY")
         if ready:
             payload = {"pid": os.getpid(), "argv": args, "env_keys": sorted(os.environ)}

@@ -23,7 +23,7 @@ from integrations.hermes_runtime.gateway import Gateway  # noqa: E402
 from integrations.hermes_runtime.memory import HighWaterLog, parse_vm_rss_kib, read_rss_kib  # noqa: E402
 from integrations.hermes_runtime.profile import load_profile  # noqa: E402
 from integrations.hermes_runtime.secrets import clear_child_secret_env, load_secrets  # noqa: E402
-from integrations.hermes_runtime.supervisor import ServiceRuntime, build_serve_argv  # noqa: E402
+from integrations.hermes_runtime.supervisor import ServiceRuntime, _backend_health_ready, build_serve_argv  # noqa: E402
 from integrations.hermes_runtime.tests._support import (  # noqa: E402
     CENSUS,
     STUB,
@@ -93,6 +93,7 @@ class GatewaySupervisorTests(unittest.TestCase):
             self.assertEqual(code, 200)
             payload = json.loads(body)
             self.assertEqual(payload["status"], "ok")
+            self.assertTrue(payload["backend_ready"])
             self.assertEqual(payload["pinned_sha"], PINNED_UPSTREAM_SHA)
             self.assertEqual(payload["allowlist"], ["clarify"])
             self.assertTrue(payload["loopback"])
@@ -109,6 +110,35 @@ class GatewaySupervisorTests(unittest.TestCase):
             self.assertNotIn("--insecure", argv)
         finally:
             runtime.stop()
+
+    def test_live_pid_without_responsive_backend_never_returns_healthy(self) -> None:
+        for mode in ("silent", "unhealthy"):
+            with self.subTest(mode=mode):
+                runtime = self._start(stub_mode=mode)
+                try:
+                    deadline = time.time() + 4
+                    while time.time() < deadline and runtime.child_pid is None:
+                        time.sleep(0.02)
+                    self.assertIsNotNone(runtime.child_pid)
+                    # Both cases keep the process alive; one has no socket,
+                    # the other returns non-200 /api/health.
+                    time.sleep(0.15)
+                    code, body = http_get(
+                        f"http://127.0.0.1:{runtime.gateway.port}/api/health",
+                        TOKEN,
+                    )
+                    payload = json.loads(body)
+                    self.assertEqual(code, 503)
+                    self.assertTrue(payload["child_running"])
+                    self.assertFalse(payload["backend_ready"])
+                    self.assertEqual(payload["status"], "starting")
+                finally:
+                    runtime.stop()
+
+    def test_backend_probe_is_loopback_only_and_refuses_invalid_ports(self) -> None:
+        for port in (0, -1, True, 65536, "7000", None):
+            with self.subTest(port=port):
+                self.assertFalse(_backend_health_ready(port))
 
     def test_kill_and_restart_recovery(self) -> None:
         runtime = self._start()

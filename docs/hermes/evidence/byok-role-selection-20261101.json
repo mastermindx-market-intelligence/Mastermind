@@ -1,4 +1,22 @@
 {
+  "backend_readiness_fix": {
+    "contract": "gateway health 200 requires live child AND localhost backend GET /api/health HTTP200",
+    "mock_server": "local fixture only: responsive, unhealthy and silent-child cases",
+    "negative_cases": [
+      "running child without listener remains 503",
+      "running child returning 503 remains 503",
+      "invalid backend port never probed",
+      "startup with 5-second memory sampling no longer times out waiting for HTTP readiness"
+    ],
+    "no_hermes_process_started": true,
+    "no_live_provider_called": true,
+    "no_model_inference_receipt": true,
+    "positive_local_tests": "49/49 Hermes harness and new targeted 3/3 runtime test methods passed; macOS 28/33 runtime as noted",
+    "probe": "http.client to exact 127.0.0.1 child port; no secrets, redirects or external endpoints; 250ms connection timeout",
+    "product_proof": "SOURCE_ONLY_FAIL_CLOSED_READINESS",
+    "sampling": "at most 250ms readiness poll; configured RSS high-water interval unchanged",
+    "unready": "503 starting, backend_ready=false, even if child_running=true"
+  },
   "fixture_only": true,
   "independent_review": "Historical independent #1885 reviewer returned REQUEST_CHANGES (Slack receipt, not GitHub review); new exact #1917 head still awaits a new nonauthor review",
   "live_runtime_started": false,
@@ -9,6 +27,15 @@
     "Existing system-unit-directory test uses Linux path resolution",
     "Five unchanged Linux-specific runtime cases on macOS; detailed failure count retained"
   ],
+  "modelark_public_docs_check": {
+    "base_url_matches_source": true,
+    "credential_or_model_activation_proven": false,
+    "deepseek_flash_model_id_matches_source": true,
+    "glm_flash_model_id_matches_source": true,
+    "models_source": "https://ai.byteplus.com/ark/region%3Aap-southeast-1/docs/model-list",
+    "region": "ap-southeast-1",
+    "region_source": "https://console.byteplus.com/ark/region%3Aap-southeast-1/docs/region-availability"
+  },
   "operation": "hermes-byok-role-selection-20261101-sol-001",
   "owned_path_digests": [
     {
@@ -17,7 +44,7 @@
     },
     {
       "path": "docs/hermes/DEPLOY_UBUNTU1.md",
-      "sha256": "321e9d52085409b4ac6ade897fe33876ab2b1d7ca0555961f7d9b249c5ff9a9b"
+      "sha256": "f9e2e0e6b7406c892e407f16f73fc087e5fc2f2b1b45b32da2046cb10eb05dcf"
     },
     {
       "path": "integrations/hermes_harness/cli.py",
@@ -61,21 +88,30 @@
     },
     {
       "path": "integrations/hermes_runtime/supervisor.py",
-      "sha256": "a1f971db078814970e882b14d22584e6d7bffbf1869fe6c950de918434f65043"
+      "sha256": "b3c9eb27c9dc29d9b4aaf63aebe0960ccf456f699c10723582bb5b003bf3102e"
+    },
+    {
+      "path": "integrations/hermes_runtime/tests/fixtures/hermes_stub.py",
+      "sha256": "52ba063042e0ebc256b6ea964bf98f7f0438f77007103ebfdd5b6d60401a5cd4"
+    },
+    {
+      "path": "integrations/hermes_runtime/tests/test_gateway_supervisor.py",
+      "sha256": "d350ddf1c614afdc38b38b9174690f171c90e398a5fab67ab5e8cd51192a7efd"
     }
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
   "previous_head_linux_evidence": {
     "does_not_qualify_current_postimage": true,
-    "harness_six_suites": "41344050929 SUCCESS Python3.12/3.13",
-    "head": "aaa8dcf81f9d47829f2e3fe3422e4457f9b559e8",
-    "runtime": "41344050754 SUCCESS"
+    "harness_six_suites": "41373602382 SUCCESS Python3.12/3.13",
+    "head": "edba269cbbc4892ef649463990fc35d57987a109",
+    "repo_ci": "41373602300 incomplete/old-base failures at last observation",
+    "runtime": "41373602357 SUCCESS"
   },
   "procedure_pin": "1f1b30d1352d2a975624e558bd9da097e4cba417",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-02T01:38:49.785069+00:00",
+  "recorded_at": "2026-11-02T02:14:24.003104+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -101,8 +137,8 @@
       "errors": 1,
       "failures": 4,
       "linux_validation_required": true,
-      "passed": 26,
-      "tests": 31
+      "passed": 28,
+      "tests": 33
     },
     "hermes_secretary": {
       "passed": 51,
@@ -131,6 +167,6 @@
     "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
   },
   "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
-  "source_manifest_sha256": "fd015d3757a03d6a95e934a14d7d74106f80a1d521f5afb23f591824bb552d3a",
+  "source_manifest_sha256": "c571d71e1ff2b9b6dd478ee6480ba720059b217da957dfa4bcdf30859be1cfc5",
   "test_host": "m2studio / macOS"
 }

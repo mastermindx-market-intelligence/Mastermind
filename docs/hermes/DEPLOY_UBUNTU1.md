@@ -300,8 +300,15 @@ with urllib.request.urlopen(request, timeout=5) as response:
 PY
 ```
 
-Expect `200` from health. The token stays in the Python process and is not
-printed. Unauthenticated health is `401`.
+Expect `200` from health **only after** both the pinned child process is
+running and its separate `127.0.0.1` backend returns HTTP `200` to
+`GET /api/health`. A live PID with an absent or failing backend is reported as
+`503` / `starting` (`backend_ready: false`), not a healthy agent; a crash-loop
+is `503` / `failed`. Readiness uses a bounded loopback-only, keyless probe,
+which does not perform a model completion or prove an authenticated provider,
+company tools, Executive admission, Slack delivery, or long-running acceptance.
+The gateway token stays in the Python process and is not printed. Unauthenticated
+health is `401`.
 
 ## 24 hour shadow
 
