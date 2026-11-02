@@ -46,18 +46,18 @@ MANIFEST_PROJECTION={
 OBJECTIVE=('Assess launch-readiness from supplied exact release evidence. Two independent read-only '
     'analyses cover auth/admission/launch and return/recovery/effect preservation. Review only the '
     'auth/admission/launch analysis; the original parent reconciles both and labels the second unreviewed.')
-# These source pins are read from Git 02649, not from the inaccessible staged file.
+# Exact source pins are the qualified H2 App component 1c65016c; old producer semantics remain tested.
 SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
         '8596eef6272ed1055ed397670bbb0cb27162759539a18e35fbcd43b3a5bae791',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        'cb1883df76ef9aaab7d513dd776efee4ffad4fbe28fefc5c6dd7673e674a5d5d',
+        '8e982b602cecac6be11c0c7d294ee4f9992b39512d8ed7f9e911ae041770041e',
     'app/mastermind_os/src/launch-config.ts':
-        'f79bb51390a822c59150c38491ddd63951d1cbec8fe9b283a6875bafe4020ace',
+        'eb138fd7e02f4bb3a8e28c0e15520612989fada6161be5c69850f2479afb8675',
 }
 
 
-def actual_launch_payload(tmp_path,principal_scope):
+def actual_launch_payload(tmp_path,principal_scope,*,profile_ref="research_only",manifest_projection=None):
     """Execute actual frozen TS producer with Node's supported TS transformer."""
     for name,digest in SOURCE_PINS.items():
         assert hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==digest
@@ -85,14 +85,15 @@ const config=decodeLaunchBindingConfig(JSON.stringify({v:1,...input.config}));
 if(!config)throw Error('accepted manifest projection refused');
 const port=new ExecutiveLaunchCommandPort(config,{callTool(){throw Error('never call an endpoint');}},
  ()=>({principalScope:input.principal_scope,generation:'offline-authenticated-context'}));
-const intent=port.makeLaunchIntent({goal:input.objective,projectRef:'executive-infrastructure',profileRef:'research_only'});
+const intent=port.makeLaunchIntent({goal:input.objective,projectRef:'executive-infrastructure',profileRef:input.profile_ref});
 if(!intent)throw Error('actual Launch producer refused fixture form');
 port.prepare(intent);
 process.stdout.write(JSON.stringify(intent.payload));
 '''
     scratch=tmp_path/'compiled-consumer';scratch.mkdir()
     data=dict(scratch=str(scratch),source=str(ROOT/'app/mastermind_os/src'),
-        config=MANIFEST_PROJECTION,principal_scope=principal_scope,objective=OBJECTIVE)
+        config=MANIFEST_PROJECTION if manifest_projection is None else manifest_projection,
+        principal_scope=principal_scope,objective=OBJECTIVE,profile_ref=profile_ref)
     node=os.environ.get('MM_TEST_TYPESCRIPT_NODE') or shutil.which('node')
     assert node,'Node with the supported TypeScript transform API is required'
     result=subprocess.run([node,'--input-type=module','-e',script],input=json.dumps(data),

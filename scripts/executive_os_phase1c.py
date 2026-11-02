@@ -1818,6 +1818,7 @@ def _service_from_config(
     canary_loader: Callable[[], Mapping[str, Any]] | None = None,
     autonomy_guard: Callable[[], None] | None = None,
     ceo_submit_admission_guard: Callable[[], None] | None = None,
+    direct_native_generation_provider: Callable[[], str] | None = None,
     initial_canary: Mapping[str, Any] | None = None,
     content_profile_loader: Callable[[], Any] | None = None,
     workspace_acquisition_loader: Callable[[], Any] | None = None,
@@ -2533,6 +2534,30 @@ def _service_from_config(
             from integrations.session_bridge.schemas import BridgeError
             from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
             from control_plane import executive_ceo_ingress as session_ingress, ceo_request
+            from ops.executive_os.coo_principal_host import DEFAULT_INSTALL_PATH
+
+            # Reuse the network gateway's root-sealed OAuth policy installation;
+            # Control neither owns OAuth nor trusts policy IDs supplied by an App
+            # principal frame. Missing/invalid/unarmed installation keeps the
+            # cross-policy reply downgrade dark, without disabling existing
+            # exact-policy Session Bridge reads.
+            session_read_policy_loader = None
+            # Control constructs a fresh per-frame provider. Keep one private
+            # HMAC cursor key for this one installed service composition so
+            # READ pagination works across frames but not across restarts.
+            from secrets import token_bytes as _session_cursor_random_bytes
+            session_reference_cursor_key = _session_cursor_random_bytes(32)
+            if installed_profile == WEB_CEO_V3_PROFILE:
+                from ops.executive_os.executive_mcp_entry import (
+                    installed_os_session_policy_source)
+                gateway_policy_path = DEFAULT_INSTALL_PATH
+                if gateway_policy_path.exists() or gateway_policy_path.is_symlink():
+                    try:
+                        session_read_policy_loader = installed_os_session_policy_source(
+                            gateway_policy_path, Path(__file__).resolve().parents[1],
+                            expected_uid=int(raw["control_uid"]))
+                    except (OSError, ValueError):
+                        session_read_policy_loader = None
 
             def session_bridge_factory(runtime):
                 # Validate the supplied live Runtime through the incumbent
@@ -2664,9 +2689,19 @@ def _service_from_config(
                     # projector proves native ownership; Wake arming is separate.
                     return w3c_plist_configured(release_sha=config.proof_base_sha)
 
+                trusted_policies = None
+                if session_read_policy_loader is not None:
+                    try:
+                        trusted_policies = session_read_policy_loader()
+                    except (OSError, ValueError):
+                        # File/policy drift disables only the independent
+                        # cross-policy read, never grants a substitute identity.
+                        trusted_policies = None
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=relay_readside_socket_path,
-                    summon_handler=summon, codex_owner_configured=codex_owner_configured)
+                    summon_handler=summon, codex_owner_configured=codex_owner_configured,
+                    authorized_policies=trusted_policies,
+                    reference_cursor_key=session_reference_cursor_key)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
@@ -2831,6 +2866,7 @@ def _service_from_config(
         ),
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=ceo_submit_admission_guard,
+        direct_native_generation_provider=direct_native_generation_provider,
         activated_socket=listener,
         service_state="READY" if initially_ready else "AWAITING_CANARY",
         canary_loader=canary_loader,
@@ -3066,6 +3102,16 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
     require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
+    def direct_native_generation():
+        # The incumbent guard proves exact running configuration and its
+        # root-owned admission receipt. This digest binds that actual epoch;
+        # bearer renewal contributes no permanent jti/expiration authority.
+        require_ceo_admission()
+        attestation=content_attestation_loader()
+        from control_plane.direct_native_execution import digest
+        value=digest(dict(config_sha256=attestation["config_sha256"],release_sha=raw["proof_base_sha"]))
+        require_ceo_admission()
+        return value
     from control_plane.fabric_attended_canary import AttendedControlProbeSource
 
     service = _service_from_config(
@@ -3081,6 +3127,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=require_ceo_admission,
+        direct_native_generation_provider=direct_native_generation,
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],

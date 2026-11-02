@@ -276,6 +276,8 @@ C4_PAPER_ORIGINAL_MANIFEST_SHA256 = "849e0af6b498408eba843bcbf2c9c500e199c218db0
 C4_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
     "e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2",
     "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+    # Exact native-pool pin postimage; all other C4 profile fields stay sealed.
+    "e10730454cd343b8774929b9c6d39f5dfbf1c9b7e83bfdc82636b8e54d0437a0",
 ))
 C4_PAPER_NON_PAPER_CONFIG_SHA256 = "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894"
 C4_PAPER_RUNTIME_IDENTITY = {
@@ -640,6 +642,183 @@ def _build_runtime_roots(account: str) -> dict:
     }
 
 
+
+# Exact existing cohort: pin compatibility preserves installed capabilities.
+NATIVE_POOL_PIN_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4', 'fabric-design', 'fabric-read'))
+NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
+                    'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                    'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
+                    'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                    'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                    'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                    'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                    'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                    'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                    'private-tunnel-gateway.mjs': 'fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540',
+                    'tailnet-gateway.mjs': '9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b'},
+ 'chatgpt3-w570f6f34': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
+                        'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                        'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
+                        'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                        'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                        'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                        'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                        'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                        'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                        'private-tunnel-gateway.mjs': 'fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540',
+                        'tailnet-gateway.mjs': '9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b'},
+ 'chatgpt3-wa2a9e6f9': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
+                        'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                        'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
+                        'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                        'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                        'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                        'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                        'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                        'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                        'private-tunnel-gateway.mjs': 'fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540',
+                        'tailnet-gateway.mjs': '9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b'},
+ 'fabric-design': {'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                   'gateway.mjs': '970b47f1c6a15bc3f1175f1043c5dd4a59ad748c2374b586e384bbd6ba40ce5e',
+                   'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                   'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                   'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                   'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                   'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                   'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                   'private-tunnel-gateway.mjs': '225b1a592f5486c688efc6f5fc37184877a7e3e8022c2e831858c8989c6cca00',
+                   'tailnet-gateway.mjs': 'bd46b40cfd5f2744f9b07be38ff2656676939707e753f6e846f4a2c578944d25'},
+ 'fabric-read': {'fabric-operator.mjs': '2ed7578ced90da1e17a95faa4df2e43c164ade42e832d307efbb3902aed42a00',
+                 'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
+                 'gateway.mjs': '2a9038d802cdefeea3af4a3fbe45d2326fb894a42c72f3f4f946603419b93446',
+                 'git-publish.mjs': '9d50cd828e51d0c08a7be0ca7b18c89bfd8fb767a548bb1e4deaddaf185225ae',
+                 'output-budget.mjs': '5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071',
+                 'package-lock.json': '9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0',
+                 'package.json': '25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634',
+                 'paper-design.mjs': 'e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e',
+                 'private-tunnel-auth.mjs': 'fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0',
+                 'private-tunnel-gateway.mjs': '225b1a592f5486c688efc6f5fc37184877a7e3e8022c2e831858c8989c6cca00',
+                 'tailnet-gateway.mjs': '89a3d1c972a31ab62f19205439d6f09bc24f4d51783ebc2e1bea788bcd9d817c'}}
+
+# Retained sealed Tailnet seats, each with only its original and exact native
+# pool-pin postimage. These are profile selectors, never an argv fallback.
+_NATIVE_POOL_PIN_TAILNET_CANONICAL = {
+    "fabric-design": frozenset((
+        "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
+    )),
+    "fabric-read": frozenset((
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
+    )),
+}
+
+
+def _pin_owner_module():
+    import importlib.util
+    path = Path(__file__).resolve().with_name("private_service_pin.py")
+    spec = importlib.util.spec_from_file_location("_studio_pin_owner", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def cmd_native_pool_pin(args):
+    pin = _pin_owner_module()
+    try:
+        value = pin.run(sys.modules[__name__], args)
+    except SystemExit as error:
+        allowed = {"NATIVE_POOL_PIN_" + code for code in pin.REFUSAL_CODES}
+        allowed.update(("NATIVE_POOL_PIN_SUCCESSOR_REFUSED", "NATIVE_POOL_PIN_SUCCESSOR_CHANGED"))
+        if type(error.code) is str and error.code in allowed:
+            raise
+        raise SystemExit("NATIVE_POOL_PIN_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_POOL_PIN_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
+@contextmanager
+def _pin_native_context(args):
+    """Use the existing successor verifier and publication lock, never a hash-only claim."""
+    import importlib.util
+    rollout = Path(__file__).resolve().parents[2] / "ops/native_fabric/quota_continuity/rollout"
+    for name in ("native_install.py", "native_generation.py"):
+        source = rollout / name
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+    code = r"""
+import json,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import native_install as i
+import native_generation as g
+p,payload=i.read_successor(Path(sys.argv[2]))
+assert p['digest']==sys.argv[3]
+store=Path(p['store']);current=g.current(store);old=p['expected_selection']
+new={'schema':g.POINTER_SCHEMA,'generation':p['target_generation'],'previous':old['generation'],'sequence':old['sequence']+1}
+e=p['entries']['pool']
+if current==old:
+ i._upgrade_entries(p);phase='PREVIOUS'
+elif current==new:
+ i._upgrade_entries(p,complete=True);phase='SELECTED'
+else:raise ValueError('selection_refused')
+print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase},sort_keys=True))
+"""
+    def proof():
+        try:
+            r = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(rollout),
+                str(args.successor_bundle), args.successor_plan_sha256],
+                capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
+        if r.returncode != 0 or len(r.stdout) > 16384:
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+        value = _pin_owner_module().decode(r.stdout)
+        if set(value) != {"successor_digest", "target_generation", "expected_selection",
+                "pool_target", "pool_previous", "pool_bridge", "store", "phase"}:
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
+        return value
+    first = proof()
+    spec = importlib.util.spec_from_file_location("_studio_pin_native_generation", rollout / "native_generation.py")
+    generation = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generation)
+    from contextlib import nullcontext
+    lock = (generation.publication_lock(Path(first["store"]))
+            if args.operation in ("apply", "reconcile") else nullcontext())
+    with lock:
+        checked = proof()
+        if checked != first:
+            raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_CHANGED")
+        yield checked
+
+
+def _pin_reject_generic_restage(account):
+    # The newly recognized cohort receives only preserving lifecycle/pin support.
+    # It does not silently acquire the generic capability-rebuilding upgrade path.
+    if account not in NATIVE_POOL_PIN_ACCOUNTS:
+        return
+    _validate_account_label(account)
+    roots = _build_runtime_roots(account)
+    if os.path.lexists(roots["state"] / "native-pool-pin"):
+        raise SystemExit("NATIVE_POOL_PIN_PROFILE_REQUIRES_PIN_OWNER")
+    if account not in NATIVE_POOL_PIN_PREDECESSORS:
+        return
+    if not os.path.lexists(roots["manifest"]):
+        return
+    prior = _read_manifest(roots["manifest"], account,
+        "com.mastermind.studio-direct-private." + account, required=True)
+    if prior["files"] == NATIVE_POOL_PIN_PREDECESSORS[account]:
+        raise SystemExit("NATIVE_POOL_PIN_PROFILE_REQUIRES_PIN_OWNER")
+
+
+def _pin_require_start(account, roots):
+    if account not in NATIVE_POOL_PIN_ACCOUNTS:
+        return
+    _pin_owner_module().require_start(sys.modules[__name__], account, roots)
+
+
 @contextmanager
 def _c2_lifecycle_mutex(account: str):
     """Serialize enrolled Paper and Fabric mutations on persistent private lock inodes.
@@ -648,7 +827,7 @@ def _c2_lifecycle_mutex(account: str):
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS | {"chatgpt2-business"}):
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS | {"chatgpt2-business"} | NATIVE_POOL_PIN_ACCOUNTS):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
     subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
@@ -723,6 +902,33 @@ def _fabric_lifecycle_serialized(*, readonly_preflight: bool = False):
                 return function(args)
         return guarded
     return decorate
+
+
+def _pin_lifecycle_serialized(function):
+    """Extend only normal lifecycle calls, without changing Paper eligibility gates."""
+    @wraps(function)
+    def guarded(args):
+        covered = PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS
+        if args.account not in NATIVE_POOL_PIN_ACCOUNTS or args.account in covered:
+            return function(args)
+        with _c2_lifecycle_mutex(args.account):
+            return function(args)
+    return guarded
+
+
+def _pin_install_serialized(function):
+    """The existing installer mutates under the same pin/lifecycle lock."""
+    @wraps(function)
+    def guarded(source, node_abs, backend_abs, account, label, host, port, roots, **kwargs):
+        if account not in NATIVE_POOL_PIN_ACCOUNTS or not os.path.lexists(roots["manifest"]):
+            return function(source, node_abs, backend_abs, account, label, host, port, roots, **kwargs)
+        before = _fabric_release_bytes(roots["manifest"])
+        with _c2_lifecycle_mutex(account):
+            if _fabric_release_bytes(roots["manifest"]) != before:
+                raise SystemExit("NATIVE_POOL_PIN_INSTALL_CAS_REFUSED")
+            _pin_reject_generic_restage(account)
+            return function(source, node_abs, backend_abs, account, label, host, port, roots, **kwargs)
+    return guarded
 
 
 def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> dict:
@@ -984,7 +1190,9 @@ def _valid_manifest(data, account: str, label: str) -> bool:
                 or (account == "chatgpt2-business"
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
-            and not c2_paper_predecessor and not c4_paper_cohort):
+            and not c2_paper_predecessor and not c4_paper_cohort
+            and not (version == MANIFEST_VERSION and account in NATIVE_POOL_PIN_PREDECESSORS
+                     and files == NATIVE_POOL_PIN_PREDECESSORS[account])):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -1087,6 +1295,7 @@ def _lifecycle_inspect(account: str, label: str, roots: dict, *,
     Paper cutover explicitly opts into stricter absence proof.
     """
     if (account not in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+            and account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL
             and account not in FABRIC_BACKEND_ACCOUNTS and not require_positive):
         return _launchd_inspect(label)
     subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
@@ -1268,6 +1477,7 @@ def _validate_port(port: int) -> None:
         raise SystemExit("--port must be between 1024 and 65535")
 
 
+@_pin_install_serialized
 def _write_install(
     source: Path,
     node_abs: Path,
@@ -1488,6 +1698,7 @@ def _commission_setting(args, roots: dict, prior: dict | None) -> str | None:
 @_fabric_lifecycle_serialized()
 def cmd_stage(args) -> int:
     account = args.account
+    _pin_reject_generic_restage(account)
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     host = "127.0.0.1"
@@ -1598,6 +1809,61 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
 
     return manifest
+
+
+def _native_pin_manifest_valid(data, account: str, label: str) -> bool:
+    """Keep the private profile rules and close the two Tailnet state sets."""
+    if not _valid_manifest(data, account, label):
+        return False
+    if account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL:
+        return True
+    return (data["files"] == NATIVE_POOL_PIN_PREDECESSORS[account]
+            and _canonical_json_sha256(data)
+            in _NATIVE_POOL_PIN_TAILNET_CANONICAL[account])
+
+
+def _verify_native_pin_tailnet_install(account: str, label: str, roots: dict) -> dict:
+    """Read the complete existing seal for one exact preserved Tailnet seat.
+
+    The private verifier remains private-only. No argument, path or caller
+    selector can opt an arbitrary profile into this transport. Even stop/seal
+    callers must retain the complete reviewed runtime seal for these states.
+    """
+    manifest = _pin_owner_module().decode(_fabric_release_bytes(roots["manifest"]))
+    if (account not in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+            or not _native_pin_manifest_valid(manifest, account, label)):
+        raise SystemExit("not staged: preserved Tailnet profile differs")
+    for name, expected_hash in manifest["files"].items():
+        if hashlib.sha256(_fabric_release_bytes(roots["base"] / name)).hexdigest() != expected_hash:
+            raise SystemExit("not staged: preserved Tailnet module differs")
+    if hashlib.sha256(_fabric_release_bytes(roots["config"])).hexdigest() != manifest["configHash"]:
+        raise SystemExit("not staged: preserved Tailnet config differs")
+    plist_raw = _fabric_release_bytes(roots["plist"])
+    if hashlib.sha256(plist_raw).hexdigest() != manifest["plistHash"]:
+        raise SystemExit("not staged: preserved Tailnet plist differs")
+    node, backend = Path(manifest["node"]), Path(manifest["backend"])
+    if (_stable_regular_file_hash(node, label="Tailnet node") != manifest["nodeHash"]
+            or _stable_regular_file_hash(backend, label="Tailnet backend") != manifest["backendHash"]
+            or manifest["dependencyTreeHash"] is None
+            or _dependency_tree_hash(roots["node_modules"]) != manifest["dependencyTreeHash"]):
+        raise SystemExit("not staged: preserved Tailnet runtime differs")
+    plist = plistlib.loads(plist_raw)
+    gateway = roots["base"] / "tailnet-gateway.mjs"
+    expected_argv = _expected_argv(node, gateway, roots["config"])
+    if (not isinstance(plist, dict) or plist.get("Label") != label
+            or list(plist.get("ProgramArguments") or []) != expected_argv):
+        raise SystemExit("plist is not the exact preserved Tailnet install")
+    return manifest
+
+
+def _verify_native_pin_install(account: str, label: str, roots: dict, *,
+                               require_runtime_seal: bool = True) -> dict:
+    """Select only the two closed Tailnet owners; preserve private admission."""
+    if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL:
+        return _verify_native_pin_tailnet_install(account, label, roots)
+    if require_runtime_seal:
+        return _verify_staged_install(account, label, roots)
+    return _verify_staged_install(account, label, roots, require_runtime_seal=False)
 
 
 
@@ -2381,6 +2647,7 @@ def _upgrade_c2_personal_git_timeout_only(
 @_fabric_lifecycle_serialized()
 def cmd_upgrade(args) -> int:
     account = args.account
+    _pin_reject_generic_restage(account)
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
     host = "127.0.0.1"
@@ -3020,6 +3287,7 @@ def cmd_fabric_backend_release(args) -> int:
     return 0
 
 
+@_pin_lifecycle_serialized
 @_fabric_lifecycle_serialized()
 @_c2_lifecycle_serialized()
 def cmd_seal_runtime(args) -> int:
@@ -3029,7 +3297,7 @@ def cmd_seal_runtime(args) -> int:
     roots = _build_runtime_roots(account)
     if _lifecycle_inspect(account, label, roots) is not None:
         raise SystemExit("refusing runtime seal while service is loaded; stop first")
-    manifest = _verify_staged_install(
+    manifest = _verify_native_pin_install(
         account, label, roots, require_runtime_seal=False
     )
     if manifest.get("version") != MANIFEST_VERSION:
@@ -3057,6 +3325,7 @@ def cmd_seal_runtime(args) -> int:
     return 0
 
 
+@_pin_lifecycle_serialized
 @_fabric_lifecycle_serialized()
 @_c2_lifecycle_serialized()
 def cmd_start(args) -> int:
@@ -3065,7 +3334,8 @@ def cmd_start(args) -> int:
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
 
-    _verify_staged_install(account, label, roots)
+    _verify_native_pin_install(account, label, roots)
+    _pin_require_start(account, roots)
 
     info = _lifecycle_inspect(account, label, roots)
     if info is not None:
@@ -3112,6 +3382,7 @@ def cmd_status(args) -> int:
     return 0
 
 
+@_pin_lifecycle_serialized
 @_fabric_lifecycle_serialized()
 @_c2_lifecycle_serialized()
 def cmd_stop(args) -> int:
@@ -3125,7 +3396,7 @@ def cmd_stop(args) -> int:
         print(json.dumps({"stopped": True, "already": True, "account": account}))
         return 0
 
-    _verify_staged_install(
+    _verify_native_pin_install(
         account, label, roots, require_runtime_seal=False
     )
 
@@ -3145,8 +3416,11 @@ def cmd_stop(args) -> int:
                 return 1
             time.sleep(0.2)
     except SystemExit as exc:
-        if account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT) or account in FABRIC_BACKEND_ACCOUNTS:
-            subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper"
+        if (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+                or account in FABRIC_BACKEND_ACCOUNTS
+                or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL):
+            subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+                       else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
             raise SystemExit(f"{subject} stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
         raise
 
@@ -3157,6 +3431,15 @@ def cmd_stop(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    pin = sub.add_parser("native-pool-pin")
+    pin.add_argument("--account", required=True)
+    pin.add_argument("--expected-manifest-sha256", required=True)
+    pin.add_argument("--successor-bundle", required=True)
+    pin.add_argument("--successor-plan-sha256", required=True)
+    pin.add_argument("--expected-plan-sha256")
+    pin.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    pin.set_defaults(func=cmd_native_pool_pin)
 
     fabric = sub.add_parser("fabric-backend-release")
     fabric.add_argument("--account", required=True)

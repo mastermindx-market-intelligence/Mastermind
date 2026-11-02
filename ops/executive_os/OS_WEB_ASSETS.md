@@ -89,17 +89,23 @@ manifests and the reserved loopback relay port. The planner refuses unless the
 observed config has exactly one `mcp.mastermind-x.com` host route whose GET
 matcher already carries exactly the incumbent fixed routes plus the current
 manifest's asset paths (either the normalized set or the known fixed+index `/os/` duplicate is accepted;
-no other repeat is permitted), exactly the three POST paths, and exactly the two existing
-reverse_proxy upstreams at the loopback reserved port. Duplicate hosts, extra
+no other repeat is permitted), either the previous sealed three POST paths or
+the exact six-path candidate (the same three plus READ-only session/context,
+session/reply and session/references), and exactly the two existing reverse_proxy
+upstreams at the loopback reserved port. The effectful session/send route stays
+excluded under the F2 authorization review. Duplicate hosts, extra
 or ambiguous matchers, wildcards, extra paths and wrong upstreams refuse.
 
 `prepare-config` admits the sorted unique union of the retired and candidate
 asset routes plus the fixed GET routes, so the publisher can prepare both allowlists before the host switch; actual
 asset availability remains a separately verified host/publisher obligation; `final-config` admits only the candidate asset routes
-plus the fixed routes, so only retired asset paths are removed. Every other
-config field — POST handlers, header rewrites, body limits, TLS, unrelated
-sites, the relay — is preserved semantically; only the selected GET path list
-differs, and caller inputs are never mutated. For a shared non-index asset
+plus the fixed routes, so only retired asset paths are removed. Both staged
+configs change an observed legacy POST matcher only to the exact read-expanded
+six-path matcher (or preserve it if already expanded); they never open
+session/send or other extra routes. The POST handlers, header rewrites, body
+limits, TLS, unrelated sites and relay remain semantically unchanged. Only the
+selected GET and the controlled POST path lists can differ; caller inputs are
+never mutated. For a shared non-index asset
 name, the planner compares manifest-declared SHA256, byte count and MIME;
 `shared_assets_verified` names only that comparison, and no asset bytes are
 read here. The existing host/preparer must verify actual bytes and availability.

@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import os
+import stat
 import fcntl
 import threading
 from copy import deepcopy
@@ -176,8 +177,69 @@ def _paths(portfolio_id: str | None = None) -> dict[str, Path]:
 # helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_dir(portfolio_id: str | None = None) -> None:
-    _paths(portfolio_id)["data"].mkdir(parents=True, exist_ok=True)
+def _check_book_dir(data_dir: Path) -> tuple[str | None, OSError | None]:
+    """Classify a book's data directory WITHOUT creating it (E14 ruling b/c).
+
+    Returns (None, None) for an existing directory, else (problem, exc) with problem one of
+    ``data_dir_missing``, ``data_dir_not_directory``, ``data_dir_unreadable:<ExcName>``.
+    """
+    try:
+        st = os.stat(data_dir)
+    except FileNotFoundError as exc:
+        return "data_dir_missing", exc
+    except OSError as exc:
+        return f"data_dir_unreadable:{type(exc).__name__}", exc
+    if not stat.S_ISDIR(st.st_mode):
+        return "data_dir_not_directory", None
+    return None, None
+
+
+def _classify_account_path(account_path: Path) -> tuple[str, str | None, OSError | None]:
+    """Classify account.json by stat only (E14 ruling a/b): ("absent"|"present"|"invalid", problem, exc).
+
+    ``absent`` ONLY when the book directory exists and ``os.lstat`` raises FileNotFoundError.
+    A dangling symlink is ``invalid``/``dangling_symlink``; any other stat failure is
+    ``invalid``/``unreadable:<ExcName>``; a directory problem is ``invalid``/``data_dir_*``.
+    """
+    problem, exc = _check_book_dir(account_path.parent)
+    if problem:
+        return "invalid", problem, exc
+    try:
+        os.lstat(account_path)
+    except FileNotFoundError:
+        return "absent", None, None
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    try:
+        os.stat(account_path)
+    except FileNotFoundError as exc:
+        return "invalid", "dangling_symlink", exc
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    return "present", None, None
+
+
+def _require_book_dir(portfolio_id: str | None = None, *, step: str = "require_book_dir") -> Path:
+    """Return the book's existing data dir; fail closed (typed, no write) if it is not usable."""
+    data_dir = _paths(portfolio_id)["data"]
+    problem, exc = _check_book_dir(data_dir)
+    if problem:
+        _raise_path_invalid(portfolio_id, data_dir, [problem], cause=exc, step=step)
+    return data_dir
+
+
+def _ensure_book_subdir(subdir: Path) -> None:
+    """Create ONE directory level inside an existing book dir (settlement receipts); never parents."""
+    subdir.mkdir(exist_ok=True)
+
+
+def bootstrap_book_dir(portfolio_id: str | None = None) -> Path:
+    """EXPLICIT first-ever book creation (E14 ruling c).  Creates only the book's own directory,
+    never its parents.  Must not be called from a GET handler, the scheduler, a sweep or any
+    load/save path."""
+    data_dir = _paths(portfolio_id)["data"]
+    data_dir.mkdir(exist_ok=True)
+    return data_dir
 
 
 def _load_account(portfolio_id: str | None = None) -> dict[str, Any]:
@@ -272,13 +334,21 @@ def account_file_status(
 
     NEVER writes, quarantines or alerts.  ``path`` overrides the registry-resolved account path.
     Returns ``{status, path, sha256, size, problems}`` with status MISSING | VALID | INVALID;
-    problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]`` or the
-    :func:`validate_account_state` codes.
+    problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]``, a path-level code
+    (``dangling_symlink``, ``data_dir_missing``, ``data_dir_not_directory``,
+    ``data_dir_unreadable:<ExcName>``) or the :func:`validate_account_state` codes.
     """
     account_path = Path(path) if path is not None else _paths(portfolio_id)["account"]
-    if not account_path.exists():
+    try:
+        kind, problem, _exc = _classify_account_path(account_path)
+    except Exception as exc:  # noqa: BLE001 — classification must never raise
+        kind, problem = "invalid", f"unreadable:{type(exc).__name__}"
+    if kind == "absent":
         return {"status": "MISSING", "path": str(account_path), "sha256": None,
                 "size": None, "problems": []}
+    if kind == "invalid":
+        return {"status": "INVALID", "path": str(account_path), "sha256": None,
+                "size": None, "problems": [problem]}
     try:
         raw_bytes = account_path.read_bytes()
     except Exception as exc:  # noqa: BLE001 — classification must never raise
@@ -405,6 +475,84 @@ def _raise_invalid_account(
     raise error
 
 
+def _raise_path_invalid(
+    portfolio_id: str | None,
+    path: Path,
+    problems: list[str],
+    *,
+    strict: bool = False,
+    cause: Exception | None = None,
+    step: str = "load_account",
+) -> NoReturn:
+    """Fail closed on a path-level problem (dangling symlink, missing/unusable book dir).
+
+    Writes NOTHING: no quarantine copy, no ledger row, no directory.  Emits one best-effort
+    HARD_STOP run_event and one log line, then raises AccountStateInvalid.
+    """
+    record: dict[str, Any] = {
+        "event": "account_state_invalid",
+        "portfolio_id": portfolio_id or "flagship",
+        "path_name": path.name,
+        "source_sha256": None,
+        "size": None,
+        "problems": list(problems),
+        "quarantine_file": None,
+        "status": "path_invalid",
+        "detected_at": datetime.now(UTC).isoformat(),
+        "recoverable": True,
+    }
+    try:
+        from control_plane import run_events
+        run_events.append({
+            "kind": "account_state_invalid",
+            "job": "paper_account",
+            "book": portfolio_id or "flagship",
+            "step": step,
+            "status": "error",
+            "severity": "HARD_STOP",
+            "actor": "deterministic_engine",
+            "extra": {
+                "problems": record["problems"],
+                "quarantine_file": None,
+                "quarantine_status": "path_invalid",
+                "source_sha256": None,
+                "recoverable": True,
+            },
+        })
+    except Exception as exc:  # noqa: BLE001 — event logging never re-enables an invalid book
+        record["event_log_error"] = repr(exc)[:300]
+    logging.getLogger(__name__).error(
+        "account_path_invalid portfolio=%s problems=%s",
+        record["portfolio_id"], record["problems"],
+    )
+    error = _account_invalid_error(
+        portfolio_id, list(problems), record, strict=strict, read_exc=cause,
+    )
+    if cause is not None:
+        raise error from cause
+    raise error
+
+
+def _raise_for_path_problem(
+    portfolio_id: str | None,
+    account_path: Path,
+    problem: str | None,
+    exc: OSError | None,
+    *,
+    strict: bool = False,
+) -> NoReturn:
+    """Route one path-classification problem to its fail-closed raise (E14).
+
+    ``unreadable:*`` keeps the E13 quarantine path (best-effort copy + one ledger row + one
+    event); every other problem (dangling symlink, unusable book dir) writes NOTHING."""
+    problem = problem or "unreadable:Unknown"
+    if problem.startswith("unreadable:"):
+        _raise_invalid_account(
+            portfolio_id, account_path, None, [problem], strict=strict, cause=exc,
+        )
+    _raise_path_invalid(portfolio_id, account_path, [problem], cause=exc)
+
+
 def _load_account_file(portfolio_id: str | None = None, *, strict: bool = False) -> dict[str, Any]:
     """Read account.json without invoking transaction recovery.
 
@@ -415,14 +563,30 @@ def _load_account_file(portfolio_id: str | None = None, *, strict: bool = False)
     read, parsed, or schema-validated is quarantined (byte-for-byte copy beside the original) and
     raises :class:`AccountStateInvalid`.  It is NEVER replaced by a fresh book — the next save of a
     fresh book over the real file would silently reset a live paper book.
+
+    E14: the classification is stat-based — a file that cannot be stat'ed (dangling symlink,
+    unreadable path) is INVALID, never absent, and a missing book data directory fails closed
+    with ``data_dir_missing`` instead of seeding a fresh book.
     """
     _account_path = _paths(portfolio_id)["account"]
-    if not _account_path.exists():
+    kind, problem, exc = _classify_account_path(_account_path)
+    if kind == "absent":
         return _fresh_account()
+    if kind == "invalid":
+        _raise_for_path_problem(portfolio_id, _account_path, problem, exc, strict=strict)
     try:
         raw_bytes = _account_path.read_bytes()
-    except FileNotFoundError:
-        return _fresh_account()
+    except FileNotFoundError as read_exc:
+        # Re-classify: the file may have vanished between the stat and the read.
+        kind, problem, exc = _classify_account_path(_account_path)
+        if kind == "absent":
+            return _fresh_account()
+        if kind == "invalid":
+            _raise_for_path_problem(portfolio_id, _account_path, problem, exc, strict=strict)
+        _raise_invalid_account(
+            portfolio_id, _account_path, None, ["unreadable:FileNotFoundError"],
+            strict=strict, cause=read_exc,
+        )
     except Exception as exc:
         _raise_invalid_account(
             portfolio_id, _account_path, None,
@@ -438,7 +602,6 @@ def _load_account_file(portfolio_id: str | None = None, *, strict: bool = False)
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
     """Durably replace one runtime-state file without exposing a partial JSON document."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with tmp.open("wb") as fh:
@@ -480,7 +643,6 @@ def _durable_unlink(path: Path) -> None:
 
 
 def _save_account(state: dict[str, Any], portfolio_id: str | None = None) -> None:
-    _ensure_dir(portfolio_id)
     # Refuse to PERSIST an invalid in-memory book before anything is written.  The on-disk file
     # is deliberately NOT quarantined for this case: it is still valid and stays untouched.
     state_problems = validate_account_state(state)
@@ -490,7 +652,10 @@ def _save_account(state: dict[str, Any], portfolio_id: str | None = None) -> Non
             f"{state_problems}"
         )
     account_path = _paths(portfolio_id)["account"]
-    if account_path.exists():
+    kind, problem, exc = _classify_account_path(account_path)
+    if kind == "invalid":
+        _raise_for_path_problem(portfolio_id, account_path, problem, exc, strict=False)
+    if kind == "present":
         # Nothing may overwrite an INVALID book (D-ACCT-1): saving a fresh/valid state over it
         # would silently reset a live paper book.  Quarantine the invalid bytes, then fail
         # closed — a human repairs the file directly.
@@ -570,7 +735,6 @@ def accrue_cash_yield(asof: str, portfolio_id: str | None = None,
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     created = not path.exists()
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, default=str) + "\n")
@@ -659,7 +823,7 @@ def _settlement_receipt_path(
 def _paper_transaction_lock(portfolio_id: str | None = None):
     """Serialize one book across processes, while allowing same-thread nested boundaries."""
     path = _paths(portfolio_id)["data"] / ".paper_transaction.lock"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _require_book_dir(portfolio_id, step="paper_transaction_lock")
     key = str(path.resolve())
     depths = getattr(_PAPER_LOCK_STATE, "depths", None)
     if depths is None:
@@ -892,6 +1056,7 @@ def _write_settlement_receipt(
         if _content_sha256(existing) != _content_sha256(receipt):
             raise PaperTransactionConflict("settlement receipt conflicts with recovered WAL")
         return existing
+    _ensure_book_subdir(path.parent)
     _atomic_write_bytes(path, encoded)
     return receipt
 
@@ -1288,6 +1453,7 @@ def acknowledge_settlement_receipt(
         # The existing book lock serializes cooperating receipt writers.  Never
         # replace a retained preimage, including one left by an interrupted ACK.
         if not archive.exists():
+            _ensure_book_subdir(archive.parent)
             _atomic_write_bytes(archive, payload)
         if archive.read_bytes() != payload:
             raise PaperTransactionConflict("settlement receipt archive differs from active receipt")
@@ -2749,7 +2915,7 @@ def load_pending(portfolio_id: str | None = None) -> list[dict]:
 
 
 def _save_pending(orders: list[dict], portfolio_id: str | None = None) -> None:
-    _ensure_dir(portfolio_id)
+    _require_book_dir(portfolio_id)
     _atomic_write_bytes(
         _paths(portfolio_id)["pending"],
         json.dumps(orders, indent=2, default=str).encode("utf-8"),
@@ -3372,7 +3538,6 @@ def quarantine_pending_target(portfolio_id: str | None, reason: str,
     """
     source = _pending_target_path(portfolio_id)
     data_dir = source.parent
-    data_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC)
     suffix = f"{now.strftime('%Y%m%dT%H%M%S%fZ')}.{uuid4().hex[:8]}"
     destination = data_dir / f"pending_target.quarantine.{suffix}.json"
@@ -3915,7 +4080,7 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         wrows.append(withheld_row)
         # idempotent per (date, mark_source); keep the ledger in chronological order.
         wrows.sort(key=lambda row: (str(row.get("date") or ""), str(row.get("mark_source") or "")))
-        _ensure_dir(portfolio_id)
+        _require_book_dir(portfolio_id)
         _atomic_write_bytes(
             withheld_path,
             ("\n".join(json.dumps(r, default=str) for r in wrows) + "\n").encode("utf-8"),
@@ -3963,7 +4128,7 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
     # Preserve chronological ledger order so readers that consume the final/previous rows never
     # mistake the repaired older mark for the current session.
     rows.sort(key=lambda row: str(row.get("date") or ""))
-    _ensure_dir(portfolio_id)
+    _require_book_dir(portfolio_id)
     _atomic_write_bytes(
         nav_path,
         ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8"),

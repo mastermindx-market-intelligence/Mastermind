@@ -190,7 +190,8 @@ def _grants(document):
     require(type(grants) is list and MIN_GRANTS <= len(grants) <= MAX_GRANTS,
             "publication grants count refused")
     from integrations.executive_mcp.schemas import GatewayError, validate_tool_arguments
-    scopes, seen = [], []
+    from control_plane.ceo_request import CeoRequestError, normalize_high_level_request
+    scopes, seen = {}, []
     for grant in grants:
         require(type(grant) is dict and set(grant) == GRANT_KEYS,
                 "publication grant keys are exactly principal_scope and template")
@@ -201,18 +202,43 @@ def _grants(document):
         require(all(name in names for name in GRANT_TEMPLATE_REQUIRED)
                 and names <= set(GRANT_TEMPLATE_REQUIRED) | set(GRANT_TEMPLATE_OPTIONAL),
                 "publication grant template fields differ")
-        # Canonical five-tool law for the exact template form; the harmless
-        # arguments above exist only for this validation and are discarded.
+        # Templates are DATA, not a legacy MCP call or execution authority.
+        # The App-only native choice uses the same canonical request law;
+        # incumbent profiles retain the unchanged frozen transport validator.
         try:
-            validate_tool_arguments("submit_ceo_intent",
-                                    {**TEMPLATE_VALIDATION_ARGUMENTS, **template})
-        except GatewayError:
+            arguments = {**TEMPLATE_VALIDATION_ARGUMENTS, **template}
+            if template["execution_profile"] == "native_research_only":
+                normalize_high_level_request(arguments)
+            else:
+                validate_tool_arguments("submit_ceo_intent", arguments)
+        except (GatewayError, CeoRequestError):
             raise ValueError("publication grant template refused") from None
         encoded = canonical(grant)
-        require(encoded not in seen and grant["principal_scope"] not in scopes,
-                "publication grants must be unique")
+        require(encoded not in seen, "publication grants must be unique")
         seen.append(encoded)
-        scopes.append(grant["principal_scope"])
+        scopes.setdefault(grant["principal_scope"], []).append(grant)
+    for group in scopes.values():
+        profiles = [grant["template"]["execution_profile"] for grant in group]
+        if len(group) == 1:
+            require(profiles != ["native_research_only"],
+                    "native publication requires the exact READ-only pair")
+            continue
+        require(profiles == ["research_only", "native_research_only"],
+                "same-scope publication requires the exact READ-only pair")
+        first, second = group
+        position = next(i for i, grant in enumerate(grants) if grant is first)
+        require(grants[position + 1] is second,
+                "same-scope publication pair must be adjacent")
+        left = {key: value for key, value in first["template"].items()
+                if key != "execution_profile"}
+        right = {key: value for key, value in second["template"].items()
+                 if key != "execution_profile"}
+        require(canonical(left) == canonical(right)
+                and type(right.get("attempt_limit")) is int
+                and right["attempt_limit"] == 1
+                and right.get("allowed_write_paths", []) == []
+                and right.get("validation", {}) == {},
+                "same-scope publication pair must have identical READ-only fields")
     return tuple(grants)
 
 
