@@ -561,3 +561,47 @@ def test_missing_gateway_cost_holds_account_for_billing_reconciliation(monkeypat
     with pytest.raises(explabs_client.ExperientialError, match="no_eligible_account"):
         pool.complete("", "one independent task")
     assert calls == ["fake-key-b"]
+
+
+def test_brain_client_to_pool_to_gateway_to_cost_ledger_b_only(monkeypatch):
+    """Full Brain entrypoint through real pool + wire adapter with mocked HTTP."""
+    _env(monkeypatch)
+    monkeypatch.setenv("BOT_LLM_BACKEND", "explabs")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    http, calls = _transport(
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    monkeypatch.setattr(explabs_pool, "_POOL", explabs_pool.AccountPool(http_client=http))
+    from brain import cost_guard
+    recorded = []
+    monkeypatch.setattr(cost_guard, "record", lambda *a, **kw: recorded.append((a, kw)))
+
+    assert client.backend() == "explabs"
+    assert client.available()
+    assert client.call_model("", "one independent task", role="analyst") == ("OK", None)
+    assert calls == ["fake-key-b"]
+    assert len(recorded) == 1
+    args, kwargs = recorded[0]
+    assert args[1] == pytest.approx(0.0001)
+    assert kwargs["key_id"] == "explabs_account_2"
+    assert kwargs["input_tokens"] == 10
+    assert kwargs["output_tokens"] == 10
+    assert kwargs["model"] == "deepseek-v4.1-flash"
+
+
+def test_brain_client_denies_uncapped_b_before_inference(monkeypatch):
+    """True Brain entrypoint refuses an uncertified $1 cap without a POST."""
+    _env(monkeypatch)
+    monkeypatch.setenv("BOT_LLM_BACKEND", "explabs")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    http, calls = _transport(limits={"fake-key-a": 10.0, "fake-key-b": None})
+    monkeypatch.setattr(explabs_pool, "_POOL", explabs_pool.AccountPool(http_client=http))
+
+    assert client.available()
+    result, reason = client.call_model("", "one independent task", role="analyst")
+    assert result is None
+    assert reason == "explabs_pool_initial_verification_required"
+    assert calls == []
