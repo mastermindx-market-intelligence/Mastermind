@@ -3,7 +3,7 @@
 
 Consumes the incumbent build_review_stage.py output; never invokes the native
 publisher, changes CURRENT.json, touches a credential, or starts a Fabric task.
-The exact predecessor and three patched members are pinned for this wave.
+The exact predecessor and five patched members are pinned for this wave.
 """
 from __future__ import annotations
 
