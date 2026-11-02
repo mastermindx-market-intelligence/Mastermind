@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROLLOUT = ROOT / "ops/native_fabric/quota_continuity/rollout"
 PATCHES = ROOT / "ops/native_fabric/patches"
 PREDECESSOR = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
-CANDIDATE = "37c4ab4f9db5a1aab3bfd4831cdad5e001e3ceefcc6ad2d0789fdceee058d9a8"
+CANDIDATE = "42762224b705ebe0f67951f287529efca57a6dc8ec8abdfec5abc8bda9804ab6"
 
 
 class MiniMaxM31SourceStage(unittest.TestCase):
@@ -54,7 +54,8 @@ class MiniMaxM31SourceStage(unittest.TestCase):
         baseline = json.loads((self.baseline / "native-manifest.json").read_text())
         changed = {k for k in manifest if manifest[k] != baseline[k]}
         self.assertEqual(changed, {
-            "ext/pick.py", "ext/sub.sh", "ext/mm_codex_exec.sh"})
+            "ext/pick.py", "ext/sub.sh", "ext/mm_codex_exec.sh",
+            "ext/host_pick.py", "ext/placement_view.py"})
         self.assertEqual(receipt["candidate"], CANDIDATE)
         self.assertEqual(receipt["changed_members"], sorted(changed))
         self.assertEqual(json.loads((self.baseline / "native-manifest.json").read_text()),
