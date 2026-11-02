@@ -61,7 +61,7 @@ BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 ROLE_PACKAGE = "mastermind-fabric-orchestration"
 CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
 # Git blob digest of the separately reviewed local Skill source; not a runtime grant.
-CLAUDE_FABRIC_SKILL_BLOB_SHA = "41d9b46459138bfef4537ab6a32fa7cd3a0559d8"
+CLAUDE_FABRIC_SKILL_BLOB_SHA = "a4a29ba025db0e50f084179b248501fd27327bfb"
 CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
 CODEX_FABRIC_PRIOR_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
 CODEX_FABRIC_SKILL_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
