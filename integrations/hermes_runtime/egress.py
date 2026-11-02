@@ -2,7 +2,7 @@
 
 No proxy is created or launched here. The existing role-private 0600 secrets
 file supplies only its own per-role proxy address. RestrictAddressFamilies,
-IPAddressDeny=any and IPAddressAllow=localhost remain unchanged in systemd.
+IPAddressDeny=any remains; per-role IPAddressAllow now selects the exact role\nloopback alias and the shared original backend 127.0.0.1 only. The unit's\nactual cgroup BPF enforcement and parent slice policy still require proof.
 Source qualification is not evidence of an installed policy, real CONNECT,
 TLS verification or an authenticated provider response.
 """
@@ -16,7 +16,11 @@ from .errors import RuntimeRefusal
 
 PROXY_ENV_NAME = "HERMES_NATIVE_HTTPS_PROXY"
 ROLE_ENV_NAME = "HERMES_NATIVE_EGRESS_ROLE"
-ROLES = frozenset({"mmsecretary", "mmmeta"})
+ROLE_PROXY_HOST = {
+    "mmsecretary": "127.0.0.2",
+    "mmmeta": "127.0.0.3",
+}
+ROLES = frozenset(ROLE_PROXY_HOST)
 
 
 def native_egress_child_env(role: str, private_values: Mapping[str, str]) -> dict[str, str]:
@@ -38,9 +42,10 @@ def native_egress_child_env(role: str, private_values: Mapping[str, str]) -> dic
         port = url.port
     except (ValueError, TypeError):
         raise RuntimeRefusal("NATIVE_EGRESS_PROXY_INVALID") from None
-    if (url.scheme != "http" or url.hostname != "127.0.0.1"
+    host = ROLE_PROXY_HOST[role]
+    if (url.scheme != "http" or url.hostname != host
             or not isinstance(port, int) or not 1024 <= port <= 65535
-            or raw != f"http://127.0.0.1:{port}"):
+            or raw != f"http://{host}:{port}"):
         raise RuntimeRefusal("NATIVE_EGRESS_PROXY_INVALID")
     # A CONNECT proxy must be locally controlled and allowlisted OUTSIDE this
     # native unit. HTTP_PROXY/ALL_PROXY, shell proxy values and other role
