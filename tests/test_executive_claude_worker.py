@@ -1294,6 +1294,7 @@ def test_secret_stderr_and_replaced_bound_evidence_never_succeed(
     finally:
         os.close(gate_fd)
 
+
 def test_post_parse_git_rejection_leaves_bound_result_empty(tmp_path: Path) -> None:
     binary = _fixture_claude_binary(tmp_path)
     (tmp_path / "mode").write_text("git-change", encoding="utf-8")
