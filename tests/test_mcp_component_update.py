@@ -1923,7 +1923,6 @@ def _disabled_listing(*lines):
 @pytest.mark.parametrize("listing,expected", [
     (_disabled_listing('"com.mastermind.executive.mcp" => disabled'), False),
     (_disabled_listing('"com.mastermind.executive.mcp" => true'), False),
-    (_disabled_listing('"com.mastermind.executive.mcp" => true,'), False),
     (_disabled_listing('"com.mastermind.executive.mcp" => enabled'), True),
     (_disabled_listing('"com.mastermind.executive.mcp" => false'), True),
     # No override for the label (or only other labels, or a longer label) means not disabled.
@@ -1931,7 +1930,7 @@ def _disabled_listing(*lines):
     (_disabled_listing('"com.mastermind.executive.mcp.other" => disabled'), True),
     # A structurally complete table with no row for the label is "no override": enabled.
     (_disabled_listing(), True),
-], ids=["disabled", "true", "true-comma", "enabled", "false", "other-label", "longer-label", "empty-set"])
+], ids=["disabled", "true", "enabled", "false", "other-label", "longer-label", "empty-set"])
 def test_production_service_enabled_reads_the_launchd_disabled_override(launchctl, listing, expected):
     launchctl.stdout = listing
     assert m.ProductionHost().service_enabled() is expected
@@ -1956,9 +1955,22 @@ def test_production_service_enabled_reads_the_launchd_disabled_override(launchct
     b"unexpected banner\n" + _disabled_listing(),
     _disabled_listing() + b'\t"com.mastermind.executive.mcp" => disabled\n',
     _disabled_listing() + b"}\n",
+    # A row in any shape the shell parser rejects is refused, never skipped: a skipped row would
+    # leave the gateway's own disable invisible and read as "enabled".
+    _disabled_listing("com.mastermind.executive.mcp => disabled"),
+    _disabled_listing("'com.mastermind.executive.mcp' => disabled"),
+    _disabled_listing('"com.mastermind.executive.mcp"  =>  disabled  extra'),
+    _disabled_listing('"com.mastermind.executive.mcp"=>disabled'),
+    _disabled_listing('"com.mastermind.executive.mcp" => disabled,'),
+    _disabled_listing('"com.mastermind.executive.mcp" -> disabled'),
+    _disabled_listing('"com.apple.other" => disabled', '"com.apple.other" => disabled'),
+    _disabled_listing('"com apple" => disabled'),
+    _disabled_listing('"com.mastermind.executive.mcp" == disabled'),
 ], ids=["conflicting", "unknown-verdict", "no-verdict", "oversized", "empty-output", "blank-lines",
         "rows-without-header", "missing-footer", "duplicate-table", "duplicate-header", "junk-row",
-        "banner-before-header", "row-after-footer", "second-footer"])
+        "banner-before-header", "row-after-footer", "second-footer", "unquoted-label",
+        "single-quoted-label", "extra-field", "no-spaces", "trailing-comma", "wrong-arrow",
+        "duplicate-other-label", "label-with-space", "wrong-operator"])
 def test_production_service_enabled_refuses_ambiguous_output(launchctl, listing):
     launchctl.stdout = listing
     with pytest.raises(m.UpdateRefused) as caught:
