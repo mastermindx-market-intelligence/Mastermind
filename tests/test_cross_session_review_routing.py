@@ -35,6 +35,19 @@ def test_web_project_instruction_block_loads_review_guide_within_budget():
     assert (ROOT / GUIDE).is_file()
 
 
+def test_protected_index_routes_review_at_same_pinned_source():
+    # Existing Shared Project instructions already bootstrap the protected
+    # index; a conditional review entry is discoverable without re-installing
+    # the complete Project instruction block first.
+    index = _read("docs/sol_skills/INDEX.md")
+    assert "`" + GUIDE + "`" in index
+    section = index.split("### `" + GUIDE + "`", 1)[1].split("\n### ", 1)[0]
+    assert "same" in section.lower() and "protected Mastermind commit" in section
+    assert "independent PR/source review" in section
+    assert "not" in section.lower() and "runtime" in section
+    assert "does not install" in section
+
+
 def test_outside_fence_only_pointer_fails_project_consumer():
     kernel = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
     block = _project_instructions(kernel)
