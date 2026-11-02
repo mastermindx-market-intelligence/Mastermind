@@ -73,8 +73,15 @@ def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) 
     if not spec.enabled_in_profile or spec.provider_id == "cursor-pool":
         raise RuntimeRefusal("NATIVE_CANARY_MODEL_UNQUALIFIED")
     needed = (spec.credential_env, "HTTPS_PROXY", "NO_PROXY", "HERMES_HOME")
+    allowed = set(needed) | {
+        "PATH", "HOME", "LANG",
+        "HERMES_DASHBOARD_BASIC_AUTH_USERNAME",
+        "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD",
+        "HERMES_SLACK_BOT_USER_ID",
+    }
     other_role_key = "ZAI_API_KEY" if profile.role == "mmsecretary" else "BYTEPLUS_MODELARK_API_KEY"
-    if (other_role_key in env
+    if (set(env) - allowed
+            or other_role_key in env
             or any(not isinstance(env.get(k), str) or not env[k] for k in needed)
             or env.get("HERMES_HOME") != str(profile.hermes_home)
             or "HERMES_GATEWAY_TOKEN" in env
