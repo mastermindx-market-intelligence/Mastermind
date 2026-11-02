@@ -75,8 +75,43 @@ load() {
   W_OPEN=$(epoch "${DAY}T04:10"); W_LAST_START=$(epoch "${DAY}T05:30")
   W_CLOSE=$(epoch "${DAY}T05:40"); APT_MIN_NEXT=$(epoch "${DAY}T05:55")
 }
-events_tail() {  # events_tail <out>: fresh 20000-line run_events tail, extra.flags dropped
-  "${VPS[@]}" "tail -n 20000 $LIVE/governance/run_events.jsonl" | rb events-filter > "$1"
+# rev 3.2 (seat ruling D-EVT-1): the live run_events.jsonl carries interleaved-write rows that do not parse (10 rows dated
+# 2026-10-07..10-16 inside the 20000-line tail on 2026-11-02). Such a row is tolerated only when its leading "ts" prefix parses
+# and is strictly before the threshold: the running process's ActiveEnterTimestamp when gates/process_active_enter.txt exists
+# (G2 reasons about runs since process start), else 00:00Z two days before DAY. Every other unparsed row still reaches
+# events-filter and stops the step, as before. Dropped rows are recorded in logs/unparsed_rows.log.
+EVT_PREFILTER='
+import sys, re, json, datetime
+thr = float(sys.argv[1]); log = open(sys.argv[2], "a"); dropped = kept_bad = 0
+pat = re.compile(r"^\{\"ts\":\"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+for line in sys.stdin:
+    s = line.strip()
+    if not s:
+        continue
+    try:
+        json.loads(s)
+        sys.stdout.write(line)
+        continue
+    except ValueError:
+        pass
+    m = pat.match(s); ts = None
+    if m:
+        try:
+            ts = datetime.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc).timestamp()
+        except ValueError:
+            ts = None
+    if ts is not None and ts < thr:
+        dropped += 1; log.write("DROPPED ts=%s len=%d head=%s\n" % (m.group(1), len(s), s[:80])); continue
+    kept_bad += 1; log.write("KEPT_UNPARSED ts=%s len=%d head=%s\n" % (m.group(1) if m else "?", len(s), s[:80]))
+    sys.stdout.write(line)
+print(json.dumps({"events_prefilter": {"threshold_epoch": thr, "dropped_before_threshold": dropped, "kept_unparsed": kept_bad}}), file=sys.stderr)
+'
+events_tail() {  # events_tail <out>: fresh 20000-line run_events tail, extra.flags dropped; unparsed rows before the threshold dropped (D-EVT-1)
+  local thr
+  if [ -s "$EV/gates/process_active_enter.txt" ]; then thr=$(tr -d @ < "$EV/gates/process_active_enter.txt")
+  else thr=$(( $(epoch "${DAY}T00:00") - 172800 )); fi
+  [[ $thr =~ ^[0-9]+$ ]] || { echo "events_tail: bad threshold '$thr'" >&2; return 1; }
+  "${VPS[@]}" "tail -n 20000 $LIVE/governance/run_events.jsonl" | "$PY" -I -B -c "$EVT_PREFILTER" "$thr" "$EV/logs/unparsed_rows.log" | rb events-filter > "$1"
 }
 snapshot_list() {  # snapshot_list <out>
   "${VPS[@]}" 'bash -s' > "$1" <<'EOF'
