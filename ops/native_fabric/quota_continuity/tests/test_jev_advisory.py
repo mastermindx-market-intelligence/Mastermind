@@ -115,6 +115,18 @@ class JevAdvisoryContract(OfflineBoundary):
         self.assertEqual(len(calls), 1, "a refused advisory must not be retried")
         self.assertEqual(set(calls), {"offline-fixture-key"})
 
+        malformed_calls = []
+
+        def malformed(body, key, timeout):
+            malformed_calls.append(key)
+            return None
+
+        with self.assertRaises(self.jev.JevUnavailable) as caught:
+            self.jev.evaluate("task", {"task_class": "x", "work_packet": "y"},
+                              api_key="offline-fixture-key", transport=malformed)
+        self.assertEqual(caught.exception.code, "INVALID_RESPONSE")
+        self.assertEqual(len(malformed_calls), 1, "a malformed advisory must not be retried")
+
     def test_error_codes_never_carry_the_credential_or_the_request_text(self):
         secret = "offline-fixture-key"
 
