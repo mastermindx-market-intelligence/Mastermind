@@ -96,6 +96,7 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
                 ("HERMES_GATEWAY_TOKEN", "PRIVATE-NOT-LIVE"),
                 ("HERMES_SLACK_BOT_TOKEN", "PRIVATE-NOT-LIVE"),
                 ("HTTP_PROXY", "http://127.0.0.1:1234"),
+                ("ZAI_API_KEY", "SYNTHETIC_WRONG_ROLE_KEY"),
             ]:
                 bad = {**env, key: value}
                 with self.subTest(key=key, value=value):
@@ -149,9 +150,35 @@ class SyntheticRunnerTests(unittest.TestCase):
         self.assertFalse(receipt["provider_tls_verified"])
         self.assertFalse(receipt["bpf_network_deny_verified"])
         self.assertFalse(receipt["live_slack_delivery_verified"])
-        self.assertFalse(receipt["role_bot_slack_delivery_verified"]
-                         if "role_bot_slack_delivery_verified" in receipt else False)
+        self.assertNotIn("role_bot_slack_delivery_verified", receipt)
         self.assertNotIn("SOURCE_ONLY_PRIVATE_FIXTURE_KEY", str(receipt))
+
+    def test_meta_role_uses_its_selected_model_and_only_zai_key(self):
+        self.profile = compose_profile(
+            "mmmeta", state_dir=self.root / "meta-state",
+            secrets_file=self.root / "meta.secrets.env", hermes_home=self.home,
+        )
+        self.child_env.pop("BYTEPLUS_MODELARK_API_KEY")
+        self.child_env["ZAI_API_KEY"] = "SOURCE_ONLY_META_PROVIDER_FIXTURE"
+        self.child_env["HTTPS_PROXY"] = "http://127.0.0.1:18652"
+        self._write()
+        receipt = self._run()
+        self.assertEqual(receipt["status"], "PASS_CHILD_OUTPUT_OBSERVATION_ONLY")
+        self.assertEqual(receipt["role"], "mmmeta")
+        self.assertEqual(receipt["model"], "glm-5.3")
+        self.assertNotIn("SOURCE_ONLY_META_PROVIDER_FIXTURE", str(receipt))
+
+    def test_cross_role_key_refused_before_child_spawn(self):
+        self._write()
+        self.child_env["ZAI_API_KEY"] = "SYNTHETIC_WRONG_ROLE"
+        with mock.patch(
+            "integrations.hermes_harness.native_turn_runner._capture_bounded_child",
+            side_effect=AssertionError("unapproved mixed account credentials reached child"),
+        ) as spawn:
+            with self.assertRaises(RuntimeRefusal) as cm:
+                self._run()
+            self.assertEqual(cm.exception.code, "NATIVE_CANARY_ENV_UNQUALIFIED")
+            spawn.assert_not_called()
 
     def test_malformed_json_is_blocked_not_a_canary(self):
         self._write("malformed")
