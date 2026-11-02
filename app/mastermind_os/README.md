@@ -96,3 +96,20 @@ installation, registration, or release is performed by these checks.
 Approved design references remain #702's workspace and #704's consumer freeze.
 The header uses the existing facts/buttons and the content uses existing cards,
 state labels and typography; no additional design system was introduced.
+
+## Web SSO restoration candidate (review required)
+
+The web client now attempts hidden-frame authorization-code + PKCE (`prompt=none`) on
+startup and after silent tokens expire. The fixed callback hands a code only to a
+same-origin, state/source-checked parent. Access tokens remain in memory, with no
+refresh token or bearer serialized into browser storage. A nonsecret localStorage
+logout marker prevents an explicit local sign-out being undone by page reload;
+interactive sign-in clears that marker. Resource audiences remain distinct.
+
+This is **best-effort SSO restoration, not unlimited sign-in**: third-party cookie
+blocking, Auth0 session expiration, tenant iframe restrictions, revocation, and
+browser profile cleanup can require interactive sign-in. Full persistence across
+those conditions requires a separately reviewed first-party/BFF session owner or
+qualified rotating refresh-token implementation, with explicit revoke/logout,
+rotation and server-side revocation guarantees. Native macOS Keychain renewal is a
+separate implementation. Source tests do not prove live Auth0 tenant behavior.

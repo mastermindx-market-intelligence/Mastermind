@@ -110,12 +110,10 @@ export function handleWebAuthCallback(): boolean {
       ? "Sign-in failed. Close this window and try again."
       : "Completing sign-in. This window will close automatically.";
   document.body.replaceChildren(main);
-  if (origin === ORIGIN && window.opener && !window.opener.closed) {
-    try {
-      window.opener.postMessage(payload, ORIGIN);
-    } catch {
-      /* opener is gone */
-    }
+  const recipient = window.opener && !window.opener.closed ? window.opener :
+    window.parent !== window ? window.parent : null;
+  if (origin === ORIGIN && recipient) {
+    try { recipient.postMessage(payload, ORIGIN); } catch { /* unavailable */ }
   }
   return true;
 }
@@ -447,8 +445,105 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       current.cancel = () => {};
     }
   }
+  // Nonsecret explicit-logout flag prevents a reload from silently undoing sign-out.
+  const logoutKey = `mastermind-os-auth-logout-v1:${config.webClientId ?? "unconfigured"}`;
+  const logoutBlocked = () => {
+    try { return localStorage.getItem(logoutKey) === "1"; } catch { return true; }
+  };
+  // Restore the Auth0 SSO session with hidden-frame PKCE. No access/refresh
+  // tokens are placed in localStorage, cookies, or sessionStorage.
+  let restoring: Promise<AuthState> | null = null;
+  async function restore(force = false): Promise<AuthState> {
+    if (!configured || logoutBlocked() || flow || (!force && valid("acquisition")) || restoring) {
+      return restoring ?? Promise.resolve(getState());
+    }
+    const ticket = generation;
+    const restoreOne = async (resource: "acquisition" | "content" | "executive") => {
+      const verifier = random(), state = random();
+      const challenge = base64(new Uint8Array(await cryptoApi.subtle.digest(
+        "SHA-256", new TextEncoder().encode(verifier))));
+      check(ticket);
+      const url = new URL(`${ISSUER}authorize`);
+      const audience = resource === "acquisition" ? ACQUISITION_AUDIENCE :
+        resource === "content" ? CONTENT_AUDIENCE : executiveResource!;
+      for (const [key, value] of Object.entries({
+        response_type: "code", client_id: config.webClientId!,
+        redirect_uri: CALLBACK_URL, scope: resourceScope(resource), audience,
+        state, code_challenge: challenge, code_challenge_method: "S256",
+        prompt: "none", response_mode: "query",
+      })) url.searchParams.set(key, value);
+      const frame = document.createElement("iframe");
+      frame.hidden = true;
+      frame.setAttribute("aria-hidden", "true");
+      frame.title = "Session restoration";
+      const abort = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const code = await new Promise<string>((resolve, reject) => {
+          let settled = false;
+          const listener = (event: MessageEvent) => {
+            if (event.origin !== ORIGIN || event.source !== frame.contentWindow) return;
+            const data = event.data;
+            if (!data || typeof data !== "object" || data.type !== TYPE ||
+                data.state !== state) return;
+            if (ticket !== generation) return finish("TRANSACTION_CANCELLED");
+            if (Object.keys(data).some(k => !["type","state","code","failure"].includes(k)) ||
+                Boolean(data.code) === Boolean(data.failure) ||
+                (data.code !== undefined && !opaque(data.code))) return finish("CALLBACK_INVALID");
+            if (data.failure) return finish("SILENT_AUTH_UNAVAILABLE");
+            finish(undefined, data.code);
+          };
+          const finish = (error?: string, value?: string) => {
+            if (settled) return;
+            settled = true;
+            remove("message", listener);
+            clear(timer);
+            error ? reject(new Error(error)) : resolve(value!);
+          };
+          add("message", listener);
+          timer = later(() => finish("SILENT_AUTH_UNAVAILABLE"), 10000);
+          frame.src = url.toString();
+          document.body.appendChild(frame);
+        });
+        check(ticket);
+        const token = await exchange(code, verifier, resource, ticket, abort.signal);
+        check(ticket);
+        tokens[resource] = token;
+        if (resource === "executive") advanceExecutive();
+        later(() => {
+          if (ticket === generation && tokens[resource] === token) {
+            tokens[resource] = null;
+            if (resource === "executive") advanceExecutive();
+            emit();
+            void restore(true);
+          }
+        }, Math.max(0, token.expires - now()));
+        emit();
+      } finally {
+        abort.abort();
+        clear(timer);
+        frame.remove();
+      }
+    };
+    const running = (async () => {
+      try {
+        await restoreOne("acquisition");
+        if (ticket !== generation) return getState();
+        try { await restoreOne("content"); } catch { /* workspace remains usable */ }
+        if (executiveResource && ticket === generation) {
+          try { await restoreOne("executive"); } catch { /* optional privilege */ }
+        }
+      } catch { /* fail closed; manual sign-in remains available */ }
+      return getState();
+    })();
+    restoring = running;
+    try { return await running; }
+    finally { if (restoring === running) restoring = null; }
+  }
+
   async function signIn() {
     if (!configured) return getState();
+    try { localStorage.removeItem(logoutKey); } catch { /* policy restricted */ }
     cancel();
     tokens.acquisition = null;
     tokens.content = null;
@@ -523,6 +618,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   async function signOut() {
+    try { localStorage.setItem(logoutKey, "1"); } catch { /* SSO cannot be suppressed across reload when storage is blocked */ }
     cancel();
     tokens.acquisition = null;
     tokens.content = null;
@@ -732,6 +828,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     },
     signIn,
     signOut,
+    restore,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
     readWork: ({ signal }) =>
