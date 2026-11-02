@@ -685,9 +685,53 @@ def test_remote_commission_refuses_simultaneous_local_and_remote_before_fetch(
     assert calls == [], "a local refusal must never be replaced by the remote route"
 
 
-def test_remote_commission_refuses_source_free_planner_instead_of_silent_pass(
+def _corrupt_root_dialogue_source(seeded: SimpleNamespace, corruption: str) -> None:
+    """Private corruption fixture; no malformed source becomes legacy absence."""
+
+    with seeded.runtime.store.read() as connection:
+        row = connection.execute(
+            """SELECT event_id,payload_json FROM events
+               WHERE event_type='JOB_CREATED' AND job_id=?""",
+            (seeded.root.job_id,),
+        ).fetchone()
+    assert row is not None
+    payload = json.loads(str(row["payload_json"]))
+    assert isinstance(payload["provenance"].get("dialogue_source"), dict)
+    if corruption == "orphan_digest":
+        del payload["provenance"]["dialogue_source"]
+    elif corruption == "source_without_digest":
+        del payload["provenance"]["dialogue_source_digest"]
+    elif corruption == "malformed_source":
+        payload["provenance"]["dialogue_source"] = {"schema_version": "invalid"}
+    else:
+        raise AssertionError("unknown private corruption case")
+    connection = sqlite3.connect(seeded.runtime.store.path)
+    try:
+        connection.execute("DROP TRIGGER events_are_immutable_update")
+        connection.execute(
+            "UPDATE events SET payload_json=? WHERE event_id=?",
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                int(row["event_id"]),
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def test_source_free_remote_planner_passes_without_commission_after_qualification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Legacy source-free provenance passes the remote route with no commission.
+
+    Neither the optional dialogue source nor its digest exists in the
+    immutable root creation Event, so no commission was ever admitted: the
+    route returns ``None`` after qualifying the exact remote identity and
+    durable assignment.  It performs no canonical fetch and no local Git read
+    or stat of the removed workspace, and the original local route keeps its
+    legacy ``None``.
+    """
     seeded = _seed_remote_operator_planner(tmp_path, dialogue=False)
     identity = _qualified_identity(seeded)
     _detach_remote_workspace(seeded)
@@ -695,9 +739,93 @@ def test_remote_commission_refuses_source_free_planner_instead_of_silent_pass(
     calls = _install_reader(monkeypatch, content=seeded.content)
 
     assert verify_commission_for_job(seeded.runtime, seeded.planner, None) is None
+    assert (
+        verify_commission_for_job(
+            seeded.runtime, seeded.planner, None, owner_workspace_identity=identity
+        )
+        is None
+    )
+
+    assert calls == []
+
+
+@pytest.mark.parametrize("case", ["wrong_path", "wrong_base", "inode_zero", "negative_gid"])
+def test_source_free_remote_planner_refuses_unqualified_remote_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    seeded = _seed_remote_operator_planner(tmp_path, dialogue=False)
+    broken = _mutated_identity(_qualified_identity(seeded), case)
+    _detach_remote_workspace(seeded)
+    _forbid_local_git(monkeypatch)
+    calls = _install_reader(monkeypatch, content=seeded.content)
+
+    with pytest.raises(SupervisorError, match=_IDENTITY_CASES[case]):
+        verify_commission_for_job(
+            seeded.runtime, seeded.planner, None, owner_workspace_identity=broken
+        )
+
+    assert calls == []
+
+
+def test_source_free_remote_planner_refuses_without_current_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seeded = _seed_remote_operator_planner(tmp_path, dispatch=False, dialogue=False)
+    identity = _qualified_identity(seeded)
+    _detach_remote_workspace(seeded)
+    _forbid_local_git(monkeypatch)
+    calls = _install_reader(monkeypatch, content=seeded.content)
+
+    with pytest.raises(
+        SupervisorError, match="remote commission Job has no current Attempt"
+    ):
+        verify_commission_for_job(
+            seeded.runtime, seeded.planner, None, owner_workspace_identity=identity
+        )
+
+    assert calls == []
+
+
+def test_source_free_remote_planner_refuses_durable_worker_rebind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seeded = _seed_remote_operator_planner(tmp_path, dialogue=False)
+    identity = _qualified_identity(seeded)
+    _detach_remote_workspace(seeded)
+    _forbid_local_git(monkeypatch)
+    calls = _install_reader(monkeypatch, content=seeded.content)
+    _corrupt_private_row(
+        seeded,
+        "UPDATE attempts SET worker_id='worker-b' WHERE attempt_id=?",
+        (seeded.dispatch.attempt.attempt_id,),
+    )
+
     with pytest.raises(
         SupervisorError,
-        match="remote commission Job lost its admitted commission source",
+        match="remote commission durable assignment differs from the commission Job",
+    ):
+        verify_commission_for_job(
+            seeded.runtime, seeded.planner, None, owner_workspace_identity=identity
+        )
+
+    assert calls == []
+
+
+@pytest.mark.parametrize("corruption", ["orphan_digest", "source_without_digest", "malformed_source"])
+def test_corrupt_source_never_recategorizes_source_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corruption: str
+) -> None:
+    """Orphaned, partial and malformed commissioned provenance all refuse."""
+
+    seeded = _seed_remote_operator_planner(tmp_path)
+    identity = _qualified_identity(seeded)
+    _detach_remote_workspace(seeded)
+    _forbid_local_git(monkeypatch)
+    calls = _install_reader(monkeypatch, content=seeded.content)
+    _corrupt_root_dialogue_source(seeded, corruption)
+
+    with pytest.raises(
+        SupervisorError, match="immutable commission source is invalid"
     ):
         verify_commission_for_job(
             seeded.runtime, seeded.planner, None, owner_workspace_identity=identity

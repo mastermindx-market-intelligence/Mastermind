@@ -51,7 +51,7 @@ def test_private_completed_turn_callback_runs_before_existing_role_seal(tmp_path
 
 # This fixture uses real admission, claim, checkpoint, positive process release,
 # restore invalidation and COO retry APIs. Native observations alone are fake.
-def _successor(tmp_path, monkeypatch):
+def _successor(tmp_path, monkeypatch, *, commission_content=b'# W3 commission\n\nContinue the original bounded work.\n'):
     import copy
     from control_plane import codex_operator_adapter as codex
     from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
@@ -81,7 +81,7 @@ def _successor(tmp_path, monkeypatch):
     monkeypatch.setattr(WorkerRegistry, 'register_worker', register)
     clock = fixture._Clock()
     runtime, root, planner = fixture._seed_dispatchable_operator_planner(tmp_path,
-        commission_content=b'# W3 commission\n\nContinue the original bounded work.\n', clock=clock)
+        commission_content=commission_content, clock=clock)
     worker = runtime.workers.get_worker('worker-a')
     quota = runtime.workers.get_quota_class('worker-a', 'codex-coo-operator')
     metadata = copy.deepcopy(quota.metadata)
@@ -336,3 +336,15 @@ def test_second_same_operation_call_cannot_dispatch_again(tmp_path, monkeypatch)
         supervisor._run_claimed(job, lease)
     assert len(made) == 1 and made[0].begin_turn_calls == 1
     assert _has_ack(runtime, lease)
+
+
+def test_source_free_legacy_successor_does_not_gain_capsule_or_ack(tmp_path, monkeypatch):
+    from control_plane.executive_runtime import StateConflict
+    runtime, job, lease, _ = _successor(tmp_path, monkeypatch, commission_content=None)
+    supervisor, made = _normal_supervisor(runtime)
+    with pytest.raises(StateConflict, match='cross-realm continuation requires an immutable commission'):
+        supervisor._run_claimed(job, lease)
+    assert made == []
+    assert runtime.events.get_event_by_command_id(
+        f'operator-continuation:prepare:{lease.attempt.attempt_id}') is None
+    assert not _has_ack(runtime, lease)

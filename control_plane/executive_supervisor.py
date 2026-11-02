@@ -1183,6 +1183,27 @@ def _verify_remote_commission_recheck(
         )
 
 
+def _qualify_source_free_remote_planner(
+    runtime: Runtime, job: Job, identity: WorkspaceIdentity
+) -> None:
+    """Qualify one legacy source-free remote planner and pass with no commission.
+
+    The immutable root creation Event carries neither the optional dialogue
+    source nor its digest, so no commission was ever admitted for this Job:
+    that pure absence is legacy source-free provenance, not a lost
+    commissioned input, and it may pass with ``None``.  The ``None`` is only
+    reachable after the full remote qualification: the exact owner-produced
+    selected-host identity must bind to the durable Job worktree and base
+    with already qualified physical fields, and the current Job, Attempt and
+    worker assignment must be durable and exact.  Any present, malformed, or
+    drifted source never reaches this route.  No local Git read, stat, or
+    canonical fetch happens here, and no local workspace is consulted.
+    """
+
+    _verify_remote_commission_workspace(job, identity)
+    _remote_commission_current_attempt(runtime, job)
+
+
 def _verify_remote_commission_for_job(
     runtime: Runtime,
     job: Job,
@@ -1232,9 +1253,11 @@ def verify_commission_for_job(
     normal Supervisor supplies it only from its existing qualified
     selected-host source (the requested workspace's own host observation),
     never from model or caller wire data, and the ``WorkspaceIdentity`` type
-    itself is not admission.  When it is given, the exact commission bytes are
-    fetched from the canonical repository directly; no local path is accessed
-    and no local refusal ever falls back to this route or back from it.
+    itself is not admission.  An admitted commission is fetched from the
+    canonical repository directly; no local path is accessed and no local
+    refusal falls back to this route or back from it. A canonical legacy
+    source-free planner returns no commission only after exact remote
+    identity and current durable assignment qualification, without a fetch.
     """
 
     direct = _is_direct_native_job(job)
@@ -1262,12 +1285,17 @@ def verify_commission_for_job(
     except StateConflict as exc:
         raise SupervisorError(f"immutable commission source is invalid: {exc}") from exc
     if owner_workspace_identity is not None:
-        # A remote commission Job without its admitted source is a refusal,
-        # never a silent pass and never a local replacement.
         if source is None:
-            raise SupervisorError(
-                "remote commission Job lost its admitted commission source"
+            # Neither the optional source nor its digest exists in the
+            # immutable root creation Event: legacy source-free provenance,
+            # not a lost commissioned input.  Exact remote identity and
+            # durable assignment still qualify before the no-commission pass,
+            # and a present-but-invalid source above never lands here.
+            return _qualify_source_free_remote_planner(
+                runtime, job, owner_workspace_identity
             )
+        # A remote commission Job with an admitted source verifies it exactly;
+        # it is never a silent pass and never a local replacement.
         return _verify_remote_commission_for_job(
             runtime, job, owner_workspace_identity, source
         )
