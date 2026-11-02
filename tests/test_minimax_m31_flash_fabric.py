@@ -211,7 +211,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                 self.assertLess(guard, cli)
                 mode_start = text.index('case "$2" in', cli)
                 mode_end = text.index('\nesac', mode_start) + len('\nesac')
-                program = '_mm_cli_model="$1"\n' + text[mode_start:mode_end] + (
+                program = '_mm_cli_model="$2"\n' + text[mode_start:mode_end] + (
                     '\nprintf "%s\\n" "$_mm_cli_model"\n'
                 )
                 for supplied, expected in (
@@ -220,7 +220,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                     ("MiniMax-M3", "MiniMax-M3"),
                 ):
                     result = subprocess.run(
-                        ["/bin/bash", "-c", program, "fixture", supplied],
+                        ["/bin/bash", "-c", program, "fixture", "fixture-cwd", supplied],
                         capture_output=True, text=True, timeout=8,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
