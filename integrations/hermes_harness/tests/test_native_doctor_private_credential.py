@@ -122,18 +122,18 @@ class NativeDoctorCredentialTests(unittest.TestCase):
     def test_shared_model_credential_rejected_without_leaking_key(self):
         key = self._key_file("shared-provider.key", FAKE_MODELARK)
         self._write_role("mmsecretary", (
-            f"BYTEPLUS_MODELARK_API_KEY_FILE={key}\\n"
-            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\\n"
-            "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\\n"
-            "HERMES_SLACK_BOT_TOKEN=secretary-distinct-slack-token-123456\\n"
+            f"BYTEPLUS_MODELARK_API_KEY_FILE={key}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\n"
+            "HERMES_SLACK_BOT_TOKEN=secretary-distinct-slack-token-123456\n"
         ))
         self._write_role("mmmeta", (
-            f"ZAI_API_KEY_FILE={key}\\n"
-            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\\n"
-            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\\n"
-            "HERMES_SLACK_BOT_TOKEN=meta-distinct-slack-token-123456\\n"
+            f"ZAI_API_KEY_FILE={key}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
+            "HERMES_SLACK_BOT_TOKEN=meta-distinct-slack-token-123456\n"
         ), gateway="test-meta-gateway-distinct-123456",
            dashboard="test-meta-dashboard-distinct-123456")
         outcome = self._doctor()
