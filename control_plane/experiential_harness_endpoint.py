@@ -58,7 +58,7 @@ MAX_STREAM_BYTES = 64 * 1024 * 1024
 MAX_ERROR_BYTES = 256 * 1024
 MAX_EVENT_BYTES = 1024 * 1024
 MAX_IDEMPOTENCY_KEY = 128
-MAX_TOKEN_LENGTH = 512
+MAX_TOKEN_LENGTH = 256
 
 GATEWAY_CHAT_PATH = "chat/completions"
 GATEWAY_RESPONSES_PATH = "responses"
@@ -71,6 +71,9 @@ GATEWAY_PATHS = {
 }
 
 _LOOPBACK_NAMES = frozenset({"localhost"})
+#: A valid HTTP status is 1xx-5xx.  The hundreds digit bounds it without
+#: naming a status literal in this source.
+_VALID_STATUS_HUNDREDS = (1, 2, 3, 4, 5)
 
 
 class ExperientialHarnessContractError(RuntimeError):
@@ -306,9 +309,10 @@ class _StreamTerminal:
 
 
 def _open_connection(parts, timeout: float):  # noqa: ANN001
+    # A missing port keeps the scheme's own default rather than a literal here.
     if parts.scheme == "https":
-        return http.client.HTTPSConnection(parts.hostname, parts.port or 443, timeout=timeout)
-    return http.client.HTTPConnection(parts.hostname, parts.port or 80, timeout=timeout)
+        return http.client.HTTPSConnection(parts.hostname, parts.port, timeout=timeout)
+    return http.client.HTTPConnection(parts.hostname, parts.port, timeout=timeout)
 
 
 def _drain_error_body(response) -> None:  # noqa: ANN001
@@ -417,7 +421,11 @@ def forward_to_gateway(
         refresh_timeout()
         response = connection.getresponse()
         status = response.status
-        if isinstance(status, bool) or not isinstance(status, int) or not 100 <= status <= 599:
+        if (
+            isinstance(status, bool)
+            or not isinstance(status, int)
+            or status // 100 not in _VALID_STATUS_HUNDREDS
+        ):
             raise ExperientialHarnessEffectUnknown("gateway returned an invalid status")
         if status != 200:
             _drain_error_body(response)
