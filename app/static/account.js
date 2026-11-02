@@ -31,6 +31,7 @@
   var SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
 
   var state = { acct: null, loaded: false };
+  var _accountRequest = null;
   var _sb = null, _sbLoad = null, _hydrating = false, _prefTimer = null, _mounted = false, _macro = false;
   var _mode = null;                 // 'standalone' | 'embed'
   var _root = null;                 // the element whose innerHTML we render into
@@ -107,7 +108,9 @@
     guest_title: ['Access session', '访问会话'],
     guest_sub: ['You’re in with the site access password. Sign in with an account to manage email, password & preferences.',
       '你正通过站点访问密码登录。使用账户登录以管理邮箱、密码与偏好。'],
-    close: ['Close', '关闭'], loading: ['Loading…', '加载中…']
+    close: ['Close', '关闭'], loading: ['Loading…', '加载中…'],
+    access_unavailable: ['Account access could not be verified. Try again without signing out.', '暂时无法验证账户权限。无需退出登录，请重试。'],
+    retry_access: ['Check access again', '重新检查权限']
   };
   function T(k) { var v = STR[k] || ['', '']; return v[lang() === 'zh' ? 1 : 0]; }
 
@@ -120,6 +123,14 @@
       }
     } catch (e) {}
     return false;
+  }
+  // Only a pending-state hint, never a login or entitlement grant. The app
+  // receives the same shared-domain Supabase cookie as the Macro dashboard.
+  function hasSessionHint() {
+    if (hasPersisted()) return true;
+    try { return String(document.cookie || '').split(';').some(function (part) {
+      return /^sb-.*-auth-token(\.\d+)?=/.test(part.trim());
+    }); } catch (e) { return false; }
   }
   function loadSDK() {
     if (window.supabase && window.supabase.createClient) return Promise.resolve();
@@ -170,14 +181,30 @@
     }).catch(function () { return { ok: false, status: 0, data: {} }; });
   }
   function load() {
-    return api('/api/account').then(function (res) {
+    // Idle warm + click must share one read. Competing stale guest responses
+    // used to overwrite an authenticated panel after the second request won.
+    if (_accountRequest) return _accountRequest;
+    state.loaded = false;
+    render();
+    var read = api('/api/account').then(function (res) {
       var a = res.data || {};
       if (!SUPA && a.supabase) SUPA = normSupa(a.supabase);
-      if (!a.authenticated && SUPA && hasPersisted()) {
-        return api('/api/account').then(function (r2) { finishLoad(r2.data || a); });
+      if (!res.ok) { finishLoad({ access_unconfirmed: true }); return; }
+      if (!a.authenticated && hasSessionHint()) {
+        // An auth cookie is not a grant, but one temporary broker/Supabase
+        // miss is not proof of logout. Re-read once, then show a neutral
+        // retry state instead of falsely advertising sign-in or upgrades.
+        return api('/api/account').then(function (r2) {
+          finishLoad(r2.ok && r2.data && r2.data.authenticated
+            ? r2.data : { access_unconfirmed: true });
+        });
       }
       finishLoad(a);
+    }).catch(function () {
+      finishLoad({ access_unconfirmed: true });
     });
+    _accountRequest = read.finally(function () { _accountRequest = null; });
+    return _accountRequest;
   }
   function finishLoad(a) {
     state.acct = a; state.loaded = true;
@@ -345,9 +372,14 @@
         (withClose ? '<button class="mmacc-x" data-act="close" aria-label="' + esc(T('close')) + '">✕</button>' : '') +
       '</div>';
   }
+  function accessUnconfirmedHTML() {
+    return '<div class="mmacc-body"><div class="mmacc-loading" role="status">' + esc(T('access_unavailable')) + '</div>' +
+      '<button class="mmacc-btn mmacc-ghost" type="button" data-act="retry-account">' + esc(T('retry_access')) + '</button></div>';
+  }
   function panelHTML(a) {
     a = a || {};
     if (!state.loaded) return '<div class="mmacc-body"><div class="mmacc-loading">' + esc(T('loading')) + '</div></div>';
+    if (a.access_unconfirmed) return accessUnconfirmedHTML();
     if (a.authenticated) {
       return profileStripHTML(a, true) + '<div class="mmacc-body">' + bodySignedIn(a) + '</div>';
     }
@@ -359,6 +391,7 @@
   function embedHTML(a) {
     a = a || {};
     if (!state.loaded) return '<div class="mmacc-loading">' + esc(T('loading')) + '</div>';
+    if (a.access_unconfirmed) return accessUnconfirmedHTML();
     if (a.authenticated) return '<div class="mmacc-embed">' + profileStripHTML(a, false) + bodySignedIn(a) + '</div>';
     return '<div class="mmacc-embed">' + bodySignedOut(a) + '</div>';
   }
@@ -482,6 +515,7 @@
       case 'cancel-delete': showField('mmacc-del-field', false); setMsg('mmacc-del-msg', ''); return;
       case 'do-delete': return onDelete(b);
       case 'send-link': return onSendLink(b);
+      case 'retry-account': return load();
     }
   }
 
