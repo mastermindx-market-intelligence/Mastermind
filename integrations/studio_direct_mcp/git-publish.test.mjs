@@ -458,6 +458,64 @@ test('lost push response reconciles to APPLIED when exact remote head proves the
   }
 });
 
+test('explicit server-side one-ref rejection is diagnosed without treating its ref as unknown', async () => {
+  const f = await fixture();
+  try {
+    const hook = path.join(f.remote, 'hooks', 'pre-receive');
+    await writeFile(hook, '#!/bin/sh\nprintf "test-only remote rejection\\n" >&2\nexit 1\n');
+    await chmod(hook, 0o700);
+    let pushCount = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && gitCommand(args) === 'push') pushCount += 1;
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.push({ operation_id: f.operationId, expected_head_sha: f.head });
+    assert.equal(pushCount, 1, 'a rejection must never initiate another write');
+    assert.equal(result.status, 'REFUSED', JSON.stringify(result));
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal(result.code, 'REMOTE_REF_REJECTED_UNCHANGED');
+    assert.equal(result.push_attempted, true);
+    assert.equal(result.retry_allowed, false);
+    assert.equal(result.diagnostic_scope, 'SAME_CARRIER_READ_ONLY');
+    assert.equal(result.rejection_reason, 'UNDETERMINED');
+    assert.equal(result.local_head_sha, f.head);
+    assert.equal(result.remote_head_sha, null);
+    assert.equal((await git(f.workspace, 'ls-remote', '--heads', 'origin',
+      `refs/heads/${f.branch}`)).stdout.trim(), '');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('an unrelated porcelain ref cannot clear an ambiguous admitted push', async () => {
+  const f = await fixture();
+  try {
+    let pushCount = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && gitCommand(args) === 'push') {
+          pushCount += 1;
+          const error = new Error('test-only wrong-ref remote rejection');
+          error.code = 1;
+          error.stdout = `!\\t${f.head}:refs/heads/unrelated\\t[remote rejected] (failed)\\n`;
+          error.stderr = '';
+          throw error;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.push({ operation_id: f.operationId, expected_head_sha: f.head });
+    assert.equal(pushCount, 1);
+    assert.equal(result.status, 'UNKNOWN');
+    assert.equal(result.effect_state, 'EFFECT_UNKNOWN');
+    assert.equal(result.code, 'PUSH_RESULT_UNCERTAIN');
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('push failure after admission remains EFFECT_UNKNOWN when exact remote effect is not proved', async () => {
   const f = await fixture();
   try {
