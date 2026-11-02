@@ -265,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         raw = _read_snapshot(args.snapshot)
         report = audit(json.loads(raw))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         # Do not reflect error payloads or file paths, which could contain secrets.
         print(json.dumps({"schema": OUTPUT_SCHEMA, "disposition": "INPUT_UNVERIFIED", "error": "invalid_or_unreadable_snapshot"}))
         return 2

@@ -220,3 +220,13 @@ def test_safe_opaque_effect_identifiers_survive_exactly():
     held = audit(d)["held_actions"]
     assert held[0]["action_id"] == "fabric:run"
     assert held[0]["carrier"] == "studio:carrier"
+
+
+def test_deeply_nested_json_fails_closed_without_traceback(tmp_path, capsys):
+    # Legal-sized malformed JSON must not escape as RecursionError or leak input.
+    p = tmp_path / "deeply_nested.json"
+    p.write_text("[" * 12000 + "0" + "]" * 12000, encoding="utf-8")
+    assert p.stat().st_size < 131072
+    assert main([str(p)]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result == {"schema": OUTPUT_SCHEMA, "disposition": "INPUT_UNVERIFIED", "error": "invalid_or_unreadable_snapshot"}
