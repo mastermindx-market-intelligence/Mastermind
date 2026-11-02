@@ -189,7 +189,8 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                            + '\n_claude_worker_profile "minimax" "$1" || exit $?\n'
                            + 'printf "%s %s %s\\n" "$CLAUDE_CODE_MAX_CONTEXT_TOKENS" '
                            + '"$CLAUDE_CODE_AUTO_COMPACT_WINDOW" "$CLAUDE_WORKER_MAX_TURNS"\n')
-                for model in ("MiniMax-M3", "MiniMax-M3.1-Flash"):
+                for model, expected in (("MiniMax-M3", "1000000 900000 240"),
+                                        ("MiniMax-M3.1-Flash", "1000000 524288 240")):
                     result = subprocess.run(
                         ["/bin/bash", "-c", program, "fixture", model],
                         env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
@@ -197,7 +198,43 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                         text=True, capture_output=True, timeout=8,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(result.stdout.strip(), "1000000 900000 240")
+                    self.assertEqual(result.stdout.strip(), expected)
+
+    def test_m31_claude_code_uses_official_1m_model_qualifier_after_key_gate(self):
+        for path in self.shells:
+            with self.subTest(path=path):
+                text = path.read_text()
+                start = text.index('python3 "$HERE/slot.py" minimax --wait')
+                guard = text.index('MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED', start)
+                cli = text.index('_mm_cli_model="$2"', guard)
+                self.assertLess(start, guard)
+                self.assertLess(guard, cli)
+                mode_start = text.index('case "$2" in', cli)
+                mode_end = text.index('\nesac', mode_start) + len('\nesac')
+                program = '_mm_cli_model="$1"\n' + text[mode_start:mode_end] + (
+                    '\nprintf "%s\\n" "$_mm_cli_model"\n'
+                )
+                for supplied, expected in (
+                    ("MiniMax-M3.1-Flash", "MiniMax-M3.1-Flash[1m]"),
+                    ("minimax-m3.1-flash", "MiniMax-M3.1-Flash[1m]"),
+                    ("MiniMax-M3", "MiniMax-M3"),
+                ):
+                    result = subprocess.run(
+                        ["/bin/bash", "-c", program, "fixture", supplied],
+                        capture_output=True, text=True, timeout=8,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), expected)
+                # Both normal and restricted vision helpers consume the exact
+                # Claude Code qualifier. Provider accounting/preflight remain
+                # on the original bare model and subscription key must pass first.
+                finish = text.index('> "$_json" || _rc=$?', cli)
+                launch = text[cli:finish]
+                self.assertEqual(launch.count('--model "$_mm_cli_model"'), 2)
+                self.assertNotIn('--model "$2"', launch)
+                self.assertIn('capacity_preflight.py" minimax "$2"', launch)
+                self.assertIn("compact=524288", text)
+                self.assertIn("compact=900000", text)
 
     def test_m31_plan_key_gate_refuses_payg_but_preserves_legacy_m3(self):
         for path in self.shells:
