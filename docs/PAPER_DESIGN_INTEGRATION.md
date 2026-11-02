@@ -38,12 +38,22 @@ SELF-HEALING BOUNDARY: benign changes are accepted automatically at the
 very next tool call without a daemon, restart, new tunnel, new auth plane or
 release-hash hotpatch. Material semantic changes still require an explicit
 reviewed source update for only the affected operation; no software can
-prove unchanged behavior solely from an input schema. Immutable new v17
-runtime is a source candidate until independent review, protected merge,
-installer-led selection of the existing seat and a real exact-target
-scratch edit, post-read, visual screenshot and reconnect receipt.
-Synthetic and read-only live catalog checks do not prove deployment.
-Do not modify or revoke the staged older v13-v16 generations.
+prove unchanged behavior solely from an input schema. Immutable
+v17 and v18 remain historical, rejected-for-release candidates: the
+later source review found unqualified reads and unsafe verification
+under mid-operation vendor descriptor drift. Proposed immutable v19
+requalifies each reviewed read/write tool and its outgoing arguments,
+including implicit get_basic_info and the post-edit verification getter.
+If verification cannot be performed safely after dispatch, return
+EFFECT_UNKNOWN with no replay, not an invented successful receipt.
+
+The v19 source remains BUILT_NOT_PROVEN until a new independent exact-head
+review, required hosted CI, protected merge of the #1925 -> #1935 ->
+#1942 chain, original Ryan same-label installer selection, and a real
+exact-target scratch edit, readback, screenshot and reconnect receipt.
+Synthetic tests and read-only live catalog checks are not deployment
+acceptance. Preserve prior immutable runtime generations and do not
+select or overwrite v17/v18 candidates.
 
 ## M1 Paper 0.5.16 exact catalog compatibility candidate - 2026-11-02
 
