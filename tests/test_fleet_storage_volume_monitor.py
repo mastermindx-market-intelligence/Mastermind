@@ -1302,5 +1302,63 @@ class FleetStorageVolumeTests(unittest.TestCase):
                          "HELD_UNQUALIFIED_STALE_PACK_HELPER")
 
 
+    def test_unenrolled_m2_cache_trim_is_held_before_helper_dispatch(self):
+        # Drive the real coordinator on the eligible M2 path with all child
+        # launches mocked. The missing source enrollment is a pre-effect hold,
+        # not merely a post-hoc warning after an apply-capable subprocess.
+        self.assertFalse((self.sweep.HERE / "generated_cache_trim.py").exists())
+        status, receipt, calls, created = self._run_sweep(self.sweep)
+        self.assertNotIn("generated_cache_trim", [key for key, _ in calls])
+        self.assertFalse(any(
+            "generated_cache_trim.py" in token
+            for _, argv in calls for token in argv
+        ))
+        self.assertEqual(receipt["generated_cache_trim_hold"],
+                         "HELD_UNQUALIFIED_GENERATED_CACHE_HELPER")
+        self.assertEqual(receipt["generated_cache_trim_effect_state"],
+                         "NOT_APPLIED")
+        self.assertEqual(receipt["generated_cache_trim_rc"], 78)
+        self.assertIn("PRE_EFFECT_HOLD", receipt["generated_cache_trim"])
+        self.assertIn("generated_cache_trim",
+                      receipt["incomplete_substeps"])
+        self.assertIn("generated_cache_trim.held_unqualified_helper",
+                      receipt["incomplete_substeps"])
+        self.assertTrue(receipt["degraded"])
+        self.assertEqual(status, 1)
+        self.assertIn("sweep-log.jsonl", created)
+        # The generic admission helper remains deliberately key-closed.
+        with self.assertRaises(ValueError):
+            self.sweep.hold_unqualified_apply({}, "temp_gc")
+
+    def test_cache_trim_hold_beats_a_success_shaped_helper_receipt(self):
+        # Even a future regression that writes rc=0 and a plausible JSON
+        # cannot turn an explicit pre-effect hold into a green sweep.
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            with mock.patch.object(self.sweep, "STATE", state), mock.patch.object(
+                self.sweep, "_external_volume_snapshots", return_value=[]
+            ), mock.patch.object(
+                self.sweep.shutil, "disk_usage",
+                return_value=mock.Mock(free=200 * 1024 ** 3)
+            ), mock.patch.object(
+                self.sweep, "_helper_receipt_qualified", return_value=True
+            ), contextlib.redirect_stdout(io.StringIO()) as output:
+                status = self.sweep.finish({
+                    "mode": "calm",
+                    "generated_cache_trim_rc": 0,
+                    "generated_cache_trim": '{"mode":"APPLY","verified":[]}',
+                    "generated_cache_trim_hold":
+                        "HELD_UNQUALIFIED_GENERATED_CACHE_HELPER",
+                    "generated_cache_trim_effect_state": "NOT_APPLIED",
+                })
+            receipt = json.loads(output.getvalue())
+        self.assertEqual(status, 1)
+        self.assertTrue(receipt["degraded"])
+        self.assertIn("generated_cache_trim.held_unqualified_helper",
+                      receipt["incomplete_substeps"])
+        self.assertEqual(receipt["generated_cache_trim_effect_state"],
+                         "NOT_APPLIED")
+
+
 if __name__ == "__main__":
     unittest.main()
