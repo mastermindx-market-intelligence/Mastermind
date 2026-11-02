@@ -1143,6 +1143,7 @@ export function createGitPublisher(config, dependencies = {}) {
             diagnostic_scope: 'SAME_CARRIER_READ_ONLY',
             rejection_reason: 'UNDETERMINED',
             ...publicStatus(afterFailure),
+            ready_to_push: false, // A rejected write is not automatically re-admitted.
           };
         }
       } catch {
