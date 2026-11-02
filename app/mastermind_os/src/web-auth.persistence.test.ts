@@ -10,6 +10,7 @@ const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve()
 afterEach(() => {
   vi.useRealTimers();
   document.querySelectorAll("iframe").forEach(e => e.remove());
+  localStorage.clear(); sessionStorage.clear();
 });
 describe("silent Auth0 PKCE restoration", () => {
   function make() {
@@ -57,7 +58,8 @@ describe("silent Auth0 PKCE restoration", () => {
     expect(await promise).toMatchObject({ status: "signed_in", acquisition: true, content: true });
     expect(fetchFn).toHaveBeenCalledTimes(2);
     expect(document.querySelector("iframe")).toBeNull();
-    expect(localStorage.length).toBe(0);
+    expect(localStorage.getItem("mastermind-os-auth0-prior-login-v1:client-fixture")).toBe("1");
+    expect(JSON.stringify(Object.keys(localStorage))).not.toContain("private-silent-token");
   });
   it("rejects forged frame sources without a token exchange", async () => {
     const {client, fetchFn, callback} = make();

@@ -113,3 +113,27 @@ those conditions requires a separately reviewed first-party/BFF session owner or
 qualified rotating refresh-token implementation, with explicit revoke/logout,
 rotation and server-side revocation guarantees. Native macOS Keychain renewal is a
 separate implementation. Source tests do not prove live Auth0 tenant behavior.
+
+## Same-tab fallback when the live edge forbids silent frames (stacked draft)
+
+The existing production edge serves `default-src 'none'` without `frame-src`,
+and its callback sets `frame-ancestors 'none'`. Consequently hidden-iframe
+Auth0 restoration is currently **blocked by CSP**, independently of cookie
+availability. The follow-up web-auth candidate does not weaken those headers.
+It detects a frame-source CSP denial and, **only for a browser profile with a
+previously completed Workspace login**, attempts a single top-level
+`prompt=none` PKCE authorization on the fixed Auth0 issuer. The registered
+same-tab callback validates state, client, issuer and TTL, scrubs its code and
+exchanges it privately before the React app mounts. A nonsecret prior-login
+hint and one-attempt marker live in browser storage; tokens never do. Failed
+Auth0 SSO restores the ordinary manual sign-in path without an endless loop.
+Explicit logout prevents redirect, including if a subsequent popup is blocked.
+
+**This only reacquires the Workspace acquisition audience**: the separate
+Content and optional Executive grants can remain unavailable if their iframe
+attempts are also blocked. The existing user-initiated Auth0 popup may recover
+those scopes. True unattended, all-resource, cross-restart persistence in
+privacy-restricted browsers requires an independently reviewed first-party
+Auth0 custom domain + scoped CSP changes or a secure cookie/BFF credential
+custodian. The redirect candidate is a scoped fallback, not a substitute for
+those release/tenant and real-browser acceptance requirements.
