@@ -137,3 +137,15 @@ privacy-restricted browsers requires an independently reviewed first-party
 Auth0 custom domain + scoped CSP changes or a secure cookie/BFF credential
 custodian. The redirect candidate is a scoped fallback, not a substitute for
 those release/tenant and real-browser acceptance requirements.
+
+### Authentication restoration and multi-tab safety follow-up
+
+A prior Workspace user whose token expires can try the same **single bounded**
+first-party browser-tab `prompt=none` authorization fallback after the
+iframe's CSP failure, subject to the user's existing Auth0 cookie/session and
+standard expiry policy. A tab that observes an explicit logout from another
+tab immediately invalidates its private bearer owner, read generations and
+Executive/Research capabilities; it never converts logout into an automatic
+new sign-in. Manual Workspace and Research logins reauthorize only after a
+successful new grant. Complete Content/Executive renewal remains a distinct
+first-party backend/session-owner or qualified Auth0 integration gate.

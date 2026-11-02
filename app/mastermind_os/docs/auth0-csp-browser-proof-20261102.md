@@ -38,3 +38,35 @@ No browser cookies or confidential values were collected. The synthetic
 browser process was closed; no persistent daemon, credential or fixture
 identity was created. This evidence never authorizes deployment, bypass of
 independent security review, or weakening the public CSP.
+
+## Follow-up canaries: expiry and cross-tab logout (same candidate, synthetic provider)
+
+The next scoped change adds a generation-fenced, token-owner-wide response to
+an explicit logout marker arriving as a real browser `storage` event from a
+second tab. `valid()` fails closed on a logout marker even before the event is
+delivered, preventing a stale tab from using its existing access token.
+In-progress Executive and Research paths retain their existing invalidation
+rules. A new manually completed Workspace or Research login clears the local
+logout marker only after a qualifying token is issued. No auth credentials are
+stored or communicated via the `storage` event.
+
+With **two real headless Chromium tabs** of the isolated candidate, the first
+tab completed one synthetic `prompt=none` PKCE acquisition; the second tab set
+the logout marker on the same HTTPS origin. The first tab immediately reported
+`signed_out` without navigation, then stayed `signed_out` after reload. The
+counters remained exactly one mock `/authorize` and one mock `/oauth/token`
+exchange; no new reauthentication after the cross-tab logout.
+
+In a separate single-tab synthetic test, Auth0 returned a 3-second synthetic
+acquisition token. Under the production CSP, the browser completed **two**
+top-level silent PKCE authorizations and **two** synthetic token exchanges;
+primary Workspace was `signed_in` again following expiry, without writing the
+access token to localStorage. Explicit logout afterward prevented another
+redirect and remained signed-out on reload. This test is about the *client's*
+renewal machinery only; it cannot prove Auth0 actual absolute/idle session
+policies, live cookies, tenant grants, Consent, Content or Executive renewal.
+
+Source suite after these changes: `npm run typecheck` PASS, `npm test` 96 files,
+**1,988 passed, one skipped**, and `npm run build` PASS, with the pre-existing
+Vite bundle-size advisory. No production deployment, Auth0 user session,
+client registration or tenant policy was changed.

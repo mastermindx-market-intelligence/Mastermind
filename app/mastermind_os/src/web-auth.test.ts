@@ -75,10 +75,14 @@ function setup(
         digest: () => options.digest ?? Promise.resolve(new ArrayBuffer(32)),
       },
     } as unknown as Crypto,
-    addEventListener: ((_type: string, fn: (e: MessageEvent) => void) =>
-      messages.add(fn)) as unknown as typeof window.addEventListener,
-    removeEventListener: ((_type: string, fn: (e: MessageEvent) => void) =>
-      messages.delete(fn)) as unknown as typeof window.removeEventListener,
+    // This harness counts only transient PKCE callback listeners. Persistent
+    // cross-tab storage observers have a separate dedicated test fixture.
+    addEventListener: ((type: string, fn: (e: MessageEvent) => void) => {
+      if (type === "message") messages.add(fn);
+    }) as unknown as typeof window.addEventListener,
+    removeEventListener: ((type: string, fn: (e: MessageEvent) => void) => {
+      if (type === "message") messages.delete(fn);
+    }) as unknown as typeof window.removeEventListener,
   });
   const callback = (
     override: Record<string, unknown> = {},
@@ -112,6 +116,7 @@ function setup(
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  localStorage.clear(); sessionStorage.clear();
   history.replaceState(null, "", "/os/");
   Object.defineProperty(window, "opener", { value: null, configurable: true });
 });
@@ -240,6 +245,16 @@ describe("browser public PKCE", () => {
     await pending;
     expect(e.client.getState().reason).toBe("TRANSACTION_EXPIRED");
     expect(e.messages.size).toBe(0);
+  });
+  it("clears an explicit logout marker only after a new successful interactive login", async () => {
+    const e=setup();
+    await e.login();
+    await e.client.signOut();
+    expect(localStorage.getItem("mastermind-os-auth-logout-v1:fixture-public-client")).toBe("1");
+    e.popup.closed=false;
+    await e.login();
+    expect(e.client.getState()).toMatchObject({status:"signed_in",acquisition:true});
+    expect(localStorage.getItem("mastermind-os-auth-logout-v1:fixture-public-client")).toBeNull();
   });
   it("keeps acquisition usable when content is refused", async () => {
     const e = setup();

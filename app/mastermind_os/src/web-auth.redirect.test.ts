@@ -23,6 +23,21 @@ function harness() {
       effectiveDirective: "frame-src", blockedURI: new URL(ISSUER).origin,
     } as unknown as MessageEvent);
   };
+  const fireAuth = () => {
+    const frame = document.querySelector("iframe")!;
+    const parsed = new URL(frame.src);
+    for (const listener of [...listeners]) listener({
+      origin: ORIGIN, source: frame.contentWindow,
+      data: {type:"mastermind-auth-callback", state:parsed.searchParams.get("state"),
+        code:"synthetic-code"},
+    } as MessageEvent);
+  };
+  const fireRemoteLogout = () => {
+    localStorage.setItem("mastermind-os-auth-logout-v1:client-fixture","1");
+    for (const listener of [...listeners]) listener({
+      key:"mastermind-os-auth-logout-v1:client-fixture", newValue:"1",
+    } as unknown as MessageEvent);
+  };
   const makeClient = () => createWebAuth({
     config:{webClientId:"client-fixture"},
     fetchFn,navigate,
@@ -33,7 +48,7 @@ function harness() {
     addEventListener: ((_t:string, fn:(e:MessageEvent)=>void) => listeners.add(fn)) as typeof window.addEventListener,
     removeEventListener: ((_t:string, fn:(e:MessageEvent)=>void) => listeners.delete(fn)) as typeof window.removeEventListener,
   });
-  return {makeClient, navigate, fetchFn, fireCsp};
+  return {makeClient, navigate, fetchFn, fireCsp, fireAuth, fireRemoteLogout};
 }
 
 beforeEach(() => {
@@ -177,6 +192,51 @@ describe("CSP-compatible same-tab Auth0 fallback", () => {
     });
     expect(await reopened.restore!()).toMatchObject({status:"signed_out"});
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("invalidates active Workspace credentials across tabs and blocks automatic re-login", async () => {
+    const h=harness(), client=h.makeClient();
+    const pending=client.restore!();
+    await done();
+    h.fireAuth();
+    await done();
+    h.fireCsp(); // Content remains unavailable, but acquisition is granted.
+    await pending;
+    expect(client.getState()).toMatchObject({status:"signed_in",acquisition:true});
+    const before=client.invalidationGeneration!();
+    h.fireRemoteLogout();
+    expect(client.getState()).toMatchObject({status:"signed_out",acquisition:false,content:false});
+    expect(client.invalidationGeneration!()).toBeGreaterThan(before);
+    await expect(client.readPrograms!({signal:new AbortController().signal}))
+      .rejects.toThrow("TOKEN_REQUIRED");
+    expect(h.fetchFn).toHaveBeenCalledTimes(1);
+    expect(await client.restore!()).toMatchObject({status:"signed_out"});
+    expect(h.navigate).not.toHaveBeenCalled();
+  });
+
+  it("re-attempts a bounded top-level PKCE after acquisition expires", async () => {
+    const h=harness();
+    h.fetchFn.mockImplementation(async () =>
+      response({token_type:"Bearer", access_token:"synthetic-short-lived",
+        expires_in:1,scope:"mastermind.workspace.read"}));
+    const client=h.makeClient();
+    const pending=client.restore!();
+    await done();
+    h.fireAuth();
+    await done();
+    h.fireCsp(); // Content's frame is not allowed by the deployed CSP.
+    await pending;
+    expect(client.getState().acquisition).toBe(true);
+    await vi.advanceTimersByTimeAsync(1005);
+    await done();
+    expect(client.getState().acquisition).toBe(false);
+    h.fireCsp(); // The expiry renewal attempted a new acquisition iframe.
+    await done();
+    expect(h.navigate).toHaveBeenCalledTimes(1);
+    const authorize=new URL(h.navigate.mock.calls[0][0]);
+    expect(authorize.searchParams.get("prompt")).toBe("none");
+    expect(sessionStorage.getItem(ATTEMPT_KEY)).toBe("1");
+    expect(Object.keys(localStorage)).not.toContain("synthetic-short-lived");
   });
 
   it("rejects Auth0 login_required without looping or storing credentials", async () => {

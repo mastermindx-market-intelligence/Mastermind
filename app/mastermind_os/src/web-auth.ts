@@ -176,6 +176,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     config.acquisitionScope === ACQUISITION_SCOPE &&
     config.contentAudience === CONTENT_AUDIENCE &&
     config.contentScope === CONTENT_SCOPE;
+  const logoutKey = `mastermind-os-auth-logout-v1:${config.webClientId ?? "unconfigured"}`;
+  // Storage errors must not invalidate an otherwise authorized manual login.
+  const loggedOutElsewhere = () => {
+    try { return localStorage.getItem(logoutKey) === "1"; }
+    catch { return false; }
+  };
   const cryptoApi = deps.crypto ?? crypto,
     fetchFn = deps.fetchFn ?? fetch.bind(globalThis),
     now = deps.now ?? Date.now;
@@ -209,6 +215,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   const valid = (resource: Resource) =>
+    !loggedOutElsewhere() &&
     Boolean(tokens[resource] && tokens[resource]!.expires > now());
   let executiveGeneration = 0;
   const executiveListeners = new Set<() => void>();
@@ -268,6 +275,18 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       }
     }
   }
+  // Cross-tab sign-out revokes this token owner and all pending generation
+  // work. A remote logout is never an automatic login instruction.
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== logoutKey || event.newValue !== "1") return;
+    redirectGrant = null;
+    cancel();
+    tokens.acquisition = null;
+    tokens.content = null;
+    lastError = null;
+    emit();
+  };
+  if (configured) add("storage", onStorage);
   const check = (ticket: number) => {
     if (ticket !== generation) throw new Error("TRANSACTION_CANCELLED");
   };
@@ -489,7 +508,6 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   // Nonsecret explicit-logout flag prevents a reload from silently undoing sign-out.
-  const logoutKey = `mastermind-os-auth-logout-v1:${config.webClientId ?? "unconfigured"}`;
   const priorKey = PRIOR_LOGIN_KEY + (config.webClientId ?? "unconfigured");
   function rememberSignedIn() {
     try { localStorage.setItem(priorKey, "1"); } catch { /* no persistent hint */ }
@@ -630,8 +648,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           try { await restoreOne("executive"); } catch { /* optional privilege */ }
         }
       } catch {
-        if (!incoming && !force && ticket === generation) await redirectFallback(ticket);
-        // No background redirection while an active session is being used.
+        if (!incoming && ticket === generation) await redirectFallback(ticket);
+        // The one-attempt guard also protects unattended post-expiry recovery.
       }
       return getState();
     })();
@@ -669,7 +687,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     try {
       await transaction("acquisition", current);
       check(current.generation);
-      if (valid("acquisition")) {
+      const acquired = ((): Token | null => tokens.acquisition)();
+      if (acquired && acquired.expires > now()) {
+        // Explicit logout marker remains until a successful new login.
         try { localStorage.removeItem(logoutKey); } catch { /* denied */ }
         rememberSignedIn();
       }
@@ -714,6 +734,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     try {
       await transaction("research", current);
       check(current.generation);
+      const acquiredResearch = ((): Token | null => tokens.research)();
+      if (acquiredResearch && acquiredResearch.expires > now()) {
+        // Research is a user-initiated separate grant, not automatic SSO.
+        try { localStorage.removeItem(logoutKey); } catch { /* denied */ }
+      }
     } catch (error) {
       throw new Error(reason(error));
     } finally {
