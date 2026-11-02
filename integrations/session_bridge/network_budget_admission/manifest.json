@@ -1,30 +1,34 @@
 {
   "schema": "mastermind.network_budget_prospective_patch.v1",
   "base": "fbce94601823718a22466a99aeea692679266a16",
-  "policy_source": "https://github.com/mastermindx-market-intelligence/macro/pull/10483#issuecomment-6579445312",
+  "policy_source": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "pull_request": 10483,
+    "comment_id": 6579445312
+  },
   "root": "01a12a2a-d7e1-77b1-9262-ab593179dd13",
   "status": "PROSPECTIVE_SOURCE_ONLY_NOT_ACTIVE_PACKAGING_OR_INSTALLATION",
   "files": {
     "ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py": {
       "base_source": "ops/native_fabric/quota_continuity/source/fabric_operator_owner.py",
       "preimage_sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
-      "postimage_sha256": "c8454988fd535d12a21c5545255d333edc2863f1ce15e5ddef065bd965990bcb",
+      "postimage_sha256": "3e51ede6903c8405f8020d7059a1ad11ef42c6c93a8366d1bc256fdf42c856f2",
       "patch": "fabric_operator_owner.py.patch",
-      "patch_sha256": "2d012b7d163efca30d5736d4e85e38389ceda179d2d650208016df8e4cb13031",
-      "bytes": 24875
+      "patch_sha256": "c52746fbf3292338b21044a8e5f5945ccb82de6401fcb4955652769cdb3166f9",
+      "bytes": 24815
     },
     "ops/native_fabric/quota_continuity/candidate/fabric_task.py": {
       "base_source": "ops/native_fabric/quota_continuity/candidate/fabric_task.py",
       "preimage_sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
-      "postimage_sha256": "c2330c6d2eee9396332e9551b68be18f471e9c610169b6459a264fa0ae7c6d99",
+      "postimage_sha256": "2749b4f1a8cefe438253700d3235d657c62218b1a502845345281ba448685c15",
       "patch": "fabric_task.py.patch",
-      "patch_sha256": "fd7dc00ef18b7c00127de88f17c796ad38e0d9c3a62d67ceb1703d6a3d01e392",
-      "bytes": 86088
+      "patch_sha256": "37de09c0e2d48587f4c64fce6a20f30076c2f837eeafdb7a3724d6fcac42af85",
+      "bytes": 86028
     }
   },
   "prospective_identity_review": {
     "path": "ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py",
-    "sha256": "c8454988fd535d12a21c5545255d333edc2863f1ce15e5ddef065bd965990bcb",
+    "sha256": "3e51ede6903c8405f8020d7059a1ad11ef42c6c93a8366d1bc256fdf42c856f2",
     "sites": [
       [
         242,

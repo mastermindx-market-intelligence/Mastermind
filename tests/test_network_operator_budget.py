@@ -375,3 +375,10 @@ def test_actual_materialized_manual_bytes_retain_only_inherited_d8_findings(mate
     dirty = prospective + '\npeer_uid = 457\n'
     assert hashlib.sha256(dirty.encode()).hexdigest() != manifest['files'][path]['postimage_sha256']
     assert '457' in scan(dirty, path=path)
+
+
+def test_prospective_payloads_pass_the_existing_anonymous_read_fence(materialized_proposal, monkeypatch):
+    from tests import test_no_anonymous_macro_reads as fence
+    monkeypatch.setattr(fence, '_ROOT', materialized_proposal)
+    fence.test_no_anonymous_macro_reads_in_executable_or_config_surfaces(
+        fence.violations.__wrapped__())

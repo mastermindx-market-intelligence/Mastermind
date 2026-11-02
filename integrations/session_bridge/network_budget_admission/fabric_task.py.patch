@@ -13,7 +13,7 @@
 +    # Root labels here are transport metadata, not authenticated lineage: this
 +    # cannot attribute an omitted/substituted label or authorize any spending.
 +    # Existing operations above keep their original reconciliation path.
-+    # https://github.com/mastermindx-market-intelligence/macro/pull/10483#issuecomment-6579445312
++    # macro#10483, comment 6579445312
 +    if observed_root == "01a12a2a-d7e1-77b1-9262-ab593179dd13":
 +        raise FabricTaskError("NETWORK_PAID_DISPATCH_BUDGET_UNQUALIFIED")
 +    state_dir.mkdir(parents=True, exist_ok=True)
