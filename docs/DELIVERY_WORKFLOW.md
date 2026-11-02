@@ -52,8 +52,7 @@ worktree and move only the task's deliberate edits there.
    ```
 
 4. CI blocks merge/release, not independent useful work. Incomplete scope, failed
-   local qualification, or a known failing hosted check keeps release held; repair the
-   failure within the assigned scope. A **pending** hosted check alone is not a reason
+   local qualification, or a known failing hosted check keeps release held; diagnose the failure and repair it within the assigned scope. A **pending** hosted check alone is not a reason
    to keep an otherwise qualified, reviewable PR in Draft. The incumbent
    `control_plane/github_review_intent.py` explicitly refuses `review_requested`
    events while Draft (`PULL_REQUEST_DRAFT`); leaving a PR Draft while waiting for
