@@ -70,6 +70,23 @@ class MiniMaxM31SourceStage(unittest.TestCase):
         self.assertIn("baseline file mismatch", result.stderr)
         self.assertFalse(out.exists(), "refusal must not leave published-looking stage")
 
+    def test_source_stage_cannot_target_native_release_store(self):
+        store = self.root / "native-code-releases"
+        store.mkdir()
+        output = store / "forbidden"
+        result = self.invoke(output)
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("source stage cannot target native release store", result.stderr)
+        self.assertFalse(output.exists())
+
+    def test_symlinked_output_parent_cannot_point_into_historical_source(self):
+        alias = self.root / "input-alias"
+        alias.symlink_to(self.baseline, target_is_directory=True)
+        result = self.invoke(alias / "forbidden")
+        self.assertEqual(result.returncode, 78, result.stderr)
+        self.assertIn("source/output overlap", result.stderr)
+        self.assertFalse((self.baseline / "forbidden").exists())
+
     def test_existing_output_is_never_overwritten(self):
         out = self.root / "already"
         out.mkdir()
