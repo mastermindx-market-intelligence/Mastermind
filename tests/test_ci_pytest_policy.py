@@ -881,8 +881,8 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8
     assert shards["strategy"]["fail-fast"] is False
-    assert shards["strategy"]["max-parallel"] == 3
-    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2]
+    assert shards["strategy"]["max-parallel"] == 6
+    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards.get("continue-on-error", False) is False
     assert gate.get("continue-on-error", False) is False
 
@@ -893,7 +893,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     ]
     assert len(test_steps) == 1
     assert test_steps[0]["run"] == (
-        "python -m scripts.ci_parallel_shard --jobs 3 --index "
+        "python -m scripts.ci_parallel_shard --jobs 6 --index "
         "${{ matrix.index }}"
     )
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
@@ -931,7 +931,7 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
     assert 'if [ "$SHARDS_STATUS" != success ]; then' in gate["run"]
     assert "exit 1" in gate["run"]
-    assert "python scripts/ci_pytest.py --plan-only --jobs 3" in gate["run"]
+    assert "python scripts/ci_pytest.py --plan-only --jobs 6" in gate["run"]
     assert all(step.get("continue-on-error", False) is False for step in job["steps"])
 
 
@@ -1230,7 +1230,7 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
 # The preflight is a fast witness of incumbent strict gates, not an alternate
 # discovery/exclusion/fan-in owner. A release PR with an illegal EVAL R0
 # surface or changed role source without an updated immutable fixture should
-# fail near checkout instead of consuming all three expensive full shards.
+# fail near checkout instead of consuming all six expensive full shards.
 _FAST_RELEASE_NODES = (
     "tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface",
     "tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched",
@@ -1256,7 +1256,7 @@ def _assert_fast_release_preflight(workflow: dict) -> None:
     assert names.index("Fast source-bound release preflight") < names.index(
         "H1 required real Linux no-ACL positive journey"
     )
-    assert shard_job["strategy"]["matrix"]["index"] == [0, 1, 2]
+    assert shard_job["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shard_job["strategy"]["fail-fast"] is False
     assert "test" in jobs  # existing protected fan-in remains the source of truth
 
