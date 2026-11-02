@@ -573,11 +573,11 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec'
+    assert hashlib.sha256(current_raw).hexdigest()=='079181a667d7885c610712366ab6f1cc6a61634d9f25cf2b810e5fd8ce97a5ed'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==102
+    assert len(before)==95 and len(current)==103
     assert set(before)<=set(current)
-    added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
+    added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template','ext/jev_advisory.py',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
         'ext/paid_provider_entry.py'}

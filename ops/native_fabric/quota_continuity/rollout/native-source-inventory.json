@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 85543,
+      "bytes": 90757,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
+      "sha256": "33991b249aa6e32e0083426ac3f63b5dba1bd1263e9a84e07e6c3c94b6ffe4d3",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -286,6 +286,12 @@
       "installed_preimage_sha256": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
       "sha256": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
       "source": "candidate/host_pull_probe.template"
+    },
+    "ext/jev_advisory.py": {
+      "bytes": 11653,
+      "installed_preimage_sha256": null,
+      "sha256": "ccd54324d6d7950c933b424a65844f870b9a733f5137d148ece0a864882dcfd7",
+      "source": "candidate/jev_advisory.py"
     },
     "ext/lane_runtime.py": {
       "bytes": 87916,
@@ -636,7 +642,7 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 102,
+  "native_code_files": 103,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
@@ -644,6 +650,7 @@
     "fabric_continuation.py",
     "host_pull_daemon.sh",
     "host_pull_launchd.plist.template",
+    "jev_advisory.py",
     "linux_process_identity.py",
     "native_plain_packet_check.py",
     "native_plain_packet_reconcile.py",

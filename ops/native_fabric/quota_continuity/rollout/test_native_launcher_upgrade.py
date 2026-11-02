@@ -85,7 +85,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
             import base64, zlib
             fixture = Path(__file__).resolve().parents[4] / 'tests/fixtures/native-paired-historical95-6ac208.json'
             raw = fixture.read_bytes()
-            if g.digest(raw) != '98e532bd0dd819d94988fe61475e40b36b40676f5e561c38d6198e4b196d72d6':
+            if g.digest(raw) != '1cdcac9602af93d6f3b489a43666e83123d03ca0cbea0eda939eface42776e51':
                 raise AssertionError('historical95 fixture bytes changed')
             retained = json.loads(raw)
             old = retained['manifest']

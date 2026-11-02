@@ -24,7 +24,7 @@ SOURCE = {
     "pool": ("pool_launcher.sh", "4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059"),
 }
 AFTER = {
-    "ext/fabric_task.py": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
+    "ext/fabric_task.py": "33991b249aa6e32e0083426ac3f63b5dba1bd1263e9a84e07e6c3c94b6ffe4d3",
     "ext/pick.py": "9bbb96c8da84e38bbd802fdd373a0e8ba386395abc5a80bc8628b49d5afd8174",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
 }
@@ -99,7 +99,7 @@ def sha(path: Path) -> str:
 
 def test_real_native_auto_pre_effect_source_contract(tmp_path):
     """Reproduce the full native release source's F1 fix without a live install."""
-    assert sha(PATCH) == "6b1dade16fe58b732064d66e0645396dd6dd02fc255c3befbf0d03e105b23e6b"
+    assert sha(PATCH) == "345fcba07c8123480f2c39aa4d7c5a9a2aed959a3834eda65fe21f7d836fa26e"
     assert sha(FIXTURE) == "75edb2345e90f2f5a758020acef494aa9090b4c97e020bbafb6f3ee5be63c794"
     builder = NATIVE / "rollout/build_review_stage.py"
     built = tmp_path / "built"
