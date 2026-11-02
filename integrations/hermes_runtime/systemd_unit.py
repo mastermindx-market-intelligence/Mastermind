@@ -67,6 +67,10 @@ StartLimitBurst={profile.start_limit_burst}
 Type=simple
 WorkingDirectory={state}
 ExecStart={python_executable} -m integrations.hermes_runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
+# Explicit operator-only canary. systemd executes ExecReload inside this unit's
+# existing cgroup and EnvironmentFile; no extra daemon or open network endpoint.
+# A PASS proves only a pinned native output observation, not remote auth/TLS.
+ExecReload={python_executable} -m integrations.hermes_runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 Environment=PYTHONPATH={repo_root}
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile={secrets}
