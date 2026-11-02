@@ -7910,8 +7910,9 @@ class ExecutiveControlService:
     ) -> str | None:
         """Select one root, optionally collecting ephemeral pre-start diagnostics.
 
-        Only a QUEUED root with no child or Attempt history may be deferred.
-        Existing work and ambiguous effects retain their reconciliation path.
+        Defer an unstarted unusable root, or prefer independent ready work
+        over a root with an unresolved exact dispatch effect. Preserve that
+        original root for fallback reconciliation without replaying its claim.
         No persistent exclusion, new queue or retry state is introduced.
         """
         if self.config.coo_foreground_only:
@@ -7931,6 +7932,7 @@ class ExecutiveControlService:
             ).fetchall()
         if len(rows) > _COO_ROOT_SCAN_LIMIT:
             raise ServiceError("bounded COO root scan limit was exceeded")
+        first_reconciling_root: str | None = None
         for row in rows:
             root = runtime.jobs.get_job(str(row["job_id"]))
             if root is None:
@@ -7963,8 +7965,14 @@ class ExecutiveControlService:
                         if prestart_refusals is not None:
                             prestart_refusals[root.job_id] = exc
                         continue
+            if runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is not None:
+                # This root remains on its original reconciliation carrier.
+                # Its unknown effect does not fence an unrelated ready root.
+                if first_reconciling_root is None:
+                    first_reconciling_root = root.job_id
+                continue
             return root.job_id
-        return None
+        return first_reconciling_root
 
     def _live_bound_coo_root_id(self) -> str | None:
         """Return the one bound COO root owning every live service finisher."""

@@ -137,6 +137,49 @@ def test_disarmed_background_tick_does_not_advance_either_admitted_root(tmp_path
     asyncio.run(exercise())
 
 
+def test_independent_ready_root_is_not_starved_by_unresolved_other_root(tmp_path, monkeypatch):
+    """A root's own unknown effect stays fenced, but cannot pin a different root."""
+    async def exercise():
+        async with _prepared_pair(tmp_path) as (config, seed, ids, _):
+            await seed.close()
+            running, _ = _service(tmp_path, config=dataclasses.replace(
+                config, coo_tick_interval_seconds=1.0), finish_gate=asyncio.Event())
+            await running.start()
+            try:
+                # The incumbent Runtime owns these read-only markers; this
+                # fixture isolates the selector from the dispatch/replay path.
+                probe = running.runtime.jobs.pending_cycle_dispatch_effect_unknown
+                uncertain_roots = {ids[0]}
+
+                def pending(root_id):
+                    if root_id in uncertain_roots:
+                        return {"selected_job_id": "retained-original-child",
+                                "dispatch_command_id": "retained-exact-claim"}
+                    return probe(root_id)
+
+                monkeypatch.setattr(
+                    running.runtime.jobs,
+                    "pending_cycle_dispatch_effect_unknown", pending,
+                )
+                assert running._next_bound_coo_root() == ids[1]
+                # With no independently ready root, reconciliation of A must
+                # still be selected rather than silently dropped.
+                uncertain_roots.add(ids[1])
+                assert running._next_bound_coo_root() == ids[0]
+                uncertain_roots.remove(ids[1])
+                assert await _until(lambda: bool(_children(running, ids[1])), timeout=4.0), {
+                    "last_error": running._coo_last_error,
+                    "last_tick": running._coo_last_tick_at,
+                }
+                assert _children(running, ids[0]) == []
+                # Original-root ambiguity remains unmodified by B's progress.
+                assert pending(ids[0])["dispatch_command_id"] == "retained-exact-claim"
+                assert running.service_state == "READY"
+            finally:
+                await running.close()
+    asyncio.run(exercise())
+
+
 def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tmp_path):
     class LostStartReceipt(_FakeSupervisor):
         async def start_cycle_job(self, job_id, *, command_id):
