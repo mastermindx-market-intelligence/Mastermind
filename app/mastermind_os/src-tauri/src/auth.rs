@@ -1503,7 +1503,9 @@ mod tests {
                 Url::parse(&authorization_url("client", resource, "state", "verifier")).unwrap();
             let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
             assert_eq!(pairs["audience"], resource.audience());
-            assert_eq!(pairs["scope"], resource.scope());
+            assert_eq!(pairs["scope"], if resource.persistent() {
+                format!("{} offline_access", resource.scope())
+            } else { resource.scope().to_owned() });
             assert_eq!(pairs["code_challenge_method"], "S256");
             assert_eq!(pairs["redirect_uri"], CALLBACK);
             assert_eq!(
@@ -1671,7 +1673,9 @@ mod tests {
             assert!(verifiers.insert(pending.verifier.clone()));
             assert_eq!(pairs["client_id"], "public-client");
             assert_eq!(pairs["redirect_uri"], CALLBACK);
-            assert_eq!(pairs["scope"], resource.scope());
+            assert_eq!(pairs["scope"], if resource.persistent() {
+                format!("{} offline_access", resource.scope())
+            } else { resource.scope().to_owned() });
             assert_eq!(pairs["code_challenge_method"], "S256");
             assert_eq!(pairs["code_challenge"], URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes())));
             assert_eq!(pairs["audience"], if resource == Resource::Executive {
