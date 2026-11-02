@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import socket
 import threading
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +50,33 @@ CHUNK_TOOL_CALL = (
 )
 CHUNK_DONE = b"data: [DONE]\n\n"
 DEFAULT_FRAMES = CHUNK_TEXT + CHUNK_TOOL_CALL + CHUNK_DONE
+#: A provider refusal inside the stream: the JSON error object form.
+CHUNK_ERROR = (
+    b'data: {"error":{"message":"provider refusal","type":"server_error"}}\n\n'
+)
+#: The provider refusal in its SSE event form.
+CHUNK_ERROR_EVENT = (
+    b'event: error\ndata: {"message":"provider refusal"}\n\n'
+)
+#: The provider refusal in its error object form.
+CHUNK_ERROR_OBJECT = (
+    b'data: {"object":"error","message":"provider refusal"}\n\n'
+)
+#: A responses stream that carries a tool call and then completes.
+RESPONSES_TOOL_CALL = (
+    b'data: {"type":"response.output_item.added","sequence_number":1,'
+    b'"item":{"id":"fc_fixture","type":"function_call","call_id":"call_fixture",'
+    b'"name":"lookup","arguments":"{\\"q\\":\\"x\\"}"}}\n\n'
+)
+RESPONSES_COMPLETED = (
+    b'data: {"type":"response.completed","sequence_number":2,'
+    b'"response":{"id":"resp_fixture","status":"completed"}}\n\n'
+)
+#: A responses stream that fails before its completion frame.
+RESPONSES_FAILED = (
+    b'data: {"type":"response.failed","sequence_number":1,'
+    b'"response":{"id":"resp_fixture","status":"failed"}}\n\n'
+)
 
 
 class MockGateway:
@@ -97,6 +125,10 @@ class MockGateway:
     def base_url(self) -> str:
         return "http://127.0.0.1:%d/v1" % self._server.server_address[1]
 
+    @property
+    def port(self) -> int:
+        return self._server.server_address[1]
+
     # -- behaviour ---------------------------------------------------------
     def _handle(self, handler) -> None:
         length = int(handler.headers.get("Content-Length") or 0)
@@ -144,6 +176,51 @@ class _BaseHandler(BaseHTTPRequestHandler):
         pass
 
 
+class _ScriptedResolver:
+    """A resolver that answers one name with a scripted sequence of addresses.
+
+    Every answer is a list of literal addresses.  The requested port is
+    carried through, exactly as a real resolver does, so the consumer that
+    pins an answer dials the port it asked for.
+    """
+
+    def __init__(self, answers):
+        self._answers = list(answers)
+        self._calls = 0
+        self._real = socket.getaddrinfo
+
+    @property
+    def calls(self) -> int:
+        return self._calls
+
+    def __call__(self, host, port, *args, **kwargs):
+        if host != "localhost":
+            return self._real(host, port, *args, **kwargs)
+        self._calls += 1
+        script = self._answers[min(self._calls - 1, len(self._answers) - 1)]
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                (address, port),
+            )
+            for address in script
+        ]
+
+
+def localhost_route(gateway: MockGateway, *, path="chat/completions") -> ExperientialGatewayRoute:
+    """A route that names the gateway, so it has to be resolved and pinned."""
+    base_url = "http://localhost:%d/v1" % gateway.port
+    return ExperientialGatewayRoute(
+        route_id=ROUTE_ID,
+        route_generation=gateway_route_generation(base_url, path),
+        base_url=base_url,
+        path=path,
+    )
+
+
 def route_for(gateway: MockGateway, *, path="chat/completions") -> ExperientialGatewayRoute:
     return ExperientialGatewayRoute(
         route_id=ROUTE_ID,
@@ -170,11 +247,8 @@ def build(binding: ExperientialHarnessBinding, **kwargs):
     kwargs.setdefault("token_loader", lambda: PROXY_TOKEN)
     kwargs.setdefault("on_terminal_failure", failures.append)
     kwargs.setdefault("cancel", threading.Event())
-    endpoint = ExperientialHarnessEndpoint(
-        binding,
-        on_outcome=outcomes.append,
-        **kwargs,
-    )
+    kwargs.setdefault("on_outcome", outcomes.append)
+    endpoint = ExperientialHarnessEndpoint(binding, **kwargs)
     return endpoint, outcomes, failures
 
 
@@ -685,5 +759,319 @@ def test_the_typed_effect_unknown_contract_of_the_existing_endpoint_is_preserved
         assert endpoint.stopped_forwarding
         assert failures == ["effect_unknown"]
         assert outcomes[0].kind == "effect_unknown"
+    finally:
+        gateway.stop()
+
+
+# --------------------------------------------------------------------------
+# 7. A provider error frame is never a completion.
+#
+# The independent review of the previous head reproduced a chat stream that
+# carried a provider error and then ``[DONE]``: the consumer marked the
+# request completed and a second child request produced a second upstream
+# POST.  A provider error latches for good, so the terminal marker can never
+# revive it and the attempt fails stop instead.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("error_frame", [CHUNK_ERROR, CHUNK_ERROR_EVENT, CHUNK_ERROR_OBJECT])
+def test_a_chat_provider_error_frame_is_never_a_completion_and_blocks_a_second_send(error_frame):
+    frames = error_frame + CHUNK_DONE
+    gateway = MockGateway(frames=frames).start()
+    try:
+        endpoint, outcomes, failures = build(binding_for(gateway))
+        with endpoint:
+            with pytest.raises(http.client.IncompleteRead):
+                raw_post(endpoint)
+            assert raw_post(endpoint)[0] == 409
+        assert len(gateway.requests) == 1
+        assert endpoint.stopped_forwarding
+        assert failures == ["effect_unknown"]
+        assert outcomes[0].kind == "effect_unknown"
+        assert outcomes[0].http_status == 200
+        assert outcomes[0].bytes_forwarded == len(frames)
+    finally:
+        gateway.stop()
+
+
+def test_a_chat_provider_error_frame_alone_is_never_a_completion():
+    gateway = MockGateway(frames=CHUNK_ERROR).start()
+    try:
+        endpoint, outcomes, failures = build(binding_for(gateway))
+        with endpoint:
+            with pytest.raises(http.client.IncompleteRead):
+                raw_post(endpoint)
+            assert raw_post(endpoint)[0] == 409
+        assert len(gateway.requests) == 1
+        assert endpoint.stopped_forwarding
+        assert failures == ["effect_unknown"]
+        assert outcomes[0].kind == "effect_unknown"
+    finally:
+        gateway.stop()
+
+
+def test_a_real_openai_sdk_client_surfaces_the_provider_error_and_never_sends_twice():
+    gateway = MockGateway(frames=CHUNK_ERROR + CHUNK_DONE).start()
+    try:
+        endpoint, outcomes, failures = build(binding_for(gateway))
+        with endpoint:
+            client = sdk_client(endpoint)
+            with pytest.raises(Exception):
+                list(client.chat.completions.create(
+                    model=MODEL,
+                    messages=[{"role": "user", "content": "Say ok"}],
+                    stream=True,
+                ))
+            assert raw_post(endpoint)[0] == 409
+        assert len(gateway.requests) == 1
+        assert endpoint.stopped_forwarding
+        assert failures == ["effect_unknown"]
+        assert outcomes[0].kind == "effect_unknown"
+        assert PROXY_TOKEN not in repr(outcomes[0])
+    finally:
+        gateway.stop()
+
+
+def test_a_provider_error_frame_never_reaches_the_child_with_a_credential():
+    gateway = MockGateway(frames=CHUNK_ERROR + CHUNK_DONE).start()
+    try:
+        endpoint, _, _ = build(binding_for(gateway))
+        with endpoint:
+            with pytest.raises(http.client.IncompleteRead):
+                raw_post(endpoint)
+        body = b"".join(gateway.requests[0]["body"] for _ in range(1))
+        assert PROXY_TOKEN.encode() not in body
+        assert CAPABILITY.encode() not in body
+    finally:
+        gateway.stop()
+
+
+# --------------------------------------------------------------------------
+# 8. The gateway socket is pinned to a numeric loopback address.
+#
+# The previous head admitted a named loopback host and let the HTTP client
+# resolve it again at request time.  A rebinding resolver could therefore
+# answer the check with a loopback address and the send with another one.
+# The name is now resolved once and the numeric answer is dialled directly.
+# --------------------------------------------------------------------------
+
+
+def test_a_rebinding_resolver_is_refused_before_the_proxy_token_is_sent(monkeypatch):
+    gateway = MockGateway().start()
+    resolver = _ScriptedResolver([["127.0.0.1"], ["203.0.113.10"]])
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    try:
+        binding = replace(binding_for(gateway), route=localhost_route(gateway))
+        endpoint, outcomes, failures = build(binding)
+        with endpoint:
+            assert raw_post(endpoint)[0] == 409
+            assert raw_post(endpoint)[0] == 409
+        assert gateway.requests == []
+        assert endpoint.stopped_forwarding
+        assert failures == ["request_admission_refused"]
+        assert outcomes[0].kind == "refused"
+        assert resolver.calls == 2
+    finally:
+        gateway.stop()
+
+
+def test_the_gateway_socket_is_pinned_to_a_numeric_loopback_address(monkeypatch):
+    gateway = MockGateway().start()
+    resolver = _ScriptedResolver([["127.0.0.1"], ["127.0.0.1"], ["203.0.113.10"]])
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    try:
+        binding = replace(binding_for(gateway), route=localhost_route(gateway))
+        endpoint, outcomes, failures = build(binding)
+        with endpoint:
+            status, body = raw_post(endpoint)
+        assert status == 200
+        assert body == DEFAULT_FRAMES
+        assert len(gateway.requests) == 1
+        # The name was resolved once for the binding and once for the forward.
+        # The dial then used the pinned number, so no later resolution could
+        # move the bearer-bearing request off loopback.
+        assert resolver.calls == 2
+        assert outcomes[0].kind == "completed"
+        assert failures == []
+    finally:
+        gateway.stop()
+
+
+def test_a_numeric_loopback_gateway_is_never_resolved_at_all(monkeypatch):
+    gateway = MockGateway().start()
+    resolver = _ScriptedResolver([["203.0.113.10"]])
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    try:
+        endpoint, outcomes, _ = build(binding_for(gateway))
+        with endpoint:
+            status, _ = raw_post(endpoint)
+        assert status == 200
+        assert len(gateway.requests) == 1
+        assert resolver.calls == 0
+    finally:
+        gateway.stop()
+
+
+# --------------------------------------------------------------------------
+# 9. An ambiguous effect keeps what was actually observed.
+# --------------------------------------------------------------------------
+
+
+def test_an_ambiguous_stream_keeps_the_observed_status_and_forwarded_bytes():
+    gateway = MockGateway(frames=CHUNK_TEXT).start()
+    try:
+        endpoint, outcomes, failures = build(binding_for(gateway))
+        with endpoint:
+            with pytest.raises(http.client.IncompleteRead):
+                raw_post(endpoint)
+        assert outcomes[0].kind == "effect_unknown"
+        assert outcomes[0].http_status == 200
+        assert outcomes[0].bytes_forwarded == len(CHUNK_TEXT)
+        assert CAPABILITY not in repr(outcomes[0])
+        assert PROXY_TOKEN not in repr(outcomes[0])
+        assert failures == ["effect_unknown"]
+    finally:
+        gateway.stop()
+
+
+def test_an_ambiguous_effect_without_a_status_records_no_status():
+    gateway = MockGateway().start()
+    gateway.stop()
+    endpoint, outcomes, failures = build(binding_for(gateway))
+    with endpoint:
+        assert raw_post(endpoint)[0] == 409
+    assert outcomes[0].kind == "unavailable"
+    assert outcomes[0].http_status is None
+    assert outcomes[0].bytes_forwarded == 0
+
+
+# --------------------------------------------------------------------------
+# 10. The gateway base path is the pinned one and nothing else.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("base_url", [
+    "http://127.0.0.1:8311/v1/../../admin",
+    "http://127.0.0.1:8311/v1/./admin",
+    "http://127.0.0.1:8311//v1",
+    "http://127.0.0.1:8311/v1%2f..%2fadmin",
+    "http://127.0.0.1:8311/v1%2e%2e/admin",
+    "http://127.0.0.1:8311/admin/v1",
+    "http://127.0.0.1:8311/v1beta",
+    "http://127.0.0.1:8311/",
+])
+def test_an_ambiguous_gateway_base_path_is_refused_before_the_gateway(base_url):
+    with pytest.raises(ExperientialHarnessContractError):
+        ExperientialGatewayRoute(
+            route_id=ROUTE_ID,
+            route_generation=gateway_route_generation(base_url, "chat/completions"),
+            base_url=base_url,
+            path="chat/completions",
+        )
+
+
+def test_the_pinned_gateway_base_path_is_admitted():
+    base_url = "http://127.0.0.1:8311/v1"
+    route = ExperientialGatewayRoute(
+        route_id=ROUTE_ID,
+        route_generation=gateway_route_generation(base_url, "chat/completions"),
+        base_url=base_url,
+        path="chat/completions",
+    )
+    assert route.base_url == base_url
+
+
+# --------------------------------------------------------------------------
+# 11. An outcome the owner could not record fails closed.
+# --------------------------------------------------------------------------
+
+
+def test_a_failing_outcome_callback_fails_closed_and_blocks_a_second_send():
+    gateway = MockGateway().start()
+    try:
+        def refuse(outcome):
+            raise RuntimeError("the owner could not record the outcome")
+
+        endpoint, outcomes, failures = build(binding_for(gateway), on_outcome=refuse)
+        with endpoint:
+            with pytest.raises(http.client.IncompleteRead):
+                raw_post(endpoint)
+            assert raw_post(endpoint)[0] == 409
+        assert len(gateway.requests) == 1
+        assert endpoint.stopped_forwarding
+        assert failures == ["effect_unknown"]
+        assert outcomes == []
+    finally:
+        gateway.stop()
+
+
+def test_a_failing_outcome_callback_after_a_refusal_still_fails_closed():
+    gateway = MockGateway(status=429, frames=b"{}").start()
+    try:
+        def refuse(outcome):
+            raise RuntimeError("the owner could not record the outcome")
+
+        endpoint, outcomes, failures = build(binding_for(gateway), on_outcome=refuse)
+        with endpoint:
+            assert raw_post(endpoint)[0] == 409
+            assert raw_post(endpoint)[0] == 409
+        assert len(gateway.requests) == 1
+        assert endpoint.stopped_forwarding
+        # The owner never learned the outcome, so the attempt is unresolved
+        # rather than refused: the consumer cannot claim there was no effect.
+        assert failures == ["effect_unknown"]
+        assert outcomes == []
+    finally:
+        gateway.stop()
+
+
+# --------------------------------------------------------------------------
+# 12. The responses protocol keeps its tool call and completion frames.
+# --------------------------------------------------------------------------
+
+
+def responses_binding_for(gateway: MockGateway) -> ExperientialHarnessBinding:
+    return ExperientialHarnessBinding(
+        session_id="attempt-session-1",
+        model_id=MODEL,
+        protocol="responses",
+        route=route_for(gateway, path="responses"),
+        client_capability=CAPABILITY,
+    )
+
+
+def test_the_responses_protocol_completes_a_tool_call_stream():
+    frames = RESPONSES_TOOL_CALL + RESPONSES_COMPLETED
+    gateway = MockGateway(frames=frames).start()
+    try:
+        endpoint, outcomes, failures = build(responses_binding_for(gateway))
+        with endpoint:
+            status, body = raw_post(endpoint, path="/v1/responses")
+        assert status == 200
+        assert body == frames
+        assert gateway.requests[0]["path"] == "/v1/responses"
+        assert outcomes[0].kind == "completed"
+        assert outcomes[0].http_status == 200
+        assert outcomes[0].bytes_forwarded == len(frames)
+        assert failures == []
+    finally:
+        gateway.stop()
+
+
+def test_a_responses_provider_error_frame_is_never_a_completion():
+    frames = RESPONSES_FAILED + RESPONSES_COMPLETED
+    gateway = MockGateway(frames=frames).start()
+    try:
+        endpoint, outcomes, failures = build(responses_binding_for(gateway))
+        with endpoint:
+            with pytest.raises(http.client.IncompleteRead):
+                raw_post(endpoint, path="/v1/responses")
+            assert raw_post(endpoint, path="/v1/responses")[0] == 409
+        assert len(gateway.requests) == 1
+        assert endpoint.stopped_forwarding
+        assert failures == ["effect_unknown"]
+        assert outcomes[0].kind == "effect_unknown"
+        assert outcomes[0].http_status == 200
+        assert outcomes[0].bytes_forwarded == len(frames)
     finally:
         gateway.stop()

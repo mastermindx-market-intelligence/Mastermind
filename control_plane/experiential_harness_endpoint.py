@@ -23,6 +23,17 @@ Nothing new is granted or scheduled by this module:
   module refuses any other slug rather than silently substituting one.
 * One accepted child request produces exactly one upstream POST.  There is no
   client retry, no HTTP retry, no key rotation and no fallback route.
+* A provider error frame latches the stream as an unresolved effect.  A later
+  terminal marker never revives it, so an error that arrives before the
+  completion frame is never reported as a completion, and the attempt fails
+  stop instead of allowing a second upstream POST.
+* The gateway socket is dialled at a pinned numeric loopback address.  The
+  name is resolved once and the numeric answer is used for the send, so a
+  rebinding resolver cannot move a bearer-bearing request off loopback.
+* The gateway base path is the pinned allowlisted path.  An ambiguous prefix,
+  a dot segment or an encoded separator is refused before transport.
+* An ambiguous effect keeps the status and the byte count it observed, and an
+  outcome the owner could not record fails closed rather than continuing.
 
 The route is *pinned*: only a loopback gateway base URL is admitted, and the
 route generation is the attested identity of that exact pinned target (see
@@ -69,11 +80,23 @@ GATEWAY_PATHS = {
     "openai-chat": GATEWAY_CHAT_PATH,
     "responses": GATEWAY_RESPONSES_PATH,
 }
+#: The one gateway base path this consumer admits.  The dialled path is this
+#: base path plus the route path, so a base path outside the list is refused
+#: before transport: an ambiguous prefix would let a normalising proxy move
+#: the request somewhere the owner never attested.
+GATEWAY_BASE_PATHS = ("/v1",)
 
 _LOOPBACK_NAMES = frozenset({"localhost"})
 #: A valid HTTP status is 1xx-5xx.  The hundreds digit bounds it without
 #: naming a status literal in this source.
 _VALID_STATUS_HUNDREDS = (1, 2, 3, 4, 5)
+#: Provider frame types that carry a refusal rather than a completion.
+_PROVIDER_ERROR_TYPES = frozenset({
+    "error",
+    "response.failed",
+    "response.incomplete",
+    "response.cancelled",
+})
 
 
 class ExperientialHarnessContractError(RuntimeError):
@@ -85,7 +108,23 @@ class ExperientialHarnessUnavailable(RuntimeError):
 
 
 class ExperientialHarnessEffectUnknown(RuntimeError):
-    """The gateway may have taken effect; an automatic replay is not safe."""
+    """The gateway may have taken effect; an automatic replay is not safe.
+
+    ``http_status`` and ``bytes_forwarded`` carry what the forward already
+    observed.  Both are secret free, and they let the owner record the truth
+    about an ambiguous forward instead of a placeholder.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: Optional[int] = None,
+        bytes_forwarded: int = 0,
+    ) -> None:
+        super().__init__(message)
+        self.http_status = http_status
+        self.bytes_forwarded = bytes_forwarded
 
 
 @dataclass(frozen=True)
@@ -177,9 +216,48 @@ def _normalize_base_url(base_url: str) -> str:
         raise ExperientialHarnessContractError(
             "gateway base URL must not carry credentials, a query or a fragment"
         )
+    _require_pinned_base_path(parts.path)
     if not _is_loopback_host(parts.hostname or ""):
         raise ExperientialHarnessContractError("gateway base URL must be a loopback address")
     return base_url.rstrip("/")
+
+
+def _require_pinned_base_path(path: str) -> None:
+    """Refuse an ambiguous gateway base path before anything is dialled.
+
+    The dialled path is the pinned base path plus the route path, so a base
+    path that a normalising proxy could rewrite is refused rather than
+    dialled: a dot segment, a repeated separator, an encoded separator or an
+    encoded dot, and any prefix outside the allowlist.
+    """
+    normalized = path.rstrip("/")
+    if normalized not in GATEWAY_BASE_PATHS:
+        raise ExperientialHarnessContractError(
+            "gateway base path is not the pinned allowlisted path"
+        )
+    segments = normalized.split("/")
+    if segments and segments[0] == "":
+        # The leading empty segment is the path root, not an empty segment.
+        segments = segments[1:]
+    for segment in segments:
+        if segment in ("", ".", ".."):
+            raise ExperientialHarnessContractError("gateway base path is ambiguous")
+        if "%" in segment or "\\" in segment:
+            raise ExperientialHarnessContractError("gateway base path is ambiguous")
+
+
+def _observed_status(value) -> Optional[int]:  # noqa: ANN001
+    """Keep an observed status only when it is a real status integer."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _observed_bytes(value) -> int:  # noqa: ANN001
+    """Keep an observed byte count only when it is a real count."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return 0
+    return value
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -201,6 +279,101 @@ def _is_loopback_host(host: str) -> bool:
         return all(ipaddress.ip_address(address).is_loopback for address in addresses)
     except ValueError:
         return False
+
+
+@dataclass(frozen=True)
+class _PinnedEndpoint:
+    """One numeric loopback address the gateway socket is allowed to use."""
+
+    family: int
+    address: str
+    port: int
+
+
+def _pin_loopback_endpoints(host: str, port: int) -> tuple[_PinnedEndpoint, ...]:
+    """Resolve the gateway host exactly once into numeric loopback endpoints.
+
+    A numeric loopback literal is pinned without any name resolution at all.
+    A name is resolved once, here, and every answer must be a loopback
+    address; the pinned numbers are then dialled directly.  The name is never
+    resolved again, so a rebinding resolver cannot move a bearer-bearing
+    request off loopback between the check and the send.
+    """
+    candidate = host.strip("[]").lower()
+    try:
+        literal = ipaddress.ip_address(candidate)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if not literal.is_loopback:
+            raise ExperientialHarnessContractError(
+                "gateway address is not a loopback address"
+            )
+        family = socket.AF_INET6 if literal.version == 6 else socket.AF_INET
+        return (_PinnedEndpoint(family, str(literal), port),)
+    try:
+        infos = socket.getaddrinfo(candidate, port, type=socket.SOCK_STREAM)
+    except OSError:
+        raise ExperientialHarnessUnavailable("gateway address could not be resolved") from None
+    pinned: list[_PinnedEndpoint] = []
+    for family, _socktype, _proto, _canonname, sockaddr in infos:
+        try:
+            resolved = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            raise ExperientialHarnessContractError(
+                "gateway resolution did not yield a numeric address"
+            ) from None
+        if not resolved.is_loopback:
+            # The name resolved off loopback.  Refuse before any byte carries
+            # the local scoped proxy token.
+            raise ExperientialHarnessContractError(
+                "gateway resolution drifted off loopback"
+            )
+        pinned.append(_PinnedEndpoint(family, sockaddr[0], int(sockaddr[1])))
+    if not pinned:
+        raise ExperientialHarnessUnavailable("gateway address could not be resolved")
+    return tuple(pinned)
+
+
+def _dial_pinned(endpoints, timeout, source_address):  # noqa: ANN001
+    """Open one socket to a pinned numeric loopback endpoint.
+
+    No name is resolved here: the socket is handed the numeric address that
+    was pinned and verified, so the dialled peer cannot differ from the
+    checked one.
+    """
+    if source_address is not None:
+        # A source address is never used here and could reintroduce a name
+        # resolution; refuse rather than resolve one.
+        raise OSError("a pinned gateway dial does not accept a source address")
+    last_error = None
+    for endpoint in endpoints:
+        sock = socket.socket(endpoint.family, socket.SOCK_STREAM)
+        try:
+            if timeout is not None and timeout is not getattr(
+                socket, "_GLOBAL_DEFAULT_TIMEOUT", None
+            ):
+                sock.settimeout(timeout)
+            sock.connect((endpoint.address, endpoint.port))
+            return sock
+        except OSError as exc:
+            last_error = exc
+            try:
+                sock.close()
+            except OSError:
+                pass
+    if last_error is None:
+        raise OSError("the pinned gateway address could not be dialled")
+    raise last_error
+
+
+def _install_pinned_dial(connection, endpoints) -> None:  # noqa: ANN001
+    """Bind the connection to the pinned numeric endpoints."""
+
+    def dial(address, timeout=None, source_address=None):  # noqa: ANN001, ARG001
+        return _dial_pinned(endpoints, timeout, source_address)
+
+    connection._create_connection = dial
 
 
 def _bounded_seconds(value: float, maximum: float) -> float:
@@ -227,11 +400,32 @@ def _load_token(token_loader: Callable[[], str]) -> str:
     return token
 
 
+def _is_provider_error_payload(payload: dict) -> bool:
+    """True when one provider frame reports a refusal rather than progress.
+
+    A provider error may arrive as a JSON error object, as an error object
+    type, or as an error stream object.  Each of them is the provider saying
+    the request did not complete normally.
+    """
+    if payload.get("error") is not None:
+        return True
+    if payload.get("type") in _PROVIDER_ERROR_TYPES:
+        return True
+    if payload.get("object") == "error":
+        return True
+    return False
+
+
 class _StreamTerminal:
     """Bounded SSE framing observer.  It never rewrites or drops provider frames.
 
     Frames are observed only to learn when the provider stream reached its
-    terminal event.  The bytes handed to the child are the provider's bytes.
+    terminal event, or that it reported an error.  The bytes handed to the
+    child are the provider's bytes.
+
+    A provider error frame latches :attr:`failed` for good.  A later
+    ``[DONE]`` never revives a latched stream, so an error that arrives
+    before the terminal marker cannot be reported as a completion.
     """
 
     def __init__(self, path: str) -> None:
@@ -240,6 +434,15 @@ class _StreamTerminal:
         self.data: list[bytes] = []
         self.event = b""
         self.event_bytes = 0
+        self.terminal = False
+        self.failed = False
+        self.failure_reason = ""
+
+    def _latch_failure(self, reason: str) -> None:
+        if self.failed:
+            return
+        self.failed = True
+        self.failure_reason = reason
         self.terminal = False
 
     def _dispatch(self) -> None:
@@ -250,11 +453,14 @@ class _StreamTerminal:
         self.data = []
         event, self.event = self.event, b""
         self.event_bytes = 0
-        if self.terminal:
+        if self.terminal or self.failed:
+            # A settled outcome is final: a later frame never revives it.
             return
-        if self.path == GATEWAY_CHAT_PATH:
-            if data.strip() == b"[DONE]":
-                self.terminal = True
+        if event == b"error":
+            self._latch_failure("provider error event")
+            return
+        if self.path == GATEWAY_CHAT_PATH and data.strip() == b"[DONE]":
+            self.terminal = True
             return
         try:
             payload = json.loads(data.decode("utf-8"))
@@ -262,14 +468,13 @@ class _StreamTerminal:
             return
         if not isinstance(payload, dict):
             return
-        if payload.get("error") is not None or payload.get("type") in {
-            "error",
-            "response.failed",
-            "response.incomplete",
-            "response.cancelled",
-        }:
-            raise ValueError("provider error frame")
-        if payload.get("type") == "response.completed":
+        if _is_provider_error_payload(payload):
+            self._latch_failure("provider error frame")
+            return
+        if (
+            self.path == GATEWAY_RESPONSES_PATH
+            and payload.get("type") == "response.completed"
+        ):
             response = payload.get("response")
             if isinstance(response, dict) and response.get("status") == "completed":
                 self.terminal = True
@@ -308,11 +513,25 @@ class _StreamTerminal:
             raise ValueError("event size exceeded")
 
 
-def _open_connection(parts, timeout: float):  # noqa: ANN001
-    # A missing port keeps the scheme's own default rather than a literal here.
+def _effective_port(parts) -> int:  # noqa: ANN001
+    """The port this scheme dials, taken from the transport's own default."""
+    if parts.port is not None:
+        return parts.port
     if parts.scheme == "https":
-        return http.client.HTTPSConnection(parts.hostname, parts.port, timeout=timeout)
-    return http.client.HTTPConnection(parts.hostname, parts.port, timeout=timeout)
+        return http.client.HTTPSConnection.default_port
+    return http.client.HTTPConnection.default_port
+
+
+def _open_connection(parts, timeout: float, port: int):  # noqa: ANN001
+    """Open the gateway connection against pinned numeric loopback endpoints."""
+    # A missing port keeps the scheme's own default rather than a literal here.
+    endpoints = _pin_loopback_endpoints(parts.hostname or "", port)
+    if parts.scheme == "https":
+        connection = http.client.HTTPSConnection(parts.hostname, parts.port, timeout=timeout)
+    else:
+        connection = http.client.HTTPConnection(parts.hostname, parts.port, timeout=timeout)
+    _install_pinned_dial(connection, endpoints)
+    return connection
 
 
 def _drain_error_body(response) -> None:  # noqa: ANN001
@@ -387,13 +606,22 @@ def forward_to_gateway(
     response = None
     submitted = False
     forwarded = 0
+    observed_status: Optional[int] = None
 
     def refresh_timeout() -> None:
         if cancel is not None and cancel.is_set():
-            raise ExperientialHarnessEffectUnknown("attempt cancelled after submission")
+            raise ExperientialHarnessEffectUnknown(
+                "attempt cancelled after submission",
+                http_status=observed_status,
+                bytes_forwarded=forwarded,
+            )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise ExperientialHarnessEffectUnknown("gateway request exceeded its deadline")
+            raise ExperientialHarnessEffectUnknown(
+                "gateway request exceeded its deadline",
+                http_status=observed_status,
+                bytes_forwarded=forwarded,
+            )
         window = max(0.001, min(idle, remaining))
         connection.timeout = window
         sock = getattr(connection, "sock", None)
@@ -401,7 +629,7 @@ def forward_to_gateway(
             sock.settimeout(window)
 
     try:
-        connection = _open_connection(parts, min(idle, total))
+        connection = _open_connection(parts, min(idle, total), _effective_port(parts))
         headers = {
             "Authorization": "Bearer " + token,
             "Content-Type": "application/json",
@@ -417,7 +645,11 @@ def forward_to_gateway(
             # have reached the gateway.
             if getattr(connection, "sock", None) is None:
                 raise ExperientialHarnessUnavailable("gateway connection was refused") from None
-            raise ExperientialHarnessEffectUnknown("gateway request write failed") from None
+            raise ExperientialHarnessEffectUnknown(
+                "gateway request write failed",
+                http_status=observed_status,
+                bytes_forwarded=forwarded,
+            ) from None
         refresh_timeout()
         response = connection.getresponse()
         status = response.status
@@ -427,6 +659,7 @@ def forward_to_gateway(
             or status // 100 not in _VALID_STATUS_HUNDREDS
         ):
             raise ExperientialHarnessEffectUnknown("gateway returned an invalid status")
+        observed_status = status
         if status != 200:
             _drain_error_body(response)
             return GatewayStreamReceipt(
@@ -438,23 +671,53 @@ def forward_to_gateway(
             )
         content_type = (response.getheader("Content-Type") or "").split(";")[0].strip().lower()
         if content_type != "text/event-stream":
-            raise ExperientialHarnessEffectUnknown("gateway did not return an event stream")
+            raise ExperientialHarnessEffectUnknown(
+                "gateway did not return an event stream",
+                http_status=observed_status,
+                bytes_forwarded=forwarded,
+            )
         observer = _StreamTerminal(route.path)
         while True:
             refresh_timeout()
             chunk = response.read1(16384)
             if not isinstance(chunk, bytes):
-                raise ExperientialHarnessEffectUnknown("gateway returned invalid stream bytes")
+                raise ExperientialHarnessEffectUnknown(
+                    "gateway returned invalid stream bytes",
+                    http_status=observed_status,
+                    bytes_forwarded=forwarded,
+                )
             if not chunk:
                 observer.finish()
+                if observer.failed:
+                    raise ExperientialHarnessEffectUnknown(
+                        "gateway reported a provider error",
+                        http_status=observed_status,
+                        bytes_forwarded=forwarded,
+                    )
                 if not observer.terminal:
-                    raise ExperientialHarnessEffectUnknown("gateway stream ended before its terminal frame")
+                    raise ExperientialHarnessEffectUnknown(
+                        "gateway stream ended before its terminal frame",
+                        http_status=observed_status,
+                        bytes_forwarded=forwarded,
+                    )
                 break
             forwarded += len(chunk)
             if forwarded > MAX_STREAM_BYTES:
-                raise ExperientialHarnessEffectUnknown("gateway stream exceeded its size bound")
+                raise ExperientialHarnessEffectUnknown(
+                    "gateway stream exceeded its size bound",
+                    http_status=observed_status,
+                    bytes_forwarded=forwarded,
+                )
             observer.feed(chunk)
             on_chunk(chunk)
+            if observer.failed:
+                # The provider reported an error.  This is never a completion,
+                # and the endpoint fails stop so no second POST can follow.
+                raise ExperientialHarnessEffectUnknown(
+                    "gateway reported a provider error",
+                    http_status=observed_status,
+                    bytes_forwarded=forwarded,
+                )
             if observer.terminal:
                 break
         return GatewayStreamReceipt(
@@ -472,7 +735,11 @@ def forward_to_gateway(
         raise
     except Exception:
         if submitted:
-            raise ExperientialHarnessEffectUnknown("gateway forwarding failed") from None
+            raise ExperientialHarnessEffectUnknown(
+                "gateway forwarding failed",
+                http_status=observed_status,
+                bytes_forwarded=forwarded,
+            ) from None
         raise ExperientialHarnessUnavailable("gateway forwarding failed") from None
     finally:
         for item in (response, connection):
@@ -548,6 +815,8 @@ class ExperientialHarnessEndpoint:
                 model_id=core_binding.model_id,
                 bytes_forwarded=0,
             )
+            failure = None
+            receipt = None
             try:
                 payload = json.loads(request.body)
                 if not isinstance(payload, dict) or payload.get("model") != core_binding.model_id:
@@ -591,7 +860,7 @@ class ExperientialHarnessEndpoint:
                     model_id=core_binding.model_id,
                     bytes_forwarded=result.bytes_forwarded,
                 )
-                return InferenceForwardReceipt(
+                receipt = InferenceForwardReceipt(
                     route_id=result.route_id,
                     route_generation=result.route_generation,
                     http_status=result.http_status,
@@ -600,26 +869,42 @@ class ExperientialHarnessEndpoint:
                 )
             except ExperientialHarnessContractError:
                 outcome = replace(outcome, kind="refused")
-                raise InferenceForwardRefused(
+                failure = InferenceForwardRefused(
                     "Experiential consumer contract refused the request"
-                ) from None
+                )
             except ExperientialHarnessUnavailable:
                 outcome = replace(outcome, kind="unavailable")
-                raise InferenceForwardRefused("Experiential gateway is unavailable") from None
-            except ExperientialHarnessEffectUnknown:
-                outcome = replace(outcome, kind="effect_unknown")
-                raise InferenceEffectUnknown(
+                failure = InferenceForwardRefused("Experiential gateway is unavailable")
+            except ExperientialHarnessEffectUnknown as exc:
+                # Keep what the forward actually observed: an ambiguous effect
+                # with a known status and a known byte count is still a fact.
+                outcome = replace(
+                    outcome,
+                    kind="effect_unknown",
+                    http_status=_observed_status(exc.http_status),
+                    bytes_forwarded=_observed_bytes(exc.bytes_forwarded),
+                )
+                failure = InferenceEffectUnknown(
                     "Experiential gateway effect is unresolved"
-                ) from None
+                )
             except Exception:
                 outcome = replace(outcome, kind="effect_unknown")
-                raise InferenceEffectUnknown("Experiential gateway forwarding failed") from None
-            finally:
-                if self._on_outcome is not None:
-                    try:
-                        self._on_outcome(outcome)
-                    except Exception:
-                        pass
+                failure = InferenceEffectUnknown("Experiential gateway forwarding failed")
+            # The owner attestation callback is part of the terminal contract.
+            # A callback that fails means the outcome was never attested, so
+            # the attempt fails closed here instead of continuing as if the
+            # forward had been recorded.
+            if self._on_outcome is not None:
+                try:
+                    self._on_outcome(outcome)
+                except Exception:
+                    if failure is None:
+                        failure = InferenceEffectUnknown(
+                            "Experiential gateway outcome attestation failed"
+                        )
+            if failure is not None:
+                raise failure from None
+            return receipt
 
         try:
             self._core = AttemptInferenceEndpoint(
