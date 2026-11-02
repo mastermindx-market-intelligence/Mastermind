@@ -161,8 +161,12 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    `service/com.mastermind.paper-direct.business.<seat>.plist`; legacy v2 retains the historical
    unsuffixed label. Do not also launch a manual client for the same seat. Health binds only to
    `127.0.0.1:0`; its assigned address is in `state/health.url`.
-5. In the actual Business workspace, the authorized admin enables developer mode and creates
-   private **Mastermind Paper**, choosing Connection **Tunnel** and the existing tunnel ID.
+5. In the actual Business workspace, the authorized admin opens **ChatGPT Plugins**,
+   selects **Add custom MCP server** and creates the private **Mastermind Paper** plugin
+   with Connection **Tunnel** pointing at the existing tunnel ID. **Developer Mode is not
+   required** by the current Plugins setup. If the particular workspace still exposes
+   the legacy Developer Mode / Apps path, use its documented flow for the same app and
+   tunnel; never duplicate the connection.
    A plugin name or successful registration is not proof of any Paper operation. When an accepted
    source/runtime revision changes tool descriptions or collaboration metadata, review and refresh
    the **same app's** approved action snapshot. For a developer-mode MCP connection, deploy/restart

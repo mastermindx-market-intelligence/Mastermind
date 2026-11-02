@@ -257,3 +257,5 @@ def test_publication_drift_uses_current_same_app_refresh_lifecycle():
     assert "reusing the existing tunnel/backend" in runbook
     assert "parallel duplicate" in connection
     assert "parallel duplicate" in runbook
+    assert "Add custom MCP server" in runbook
+    assert "Developer Mode is not" in runbook
