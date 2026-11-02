@@ -98,6 +98,10 @@ def doctor(
     if not manager:
         missing.append("grant:ubuntu1_systemd_user_manager")
     missing.extend(_agent_identity_gaps(root, roster_path=roster_path))
+    incumbent_ids = _incumbent_peer_user_ids(roster_path)
+    for role, secrets in role_private.items():
+        if secrets.values.get("HERMES_SLACK_BOT_USER_ID", "") in incumbent_ids:
+            missing.append(f"isolation:incumbent_peer_user_id:{role}")
     # Each role needs independently revocable credentials, separate Slack
     # identity, and its own policy-enforced egress proxy. Never log values.
     for role, secrets in role_private.items():
@@ -164,6 +168,23 @@ def format_doctor(report: Mapping[str, object]) -> str:
     for item in rows:
         lines.append(f"- {item}")
     return "\n".join(lines) + "\n"
+
+
+def _incumbent_peer_user_ids(roster_path: Path | None) -> frozenset[str]:
+    """Known live peer identities from the same canonical roster, never values in output."""
+    path = roster_path or (Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return frozenset()
+    if not isinstance(data, dict) or not isinstance(data.get("peers"), list):
+        return frozenset()
+    return frozenset(
+        peer["user_id"] for peer in data["peers"]
+        if isinstance(peer, dict)
+        and isinstance(peer.get("user_id"), str)
+        and peer["user_id"].startswith("U")
+    )
 
 
 def _native_primary_present(home: Path, role: str) -> bool:
