@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import http.client
+import itertools
 import json
 import os
 import plistlib
@@ -172,6 +173,7 @@ class FakeHost:
         self.process_override = {}  # fields overlaid on the observed process
         self.process_pids = None  # iterator of pids, one per observation (crash loop)
         self.observations = 0
+        self.events = []  # read-side trace ("observe" / "probe") plus the start dispatch
 
     # fault injection ---------------------------------------------------------------
 
@@ -274,6 +276,7 @@ class FakeHost:
 
     def observe_process(self):
         self.observations += 1
+        self.events.append("observe")
         if self.process_error is not None:
             raise self.process_error
         if self.state == "ABSENT":
@@ -358,6 +361,7 @@ class FakeHost:
 
     def start_service(self):
         def action():
+            self.events.append("start")
             if not self._dispatched("start"):
                 self.violations.append("start before recorded dispatch")
             if self.state == "REGISTERED":
@@ -380,6 +384,7 @@ class FakeHost:
 
     def probe(self, port, probe):
         assert port == 8443
+        self.events.append("probe")
         override = self.probe_override.get(probe.name)
         if override is not None:
             if isinstance(override, BaseException):
@@ -709,8 +714,9 @@ def test_apply_happy_path_release_only():
     assert receipt["probes_after"] == ["metadata", "challenge"]
     assert receipt["before_images"] == ["mcp-update-" + tag + ".config.before", "mcp-update-" + tag + ".plist.before"]
     assert host.count("recover_enable") == 0
-    # The process proof needs a stable identity across consecutive launchd observations.
-    assert host.observations == m.PROCESS_STABLE_POLLS
+    # The process proof brackets the probes: a stable run before them, a hold window after them,
+    # and one final confirmation observation.
+    assert host.observations == m.PROCESS_STABLE_POLLS + m.PROCESS_HOLD_POLLS + 1
 
 
 def test_apply_happy_path_set_public():
@@ -968,7 +974,7 @@ def test_ineffective_stop_aborts_unchanged_and_re_enables():
     assert host.receipts and all(entry["before_images"] == [] for entry in host.receipts.values())
     (name,) = host.receipts
     assert name.endswith("-aborted-v1.json") and host.receipts[name]["outcome"] == "ABORTED_UNCHANGED"
-    assert host.receipts[name]["dispatched"] == ["stop", "recover_enable"]
+    assert host.receipts[name]["dispatched"] == ["stop", "recover_enable", "recover_enable_done"]
 
 
 def test_recover_not_proven_when_the_service_is_not_registered_after_enable():
@@ -989,6 +995,51 @@ def test_recover_not_proven_when_the_prior_probes_fail():
     expect(lambda: apply_of(host), m.TransactionEffectUnknown, "RECOVER_NOT_PROVEN")
     assert host.marker is not None
     assert host.violations == []
+
+
+def _recover_left_unproven(monkeypatch):
+    """The stop did not take effect; the service drops out of launchd just after the prior probes pass."""
+    host = FakeHost()
+    host.stop_effective = False
+    armed = [True]
+    real = m.probe_failures
+
+    def probe_failures(host_, port, probes, *, attempts):
+        failures = real(host_, port, probes, attempts=attempts)
+        if armed[0] and host_.count("recover_enable") == 1:
+            host_.state = "ABSENT"
+        return failures
+
+    monkeypatch.setattr(m, "probe_failures", probe_failures)
+    expect(lambda: apply_of(host), m.TransactionEffectUnknown, "RECOVER_NOT_PROVEN")
+    armed[0] = False
+    return host
+
+
+def test_recover_not_proven_when_the_service_leaves_launchd_after_the_prior_probes(monkeypatch):
+    host = _recover_left_unproven(monkeypatch)
+    assert host.marker is not None and host.receipts == {}
+    assert host.marker["dispatched"] == ["stop", "recover_enable", "recover_enable_done"]
+    assert host.count("recover_enable") == 1 and host.violations == []
+    # Registered again: observation alone closes the abort, and the enable is never replayed.
+    host.state = "REGISTERED"
+    result = reconcile_of(host)
+    assert result["outcome"] == "ABORTED_UNCHANGED"
+    assert host.count("recover_enable") == 1
+    assert_clean_prior(host)
+
+
+def test_an_operator_disable_after_the_compensating_enable_is_not_undone(monkeypatch):
+    host = _recover_left_unproven(monkeypatch)
+    host.state = "REGISTERED"
+    host.disabled = True  # the operator throws the kill switch after the tool's own enable
+    expect(lambda: reconcile_of(host), m.TransactionEffectUnknown, "GATEWAY_DISABLED_AFTER_RECOVERY")
+    assert host.count("recover_enable") == 1 and host.disabled is True
+    assert host.marker is not None and host.receipts == {}
+    host.disabled = False
+    assert reconcile_of(host)["outcome"] == "ABORTED_UNCHANGED"
+    assert host.count("recover_enable") == 1
+    assert_clean_prior(host)
 
 
 def test_start_not_observed_then_reconcile_never_starts_twice():
@@ -1163,6 +1214,9 @@ def test_reconcile_unreadable_marker_is_effect_unknown():
     lambda mk: mk.update(phase="NOPE"),
     lambda mk: mk.update(dispatched=["stop", "stop"]),
     lambda mk: mk.update(dispatched=["format-disk"]),
+    lambda mk: mk.update(dispatched=["stop", "recover_enable_done"]),
+    lambda mk: mk.update(dispatched=["stop", "recover_enable_done", "recover_enable"]),
+    lambda mk: mk.update(dispatched=["stop", "recover_enable", "recover_enable"]),
     lambda mk: mk.update(dispatched="stop"),
     lambda mk: mk.update(set_public_mcp_resource=1),
     lambda mk: mk.update(last_verify="x"),
@@ -1216,7 +1270,8 @@ def _identity_failure_state(host, code):
 def test_a_crash_looping_new_release_is_effect_unknown_and_never_rolled_back():
     baseline = FakeHost()
     apply_of(baseline)
-    other_sleeps = len(baseline.sleeps) - (m.PROCESS_STABLE_POLLS - 1)  # settling, not the identity proof
+    # Settling sleeps only: the baseline's stage-A gaps and hold-window sleeps are the identity proof.
+    other_sleeps = len(baseline.sleeps) - (m.PROCESS_STABLE_POLLS - 1) - m.PROCESS_HOLD_POLLS
     host = FakeHost()
     host.process_pids = iter(range(1000, 1000 + 10 * m.PROCESS_POLLS))  # a new pid on every poll
     code = "PROCESS_IDENTITY_NOT_PROVEN:PID_CHANGED"
@@ -1295,15 +1350,19 @@ def test_a_transient_launchd_observation_refusal_is_retried_within_the_bound():
 
     host.sleep = sleep
     assert apply_of(host)["outcome"] == "COMPLETE"
-    assert m.PROCESS_STABLE_POLLS < host.observations < m.PROCESS_POLLS
+    # Failed stage-A observations cost extra polls, bounded by the stage-A budget, then the hold
+    # window and the final observation.
+    clean = m.PROCESS_STABLE_POLLS + m.PROCESS_HOLD_POLLS + 1
+    assert clean < host.observations < m.PROCESS_POLLS + m.PROCESS_HOLD_POLLS + 1
     assert_complete(host)
 
 
 def test_one_pid_change_while_the_new_release_settles_is_tolerated():
     host = FakeHost()
-    host.process_pids = iter([5000, 5001, 5001, 5001])  # a first launch replaced once, then stable
+    # A first launch replaced once, then stable; the stable pid is the one held after the probes.
+    host.process_pids = itertools.chain([5000, 5001, 5001, 5001], itertools.repeat(5001))
     assert apply_of(host)["outcome"] == "COMPLETE"
-    assert host.observations == 4
+    assert host.observations == 4 + m.PROCESS_HOLD_POLLS + 1
     (receipt,) = host.receipts.values()
     assert receipt["process"]["pid"] == 5001
     assert_complete(host)
@@ -1317,6 +1376,157 @@ def test_a_flapping_pid_never_accumulates_a_stable_run_across_a_change():
     code = "PROCESS_IDENTITY_NOT_PROVEN:PID_CHANGED"
     expect(lambda: apply_of(host), m.TransactionEffectUnknown, code)
     _identity_failure_state(host, code)
+
+
+# --- process identity brackets the probes ------------------------------------------------------
+
+
+def _runs(events):
+    """Collapse consecutive duplicates: ["a", "a", "b"] -> [("a", 2), ("b", 1)]."""
+    runs = []
+    for event in events:
+        if runs and runs[-1][0] == event:
+            runs[-1][1] += 1
+        else:
+            runs.append([event, 1])
+    return [tuple(run) for run in runs]
+
+
+def _after_start(host):
+    return host.events[host.events.index("start") + 1:]
+
+
+def _degrade_after(host, clean, **overlay):
+    """From the (clean + 1)th launchd observation on, the observed process carries ``overlay``."""
+    real = host.observe_process
+
+    def observe():
+        value = real()
+        if host.observations > clean:
+            value.update(overlay)
+        return value
+
+    host.observe_process = observe
+
+
+def _unobservable_after(host, clean, error):
+    """From the (clean + 1)th launchd observation on, every observation is refused with ``error``."""
+    real = host.observe_process
+
+    def observe():
+        if host.observations >= clean:
+            host.process_error = error
+        return real()
+
+    host.observe_process = observe
+
+
+def _heal(host):
+    host.__dict__.pop("observe_process", None)
+    host.__dict__.pop("probe", None)
+    host.process_error = None
+
+
+# Observations are counted from the start dispatch: STABLE before the first probe pass, HOLD after it,
+# then one final observation after the second probe pass.
+HOLD_START = m.PROCESS_STABLE_POLLS
+HOLD_END = m.PROCESS_STABLE_POLLS + m.PROCESS_HOLD_POLLS
+CLEAN_BEFORE_FAILURE = [
+    pytest.param(HOLD_START, id="first-hold-poll"),
+    pytest.param(HOLD_START + 5, id="mid-hold"),
+    pytest.param(HOLD_END - 1, id="last-hold-poll"),
+    pytest.param(HOLD_END, id="final-observation-only"),
+]
+
+
+def test_the_process_proof_brackets_the_probes_in_order():
+    host = FakeHost()
+    assert apply_of(host)["outcome"] == "COMPLETE"
+    runs = _runs(_after_start(host))
+    assert [kind for kind, _ in runs] == ["observe", "probe", "observe", "probe", "observe"]
+    counts = [count for _, count in runs]
+    assert counts[0] == m.PROCESS_STABLE_POLLS
+    assert counts[2] == m.PROCESS_HOLD_POLLS
+    assert counts[4] == 1
+    assert counts[1] == counts[3] >= 1
+    assert host.observations == HOLD_END + 1
+
+
+def test_no_probe_runs_while_the_process_identity_is_unproven():
+    host = FakeHost()
+    host.process_override = {"username": "root"}
+    expect(lambda: apply_of(host), m.TransactionEffectUnknown, "PROCESS_IDENTITY_NOT_PROVEN:USER")
+    assert "probe" not in _after_start(host)
+
+
+@pytest.mark.parametrize("clean", CLEAN_BEFORE_FAILURE)
+@pytest.mark.parametrize("overlay,reason", [
+    ({"pid": 9999}, "PID_CHANGED"),
+    ({"state": "waiting"}, "STATE"),
+    ({"username": "root"}, "USER"),
+])
+def test_a_release_that_changes_after_the_probes_answered_is_effect_unknown(clean, overlay, reason):
+    baseline = FakeHost()
+    apply_of(baseline)
+    per_pass = _runs(_after_start(baseline))[1][1]
+    host = FakeHost()
+    _degrade_after(host, clean, **overlay)
+    code = "PROCESS_IDENTITY_NOT_PROVEN:AFTER_PROBES:" + reason
+    expect(lambda: apply_of(host), m.TransactionEffectUnknown, code)
+    _identity_failure_state(host, code)
+    assert host.observations == clean + 1
+    # The probes had answered healthy: only the process observation after them caught the change.
+    passes = 2 if clean == HOLD_END else 1
+    assert _after_start(host).count("probe") == per_pass * passes
+    # The fault clears: read-only re-verification completes without a second stop or start.
+    _heal(host)
+    assert reconcile_of(host)["outcome"] == "COMPLETE"
+    assert host.count("stop_service") == 1 and host.count("start_service") == 1
+    assert_complete(host)
+    (receipt,) = host.receipts.values()
+    assert receipt["process"]["pid"] == 4242
+
+
+@pytest.mark.parametrize("clean", CLEAN_BEFORE_FAILURE)
+def test_launchd_losing_the_process_after_the_probes_is_effect_unknown(clean):
+    host = FakeHost()
+    _unobservable_after(host, clean, m.UpdateRefused("LAUNCHD_GONE"))
+    code = "PROCESS_IDENTITY_NOT_PROVEN:AFTER_PROBES:OBSERVATION:LAUNCHD_GONE"
+    expect(lambda: apply_of(host), m.TransactionEffectUnknown, code)
+    _identity_failure_state(host, code)
+    assert host.observations == clean + 1
+    _heal(host)
+    assert reconcile_of(host)["outcome"] == "COMPLETE"
+    assert host.count("stop_service") == 1 and host.count("start_service") == 1
+    assert_complete(host)
+
+
+def test_a_probe_failure_after_the_hold_window_is_verify_failed_with_a_short_recheck():
+    baseline = FakeHost()
+    apply_of(baseline)
+    per_pass = _runs(_after_start(baseline))[1][1]
+    host = FakeHost()
+    real = host.probe
+    failing = []
+
+    def probe(port, spec):
+        if host.observations >= HOLD_END:
+            failing.append(spec.name)
+            return m.ProbeResult(500, {}, b"")
+        return real(port, spec)
+
+    host.probe = probe
+    expect(lambda: apply_of(host), m.TransactionEffectUnknown, "VERIFY_FAILED")
+    # The recheck is bounded by its own, shorter attempt count and ran after the hold window.
+    assert len(failing) == per_pass * m.PROBE_RECHECK_ATTEMPTS
+    assert host.observations == HOLD_END
+    assert host.marker is not None and host.marker["last_verify"]
+    assert not any(entry.startswith("PROCESS_IDENTITY") for entry in host.marker["last_verify"])
+    assert host.config == expected_config_after() and host.receipts == {}
+    assert host.count("stop_service") == 1 and host.count("start_service") == 1
+    _heal(host)
+    assert reconcile_of(host)["outcome"] == "COMPLETE"
+    assert_complete(host)
 
 
 # --- aborts: re-apply, re-entry and cleanup --------------------------------------------
@@ -1719,10 +1929,9 @@ def _disabled_listing(*lines):
     # No override for the label (or only other labels, or a longer label) means not disabled.
     (_disabled_listing('"com.apple.other" => disabled'), True),
     (_disabled_listing('"com.mastermind.executive.mcp.other" => disabled'), True),
+    # A structurally complete table with no row for the label is "no override": enabled.
     (_disabled_listing(), True),
-    (b"", True),
-], ids=["disabled", "true", "true-comma", "enabled", "false", "other-label", "longer-label", "empty-set",
-        "no-output"])
+], ids=["disabled", "true", "true-comma", "enabled", "false", "other-label", "longer-label", "empty-set"])
 def test_production_service_enabled_reads_the_launchd_disabled_override(launchctl, listing, expected):
     launchctl.stdout = listing
     assert m.ProductionHost().service_enabled() is expected
@@ -1735,7 +1944,21 @@ def test_production_service_enabled_reads_the_launchd_disabled_override(launchct
     _disabled_listing('"com.mastermind.executive.mcp" => maybe'),
     _disabled_listing('"com.mastermind.executive.mcp" =>'),
     b"x" * (m.MAX_LAUNCHCTL_OUTPUT_BYTES + 1),
-], ids=["conflicting", "unknown-verdict", "no-verdict", "oversized"])
+    # Fail closed on output that is not exactly one header, rows and one footer: an empty, truncated
+    # or reshaped listing must never read as "no override".
+    b"",
+    b"\n\n",
+    b'\t"com.mastermind.executive.mcp" => enabled\n',
+    b'disabled services = {\n\t"com.mastermind.executive.mcp" => enabled\n',
+    b"disabled services = {\n}\ndisabled services = {\n}\n",
+    b"disabled services = {\ndisabled services = {\n}\n",
+    b"disabled services = {\n\tsomething unexpected\n}\n",
+    b"unexpected banner\n" + _disabled_listing(),
+    _disabled_listing() + b'\t"com.mastermind.executive.mcp" => disabled\n',
+    _disabled_listing() + b"}\n",
+], ids=["conflicting", "unknown-verdict", "no-verdict", "oversized", "empty-output", "blank-lines",
+        "rows-without-header", "missing-footer", "duplicate-table", "duplicate-header", "junk-row",
+        "banner-before-header", "row-after-footer", "second-footer"])
 def test_production_service_enabled_refuses_ambiguous_output(launchctl, listing):
     launchctl.stdout = listing
     with pytest.raises(m.UpdateRefused) as caught:

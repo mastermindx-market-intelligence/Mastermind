@@ -482,17 +482,29 @@ file placed under a production tree is refused as well.
     digest (`--plan-sha256`) and refuses on any drift. Each effect (stage, stop,
     replace, start) is persisted as a transaction marker before it is dispatched,
     stop and start are never replayed, and recovery is observation-driven through
-    `reconcile`. A launchd `disabled` override on the gateway label is the
-    operator kill switch: `apply` refuses (`GATEWAY_DISABLED`) and a gateway
-    disabled between staging and the stop discards the staged images with no
-    effect; the tool never re-enables a service the operator disabled (the one
-    compensating `enable` runs only after the tool's own stop dispatch). A
-    candidate is verified only when the readback join, the loopback probes
-    **and** a launchd process-identity proof pass: the running gateway must have
-    the after-image argv, program, working directory and service user and keep
-    one stable pid for three consecutive polls; a crash-looping or still-old
-    process is EFFECT_UNKNOWN `PROCESS_IDENTITY_NOT_PROVEN:<reasons>`, never a
-    COMPLETE receipt. There is **no automatic rollback after replacement**: a
+    `reconcile`. A launchd `disabled` override on the gateway label is honored
+    as an operator kill switch only where it can be told apart from the tool's
+    own `disable`: `apply` refuses (`GATEWAY_DISABLED`) and a gateway disabled
+    between staging and the stop discards the staged images with no effect. After
+    the tool's own stop the flag is its own, so an operator `disable` made before
+    the `start` (or before the compensating `enable` completes) is undone by the
+    `start`/`enable` the tool already owes. Once the compensating `enable` has
+    completed and is recorded, the tool never enables again: a label found
+    disabled then is EFFECT_UNKNOWN `GATEWAY_DISABLED_AFTER_RECOVERY` and needs
+    the operator to enable it. A candidate is verified only when the readback
+    join, the loopback probes **and** a launchd process-identity proof pass, and
+    the proof brackets the probes: the running gateway must have the after-image
+    argv, program, working directory and service user and keep one stable pid
+    for three consecutive polls before the probes; after the probes the same pid
+    must be observed running with that identity on every poll of a hold window
+    that outlasts launchd's 10 s `ThrottleInterval`, the probes are repeated, and
+    a final observation must match again. A new release that dies, is respawned
+    or changes identity within that window, and a before-image process, are
+    EFFECT_UNKNOWN `PROCESS_IDENTITY_NOT_PROVEN:<reasons>`, never a COMPLETE
+    receipt. The proof does **not** tie the listener pid to the port (a foreign
+    process holding the port while the new release stays alive but unbound is not
+    detected) and does not cover a failure later than the hold window. There is
+    **no automatic rollback after replacement**: a
     failed candidate is restored by a human-approved copy of the preserved
     before-images (`mcp-update-<plan12>.config.before` and `.plist.before` in
     `installation-receipts/`) followed by `launchctl enable` and `bootstrap`;
