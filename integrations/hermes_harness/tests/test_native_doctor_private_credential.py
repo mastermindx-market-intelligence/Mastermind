@@ -138,6 +138,36 @@ class NativeDoctorCredentialTests(unittest.TestCase):
                       report["core_text_missing"])
         self.assertNotIn("U0BTCHX8HMF", str(report))
 
+    def test_cli_core_only_exit_is_configuration_only_not_global_ready(self):
+        import contextlib
+        import io
+        import json
+        from unittest import mock
+        from integrations.hermes_harness.cli import main
+
+        core = {
+            "schema": "mastermind.hermes_harness.doctor.v1",
+            "status": "MISSING",
+            "missing": ["grant:executive_admission", "id:DOT_BOT_USER_IDS"],
+            "core_text_status": "CONFIG_READY_NOT_LIVE_PROVEN",
+            "core_text_missing": [],
+            "core_text_missing_count": 0,
+        }
+        with mock.patch("integrations.hermes_harness.cli.doctor", return_value=core):
+            sink = io.StringIO()
+            with contextlib.redirect_stdout(sink):
+                self.assertEqual(main(["doctor", "--core-text-config-only", "--json"]), 0)
+            observed = json.loads(sink.getvalue())
+            self.assertEqual(observed["status"], "MISSING")
+            self.assertEqual(observed["core_text_status"], "CONFIG_READY_NOT_LIVE_PROVEN")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["doctor", "--json"]), 2)
+
+        core["core_text_status"] = "CONFIG_MISSING"
+        with mock.patch("integrations.hermes_harness.cli.doctor", return_value=core):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["doctor", "--core-text-config-only"]), 2)
+
     def test_bad_pointer_is_not_covered_by_inline_provider_key(self):
         self._write_role(
             "mmsecretary",
