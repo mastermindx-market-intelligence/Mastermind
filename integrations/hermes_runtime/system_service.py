@@ -64,7 +64,7 @@ def render_host_unit(
     """An operator-reviewed SYSTEM unit; never installs or starts services."""
     if (type(profile) is not RuntimeProfile
             or profile.role not in ROLE_PROXY_HOST
-            or profile.service_name != f"hermes-runtime-{profile.role}.service"
+            or profile.service_name != f"hermes-runtime-{profile.role}"
             or profile.sha != PINNED_UPSTREAM_SHA):
         raise RuntimeRefusal("ROOT_UNIT_PROFILE_UNQUALIFIED")
     if (not isinstance(runtime_user, str) or not _ACCOUNT.fullmatch(runtime_user)
@@ -82,7 +82,7 @@ def render_host_unit(
         raise RuntimeRefusal("ROOT_UNIT_PATH_INVALID")
     role_ip = ROLE_PROXY_HOST[profile.role]
     seconds = int(profile.restart_sec) if float(profile.restart_sec).is_integer() else profile.restart_sec
-    unit = f"""# ROOT-OWNED /etc/systemd/system/{profile.service_name}
+    unit = f"""# ROOT-OWNED /etc/systemd/system/{profile.service_name}.service
 # Enforcing IPAddressDeny requires PID1's system manager; NEVER systemd --user.
 # Role: {profile.role}; pinned donor: {PINNED_UPSTREAM_SHA}
 # A rendered unit is not host-kernel or provider acceptance.
