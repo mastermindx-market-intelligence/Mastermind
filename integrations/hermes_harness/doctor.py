@@ -77,6 +77,7 @@ def doctor(
         if not _gateway_file_ok(path):
             missing.append(f"credential_file:{name}")
     role_private = {}
+    model_keys_by_role = {}
     # Check the actual selected role-private systemd file, never ambient
     # HTTP(S)_PROXY or an unrelated role/user secrets file.
     for role in PROFILE_PRIMARY:
@@ -84,6 +85,10 @@ def doctor(
             _spec, secrets_path = _native_primary_source(root, role)
             secrets = load_secrets(secrets_path)
             role_private[role] = secrets
+            try:
+                model_keys_by_role[role] = load_credential(_spec, secrets.values)
+            except CredentialUnavailable:
+                pass  # The existing primary-key presence gate reports this.
             native_egress_child_env(role, secrets.values)
         except (RuntimeRefusal, OSError, ValueError, KeyError):
             missing.append(f"network_proxy:{role}")
@@ -107,6 +112,9 @@ def doctor(
     for role, secrets in role_private.items():
         if secrets.dashboard_password == secrets.token:
             missing.append(f"isolation:gateway_dashboard_alias:{role}")
+    if (len(model_keys_by_role) == len(PROFILE_PRIMARY)
+            and len(set(model_keys_by_role.values())) != len(model_keys_by_role)):
+        missing.append("isolation:shared_model_credential")
     if len(role_private) == len(PROFILE_PRIMARY):
         secretary = role_private["mmsecretary"]
         meta = role_private["mmmeta"]
