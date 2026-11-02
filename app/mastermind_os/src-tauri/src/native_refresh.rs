@@ -139,6 +139,27 @@ mod tests {
         assert!(valid_refresh(&"x".repeat(4096)));
         assert!(!valid_refresh(&"x".repeat(4097)));
     }
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "explicit synthetic Keychain canary on authorized unlocked macOS host only"]
+    fn native_keychain_synthetic_roundtrip_canary() {
+        // Never touch a registered client, user account, or real refresh token.
+        let client = format!("mmos-synthetic-keychain-canary-{}", std::process::id());
+        let audience = format!("https://fixture.invalid/keychain-canary/{}", std::process::id());
+        let synthetic = "synthetic-keychain-roundtrip-token-only-no-credential";
+        assert_eq!(load(&client, &audience).expect("Keychain read"), None);
+        struct Cleanup(String, String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = super::delete(&self.0, &self.1); }
+        }
+        save(&client, &audience, synthetic).expect("Keychain write");
+        let _cleanup = Cleanup(client.clone(), audience.clone());
+        assert_eq!(load(&client, &audience).expect("Keychain readback"),
+            Some(synthetic.to_owned()));
+        delete(&client, &audience).expect("Keychain delete");
+        assert_eq!(load(&client, &audience).expect("Keychain absence"), None);
+    }
+
     #[test]
     fn rotation_successor_must_be_new_and_opaque() {
         let first = "a".repeat(64);
