@@ -27,6 +27,9 @@ LANE_FLAGS = (
     "lane_local_wait_blocks_only_its_lane",
     "remaining_safe_work",
     "all_lanes_proven_blocked",
+    "all_external_waits_proven_blocked",
+    "checkpoint_continuation_verified",
+    "wait_executor_verified",
     "no_delta_loop_forces_tactic_change",
     "status_summary_is_not_continuation",
     "wait_requires_started_durable_executor",
@@ -315,6 +318,7 @@ def test_same_facts_with_continue_claim_is_not_premature():
 def test_staging_the_guard_lane_removes_remaining_safe_work_flag():
     data = prophet_snapshot()
     data["lanes"]["items"][2]["state"] = "DONE"
+    data["lanes"]["items"][2]["completion_ref"] = "github:guard-suite-commit"
     report = audit(data)
     assert report["remaining_safe_work"] is False
     assert report["lane_local_wait_blocks_only_its_lane"] is False
@@ -334,9 +338,14 @@ def test_all_lanes_proven_blocked_stop_is_lawful_fence():
     }
     data["lanes"] = {
         "items": [
-            {"id": "macro:source-write-lane", "state": "FENCED"},
-            {"id": "macro:permission-ceremony-lane", "state": "BLOCKED_PROVEN"},
-            {"id": "macro:finished-read-lane", "state": "DONE"},
+            {"id": "macro:source-write-lane", "state": "FENCED",
+             "effect_action_id": "macro:held-source-write",
+             "effect_carrier": "macro:original-pr-carrier"},
+            {"id": "macro:permission-ceremony-lane", "state": "BLOCKED_PROVEN",
+             "blocker_ref": "studio:permission-denial", "blocker_owner_ref": "studio:owner",
+             "blocker_observed": True, "negative_capability_verified": True},
+            {"id": "macro:finished-read-lane", "state": "DONE",
+             "completion_ref": "github:reviewed-read"},
         ],
         "exit_claim": "ALL_LANES_BLOCKED_STOP",
         "wait_executor": {"started": False, "ref": None},
@@ -365,8 +374,11 @@ def test_one_fenced_lane_with_independent_work_is_not_mission_stop():
     }
     data["lanes"] = {
         "items": [
-            {"id": "macro:uncertain-deployment-lane", "state": "FENCED"},
-            {"id": "macro:independent-review-lane", "state": "SAFE_WORK_REMAINING"},
+            {"id": "macro:uncertain-deployment-lane", "state": "FENCED",
+             "effect_action_id": "macro:deployment-mutation",
+             "effect_carrier": "studio:original-carrier"},
+            {"id": "macro:independent-review-lane", "state": "SAFE_WORK_REMAINING",
+             "next_action_ref": "github:read-disjoint-diff"},
         ],
         "exit_claim": "ALL_LANES_BLOCKED_STOP",
     }
@@ -414,8 +426,12 @@ def test_wait_claim_requires_started_durable_executor():
     # trigger is not that executor.
     data = prophet_snapshot()
     data["lanes"]["items"] = [
-        {"id": "macro:pr-10289-hosted-exact-head-ci", "state": "WAITING_EXTERNAL"},
-        {"id": "macro:pr-10289-independent-review", "state": "WAITING_EXTERNAL"},
+        {"id": "macro:pr-10289-hosted-exact-head-ci", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:ci-pending-10289", "blocker_owner_ref": "github:actions",
+         "blocker_observed": True},
+        {"id": "macro:pr-10289-independent-review", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:review-pending-10289", "blocker_owner_ref": "github:reviewer",
+         "blocker_observed": True},
     ]
     data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
     data["lanes"].pop("support_cycles_without_delta")
@@ -423,22 +439,66 @@ def test_wait_claim_requires_started_durable_executor():
     assert report["wait_requires_started_durable_executor"] is True
     assert report["premature_exit_detected"] is True
     assert report["remaining_safe_work"] is False
-    data["lanes"]["wait_executor"] = {"started": True, "ref": "fabric:nightly-guard-run"}
+    data["lanes"]["wait_executor"] = {"started": True, "ref": "fabric:nightly-guard-run",
+                                    "return_path_ref": "fabric:result-return",
+                                    "owner_observed": True}
     report = audit(data)
     assert report["wait_requires_started_durable_executor"] is False
     assert report["premature_exit_detected"] is False
 
 
-def test_checkpointed_continuation_requires_executor_not_summary():
+def test_verified_checkpoint_without_running_worker_is_lawful():
+    data = prophet_snapshot()
+    data["lanes"]["exit_claim"] = "CHECKPOINTED_CONTINUATION"
+    assert audit(data)["premature_exit_detected"] is True
+    data["lanes"]["checkpoint"] = {
+        "persisted": True, "receipt_ref": "agentos:verified-handoff",
+        "revision": "a" * 64, "continuity_reason": "CONTEXT_PRESSURE",
+        "observed_continuity_risk": True, "next_action_ref": "macro:guard-suite-step",
+        "resume_surface_ref": "chatgpt:fresh-session",
+        "effects_accounted": True, "custody_preserved": True, "mission_complete": False,
+    }
+    report = audit(data)
+    assert report["checkpoint_continuation_verified"] is True
+    assert report["premature_exit_detected"] is False
+    assert report["remaining_safe_work"] is True
+
+
+def test_status_summary_is_premature_even_with_unrelated_started_executor():
     data = prophet_snapshot()
     data["lanes"]["items"] = [
-        {"id": "macro:pr-10289-hosted-exact-head-ci", "state": "WAITING_EXTERNAL"},
+        {"id": "macro:pr-10289-hosted-exact-head-ci", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:ci-pending-10289", "blocker_owner_ref": "github:actions",
+         "blocker_observed": True}
     ]
-    assert audit(data)["premature_exit_detected"] is True
-    data["lanes"]["wait_executor"] = {"started": True, "ref": "fabric:successor-executor"}
+    data["lanes"]["wait_executor"] = {
+        "started": True, "ref": "fabric:unrelated-worker",
+        "return_path_ref": "fabric:unrelated-wake", "owner_observed": True,
+    }
     report = audit(data)
-    assert report["status_summary_is_not_continuation"] is False
-    assert report["premature_exit_detected"] is False
+    assert report["wait_executor_verified"] is True
+    assert report["status_summary_is_not_continuation"] is True
+    assert report["premature_exit_detected"] is True
+
+
+def test_checkpoint_requires_actual_pressure_and_immutable_readback():
+    data = prophet_snapshot()
+    data["lanes"]["exit_claim"] = "CHECKPOINTED_CONTINUATION"
+    cp = data["lanes"]["checkpoint"] = {
+        "persisted": True, "receipt_ref": "agentos:verified-handoff",
+        "revision": "b" * 64, "continuity_reason": "CONTEXT_PRESSURE",
+        "observed_continuity_risk": True, "next_action_ref": "macro:guard-145",
+        "resume_surface_ref": "chatgpt:next-chat", "effects_accounted": True,
+        "custody_preserved": True, "mission_complete": False,
+    }
+    assert audit(data)["premature_exit_detected"] is False
+    cp["continuity_reason"] = "CLEAN_PHASE_ONLY"
+    assert audit(data)["premature_exit_detected"] is True
+    cp["continuity_reason"] = "CONTEXT_PRESSURE"
+    cp["revision"] = None
+    assert audit(data)["premature_exit_detected"] is True
+
+
 
 
 @pytest.mark.parametrize("cycles,expected", [(0, False), (1, False), (2, True), (5, True)])
@@ -464,3 +524,77 @@ def test_prophet10289_discriminator_via_cli(tmp_path, capsys):
     assert result["premature_exit_detected"] is True
     assert result["lane_local_wait_blocks_only_its_lane"] is True
     assert result["status_summary_is_not_continuation"] is True
+
+
+def test_proven_external_waits_allow_a_genuine_all_lanes_stop():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "macro:ci-queued", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:run-415", "blocker_owner_ref": "github:actions",
+         "blocker_observed": True},
+        {"id": "macro:review-awaited", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:review-request", "blocker_owner_ref": "github:reviewer",
+         "blocker_observed": True},
+    ]
+    data["lanes"]["exit_claim"] = "ALL_LANES_BLOCKED_STOP"
+    result = audit(data)
+    assert result["all_lanes_proven_blocked"] is True
+    assert result["all_external_waits_proven_blocked"] is True
+    assert result["premature_exit_detected"] is False
+    assert result["no_delta_loop_forces_tactic_change"] is False
+
+
+def test_claimed_external_wait_without_attributed_proof_is_invalid():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [{"id": "macro:claimed-review", "state": "WAITING_EXTERNAL"}]
+    data["lanes"]["exit_claim"] = "ALL_LANES_BLOCKED_STOP"
+    with pytest.raises(InvalidSnapshot):
+        audit(data)
+
+
+def test_proven_blocker_needs_real_negative_capability():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "macro:claimed-block", "state": "BLOCKED_PROVEN",
+         "blocker_ref": "studio:read-denied", "blocker_owner_ref": "studio:owner",
+         "blocker_observed": True}
+    ]
+    data["lanes"]["exit_claim"] = "ALL_LANES_BLOCKED_STOP"
+    with pytest.raises(InvalidSnapshot):
+        audit(data)
+
+
+def test_unrelated_held_effect_cannot_fence_a_separate_lane():
+    data = prophet_snapshot()
+    data["effect"] = {
+        "class": "EFFECT_UNKNOWN", "action_id": "macro:old-mutation",
+        "carrier": "studio:original-carrier", "dispatched": None,
+    }
+    data["lanes"]["items"] = [
+        {"id": "macro:other-lane", "state": "FENCED",
+         "effect_action_id": "macro:different-mutation",
+         "effect_carrier": "studio:original-carrier"}
+    ]
+    data["lanes"]["exit_claim"] = "ALL_LANES_BLOCKED_STOP"
+    with pytest.raises(InvalidSnapshot):
+        audit(data)
+    data["lanes"]["items"][0]["effect_action_id"] = "macro:old-mutation"
+    data["lanes"]["items"][0]["effect_carrier"] = "studio:other-carrier"
+    with pytest.raises(InvalidSnapshot):
+        audit(data)
+
+
+def test_started_wait_requires_canonical_return_path():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "macro:ci-queued", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:run-415", "blocker_owner_ref": "github:actions",
+         "blocker_observed": True}
+    ]
+    data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
+    data["lanes"]["wait_executor"] = {"started": True, "ref": "fabric:unrelated-worker"}
+    with pytest.raises(InvalidSnapshot):
+        audit(data)
+    data["lanes"]["wait_executor"]["return_path_ref"] = "fabric:real-return"
+    data["lanes"]["wait_executor"]["owner_observed"] = True
+    assert audit(data)["premature_exit_detected"] is False
