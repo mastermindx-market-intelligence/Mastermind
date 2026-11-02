@@ -99,9 +99,12 @@ surface omits it, classify the mismatch as publication/surface drift: `STUDIO_TO
 reads/edits may remain available, but exact-file transition is held until the same Studio
 Direct app's **workspace-approved action snapshot** is current and `paper_prepare` is directly
 surfaced. OpenAI documents that approved MCP apps use a frozen tool/input snapshot and do not
-auto-update when the server changes. On Business, published custom apps currently cannot be
-updated in place; recreate + republish is required. Draft/dev apps must re-scan/recreate their
-tool catalog as applicable, then the caller starts a fresh chat/tool selection. Do not reproduce
+auto-update when the server changes. Business and Enterprise/Edu workspace admins with
+management permission and a valid connection can **Refresh the existing published custom
+MCP app's tool definitions without recreation**, review/publish the changed actions,
+and start a new conversation. Developer-mode connections use Refresh; Plugin Directory
+plugins use continuous tool review/rescan. If Refresh is unavailable for the exact app,
+hold at the workspace admin gate rather than creating a duplicate app or tunnel. Do not reproduce
 prepare with generic Studio `start_process`/filesystem tools, RDC, raw upstream `open_file`,
 shell, or UI automation. This keeps file transition inside the reviewed narrow action instead
 of silently broadening workstation authority.
@@ -376,12 +379,13 @@ staging into PROVEN_LIVE. Continue at the first unmet item, retaining this carri
   lifecycle. Developer-mode MCP connections support an explicit **Refresh** after tool names,
   descriptions, schemas, annotations, auth, or UI resources change; confirm refreshed metadata
   and start a new conversation. Published Plugin Directory definitions use continuous review/rescan.
-  The current custom-app Help Center separately says published custom workspace MCP app tool/metadata changes
-  may require recreate + republish, while Enterprise/Edu Action control can Refresh changed actions
-  after publication. Therefore bind recovery to the exact observed app/workspace state rather than
-  generalizing either lifecycle. If recreation is required, replace the old logical Paper app through
-  the attended platform ceremony while reusing the existing tunnel/backend; do not leave a parallel
-  duplicate Paper plane merely because an older chat still shows stale tool metadata.
+  Current OpenAI Help Center guidance (updated October 2026) permits Business and
+  Enterprise/Edu admins to **Refresh published custom workspace MCP app tool definitions
+  in place** from workspace settings, with app-management permission and a valid connection.
+  The admin reviews and publishes the update; Enterprise/Edu Action control also
+  supports individual action Refresh. Prefer the existing tunnel/backend and do not
+  turn an older chat's tool text into a file lease or duplicate app. Only a separately
+  verified platform requirement and approved owner transition justify replacement.
 - https://github.com/openai/tunnel-client - private outbound Secure MCP Tunnel, stdio support.
 - https://modelcontextprotocol.io/specification/2025-03-26/basic/transports - HTTP/SSE/session rules.
 - https://pypi.org/project/mcp/1.30.0/ - pinned official SDK maintenance line.

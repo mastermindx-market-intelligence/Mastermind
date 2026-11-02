@@ -32,11 +32,12 @@ classify **DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Keep the same app/tunn
 bring that app's approved action snapshot current through the platform's supported existing-app
 lifecycle after the accepted runtime is deployed. For a developer-mode MCP connection, use
 **Refresh** and verify the new metadata in a new conversation. For a published Plugin Directory
-plugin, use continuous review/rescan. For a published custom workspace MCP app, current OpenAI help
-can require recreate + republish for tool/metadata changes, while Enterprise/Edu Action control can
-Refresh action updates after publication; use the exact current workspace/app state as the gate.
-When recreation is required, replace the old logical Paper app through the attended ceremony while
-reusing the existing tunnel/backend rather than leaving a parallel duplicate. Do not create a second
+plugin, use continuous review/rescan. **Business and Enterprise/Edu** admins can
+**Refresh published custom workspace MCP app tools in place** from workspace settings
+with permission to manage the app and a valid connection; review/publish the update,
+then use a new conversation. Enterprise/Edu Action control also offers per-action
+Refresh. If Refresh is unavailable, hold the exact workspace admin/platform gate.
+Keep reusing the existing tunnel/backend, never a parallel duplicate. Do not create a second
 Paper plane, infer a file lease from stale metadata, or use publication drift to bypass a denial or
 unresolved effect.
 
@@ -76,10 +77,13 @@ approved action snapshot** is brought current and `paper_prepare` is directly su
 retain an older approved definition until the connection/app lifecycle admits the update. For a
 developer-mode MCP connection, deploy the server change, use the connection's **Refresh** action,
 confirm the advertised metadata changed, and start a new conversation. Published Plugin Directory
-plugins use continuous review/rescan. Published custom workspace MCP apps follow the current workspace
-flow: tool/metadata changes can require recreate + republish, while Enterprise/Edu Action control can
-Refresh action updates after publication. If recreation is required, replace the old logical app while
-reusing its existing tunnel/backend; do not leave a parallel duplicate app/tunnel. Never reproduce the transition with generic Studio process/filesystem
+plugins use continuous review/rescan. **Business and Enterprise/Edu** admins can
+**Refresh existing published custom workspace MCP app tools** from workspace
+settings without recreation, with management permission and a valid connection.
+Review/publish changed actions, start a fresh conversation; Enterprise/Edu
+Action control also permits per-action Refresh. If unavailable, hold the exact
+workspace admin/platform gate. Keep reusing its existing tunnel/backend;
+do not leave a parallel duplicate app/tunnel. Never reproduce the transition with generic Studio process/filesystem
 actions, Desktop Commander, raw `open_file`, shell, or UI automation. After the workspace action
 snapshot is current, start a fresh chat/tool selection, call `paper_inspect` again, then the direct
 `paper_prepare(file_id)`, then inspect once more before the first edit.

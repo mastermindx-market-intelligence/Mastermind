@@ -248,7 +248,9 @@ def test_publication_drift_uses_current_same_app_refresh_lifecycle():
     for text in (skill, connection, runbook, integration):
         assert "Plugin Directory" in text
         assert "custom workspace MCP app" in text
-        assert "recreate + republish" in text
+        assert "Business and Enterprise/Edu" in text
+        assert "Refresh" in text
+        assert "recreate + republish is required" not in text
     assert "Enterprise/Edu Action control" in connection
     assert "Enterprise/Edu Action control" in runbook
     assert "reusing the existing tunnel/backend" in connection

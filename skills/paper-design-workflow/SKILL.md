@@ -70,11 +70,13 @@ the workspace's accepted primary route.
    platform's current action-catalog lifecycle. For a developer-mode MCP connection, deploy the change,
    use its **Refresh** action, confirm the advertised metadata changed, and then start a new conversation.
    For a published Plugin Directory plugin, use its continuous-review/rescan path. For a
-   published custom workspace MCP app, follow the exact current workspace flow: current OpenAI help
-   says tool/metadata changes can require recreate + republish, while Enterprise/Edu Action control
-   can Refresh changed actions after publication. Treat the observed app/workspace UI as the gate.
-   If recreation is required, replace the old logical Paper app through that attended ceremony while
-   reusing the existing tunnel/backend; never create a parallel duplicate connection. Then start a fresh chat/tool selection,
+   published custom workspace MCP app, **Business and Enterprise/Edu** admins can
+   **Refresh the existing published custom MCP tool definitions in workspace
+   settings** without recreation, with app-management permission and a valid
+   connection. Review/publish updated actions. Enterprise/Edu Action control also
+   permits per-action Refresh. An unavailable Refresh path is a platform/admin gate,
+   not permission to replace the app. Keep reusing the existing tunnel/backend;
+   never create a parallel duplicate connection. Then start a fresh chat/tool selection,
    re-run `paper_inspect`, and invoke the surfaced `paper_prepare(file_id)` directly. Only after
    that same-app publication path is actually unavailable or explicitly refused is file transition
    an exact human/platform gate. Re-inspect the target file before any edit.

@@ -168,11 +168,13 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    the **same app's** approved action snapshot. For a developer-mode MCP connection, deploy/restart
    the reviewed server, open that existing connection in ChatGPT Plugins, select **Refresh**, confirm
    the advertised tool metadata changed, and then start a new conversation. A published Plugin
-   Directory plugin uses continuous review/rescan. A published custom workspace MCP app follows its
-   current workspace flow: OpenAI help can require recreate + republish for tool/metadata changes,
-   while Enterprise/Edu Action control can Refresh changed actions after publication. If that exact
-   flow requires recreation, replace the old logical Mastermind Paper app in the attended ceremony
-   while reusing the existing tunnel/backend; do not leave a parallel duplicate app/tunnel. If
+   Directory plugin uses continuous review/rescan. **Business and Enterprise/Edu**
+   admins can **Refresh existing published custom workspace MCP app tools in place**
+   from workspace settings with management permission and a valid connection,
+   then review/publish action updates and start a new chat. Enterprise/Edu also
+   offers action-level Refresh in Action control. Keep reusing the existing
+   tunnel/backend; if Refresh is unavailable, hold the exact admin/platform
+   gate instead of creating a parallel duplicate app/tunnel. If
    ChatGPT still shows older file-exclusive wording after the runtime is current, record
    `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not treat stale transport metadata as a document lease.
 6. Discover exactly the accepted tools in a fresh ChatGPT session. Use the assigned direct app
