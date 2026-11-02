@@ -478,6 +478,7 @@ test('explicit server-side one-ref rejection is diagnosed without treating its r
     assert.equal(result.code, 'REMOTE_REF_REJECTED_UNCHANGED');
     assert.equal(result.push_attempted, true);
     assert.equal(result.retry_allowed, false);
+    assert.equal(result.ready_to_push, false);
     assert.equal(result.diagnostic_scope, 'SAME_CARRIER_READ_ONLY');
     assert.equal(result.rejection_reason, 'UNDETERMINED');
     assert.equal(result.local_head_sha, f.head);
