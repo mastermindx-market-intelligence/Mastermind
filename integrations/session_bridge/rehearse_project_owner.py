@@ -117,6 +117,7 @@ def exercise(macro_repo, root, session):
     trace = root / "git.jsonl"
     install_read_guard(bin_dir, git, root, trace)
     env["PATH"] = str(bin_dir)
+    env["GIT_CEILING_DIRECTORIES"] = str(root)
     # Use the actual entry point, not a synthetic SessionStart callback.
     helper = SOURCE / "integrations/session_bridge/mmtask_restore/payload/mmtask"
     require(digest(helper.read_bytes()) == HELPER_SHA, "helper source mismatch")

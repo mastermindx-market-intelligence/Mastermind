@@ -282,3 +282,27 @@ def test_complete_delivery_bound_includes_owner_metadata(tmp_path,monkeypatch):
     assert result['projection']['candidate'] is None
     assert result['projection']['reason']=='CONTEXT_DELIVERY_TOO_LARGE'
     assert 'context_bundle' not in result
+
+
+def test_private_rehearsal_guard_refuses_fetch_and_foreign_repository(tmp_path):
+    """A swallowed pull failure is visible, and the Git backend never runs."""
+    import json
+    import os
+    import subprocess
+
+    from integrations.session_bridge.rehearse_project_owner import install_read_guard
+
+    private = tmp_path / 'private'
+    bin_dir = private / 'bin'
+    bin_dir.mkdir(parents=True)
+    foreign = tmp_path / 'foreign'
+    foreign.mkdir()
+    log = private / 'calls.jsonl'
+    never_executed = private / 'missing-backend'
+    install_read_guard(bin_dir, str(never_executed), private, log)
+    for args in (['pull'], ['-C', str(foreign), 'log'], ['show', '--output=outside']):
+        result = subprocess.run([bin_dir / 'git', *args], cwd=private,
+                                env={'PATH': os.defpath}, capture_output=True)
+        assert result.returncode == 77, result.stderr
+    assert [json.loads(line) for line in log.read_text().splitlines()] == [
+        {'command': 'rejected', 'allowed': False}] * 3
