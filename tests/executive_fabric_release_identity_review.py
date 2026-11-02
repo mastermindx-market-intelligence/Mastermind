@@ -482,3 +482,8 @@ REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
     'sha256': 'f6b94b81eec07354bf74ae6d589e76b43255604006b11cf7a7712a02fe513379',
     'sites': ((190, 46, 49, 'int', '512'),),
 }
+
+# Prospective Network nested-reservation policy only. The inherited 660s
+# start-window predicates are unchanged; only this full candidate SHA and
+# these two complete Constant tokens qualify, never identity or budget data.
+REVIEWED_FILES["ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py"] = {'sha256': 'c8454988fd535d12a21c5545255d333edc2863f1ce15e5ddef065bd965990bcb', 'sites': ((242, 81, 84, 'int', '660'), (397, 85, 88, 'int', '660'))}
