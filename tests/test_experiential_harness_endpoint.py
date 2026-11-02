@@ -58,6 +58,8 @@ CHUNK_ERROR = (
 CHUNK_ERROR_EVENT = (
     b'event: error\ndata: {"message":"provider refusal"}\n\n'
 )
+#: A bare SSE error event is a refusal even without a data: field.
+CHUNK_ERROR_EVENT_BARE = b"event: error\n\n"
 #: The provider refusal in its error object form.
 CHUNK_ERROR_OBJECT = (
     b'data: {"object":"error","message":"provider refusal"}\n\n'
@@ -774,7 +776,10 @@ def test_the_typed_effect_unknown_contract_of_the_existing_endpoint_is_preserved
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("error_frame", [CHUNK_ERROR, CHUNK_ERROR_EVENT, CHUNK_ERROR_OBJECT])
+@pytest.mark.parametrize(
+    "error_frame",
+    [CHUNK_ERROR, CHUNK_ERROR_EVENT, CHUNK_ERROR_EVENT_BARE, CHUNK_ERROR_OBJECT],
+)
 def test_a_chat_provider_error_frame_is_never_a_completion_and_blocks_a_second_send(error_frame):
     frames = error_frame + CHUNK_DONE
     gateway = MockGateway(frames=frames).start()

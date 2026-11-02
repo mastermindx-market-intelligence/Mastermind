@@ -447,6 +447,10 @@ class _StreamTerminal:
 
     def _dispatch(self) -> None:
         if not self.data:
+            # A bare SSE error event still reports a failed provider request.
+            # Discarding it would let a later [DONE] falsely complete the stream.
+            if self.event == b"error":
+                self._latch_failure("provider error event")
             self.event, self.event_bytes = b"", 0
             return
         data = b"\n".join(self.data)
