@@ -70,6 +70,10 @@ FINALIZATION + DURABILITY
 39. Persist material rulings/results/delegations/blockers/merges/proof/continuations to the correct owner; verify readback. Keep capability/recovery evidence there, not a new registry.
 ```
 
+## Cross-session review discoverability
+
+The approved Project bootstrap remains compact. Assigned Web/Codex/Claude/Grok sessions needing an independent PR or source review must load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the same accepted protected repository revision, discover their actual Fabric tools, and preserve existing review/effect identity before deciding a route. Where independently authorized and eligible, a separate read-only Dot reviewer can be addressed through the existing Slack channel, but delivery is not START and Slack technical findings are not formal GitHub approval. An explicit refused/uncertain effect cannot be rerouted via another provider, host, account or Dot. This source pointer is not proof the live shared ChatGPT Project instructions have been edited or freshly loaded.
+
 ## Compatibility safety invariants
 
 The compact Project kernel above shortens several provider-safety clauses but does not weaken them.
