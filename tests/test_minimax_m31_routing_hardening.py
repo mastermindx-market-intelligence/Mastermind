@@ -132,6 +132,22 @@ for bad in [
     modified={"pools":{"minimax":bad}}
     ok,reason=pick.policy_allows("minimax","mechanical",modified)
     assert not ok and reason=="invalid MiniMax signed model policy"
+# REVIEW #5732561118: absent, incomplete and wrong-typed signed pool
+# documents must refuse rather than default to M3 or raise AttributeError.
+for missing in [
+ {},
+ {"pools":{}},
+ {"pools":[]},
+ {"pools":42},
+ {"pools":{"minimax":[]}},
+ {"pools":{"minimax":{}}},
+ {"pools":{"minimax":{"role":["executor"]}}},
+ {"pools":{"minimax":{"default_model":None}}},
+]:
+    ok,why=pick.policy_allows("minimax","mechanical",missing)
+    assert (ok,why)==(False,"invalid MiniMax signed model policy"), (missing,ok,why)
+# A signed default with no optional class overrides remains valid M3.
+assert pick._minimax_signed_model_policy({"pools":{"minimax":{"default_model":"MiniMax-M3"}}})==(True,"ok")
 # No unreviewed or implicit default-model promotion.
 assert pick._selection_model("minimax","mechanical",
        {"pools":{"minimax":{"default_model":"MiniMax-M3"}}})[0] == "MiniMax-M3"
