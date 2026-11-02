@@ -13,13 +13,13 @@ from integrations.hermes_runtime.errors import RuntimeRefusal
 
 class NativeEgressTests(unittest.TestCase):
     def test_secretary_explicit_loopback_proxy(self):
-        private = {ROLE_ENV_NAME: "mmsecretary", PROXY_ENV_NAME: "http://127.0.0.1:18651"}
+        private = {ROLE_ENV_NAME: "mmsecretary", PROXY_ENV_NAME: "http://127.0.0.2:18651"}
         self.assertEqual(native_egress_child_env("mmsecretary", private), {
-            "HTTPS_PROXY": "http://127.0.0.1:18651", "NO_PROXY": "127.0.0.1,localhost",
+            "HTTPS_PROXY": "http://127.0.0.2:18651", "NO_PROXY": "127.0.0.1,localhost",
         })
 
     def test_meta_role_receives_only_own_proxy(self):
-        private = {ROLE_ENV_NAME: "mmmeta", PROXY_ENV_NAME: "http://127.0.0.1:18652",
+        private = {ROLE_ENV_NAME: "mmmeta", PROXY_ENV_NAME: "http://127.0.0.3:18652",
                    "ZAI_API_KEY": "fake-meta-token", "HERMES_SLACK_BOT_TOKEN": "fake-bot-token"}
         env = native_egress_child_env("mmmeta", private)
         self.assertEqual(set(env), {"HTTPS_PROXY", "NO_PROXY"})
@@ -27,24 +27,38 @@ class NativeEgressTests(unittest.TestCase):
         self.assertNotIn("HERMES_SLACK_BOT_TOKEN", env)
 
     def test_missing_proxy_fails_even_with_ambient_shell_proxy(self):
-        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:18651"}):
+        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.2:18651"}):
             with self.assertRaises(RuntimeRefusal) as cm:
                 native_egress_child_env("mmsecretary", {ROLE_ENV_NAME: "mmsecretary"})
             self.assertEqual(cm.exception.code, "NATIVE_EGRESS_PROXY_NOT_ENROLLED")
 
     def test_cross_role_binding_refused(self):
-        private = {ROLE_ENV_NAME: "mmmeta", PROXY_ENV_NAME: "http://127.0.0.1:18652"}
+        private = {ROLE_ENV_NAME: "mmmeta", PROXY_ENV_NAME: "http://127.0.0.3:18652"}
         with self.assertRaises(RuntimeRefusal) as cm:
             native_egress_child_env("mmsecretary", private)
         self.assertEqual(cm.exception.code, "NATIVE_EGRESS_ROLE_BINDING_MISSING")
 
+    def test_cross_role_proxy_address_denied_even_with_distinct_port(self):
+        with self.assertRaises(RuntimeRefusal) as cm:
+            native_egress_child_env("mmsecretary", {
+                ROLE_ENV_NAME: "mmsecretary",
+                PROXY_ENV_NAME: "http://127.0.0.3:18651",
+            })
+        self.assertEqual(cm.exception.code, "NATIVE_EGRESS_PROXY_INVALID")
+        with self.assertRaises(RuntimeRefusal) as cm:
+            native_egress_child_env("mmmeta", {
+                ROLE_ENV_NAME: "mmmeta",
+                PROXY_ENV_NAME: "http://127.0.0.2:18652",
+            })
+        self.assertEqual(cm.exception.code, "NATIVE_EGRESS_PROXY_INVALID")
+
     def test_unknown_role_refused(self):
         with self.assertRaises(RuntimeRefusal) as cm:
-            native_egress_child_env("unknown", {ROLE_ENV_NAME: "unknown", PROXY_ENV_NAME: "http://127.0.0.1:18652"})
+            native_egress_child_env("unknown", {ROLE_ENV_NAME: "unknown", PROXY_ENV_NAME: "http://127.0.0.3:18652"})
         self.assertEqual(cm.exception.code, "NATIVE_EGRESS_ROLE_REFUSED")
 
     def test_noncanonical_or_external_proxy_urls_refused(self):
-        bad = ["", "http://127.0.0.1", "http://127.0.0.1:80", "http://127.0.0.1:65536",
+        bad = ["http://127.0.0.1:18651", "http://127.0.0.3:18651", "" , "http://127.0.0.1", "http://127.0.0.1:80", "http://127.0.0.1:65536",
                "http://127.0.0.1:00018651", "http://localhost:18651",
                "http://[::1]:18651", "http://10.0.0.1:18651", "http://0.0.0.0:18651",
                "http://127.0.0.1:18651/", "http://127.0.0.1:18651/x",
