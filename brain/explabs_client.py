@@ -117,16 +117,27 @@ def chat_completion(
         # output budget, not only the tokens actually generated. The minimal
         # catalog/smoke wire call keeps its two-field body by default.
         body["max_tokens"] = max_tokens
-    post = client.post if client is not None else httpx.post
+    # Numeric loopback validation is not sufficient: HTTPX honors HTTP_PROXY
+    # from the process environment by default. Never transmit a scoped local
+    # bearer to an ambient proxy when the account is bound to our gateway.
+    request_kwargs = {
+        "headers": {"Authorization": f"Bearer {key}"},
+        "json": body,
+        "timeout": 30.0,
+    }
     try:
-        response = post(
-            f"{target}/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json=body,
-            timeout=30.0,
-        )
+        if shared_gateway_origin is not None and client is None:
+            with httpx.Client(trust_env=False, follow_redirects=False) as local:
+                response = local.post(f"{target}/chat/completions", **request_kwargs)
+        else:
+            post = client.post if client is not None else httpx.post
+            response = post(f"{target}/chat/completions", **request_kwargs)
     except httpx.HTTPError:
         raise ExperientialError("explabs_transport_error") from None
+    if 300 <= response.status_code < 400:
+        raise ExperientialError(
+            "explabs_upstream_redirect_refused", status=response.status_code,
+        )
     if response.status_code >= 400:
         # Branch on the documented machine code, never raw provider prose.
         try:

@@ -153,13 +153,18 @@ class AccountPool:
         self._eligible_set_verified = False
 
     def _get(self, url: str, key: str) -> dict:
-        transport = self._client.get if self._client is not None else httpx.get
+        # Shared local gateway metadata must ignore all ambient proxy settings.
+        # The direct-vendor compatibility transport remains unchanged.
+        # Injected HTTPX clients are test/owner supplied and own their policy.
+        kwargs = {"headers": {"Authorization": f"Bearer {key}"}, "timeout": 10.0}
         try:
-            result = transport(
-                url,
-                headers={"Authorization": f"Bearer {key}"},
-                timeout=10.0,
-            )
+            if self._client is not None:
+                result = self._client.get(url, **kwargs)
+            elif httpx.URL(url).host == "127.0.0.1":
+                with httpx.Client(trust_env=False, follow_redirects=False) as local:
+                    result = local.get(url, **kwargs)
+            else:
+                result = httpx.get(url, **kwargs)
         except httpx.HTTPError:
             raise gateway.ExperientialError("explabs_probe_transport_error") from None
         if result.status_code != 200:
