@@ -3,7 +3,8 @@
 The authoritative VPS uses ``waterfall``: Codex (ChatGPT-managed auth, Sol
 xhigh) first, then Macro Dashboard's shared Claude OAuth pool.  Direct
 ``codex``/``cli`` modes remain available for diagnostics and local use, with
-``api`` as the metered Anthropic Messages API fallback.
+``api`` as the metered Anthropic Messages API fallback, and explicit
+``explabs`` as the Experiential Labs OpenAI-compatible gateway.
 
 Every mode is exclusive: a configured shared-waterfall outage never falls through to a
 separate metered credential.  ``call_model()`` returns (text|None, degraded_reason|None) — the same contract as
@@ -30,7 +31,7 @@ TIERS = {
 def backend() -> str:
     """Configured LLM backend. Env override > agents.yml > shared waterfall."""
     env = os.environ.get("BOT_LLM_BACKEND")
-    if env in ("waterfall", "codex", "cli", "api"):
+    if env in ("waterfall", "codex", "cli", "api", "explabs"):
         return env
     try:
         return cli_bridge._cfg().get("backend", "waterfall")
@@ -60,6 +61,9 @@ def available() -> bool:
         return cli_bridge.available()
     if selected == "api":
         return api_available()
+    if selected == "explabs":
+        from brain import explabs_client
+        return explabs_client.available()
     return False
 
 
@@ -71,6 +75,32 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     backend — seat names the ledger seat (default = role), record_book overrides the
     _ROLE_BOOK default book. Attribution-only; never changes routing or behaviour."""
     selected = backend()
+
+    if selected == "explabs":
+        from brain import explabs_client
+        if not explabs_client.available():
+            return None, "explabs_unavailable"
+        try:
+            reply = explabs_client.complete(system, user)
+            if not reply.text:
+                return None, "explabs_empty_reply"
+            # Reuse the existing cost ledger; never estimate a gateway charge.
+            try:
+                from brain import cost_guard as _cg
+                from brain.cli_bridge import _ROLE_BOOK
+                _cg.record(
+                    record_book or _ROLE_BOOK.get(str(role).lower(), "flagship"),
+                    reply.cost_usd or 0.0,
+                    seat=seat or role,
+                    model=reply.model,
+                    input_tokens=reply.input_tokens,
+                    output_tokens=reply.output_tokens,
+                )
+            except Exception:
+                pass
+            return reply.text, None
+        except explabs_client.ExperientialError as exc:
+            return None, str(exc)
 
     if selected == "waterfall":
         if not cli_bridge.available():
