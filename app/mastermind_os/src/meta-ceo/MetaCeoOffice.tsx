@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createDirectionPreview, previewIsCurrent, type DirectionPreview } from "./preview";
 import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceClaim } from "./projection";
 import "./office.css";
+import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
 import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
 import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
@@ -140,6 +141,8 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
   const title = mission?.program.title ?? mission?.program.work_ref;
   const unknownEffect = projection.receipts.effect === "EFFECT_UNKNOWN";
   const draftAssociated = draft.context.authGeneration === projection.context.authGeneration && sameTarget(draft.context, projection.context);
+  useEffect(() => registerUnsavedNavigationHold(() => draftAssociated && draft.text.length > 0),
+    [draftAssociated, draft.text]);
   const visiblePreview = preview && previewIsCurrent(preview, projection.context) ? preview : null;
   useEffect(() => {
     if (sourcesOpen) sourcesPanel.current?.focus();

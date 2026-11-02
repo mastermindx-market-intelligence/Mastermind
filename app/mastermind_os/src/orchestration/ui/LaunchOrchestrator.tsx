@@ -1,4 +1,5 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { registerUnsavedNavigationHold } from "../../auth-navigation-guard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -128,6 +129,13 @@ export function LaunchOrchestrator({
   // the guard — a stale or duplicated completion is a no-op.
   const launchTokenRef = useRef<number | null>(null);
   const tokenSeqRef = useRef(0);
+
+  // Draft goals and exact pending-command handles must survive automatic
+  // identity renewal. No form content enters browser credential storage.
+  useEffect(() => registerUnsavedNavigationHold(() =>
+    draftGoal.length > 0 || draftProject.length > 0 || draftProfile.length > 0 ||
+    launchTokenRef.current !== null || submitting || launchInFlight
+  ), [draftGoal, draftProject, draftProfile, submitting, launchInFlight]);
 
   const launchPending = submitting || launchInFlight;
 

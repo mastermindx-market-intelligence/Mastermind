@@ -2,6 +2,7 @@
 // @vitest-environment-options {"url":"https://mcp.mastermind-x.com/os/"}
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import { createWebAuth, handleWebAuthCallback } from "./web-auth";
+import { registerUnsavedNavigationHold } from "./auth-navigation-guard";
 import { CALLBACK_PATH, ISSUER, ORIGIN } from "./public-config";
 
 const done = async () => { for (let i=0; i<40; i++) await Promise.resolve(); };
@@ -67,6 +68,24 @@ afterEach(() => {
 });
 
 describe("CSP-compatible same-tab Auth0 fallback", () => {
+  it("never overwrites an unsent Office draft via automatic OAuth navigation", async () => {
+    localStorage.setItem(PRIOR_KEY, "1");
+    let dirty = true;
+    const release = registerUnsavedNavigationHold(() => dirty);
+    try {
+      const h = harness(), c = h.makeClient();
+      const first = c.restore!();
+      await done(); await vi.advanceTimersByTimeAsync(10005); await first;
+      expect(h.navigate).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(PENDING_KEY)).toBeNull();
+      expect(sessionStorage.getItem(ATTEMPT_KEY)).toBeNull();
+      dirty = false;
+      const second = c.restore!();
+      await done(); await vi.advanceTimersByTimeAsync(10005); await second;
+      expect(h.navigate).toHaveBeenCalledTimes(1);
+      expect(new URL(h.navigate.mock.calls[0][0]).searchParams.get("prompt")).toBe("none");
+    } finally { release(); }
+  });
   it("does not redirect a new visitor without a previous explicit signed-in session", async () => {
     const h=harness(), c=h.makeClient();
     const task=c.restore!();

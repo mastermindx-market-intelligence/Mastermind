@@ -1,4 +1,5 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { registerUnsavedNavigationHold } from "../../auth-navigation-guard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -136,6 +137,11 @@ export function SessionWorkspace({
   const sendTokenRef = useRef<number | null>(null);
   const stopTokenRef = useRef<number | null>(null);
   const tokenSeqRef = useRef(0);
+  // Never discard an unsent draft or unresolved effect via unattended navigation.
+  useEffect(() => registerUnsavedNavigationHold(() =>
+    draftRef.current.length > 0 || sendTokenRef.current !== null ||
+    stopTokenRef.current !== null || sending || stopping === true || turnBusy
+  ), [sending, stopping, turnBusy]);
 
   const sentTextRef = useRef("");
 

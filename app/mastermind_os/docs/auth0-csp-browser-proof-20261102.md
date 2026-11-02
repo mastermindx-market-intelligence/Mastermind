@@ -70,3 +70,24 @@ Source suite after these changes: `npm run typecheck` PASS, `npm test` 96 files,
 **1,988 passed, one skipped**, and `npm run build` PASS, with the pre-existing
 Vite bundle-size advisory. No production deployment, Auth0 user session,
 client registration or tenant policy was changed.
+
+## User-editing safety: no destructive unattended renewal
+
+A same-tab silent Auth0 redirect reloads the OS app. The earlier synthetic
+3-second-token canary proved renewal but did **not** prove unsent UI drafts
+survive the reload. The subsequent UI-owner guard is an in-memory, nonsecret
+signal only: when the Meta-CEO Office direction, conversation notes, Session
+Workspace message, Orchestrator Launch form or an unresolved command is active,
+a top-level automatic `prompt=none` redirect is **deferred**. The guard is
+checked twice, including after asynchronous PKCE challenge generation and
+before writing a pending navigation transaction. The sign-in owner still
+requires the same prior-session hint and session-scoped one-attempt gate.
+Explicit logout and revocation remain effective regardless of any UI hold.
+
+This protects unsent drafts; it does **not** provide unattended refresh while a
+user continues editing or retain authentication beyond the Auth0 session's
+absolute lifetime. After preserving/submitting the work, the user can
+explicitly sign in or reopen the page to resume an eligible Auth0 session.
+No draft text, access token or refresh token enters localStorage or the new
+navigation guard. Separate per-resource Content and Executive persistence
+remains blocked on tenant/first-party architecture qualification.

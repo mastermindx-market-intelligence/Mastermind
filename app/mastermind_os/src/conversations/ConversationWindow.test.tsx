@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConversationWindow } from "./ConversationWindow";
+import { canNavigateForAutomaticSignIn } from "../auth-navigation-guard";
 import { emptyDrafts, readDraft, writeDraft } from "./drafts";
 import { decodeMissionv3 } from "../mission";
 import { decodeWindow } from "../workspace-contract";
@@ -38,6 +39,18 @@ function Harness({ projection }: { projection: OfficeProjection }) {
 }
 
 describe("Atelier observed conversation window", () => {
+  it("holds unattended redirects while conversation notes are unsent", async () => {
+    const view = render(<Harness projection={(await input()).projection} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Unsent draft" }),
+      { target: { value: "Do not lose these notes." } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(screen.getByRole("textbox", { name: "Unsent draft" }),
+      { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
   it.each([false, true])("attaches result evidence only to the observed Job/Attempt, exact=%s", async exact => {
     const { reads, context } = await input();
     const result = decodeResultEnvelope(structuredClone(resultFixture), {

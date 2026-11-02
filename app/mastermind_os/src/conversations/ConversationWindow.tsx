@@ -1,5 +1,6 @@
 import { ObservedTranscript } from "./ObservedTranscript";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { observedMissionAssociation } from "../workspace-contract";
 import type { OfficeProjection, SourceClaim } from "../meta-ceo/projection";
 import type { MissionResultRead } from "../host";
@@ -274,6 +275,8 @@ function ConversationBody({ projection, draft, onDraftChange, readResult, draftR
 /** Read-only owner projection. Exact managed sessions use the separate canonical
  * command binding; this component cannot promote a window to that capability. */
 export function ConversationWindow(props: ConversationWindowProps) {
+  useEffect(() => registerUnsavedNavigationHold(() => props.draft.length > 0),
+    [props.draft]);
   const { context, conversation, mission, result } = props.projection;
   // Privacy/target changes still replace the body. Passive evidence refreshes
   // only withdraw inspection state, preserving the actual notes textarea.

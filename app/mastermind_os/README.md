@@ -149,3 +149,12 @@ Executive/Research capabilities; it never converts logout into an automatic
 new sign-in. Manual Workspace and Research logins reauthorize only after a
 successful new grant. Complete Content/Executive renewal remains a distinct
 first-party backend/session-owner or qualified Auth0 integration gate.
+
+**Unsent work and automatic authentication:** OS keeps an in-memory navigation
+hold on unsent Office and Conversation notes, Session messages, Launch goals,
+and unresolved command effects. An automatic Auth0 top-level redirect is
+deferred while any such work is active, rather than silently discarding it.
+This is a user-data safety gate, not an implementation of indefinite login;
+a saved/finished draft may be followed by explicit sign-in or page reopen.
+All draft/credential storage, live Auth0 tenant, Content/Executive authorization
+and deployment remain with their existing qualified owners.

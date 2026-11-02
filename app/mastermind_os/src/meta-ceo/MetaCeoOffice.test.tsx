@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it } from "vitest";
 import { useState } from "react";
 import { MetaCeoOffice } from "./MetaCeoOffice";
+import { canNavigateForAutomaticSignIn } from "../auth-navigation-guard";
 import { projectOffice, type OfficeInput, type ProjectionContext, type SourceState } from "./projection";
 import { decodeMission } from "../mission";
 import currentMission from "../fixtures/mission-v2-current-128c46f6.json";
@@ -21,6 +22,16 @@ function input(): OfficeInput {
 }
 
 describe("Daily Office consumer", () => {
+  it("keeps unattended login navigation out of a live Chairman draft", () => {
+    const office = (text: string) => <MetaCeoOffice projection={projectOffice(input(), context)}
+      draft={{ text, context }} onDraftChange={() => {}} />;
+    const view = render(office("Preserve an exact private draft."));
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    view.rerender(office(""));
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
   it.each(["current", "stale", "unknown"] as const)("requires current owner receipts for Chairman attention: %s", freshness => {
     const reads = input();
     reads.mission!.value!.principal.owed_turn = { seat: "chairman", reason: "Reserved decision from owner.",

@@ -27,6 +27,7 @@ import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection
 import { validActivitySelection } from "./planning/retained-activity";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
+import { canNavigateForAutomaticSignIn } from "./auth-navigation-guard";
 import { evidenceUrl, EVIDENCE_BODY_BYTES } from "./research/evidence-contract";
 export type { AuthState } from "./host";
 export interface WebPopup {
@@ -516,11 +517,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     if (!configured || logoutBlocked() || valid("acquisition")) return;
     try {
       if (localStorage.getItem(priorKey) !== "1" ||
-          sessionStorage.getItem(REDIRECT_ATTEMPT_KEY)) return;
+          sessionStorage.getItem(REDIRECT_ATTEMPT_KEY) ||
+          !canNavigateForAutomaticSignIn()) return;
       const verifier = random(), state = random();
       const challenge = base64(new Uint8Array(await cryptoApi.subtle.digest(
         "SHA-256", new TextEncoder().encode(verifier))));
       check(ticket);
+      // Drafts may change while calculating the PKCE code challenge.
+      if (!canNavigateForAutomaticSignIn()) return;
       const url = new URL(`${ISSUER}authorize`);
       for (const [key, value] of Object.entries({
         response_type: "code", client_id: config.webClientId!,

@@ -6,6 +6,7 @@ import type {
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { registerUnsavedNavigationHold } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
@@ -1568,6 +1569,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     (commandRefusal.kind === "launch" ||
       (sessionExact && commandRefusal.sessionKey === commandView?.session?.sessionKey))
     ? commandRefusal : null;
+  // A retained command pointer is an effect-reconciliation obligation.
+  // Automatic OAuth navigation must not tear down an unresolved UI owner.
+  useEffect(() => registerUnsavedNavigationHold(() =>
+    pendingCommand.current !== null || heldKind !== null || recoverInFlight
+  ), [heldKind, recoverInFlight]);
+
   useEffect(() => {
     setCommandRefusal(null);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation,
