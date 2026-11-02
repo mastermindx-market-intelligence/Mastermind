@@ -811,17 +811,21 @@ def test_a_chat_provider_error_frame_alone_is_never_a_completion():
 
 
 def test_a_real_openai_sdk_client_surfaces_the_provider_error_and_never_sends_twice():
+    openai = pytest.importorskip(
+        "openai", reason="OpenAI SDK unavailable in this test environment"
+    )
     gateway = MockGateway(frames=CHUNK_ERROR + CHUNK_DONE).start()
     try:
         endpoint, outcomes, failures = build(binding_for(gateway))
         with endpoint:
             client = sdk_client(endpoint)
-            with pytest.raises(Exception):
+            with pytest.raises(openai.APIError) as caught:
                 list(client.chat.completions.create(
                     model=MODEL,
                     messages=[{"role": "user", "content": "Say ok"}],
                     stream=True,
                 ))
+            assert "provider refusal" in str(caught.value)
             assert raw_post(endpoint)[0] == 409
         assert len(gateway.requests) == 1
         assert endpoint.stopped_forwarding
@@ -832,16 +836,17 @@ def test_a_real_openai_sdk_client_surfaces_the_provider_error_and_never_sends_tw
         gateway.stop()
 
 
-def test_a_provider_error_frame_never_reaches_the_child_with_a_credential():
+def test_the_child_receives_the_provider_error_bytes_and_no_credential():
     gateway = MockGateway(frames=CHUNK_ERROR + CHUNK_DONE).start()
     try:
         endpoint, _, _ = build(binding_for(gateway))
         with endpoint:
-            with pytest.raises(http.client.IncompleteRead):
+            with pytest.raises(http.client.IncompleteRead) as caught:
                 raw_post(endpoint)
-        body = b"".join(gateway.requests[0]["body"] for _ in range(1))
-        assert PROXY_TOKEN.encode() not in body
-        assert CAPABILITY.encode() not in body
+        received = caught.value.partial
+        assert b"provider refusal" in received
+        assert PROXY_TOKEN.encode() not in received
+        assert CAPABILITY.encode() not in received
     finally:
         gateway.stop()
 
