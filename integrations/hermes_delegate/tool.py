@@ -18,10 +18,11 @@ from integrations.hermes_delegate.schema import ACTIONS
 TOOL_SCHEMA: dict[str, Any] = {
     "name": TOOL_NAME,
     "description": (
-        "Submit one bounded Mastermind child through Executive OS admission to "
-        "Subagent Fabric or a Cursor cloud agent, then track, independently review, "
-        "and consume its result once. Does not spawn a Hermes subagent. Built-in "
-        "delegate_task stays disabled. UNKNOWN is not retried. A refusal is not rehomed."
+        "Submit, observe, or cancel one bounded Mastermind child through "
+        "Executive admission on an existing Fabric/Cursor carrier. Model calls "
+        "cannot submit independent-review verdicts or consume a parent's result; "
+        "those require a separate trusted owner. Built-in delegate_task remains "
+        "disabled. UNKNOWN is not retried and refusals are not rehomed."
     ),
     "parameters": {
         "type": "object",
@@ -42,12 +43,6 @@ TOOL_SCHEMA: dict[str, Any] = {
             "objective": {"type": "string"},
             "acceptance": {"type": "string"},
             "constraints": {"type": "array", "items": {"type": "string"}},
-            "reviewer_id": {"type": "string"},
-            "verdict": {"type": "string", "enum": ["accept", "reject"]},
-            "result_sha256": {"type": "string"},
-            "handoff_model": {"type": "string"},
-            "workstream": {"type": "string"},
-            "session": {"type": "string"},
         },
         "required": ["action", "idempotency_key"],
     },
@@ -74,6 +69,14 @@ def dispatch(arguments: Mapping[str, Any] | Any, bridge: Bridge | None = None) -
     owner = bridge if bridge is not None else Bridge()
     if not isinstance(arguments, Mapping):
         return _dump({"state": "REFUSED", "reason": "ARGUMENTS_NOT_OBJECT", "live_submit": False})
+    # Client schema is advisory; enforce this fence in the handler as well.
+    # A model can invent a reviewer_id, not a legitimate non-author receipt.
+    if arguments.get("action") in {"review", "consume"}:
+        return _dump({
+            "state": "REFUSED",
+            "reason": "REVIEW_AND_CONSUME_OWNER_ONLY",
+            "live_submit": False,
+        })
     unknown = set(arguments) - set(TOOL_SCHEMA["parameters"]["properties"])
     if unknown:
         return _dump({"state": "REFUSED", "reason": "UNKNOWN_FIELD", "live_submit": False})
@@ -87,23 +90,8 @@ def dispatch(arguments: Mapping[str, Any] | Any, bridge: Bridge | None = None) -
         body = owner.submit(arguments)
     elif action == "status":
         body = owner.status(key)
-    elif action == "cancel":
-        body = owner.cancel(key)
-    elif action == "review":
-        body = owner.review(
-            key,
-            reviewer_id=str(arguments.get("reviewer_id") or ""),
-            verdict=str(arguments.get("verdict") or ""),
-            result_sha256=str(arguments.get("result_sha256") or ""),
-        )
     else:
-        body = owner.consume(
-            key,
-            parent_id=str(arguments.get("parent_id") or ""),
-            handoff_model=arguments.get("handoff_model") if isinstance(arguments.get("handoff_model"), str) else None,
-            workstream=arguments.get("workstream") if isinstance(arguments.get("workstream"), str) else None,
-            session=arguments.get("session") if isinstance(arguments.get("session"), str) else None,
-        )
+        body = owner.cancel(key)
     return _dump(body)
 
 

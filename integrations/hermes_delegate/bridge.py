@@ -76,8 +76,14 @@ class Bridge:
         admission: Any | None = None,
         carriers: Mapping[str, Any] | None = None,
         policy: Mapping[str, Any] | None = None,
+        review_verifier: Any | None = None,
+        parent_verifier: Any | None = None,
     ) -> None:
         self.admission = admission if admission is not None else InertExecutiveAdmission()
+        # Existing Executive/original-parent and independent review owners
+        # supply verification-only ports. Unbound default permits no finish.
+        self.review_verifier = review_verifier
+        self.parent_verifier = parent_verifier
         self.carriers = dict(carriers or {})
         self.carriers.setdefault("fabric", UnboundCarrier())
         self.carriers.setdefault("cursor_cloud", UnboundCarrier())
@@ -192,6 +198,30 @@ class Bridge:
                 return {**self._view(record), "state": "REFUSED", "reason": "RESULT_SHA_UNAVAILABLE"}
             if result_sha256 != record.result_sha256:
                 return {**self._view(record), "state": "REFUSED", "reason": "REVIEW_DIGEST_MISMATCH"}
+            if self.review_verifier is None:
+                return {
+                    **self._view(record),
+                    "state": "REVIEW_REQUIRED",
+                    "reason": "INDEPENDENT_REVIEW_NOT_BOUND",
+                }
+            try:
+                # This is a verification-only adapter to the existing review
+                # owner, not a new reviewer registry or a model-supplied claim.
+                verified = self.review_verifier.verify(
+                    idempotency_key=record.key,
+                    parent_id=record.parent_id,
+                    root_id=record.root_id,
+                    carrier=record.carrier,
+                    reviewer_id=reviewer_id,
+                    verdict=verdict,
+                    result_sha256=result_sha256,
+                )
+            except Exception:
+                # Never echo a verifier exception: it may contain source
+                # paths, tokens or remote reviewer account details.
+                return {**self._view(record), "state": "REFUSED", "reason": "REVIEW_OWNER_UNAVAILABLE"}
+            if verified is not True:
+                return {**self._view(record), "state": "REFUSED", "reason": "INDEPENDENT_REVIEW_UNVERIFIED"}
             record.review = {
                 "reviewer_id": reviewer_id,
                 "verdict": verdict,
@@ -213,16 +243,34 @@ class Bridge:
             record = self._by_key.get(idempotency_key)
             if record is None:
                 return _bare(state="NOT_FOUND", reason="UNKNOWN_CHILD", idempotency_key=idempotency_key)
-            if record.consumed:
-                return self._view(record, deduped=True, already_consumed=True)
-            if record.state in _TERMINAL_STICKY and record.state != "REVIEW_REJECTED":
+            if record.state in _TERMINAL_STICKY and record.state != "REVIEW_REJECTED" and not record.consumed:
                 return self._view(record)
             if record.state == "REVIEW_REJECTED":
                 return {**self._view(record), "reason": "REVIEW_REJECTED"}
-            if record.state != "REVIEWED":
+            if record.state != "REVIEWED" and not record.consumed:
                 return {**self._view(record), "state": "REVIEW_REQUIRED", "reason": "REVIEW_REQUIRED"}
             if parent_id != record.parent_id:
                 return {**self._view(record), "state": "REFUSED", "reason": "PARENT_MISMATCH"}
+            if self.parent_verifier is None:
+                return {**self._view(record), "state": "REFUSED", "reason": "PARENT_CONSUMPTION_NOT_BOUND"}
+            try:
+                owner_verified = self.parent_verifier.verify(
+                    idempotency_key=record.key,
+                    parent_id=record.parent_id,
+                    root_id=record.root_id,
+                    run_id=record.run_id,
+                    carrier=record.carrier,
+                    result_sha256=record.result_sha256,
+                )
+            except Exception:
+                # No partial result fetch or secret-bearing error propagation.
+                return {**self._view(record), "state": "REFUSED", "reason": "PARENT_OWNER_UNAVAILABLE"}
+            if owner_verified is not True:
+                return {**self._view(record), "state": "REFUSED", "reason": "PARENT_OWNER_UNVERIFIED"}
+            # Idempotent replay is also scoped: do not reveal the already
+            # consumed result until the ORIGINAL parent is re-authenticated.
+            if record.consumed:
+                return self._view(record, deduped=True, already_consumed=True, reveal_result=True)
             if record.result_fetched:
                 return self._view(record)
             record.result_fetched = True
@@ -256,7 +304,7 @@ class Bridge:
                 workstream=workstream,
                 session=session,
             )
-            return self._view(record)
+            return self._view(record, reveal_result=True)
 
     def _admit(self, record: _Record) -> Mapping[str, Any] | None:
         try:
@@ -351,7 +399,10 @@ class Bridge:
         record.detail = detail
         record.observed_terminal = True
 
-    def _view(self, record: _Record, *, deduped: bool = False, already_consumed: bool = False) -> dict[str, Any]:
+    def _view(
+        self, record: _Record, *, deduped: bool = False,
+        already_consumed: bool = False, reveal_result: bool = False,
+    ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "schema": "mastermind.hermes_delegate.child_view/v1",
             "idempotency_key": record.key,
@@ -367,7 +418,9 @@ class Bridge:
             "live_submit": False,
             "result_sha256": record.result_sha256 if record.consumed or record.observed_terminal else None,
         }
-        if record.consumed:
+        if record.consumed and reveal_result:
+            # Only a verified original-parent consume receives result bytes.
+            # Model-visible submit/status/cancel never carries worker output.
             body["result_text"] = record.result_text
             body["handoff"] = record.handoff
             body["handoff_reason"] = record.handoff_reason

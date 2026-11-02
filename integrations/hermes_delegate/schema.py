@@ -13,7 +13,9 @@ COMPLEXITIES = frozenset({
     "C1_ROUTINE_BOUNDED",
     "C2_COMPLEX_BOUNDED",
 })
-ACTIONS = frozenset({"submit", "status", "cancel", "review", "consume"})
+ACTIONS = frozenset({"submit", "status", "cancel"})
+# Independent review and original-parent consumption are host-owned operations.
+# Never offer those actions to a model, even before a live review port exists.
 KEY_RE = re.compile(r"^[a-z0-9][a-z0-9._:-]{7,127}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")

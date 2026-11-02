@@ -112,7 +112,7 @@ def render_child_handoff(
         "verified": [
             {
                 "claim": f"Parent consumed child {key} once after an independent review of {result_sha256}.",
-                "command": f"mmx_delegate consume {key}",
+                "command": f"Bridge.consume {key} (host-only, no model tool)",
                 "result": result_sha256,
             }
         ],
