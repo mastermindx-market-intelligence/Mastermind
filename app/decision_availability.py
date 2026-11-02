@@ -84,8 +84,13 @@ def _signature(path: Path) -> tuple | None:
         return None
 
 
-def _read(path: Path, *, lines: bool = False) -> tuple[Any, dict, tuple | None]:
-    """Never skip a bad row without qualifying the source that remains."""
+def _read(path: Path, *, lines: bool = False,
+          view: Callable[[list], list] | None = None) -> tuple[Any, dict, tuple | None]:
+    """Never skip a bad row without qualifying the source that remains.
+
+    The byte cap is the only pre-parse guard. The row cap judges the rows a reader selects
+    from: ``view`` (e.g. the effective view of an append-only ledger) when given, else the
+    parsed rows. ``sha256`` and ``row_count`` stay computed on the raw file."""
     source: dict = {"file": path.name, "status": "missing", "sha256": None,
                     "modified_at": None, "issues": []}
     signature = None
@@ -106,13 +111,11 @@ def _read(path: Path, *, lines: bool = False) -> tuple[Any, dict, tuple | None]:
             modified_at=datetime.fromtimestamp(signature[3] / 1e9, timezone.utc).isoformat(),
         )
         if lines:
-            nonempty = [line for line in raw.splitlines() if line.strip()]
-            if len(nonempty) > _MAX_ROWS:
-                source.update(status="invalid", issues=["source_too_many_rows"])
-                return (None, source, signature)
             rows = []
             bad = False
-            for line in nonempty:
+            for line in raw.splitlines():
+                if not line.strip():
+                    continue
                 try:
                     value = _parse(line)
                     if not isinstance(value, dict):
@@ -120,9 +123,13 @@ def _read(path: Path, *, lines: bool = False) -> tuple[Any, dict, tuple | None]:
                     rows.append(value)
                 except (ValueError, UnicodeError, RecursionError):
                     bad = True
+            selected = view(rows) if view is not None else rows
+            if len(selected) > _MAX_ROWS:
+                source.update(status="invalid", issues=["source_too_many_rows"])
+                return (None, source, signature)
             source.update(status=("partial" if rows else "invalid") if bad else "available",
                           issues=["invalid_rows"] if bad else [], row_count=len(rows))
-            return (rows, source, signature)
+            return (selected, source, signature)
         value = _parse(raw)
         if not isinstance(value, dict):
             raise ValueError("source_not_object")
@@ -375,18 +382,17 @@ def read_decision_availability(
     sources = {}
     signatures = {}
     data = {}
-    for key, filename, lines in (
-        ("decisions", "decisions.jsonl", True),
-        ("account", "account.json", False),
-        ("pending_target", "pending_target.json", False),
-        ("nav_history", "nav_history.jsonl", True),
+    from bot import decision_rows
+    # The ledger is append-only: selection reads (and the row cap judges) the effective view, one
+    # row per asof, while sources/signatures stay computed on the raw file.
+    for key, filename, lines, view in (
+        ("decisions", "decisions.jsonl", True, decision_rows.effective_rows),
+        ("account", "account.json", False, None),
+        ("pending_target", "pending_target.json", False, None),
+        ("nav_history", "nav_history.jsonl", True, None),
     ):
-        data[key], sources[key], signatures[key] = _read(base_dir / filename, lines=lines)
-    # The ledger is append-only: selection reads the effective view (one row per asof), while
-    # sources/signatures above stay computed on the raw file.
-    if isinstance(data["decisions"], list):
-        from bot import decision_rows
-        data["decisions"] = decision_rows.effective_rows(data["decisions"])
+        data[key], sources[key], signatures[key] = _read(base_dir / filename, lines=lines,
+                                                         view=view)
     wal_path = base_dir / "paper_transaction.json"
     try:
         wal_signature = _signature(wal_path)
