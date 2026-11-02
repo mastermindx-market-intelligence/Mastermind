@@ -776,6 +776,9 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
     installed_product_keys = {
         "company_consultation",
         "executive_mcp_profile",
+        # Reply Events are an explicit product enrollment, never a static
+        # control-template default or required boot-time credential.
+        "reply_events",
         "content_observer",
         "content_observer_profile_path",
         "workspace_acquisition",

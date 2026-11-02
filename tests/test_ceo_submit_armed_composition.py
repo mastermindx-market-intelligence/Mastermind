@@ -1550,11 +1550,14 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Keep a pinned full-source digest. Never derive it during this test.
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
+    # Return plus attention composition changes the module; the installed entry
+    # AST below remains identical to protected d65414e. This static literal
+    # freezes the combined candidate, not independent review or release authority.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '717f28e2b15efc26dbb6536defb577c3fdd4275b00f877672be72983fb81f164'):
+            '8cf281db5dbc0af7e5f3eac6a0fea270b7886feb2165df97bf4683d601545561'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
