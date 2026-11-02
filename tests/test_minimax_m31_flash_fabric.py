@@ -162,9 +162,11 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                     text.index('python3 "$HERE/slot.py" minimax --wait'),
                     text.index("MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED"),
                 )
-                clause = text.split("# M3.1 Flash is commissioned", 1)[1]
+                start = 'case "$2" in\n  MiniMax-M3.1-Flash|minimax-m3.1-flash)'
+                clause = start + text.split(start, 1)[1]
                 clause = clause.split("export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN", 1)[0]
-                program = 'ANTHROPIC_AUTH_TOKEN="$1"\\n' + clause + '\\nprintf "ADMITTED\\n"\\n'
+                program = ('ANTHROPIC_AUTH_TOKEN="$1"\n' + clause
+                           + '\nprintf "ADMITTED\n"\n')
                 for token, model, expected in (
                     ("sk-cp-fixture", "MiniMax-M3.1-Flash", 0),
                     ("sk-api-fixture", "MiniMax-M3.1-Flash", 78),
@@ -181,9 +183,10 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
         text = (SOURCE / "mm_codex_exec.sh").read_text()
         self.assertLess(text.index("export MINIMAX_API_KEY="),
                         text.index("MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED"))
-        body = text.split("# This is checked only after the original MiniMax slot is acquired.", 1)[1]
-        body = body.split("\\nesac", 1)[0] + "\\nesac\\n"
-        program = 'MODEL="$1"\\nMINIMAX_API_KEY="$2"\\n' + body + 'echo ADMITTED\\n'
+        start = 'case "$MODEL" in\n  MiniMax-M3.1-Flash|minimax-m3.1-flash)'
+        clause = start + text.split(start, 1)[1]
+        clause = clause.split("\nesac", 1)[0] + "\nesac\n"
+        program = 'MODEL="$1"\nMINIMAX_API_KEY="$2"\n' + clause + 'echo ADMITTED\n'
         for model, token, expected in (
             ("MiniMax-M3.1-Flash", "sk-cp-fixture", 0),
             ("MiniMax-M3.1-Flash", "sk-api-fixture", 78),
