@@ -1224,3 +1224,67 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
 
     monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) == 3
+
+
+
+# The preflight is a fast witness of incumbent strict gates, not an alternate
+# discovery/exclusion/fan-in owner. A release PR with an illegal EVAL R0
+# surface or changed role source without an updated immutable fixture should
+# fail near checkout instead of consuming all six expensive full shards.
+_FAST_RELEASE_NODES = (
+    "tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface",
+    "tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched",
+    "tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure",
+)
+
+
+def _assert_fast_release_preflight(workflow: dict) -> None:
+    jobs = workflow["jobs"]
+    shard_job = jobs["pytest_shards"]
+    steps = shard_job["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.count("Fast source-bound release preflight") == 1
+    step = steps[names.index("Fast source-bound release preflight")]
+    assert "if" not in step  # all shards and all event types
+    assert "continue-on-error" not in step
+    command = step["run"]
+    assert command.startswith("python -m pytest -q --tb=short ")
+    for node in _FAST_RELEASE_NODES:
+        assert command.count(node) == 1
+    assert names.index("Install project") < names.index("Fast source-bound release preflight")
+    assert names.index("Fast source-bound release preflight") < names.index("Run repository test shard")
+    assert names.index("Fast source-bound release preflight") < names.index(
+        "H1 required real Linux no-ACL positive journey"
+    )
+    assert shard_job["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
+    assert shard_job["strategy"]["fail-fast"] is False
+    assert "test" in jobs  # existing protected fan-in remains the source of truth
+
+
+def test_source_bound_fast_preflight_runs_for_all_full_shards():
+    source = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    workflow = cip.yaml.load(source, Loader=cip._WorkflowYAMLLoader)
+    _assert_fast_release_preflight(workflow)
+
+
+@pytest.mark.parametrize("corruption", ["missing", "conditional", "waived", "drop-r0", "drop-role", "late"])
+def test_source_bound_fast_preflight_regression_rejects_coverage_or_order_loss(corruption):
+    source = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    workflow = cip.yaml.load(source, Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    step = next(s for s in steps if s.get("name") == "Fast source-bound release preflight")
+    if corruption == "missing":
+        steps.remove(step)
+    elif corruption == "conditional":
+        step["if"] = "matrix.index == 0"
+    elif corruption == "waived":
+        step["continue-on-error"] = True
+    elif corruption == "drop-r0":
+        step["run"] = step["run"].replace(_FAST_RELEASE_NODES[0], "")
+    elif corruption == "drop-role":
+        step["run"] = step["run"].replace(_FAST_RELEASE_NODES[2], "")
+    else:
+        steps.remove(step)
+        steps.append(step)
+    with pytest.raises(AssertionError):
+        _assert_fast_release_preflight(workflow)
