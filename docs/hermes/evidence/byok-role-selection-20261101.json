@@ -192,6 +192,22 @@
     {
       "path": "integrations/hermes_steward/tests/test_client_grounded.py",
       "sha256": "e40151bcdadc5c2348590ae41fd453d24d96140dbf82f78a8f7c081b977a5254"
+    },
+    {
+      "path": "tests/test_cap_s1_mastermind_operator_canary.py",
+      "sha256": "b9a9ef1c73fb1fcf2fd020eb82429b6b64003e490ecef86871ddc7a5023fb728"
+    },
+    {
+      "path": "tests/test_executive_autonomy_control.py",
+      "sha256": "3e8f3eadc7ca021fee56900f3acb2ca0484fbc4a345d3602e408dac600b2d9e2"
+    },
+    {
+      "path": "tests/test_h1_input_wrapper.py",
+      "sha256": "d83b6521b7b76efa9fa37f5fe74a5760009ed23321596bd6d7639b322c815d44"
+    },
+    {
+      "path": "tests/test_health_readiness.py",
+      "sha256": "5ab974fbeef3d783ea0577a18ab59847133671cfd55a9fa505c955d89dab0838"
     }
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
@@ -205,9 +221,32 @@
   },
   "procedure_pin": "19cb00cfed26b68f0a8a5cdc0f2f1a9463a3feec",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
+  "protected_master_test_fix_sync": {
+    "files": [
+      "tests/test_cap_s1_mastermind_operator_canary.py",
+      "tests/test_h1_input_wrapper.py",
+      "tests/test_executive_autonomy_control.py",
+      "tests/test_health_readiness.py"
+    ],
+    "five_target_test_result": "5/5 PASS Python3.12 in existing no-secret M2 QA tree with exact pinned Macro CI vendor",
+    "original_protected_review_required": true,
+    "previous_head_three_workflows": {
+      "broad": "41382230088 FAILURE: five test-only fixture cases",
+      "candidate": "41382230090 SUCCESS",
+      "harness": "41382230195 SUCCESS",
+      "runtime": "41382230099 SUCCESS"
+    },
+    "prior_hermes_head": "604b9dc6bf060f9a7663bdef5e7ddc40811579ef",
+    "protected_master_source": "19cb00cfed26b68f0a8a5cdc0f2f1a9463a3feec",
+    "qa_dependency": "mastermindx-market-intelligence/macro@256c757b3c4f0ec759571c29a30a71387d0a18f8 (engine, lib)",
+    "qa_shard_total": "not run end-to-end; next exact-head GitHub full CI required",
+    "reason": "Broad exact-head CI workflow 41382230088 failed on five test-only local monkeypatch/fixture cleanup defects already repaired on protected master",
+    "release_or_production_proven": false,
+    "strategy": "Copy four test source blobs byte-for-byte from the exact protected master, not new logic, no global pytest behavior change"
+  },
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-02T03:16:09.622204+00:00",
+  "recorded_at": "2026-11-02T05:27:16.610652+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -263,6 +302,6 @@
     "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
   },
   "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
-  "source_manifest_sha256": "bbaa1a92da0edea1d1014d6002338a94763a0b361bfef0838229e974424799cf",
+  "source_manifest_sha256": "8842dded64caf550da6d6335843dfe479ff998f0f8bd9b392b00762d298b75a2",
   "test_host": "m2studio / macOS"
 }
