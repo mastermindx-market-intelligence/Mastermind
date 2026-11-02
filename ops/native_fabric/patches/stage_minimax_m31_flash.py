@@ -22,7 +22,7 @@ import native_generation as native  # the incumbent generation descriptor owner
 
 BASE_MANIFEST_SHA256 = "0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec"
 PREDECESSOR = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
-EXPECTED_CANDIDATE = "5522b68a16fe7a013065d4f12738023dd3842b37b1f056f1fd34ef3d8effdd37"
+EXPECTED_CANDIDATE = "c66e4744ca788c081cdffc0ed52e559b6261b9914e806abbae28986edb6db7d4"
 MEMBER_DIGESTS = {
     "ext/pick.py": (
         "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
@@ -38,7 +38,7 @@ MEMBER_DIGESTS = {
     ),
     "ext/sub.sh": (
         "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
-        "45ef4e9f5dda022ea60fd8d2b3311a2f983ea6659e382b96412df92f089d43ce",
+        "9c3db528939245bfaef8c0cb96f10fc529b14b2fb258ce4fb5c3752ad6cbf536",
     ),
     "ext/mm_codex_exec.sh": (
         "0c31ceaa0467e4eb82f5220adb59328677e28e48a9ea7786a09bb0d78f1919f4",
