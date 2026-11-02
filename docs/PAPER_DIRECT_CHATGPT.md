@@ -299,6 +299,39 @@ a UI-focus operation; its source description reflects the implementation. Active
 focus is reported as unknown rather than guessed. Its conservative existing
 annotation and workspace confirmation policy are unchanged in this source slice.
 
+### Immutable v18 Paper bridge — guarded release pending
+
+A reviewer reproduced three **source-only v17** read-boundary defects: an unsafe
+read annotation could still dispatch, an unreviewed optional reader argument could be
+forwarded, and numeric `1` could be mistaken for Boolean `true` on safety hints.
+No live Paper design was altered by this diagnosis.
+
+The corrected v18 bridge (SHA-256
+`48ad9043494447ebafb1b8f7c987ddbb8845a8d5cb5a136443a8e6841a18b6c5`)
+validates read schemas/inputs before dispatch, including the implicit `get_basic_info`
+used for status, guarded reads and `paper_prepare`. The older v17 digest remains
+pinned in `runtime_stage.py` for immutable audit of already staged v17 bundles,
+**not** as permission to activate them. Never mutate the old staged generation,
+relabel its source, or treat a previous v17 scratch receipt as v18 acceptance.
+
+Release in order: original #1925 protected queue and merge; #1935 current-base
+integration and merge; then #1942 **fresh v18 exact-head CI, independent review,
+and protected merge-group qualification**. Only the authorized original host
+installer/custody owner may stage v18 as a new generation, verify the same-label
+source-to-process and manifest bindings, and cut over the intended Paper seat.
+This document is not permission to deploy, restart, change credentials, or
+overwrite existing Paper runtime state. The previous Ryan v13 client is the
+incumbent until an actual owner-controlled installation receipt proves otherwise.
+
+After release/authorized cutover, prove one new exact scratch `fileId` path:
+`paper_read(get_basic_info)` -> `paper_prepare` -> guarded rich HTML
+`paper_edit` -> same-file post-read -> screenshot/JSX -> reconnect, preserving
+stable operation IDs and the existing no-replay rule. Do not duplicate the
+Paper app/tunnel. The Business workspace admin refreshes the existing custom
+MCP action list through its approved app settings (when permission/connection
+are valid), then verifies the new tool definitions in a fresh conversation.
+Staged source, synthetic tests and a tool-list refresh are not live canary proof.
+
 ### Remaining multi-host implementation and acceptance
 
 The next slice must connect host selection to the existing fleet transport owner,

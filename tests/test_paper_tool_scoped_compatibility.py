@@ -262,6 +262,10 @@ class ContractResilienceTests(unittest.TestCase):
         self.assertIsNone(b.compatible_tool_contract("get_node_info", cat["get_node_info"]))
         with tempfile.TemporaryDirectory() as tmp:
             c = Client(cat)
+            listing = b.execute("catalog", client=c, lock_root=Path(tmp))
+            unsafe = [x for x in listing["tools"] if x["name"] == "get_node_info"]
+            self.assertEqual(unsafe[0]["bridge_access"], "read_held_schema")
+            self.assertEqual(c.calls, [], "catalog must not dispatch a tool")
             args = {"fileId": FILE_ID, "nodeId": "text-1"}
             with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
                 b.execute("read", tool="get_node_info", arguments=args,
@@ -362,6 +366,16 @@ class ContractResilienceTests(unittest.TestCase):
                                       allow_prepare=True, client=c,
                                       lock_root=Path(tmp))
             self.assertEqual(c.calls, [])
+            # Genuine reviewed descriptor remains usable; the new guard is
+            # selective rather than a Paper-wide read/write outage.
+            good = Client()
+            guard = b.snapshot(good, FILE_ID)["snapshot_sha256"]
+            good.calls.clear()
+            prepared = prep.prepare_document(
+                FILE_ID, guard, "qualified-prepare", allow_prepare=True,
+                client=good, lock_root=Path(tmp))
+            self.assertEqual(prepared["state"], "PAPER_READY")
+            self.assertEqual(good.calls, [("get_basic_info", {"fileId": FILE_ID})])
 
 
 if __name__ == "__main__":
