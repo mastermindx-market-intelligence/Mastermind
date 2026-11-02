@@ -126,7 +126,7 @@ def observe_native_turn(
         if any(ev.get("type") == "text" and not isinstance(ev.get("text"), str)
                for ev in events[1:-1]):
             issues.add("DELTA_INVALID")
-        if final.get("exit_code") != 0 or final.get("error") or final.get("replay_gap"):
+        if type(final.get("exit_code")) is not int or final.get("exit_code") != 0 or final.get("error") or final.get("replay_gap"):
             issues.add("RESULT_NOT_COMPLETE")
         answer = final.get("text")
         if (not isinstance(answer, str) or len(answer) > MAX_ANSWER_CHARS
