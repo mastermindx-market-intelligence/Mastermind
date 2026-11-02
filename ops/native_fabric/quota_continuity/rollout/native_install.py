@@ -275,7 +275,7 @@ def upgrade(bundle):
 SUCCESSOR_SCHEMA = "native-ingress-launcher-successor.v1"
 SUCCESSOR_FROM = "d044c24940df13d24ff6241f0da9cec3dc24d90dd60604a08c82e0ad8613586c"
 SUCCESSOR_TO = "43e814339a16582e2205f12117e1f17c40dce2e42a9c52d815a37c043e772e1b"
-SUCCESSOR_MANIFEST = "f282689b9e3a5cb0af95595489f3036ce63dac533f24ac6247256f7955835423"
+SUCCESSOR_MANIFEST = "079181a667d7885c610712366ab6f1cc6a61634d9f25cf2b810e5fd8ce97a5ed"
 SUCCESSOR_MEMBER_COUNT = 103
 _SUCCESSOR_PLAN_FIELDS = frozenset({
     "schema", "prior_upgrade_bundle", "prior_upgrade_digest", "bootstrap_digest",

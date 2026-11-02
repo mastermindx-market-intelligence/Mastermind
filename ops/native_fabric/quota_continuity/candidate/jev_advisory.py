@@ -190,7 +190,13 @@ def evaluate(kind: str, state: dict[str, Any], *,
     if not key:
         raise JevUnavailable("NOT_CONFIGURED")
     start = time.monotonic()
-    response = (transport or native_post)(body, key, timeout_s)
+    try:
+        response = (transport or native_post)(body, key, timeout_s)
+    except (error.URLError, OSError, TimeoutError, http.client.HTTPException):
+        # A provider transport failure is an advisory miss with a bounded
+        # code. Never let a raw provider exception carry request text or
+        # credential detail into the caller's stderr, and never retry.
+        raise JevUnavailable("TRANSPORT") from None
     elapsed = round((time.monotonic() - start) * 1000)
     if not isinstance(response, dict) or not isinstance(response.get("answers"), dict):
         raise JevUnavailable("INVALID_RESPONSE")
