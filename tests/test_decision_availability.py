@@ -14,6 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app import auth, decision_availability as projection, response_cache, web
+from bot import decision_rows
 from portfolio import instrument_policy, paper_account, registry
 
 OBSERVED = "2026-10-17T10:00:00+00:00"
@@ -387,6 +388,50 @@ def test_pit_read_bounds_and_summary_truncation_are_explicit(tmp_path, monkeypat
     assert bounded["sources"]["decisions"]["status"] == "invalid"
     assert bounded["sources"]["decisions"]["issues"] == ["source_too_large"]
     assert bounded["last_valid_decision"] is None
+
+
+def revision_chain(physical):
+    """One accepted decision plus ``physical - 1`` same-asof revisions, each superseding the last."""
+    rows = [accepted()]
+    for index in range(1, physical):
+        row = accepted()
+        row["summary"] = f"Synthetic revision {index}."
+        row.update(supersedes=[decision_rows.row_identity(rows[-1])], supersede_mode="revise",
+                   row_id="row.v1." + format(index, "024x"))
+        rows.append(row)
+    return rows
+
+
+def test_row_cap_judges_effective_rows_not_physical_lines(tmp_path):
+    rows = revision_chain(projection._MAX_ROWS + 1)
+    assert len(decision_rows.effective_rows(rows)) == 1
+    write(tmp_path, "decisions.jsonl", rows)
+    result = read(tmp_path)
+    source = result["sources"]["decisions"]
+    assert (source["status"], source["issues"]) == ("available", [])
+    assert source["row_count"] == projection._MAX_ROWS + 1
+    assert result["last_valid_decision"]["summary"] == f"Synthetic revision {projection._MAX_ROWS}."
+
+
+def test_row_cap_still_rejects_too_many_effective_rows(tmp_path):
+    write(tmp_path, "decisions.jsonl", [accepted()] * (projection._MAX_ROWS + 1))
+    result = read(tmp_path)
+    source = result["sources"]["decisions"]
+    assert (source["status"], source["issues"]) == ("invalid", ["source_too_many_rows"])
+    assert result["last_valid_decision"] is None
+
+
+def test_row_cap_counts_parsed_rows_not_blank_or_invalid_lines(tmp_path, monkeypatch):
+    monkeypatch.setattr(projection, "_MAX_ROWS", 2)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "decisions.jsonl").write_text(
+        json.dumps(accepted()) + "\n\n{broken\n[1]\n" + json.dumps(failed()) + "\n")
+    result = read(tmp_path)
+    assert result["sources"]["decisions"]["status"] == "partial"
+    assert result["sources"]["decisions"]["row_count"] == 2
+    write(tmp_path, "nav_history.jsonl", [{"date": f"2026-10-1{day}", "nav": 10000} for day in range(3)])
+    bounded = read(tmp_path)
+    assert bounded["sources"]["nav_history"]["issues"] == ["source_too_many_rows"]
 
 
 @pytest.mark.parametrize("queued_at", ["2099-01-01T00:00:00+00:00", "2026-10-09T20:00:00", None, "bad"])
