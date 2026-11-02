@@ -210,10 +210,21 @@ def pytest_argv(
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Keep the measured protected-master hot-module pins. The capacity-host and
-    # walkforward swap is retired: the observed queue profile shows it overloads
-    # shard 1 with cold setup. Unlisted modules retain SHA-256 placement, and
-    # every test still runs exactly once.
+    # Keep the protected-master hot-module pins. A previous two-module
+    # capacity-host/walkforward swap overloaded shard 1 with cold setup; do
+    # not repeat that uncompensated swap. In PR #1763 CI 41251754394, shard 0
+    # ended without a completed pytest step or cleanup after ~51 minutes.
+    # Its job log is unavailable, so this is a measured load mitigation, NOT
+    # an assertion that any individual test failed. Last successful CI
+    # 41243150199 measured capacity-host at ~846s in shard 0, while native
+    # Fabric quota (~258s), walkforward (~154s) and deploy provenance (~74s)
+    # ran in shard 1. Move the long capacity module to shard 1 only while
+    # moving ALL three other measured modules back to shard 0. This balances
+    # both runners without dropping tests or changing other SHA-256 placements.
+    "tests/test_capacity_host_artifacts.py": 1,
+    "tests/test_native_fabric_quota_continuity.py": 0,
+    "tests/test_trend_persistence_walkforward.py": 0,
+    "tests/test_deploy_provenance.py": 0,
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
     # The protected one-runner CI gate measured these further slow modules.
