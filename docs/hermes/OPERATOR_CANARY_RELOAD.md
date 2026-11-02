@@ -16,13 +16,17 @@ An authorized Ubuntu1 operator first verifies all of these through the proper pr
 
 1. #1952, #1947 and this PR have passed exact-head checks, independent non-author review, normal protected release and on-host installed-source validation.
 2. The role's user unit, 0600 secrets file, provider pointer and **distinct** gateway/dashboard keys are installed. The on-disk manifest points to the actual current numbered release, whose install receipt has `upstream_attested=true` and SHA-256 hashes matching both its immutable profile and native config, and the local pinned Git checkout is exactly `1c0cd667746d3395fe9e1b6c74f8f85952486f18`.
-3. The independently owned per-role localhost CONNECT proxy is listening with an actual inspected hostname/port allowlist. Secretary may reach only `ark.ap-southeast.bytepluses.com:443`, Meta-CEO only `api.z.ai:443`; off-list destinations and cross-role access are **proven denied**, not assumed from the URL. The native HTTPS client must still validate TLS; a token-bearing provider request is not a reason to relax `IPAddressDeny=any`.
+3. The independently owned per-role localhost CONNECT proxy is listening with an actual inspected hostname/port allowlist. Secretary's proxy must bind `127.0.0.2` and reach only `ark.ap-southeast.bytepluses.com:443`; Meta-CEO's proxy must bind `127.0.0.3` and reach only `api.z.ai:443`; off-list destinations and cross-role access are **proven denied**, not assumed from the URL. The native HTTPS client must still validate TLS; a token-bearing provider request is not a reason to relax `IPAddressDeny=any`.
 **Cross-role TCP caveat:** both `systemd --user` units may run under the
 **same Linux account**. Merely assigning 127.0.0.1:18651 and
 127.0.0.1:18652, or setting a role label in a 0600 file, does **not**
 prevent one unit from connecting to the other unit's loopback proxy.
+The updated per-role unit now permits only 127.0.0.1/32 for the
+existing dashboard and the role's unique proxy alias (127.0.0.2/32
+for Secretary, 127.0.0.3/32 for Meta-CEO) under IPAddressDeny=any.
 The host network owner must prove real source-cgroup/credential-based
-isolation (or otherwise secure separately-owned proxy endpoints) with
+isolation (and verify parent slices do not grant a broader loopback
+allowance) with
 **negative** Secretary-to-Meta and Meta-to-Secretary CONNECT attempts,
 as well as off-list and no-proxy denials. Without those receipts, do not
 enroll provider keys or invoke the model canary.
