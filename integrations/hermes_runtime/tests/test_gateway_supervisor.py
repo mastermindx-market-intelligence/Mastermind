@@ -89,7 +89,9 @@ class GatewaySupervisorTests(unittest.TestCase):
             health = f"http://127.0.0.1:{port}/api/health"
             self.assertEqual(http_get(health)[0], 401)
             self.assertNotIn(TOKEN.encode(), http_get(health, "wrong-token-value-xxxx")[1])
-            code, body = http_get(health, TOKEN)
+            # Readiness is asynchronous: prove the backend answers before
+            # requiring HTTP 200; a live PID alone must remain HTTP 503.
+            code, body = self._wait_health(runtime)
             self.assertEqual(code, 200)
             payload = json.loads(body)
             self.assertEqual(payload["status"], "ok")

@@ -12,6 +12,7 @@
     "no_live_provider_called": true,
     "no_model_inference_receipt": true,
     "positive_local_tests": "49/49 Hermes harness and new targeted 3/3 runtime test methods passed; macOS 28/33 runtime as noted",
+    "positive_test_async_wait": "existing loopback/auth positive test now awaits truly ready backend; immediate process launch is no longer an availability proof",
     "probe": "http.client to exact 127.0.0.1 child port; no secrets, redirects or external endpoints; 250ms connection timeout",
     "product_proof": "SOURCE_ONLY_FAIL_CLOSED_READINESS",
     "sampling": "at most 250ms readiness poll; configured RSS high-water interval unchanged",
@@ -96,22 +97,23 @@
     },
     {
       "path": "integrations/hermes_runtime/tests/test_gateway_supervisor.py",
-      "sha256": "d350ddf1c614afdc38b38b9174690f171c90e398a5fab67ab5e8cd51192a7efd"
+      "sha256": "92acddd813e999372ee9c7171d2f8803c681504fc397f1410b74807204771722"
     }
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
   "previous_head_linux_evidence": {
+    "diagnostic": "exactly one positive test asserted health 200 immediately after start; backend-aware startup correctly returns 503 until ready",
     "does_not_qualify_current_postimage": true,
-    "harness_six_suites": "41373602382 SUCCESS Python3.12/3.13",
-    "head": "edba269cbbc4892ef649463990fc35d57987a109",
-    "repo_ci": "41373602300 incomplete/old-base failures at last observation",
-    "runtime": "41373602357 SUCCESS"
+    "harness": "41376706940 FAILURE 3.12/3.13",
+    "head": "63cadb4272a24ea1c8c5593f07deec4009cd01ab",
+    "repair": "test_loopback_only_binding_requires_auth now waits for authenticated backend-ready state, without weakening negative false-green tests",
+    "runtime": "41376706957 FAILURE 3.12/3.13"
   },
   "procedure_pin": "1f1b30d1352d2a975624e558bd9da097e4cba417",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-02T02:14:24.003104+00:00",
+  "recorded_at": "2026-11-02T02:16:39.619578+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -167,6 +169,6 @@
     "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
   },
   "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
-  "source_manifest_sha256": "c571d71e1ff2b9b6dd478ee6480ba720059b217da957dfa4bcdf30859be1cfc5",
+  "source_manifest_sha256": "0564d790cab13a5078dc7608ec932c3504a1ef6915783c804ab418ce2151b287",
   "test_host": "m2studio / macOS"
 }
