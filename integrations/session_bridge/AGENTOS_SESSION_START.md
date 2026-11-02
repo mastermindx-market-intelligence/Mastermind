@@ -169,3 +169,21 @@ installation or an end-to-end product/Runtime job.
 The compiler's old W3 `next_action` mentioning PR1289 is a concrete stale-prose
 example: that PR subsequently landed. It is never converted into a new task by
 this integration, and no historical operation is reopened.
+
+### Exact frozen-source audit exception
+
+The restored helper uses `compact(..., 500)` as a display bound on a line with an
+em dash. The existing ASCII-only review format cannot describe that Constant's
+Python byte columns without changing the frozen source. This contribution keeps
+that source unchanged and adds a strictly opt-in `utf8_sites` format to the
+existing exact-file review matcher, used only for that pinned payload. The
+preimage and its ordinary ASCII `400` display bound retain the original format.
+
+A UTF-8 site needs the exact path/full-file SHA, complete byte slice on valid
+character boundaries, and exactly one complete Python AST Constant matching
+line, byte start/end, integer type/value and spelling. Masking receives converted
+character columns only after every check succeeds. A string substring, partial
+adjacent integer, normalization, changed hash, wrong path/column, or new identity
+literal is not covered. Legacy records keep the existing ASCII requirement.
+This is source-review accounting, not runtime authorization or a generic scanner
+exemption; the consequential matcher change requires nonauthor review.
