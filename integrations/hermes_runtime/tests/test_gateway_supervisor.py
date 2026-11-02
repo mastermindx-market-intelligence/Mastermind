@@ -96,6 +96,12 @@ class GatewaySupervisorTests(unittest.TestCase):
             payload = json.loads(body)
             self.assertEqual(payload["status"], "ok")
             self.assertTrue(payload["backend_ready"])
+            # Local pinned backend health is not a remote model inference
+            # or role Slack roundtrip, even while this endpoint returns 200.
+            self.assertFalse(payload["provider_authenticated"])
+            self.assertFalse(payload["native_model_turn_verified"])
+            self.assertFalse(payload["network_egress_policy_verified"])
+            self.assertFalse(payload["slack_roundtrip_verified"])
             self.assertEqual(payload["pinned_sha"], PINNED_UPSTREAM_SHA)
             self.assertEqual(payload["allowlist"], ["clarify"])
             self.assertTrue(payload["loopback"])

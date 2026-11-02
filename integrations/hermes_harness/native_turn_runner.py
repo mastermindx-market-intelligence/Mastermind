@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from integrations.hermes_models.contract import native_provider
 from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
 from integrations.hermes_runtime.errors import RuntimeRefusal
+from integrations.hermes_runtime.egress import ROLE_PROXY_HOST
 from integrations.hermes_runtime.profile import RuntimeProfile
 from .native_turn_evidence import (
     MAX_STREAM_BYTES, ObservationRefusal, canary_prompt,
@@ -93,7 +94,8 @@ def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) 
     # accepted #1952 composition. Verify its essential shape here without
     # replacing the upstream egress contract or reading another key file.
     proxy = env["HTTPS_PROXY"]
-    if not re.fullmatch(r"http://127\.0\.0\.1:([1-9][0-9]{3,4})", proxy):
+    expected_host = ROLE_PROXY_HOST[profile.role]
+    if not re.fullmatch(rf"http://{re.escape(expected_host)}:([1-9][0-9]{{3,4}})", proxy):
         raise RuntimeRefusal("NATIVE_CANARY_PROXY_NOT_QUALIFIED")
     port = int(proxy.rpartition(":")[2])
     if not 1024 <= port <= 65535 or env["NO_PROXY"] != "127.0.0.1,localhost":
