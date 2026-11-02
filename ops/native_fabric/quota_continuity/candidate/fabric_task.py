@@ -560,6 +560,23 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
         pass
 
+    if (state == "TERMINAL" and rc == 75 and signal == "admission"
+            and rid == "terminal-news-sidebar-20261102-c4-current-build-001"):
+        import native_thermal_refusal_reconcile as thermal_reconcile
+        try:
+            verified = thermal_reconcile.status_from_receipt()
+            if verified is not None:
+                return {**_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"), **verified}
+        except (OSError, ValueError, TypeError, KeyError):
+            # The retained refusal facts survive an unreadable reconciliation
+            # receipt; only the reconciliation observation is withheld.
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                "state": "STATUS_UNREADABLE", "rc": rc, "signal": signal,
+                "reason": "remote_admission_refused",
+                "result_available": result_available, "result_bytes": result_bytes,
+                "reconciliation": {"state": "UNREADABLE"},
+                **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
+
     status = {
         "schema": "mastermind.fabric_task_status.v1",
         "run_id": rid,
@@ -1270,18 +1287,23 @@ def _discard_failed_stdout() -> None:
                 pass
 
 
-def _plain_packet_reconciliation_response(value: object, effect_state: str) -> bool:
+def _reconciliation_response(value: object, effect_state: str, marker: str) -> bool:
     """Deliver either response without losing the operation's effect state."""
     try:
         _json(value)
         sys.stdout.flush()
     except (OSError, ValueError, TypeError) as exc:
         _discard_failed_stdout()
-        print("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: "
+        print(marker + "_RETURN_UNDELIVERED: "
               + effect_state + ": " + type(exc).__name__ + ": " + str(exc),
               file=sys.stderr, flush=True)
         return False
     return True
+
+
+def _plain_packet_reconciliation_response(value: object, effect_state: str) -> bool:
+    """Deliver either response without losing the operation's effect state."""
+    return _reconciliation_response(value, effect_state, "PLAIN_PACKET_RECONCILIATION")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1297,6 +1319,16 @@ def main(argv: list[str] | None = None) -> int:
     p_packet_reconcile.add_argument("run_id")
     p_packet_reconcile.add_argument("--root", required=True)
     p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
+
+    p_thermal_check = sub.add_parser("check-thermal-refusal", help="Read-only fixed original rc75 thermal-refusal proof; no reconciliation or retry")
+    p_thermal_check.add_argument("run_id")
+    p_thermal_check.add_argument("--root", required=True)
+
+    p_thermal_reconcile = sub.add_parser("reconcile-thermal-refusal",
+        help="Record the exact original thermal-refusal disposition; never replay or accept")
+    p_thermal_reconcile.add_argument("run_id")
+    p_thermal_reconcile.add_argument("--root", required=True)
+    p_thermal_reconcile.add_argument("--expected-proof-sha256", required=True)
 
 
     p_preview = sub.add_parser("preview", help="read-only incumbent model and provider selection")
@@ -1536,6 +1568,36 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             except (OSError, ValueError, TypeError, KeyError) as exc:
                 print("PLAIN_PACKET_CHECK_UNQUALIFIED: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                return 78
+        if args.cmd == "reconcile-thermal-refusal":
+            import native_thermal_refusal_reconcile as thermal_reconcile
+            try:
+                response = thermal_reconcile.reconcile_original(
+                    args.run_id, args.root, args.expected_proof_sha256)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                effect_state = getattr(exc, "effect_state", "NOT_APPLIED")
+                _reconciliation_response(
+                    {"schema": thermal_reconcile.SCHEMA, "action": "UNQUALIFIED",
+                     "run_id": args.run_id, "expected_root_id": args.root,
+                     "effect_state": effect_state, "retry_allowed": False,
+                     "worker_dispatch_performed": False,
+                     "new_work_admission": "UNCHANGED"},
+                    effect_state, "THERMAL_REFUSAL_RECONCILIATION")
+                print("THERMAL_REFUSAL_RECONCILIATION_UNQUALIFIED: " + effect_state
+                      + ": " + type(exc).__name__ + ": " + str(exc),
+                      file=sys.stderr, flush=True)
+                return 78
+            # A returned operation may already have published the receipt.
+            return 0 if _reconciliation_response(response, "EFFECT_UNKNOWN",
+                                                  "THERMAL_REFUSAL_RECONCILIATION") else 78
+        if args.cmd == "check-thermal-refusal":
+            import native_thermal_refusal_check as thermal_check
+            try:
+                _json(thermal_check.check_original(args.run_id, args.root))
+                return 0
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                print("THERMAL_REFUSAL_CHECK_UNQUALIFIED: " + type(exc).__name__
+                      + ": " + str(exc), file=sys.stderr)
                 return 78
         if args.cmd == "reconcile-completed":
             try:

@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 85543,
+      "bytes": 89241,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
+      "sha256": "db63aeb01b7672280de347e05f3b08cd5d30d1dd549ccd64c0a2ccf3fecd3fc6",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -401,6 +401,18 @@
       "sha256": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
       "source": "candidate/native_runtime_bindings.py"
     },
+    "ext/native_thermal_refusal_check.py": {
+      "bytes": 35452,
+      "installed_preimage_sha256": null,
+      "sha256": "b25007e930e8f605f958411a47cac7db6b3573b1bdee419402c26054bf5c86d8",
+      "source": "candidate/native_thermal_refusal_check.py"
+    },
+    "ext/native_thermal_refusal_reconcile.py": {
+      "bytes": 9718,
+      "installed_preimage_sha256": null,
+      "sha256": "dd0a7ce871b43d0a7543be172967c1d13024d13f4aa78eda3cbb1d4603fc92d4",
+      "source": "candidate/native_thermal_refusal_reconcile.py"
+    },
     "ext/oc_free_exec.sh": {
       "bytes": 8121,
       "installed_preimage_sha256": "279842e54d6095276b087fd78eae9268026db3079add4b61e474119ce08d3783",
@@ -636,7 +648,7 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 102,
+  "native_code_files": 104,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
@@ -648,6 +660,8 @@
     "native_plain_packet_check.py",
     "native_plain_packet_reconcile.py",
     "native_runtime_bindings.py",
+    "native_thermal_refusal_check.py",
+    "native_thermal_refusal_reconcile.py",
     "paid_controller_channel.py",
     "paid_controller_spawn.py",
     "paid_glm_model_client.py",

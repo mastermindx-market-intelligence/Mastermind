@@ -154,6 +154,8 @@
   "removed_current_members": [
     "ext/host_pull_daemon.sh",
     "ext/host_pull_launchd.plist.template",
+    "ext/native_thermal_refusal_check.py",
+    "ext/native_thermal_refusal_reconcile.py",
     "ext/paid_host_readiness.py",
     "ext/paid_initializer.py",
     "ext/paid_initializer_nested_data.py",
