@@ -76,6 +76,11 @@ REVIEWED_GENERATIONS = {
     "v17": {
         "bridge.py": "2da2dadada8bba9e78bc31fceba02b67f96d00a5214cf6d78c821d3d30fd0474",
     },
+    # Security-qualified v18: preserve all immutable earlier generation pins.
+    # The v17 candidate must not be selected after its reviewed contract bugs.
+    "v18": {
+        "bridge.py": "48ad9043494447ebafb1b8f7c987ddbb8845a8d5cb5a136443a8e6841a18b6c5",
+    },
 }
 
 
