@@ -25,7 +25,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # the host's mutable config is not evidence that a launched worker uses it.
 CODEX_CONTEXT_ARGS=()
 case "$MODEL" in
-  MiniMax-M3|minimax-m3)
+  MiniMax-M3|minimax-m3|MiniMax-M3.1-Flash|minimax-m3.1-flash)
     _ctx="${POOL_MAX_CONTEXT_TOKENS:-1000000}"
     case "$_ctx" in ''|*[!0-9]*|0*) echo "CODEX_CONTEXT_REFUSED reason=window_invalid" >&2; exit 78 ;; esac
     if [ "${#_ctx}" -gt 7 ] || [ "$_ctx" -lt 100000 ] || [ "$_ctx" -gt 1000000 ]; then
