@@ -4827,11 +4827,14 @@ function renderAllocation() {
     if (lbl) lbl.textContent = t('alloc.' + key) + ' ' + pct.toFixed(0) + '%';
   }
 
-  sleeve('seg-lead', 'lbl-lead', 'leadership', sl.leadership);
-  sleeve('seg-conv', 'lbl-conv', 'conviction', sl.conviction);
-  sleeve('seg-cash', 'lbl-cash', 'cash', sl.cash);
+  // D-ACCT-1: an unreadable account file has no current split; the last-published
+  // sleeves would read as live weights.
+  var invalid = !!_accountStateInvalid();
+  sleeve('seg-lead', 'lbl-lead', 'leadership', invalid ? null : sl.leadership);
+  sleeve('seg-conv', 'lbl-conv', 'conviction', invalid ? null : sl.conviction);
+  sleeve('seg-cash', 'lbl-cash', 'cash', invalid ? null : sl.cash);
 
-  E('lbl-gross').textContent = b.gross != null ? pctInt(b.gross) + ' ' + t('alloc.gross') : '';
+  E('lbl-gross').textContent = (!invalid && b.gross != null) ? pctInt(b.gross) + ' ' + t('alloc.gross') : '';
 }
 
 // ── SAFETY (portfolio risk backtest) ───────────────────────────────────────────
@@ -4844,6 +4847,14 @@ function renderSafety() {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var H = function(en, zh) { return '<span class="l-en">' + en + '</span><span class="l-zh">' + zh + '</span>'; };
   var head = '<h2>' + H('Portfolio Safety', '组合安全度') + '</h2>';
+
+  // D-ACCT-1: the risk snapshot describes holdings the unreadable account cannot vouch
+  // for, so the panel shows the same canonical cell as NAV, curve and positions.
+  var invalidState = _accountStateInvalid();
+  if (invalidState) {
+    el.innerHTML = head + '<div style="padding:12px 0">' + _bookInvalidHtml(invalidState) + '</div>';
+    return;
+  }
 
   if (!d || (d.safety_score == null && (!d.metrics || !Object.keys(d.metrics).length))) {
     var msg = (d && d.note) ? d.note : (isZh ? '暂无足够数据评估组合安全度。' : 'Not enough data to assess portfolio safety yet.');

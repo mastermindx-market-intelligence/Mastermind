@@ -662,6 +662,40 @@ def test_t12_invalid_state_renders_one_canonical_cell(tmp_path, lang, word, ref)
 
 
 @requires_node
+@pytest.mark.parametrize("lang,word,ref", [
+    ("en", "Book unavailable — state invalid", "Quarantine ref " + SHA16),
+    ("zh", "账本不可用 — 状态无效", "隔离编号 " + SHA16),
+])
+def test_t12_invalid_state_withholds_the_book_derived_safety_and_allocation(tmp_path, lang,
+                                                                            word, ref):
+    scenario = INVALID_SCENARIO.replace("STATE", json.dumps(INVALID)) + r"""
+_risk = {safety_score: 79, grade: 'B', as_of: '2026-10-22', source: 'held', n_positions: 4,
+         metrics: {max_drawdown_pct: -5.7}};
+_book.sleeves = {leadership: 0.2, conviction: 0.1, cash: 0.7}; _book.gross = 0.3;
+renderSafety(); renderAllocation();
+"""
+    dom = _run(tmp_path, scenario, lang)["dom"]
+    safety = dom["safety"]["html"]
+    assert word in safety and ref in safety
+    for bad in ("79", "SAFETY / 100", "安全度 / 100", "4 positions", "4 个持仓", "-5.7"):
+        assert bad not in safety, bad
+    for seg in ("seg-lead", "seg-conv", "seg-cash"):
+        assert dom[seg]["display"] == "none", seg
+    unavailable = "Unavailable" if lang == "en" else "不可用"
+    for lbl in ("lbl-lead", "lbl-conv", "lbl-cash"):
+        assert dom[lbl]["text"].endswith(unavailable) and "%" not in dom[lbl]["text"], lbl
+    assert dom["lbl-gross"]["text"] == ""
+
+
+def test_t12_invalid_cell_has_no_coloured_edge_rule():
+    css = (ROOT / "app" / "static" / "theme.css").read_text(encoding="utf-8")
+    block = css[css.index(".mm-book-invalid {"):]
+    block = block[:block.index("}")]
+    assert "border-left" not in block and "border-inline-start" not in block
+    assert "border: 1px solid var(--line)" in block
+
+
+@requires_node
 @pytest.mark.parametrize("lang,reason,label", [
     ("en", "The account file failed validation, so no balances are shown.", "Validator problems:"),
     ("zh", "账户文件未通过校验，因此不显示任何余额。", "校验问题："),

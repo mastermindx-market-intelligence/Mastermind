@@ -978,8 +978,9 @@ html[data-lang="zh"] .lang-toggle .zh-opt { color: #fff; }
 .mm-epi-badge.unverified { color: var(--muted); }
 
 /* D-ACCT-1 — the account file exists but cannot be read, parsed or validated.
-   Glyph + word + the left rule are the non-colour cue; the warn tint only
-   reinforces them, so the state survives greyscale and a screen reader. */
+   Glyph + word are the non-colour cue; the quiet warn fill only reinforces them,
+   so the state survives greyscale and a screen reader. Even neutral border, no
+   coloured edge rule (design law 2026-10-18). */
 .mm-book-invalid {
   display: inline-flex;
   gap: 8px;
@@ -987,9 +988,8 @@ html[data-lang="zh"] .lang-toggle .zh-opt { color: #fff; }
   flex-wrap: wrap;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--warn);
   border-radius: var(--radius-sm);
-  background: var(--surface-inset);
+  background: color-mix(in srgb, var(--warn) 8%, var(--surface-inset));
   color: var(--text);
   font-weight: 600;
   font-size: var(--fs-sm, 12.5px);
