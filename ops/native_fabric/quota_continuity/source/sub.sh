@@ -724,6 +724,16 @@ cd "$1" || exit 1
 _mm_cfg="$HOME/.minimax/config.json"
 ANTHROPIC_BASE_URL="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[\"anthropic_base_url\"])" "$_mm_cfg")" || exit 1
 ANTHROPIC_AUTH_TOKEN="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[\"api_key\"])" "$_mm_cfg")" || exit 1
+# M3.1 Flash is commissioned against the paid-included MiniMax M Plan only.
+# This check is *inside* slot.py's payload, AFTER provider admission and
+# credential read. Preserve legacy M3 routes and never print the key.
+case "$2" in
+  MiniMax-M3.1-Flash|minimax-m3.1-flash)
+    case "$ANTHROPIC_AUTH_TOKEN" in
+      sk-cp-*) ;;
+      *) echo "MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED" >&2; exit 78 ;;
+    esac ;;
+esac
 export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
 export CLAUDE_CONFIG_DIR="$4"
 export PATH="$(cd "$(dirname "$0")" && pwd)/lane_bin:$PATH"   # 2026-09-19 seat: executor guard shims (gh/git)
