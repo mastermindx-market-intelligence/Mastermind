@@ -1,3 +1,33 @@
+## Paper 0.5.18 exact-catalog compatibility candidate - 2026-11-01
+
+The M2 Paper Desktop has two installations: /Applications/Paper.app v0.5.11
+and the intended ~/Applications/Paper.app v0.5.18. A graceful transition to
+the latter restored a direct paper_inspect CONNECTED response for explicit
+MASTERMIND PAGES file 01M2WGNCX9475G79JRKJTCM08P. This is a connection
+receipt, not a live write or restart-resilience acceptance result.
+
+The captured 0.5.18 41-tool full catalog is retained as
+tests/fixtures/paper_desktop/16e6b_full_catalog.json; its canonical SHA-256 is
+16e6b93f0c51a1574ba8acee4df732052898707a04731d3817530971a88fdefd.
+Compared to accepted 37-tool 1b9aff..., no names were removed; the four new
+resource tools archive_resources, create_folder, move_resources and
+unarchive_resources stay uncallable. Ten existing descriptors changed,
+including rich HTML set_text_content (updates[].html replaces
+updates[].textContent), get_jsx styling default, and optional resource
+parameters. The guarded successor bridge 0.1.6 admits this exact full-catalog
+digest and refuses obsolete text-edit payloads before dispatch, retaining
+all file/snapshot/operation/unknown-effect constraints. Historical catalog
+receipts remain accepted. Any future descriptor drift fails closed.
+
+This is a source-only candidate, not a live activation. Immutable
+runtime_stage.py v15 is proposed as a new hash-pinned generation; do not alter
+v2-v14. After an independent non-author review, accepted source release, and
+installer-controlled seat replacement with original manifest/seat identity,
+prove on the same direct carrier: accepted live schema, exact scratch-file read
+and prepare, a bounded guarded edit using updates[].html, same-file post-read,
+screenshot, and reconnect without duplicate clients. Never manually repin the
+installed v13 bridge or claim deployment from green synthetic tests.
+
 # Paper.design integration - bounded local and web design capability
 
 ## Guarded file/page administration candidate (2026-10-22; NOT installed)
