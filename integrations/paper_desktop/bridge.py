@@ -1188,9 +1188,19 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
                 # default active-file context. Never infer a target from a name.
                 if not same_document({"kind": "file-id", "id": supplied_file}, basic_object(result)):
                     raise Refusal("FILE_ID_MISMATCH", "Paper target read did not return the requested file.")
-                # Keep page-specific content in result, but obtain the guard
-                # from the same file-only snapshot constructor used by edits.
-                # Installed host/runtime provenance and the mutex are retained.
+                # A page-specific result cannot mint the file-only snapshot
+                # used by edits. We must read the file-only getter again, but
+                # only after requalifying its *current* schema/annotations.
+                # The first getter may itself have changed the live catalog.
+                # No unreviewed second getter may reach the vendor.
+                if not custom_exact_pin:
+                    live_snapshot_schema = schema_receipt(
+                        client, client.catalog(), server_pin=_server_pin,
+                        catalog_pin=_catalog_pin)
+                    if (not live_snapshot_schema["server_name_compatible"]
+                            or not live_snapshot_schema["server_version_compatible"]
+                            or not live_snapshot_schema["snapshot_tool_compatible"]):
+                        raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
                 observed["document"] = snapshot(client, supplied_file, execution_binding=execution_binding)
                 observed["write_schema"] = schema
             return observed

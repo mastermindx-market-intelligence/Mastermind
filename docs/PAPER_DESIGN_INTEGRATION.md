@@ -41,19 +41,23 @@ reviewed source update for only the affected operation; no software can
 prove unchanged behavior solely from an input schema. Immutable
 v17 and v18 remain historical, rejected-for-release candidates: the
 later source review found unqualified reads and unsafe verification
-under mid-operation vendor descriptor drift. Proposed immutable v19
+under mid-operation vendor descriptor drift. Proposed immutable v20
 requalifies each reviewed read/write tool and its outgoing arguments,
 including implicit get_basic_info and the post-edit verification getter.
-If verification cannot be performed safely after dispatch, return
-EFFECT_UNKNOWN with no replay, not an invented successful receipt.
+In addition, after the FIRST get_basic_info read it requalifies the
+critical live getter again before any SECOND file-only snapshot call;
+unsafe drift refuses without dispatching the second getter. If
+post-write verification cannot safely proceed, retain EFFECT_UNKNOWN
+with no replay, not an invented successful receipt. v19 is now a
+preserved but superseded, release-ineligible runtime generation.
 
-The v19 source remains BUILT_NOT_PROVEN until a new independent exact-head
+The v20 source remains BUILT_NOT_PROVEN until a new independent exact-head
 review, required hosted CI, protected merge of the #1925 -> #1935 ->
 #1942 chain, original Ryan same-label installer selection, and a real
 exact-target scratch edit, readback, screenshot and reconnect receipt.
 Synthetic tests and read-only live catalog checks are not deployment
 acceptance. Preserve prior immutable runtime generations and do not
-select or overwrite v17/v18 candidates.
+select or overwrite v17/v18/v19 candidates.
 
 ## M1 Paper 0.5.16 exact catalog compatibility candidate - 2026-11-02
 

@@ -299,7 +299,26 @@ a UI-focus operation; its source description reflects the implementation. Active
 focus is reported as unknown rather than guessed. Its conservative existing
 annotation and workspace confirmation policy are unchanged in this source slice.
 
-### Immutable v19 Paper bridge — guarded release pending
+### Immutable v20 Paper bridge — guarded release pending
+
+A later independent exact-head source review (#1942, review 5743595952)
+found one residual v19 TOCTOU issue: an explicit-file
+`paper_read(get_basic_info)` first qualified the getter but then called a
+second implicit file-only snapshot getter without requalifying its live
+contract. A vendor descriptor change after the first read could therefore
+dispatch a newly unsafe getter. Source-only recorder reproduction; no
+production Paper mutation.
+
+The proposed v20 bridge SHA-256
+`1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced`
+requalifies the current server identity, getter input schema and safety
+annotations immediately BEFORE that second file-only getter. On newly
+unreviewed safety drift it refuses `UPSTREAM_SCHEMA_UNREVIEWED` with zero
+second getter calls, rather than minting an unsafe target guard. The
+positive explicit-file bootstrap remains valid, preserving file-only
+snapshot hashes, page-specific read results and execution-binding
+provenance. The v19 bridge, like v17/v18, is preserved but superseded;
+its already staged seat packages MUST NOT be activated.
 
 A reviewer reproduced three **source-only v17** read-boundary defects: an unsafe
 read annotation could still dispatch, an unreviewed optional reader argument could be
@@ -317,10 +336,11 @@ pinned in `runtime_stage.py` for immutable audit of already staged v17 bundles,
 **not** as permission to activate them. Never mutate the old staged generation,
 relabel its source, or treat a previous v17 scratch receipt as v18 acceptance.
 
-Release in order: original #1925 protected queue and merge; #1935 current-base
-integration and merge; then #1942 **fresh v19 exact-head CI, independent review,
-and protected merge-group qualification**. Only the authorized original host
-installer/custody owner may stage v19 as a new generation, verify the same-label
+Release in order: #1925 merged; #1935 accepted independent review and
+entered the normal protected merge queue; then #1942 with **fresh v20 exact-head
+CI, independent source re-review and protected merge-group qualification**.
+Only the authorized original host installer/custody owner may stage v20 as a
+new generation, verify the same-label
 source-to-process and manifest bindings, and cut over the intended Paper seat.
 This document is not permission to deploy, restart, change credentials, or
 overwrite existing Paper runtime state. The previous Ryan v13 client is the

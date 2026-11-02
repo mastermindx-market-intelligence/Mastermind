@@ -85,6 +85,11 @@ REVIEWED_GENERATIONS = {
     "v19": {
         "bridge.py": "2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae",
     },
+    # v20 closes the implicit second-read TOCTOU review finding.
+    # v19 receipts remain immutable historical proof and are not selected.
+    "v20": {
+        "bridge.py": "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
+    },
 }
 
 
