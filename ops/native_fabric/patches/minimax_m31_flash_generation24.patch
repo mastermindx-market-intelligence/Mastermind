@@ -141,7 +141,21 @@
        default_turns=240
        ;;
    esac
-@@ -748,6 +748,16 @@
+@@ -237,7 +237,12 @@
+     fi
+     export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$context"
+     if [ -z "$compact" ] && [ "$context" -ge 1000000 ]; then
+-      compact=900000
++      # Official MiniMax M3.1 Claude Code guidance recommends 512K compaction.
++      # Preserve legacy 900K for M3 and other worker models.
++      case "$pool:$model" in
++        minimax:MiniMax-M3.1-Flash|minimax:minimax-m3.1-flash) compact=524288 ;;
++        *) compact=900000 ;;
++      esac
+     fi
+   fi
+   if [ -n "$compact" ]; then
+@@ -748,6 +753,22 @@
  _mm_cfg="$HOME/.minimax/config.json"
  ANTHROPIC_BASE_URL="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[\"anthropic_base_url\"])" "$_mm_cfg")" || exit 1
  ANTHROPIC_AUTH_TOKEN="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[\"api_key\"])" "$_mm_cfg")" || exit 1
@@ -155,9 +169,30 @@
 +      *) echo "MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED" >&2; exit 78 ;;
 +    esac ;;
 +esac
++# Claude Code needs the documented [1m] qualifier for long client context.
++# Keep the original bare model for provider quota and preflight accounting.
++_mm_cli_model="$2"
++case "$2" in
++  MiniMax-M3.1-Flash|minimax-m3.1-flash) _mm_cli_model="MiniMax-M3.1-Flash[1m]" ;;
++esac
  export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
  export CLAUDE_CONFIG_DIR="$4"
  export PATH="$(cd "$(dirname "$0")" && pwd)/lane_bin:$PATH"   # 2026-09-19 seat: executor guard shims (gh/git)
+@@ -764,12 +785,12 @@
+   # capture is performed by the trusted Fabric wrapper before this process starts.
+   exec claude -p "${_mm_prompt_args[@]}" --append-system-prompt "$6" --output-format text \
+     --permission-mode dontAsk --permission-prompts none --max-turns 60 \
+-    --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --model "$2"
++    --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --model "$_mm_cli_model"
+ fi
+ python3 "${10}/capacity_preflight.py" minimax "$2"
+ _mm_probe_rc=$?
+ if [ "$_mm_probe_rc" -ne 0 ]; then exit "$_mm_probe_rc"; fi
+-exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --dangerously-skip-permissions --max-turns "$8" --model "$2" \
++exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --dangerously-skip-permissions --max-turns "$8" --model "$_mm_cli_model" \
+   --strict-mcp-config --mcp-config "$7"
+ ' _ "$LAUNCH_CWD" "${MODEL:-MiniMax-M3}" "$PROMPT" "$HERE/../minimax_claude_home" "${MINIMAX_VISUAL_HELPER:-0}" "$_mm_visual_system" "$_mm_mcp_config" "$CLAUDE_WORKER_MAX_TURNS" "$_SUB_PROMPT_FILE_MODE" "$HERE" > "$_json" || _rc=$?
+     if [ "${MINIMAX_VISUAL_HELPER:-0}" = "1" ]; then
 --- a/ext/mm_codex_exec.sh
 +++ b/ext/mm_codex_exec.sh
 @@ -25,7 +25,7 @@
