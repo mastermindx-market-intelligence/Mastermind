@@ -122,3 +122,33 @@ native release. Host installation still separately requires exact preimage
 hashes, a known backup, atomic replacement, source import verification and an
 M2-to-M1 peer observation. Hermetic regression:
 `python3 -m unittest discover -s tests -p test_fleet_storage_volume_monitor.py`.
+
+## B12 source-only pre-effect hold: generated cache helper
+
+The M2-only `generated_cache_trim.py` is **not enrolled in the protected
+Mastermind source tree**. Its installed `--apply` behavior has not been
+independently qualified against the installed preimage, active worktree
+ownership, or an effect-safe completion contract. A nonzero or degraded
+receipt written **after** a subprocess exits cannot undo deletions performed
+earlier by that subprocess.
+
+The existing sweeper therefore records
+`generated_cache_trim_hold=HELD_UNQUALIFIED_GENERATED_CACHE_HELPER`,
+`generated_cache_trim_effect_state=NOT_APPLIED`, and
+`generated_cache_trim_rc=78` on the M2 path without invoking this helper.
+`finish()` also records `generated_cache_trim.held_unqualified_helper`
+in `incomplete_substeps`, even if a success-shaped helper receipt is
+later injected. Other existing sweeper passes, the original timer,
+kernel flock, and host configuration remain unchanged. No replacement
+cleaner or inventory script is introduced.
+
+This is an **inert source candidate**, stacked on the independently
+reviewed Draft stale-pack guard #1900 and its #1877 base. Neither Draft
+source approval nor green CI authorizes install, reconfigure, restart,
+cache removal, ref publication, or merge. Before any eventual native
+release, the existing installed-sweeper owner must reconcile exact
+preimages, preserve backups, qualify source/effects of the unenrolled
+helper, obtain independent review and protected integrated CI, and
+prove one natural existing-service execution/JSONL result. Hermetic
+coordinator regression: `python3 -m unittest discover -s tests -p
+test_fleet_storage_volume_monitor.py`.
