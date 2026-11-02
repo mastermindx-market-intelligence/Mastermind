@@ -25,9 +25,9 @@ UPSTREAM = "fixture-host-owned-upstream-provider-credential"
 def test_real_local_tcp_brain_responses_jev_one_shared_sqlite_rpm(tmp_path, monkeypatch):
     path = (Path(__file__).resolve().parents[1]
             / "ops/native_fabric/experiential_proxy/gateway.py")
-    if not path.is_file():
-        pytest.skip("gateway PR #1945 not yet composed into Brain source")
-    uvicorn = pytest.importorskip("uvicorn")
+    # Composition proof is invalid if a dependency silently skips this test.
+    assert path.is_file(), "gateway PR #1945 source must be composed"
+    import uvicorn
     from ops.native_fabric.experiential_proxy.gateway import Settings, create_app
 
     observed = []
