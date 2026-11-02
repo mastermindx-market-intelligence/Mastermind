@@ -45,7 +45,7 @@ B=$(mktemp -d)
 git -C "$SEAT_WT" fetch -q origin claude/ssd-pbr-runtime-85f3de87bc7b8894
 git -C "$SEAT_WT" show "FETCH_HEAD:$RB/install_w1.sh" > "$B/install_w1.sh"
 echo "2119a2fe17f86dcb44caf60b58ff9badee658ddd6b51dfc1a8e6e60b9231c1c1  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
-env -u PBR_EV OPERATOR_SESSION_ID=<executing session id> /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
+env -u PBR_EV OPERATOR_SESSION_ID=<executing session id> PBR_DAY=2026-11-02 /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
 # s0's last line prints:  export PBR_EV=/Volumes/Mastermind/evidence/pbr/install-<UTCyyyymmddThhmmZ>_<sha8>
 ```
 
@@ -111,11 +111,11 @@ If s2 has not passed by 05:20Z, the window is lost. Do not run s3. Report to the
 ### s0: compose (03:40Z, local)
 
 ```sh
-env -u PBR_EV OPERATOR_SESSION_ID=<id> /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
+env -u PBR_EV OPERATOR_SESSION_ID=<id> PBR_DAY=2026-11-02 /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
 ```
 
 **What it does**
-1. Runs the environment guard. Requires `OPERATOR_SESSION_ID`. `PBR_DAY=YYYY-MM-DD` is required (rev 3.1: no default) and must be a weekday. Runs the epoch self-check (04:10 = `1792728600`, 05:30 = `1792733400`). Checks for the deploy key and the tools.
+1. Runs the environment guard. Requires `OPERATOR_SESSION_ID`. `PBR_DAY=YYYY-MM-DD` is required (rev 3.1: no default) and must be a weekday. Runs the epoch self-check (04:10 = `1792728600`, 05:30 = `1792733400`) only when `PBR_DAY=2026-10-23`. Checks for the deploy key and the tools.
 2. Creates a fresh worktree from `origin/master` via `worktree_storage.py create` (external SSD policy). HEAD must equal `git ls-remote origin refs/heads/master`, and the tree must be clean.
 3. Creates `$EV=/Volumes/Mastermind/evidence/pbr/install-<cid>` and records `CAPTURE_ID`, `SHA`, `WT` and `DAY`.
 4. Extracts the three helpers from `origin/claude/ssd-pbr-runtime-85f3de87bc7b8894` and runs `shasum -a 256 -c` against the pins. Copies the driver to `$EV/tools/`.
