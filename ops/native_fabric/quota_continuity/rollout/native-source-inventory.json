@@ -288,9 +288,9 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/jev_advisory.py": {
-      "bytes": 11653,
+      "bytes": 18365,
       "installed_preimage_sha256": null,
-      "sha256": "ccd54324d6d7950c933b424a65844f870b9a733f5137d148ece0a864882dcfd7",
+      "sha256": "c00bdd5c0586a94289ec40257173d4a243b9541cf1d2bda17f9266ef6a80d330",
       "source": "candidate/jev_advisory.py"
     },
     "ext/lane_runtime.py": {

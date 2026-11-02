@@ -43,7 +43,7 @@
   "ext/host_pull_daemon.sh": "826aed96db81ecbfee1b647a1d5e4842414d43961b6daaea5a77606e9e679345",
   "ext/host_pull_launchd.plist.template": "160e322306f197149c2bf5343c08f00bd38e46768ed21cf3dd35d077869c4ac3",
   "ext/host_pull_probe.template": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
-  "ext/jev_advisory.py": "ccd54324d6d7950c933b424a65844f870b9a733f5137d148ece0a864882dcfd7",
+  "ext/jev_advisory.py": "c00bdd5c0586a94289ec40257173d4a243b9541cf1d2bda17f9266ef6a80d330",
   "ext/lane_runtime.py": "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329",
   "ext/lease_broker.py": "a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406",
   "ext/linux_process_identity.py": "e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2",
