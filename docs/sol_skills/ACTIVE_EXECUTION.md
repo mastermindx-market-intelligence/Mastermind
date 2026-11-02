@@ -9,43 +9,36 @@ skill: active_execution
 
 Use this skill after current-state recovery whenever Sol is leading substantial continuing or
 modifying work in the active session. It governs the middle of a CEO turn: after `COLD_START.md`
-has found the frontier and before `CLOSEOUT.md` records the accepted result.
-
-It does **not** create a lifecycle, scheduler, retry engine, memory store, queue, permission layer,
-or background worker. Executive OS, Agent OS, GitHub, Linear, Slack, Workbench/process owners and
-provider runtimes keep their existing authority.
+has found the frontier and before `CLOSEOUT.md` records the accepted result. It does **not** create a lifecycle, scheduler, retry engine, memory store, queue, permission layer, or background worker.
+Executive OS, Agent OS, GitHub, Linear, Slack, Workbench/process owners and provider runtimes keep
+their existing authority.
 
 ## Mission
 
 Advance the highest-leverage unfinished capability through the real critical path until either:
-
-* the requested outcome is production-proven at the level the commission requires; or
-* every materially useful in-scope lane is stopped by a genuine authority, effect-uncertainty,
-  platform, or external-human boundary; or
-* Step 8 permits a verified CHECKPOINTED_CONTINUATION while the mission remains incomplete.
-
-A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
-not permission to end the whole turn while another in-scope critical-path lane remains executable.
+the requested outcome is production-proven at the level the commission requires; every materially
+useful in-scope lane is stopped by a genuine authority, effect-uncertainty, platform, or
+external-human boundary; or Step 8 permits a verified CHECKPOINTED_CONTINUATION while the mission
+remains incomplete. A detailed status artifact is not a substitute for capability advancement, and a
+blocker on one lane is not permission to end the whole turn while another in-scope critical-path
+lane remains executable.
 
 ## Durable project plan at the start, not only at handoff
 
-For any multi-phase initiative, first recover the Agent OS workstream waves and the
-latest dated handoff (the pinned plan), then the repo master plan's task tree, or
-create a useful initial task tree when no legitimate one exists. Follow
-`docs/CEO_PROJECT_PLAN_CONTINUITY.md` from this same protected pin. Record stable
-task/subtask IDs, dependencies, `DONE_WHEN`, expected evidence and review on the
-task tree. Keep wave status, `next_action` and `do_not_redo` on the Agent OS records.
-Verify the first durable GitHub save and the authorized handoff readback as available
-**before major delegation or construction**.
-This is a phase-level safety requirement, not an approval loop or a requirement to
-pre-write every tiny implementation command. If a writer is unavailable, identify
-which record is missing and never pretend an unsaved plan is durable.
+For any multi-phase initiative, first recover the Agent OS workstream waves and the latest dated
+handoff (the pinned plan), then the repo master plan's task tree, or create a useful initial task
+tree when no legitimate one exists; follow `docs/CEO_PROJECT_PLAN_CONTINUITY.md` from this same
+protected pin for the record layout, writers and readbacks. Verify the first durable GitHub save
+and the authorized handoff readback as available **before major delegation or construction**. This
+is a phase-level safety requirement, not an approval loop or a requirement to pre-write every tiny
+implementation command; if a writer is unavailable, identify which record is missing and never
+pretend an unsaved plan is durable.
 
-On material progress, accepted rulings, child returns, dependency changes and risky
-session boundaries, revise the affected task-tree nodes or wave fields through that
-owner's writer, read back the revision, and amend the latest dated Agent OS handoff.
-Keep completed work and pending effects precise. A saved plan/checkpoint does not end
-the active turn or grant a new operator, runtime or chat authority.
+On material progress, accepted rulings, child returns, dependency changes and risky session
+boundaries, revise the affected task-tree nodes or wave fields through that owner's writer, read
+back the revision, and amend the latest dated Agent OS handoff, keeping completed work and pending
+effects precise. A saved plan/checkpoint does not end the active turn or grant a new operator,
+runtime or chat authority.
 
 ## Start and recover without administrative ceremony
 
@@ -65,7 +58,7 @@ authentication or user-consent boundary; do not treat those as administrative ce
 **Responsibility survives a chat; a chat does not own work forever.** Separate the accountable role,
 current receiver assignment and exclusive execution/source lease. A historical title, old PR author,
 archived Web chat or Agent OS claim is not current liveness. Inspect fresh live claim, source-writer
-custody and pending effects once through their existing owners. An observation failure means unknown
+custody and pending effects once through their existing owners; an observation failure means unknown
 is not expired. Preserve any live or EFFECT_UNKNOWN modifier; no timeout, archived tab or handoff
 silently clears its fence. Use existing compare-and-swap/fencing and successor/recovery admission to
 replace an actual lease. Where current assignment exists and no lease, writer or pending effect is
@@ -89,7 +82,7 @@ do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
 
 **Action-scoped refusal is not mission-wide refusal.** If one tool request is denied, record the
 precise action, target, originating carrier, receipt, and whether any effect dispatched. Hold that
-specific denied action. Do not treat the refusal as proof that all other tasks, repositories,
+specific denied action; do not treat the refusal as proof that all other tasks, repositories,
 read-only inspections, or Fabric operations are barred. Continue the highest-value independent
 task using an admitted worker where allowed, with a distinct task identity and no replay of the
 denied effect. A different task must be genuinely separable in authority, target, and intended
@@ -98,20 +91,18 @@ with `EFFECT_NONE` may be recovered only within the bounds already allowed for t
 category. `EFFECT_UNKNOWN` must be reconciled at the original target before any further operation
 depending on it.
 
-Establish refusal provenance before projecting it onto another session. Identify the actual
-tool/provider receipt, originating surface/carrier, action/target, and dispatch/effect state.
-A handoff's claim, an assistant's own refusal, a current system/developer policy restriction,
-a human-imposed scope restriction, and a current tool denial are different evidence.
-Preserve the named held effect while checking the record;
-never replay it to discover whether the earlier refusal was real. An unverified historical
-claim is not proof of a current platform-wide restriction or a requirement for an invented
-clearance receipt. Permitted non-effectful local inspection may establish the current surface.
-A later direct human instruction in the current session's own instruction record can revise
-human-imposed scope; a handoff's report of an earlier grant remains a claim to verify.
-It cannot clear an applicable
-system/developer restriction, real tool/provider denial, live lease or EFFECT_UNKNOWN. Local
-Codex/Claude native tools do not require optional Web/Studio Direct/Executive connectivity;
-they remain subject to their actual grants and all applicable effect fences.
+Establish refusal provenance before projecting it onto another session: identify the actual
+tool/provider receipt, originating surface/carrier, action/target, and dispatch/effect state. A
+handoff's claim, an assistant's own refusal, a current system/developer policy restriction,
+a human-imposed scope restriction, and a current tool denial are different evidence. Preserve the
+named held effect while checking the record; never replay it to discover whether the earlier refusal
+was real. An unverified historical claim is not proof of a platform-wide restriction or a requirement
+for an invented clearance receipt; permitted non-effectful local inspection may establish the current
+surface. A later direct human instruction in the current session's own instruction record can revise
+human-imposed scope; a handoff's report of an earlier grant remains a claim to verify and cannot
+clear an applicable system/developer restriction, real tool/provider denial, live lease or
+EFFECT_UNKNOWN. Local Codex/Claude native tools remain subject to their actual grants and effect
+fences without optional Web/Studio Direct/Executive connectivity.
 
 EFFECT_NONE is not retry permission. The first explicit safety or permission denial ends retry for
 that action. Do not rephrase it or change tools, carriers, accounts, models or providers to get the
@@ -207,29 +198,15 @@ round, polling cadence or status artifact.
 
 ## Step 1 — Freeze the active-turn frame
 
-After recovery/reconciliation, keep one compact working frame:
-
-```text
-OUTCOME
-CURRENT_CRITICAL_DEPENDENCY
-ACTIVE_LANE
-ACTIVE_PHASE
-PHASE_DONE_WHEN
-ALLOWED_SURFACES
-DEFERRED_NONBLOCKING_FINDINGS
-HELD_OR_BLOCKED_LANES
-LAST_MATERIAL_CAPABILITY_DELTA
-LAST_DURABLE_EFFECT
-MATERIAL_INVALIDATORS_SINCE_PIN
-TOOL_SURFACE_STATE
-FINALIZATION_CLASSIFICATION
-```
-
-This is an ephemeral reasoning aid, not a new truth store. Do not persist it as another lifecycle
-ledger. Exact durable facts still belong to their canonical owners.
-
-`CURRENT_CRITICAL_DEPENDENCY` is the next dependency whose completion most directly unlocks the
-requested outcome. Do not replace it with the easiest available task merely to show activity.
+After recovery/reconciliation, keep one compact working frame listing `OUTCOME`,
+`CURRENT_CRITICAL_DEPENDENCY`, `ACTIVE_LANE`, `ACTIVE_PHASE`, `PHASE_DONE_WHEN`,
+`ALLOWED_SURFACES`, `DEFERRED_NONBLOCKING_FINDINGS`, `HELD_OR_BLOCKED_LANES`,
+`LAST_MATERIAL_CAPABILITY_DELTA`, `LAST_DURABLE_EFFECT`, `MATERIAL_INVALIDATORS_SINCE_PIN`,
+`TOOL_SURFACE_STATE`, and `FINALIZATION_CLASSIFICATION`. This is an ephemeral reasoning aid, not a
+new truth store; do not persist it as another lifecycle ledger, and exact durable facts still belong
+to their canonical owners. `CURRENT_CRITICAL_DEPENDENCY` is the next dependency whose completion most
+directly unlocks the requested outcome; do not replace it with the easiest available task merely to
+show activity.
 
 `ACTIVE_PHASE` is the one coherent semantic unit currently being executed. `PHASE_DONE_WHEN` names
 its observable exit condition and `ALLOWED_SURFACES` bounds the files, tools, repositories, browser
@@ -307,19 +284,15 @@ with their existing owners. A mode switch is not context rotation or proof that 
 At a continuation boundary, record the recommended next mode and why when that fact materially affects
 recovery.
 
-
 ## Step 2 — Execute one observable capability step
 
 Choose the next material action inside `ACTIVE_PHASE` that can advance the current dependency.
 A single action may require many necessary tool operations; do not fragment productive depth merely
-to keep a turn short. Prefer work that produces one of these observable deltas:
-
-* a previously absent user/machine capability now works;
-* a blocking implementation defect is removed;
-* a required real-path proof is obtained;
-* a required authority/review/release gate is truthfully closed;
-* a durable worker/process is lawfully started for work that should outlive this reasoning turn;
-* a material uncertainty is converted into an exact known state that unlocks the next action.
+to keep a turn short. Prefer work that produces one of these observable deltas: a previously absent
+user/machine capability now works; a blocking implementation defect is removed; a required real-path
+proof is obtained; a required authority/review/release gate is truthfully closed; a durable
+worker/process is lawfully started for work that should outlive this reasoning turn; or a material
+uncertainty is converted into an exact known state that unlocks the next action.
 
 Run the action through the canonical owner/tool. Preserve source-writer custody, one-carrier effect
 reconciliation, and all modification gates from `INDEX.md`.
@@ -335,12 +308,11 @@ implement, validate, and repair within its granted limits without asking the par
 Compare framing + review + expected repair + critical-path delay against direct execution and the
 value of useful principal work available in parallel. The cheapest token is not necessarily the
 cheapest accepted result. Keep substantial direct work when one of these reasons actually applies:
-
-* `LOWER_TOTAL_OVERHEAD` — the complete direct action is smaller than dispatch and review overhead;
-* `PRINCIPAL_JUDGMENT` — execution cannot yet be separated from a consequential principal decision;
-* `UNIQUE_APPROVED_ACCESS` — only the current principal has the required approved interaction;
-* `CRITICAL_PATH_SHORTCUT` — a small direct intervention materially unlocks the accepted work;
-* `NO_ELIGIBLE_PRE_EFFECT_WORKER` — no suitable lawful worker exists and no conflicting effect began.
+`LOWER_TOTAL_OVERHEAD` (the complete direct action is smaller than dispatch and review overhead),
+`PRINCIPAL_JUDGMENT` (execution cannot yet be separated from a consequential principal decision),
+`UNIQUE_APPROVED_ACCESS` (only the current principal has the required approved interaction),
+`CRITICAL_PATH_SHORTCUT` (a small direct intervention materially unlocks the accepted work), or
+`NO_ELIGIBLE_PRE_EFFECT_WORKER` (no suitable lawful worker exists and no conflicting effect began).
 
 Record the brief reason in the existing commission/checkpoint context, not a new ledger. Reassess when discovery becomes routine execution.
 Native children follow WEB_CEO_DELEGATION section 4: paid Fabric is the eligible-labor default; native Sol is for needed reasoning/coordinator roles, not routine labor or a silent response to a Fabric blocker.
@@ -391,13 +363,12 @@ justify bypassing the currently admitted graph or increasing budget/depth from p
 ## Step 3 — Require a capability delta, not activity
 
 After each material action, ask only what changed in externally recoverable capability state.
-
-Supporting work includes archaeology, manifests, reviews, ledgers, receipts, documentation, test
-runs, refactors, handoffs, review requests, notifications, status reads, projection lookups,
-checkpoint/comments, CI observations and status summaries. Supporting work is valuable when it unlocks,
-de-risks, proves the capability, or resolves a blocking uncertainty. It is not itself forward motion
-merely because it is thorough or externally visible. A review request, owner message, checkpoint,
-status read, projection lookup, or CI observation is a capability delta only when its observed result
+Supporting work — archaeology, manifests, reviews, ledgers, receipts, documentation, test runs,
+refactors, handoffs, review requests, notifications, status reads, projection lookups,
+checkpoint/comments, CI observations and status summaries — is valuable when it unlocks, de-risks,
+proves the capability, or resolves a blocking uncertainty. It is not itself forward motion merely
+because it is thorough or externally visible: a review request, owner message, checkpoint, status
+read, projection lookup, or CI observation is a capability delta only when its observed result
 actually closes a gate or changes what can safely happen next.
 
 If two consecutive material work cycles produce **no capability delta and no newly resolved blocking
@@ -421,11 +392,10 @@ When the active lane hits a boundary:
 capacity hold, or notification does not make the mission wait as a whole. While any independent useful
 lane remains authorized and safe, move to it in the same turn. Waiting alone can justify finalization
 only through an otherwise-valid Step 8 class; a mere request/delivery/notification is not durable
-execution and does not establish an all-lanes blocker.
-
-Example: a local administrator authentication ceremony blocks installation, but nonprivileged
-preflight, exact release qualification, or a disjoint implementation dependency remains available.
-The authentication gate stops installation only; it does not terminate the CEO turn.
+execution and does not establish an all-lanes blocker. Example: a local administrator authentication
+ceremony blocks installation, but nonprivileged preflight, exact release qualification, or a disjoint
+implementation dependency remains available; the authentication gate stops installation only, not the
+CEO turn.
 
 Never route around a denial or `EFFECT_UNKNOWN` mutation by changing carriers, devices, providers, or
 tools. Lane switching is for genuinely independent permitted work. An `EFFECT_UNKNOWN` in one lane
@@ -435,15 +405,9 @@ effect; freeze the uncertain lane and continue only work whose safety and result
 ## Step 5 — Bound reconciliation and concurrent-session churn
 
 Freeze the exact repo/PR/branch/operation identities needed for the next action. Reconcile again only
-when a **material invalidator** could change that action, such as:
-
-* the owned carrier/head changed;
-* governing authority/procedure changed;
-* a dependency or imported interface changed;
-* a worker returned material evidence;
-* a modifying effect became ambiguous;
-* a relevant production/runtime generation changed.
-
+when a **material invalidator** could change that action: the owned carrier/head changed; governing
+authority/procedure changed; a dependency or imported interface changed; a worker returned material
+evidence; a modifying effect became ambiguous; or a relevant production/runtime generation changed.
 Unrelated protected-master movement, another session's path-disjoint merge, or a new status message is
 not a reason to restart global archaeology. Apply the bounded compatibility rules in
 `RECONCILE_STATE.md` and return to execution.
@@ -451,24 +415,19 @@ not a reason to restart global archaeology. Apply the bounded compatibility rule
 ## Step 6 — Discover exact action capability, then react to evidence
 
 Use the current effective tool/action surface rather than assumptions. For host tools, apply the current
-protected host-discovery procedure when present. Within a stable connection/generation:
-
-* classify the exact requested action family before making a capability claim; a route or provider name
-  is too coarse when READ, WRITE, ADMIN, browser, process, or another action class differs;
-* discover the needed schema/capability once for the exact requested action family and record the discovery result from the current
-  generation;
-* when a non-mutating permission/capability/binding preflight exists, use it before declaring the
-  requested action unavailable;
-* record a tool lane as usable, degraded, refused, or unknown from direct evidence;
-* do not repeatedly rediscover the same failure in place of useful work;
-* re-probe only after a connection/device/schema change, a relevant selected-mode/session change,
-  an explicit recovery signal, or when the next critical action genuinely requires fresh proof.
+protected host-discovery procedure when present. Within a stable connection/generation: classify the
+exact requested action family before making a capability claim (a route or provider name is too coarse
+when READ, WRITE, ADMIN, browser, process, or another action class differs); discover the needed schema/capability once for the exact requested action family and record the discovery result from the
+current generation; when a non-mutating permission/capability/binding preflight exists, use it before
+declaring the requested action unavailable; record a tool lane as usable, degraded, refused, or unknown
+from direct evidence; do not repeatedly rediscover the same failure in place of useful work; and
+re-probe only after a connection/device/schema change, a relevant selected-mode/session change, an
+explicit recovery signal, or when the next critical action genuinely requires fresh proof.
 
 `UNKNOWN` / `UNPROBED` is never equivalent to `UNAVAILABLE`. Absence from the tools already used,
 a read-only call path, a failed lookup, or a successful READ does not prove that a WRITE/ADMIN action
 is unavailable. If safe discovery or a non-effectful preflight for the requested action family remains
 possible, perform it in the same turn; the truthful active-turn state remains `MORE_WORK_EXISTS`.
-
 Never perform a dummy mutation solely to prove capability. If only an effectful probe exists and the
 actual action is not yet authorized or safe, keep the requested action `UNKNOWN` / `UNPROBED`
 rather than fabricating a negative claim.
@@ -478,16 +437,11 @@ the requested action family; discovery result; permission/capability/binding pre
 explicit refusal/error; exact target/binding scope; whether any safe probe remains; and the exact
 human/admin ceremony if one truly remains.
 
-Keep four axes separate:
-
-* technical tool/action exposure;
-* authenticated resource permission/serviceability;
-* organizational/source-writer authority;
-* effect state.
-
-A missing or denied axis must not be rewritten as another. Technical availability never grants
-organizational permission; unknown organizational permission never proves technical absence; and
-`EFFECT_UNKNOWN` remains an effect fact rather than a capability fact.
+Keep four axes separate: technical tool/action exposure; authenticated resource permission/serviceability;
+organizational/source-writer authority; and effect state. A missing or denied axis must not be rewritten
+as another: technical availability never grants organizational permission, unknown organizational
+permission never proves technical absence, and `EFFECT_UNKNOWN` remains an effect fact rather than a
+capability fact.
 
 A worker/COO `BLOCKED` or `DECISION_REQUEST` that rests on a negative capability claim is return
 evidence, not a self-authenticating Chairman/platform gate. Before escalating it, the action-authoritative
@@ -497,28 +451,27 @@ missing and the repair is within existing scope, issue the lawful same-carrier `
 after the exact capability/authority/human ceremony is actually proven or another current source law
 requires Chairman judgment.
 
-A listed/online device is not proof its backend can execute. A successful ping is not proof of file,
+A listed/online device is not proof its backend can execute: a successful ping is not proof of file,
 process, browser, desktop, or provider-session readiness. Conversely, one degraded connector does not
 make unrelated GitHub/research/file lanes unavailable.
 
 ## Step 7 — Offload work that should outlive the reasoning turn
 
 A ChatGPT reasoning turn is not a daemon. Once Sol sends a final response, local reasoning and tool
-execution for that turn stop.
-
-When work involves long waits, builds, tests, external workers, durable process handles, or provider
-execution that should survive the current turn, use the existing production-proven Executive,
-Workbench/process, provider-worker, watcher/dialogue, or other canonical owner when current authority
-allows it. Record the exact Job/Attempt/process/operation identity and return path.
+execution for that turn stop. When work involves long waits, builds, tests, external workers, durable
+process handles, or provider execution that should survive the current turn, use the existing
+production-proven Executive, Workbench/process, provider-worker, watcher/dialogue, or other canonical
+owner when current authority allows it, and record the exact Job/Attempt/process/operation identity and
+return path.
 
 Never claim work will continue in the background unless a real external durable owner has accepted or
 started it and canonical evidence supports that claim. `QUEUED`, delivered, acknowledged, started,
 running, completed and accepted remain distinct. A GitHub review request, Slack notification, owner
-inquiry, CI trigger, or message delivery is not `DURABLE_EXECUTION_RUNNING`; without an accepted/started
-execution identity and lawful return/wake path, continue useful foreground work instead of ending to wait.
-
-If no such durable execution capability is production-proven for the needed action, continue useful
-work in the present turn and report that limitation truthfully at the eventual stop boundary.
+inquiry, CI trigger, or message delivery is not `DURABLE_EXECUTION_RUNNING`; without an
+accepted/started execution identity and lawful return/wake path, continue useful foreground work
+instead of ending to wait. If no such durable execution capability is production-proven for the needed
+action, continue useful work in the present turn and report that limitation truthfully at the eventual
+stop boundary.
 
 ## Step 7A — Preserve operational continuity before interruption
 
@@ -539,7 +492,6 @@ persistence to the final response. Preserve mission/scope and authority refs; ex
 identities; last verified effect; accepted work and DO_NOT_REDO; rejected approaches and why;
 research hypotheses and falsifiers; active children/returns; unresolved effects; evidence refs;
 and the exact next action. A missing field stays explicitly unknown rather than being invented.
-
 The working checkpoint belongs to existing Agent OS/Runtime/artifact owners. It is distinct from an
 immutable transfer capsule: do not overwrite a prepared capsule for the same target Attempt or
 create a second latest-state store. A new chat does not transfer a lease or source custody. Follow
@@ -596,18 +548,18 @@ DO_NOT_REDO; the successor loads the durable frontier plus only the minimum fres
 ## Step 8 — Final-response gate
 
 Before ending a substantial active-execution turn, classify the state into exactly one of:
-
-* `PROVEN_OUTCOME` — the requested capability meets its declared completion/proof law;
-* `EXACT_HUMAN_GATE` — the only remaining critical action requires a specific human/admin ceremony
-  that this session cannot lawfully perform, and every other useful in-scope lane is exhausted;
-* `EFFECT_UNKNOWN` — an unresolved modifying effect makes every remaining useful in-scope action
-  unsafe or dependent on that unknown effect; same-carrier reconciliation is required before any
-  further scoped continuation can be safe;
-* `ALL_SCOPED_LANES_BLOCKED` — every materially useful authorized lane is blocked, with exact blockers
-  and next owners known;
-* `DURABLE_EXECUTION_RUNNING` — real external durable execution is proven started/running under its
-  canonical owner, with a lawful return/wake path armed; local turn continuation would add no useful
-  work until that result arrives.
+`PROVEN_OUTCOME` (the requested capability meets its declared completion/proof law);
+`EXACT_HUMAN_GATE` (the only remaining critical action requires a specific human/admin ceremony
+that this session cannot lawfully perform, and every other useful in-scope lane is exhausted);
+`EFFECT_UNKNOWN` (an unresolved modifying effect makes every remaining useful in-scope action
+unsafe or dependent on that unknown effect; same-carrier reconciliation is required before any
+further scoped continuation can be safe);
+`ALL_SCOPED_LANES_BLOCKED` (every materially useful authorized lane is blocked, with exact blockers
+and next owners known);
+`DURABLE_EXECUTION_RUNNING` (real external durable execution is proven started/running under its
+canonical owner, with a lawful return/wake path armed; local turn continuation would add no useful
+work until that result arrives);
+or the continuation disposition below.
 
 `PLATFORM_FAILURE` is a blocker reason, not a finalization classification. Project it into
 `ALL_SCOPED_LANES_BLOCKED` when every useful lane is blocked, or `EXACT_HUMAN_GATE` when a specific
@@ -618,23 +570,24 @@ disposition: use `EFFECT_UNKNOWN` only for an ambiguous checkpoint write, `EXACT
 for a real human/admin ceremony, `ALL_SCOPED_LANES_BLOCKED` for a proven persistence/platform outage
 only when every useful lane is blocked, and `MORE_WORK_EXISTS` when safe independent work remains.
 
-* `CHECKPOINTED_CONTINUATION` — a procedural turn disposition, not an Executive Job/Attempt status.
-  The mission is explicitly incomplete (`MISSION_COMPLETE: false`). This is permitted only when
-  all of the following hold:
-  1. An observed continuity risk, materially heavy/context-expanding next phase that would consume the
+`CHECKPOINTED_CONTINUATION` — a procedural turn disposition, not an Executive Job/Attempt status.
+The mission is explicitly incomplete (`MISSION_COMPLETE: false`). This is permitted only when
+all of the following hold:
+
+1. An observed continuity risk, materially heavy/context-expanding next phase that would consume the
      safe landing reserve, or a genuinely required surface/context transition justifies ending this turn.
      The older shorthand `specific chunk boundary or observed continuity risk` is preserved here only as
      a compatibility phrase: a specific chunk boundary alone is no longer sufficient. An ordinary clean
      task/phase/chunk/checkpoint boundary, review request, owner message, pending CI, completed plan or arbitrary time target
      is insufficient while healthy useful authorized work remains; elapsed time alone never satisfies this gate.
-  2. The current cumulative checkpoint has a verified persistence receipt/readback from its existing
+2. The current cumulative checkpoint has a verified persistence receipt/readback from its existing
      owner, with an exact immutable revision or digest. It covers all material effects through this
      boundary, not merely an older snapshot.
-  3. Mission/scope, authority, source identities, accepted/rejected work, pending effects, active
+3. Mission/scope, authority, source identities, accepted/rejected work, pending effects, active
      children/returns, evidence and unfinished obligations remain recoverable.
-  4. An exact next action and intended resume surface are supplied; no autonomous wake is claimed
+4. An exact next action and intended resume surface are supplied; no autonomous wake is claimed
      without an actually proven return path. A fresh chat is a presentation change, not admission.
-  5. Source custody, same-carrier reconciliation and successor gates remain intact. An unresolved
+5. Source custody, same-carrier reconciliation and successor gates remain intact. An unresolved
      effect must remain explicitly frozen, never silently transferred or retried.
 
 A checkpoint is not itself a reason to stop. A permitted continuation protects the remaining mission;
@@ -655,11 +608,9 @@ exact object/revision before retry. A chat-only or local scratch note is not a d
 If no authorized persistent path is reachable, avoid further effects that enlarge the unrecoverable
 gap; emit one copyable `NOT_CANONICALLY_PERSISTED` frontier containing the last durable ref, unresolved
 uncertainties/effects, DO_NOT_REDO, and exact next action. Do not loop on checkpoint writes. The
-successor must reconcile and persist it before treating it as durable. Classify from observed cause:
-`EFFECT_UNKNOWN` only for an ambiguous checkpoint write, `EXACT_HUMAN_GATE` only for a real
-human/admin ceremony, a proven persistence/platform outage as `ALL_SCOPED_LANES_BLOCKED` only when
-every useful lane is blocked, and `MORE_WORK_EXISTS` when safe independent work remains. Never
-fabricate `CHECKPOINTED_CONTINUATION`; the emergency note proves neither persistence nor effect state.
+successor must reconcile and persist it before treating it as durable. Classify from observed cause
+using the same mapping as above, and never fabricate `CHECKPOINTED_CONTINUATION`; the emergency note
+proves neither persistence nor effect state.
 
 If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**. Select the highest-leverage
 unblocked dependency and continue execution while the surface remains healthy, including across task and
@@ -674,67 +625,13 @@ or because enough prose was produced.
 
 ## Step 9 — Make every genuine stop recoverable
 
-When a permitted finalization class is reached, leave:
-
-```text
-FINALIZATION_CLASSIFICATION
-CAPABILITY_DELTA
-EXACT_CURRENT_IDENTITIES
-BLOCKED_LANES_AND_REASON
-DURABLE_EXECUTION_OR_RETURN_REF (if any)
-EXACT_NEXT_ACTION
-WHAT_MUST_NOT_BE_REDONE
-CHECKPOINT_REVISION_AND_VERIFICATION (for continuation)
-MISSION_COMPLETE: false (for continuation)
-INTENDED_RESUME_SURFACE (for continuation)
-```
-
-Use `CLOSEOUT.md` after material implementation, proof, ruling, reconciliation or handoff so a fresh
-session can recover without this chat. Store each fact only in its existing canonical owner.
-
-## Pressure cases
-
-### A — local human gate, another lane open
-
-Installation reaches a native administrator prompt. Source/release qualification and nonprivileged
-preflight remain unfinished and path-disjoint. Correct behavior: freeze installation as
-`HUMAN_AUTH`, continue the best unblocked lane, and do not finalize as `EXACT_HUMAN_GATE` yet.
-
-### B — GitHub reads observed, write unprobed
-
-A session has successfully read GitHub state. The next lawful step requires a GitHub write-class
-action, but the session has not yet inspected the current write action family or repository
-permission/serviceability. Correct behavior: classify WRITE as `UNKNOWN` / `UNPROBED`, discover the
-current GitHub write actions and use a non-mutating permission/preflight when available, then continue
-to the separate organizational/source-writer gate. Do not emit `EXACT_HUMAN_GATE` merely because the
-first calls were read-oriented.
-
-### B2 — exact write refusal is proven
-
-The requested GitHub write action family is current and discovered, and an exact non-mutating
-permission/serviceability preflight returns an explicit refusal for the bound repository scope.
-Correct behavior: preserve that current refusal as technical/resource evidence, keep
-organizational/source-writer authority separate, name the exact remaining admin ceremony when one
-exists, and continue any independent useful lane. Do not issue a dummy mutation to double-check the
-refusal and do not broaden one repository denial into a platform-wide write claim.
-
-### C — protected master moves on unrelated paths
-
-The candidate-owned blobs and governing material source are unchanged. Correct behavior: perform the
-bounded compatibility check required by `RECONCILE_STATE.md`, then resume. Do not restart the program
-archaeology.
-
-### D — artifact substitution
-
-Two consecutive cycles produce another manifest, status report or decision matrix but no capability
-delta or resolved blocker. Correct behavior: classify `NO_DELTA_LOOP`, re-plan, and execute a real
-capability step before producing more support artifacts.
-
-### E — turn-independent execution claim
-
-Sol has not started an Executive Attempt, Workbench/process handle, external worker, or equivalent
-canonical durable executor. Correct behavior: never say "work will keep running after this reply."
-If useful local work remains, continue it; otherwise stop with the exact missing durable capability.
+When a permitted finalization class is reached, leave `FINALIZATION_CLASSIFICATION`,
+`CAPABILITY_DELTA`, `EXACT_CURRENT_IDENTITIES`, `BLOCKED_LANES_AND_REASON`,
+`DURABLE_EXECUTION_OR_RETURN_REF` (if any), `EXACT_NEXT_ACTION`, `WHAT_MUST_NOT_BE_REDONE`, plus
+`CHECKPOINT_REVISION_AND_VERIFICATION`, `MISSION_COMPLETE: false`, and `INTENDED_RESUME_SURFACE`
+for continuation. Use `CLOSEOUT.md` after material implementation, proof, ruling, reconciliation or
+handoff so a fresh session can recover without this chat. Store each fact only in its existing
+canonical owner.
 
 ## Role-aware pressure cases
 
@@ -774,7 +671,6 @@ A substantial CEO continuation passes this skill when:
 * the final stop classification and exact next action are recoverable by a fresh session; and
 * no new lifecycle, queue, retry, memory, permission, or control plane was created to enforce this
   procedure.
-
 
 ## Procedural ownership and companion enrollment
 

@@ -15,33 +15,21 @@ unchanged.
 **Fable is not the default worker. Included Chat web with non-Pro reasoning is the default Sol-class
 cognition surface.**
 
-Mastermind has multiple cognition surfaces, execution surfaces and worker/model tiers. CEO sessions
-must choose the **lowest-marginal-cost / least-scarce route that can reliably complete the bounded
-mission while preserving required quality, authority and independence**.
+Choose the **lowest-marginal-cost / least-scarce route that can reliably complete the bounded
+mission while preserving required quality, authority and independence**. Personal-Pro
+subscription/account, Chat web surface, and reasoning mode are separate: access to a Personal-Pro
+account or included Chat web does not select turn-billed Pro reasoning mode.
 
-Personal-Pro subscription/account, Chat web surface, and reasoning mode are separate. Access to a
-Personal-Pro account or included Chat web does not select turn-billed Pro reasoning mode.
-
-Do not send work to Fable merely because Fable is available, because the program is important,
-because the task is large, or because Fable carries the COO title. Do not move Sol-class executive
-reasoning to a metered API, Workspace Agent, ChatGPT Work or Business-credit surface merely because
-that surface is easier to automate.
-
-Before every meaningful delegation, classify:
-
-- task kind;
-- ambiguity;
-- technical/product risk;
-- repository/system scope;
-- architecture/authority sensitivity;
-- expected continuity;
-- whether the mission is sufficiently frozen to be executed by a bounded worker;
-- whether included-plan Chat cognition can perform the Sol-class reasoning reliably;
-- whether any proposed metered surface has a bounded approved economic exception.
-
-Importance and difficulty are not the same as ambiguity. A critical but fully specified migration
-may still belong to a bounded engineering worker with stronger review. Programmatic convenience is
-not the same as economic or product necessity.
+Do not send work to Fable merely because Fable is available, important, large, or titled COO, and do
+not move Sol-class executive reasoning to a metered API, Workspace Agent, ChatGPT Work or
+Business-credit surface merely because that surface is easier to automate. Before every meaningful
+delegation, classify: task kind; ambiguity; technical/product risk; repository/system scope;
+architecture/authority sensitivity; expected continuity; whether the mission is sufficiently frozen
+for a bounded worker; whether included-plan Chat cognition can perform the Sol-class reasoning
+reliably; and whether any proposed metered surface has a bounded approved economic exception.
+Importance and difficulty are not ambiguity: a critical but fully specified migration may still
+belong to a bounded engineering worker with stronger review, and programmatic convenience is not
+economic or product necessity.
 
 ## 1A. Difficulty-signal calibration law
 
@@ -57,16 +45,15 @@ separate:
 - `topology`: parent, worker, subagent, reviewer or coordinator role;
 - required capabilities, context breadth and continuity.
 
-**Topology is not difficulty.** A task does not become harder because it is delegated to a
-subagent, reviewer, worker, or child session. A provider's generic `subagent` model setting must not
-silently promote a routine child to a stronger model than the routine worker default. If a child
-mission actually requires a stronger tier, the parent must classify that bounded child by its own
-complexity and record the escalation reason.
+**Topology is not difficulty.** Delegation to a subagent, reviewer, worker or child does not make a
+task harder, and a provider's generic `subagent` model setting must not silently promote a routine
+child above the routine worker default; if a child mission actually requires a stronger tier, the
+parent must classify that bounded child by its own complexity and record the escalation reason.
 
 **Business impact is not difficulty.** `material` or `critical` business impact can require
 independent review, stronger validation, rollback planning or Chairman/authority gates while the
-builder remains a routine bounded worker. Do not translate business impact directly into
-`critical` execution risk or `high` ambiguity.
+builder remains a routine bounded worker; do not translate it into `critical` execution risk or
+`high` ambiguity.
 
 Use these bounded complexity classes when an orchestrator has to choose a provider/model class:
 
@@ -87,22 +74,16 @@ C3_FRONTIER_JUDGMENT
   coordination that cannot be safely decomposed first
 ```
 
-Default down, escalate on evidence. `C0` and `C1` use the least-scarce qualified fast/routine
-worker. `C2` may use a stronger standard/hard worker. `C3` is the only complexity class that
-justifies a frontier principal/model merely because of reasoning difficulty.
-
-A frontier route must name at least one concrete `FRONTIER_WITNESS` from the C3 definition above.
-The following are **not** frontier witnesses by themselves:
-
-- the parent program is important, expensive, customer-facing or production-bound;
-- many files exist, the repository is large, or the prompt/context is long;
-- the task can write code or run tests;
-- the worker is a subagent, coordinator, reviewer or child;
-- a frontier model is available or has unused quota;
-- the orchestrator is uncertain because it has not yet decomposed the mission.
-
-When the task is large but separable, first split it into bounded missions and classify each child.
-Do not promote the whole program to a frontier model because one subproblem is difficult.
+Default down, escalate on evidence: `C0`/`C1` use the least-scarce qualified fast/routine worker,
+`C2` may use a stronger standard/hard worker, and `C3` is the only complexity class that justifies a
+frontier principal/model merely because of reasoning difficulty. A frontier route must name at least
+one concrete `FRONTIER_WITNESS` from the C3 definition above. None of these is a frontier witness by
+itself: an important, expensive, customer-facing or production-bound program; many files, a large
+repository or a long prompt; the ability to write code or run tests; a subagent, coordinator,
+reviewer or child topology; an available or under-quota frontier model; or orchestrator uncertainty
+caused by not yet decomposing the mission. When the task is large but separable, first split it into
+bounded missions and classify each child; do not promote the whole program because one subproblem is
+difficult.
 
 For meaningful external-worker routing, preserve these decision facts in the existing routing /
 commission evidence where that carrier already supports them:
@@ -117,7 +98,7 @@ FRONTIER_WITNESS: <NONE or one concrete C3 witness>
 ```
 
 These fields are explanatory classification evidence, not a new router, lifecycle record, quota
-ledger, placement authority or runtime schema. Existing Executive OS / Model Router / Capacity
+ledger, placement authority or runtime schema; existing Executive OS / Model Router / Capacity
 owners remain canonical.
 
 ## 1B. Operator-first completion economics
@@ -131,8 +112,8 @@ principal, quality or authority responsibilities. Role and topology never manufa
 witness. Deterministic work remains deterministic; each bounded child retains its own task fit.
 
 Sol/Opus remain program executives and exceptional specialists rather than mandatory routine
-management. Astra/Fable remain optional strategic principals. Omit any layer that adds only relay
-cost. Direct CEO -> worker remains allowed when its complete closure is cheaper or a concrete
+management, and Astra/Fable remain optional strategic principals. Omit any layer that adds only
+relay cost. Direct CEO -> worker remains allowed when its complete closure is cheaper or a concrete
 existing direct-work exception applies; the direct commissioning owner retains adjudication.
 The goal is accepted outcomes per conserved original-root budget including principal consumption,
 not a cheaper model doing one part while premium parents still manage every return.
@@ -147,11 +128,7 @@ source custody or release gates. All descendants conserve the original root and 
 
 ## 2. Mandatory Chat-native cognition law
 
-Every meaningful Sol/model delegation must apply:
-
-```text
-docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md
-```
+Every meaningful Sol/model delegation must apply `docs/EXECUTIVE_CHAT_NATIVE_SOL_HIERARCHY_LAW.md`.
 
 The default cognition receipt is:
 
@@ -180,36 +157,20 @@ EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
 STOP_CONDITION: <observable completion or abort condition>
 ```
 
-`PRO_MODE_TASK_CLASS` is closed to:
+`PRO_MODE_TASK_CLASS` is closed to `LONG_HORIZON_FRONTIER_REASONING`, `CROSS_SYSTEM_ARCHITECTURE`,
+`HARD_DEBUGGING`, and `ADVERSARIAL_JUDGMENT`. All fields are required.
+`EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes, inclusive, and therefore
+at least 80 minutes. Pro mode is categorically refused for handoffs; `ACK / PICKUP_ACK / START /
+CONTINUE / STOP` lifecycle or routing packets; status checks; monitoring / watchers / polling;
+message relay; routing / placement / foregrounding; mechanical edits or tests; simple reviews; and
+other short bounded work. A larger parent program does not make one short turn eligible. An
+incomplete, under-duration, over-duration, stale, or ineligible request produces
+`PRO_MODE_REFUSED / USE_NON_PRO_MODE`.
 
-```text
-LONG_HORIZON_FRONTIER_REASONING
-CROSS_SYSTEM_ARCHITECTURE
-HARD_DEBUGGING
-ADVERSARIAL_JUDGMENT
-```
-
-All fields are required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
-inclusive, and therefore at least 80 minutes.
-Pro mode is categorically refused for handoffs; `ACK / PICKUP_ACK / START / CONTINUE / STOP`
-lifecycle or routing packets; status checks; monitoring / watchers / polling; message relay;
-routing / placement / foregrounding; mechanical edits or tests; simple reviews; and other short
-bounded work. A larger parent program does not make one short turn eligible. An incomplete,
-under-duration, over-duration, stale, or ineligible request produces:
-
-```text
-PRO_MODE_REFUSED / USE_NON_PRO_MODE
-```
-
-The default stack below is rejected:
-
-```text
-Workspace-Agent-front-end plus API-Meta-CEO default stack is REJECTED_BY_DESIGN
-```
-
-It pays for two additional reasoning layers, replaces the fixed-cost Chat-native Sol organization,
-and causes executive cost to scale with each turn. Workspace Agents, Work, Business-credit surfaces,
-and API inference remain available only as bounded exceptions.
+The Workspace-Agent-front-end plus API-Meta-CEO default stack is REJECTED_BY_DESIGN: it pays for two
+additional reasoning layers, replaces the fixed-cost Chat-native Sol organization, and causes
+executive cost to scale with each turn. Workspace Agents, Work, Business-credit surfaces, and API
+inference remain available only as bounded exceptions.
 
 A metered cognition receipt must contain all fields:
 
@@ -223,21 +184,17 @@ STOP_CONDITION: <observable completion or abort condition>
 BUDGET_AUTHORITY: <current approved envelope or explicit Chairman decision>
 ```
 
-Missing or unapproved fields produce:
-
-```text
-METERED_ROUTE_REFUSED / WAITING_FOR_LAWFUL_ROUTE
-```
+Missing or unapproved fields produce `METERED_ROUTE_REFUSED / WAITING_FOR_LAWFUL_ROUTE`.
 
 **Convenience is not a metered-route justification.** Neither project importance, a larger advertised
 context, provider novelty, ease of programmatic orchestration, nor an unavailable preferred UI is by
 itself sufficient. First test lawful bounded decomposition, progressive disclosure, session
 rotation, another Chat-native Sol responsibility, or an already-paid worker avenue.
 
-Pro reasoning mode is not a metered cognition surface. `PRO_MODE_EXCEPTION` and
-`METERED_EXCEPTION` are independent gates: one selects a turn-billed reasoning mode on included
-Chat web; the other selects a different incrementally billed cognition surface. Neither receipt
-satisfies or authorizes the other, and the metered receipt schema remains unchanged.
+Pro reasoning mode is not a metered cognition surface. `PRO_MODE_EXCEPTION` and `METERED_EXCEPTION`
+are independent gates: one selects a turn-billed reasoning mode on included Chat web; the other
+selects a different incrementally billed cognition surface. Neither receipt satisfies or authorizes
+the other, and the metered receipt schema remains unchanged.
 
 Business / plugins / MCP remain optional companion surfaces for connection, read/write adaptation,
 app attestation, OAuth separation and reversible canaries. They do not replace included Chat web
@@ -258,75 +215,49 @@ lease/fence, merge, release or Chairman authority.
 ### SOL — executive/architecture owner
 
 Owns product thesis, systems/experience/intelligence architecture, authority adjudication, program
-decomposition, architecture freeze, adversarial review and final acceptance.
-
-Sol should not become routine implementation labor. For Sol-class cognition, apply Section 2 before
-choosing any concrete Chat, Workspace Agent, Work or API surface.
+decomposition, architecture freeze, adversarial review and final acceptance. Sol should not become
+routine implementation labor; for Sol-class cognition, apply Section 2 before choosing any concrete
+Chat, Workspace Agent, Work or API surface.
 
 ### LUNA — default fast bounded worker
 
-Use for low-ambiguity bounded labor such as:
-
-- mechanical edits;
-- fixtures;
-- tests;
-- extraction;
-- simple bugs;
-- straightforward migrations;
-- small, well-specified implementation.
-
-Prefer Luna when the packet can state the expected behavior and proof precisely enough that little
-independent architectural judgment is needed.
+Use for low-ambiguity bounded labor such as mechanical edits, fixtures, tests, extraction, simple
+bugs, straightforward migrations, and small, well-specified implementation. Prefer Luna when the
+packet can state the expected behavior and proof precisely enough that little independent
+architectural judgment is needed.
 
 ### TERRA — default standard engineering/research worker
 
-Use for:
-
-- normal feature implementation;
-- meaningful but bounded refactors;
-- elevated research;
-- standard debugging;
-- independent technical review.
-
-A substantial share of ordinary engineering that would otherwise drift to Fable should route here.
+Use for normal feature implementation, meaningful but bounded refactors, elevated research, standard
+debugging, and independent technical review. A substantial share of ordinary engineering that would
+otherwise drift to Fable should route here.
 
 ### SONNET — default Claude workhorse
 
 Use for bounded multi-step engineering, research, documentation and general execution when the
-Claude tool/workflow environment is materially useful.
-
-Prefer Sonnet over Opus or Fable unless the mission actually requires deeper judgment or principal
-continuity.
+Claude tool/workflow environment is materially useful. Prefer Sonnet over Opus or Fable unless the
+mission actually requires deeper judgment or principal continuity.
 
 ### OPUS — premium bounded specialist
 
-Use for difficult but still bounded work such as:
-
-- hard debugging;
-- complex bounded refactors;
-- adversarial review;
-- multi-service technical investigation;
-- reasoning-heavy execution after Sol has frozen the strategic boundary.
-
-Opus is not the default worker for ordinary implementation.
+Use for difficult but still bounded work such as hard debugging, complex bounded refactors,
+adversarial review, multi-service technical investigation, and reasoning-heavy execution after Sol
+has frozen the strategic boundary. Opus is not the default worker for ordinary implementation.
 
 ### CODEX — preferred engineering execution surface
 
 Use for well-specified repository work, parallel implementation waves, tests, migrations, refactors
-and isolated worktree execution.
-
-Within Codex, prefer the least-scarce capable model tier: Luna for routine work and Terra for
-standard/elevated work where those bindings are actually available. Do not automatically select
-Sol-tier execution for worker labor.
+and isolated worktree execution. Within Codex, prefer the least-scarce capable model tier: Luna for
+routine work and Terra for standard/elevated work where those bindings are actually available. Do
+not automatically select Sol-tier execution for worker labor.
 
 ### CURSOR — interactive engineering surface
 
 Use when repo-local exploration, rapid implementation, browser/visual work, or long agentic IDE
-workflows materially improve execution.
-
-Cursor is an execution surface, not a capability tier. Select the appropriate model inside Cursor
-rather than treating `Cursor` as the worker identity. Prefer faster/economical models for normal
-coding and stronger long-horizon models only when the work requires them.
+workflows materially improve execution. Cursor is an execution surface, not a capability tier:
+select the appropriate model inside Cursor rather than treating `Cursor` as the worker identity, and
+prefer faster/economical models for normal coding and stronger long-horizon models only when the
+work requires them.
 
 For independent PR source/security review, **Cursor Cloud launched through an authorized
 GitHub-native `@cursor` comment is also a permissible attended external review surface**.
@@ -363,20 +294,13 @@ Before commissioning Fable, the CEO must record:
 WHY FABLE: <specific ambiguity, cross-system dependency, architecture sensitivity, or continuity requirement that makes ordinary bounded workers insufficient>
 ```
 
-Insufficient justifications include:
-
-- `important project`;
-- `large task`;
-- `Fable is our COO`;
-- `Fable is strongest`;
-- `Fable is available`.
-
-If Sol cannot write a convincing `WHY FABLE`, route elsewhere or decompose the mission further.
+Insufficient justifications include `important project`, `large task`, `Fable is our COO`,
+`Fable is strongest`, and `Fable is available`. If Sol cannot write a convincing `WHY FABLE`,
+route elsewhere or decompose the mission further.
 
 ## 5. Decomposition law
 
 Do not select one worker/model or one paid reasoning surface for an entire major program by habit.
-
 The normal shape is:
 
 ```text
@@ -389,24 +313,19 @@ Chat-native Sol recovers intent and freezes architecture
 -> metered Sol cognition enters only under the complete exception receipt
 ```
 
-One independently useful capability per commission remains the default.
-
-A major program may legitimately contain several worker tiers and several bounded Sol
-responsibilities. Routing is per bounded mission, not per program prestige. Scale through durable
-responsibilities, parking, bounded fanout and session recycling rather than keeping hundreds of
-reasoning tabs actively generating.
+One independently useful capability per commission remains the default. A major program may
+legitimately contain several worker tiers and several bounded Sol responsibilities. Routing is per
+bounded mission, not per program prestige. Scale through durable responsibilities, parking, bounded
+fanout and session recycling rather than keeping hundreds of reasoning tabs actively generating.
 
 ## 6. Builder / reviewer separation
 
 When practical, do not use the same worker/model as both builder and independent reviewer.
-
 For consequential waves, prefer cross-model or cross-provider review when that improves
 independence without violating confidentiality, authority, availability or the cognition-economics
 law. An independent Chat-native Auditor Sol is preferred when Sol-class judgment is required and
-included-plan capacity is available.
-
-Independent review never grants the reviewer merge/release/authority rights beyond the review
-packet.
+included-plan capacity is available. Independent review never grants the reviewer merge/release or
+authority rights beyond the review packet.
 
 ## 7. Cognition route / surface / worker / authority separation
 
@@ -422,30 +341,23 @@ runtime identity: exact SessionTarget / RuntimeBinding / Attempt / Worker / leas
 ```
 
 Choosing a model, plan, application, workspace, or execution surface never grants additional
-organizational authority.
-
-Executive OS remains lifecycle authority where applicable. Agent OS remains durable organizational
-memory. Slack/Relay remains transport/hot-state. GitHub remains implementation/evidence truth.
-RuntimeBinding remains the exact current reasoning/execution surface projection. Capacity remains
-the placement and eligibility owner.
+organizational authority. Executive OS remains lifecycle authority where applicable. Agent OS remains
+durable organizational memory. Slack/Relay remains transport/hot-state. GitHub remains
+implementation/evidence truth. RuntimeBinding remains the exact current reasoning/execution surface
+projection. Capacity remains the placement and eligibility owner.
 
 ## 8. Runtime-alias honesty
 
 `docs/EXECUTIVE_WORKER_ROUTING.md` and `config/executive_worker_routes.json` describe the currently
-implemented Executive routing aliases and runtime capability. This addendum is broader CEO/manual
-routing policy.
-
-Therefore:
-
-- do not claim Chat, Sonnet, Opus, Fable, Cursor, Work, Workspace Agent, API or any named account is
-  Executive-runtime-armed unless current canonical runtime evidence proves it;
-- do not fabricate provider aliases, model slugs, credentials, quotas, budgets or session identities
-  to make the organizational policy look implemented;
-- future runtime routing should converge toward this policy through the existing deterministic
-  router, Capacity owners and Executive OS claim path, not through a second router/queue;
-- Chat creation, model selection, prompt delivery and visible browser activity are not ACK, START,
-  execution or RESULT;
-- an API or Workspace-Agent trigger acceptance is not target consumption or lifecycle progress.
+implemented Executive routing aliases and runtime capability; this addendum is broader CEO/manual
+routing policy. Therefore: do not claim Chat, Sonnet, Opus, Fable, Cursor, Work, Workspace Agent,
+API or any named account is Executive-runtime-armed unless current canonical runtime evidence proves
+it; do not fabricate provider aliases, model slugs, credentials, quotas, budgets or session
+identities to make the organizational policy look implemented; converge future runtime routing
+toward this policy through the existing deterministic router, Capacity owners and Executive OS claim
+path, not a second router/queue; and treat Chat creation, model selection, prompt delivery and
+visible browser activity as never ACK, START, execution or RESULT, and an API or Workspace-Agent
+trigger acceptance as never target consumption or lifecycle progress.
 
 Manual/session delegation may use an approved available surface even when the Executive runtime
 alias does not yet exist, but that remains manual transport and must not be mislabeled as Executive
@@ -455,56 +367,21 @@ dispatch.
 
 Once a modifying operation begins on one carrier/session, do not silently resend the same logical
 operation through another worker or surface because the first appears slow, disconnected,
-context-exhausted or ambiguous.
-
-Reconcile the first operation's canonical effect/state before rerouting. `EFFECT_UNKNOWN` blocks
-blind failover. A planned Chat context rotation uses accepted responsibility/session binding
-succession and fencing; it is not a free-form copy of the same started operation into another tab.
-
-A new worker after a reconciled terminal/failed operation receives a new lawful
-commission/operation identity as required by current source law.
+context-exhausted or ambiguous. Reconcile the first operation's canonical effect/state before
+rerouting; `EFFECT_UNKNOWN` blocks blind failover. A planned Chat context rotation uses accepted
+responsibility/session binding succession and fencing; it is not a free-form copy of the same started
+operation into another tab. A new worker after a reconciled terminal/failed operation receives a new
+lawful commission/operation identity as required by current source law.
 
 ## 10. CEO routing receipt
 
-For every meaningful Sol-class cognition or worker commission, record the cognition route first.
-
-Default included Chat form:
+For every meaningful Sol-class cognition or worker commission, record the cognition route first,
+using the complete Section 2 receipt for the selected route (`CHAT_INCLUDED_DEFAULT` with
+`NON_PRO_DEFAULT` or `PRO_MODE_EXCEPTION`, or `METERED_EXCEPTION`), plus these routing fields:
 
 ```text
-COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
-CHAT_REASONING_MODE: NON_PRO_DEFAULT
 ROUTE: <worker/model + execution surface>
 WHY: <why this route can reliably satisfy the mission>
-WHY NOT FABLE: <why principal capacity is unnecessary>
-```
-
-Pro-mode form, only for one of the four admitted long-horizon classes:
-
-```text
-COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT
-CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
-WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
-WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
-PRO_MODE_TASK_CLASS: <LONG_HORIZON_FRONTIER_REASONING|CROSS_SYSTEM_ARCHITECTURE|HARD_DEBUGGING|ADVERSARIAL_JUDGMENT>
-EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
-STOP_CONDITION: <observable completion or abort condition>
-ROUTE: <worker/model + execution surface>
-WHY: <mission fit>
-WHY NOT FABLE: <why principal capacity is unnecessary>
-```
-
-Metered form:
-
-```text
-COGNITION_ROUTE: METERED_EXCEPTION
-WHY_METERED: <specific capability, availability, or bounded economic advantage>
-WHY_PRO_CHAT_INSUFFICIENT: <specific reason included Chat cannot reliably perform this mission>
-EXPECTED_MAX_COST: <bounded estimate or approved accounting unit>
-HARD_BUDGET_CAP: <enforceable maximum>
-STOP_CONDITION: <observable completion or abort condition>
-BUDGET_AUTHORITY: <current approved envelope or explicit Chairman decision>
-ROUTE: <worker/model + execution surface>
-WHY: <mission fit>
 WHY NOT FABLE: <why principal capacity is unnecessary>
 ```
 
