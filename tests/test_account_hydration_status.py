@@ -17,6 +17,8 @@ def test_account_failure_state_uses_no_premium_grant_or_false_guest():
     assert "if (!a.authenticated && hasSessionHint())" in source
     assert "accessUnconfirmedHTML()" in source
     assert "if (_accountRequest) return _accountRequest" in source
+    assert 'a.plan_verified === true && a.plan === "free"' in source
+    assert "a.plan_verified === true && a.plan_label" in source
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="Node required for browser-script behavioral proof")
@@ -74,6 +76,8 @@ async function harness(cookie) {
     await work;
     assert.equal(h.window.__test.state().acct.authenticated, true);
     assert.match(h.root.innerHTML, /Signed in/);
+    assert.doesNotMatch(h.root.innerHTML, /Upgrade to Pro/,
+      "a paid signed-in account must not see an unverified tier-based upsell");
   }
   // When authentication or network cannot be checked, the user is not
   // reclassified as Free/guest. A neutral retry is the only account CTA.
@@ -113,6 +117,8 @@ async function harness(cookie) {
     h.reply(0, 200, {authenticated:true, email:"owner@example.org"});
     await Promise.all([first, second]);
     assert.equal(h.window.__test.state().acct.authenticated, true);
+    assert.doesNotMatch(h.root.innerHTML, /mmacc-pro-card/,
+      "verified identity alone cannot grant or upsell a marketing plan");
   }
   process.stdout.write("PASS: Bot Portfolio account pending/unavailable/guest/recovery/no-duplicate-read\n");
 })().catch(err => { console.error(err); process.exitCode = 1; });
