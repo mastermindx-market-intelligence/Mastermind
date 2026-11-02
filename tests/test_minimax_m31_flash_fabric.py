@@ -1,0 +1,147 @@
+"""No-provider regression for MiniMax M3.1 Flash within the incumbent Fabric.
+
+Tests are read-only: no lease, account credential, host, policy publication,
+worker launch, subscription spend, or installed native-generation mutation.
+"""
+from __future__ import annotations
+
+import importlib.util
+import os
+from pathlib import Path
+import subprocess
+import sys
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+NATIVE = ROOT / "ops/native_fabric"
+SOURCE = NATIVE / "quota_continuity/source"
+PICKERS = (
+    SOURCE / "pick.py",
+    NATIVE / "grok47/overlay/pick.py",
+)
+SHELLS = (
+    SOURCE / "sub.sh",
+    NATIVE / "grok47/overlay/sub.sh",
+)
+
+
+def load_picker(path: Path):
+    sys.path.insert(0, str(SOURCE))
+    spec = importlib.util.spec_from_file_location("minimax_m31_test_" + path.parent.name, path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class MiniMaxM31FlashRouting(unittest.TestCase):
+    def setUp(self):
+        self.policy = {
+            "pools": {
+                "minimax": {"default_model": "MiniMax-M3"},
+                "glm": {"models": {"executor": "glm-5.3-flash", "operator": "glm-5.3"}},
+            },
+        }
+
+    def selected(self, picker, model=None, pool="minimax"):
+        # Preserve native picker model resolution and emission, but isolate
+        # host/quality/capacity readers so this test cannot commission work.
+        with (
+            patch.object(picker, "load_pools", return_value=self.policy),
+            patch.object(picker, "policy_allows", return_value=(True, "ok")),
+            patch.object(picker, "_needs_ok", return_value=(True, "ok")),
+            patch.object(picker, "_subject_ok", return_value=(True, "ok")),
+            patch.object(picker, "hard_filter", return_value=(True, "ok")),
+            patch.object(picker, "floor_demotes", return_value=False),
+            patch.object(picker, "is_execute_class", return_value=False),
+            patch.object(picker, "launch_policy", return_value={"allowed": True}),
+        ):
+            return picker._format_pick("fix_build", pool=pool,
+                                       requested_model=model,
+                                       host_modes={"minimax": "minimax",
+                                                   "glm": "glm"})
+
+    def test_both_pickers_preserve_old_default_and_admit_only_exact_pin(self):
+        for path in PICKERS:
+            with self.subTest(path=path):
+                picker = load_picker(path)
+                self.assertEqual(
+                    picker._selection_model("minimax", "fix_build",
+                                            self.policy, model="MiniMax-M3.1-Flash")[0],
+                    "MiniMax-M3.1-Flash",
+                )
+                self.assertEqual(
+                    picker._selection_model("minimax", "fix_build",
+                                            self.policy, model="minimax-m3")[0],
+                    "MiniMax-M3",
+                )
+                default = self.selected(picker)
+                self.assertIn("MODEL=MiniMax-M3 ", default)
+                new = self.selected(picker, "MiniMax-M3.1-Flash")
+                self.assertIn("POOL=minimax ", new)
+                self.assertIn("MODEL=MiniMax-M3.1-Flash ", new)
+                old = self.selected(picker, "MiniMax-M3")
+                self.assertIn("MODEL=MiniMax-M3 ", old)
+
+    def test_wrong_pool_and_unreviewed_model_fail_closed(self):
+        for path in PICKERS:
+            with self.subTest(path=path):
+                picker = load_picker(path)
+                for model, pool in (
+                    ("MiniMax-M3.1-Flash", "glm"),
+                    ("MiniMax-M3.1-Flash", None),
+                    ("MiniMax-M3.1-Pro", "minimax"),
+                    ("MiniMax-M3.1-Flash-Other", "minimax"),
+                ):
+                    with self.subTest(model=model, pool=pool):
+                        result = self.selected(picker, model, pool)
+                        self.assertTrue(result.startswith("NONE reason="), result)
+
+    def test_claude_profiles_keep_1m_context_and_compaction_headroom(self):
+        for path in SHELLS:
+            with self.subTest(path=path):
+                text = path.read_text()
+                body = text.split("CLAUDE_WORKER_MAX_TURNS=120\n", 1)[1]
+                body = body.split("\n}\n", 1)[0] + "\n}\n"
+                program = ('CLAUDE_WORKER_MAX_TURNS=120\n' + body
+                           + '\n_claude_worker_profile "minimax" "$1" || exit $?\n'
+                           + 'printf "%s %s %s\\n" "$CLAUDE_CODE_MAX_CONTEXT_TOKENS" '
+                           + '"$CLAUDE_CODE_AUTO_COMPACT_WINDOW" "$CLAUDE_WORKER_MAX_TURNS"\n')
+                for model in ("MiniMax-M3", "MiniMax-M3.1-Flash"):
+                    result = subprocess.run(
+                        ["/bin/bash", "-c", program, "fixture", model],
+                        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                             "POOL_TASK_COMPLEXITY": "C0_MECHANICAL"},
+                        text=True, capture_output=True, timeout=8,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stdout.strip(), "1000000 900000 240")
+
+    def test_codex_profile_recognizes_m31_and_rejects_excess_context(self):
+        source = (SOURCE / "mm_codex_exec.sh").read_text()
+        segment = source.split("CODEX_CONTEXT_ARGS=()\n", 1)[1]
+        segment = segment.split("\nSTUDIO_MCP_CODEX_OVERRIDE=", 1)[0]
+        program = ('MODEL="$1"\nCODEX_CONTEXT_ARGS=()\n' + segment
+                   + '\nprintf "%s\\n" "${CODEX_CONTEXT_ARGS[*]}"\n')
+        for model in ("MiniMax-M3", "MiniMax-M3.1-Flash"):
+            result = subprocess.run(
+                ["/bin/bash", "-c", program, "fixture", model],
+                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                text=True, capture_output=True, timeout=8,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("model_context_window=1000000", result.stdout)
+            self.assertIn("model_auto_compact_token_limit=900000", result.stdout)
+        refusal = subprocess.run(
+            ["/bin/bash", "-c", program, "fixture", "MiniMax-M3.1-Flash"],
+            env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                 "POOL_MAX_CONTEXT_TOKENS": "1000001"},
+            text=True, capture_output=True, timeout=8,
+        )
+        self.assertEqual(refusal.returncode, 78)
+        self.assertIn("window_out_of_bounds", refusal.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()
