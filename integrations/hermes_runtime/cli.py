@@ -157,7 +157,17 @@ def _canary(profile_path: Path, hermes_bin: Path) -> int:
     assert_checkout_sha(current / "upstream")
     secrets = load_secrets(profile.secrets_file)
     runtime = ServiceRuntime(profile, secrets, hermes_bin)
-    model_env = runtime._model_child_env()
+    source_env = runtime._model_child_env()
+    from integrations.hermes_models.contract import native_provider
+    spec = native_provider(profile.role, profile.native_provider_id)
+    # The normal serving child currently also receives dashboard identity.
+    # This one-shot text check needs only one model key and the approved
+    # proxy; never forward dashboard Basic Auth or Slack IDs to the canary.
+    canary_keys = {
+        "PATH", "HOME", "HERMES_HOME", "LANG", "HTTPS_PROXY", "NO_PROXY",
+        spec.credential_env,
+    }
+    model_env = {key: value for key, value in source_env.items() if key in canary_keys}
     receipt = run_native_canary(
         profile, hermes_bin=hermes_bin, model_child_env=model_env,
     )
