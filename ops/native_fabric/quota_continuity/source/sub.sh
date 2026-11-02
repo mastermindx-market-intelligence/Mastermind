@@ -207,12 +207,12 @@ _claude_worker_profile() {
   local compact="${POOL_AUTO_COMPACT_WINDOW_TOKENS:-}" default_turns=120 turns=""
 
   case "$pool:$model" in
-    minimax:MiniMax-M3|minimax:minimax-m3|glm:glm-5.3|glm:glm-5.3-*|go-claude:minimax-m3|go-claude:MiniMax-M3)
+    minimax:MiniMax-M3|minimax:minimax-m3|minimax:MiniMax-M3.1-Flash|minimax:minimax-m3.1-flash|glm:glm-5.3|glm:glm-5.3-*|go-claude:minimax-m3|go-claude:MiniMax-M3)
       [ -n "$context" ] || context=1000000
       ;;
   esac
   case "$pool:$model" in
-    minimax:MiniMax-M3|minimax:minimax-m3|glm:*flash*|go-claude:minimax-m3|go-claude:MiniMax-M3)
+    minimax:MiniMax-M3|minimax:minimax-m3|minimax:MiniMax-M3.1-Flash|minimax:minimax-m3.1-flash|glm:*flash*|go-claude:minimax-m3|go-claude:MiniMax-M3)
       default_turns=240
       ;;
   esac
