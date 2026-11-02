@@ -122,8 +122,15 @@ def test_real_local_tcp_brain_responses_jev_one_shared_sqlite_rpm(tmp_path, monk
             monkeypatch.setenv(name, value)
         monkeypatch.delenv("EXPLABS_API_KEY_2", raising=False)
 
+        # Deliberately hostile ambient proxies must never receive a local
+        # scoped token. Exercise production's default HTTPX path, not merely
+        # an explicitly trust_env=False injected test client.
+        monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:9")
+        monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+        monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:9")
+        monkeypatch.setenv("NO_PROXY", "")
         with httpx.Client(timeout=10, trust_env=False) as client:
-            pool = explabs_pool.AccountPool(http_client=client)
+            pool = explabs_pool.AccountPool()
             brain = pool.complete("", "offline Brain fixture", max_tokens=200)
             assert brain.account_slot == "2"
             assert brain.text == "fixture-completed"

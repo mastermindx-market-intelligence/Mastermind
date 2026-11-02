@@ -118,12 +118,21 @@ def chat_completion(
         # catalog/smoke wire call keeps its two-field body by default.
         body["max_tokens"] = max_tokens
     post = client.post if client is not None else httpx.post
+    # A scoped local token must never follow ambient HTTP_PROXY/ALL_PROXY
+    # configuration into a non-loopback intermediary. Explicitly injected
+    # test clients own their own transport; production top-level calls must
+    # use direct loopback sockets.
+    transport_policy = (
+        {"trust_env": False}
+        if shared_gateway_origin is not None and client is None else {}
+    )
     try:
         response = post(
             f"{target}/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
             json=body,
             timeout=30.0,
+            **transport_policy,
         )
     except httpx.HTTPError:
         raise ExperientialError("explabs_transport_error") from None

@@ -152,13 +152,18 @@ class AccountPool:
         self._verified_org_ids: tuple[str, ...] | None = None
         self._eligible_set_verified = False
 
-    def _get(self, url: str, key: str) -> dict:
+    def _get(self, url: str, key: str, *, shared_gateway: bool = False) -> dict:
         transport = self._client.get if self._client is not None else httpx.get
+        transport_policy = (
+            {"trust_env": False}
+            if shared_gateway and self._client is None else {}
+        )
         try:
             result = transport(
                 url,
                 headers={"Authorization": f"Bearer {key}"},
                 timeout=10.0,
+                **transport_policy,
             )
         except httpx.HTTPError:
             raise gateway.ExperientialError("explabs_probe_transport_error") from None
@@ -177,7 +182,8 @@ class AccountPool:
 
     def _read_spend_cap(self, account: Account) -> float:
         """Verify the upstream daily *charged USD* cap before every dispatch."""
-        key_meta = self._get(account.api_origin + "/api/v1/key", account.key).get("data")
+        key_meta = self._get(account.api_origin + "/api/v1/key", account.key,
+                             shared_gateway=account.shared_gateway).get("data")
         if not isinstance(key_meta, dict):
             raise gateway.ExperientialError("explabs_probe_invalid_response")
         key_cap = _money(key_meta.get("limit"))
@@ -191,20 +197,23 @@ class AccountPool:
         return remaining
 
     def _probe(self, account: Account, model: str) -> Observation:
-        identity = self._get(account.api_origin + "/api/whoami", account.key)
+        identity = self._get(account.api_origin + "/api/whoami", account.key,
+                             shared_gateway=account.shared_gateway)
         org_slug = identity.get("org_slug")
         org_id = identity.get("org_id")
         if (not isinstance(org_id, str) or not org_id or
                 not isinstance(org_slug, str) or org_slug != account.expected_org):
             raise gateway.ExperientialError("explabs_pool_org_mismatch")
-        catalog = self._get(account.api_origin + "/v1/models", account.key).get("data")
+        catalog = self._get(account.api_origin + "/v1/models", account.key,
+                             shared_gateway=account.shared_gateway).get("data")
         if not isinstance(catalog, list) or model not in {
             row.get("id") for row in catalog if isinstance(row, dict)
             and isinstance(row.get("id"), str)
         }:
             raise gateway.ExperientialError("explabs_pool_model_not_listed")
         remaining = self._read_spend_cap(account)
-        credit_meta = self._get(account.api_origin + "/api/v1/credits", account.key).get("data")
+        credit_meta = self._get(account.api_origin + "/api/v1/credits", account.key,
+                             shared_gateway=account.shared_gateway).get("data")
         if not isinstance(credit_meta, dict):
             raise gateway.ExperientialError("explabs_probe_invalid_response")
         total_credits = _money(credit_meta.get("total_credits"))
