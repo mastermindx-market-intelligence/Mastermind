@@ -120,9 +120,11 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
     'Push exactly the current HEAD of one existing clean Mastermind attended Web workspace to its ' +
     'same host-resolved sol/web-* origin branch without force, tags, branch selection or credential input. ' +
     'Requires the caller to fence the action with the exact expected local HEAD. If the remote already ' +
-    'equals that HEAD, no push is issued. A failure after push starts is EFFECT_UNKNOWN unless remote ' +
-    'readback proves the exact HEAD is applied. EFFECT_UNKNOWN remains unresolved and carries no retry authority; ' +
-    'studio_git_publish_status exposes read-only reconciliation state for any later decision.',
+    'equals that HEAD, no push is issued. Readback of the exact pinned ref proves successful publication. ' +
+    'A Git porcelain one-ref rejection with the remote ref unchanged returns NOT_APPLIED for that ref, ' +
+    'but never grants retry or alternative-carrier permission; diagnose its unknown cause read-only on ' +
+    'the original carrier. All other unresolved push failures remain EFFECT_UNKNOWN and fenced. ' +
+    'studio_git_publish_status provides read-only reconciliation.',
   inputSchema: {
     type: 'object',
     properties: {
