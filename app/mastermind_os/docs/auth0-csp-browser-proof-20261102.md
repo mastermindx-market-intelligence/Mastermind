@@ -132,3 +132,61 @@ exercise passive expiry retention, sign-in privacy boundary, explicit logout
 and navigation-hold behavior. Browser content/audience persistence still
 requires actual tenant/first-party confirmation and separate security review.
 No browser draft, refresh token or bearer is written to persistent storage.
+
+## Independent-review REQUEST_CHANGES repair — 2026-11-02
+
+The separate exact-head independent review of web Draft PR #1928 at
+`6b900532fefe123631ce94622925374c474bf4ab` reproduced **two real
+privacy/UX blockers**. This follow-up repairs both without another identity,
+credential, browser storage, queue, retry, or publication owner:
+
+1. **Logout marker quota failure.** `localStorage.setItem(logoutKey, "1")`
+   may throw while storage reads and deletions still work. The existing
+   in-memory Auth0 client now sets its own explicit user-sign-out fact before
+   touching storage, exposes `USER_SIGNED_OUT` on the same existing auth state,
+   clears tokens and effects as before, and suppresses automatic restoration
+   even when the marker could not be stored. Each browser cleanup operation is
+   individually attempted. The App treats this event as a privacy boundary,
+   **never** as passive access-token expiry. Cross-tab `storage` logout uses
+   that same existing auth owner. A successful new interactive grant is the
+   only way to clear same-page explicit logout; failed popups remain failed.
+2. **Off-view and unmounted drafts.** The App's existing local presentation
+   owner retains user-authored Launch goal/Session message text when an
+   expiring bearer unmounts the authenticated command forms. Only this
+   plaintext user draft stays in React memory, not authority-bearing command
+   bindings, session history, selection permissions, or a pending effect.
+   The signed-out screen offers the text for copying/editing or discarding
+   with *no* Launch/Send command. Off-view Office and Conversation drafts are
+   considered in the same root navigation hold; it is released as soon as
+   retained unsent text is cleared. The source owner/selection/auth epoch
+   still fences command composer rehydration; any explicit logout, fresh
+   login, changed principal or grant clears private drafts. No draft text is
+   moved into localStorage, sessionStorage, cookies or backend services.
+
+**Tests run on M1 Studio source:** TypeScript typecheck PASS; 98 Vitest
+files, **2,004 passed, one skipped**; production Vite build PASS with the
+pre-existing large-bundle advisory. Added direct falsifiers for same-tab
+quota denial, App-level explicit logout with no storage marker, retained
+Launch/Session drafts and inaccessible commands after expiry, new-grant
+clearance, and off-view Office text on Work/Today transitions. Existing
+owner-scoping/operation/PKCE tests remain green.
+
+**Real headless Chrome** with the exact candidate bundle, production CSP and
+intercepted SYNTHETIC Auth0 code exchanges: (a) seven-second acquisition
+credential expired, state truthfully became `signed_out`, Office direction
+remained unchanged, and no second top-level redirect occurred; (b) after
+that expiry, artificially rejecting only the logout-marker `setItem` with
+`QuotaExceededError` caused the *real App* to clear the draft, report
+`USER_SIGNED_OUT`, retain no acquisition permission and remove the prior
+login hint despite the missing marker; (c) an independent synthetic
+same-origin cross-tab `StorageEvent` for the logout key also cleared the
+Office text and set `USER_SIGNED_OUT`. Each browser canary returned rc0.
+The synthetic browser runs are not a live tenant or registered API test.
+
+**Non-goals / remaining real-path gates:** no bypass of Auth0 absolute/idle
+session expiry, no silent reauthentication while a user has unsent work, no
+multi-resource Content/Executive refresh claim from Acquisition-only tests,
+no cross-user draft migration, no signed/native install or tenant setting
+changes. Browser first-party domain/session grant, current-head independent
+security review, formal non-author GitHub approval and installed release proof
+remain separate.

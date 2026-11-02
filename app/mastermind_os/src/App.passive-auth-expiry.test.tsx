@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { bindMissionHost, type AuthState, type RawClient } from "./host";
 import { canNavigateForAutomaticSignIn } from "./auth-navigation-guard";
+import userEvent from "@testing-library/user-event";
+import { navigateCompanyOperation } from "./test-operational-navigation";
 
 const initial: AuthState = { status: "signed_in", reason: null, acquisition: true, content: false };
 const expired: AuthState = { status: "signed_out", reason: null, acquisition: false, content: false };
@@ -52,6 +54,38 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     // before a fresh credential can become usable.
     await act(async () => { await web.host.auth!.signIn(); });
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("");
+  });
+
+  it("preserves a private Office draft when it is off-view at passive expiry", async () => {
+    const web = fakeWebOwner();
+    window.MastermindMissionHost = web.host;
+    const user = userEvent.setup();
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", {name:"Direction to Meta-CEO"}),
+      {target:{value:"Off-view draft needs a safe return."}});
+    await navigateCompanyOperation(user, "Work");
+    await act(async () => { web.publish(expired); });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", {name:"Direction to Meta-CEO"}).value)
+      .toBe("Off-view draft needs a safe return.");
+    expect(web.host.auth!.getState().acquisition).toBe(false);
+  });
+
+  it("drops private Office text on an explicit logout signal without a stored marker", async () => {
+    const web = fakeWebOwner();
+    window.MastermindMissionHost = web.host;
+    render(<App />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }),
+      { target: { value: "Must not survive quota-rejected logout." } });
+    expect(localStorage.getItem(logoutKey)).toBeNull();
+    await act(async () => {
+      web.publish({ status: "signed_out", reason: "USER_SIGNED_OUT",
+        acquisition: false, content: false });
+    });
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox",
+      { name: "Direction to Meta-CEO" }).value).toBe("");
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
   });
 
   it("clears retained text on explicit cross-tab logout and never bypasses the marker", async () => {

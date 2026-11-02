@@ -196,6 +196,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       deps.removeEventListener ?? window.removeEventListener.bind(window);
   const later = deps.setTimeout ?? setTimeout,
     clear = deps.clearTimeout ?? clearTimeout;
+  // Same-document logout is an auth-owner fact, not conditional on whether
+  // the browser can write the cross-tab storage marker.
+  let explicitlySignedOut = false;
   let generation = 0,
     flow: { generation: number; popup: WebPopup; cancel: () => void } | null =
       null,
@@ -242,7 +245,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
             : valid("acquisition") || valid("content")
               ? "signed_in"
               : "signed_out",
-      reason: !configured ? "CLIENT_NOT_REGISTERED" : lastError,
+      reason: !configured ? "CLIENT_NOT_REGISTERED" :
+        lastError || (explicitlySignedOut ? "USER_SIGNED_OUT" : null),
       acquisition: valid("acquisition"),
       content: valid("content"),
     };
@@ -281,6 +285,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   const onStorage = (event: StorageEvent) => {
     if (event.key !== logoutKey || event.newValue !== "1") return;
     redirectGrant = null;
+    explicitlySignedOut = true;
     cancel();
     tokens.acquisition = null;
     tokens.content = null;
@@ -550,7 +555,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
   // tokens are placed in localStorage, cookies, or sessionStorage.
   let restoring: Promise<AuthState> | null = null;
   async function restore(force = false): Promise<AuthState> {
-    if (!configured || logoutBlocked() || flow || (!force && valid("acquisition")) || restoring) {
+    if (!configured || explicitlySignedOut || logoutBlocked() || flow ||
+        (!force && valid("acquisition")) || restoring) {
       return restoring ?? Promise.resolve(getState());
     }
     const ticket = generation;
@@ -693,7 +699,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       check(current.generation);
       const acquired = ((): Token | null => tokens.acquisition)();
       if (acquired && acquired.expires > now()) {
-        // Explicit logout marker remains until a successful new login.
+        // Only a new interactive grant can clear an explicit same-tab logout.
+        explicitlySignedOut = false;
         try { localStorage.removeItem(logoutKey); } catch { /* denied */ }
         rememberSignedIn();
       }
@@ -741,6 +748,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       const acquiredResearch = ((): Token | null => tokens.research)();
       if (acquiredResearch && acquiredResearch.expires > now()) {
         // Research is a user-initiated separate grant, not automatic SSO.
+        explicitlySignedOut = false;
         try { localStorage.removeItem(logoutKey); } catch { /* denied */ }
       }
     } catch (error) {
@@ -754,12 +762,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   async function signOut() {
-    try {
-      localStorage.setItem(logoutKey, "1");
-      localStorage.removeItem(priorKey);
-      sessionStorage.removeItem(REDIRECT_PENDING_KEY);
-      sessionStorage.removeItem(REDIRECT_ATTEMPT_KEY);
-    } catch { /* unavailable browser storage */ }
+    // Apply the local privacy boundary before any storage operations. A quota
+    // refusal may reject setItem while read operations still succeed.
+    explicitlySignedOut = true;
+    try { localStorage.setItem(logoutKey, "1"); } catch { /* unavailable */ }
+    try { localStorage.removeItem(priorKey); } catch { /* unavailable */ }
+    try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* unavailable */ }
+    try { sessionStorage.removeItem(REDIRECT_ATTEMPT_KEY); } catch { /* unavailable */ }
     redirectGrant = null;
     cancel();
     tokens.acquisition = null;

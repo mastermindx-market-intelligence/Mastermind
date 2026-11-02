@@ -55,6 +55,8 @@ export interface SessionWorkspaceProps {
   sending: boolean;
   unavailableReason?: string;
   error?: string;
+  initialDraft?: string;
+  onDraftChange?: (text: string) => void;
   stopLabel?: "Interrupt turn" | "Request stop";
   stopping?: boolean;
   onSend: (text: string, onComplete: SessionCompletion) => void;
@@ -110,6 +112,8 @@ export function SessionWorkspace({
   sending,
   unavailableReason,
   error,
+  initialDraft = "",
+  onDraftChange,
   stopLabel,
   stopping,
   onSend,
@@ -119,11 +123,12 @@ export function SessionWorkspace({
   const sendId = `${formId}-send`;
 
   // Draft state — preserved until the owner reports a successful send.
-  const [draft, setDraft] = useState("");
-  const draftRef = useRef("");
+  const [draft, setDraft] = useState(initialDraft);
+  const draftRef = useRef(initialDraft);
   const setDraftText = (next: string) => {
     draftRef.current = next;
     setDraft(next);
+    onDraftChange?.(next);
   };
 
   // In-flight actions owned by this component: armed synchronously when the

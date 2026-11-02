@@ -57,6 +57,9 @@ export interface LaunchOrchestratorProps {
   blocked?: boolean;
   unavailableReason?: string;
   error?: string;
+  /** Optional App-owned presentation draft, never a credential or host state. */
+  initialDraft?: string;
+  onDraftChange?: (text: string) => void;
   onSubmit: (intent: LaunchForm, onComplete: LaunchCompletion) => void;
   onCancel: () => void;
 }
@@ -107,6 +110,8 @@ export function LaunchOrchestrator({
   blocked = false,
   unavailableReason,
   error,
+  initialDraft = "",
+  onDraftChange,
   onSubmit,
   onCancel,
 }: LaunchOrchestratorProps) {
@@ -116,7 +121,7 @@ export function LaunchOrchestrator({
   const profileId = `${formId}-profile`;
 
   // Draft state — preserved across error and rerender
-  const [draftGoal, setDraftGoal] = useState("");
+  const [draftGoal, setDraftGoal] = useState(initialDraft);
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
 
@@ -149,6 +154,7 @@ export function LaunchOrchestrator({
       // Success consumes the goal so the same intent cannot be launched twice
       // by a parent that stays mounted. A refusal keeps the draft.
       setDraftGoal("");
+      onDraftChange?.("");
     }
   };
 
@@ -253,7 +259,7 @@ export function LaunchOrchestrator({
             <textarea
               id={goalId}
               value={draftGoal}
-              onChange={(e) => setDraftGoal(e.target.value)}
+              onChange={(e) => { setDraftGoal(e.target.value); onDraftChange?.(e.target.value); }}
               rows={4}
               placeholder="Describe the objective for this launch…"
               disabled={launchPending}

@@ -213,6 +213,31 @@ describe("CSP-compatible same-tab Auth0 fallback", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("signs out in the same tab even when logout marker writes hit quota", async () => {
+    localStorage.setItem(PRIOR_KEY, "1");
+    const key = "mastermind-os-auth-logout-v1:client-fixture";
+    const original = Storage.prototype.setItem;
+    const denial = vi.spyOn(Storage.prototype, "setItem").mockImplementation(
+      function(this: Storage, item: string, value: string) {
+        if (item === key) throw new DOMException("quota", "QuotaExceededError");
+        return original.call(this, item, value);
+      });
+    try {
+      const h = harness(), client = h.makeClient();
+      const signedOut = await client.signOut();
+      expect(signedOut).toMatchObject({
+        status: "signed_out", reason: "USER_SIGNED_OUT",
+        acquisition: false, content: false,
+      });
+      expect(localStorage.getItem(key)).toBeNull();
+      // The independent remove is not skipped when setItem throws.
+      expect(localStorage.getItem(PRIOR_KEY)).toBeNull();
+      expect(await client.restore!()).toMatchObject({status:"signed_out"});
+      expect(h.navigate).not.toHaveBeenCalled();
+      expect(h.fetchFn).not.toHaveBeenCalled();
+    } finally { denial.mockRestore(); }
+  });
+
   it("invalidates active Workspace credentials across tabs and blocks automatic re-login", async () => {
     const h=harness(), client=h.makeClient();
     const pending=client.restore!();

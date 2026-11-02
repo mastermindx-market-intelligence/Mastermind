@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { canNavigateForAutomaticSignIn } from "./auth-navigation-guard";
 import { navigateCompanyOperation } from "./test-operational-navigation";
 import { bindMissionHost, type AuthState } from "./host";
 import { createWebAuth } from "./web-auth";
@@ -1753,6 +1754,54 @@ async function launchFromWork(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("App command composition", () => {
+  it("retains a user-written Launch goal after passive expiry with no command access", async () => {
+    const made = makeCommandBinding(), auth = installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await navigateCompanyOperation(user, "Work");
+    await user.type(screen.getByLabelText("Goal"), "Unsent launch goal must survive expiry.");
+    act(() => auth.notify({status:"signed_out",reason:null,acquisition:false,content:false}));
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value)
+      .toBe("Unsent launch goal must survive expiry.");
+    expect(screen.queryByRole("button", {name:"Launch"})).toBeNull();
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    await user.click(screen.getByRole("button", {name:"Discard launch goal"}));
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("does not reuse a Session draft when a different session key appears", async () => {
+    const made = makeCommandBinding(), original = made.binding.getView();
+    installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", {name:"Conversation"}));
+    await user.type(screen.getByLabelText("Message"), "Private session A note");
+    act(() => made.setView({ ...original, session: {...defaultSession, sessionKey:"sess-B"} }));
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("");
+    act(() => made.setView(original));
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value).toBe("");
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+  it("retains Session Message text after passive expiry and clears it on a new grant", async () => {
+    const made = makeCommandBinding(), auth = installCommandHost(made.binding);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", {name:"Conversation"}));
+    await user.type(screen.getByLabelText("Message"), "Unsent session text must survive expiry.");
+    act(() => auth.notify({status:"signed_out",reason:null,acquisition:false,content:false}));
+    expect((screen.getByLabelText("Message") as HTMLTextAreaElement).value)
+      .toBe("Unsent session text must survive expiry.");
+    expect(screen.queryByRole("button", {name:"Send"})).toBeNull();
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    act(() => auth.notify({status:"signing_in",reason:null,acquisition:false,content:false}));
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    expect(made.submit).not.toHaveBeenCalled();
+  });
+
+
   it("does not show a late refusal after leaving and returning to the same session", async () => {
     const response = deferred<EffectReceipt>();
     const made = makeCommandBinding({ submit: vi.fn(() => response.promise) });

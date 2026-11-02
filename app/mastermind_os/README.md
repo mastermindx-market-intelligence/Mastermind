@@ -158,3 +158,11 @@ This is a user-data safety gate, not an implementation of indefinite login;
 a saved/finished draft may be followed by explicit sign-in or page reopen.
 All draft/credential storage, live Auth0 tenant, Content/Executive authorization
 and deployment remain with their existing qualified owners.
+
+**Browser-session expiry and privacy:** On an unambiguous passive web token
+expiry, user-authored unsent Office/Conversation/Launch/Session text is kept
+only in the mounted page until explicitly copied, discarded or replaced by
+new authentication. Source data and command authority remain invalid. Both
+same-tab and cross-tab logout immediately clear the retained text even if
+browser quota prevents writing the logout marker. No draft or credential is
+persisted as a workaround for third-party-cookie restrictions.
