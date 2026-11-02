@@ -289,6 +289,33 @@ mod tests {
         assert_eq!(load(&client, &audience).expect("successor"), Some(successor.to_owned()));
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "explicit synthetic stale Keychain item vs sign-out canary on unlocked macOS"]
+    fn deleted_keychain_item_reference_cannot_resurrect_signed_out_grant() {
+        use security_framework::os::macos::keychain::SecKeychain;
+        let client = format!("mmos-synthetic-signout-race-{}", std::process::id());
+        let audience = format!("https://fixture.invalid/signout-race/{}", std::process::id());
+        let old = "synthetic-original-grant-not-a-real-credential";
+        let new_login = "synthetic-after-explicit-login-new-grant";
+        let stale_rotation = "synthetic-stale-rotation-must-not-overwrite";
+        struct Cleanup(String, String);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = super::delete(&self.0, &self.1); } }
+        let _cleanup = Cleanup(client.clone(), audience.clone());
+        save(&client, &audience, old).expect("synthetic seed");
+        let kc = SecKeychain::default().expect("default test Keychain");
+        let (observed, mut stale_item) = kc.find_generic_password(
+            SERVICE, &account(&client, &audience)).expect("fixture item");
+        assert_eq!(observed.as_ref(), old.as_bytes());
+        drop(observed);
+        delete(&client, &audience).expect("explicit sign-out");
+        assert!(stale_item.set_password(stale_rotation.as_bytes()).is_err());
+        assert_eq!(load(&client, &audience).expect("logout read"), None);
+        save(&client, &audience, new_login).expect("fresh explicit user login");
+        assert!(stale_item.set_password(stale_rotation.as_bytes()).is_err());
+        assert_eq!(load(&client, &audience).expect("new login read"), Some(new_login.to_owned()));
+    }
+
     #[test]
     fn rotation_successor_must_be_new_and_opaque() {
         let first = "a".repeat(64);
