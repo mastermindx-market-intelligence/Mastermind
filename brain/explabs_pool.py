@@ -29,10 +29,12 @@ _SLOTS = (("1", "EXPLABS_API_KEY", "EXPLABS_ACCOUNT_1"), ("2", "EXPLABS_API_KEY_
 @dataclass(frozen=True)
 class Account:
     slot: str
-    key: str
+    key: str  # raw provider key only in legacy direct mode, otherwise scoped local token
     expected_org: str
     max_inflight: int
     max_daily_usd: float
+    api_origin: str = _API_HOST  # exact checked local gateway or fixed vendor origin
+    shared_gateway: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,8 +77,26 @@ def _configs() -> tuple[Account, ...]:
         # in /v1/models is not proof of a callable serving lane.
         if os.environ.get(stem + "_SERVING_VERIFIED") != "1":
             raise gateway.ExperientialError("explabs_pool_serving_unverified")
-        key = os.environ.get(key_name, "")
+        transport = os.environ.get(stem + "_TRANSPORT", "direct").strip()
+        if transport not in {"direct", "shared_gateway"}:
+            raise gateway.ExperientialError("explabs_pool_invalid_transport")
+        shared_gateway = transport == "shared_gateway"
         org = os.environ.get(stem + "_ORG_SLUG", "").strip()
+        if shared_gateway:
+            if os.environ.get(key_name, ""):
+                # The raw vendor credential belongs only on the gateway host.
+                raise gateway.ExperientialError("explabs_pool_provider_key_on_brain_host")
+            raw_origin = os.environ.get(stem + "_GATEWAY_ORIGIN", "")
+            api_origin = gateway.validated_shared_gateway_origin(raw_origin)
+            key = os.environ.get(stem + "_GATEWAY_TOKEN", "").strip()
+            if len(key) < 24 or len(key) > 256 or any(c.isspace() for c in key):
+                raise gateway.ExperientialError("explabs_pool_invalid_gateway_token")
+        else:
+            if (os.environ.get(stem + "_GATEWAY_ORIGIN")
+                    or os.environ.get(stem + "_GATEWAY_TOKEN")):
+                raise gateway.ExperientialError("explabs_pool_gateway_binding_requires_optin")
+            api_origin = _API_HOST
+            key = os.environ.get(key_name, "")
         if not key or not org:
             raise gateway.ExperientialError("explabs_pool_account_not_configured")
         raw = os.environ.get(stem + "_MAX_INFLIGHT", "2")
@@ -89,11 +109,17 @@ def _configs() -> tuple[Account, ...]:
         max_daily_usd = _money(os.environ.get(stem + "_DAILY_CAP_USD"))
         if max_daily_usd is None or max_daily_usd <= 0:
             raise gateway.ExperientialError("explabs_pool_daily_cap_required")
-        accounts.append(Account(slot, key, org, cap, max_daily_usd))
+        accounts.append(Account(slot, key, org, cap, max_daily_usd,
+                                api_origin, shared_gateway))
     if not accounts:
         raise gateway.ExperientialError("explabs_pool_no_enabled_accounts")
     if len({a.expected_org for a in accounts}) != len(accounts):
         raise gateway.ExperientialError("explabs_pool_requires_distinct_orgs")
+    # One gateway has one provider key and one physical RPM state owner.
+    # Two distinct organizations must NOT be assigned the same gateway.
+    gateway_origins = [a.api_origin for a in accounts if a.shared_gateway]
+    if len(gateway_origins) != len(set(gateway_origins)):
+        raise gateway.ExperientialError("explabs_pool_duplicate_gateway_owner")
     return tuple(accounts)
 
 
@@ -151,7 +177,7 @@ class AccountPool:
 
     def _read_spend_cap(self, account: Account) -> float:
         """Verify the upstream daily *charged USD* cap before every dispatch."""
-        key_meta = self._get(_API_HOST + "/api/v1/key", account.key).get("data")
+        key_meta = self._get(account.api_origin + "/api/v1/key", account.key).get("data")
         if not isinstance(key_meta, dict):
             raise gateway.ExperientialError("explabs_probe_invalid_response")
         key_cap = _money(key_meta.get("limit"))
@@ -165,20 +191,20 @@ class AccountPool:
         return remaining
 
     def _probe(self, account: Account, model: str) -> Observation:
-        identity = self._get(_API_HOST + "/api/whoami", account.key)
+        identity = self._get(account.api_origin + "/api/whoami", account.key)
         org_slug = identity.get("org_slug")
         org_id = identity.get("org_id")
         if (not isinstance(org_id, str) or not org_id or
                 not isinstance(org_slug, str) or org_slug != account.expected_org):
             raise gateway.ExperientialError("explabs_pool_org_mismatch")
-        catalog = self._get(_API_HOST + "/v1/models", account.key).get("data")
+        catalog = self._get(account.api_origin + "/v1/models", account.key).get("data")
         if not isinstance(catalog, list) or model not in {
             row.get("id") for row in catalog if isinstance(row, dict)
             and isinstance(row.get("id"), str)
         }:
             raise gateway.ExperientialError("explabs_pool_model_not_listed")
         remaining = self._read_spend_cap(account)
-        credit_meta = self._get(_API_HOST + "/api/v1/credits", account.key).get("data")
+        credit_meta = self._get(account.api_origin + "/api/v1/credits", account.key).get("data")
         if not isinstance(credit_meta, dict):
             raise gateway.ExperientialError("explabs_probe_invalid_response")
         total_credits = _money(credit_meta.get("total_credits"))
@@ -325,6 +351,7 @@ class AccountPool:
                 client=self._client,
                 api_key=account.key,
                 max_tokens=max_tokens,
+                shared_gateway_origin=(account.api_origin if account.shared_gateway else None),
             )
         except gateway.ExperientialError as exc:
             with self._lock:

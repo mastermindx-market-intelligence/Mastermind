@@ -9,12 +9,42 @@ from __future__ import annotations
 import math
 import os
 import re
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 BASE_URL = "https://api.experientiallabs.ai/v1"
+
+
+def validated_shared_gateway_origin(value: str) -> str:
+    """Accept only explicit numeric local IPv4 tunnel targets for scoped tokens.
+
+    Never DNS resolve localhost or accept a remote endpoint. A gateway on a
+    remote host must be reached by an authorized local loopback tunnel.
+    """
+    if not isinstance(value, str) or value != value.strip():
+        raise ExperientialError("explabs_invalid_gateway_origin")
+    if any(ord(ch) < 33 or ord(ch) > 126 for ch in value):
+        raise ExperientialError("explabs_invalid_gateway_origin")
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+        valid = (
+            parts.scheme in {"http", "https"}
+            and parts.hostname == "127.0.0.1"
+            and parts.netloc == f"127.0.0.1:{port}"
+            and port is not None and 1 <= port <= 65535
+            and not parts.path and not parts.query and not parts.fragment
+            and parts.username is None and parts.password is None
+            and value == f"{parts.scheme}://127.0.0.1:{port}"
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ExperientialError("explabs_invalid_gateway_origin")
+    return value
 DEFAULT_MODEL = "deepseek-v4.1-flash"
 
 
@@ -59,6 +89,7 @@ def chat_completion(
     client: httpx.Client | None = None,
     api_key: str | None = None,
     max_tokens: int | None = None,
+    shared_gateway_origin: str | None = None,
 ) -> httpx.Response:
     """Send model + messages, optionally with a bounded output-token cap.
 
@@ -68,8 +99,13 @@ def chat_completion(
     key = api_key if api_key is not None else os.environ.get("EXPLABS_API_KEY")
     if not key:
         raise ExperientialError("explabs_missing_key")
-    if (os.environ.get("EXPLABS_BASE_URL") or BASE_URL).rstrip("/") != BASE_URL:
-        raise ExperientialError("explabs_invalid_base_url")
+    if shared_gateway_origin is None:
+        if (os.environ.get("EXPLABS_BASE_URL") or BASE_URL).rstrip("/") != BASE_URL:
+            raise ExperientialError("explabs_invalid_base_url")
+        target = BASE_URL
+    else:
+        # Explicitly bound by the account selector, not an arbitrary env override.
+        target = validated_shared_gateway_origin(shared_gateway_origin) + "/v1"
     selected_model = model or os.environ.get("EXPLABS_MODEL") or DEFAULT_MODEL
     if not isinstance(selected_model, str) or not selected_model.strip():
         raise ExperientialError("explabs_invalid_model")
@@ -84,7 +120,7 @@ def chat_completion(
     post = client.post if client is not None else httpx.post
     try:
         response = post(
-            f"{BASE_URL}/chat/completions",
+            f"{target}/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
             json=body,
             timeout=30.0,
@@ -119,6 +155,7 @@ def complete(
     client: httpx.Client | None = None,
     api_key: str | None = None,
     max_tokens: int | None = None,
+    shared_gateway_origin: str | None = None,
 ) -> Completion:
     """Return text and gateway-reported usage, without changing sampling."""
     messages = []
@@ -127,7 +164,7 @@ def complete(
     messages.append({"role": "user", "content": user})
     response = chat_completion(
         messages, model=model, client=client, api_key=api_key,
-        max_tokens=max_tokens,
+        max_tokens=max_tokens, shared_gateway_origin=shared_gateway_origin,
     )
     try:
         data: dict[str, Any] = response.json()
