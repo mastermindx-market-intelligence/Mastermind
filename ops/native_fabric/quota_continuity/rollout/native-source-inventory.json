@@ -612,9 +612,9 @@
       "source": "source/studio_mcp_projection.sh"
     },
     "ext/sub.sh": {
-      "bytes": 43222,
+      "bytes": 42698,
       "installed_preimage_sha256": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866",
-      "sha256": "7bbe1a1dd22811605fbd4cf7d81733e843ce0ec20e8e925a68ab70c414ba3561",
+      "sha256": "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
       "source": "../grok47/overlay/sub.sh"
     },
     "ext/support_bundle.py": {
