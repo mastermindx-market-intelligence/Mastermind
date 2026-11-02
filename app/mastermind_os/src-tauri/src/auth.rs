@@ -696,7 +696,6 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
                     return Err("AUTHENTICATION_CHANGED".into());
                 }
                 crate::native_refresh::StaleGrantCleanup::RemovedStaleGrant
-                | crate::native_refresh::StaleGrantCleanup::RemovedStaleCredential
                 | crate::native_refresh::StaleGrantCleanup::AlreadyAbsent => {
                     match resource {
                         Resource::Acquisition => inner.acquisition = None,

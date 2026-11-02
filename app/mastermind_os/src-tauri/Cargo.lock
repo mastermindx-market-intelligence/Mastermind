@@ -2125,11 +2125,13 @@ name = "mastermind-os"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "core-foundation",
  "libc",
  "minisign-verify",
  "rand 0.8.8",
  "reqwest 0.12.28",
  "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "sha2",

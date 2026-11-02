@@ -152,10 +152,18 @@ pub(crate) fn finish_rotation(_: &str, _: &str, _: &str, _: &str) -> Result<(), 
 }
 #[cfg(target_os = "macos")]
 pub(crate) fn save(client_id: &str, audience: &str, value: &str) -> Result<(), &'static str> {
-    use security_framework::passwords::set_generic_password;
+    use security_framework::os::macos::keychain::SecKeychain;
     if !valid_refresh(value) { return Err("REFRESH_TOKEN_INVALID"); }
-    set_generic_password(SERVICE, &account(client_id, audience), value.as_bytes())
-        .map_err(|_| "KEYCHAIN_WRITE_FAILED")
+    let keychain = SecKeychain::default().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+    // Explicit sign-in clears its old grant before beginning OAuth. An item
+    // appearing during that transaction belongs to another publication.
+    // Never change a captured item reference into a reference to a new grant.
+    keychain.add_generic_password(
+        SERVICE, &account(client_id, audience), value.as_bytes(),
+    ).map(|_| ()).map_err(|error| {
+        if error.code() == -25299 { "REFRESH_TOKEN_CHANGED" }
+        else { "KEYCHAIN_WRITE_FAILED" }
+    })
 }
 #[cfg(target_os = "macos")]
 pub(crate) fn delete(client_id: &str, audience: &str) -> Result<(), &'static str> {
@@ -174,30 +182,14 @@ pub(crate) fn delete(client_id: &str, audience: &str) -> Result<(), &'static str
     }
     Ok(())
 }
-/// Typed outcome of terminal `invalid_grant` cleanup for a response that
-/// belongs to one exact old grant. A stale response is authoritative only
-/// about storage it can still prove holds that grant.
+/// Outcome of terminal cleanup bound to the exact old grant and its exclusive
+/// pending marker. Missing or changed ownership never authorizes deletion.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum StaleGrantCleanup {
-    /// The dead old grant was removed together with its own stale rotation
-    /// marker.
     RemovedStaleGrant,
-    /// Only the dead old credential occupied the account (no marker item
-    /// existed); it was removed.
-    RemovedStaleCredential,
-    /// A newer credential, or a marker owned by another rotation, occupies
-    /// this account: the stale response must not mutate it.
     Superseded,
-    /// No credential item exists: an explicit sign-out already removed the
-    /// grant. Nothing was deleted.
     AlreadyAbsent,
 }
-/// Ownership decision for terminal `invalid_grant` processing, reduced to
-/// its observable qualifications so the cross-instance rules stay testable
-/// without a Keychain. `stored_is_old` observes whether the account still
-/// holds exactly the dead grant this process sent (None: no credential
-/// item); `marker_is_old` observes whether the pending item is the stale
-/// rotation marker derived from that same grant (None: no marker item).
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn stale_cleanup_decision(
     stored_is_old: Option<bool>,
@@ -205,68 +197,77 @@ pub(crate) fn stale_cleanup_decision(
 ) -> StaleGrantCleanup {
     match (stored_is_old, marker_is_old) {
         (None, _) => StaleGrantCleanup::AlreadyAbsent,
-        (Some(false), _) => StaleGrantCleanup::Superseded,
-        (Some(true), None) => StaleGrantCleanup::RemovedStaleCredential,
-        // The stored grant is provably dead, but a pending item with any
-        // other content belongs to a rotation this response knows nothing
-        // about; it is never freed.
-        (Some(true), Some(false)) => StaleGrantCleanup::Superseded,
         (Some(true), Some(true)) => StaleGrantCleanup::RemovedStaleGrant,
+        // The marker must still exclude a second admitted rotation.
+        _ => StaleGrantCleanup::Superseded,
     }
 }
-/// Terminal cleanup after a definitive Auth0 `invalid_grant` for the exact
-/// grant `old` this process sent. Unlike the account-level delete used by
-/// explicit sign_out/sign_in, every mutation is bound to the exact Keychain
-/// item observed to still hold the old grant: a credential or pending item
-/// created after `old` was read — another instance's fresh sign-in, or its
-/// in-flight rotation marker — matches neither the value nor the marker
-/// qualification and is never mutated. The marker is deleted before the
-/// credential so a crash between the two deletions leaves at worst the dead
-/// credential for the next refresh attempt to clean, never a dangling
-/// marker that blocks every later read of the account.
+
+#[cfg(target_os = "macos")]
+fn delete_keychain_item(
+    item: security_framework::os::macos::keychain_item::SecKeychainItem,
+) -> security_framework::base::Result<()> {
+    use core_foundation::base::TCFType;
+    use security_framework::base::Error;
+    use security_framework_sys::keychain_item::SecKeychainItemDelete;
+    // SAFETY: item owns a retained, typed reference and remains alive for this
+    // synchronous call. This deletes that exact item, without an account lookup.
+    // The high-level 3.7.0 delete() discards OSStatus; retain it here.
+    let status = unsafe { SecKeychainItemDelete(item.as_concrete_TypeRef()) };
+    if status == 0 { Ok(()) } else { Err(Error::from_code(status)) }
+}
+
+/// Clean a definitive invalid_grant only while its original marker still owns
+/// exclusion. Login publication is add-only; successful rotation is the sole
+/// in-place credential writer and requires that marker. Keep the marker until
+/// the credential is gone. A crash retains an ambiguous marker and requires
+/// explicit sign-in; it must not enable a second refresh of the dead grant.
 #[cfg(target_os = "macos")]
 pub(crate) fn delete_stale(
     client_id: &str,
     audience: &str,
     old: &str,
 ) -> Result<StaleGrantCleanup, &'static str> {
+    delete_stale_after_lookup(client_id, audience, old, || {})
+}
+
+#[cfg(target_os = "macos")]
+fn delete_stale_after_lookup<F: FnOnce()>(
+    client_id: &str,
+    audience: &str,
+    old: &str,
+    after_lookup: F,
+) -> Result<StaleGrantCleanup, &'static str> {
     use security_framework::os::macos::keychain::SecKeychain;
     let keychain = SecKeychain::default().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
     let name = account(client_id, audience);
-    let mut credential = match keychain.find_generic_password(SERVICE, &name) {
-        Ok((stored, item)) => Some((stored, item)),
+    let credential = match keychain.find_generic_password(SERVICE, &name) {
+        Ok(value) => Some(value),
         Err(err) if err.code() == NOT_FOUND => None,
         Err(_) => return Err("KEYCHAIN_UNAVAILABLE"),
     };
-    let mut pending = match keychain.find_generic_password(SERVICE, &format!("{name}:pending")) {
-        Ok((marker, item)) => Some((marker, item)),
+    let pending = match keychain.find_generic_password(SERVICE, &format!("{name}:pending")) {
+        Ok(value) => Some(value),
         Err(err) if err.code() == NOT_FOUND => None,
         Err(_) => return Err("KEYCHAIN_UNAVAILABLE"),
     };
-    // The observations and the deletes below reference exact items, so a
-    // concurrent sign-out plus fresh sign-in that replaced both items after
-    // this lookup can neither be matched by value nor deleted through these
-    // references.
     let decision = stale_cleanup_decision(
         credential.as_ref().map(|(stored, _)| stored.as_ref() == old.as_bytes()),
-        pending.as_ref().map(|(marker, _)| {
-            marker.as_ref() == rotation_marker(old).as_bytes()
-        }),
+        pending.as_ref().map(|(marker, _)| marker.as_ref() == rotation_marker(old).as_bytes()),
     );
-    if matches!(decision, StaleGrantCleanup::RemovedStaleGrant) {
-        if let Some((marker, marker_item)) = pending.take() {
-            drop(marker);
-            marker_item.delete().map_err(|_| "KEYCHAIN_DELETE_FAILED")?;
-        }
+    if decision != StaleGrantCleanup::RemovedStaleGrant {
+        return Ok(decision);
     }
-    if matches!(decision, StaleGrantCleanup::RemovedStaleGrant
-        | StaleGrantCleanup::RemovedStaleCredential) {
-        if let Some((stored, credential_item)) = credential.take() {
-            drop(stored);
-            credential_item.delete().map_err(|_| "KEYCHAIN_DELETE_FAILED")?;
-        }
-    }
-    Ok(decision)
+    let (stored, credential_item) = credential.ok_or("REFRESH_OUTCOME_UNCONFIRMED")?;
+    let (marker, marker_item) = pending.ok_or("REFRESH_OUTCOME_UNCONFIRMED")?;
+    after_lookup();
+    drop(stored);
+    drop(marker);
+    // Retain exclusion until the old credential is gone. Never compensate for
+    // a refused exact-item delete with an account-level deletion.
+    delete_keychain_item(credential_item).map_err(|_| "KEYCHAIN_DELETE_FAILED")?;
+    delete_keychain_item(marker_item).map_err(|_| "KEYCHAIN_DELETE_FAILED")?;
+    Ok(StaleGrantCleanup::RemovedStaleGrant)
 }
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn delete_stale(
@@ -444,12 +445,12 @@ mod tests {
             StaleGrantCleanup::AlreadyAbsent);
         assert_eq!(stale_cleanup_decision(None, Some(true)),
             StaleGrantCleanup::AlreadyAbsent);
-        // The stored grant is unchanged: removed together with its own stale
-        // marker, or alone when no marker exists.
+        // The stored grant is removed only with its own matching marker.
+        // Missing exclusion must preserve the credential.
         assert_eq!(stale_cleanup_decision(Some(true), Some(true)),
             StaleGrantCleanup::RemovedStaleGrant);
         assert_eq!(stale_cleanup_decision(Some(true), None),
-            StaleGrantCleanup::RemovedStaleCredential);
+            StaleGrantCleanup::Superseded);
         // A pending item whose content belongs to a different rotation is
         // another process's current marker: never freed.
         assert_eq!(stale_cleanup_decision(Some(true), Some(false)),
@@ -521,6 +522,52 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "synthetic after-lookup stale cleanup canary on unlocked macOS only"]
+    fn stale_invalid_grant_cleanup_after_lookup_preserves_new_login_canary() {
+        use security_framework::os::macos::keychain::SecKeychain;
+        use std::cell::Cell;
+        let client = format!("mmos-synthetic-stale-after-lookup-{}", std::process::id());
+        let audience = format!("https://fixture.invalid/stale-after-lookup/{}", std::process::id());
+        let old = "synthetic-old-grant-for-after-lookup-cleanup";
+        let new_login = "synthetic-new-login-after-stale-lookup";
+        let successor = "synthetic-new-login-rotation-successor";
+        struct Cleanup(String, String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = super::delete(&self.0, &self.1); }
+        }
+        let _cleanup = Cleanup(client.clone(), audience.clone());
+        assert_eq!(load(&client, &audience).expect("initial absence"), None);
+        save(&client, &audience, old).expect("synthetic seed");
+        begin_rotation(&client, &audience, old).expect("old claim");
+        let reached_after_lookup = Cell::new(false);
+        let cleanup_result = delete_stale_after_lookup(&client, &audience, old, || {
+            reached_after_lookup.set(true);
+            // The delayed callback cannot overwrite the captured old item.
+            assert_eq!(save(&client, &audience, new_login), Err("REFRESH_TOKEN_CHANGED"));
+            let keychain = SecKeychain::default().expect("default test Keychain");
+            let (stored, _) = keychain.find_generic_password(
+                SERVICE, &account(&client, &audience),
+            ).expect("old item remains");
+            assert_eq!(stored.as_ref(), old.as_bytes());
+            drop(stored);
+            // Real signout/login replaces both items after cleanup's lookup.
+            super::delete(&client, &audience).expect("other instance explicit signout");
+            save(&client, &audience, new_login).expect("fresh login creates new item");
+            begin_rotation(&client, &audience, new_login).expect("new login marker");
+        });
+        assert!(reached_after_lookup.get());
+        assert!(cleanup_result.is_ok() || cleanup_result == Err("KEYCHAIN_DELETE_FAILED"),
+            "{cleanup_result:?}");
+        finish_rotation(&client, &audience, new_login, successor)
+            .expect("newer rotation survives stale cleanup");
+        assert_eq!(load(&client, &audience).expect("surviving successor"),
+            Some(successor.to_owned()));
+        super::delete(&client, &audience).expect("synthetic teardown");
+        assert_eq!(load(&client, &audience).expect("final credential and marker absence"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     #[ignore = "explicit synthetic stale cleanup removal canary on unlocked macOS only"]
     fn stale_invalid_grant_cleanup_removes_unchanged_old_grant_canary() {
         let client = format!("mmos-synthetic-stale-removal-{}", std::process::id());
@@ -537,11 +584,14 @@ mod tests {
             delete_stale(&client, &audience, old).expect("qualified cleanup"),
             StaleGrantCleanup::RemovedStaleGrant);
         assert_eq!(load(&client, &audience).expect("removal read"), None);
-        // Without a marker item, only the credential remains to remove.
+        // Without the old marker there is no exclusive cleanup authority.
         save(&client, &audience, old).expect("reseed");
         assert_eq!(
             delete_stale(&client, &audience, old).expect("cleanup without marker"),
-            StaleGrantCleanup::RemovedStaleCredential);
+            StaleGrantCleanup::Superseded);
+        assert_eq!(load(&client, &audience).expect("unowned grant preserved"),
+            Some(old.to_owned()));
+        super::delete(&client, &audience).expect("synthetic unowned grant teardown");
         assert_eq!(load(&client, &audience).expect("absence"), None);
         // Cleaning an already-absent account is a typed missing outcome.
         assert_eq!(

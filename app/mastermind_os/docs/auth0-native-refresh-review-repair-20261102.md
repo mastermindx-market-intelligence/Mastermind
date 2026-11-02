@@ -57,27 +57,40 @@ normal reviewed deployment. Browser Content and Executive persistence are
 separate first-party architecture/tenant qualifications. Never represent
 this as a guaranteed never-expiring or irrevocable session.
 
-## Stale terminal `invalid_grant` cleanup — cross-instance custody repair (2026-11-02 UTC, isolated lane)
+## Stale terminal `invalid_grant` cleanup — cross-instance repair
 
-Isolated repair lane `mmos-native-stale-grant-20261102-c4-01` against PR head
-`d28287ee6099a05720c722aa413cf4c6758ae9a7`. Confirmed cross-instance race:
-the process-local generation fence cannot see a second app instance, so a
-stale `invalid_grant` response (instance A's in-flight refresh of `old`,
-after instance B's explicit sign-out and fresh sign-in) reached the
-account-level `native_refresh::delete` and destroyed B's newer credential
-and pending marker. Terminal cleanup now uses `native_refresh::delete_stale`,
-which proves ownership per exact Keychain item — the stored credential must
-still equal `old`, and a pending item is freed only when its content is the
-rotation marker derived from that same `old` (any other content belongs to
-another rotation and is never freed). Typed outcomes: `RemovedStaleGrant`,
-`RemovedStaleCredential`, `Superseded` (a newer credential owns the account:
-nothing is deleted, the local session is not cleared, existing
-`AUTHENTICATION_CHANGED` signal), `AlreadyAbsent` (explicit sign-out already
-removed the grant). Explicit sign_out/sign_in keep their unconditional
-account-level semantics; marker-before-credential ordering leaves at worst a
-dead credential, never a blocking marker, across a crash between the two
-deletions. Two new synthetic Keychain canaries (ignored macOS, fixture
-accounts only) demonstrate the defect and prove the newer grant/marker
-survive; ownership-decision table tests run on every platform. Linux worker
-could not compile Rust (no toolchain; installs out of scope) — macOS canaries
-await the authorized M2 host run.
+The retained worker return `mmos-native-stale-grant-20261102-c4-01` started
+from `d28287ee6099a05720c722aa413cf4c6758ae9a7`. Its exact patch was consumed;
+Mac compilation of the initial composition exposed that security-framework
+3.7.0's item `delete()` discards OSStatus and returns unit. The parent repair
+uses a small exact-item native binding that preserves the actual status,
+with the already-locked core-foundation 0.10.1 and security-framework-sys
+2.17.0 versions. No account-level fallback follows a failed exact-item delete.
+
+A captured item reference alone does not prevent an in-place replacement.
+Login publication is now atomic add-only: a delayed login callback refuses
+an existing credential instead of overwriting it. Successful rotation
+retains its existing exact-item update and exclusive pending-marker claim,
+so concurrent signout cannot be undone by a delete-and-recreate rotation.
+
+Terminal cleanup requires both the exact old credential and its matching
+pending marker. It deletes the credential before releasing that marker.
+Missing or changed ownership yields `Superseded` without storage mutation;
+an absent credential yields `AlreadyAbsent`. A crash may retain an ambiguous
+marker requiring explicit sign-in. It must never release a second refresh
+of the old grant. Explicit signout still removes the exact client/audience
+credential and marker through its existing account-level operation.
+
+Three ignored synthetic Keychain canaries cover newer-grant preservation,
+unchanged old-grant removal with marker custody, and the deterministic
+interleaving after cleanup has captured its old item references. They use
+PID-qualified synthetic clients and fixture.invalid audiences, and explicitly
+prove fixture credential/marker absence on success. The after-lookup case
+first proves a delayed overwrite is refused, then replaces both items through
+explicit signout/login and proves the newer rotation survives stale cleanup.
+
+The initial worker patch did not compile on the Mac and is not independently
+accepted as returned. The parent-corrected candidate requires actual locked
+default-OFF and flag-ON Mac checks and these synthetic canaries. Real tenant
+configuration, installed-app identity and authenticated restart remain
+separate from synthetic source qualification.
