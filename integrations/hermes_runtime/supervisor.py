@@ -227,6 +227,12 @@ class ServiceRuntime:
             if any(value in protected_values for value in model_keys.values()):
                 raise RuntimeRefusal("NATIVE_MODEL_KEY_REUSE_REFUSED")
             env.update(model_keys)
+            # The model child may reach external HTTPS only through an
+            # operator-enrolled role-private localhost CONNECT proxy. A
+            # missing or malformed proxy refuses startup before subprocess.
+            # Never copy an ambient shell HTTPS_PROXY to the child.
+            from .egress import native_egress_child_env
+            env.update(native_egress_child_env(self.profile.role, self.secrets.values))
         return env
 
     def _expected_disabled_mcp(self) -> dict[str, tuple[str, ...]] | None:
