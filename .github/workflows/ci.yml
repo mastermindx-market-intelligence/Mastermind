@@ -79,6 +79,18 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # Fast deterministic release-source checks before expensive hosted work.
+      # Reuse the incumbent strict EVAL changed-path and fixed-role package
+      # tests without replacing or excluding any discovery-first shard.
+      # These run for every shard, with the same immutable checkout; failures
+      # stop the shard early and still fail the original protected test fan-in.
+      - name: Fast source-bound release preflight
+        run: >-
+          python -m pytest -q --tb=short
+          tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface
+          tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
+          tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
+
       # Non-pytest qualification is required once per immutable CI checkout.
       # Failure of shard 0 also fails the exact required fan-in status.
       - name: Verify Paper direct pinned MCP SDK
