@@ -71,7 +71,15 @@
      if pool == "bailian" and task_class.lower() == "review":
          model = spec.get("review_model") or "qwen3.8-max"
      return model, suffix
-@@ -1970,9 +2016,12 @@
+@@ -1854,6 +1900,7 @@
+             view = placement_view.build_placement_view(
+                 registry, host_pick.HOSTS_STATE_DIR, mode, now=now,
+                 excluded=mode_excluded, plan_path=None, state_reader=reader,
++                **({"max_age": 180} if pool == "minimax" else {}),
+                 **({"selection_key": route_key} if host == "auto" and route_key is not None else {}),
+             )
+             chosen = view.get("host_choice")
+@@ -1970,9 +2017,12 @@
      qwen_candidate_model = None
      if host is not None:
          try:
@@ -87,7 +95,7 @@
              qwen_candidate_model = _selection_model("bailian", task_class, load_pools(), needs)[0]
              routes = _eligible_host_routes(
                  host, glm_model=glm_candidate_model,
-@@ -2052,7 +2101,10 @@
+@@ -2052,7 +2102,10 @@
          # This exact high-effort alias was observed in the authenticated Cursor
          # catalog. Capability/host, economic, quality and independence gates
          # below are still required; catalog presence is not worker admission.
@@ -99,7 +107,7 @@
          # Exact worker pinning is never an arbitrary model promotion. Permit
          # the current task-qualified default for its explicitly chosen pool;
          # keep the pre-existing full GLM C2 escalation narrow and witnessed.
-@@ -2096,7 +2148,7 @@
+@@ -2096,7 +2149,7 @@
              return "NONE reason=go_short_capability_only_for_c0_c1"
          if host_modes is not None and forced not in host_modes:
              return f"NONE reason=pool {forced} has no eligible mode on requested host"
