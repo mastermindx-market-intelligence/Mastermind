@@ -240,6 +240,32 @@ class AccountPool:
             # new requests may use an already verified healthy eligible org.
             raise gateway.ExperientialError("explabs_pool_initial_verification_required")
 
+    def _refresh_candidate_headroom(self, accounts: tuple[Account, ...]) -> list[gateway.ExperientialError]:
+        """Read each eligible key's current provider cap before selecting a slot.
+
+        This happens strictly BEFORE any inference dispatch. If one key is
+        exhausted or its provider cap no longer satisfies policy, a separate
+        eligible key may serve the NEW request. Never retry a dispatched call.
+        """
+        failures: list[gateway.ExperientialError] = []
+        for account in accounts:
+            state = self._health[account.slot]
+            if (state.blocked or state.observation is None or
+                    state.cooldown_until > self._clock() or
+                    state.inflight >= account.max_inflight):
+                continue
+            try:
+                remaining = self._read_spend_cap(account)
+            except gateway.ExperientialError as exc:
+                state.blocked = str(exc)
+                state.observation = None
+                failures.append(exc)
+                continue
+            state.observation = replace(
+                state.observation, key_remaining_usd=remaining
+            )
+        return failures
+
     def _pick(self, accounts: tuple[Account, ...]) -> Account:
         eligible = []
         for a in accounts:
@@ -276,20 +302,16 @@ class AccountPool:
         model = os.environ.get("EXPLABS_MODEL") or gateway.DEFAULT_MODEL
         with self._lock:
             self._ensure_fresh(accounts, model)
-            account = self._pick(accounts)
-            state = self._health[account.slot]
+            failures = self._refresh_candidate_headroom(accounts)
             try:
-                current_remaining = self._read_spend_cap(account)
+                account = self._pick(accounts)
             except gateway.ExperientialError as exc:
-                state.blocked = str(exc)
-                state.observation = None
-                raise
-            if current_remaining <= 0:
-                raise gateway.ExperientialError("explabs_pool_daily_cap_exhausted")
-            if state.observation is not None:
-                state.observation = replace(
-                    state.observation, key_remaining_usd=current_remaining
-                )
+                # Preserve the exact cap failure if every candidate was
+                # refused before dispatch; never turn it into a retry.
+                if failures:
+                    raise failures[0] from None
+                raise exc
+            state = self._health[account.slot]
             state.inflight += 1
             self._last_chosen = account.slot
         try:
@@ -310,14 +332,25 @@ class AccountPool:
             raise
         else:
             with self._lock:
-                total_tokens = reply.input_tokens + reply.output_tokens
-                if reply.cost_usd is not None and total_tokens > 0:
-                    sample = reply.cost_usd * 1000.0 / total_tokens
-                    state = self._health[account.slot]
-                    previous = state.unit_cost_per_1k_tokens
-                    state.unit_cost_per_1k_tokens = (
-                        sample if previous is None else 0.8 * previous + 0.2 * sample
-                    )
+                state = self._health[account.slot]
+                # The per-key cap only constrains *platform-funded* spend.
+                # If routing unexpectedly changes to BYOK (or usage.cost is
+                # absent), the response may already be served and must be
+                # attributed, but never admit another request on that slot
+                # until a separate billing-path reconciliation is done.
+                if reply.is_byok:
+                    state.blocked = "explabs_unexpected_byok"
+                elif reply.cost_usd is None:
+                    state.blocked = "explabs_missing_gateway_cost"
+                else:
+                    total_tokens = reply.input_tokens + reply.output_tokens
+                    if total_tokens > 0:
+                        sample = reply.cost_usd * 1000.0 / total_tokens
+                        previous = state.unit_cost_per_1k_tokens
+                        state.unit_cost_per_1k_tokens = (
+                            sample if previous is None
+                            else 0.8 * previous + 0.2 * sample
+                        )
             return replace(reply, account_slot=account.slot)
         finally:
             with self._lock:

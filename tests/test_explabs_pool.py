@@ -465,3 +465,99 @@ def test_included_free_gateway_cost_does_not_claim_paid_usage(monkeypatch):
     assert outcome.is_byok is False
     assert (outcome.input_tokens, outcome.output_tokens) == (9, 3)
     assert calls == ["fake-key-b"]
+
+
+def test_pre_dispatch_exhausted_key_is_skipped_for_new_work(monkeypatch):
+    """No wasted dispatch to a stale cached key with zero daily headroom."""
+    _env(monkeypatch)
+    remaining = {"fake-key-a": 5.0, "fake-key-b": 5.0}
+    http, calls = _transport(remaining=remaining)
+    pool = explabs_pool.AccountPool(http_client=http)
+    first = pool.complete("", "one independent task")
+    assert first.account_slot == "1"
+    remaining["fake-key-a"] = 0.0
+    # Different, independent new call. It must not pick the now-exhausted A
+    # based on the previous observation, nor replay the prior completion.
+    second = pool.complete("", "one independent task")
+    assert second.account_slot == "2"
+    assert calls == ["fake-key-a", "fake-key-b"]
+    assert pool.status()["1"]["key_remaining_usd"] == 0
+
+
+def test_pre_dispatch_changed_provider_cap_isolated_to_one_account(monkeypatch):
+    """One key's unsafe limit cannot prevent distinct new work on a safe peer."""
+    _env(monkeypatch)
+    limits = {"fake-key-a": 10.0, "fake-key-b": 10.0}
+    remaining = {"fake-key-a": 5.0, "fake-key-b": 5.0}
+    http, calls = _transport(limits=limits, remaining=remaining)
+    pool = explabs_pool.AccountPool(http_client=http)
+    first = pool.complete("", "one independent task")
+    assert first.account_slot == "1"
+    limits["fake-key-a"] = 11.0  # Exceeds local approved cap
+    remaining["fake-key-a"] = 10.0
+    second = pool.complete("", "one independent task")
+    assert second.account_slot == "2"
+    assert calls == ["fake-key-a", "fake-key-b"]
+    assert pool.status()["1"]["blocked"] == "explabs_pool_gateway_cap_not_verified"
+
+
+def test_unexpected_byok_serving_lane_holds_billing_exposure(monkeypatch):
+    """A provider BYOK bill is NOT protected by the Experiential daily cap."""
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+
+    def serve(key, count):
+        return httpx.Response(200, json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {
+                "prompt_tokens": 5,
+                "completion_tokens": 4,
+                "cost": 0,
+                "is_byok": True,
+            },
+            "is_byok": True,
+        })
+
+    http, calls = _transport(
+        response=serve,
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    pool = explabs_pool.AccountPool(http_client=http)
+    served = pool.complete("", "one independent task")
+    assert served.text == "OK"
+    assert served.is_byok is True
+    assert pool.status()["2"]["blocked"] == "explabs_unexpected_byok"
+    with pytest.raises(explabs_client.ExperientialError, match="no_eligible_account"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-b"]
+
+
+def test_missing_gateway_cost_holds_account_for_billing_reconciliation(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+
+    def serve(key, count):
+        return httpx.Response(200, json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+            "is_byok": False,
+        })
+
+    http, calls = _transport(
+        response=serve,
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    pool = explabs_pool.AccountPool(http_client=http)
+    served = pool.complete("", "one independent task")
+    assert served.text == "OK"
+    assert served.cost_usd is None
+    assert pool.status()["2"]["blocked"] == "explabs_missing_gateway_cost"
+    with pytest.raises(explabs_client.ExperientialError, match="no_eligible_account"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-b"]
