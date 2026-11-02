@@ -16,6 +16,9 @@ def load(name):
     return module
 
 class GrokUpgrade(unittest.TestCase):
+    # The immutable Grok overlay retains its historical bounded refusal.
+    # Native F1 candidate composition overrides only this diagnostic contract.
+    EXPECTED_UNKNOWN_MODEL_DENIAL = 'NONE reason=unknown requested_model'
     def test_default_model_is_47(self):
         picker = load('pick')
         self.assertEqual(picker._default_model('grok'), 'grok-4.7')
@@ -56,6 +59,40 @@ class GrokUpgrade(unittest.TestCase):
             self.assertEqual(captured[-1]['requested_model'],requested)
         self.assertEqual(len(captured),2)
 
+    def test_exhausted_grok_explicit_pin_refuses_cross_provider_substitution(self):
+        picker=load('pick')
+        for requested in ('grok-4.6','grok-4.7'):
+            for target in (None,'grok'):
+                seen=[]
+                def fake(_class,**options):
+                    seen.append((options.get('pool'),options.get('requested_model')))
+                    if options.get('pool')=='grok':
+                        return 'NONE reason=grok exhausted (GROK_EXHAUSTED marker)'
+                    return 'POOL=cursor KEY=- MODEL=cursor-grok-4.6-high REASON=fixture'
+                with self.subTest(requested=requested,pool=target), \
+                     patch.object(picker,'_format_pick_host',side_effect=fake), \
+                     patch.object(picker,'_grok_exhausted',return_value=True):
+                    result=picker.format_pick('review',pool=target,requested_model=requested)
+                self.assertEqual(result,'NONE reason=grok exhausted (GROK_EXHAUSTED marker)')
+                self.assertEqual(seen,[('grok',requested)])
+
+    def test_exhausted_unpinned_grok_affinity_still_uses_legacy_cursor(self):
+        picker=load('pick')
+        seen=[]
+        def fake(_class,**options):
+            seen.append((options.get('pool'),options.get('requested_model')))
+            if options.get('pool')=='grok':
+                return 'NONE reason=grok exhausted (GROK_EXHAUSTED marker)'
+            if options.get('pool')=='cursor':
+                return 'POOL=cursor KEY=- MODEL=cursor-grok-4.6-high REASON=fixture'
+            return 'POOL=glm KEY=- MODEL=glm-5.3 REASON=fixture'
+        with patch.object(picker,'_format_pick_host',side_effect=fake), \
+             patch.object(picker,'_grok_exhausted',return_value=True):
+            result=picker.format_pick('review',pool='grok')
+        self.assertIn('MODEL=cursor-grok-4.6-high',result)
+        self.assertIn('QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true',result)
+        self.assertEqual(seen,[('grok',None),('cursor','cursor-grok-4.6-high')])
+
     def test_forced_grok_pin_reaches_model_aware_launch_guard(self):
         picker=load('pick')
         doc={'pools':{'grok':{'default_model':'grok-4.6'}}}
@@ -77,14 +114,17 @@ class GrokUpgrade(unittest.TestCase):
             refused=picker._format_pick('review',pool='cursor',requested_model='grok-4.7')
             self.assertTrue(refused.startswith('NONE reason=exact Grok Build model'))
             invalid=picker._format_pick('review',pool='grok',requested_model='grok-4.8')
-            self.assertTrue(invalid.startswith('NONE reason=unknown requested_model'))
+            self.assertEqual(invalid, self.EXPECTED_UNKNOWN_MODEL_DENIAL)
+            # A refused, unadmitted model cannot reach the launch policy.
+            self.assertEqual(gate_models, ['grok-4.6', 'grok-4.7'])
 
     def test_unknown_requested_model_not_echoed_in_cli_response(self):
         picker=load('pick')
         secret_input='private-password-secret-should-never-echo'
         with patch.object(picker,'load_pools',return_value={'pools':{'grok':{}}}):
             result=picker._format_pick('review',pool='grok',requested_model=secret_input)
-        self.assertEqual(result,'NONE reason=unknown requested_model')
+        # Both overlay and composed candidate must refuse without echoing secrets.
+        self.assertEqual(result, self.EXPECTED_UNKNOWN_MODEL_DENIAL)
         self.assertNotIn(secret_input,result)
 
     def test_advisory_bailian_result_never_exposes_account_alias(self):

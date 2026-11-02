@@ -1,4 +1,48 @@
+## Paper 0.5.18 exact-catalog compatibility candidate - 2026-11-01
+
+The M2 Paper Desktop has two installations: /Applications/Paper.app v0.5.11
+and the intended ~/Applications/Paper.app v0.5.18. A graceful transition to
+the latter restored a direct paper_inspect CONNECTED response for explicit
+MASTERMIND PAGES file 01M2WGNCX9475G79JRKJTCM08P. This is a connection
+receipt, not a live write or restart-resilience acceptance result.
+
+The captured 0.5.18 41-tool full catalog is retained as
+tests/fixtures/paper_desktop/16e6b_full_catalog.json; its canonical SHA-256 is
+16e6b93f0c51a1574ba8acee4df732052898707a04731d3817530971a88fdefd.
+Compared to accepted 37-tool 1b9aff..., no names were removed; the four new
+resource tools archive_resources, create_folder, move_resources and
+unarchive_resources stay uncallable. Ten existing descriptors changed,
+including rich HTML set_text_content (updates[].html replaces
+updates[].textContent), get_jsx styling default, and optional resource
+parameters. The guarded successor bridge 0.1.6 admits this exact full-catalog
+digest and refuses obsolete text-edit payloads before dispatch, retaining
+all file/snapshot/operation/unknown-effect constraints. Historical catalog
+receipts remain accepted. Any future descriptor drift fails closed.
+
+This is a source-only candidate, not a live activation. Immutable
+runtime_stage.py v15 is proposed as a new hash-pinned generation; do not alter
+v2-v14. After an independent non-author review, accepted source release, and
+installer-controlled seat replacement with original manifest/seat identity,
+prove on the same direct carrier: accepted live schema, exact scratch-file read
+and prepare, a bounded guarded edit using updates[].html, same-file post-read,
+screenshot, and reconnect without duplicate clients. Never manually repin the
+installed v13 bridge or claim deployment from green synthetic tests.
+
 # Paper.design integration - bounded local and web design capability
+
+## Guarded file/page administration candidate (2026-10-22; NOT installed)
+
+### Paper 0.5.15 exact-catalog compatibility candidate (stacked successor, not active)
+
+Read-only inspection of M1 Paper Desktop 0.5.15 observed upstream catalog SHA-256 `f3483e001d4f07f5a49144ca52a4f9e14ba046e35546dda05d6cd37c9d2b4728` with exactly 37 tools. Compared with Paper 0.5.14, only `get_jsx` changed: its default styling format became `inline-styles`, with enum ordering `inline-styles,tailwind` and a corresponding description change. All other 36 descriptors, including file and page operations, were identical.
+
+The stacked v14 bridge admits only the two reviewed complete-catalog digests and retains server identity, source file guards, operation IDs, write permission, and fail-closed drift handling. JSX readers should provide an explicit `format` if the default matters. V13 remains immutable and usable for M2; staging v14 does not select any live runtime or update a workspace plugin. Paper 0.5.15 still has no native whole-page transfer/deletion method.
+
+
+Current exact Paper 0.5.14 catalog includes `list_resources`, `create_file`, `rename_resource`, `arrange_pages`, and `update_pages`, which the prior v12 bridge intentionally blocked. The bounded candidate admits `list_resources` as read and `arrange_pages`/`update_pages` as guarded edits. It adds `create_file`/`rename_resource` to the existing modifying `paper_edit` action so the already-published five-tool MCP surface remains unchanged; internally these receive extra file-management validation. It preserves full-catalog SHA pin, existing file snapshot, operation id, desktop mutex, no replay and unknown-effect rules. In this candidate, create_file requires either `cloneFileId` (copy entire file) or `sourceFileId` (guarded context for creating an empty file), plus a name; `sourceFileId` is a bridge-only guard and is never forwarded to Paper. Renaming accepts only exact Paper file IDs, never arbitrary folders. An observed create-file response is explicitly `RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION` until the returned new file ID is separately read and checked; neither a clone nor a successful response means a cross-file page migration occurred.
+
+**Crucial limitation:** Paper's reviewed 37-tool MCP schema does not expose a native move-page-between-files, delete-page, or delete-file operation. The candidate **does not** delete originals or reconstruct pages from JSX and claim a lossless transfer. For the 63-page MASTERMIND PAGES cleanup, make a source inventory, create destinations and whole-file preservation clones, verify every destination's ID and contents, then move a page only through a subsequently verified lossless vendor operation or explicit attended Paper UI transaction with source/destination readback. Preserve original pages pending verification, with no speculative deletion or raw database edits. This candidate pins immutable v13 bridge source separately from the installed v12 runtime. The existing MCP five-tool surface remains unchanged; action-description refresh may still be necessary for individual ChatGPT seats. v13 staging alone is not activation, an Executive grant, a scratch-file canary, or production acceptance. No current Paper pages have been moved or deleted.
+
 
 ## Mission and frozen boundary
 

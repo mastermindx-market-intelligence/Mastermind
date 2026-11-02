@@ -307,6 +307,41 @@ test('edit dispatches once and preserves adapter effect unknown', async () => {
   assert.equal(result.value.retry_allowed, false);
 });
 
+test('observed create-file reply remains verification-required, never a failed write', async () => {
+  const receipt = {
+    state: 'RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION',
+    operation_id: 'paper-create-proof',
+    tool: 'create_file',
+    retry_allowed: false,
+    production_acceptance: false,
+    result: { content: [{ type: 'text', text: '{"fileId":"NEW"}' }] },
+  };
+  for (const responseMode of ['normal', 'parsed-subprocess-error']) {
+    let calls = 0;
+    const designer = createPaperDesigner(cfg(), deps(async () => {
+      calls += 1;
+      if (responseMode === 'parsed-subprocess-error') {
+        const error = new Error('bridge response propagated via process error');
+        error.stdout = JSON.stringify(receipt);
+        throw error;
+      }
+      return { stdout: JSON.stringify(receipt) };
+    }));
+    const result = await designer.call('paper_edit', {
+      tool: 'create_file',
+      arguments: { sourceFileId: '01M2WGNCX9475G79JRKJTCM08P', name: 'Scratch' },
+      expected_snapshot: 'a'.repeat(64),
+      operation_id: 'paper-create-proof',
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.isError, false);
+    assert.equal(result.effectUnknown, false);
+    assert.equal(result.value.state, 'RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION');
+    assert.equal(result.value.retry_allowed, false);
+    assert.equal(result.value.production_acceptance, false);
+  }
+});
+
 test('lost edit subprocess result becomes effect unknown while lost read stays definite local failure', async () => {
   const failed = async () => {
     const err = new Error('lost');

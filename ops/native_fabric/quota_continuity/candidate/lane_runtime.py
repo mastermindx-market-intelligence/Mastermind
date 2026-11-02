@@ -1001,6 +1001,7 @@ def run_owned_process(
     timeout_returncode: int = -9,
     capture_limit_bytes: int = DEFAULT_CAPTURE_LIMIT_BYTES,
     receipt_diagnostics=None,
+    launch_observer=None,
 ) -> OwnedProcessResult:
     try:
         timeout = float(timeout)
@@ -1073,6 +1074,19 @@ def run_owned_process(
     except BaseException:
         _terminate_verified_group(proc, pgid, grace=0.2, reason="set_current_failed")
         raise
+
+    # Optional canonical paid owner observation runs on this original executor
+    # thread with the actual owned Popen. It cannot replace process ownership.
+    # The remote model may enter HTTP, but the issuer denies provider access
+    # until this receipt crosses the authenticated original controller path.
+    if launch_observer is not None:
+        try:
+            launch_observer(proc, started_at)
+        except BaseException:
+            _terminate_verified_group(proc, pgid, grace=terminate_grace,
+                                      reason="launch_observation_failed")
+            _clear_current(proc)
+            raise
 
     stdout_collector = _BoundedStreamCollector(
         proc.stdout, int(capture_limit_bytes), "stdout"
@@ -1197,6 +1211,8 @@ def run_owned_process(
                 {
                     "schema": PROCESS_RECEIPT_SCHEMA,
                     **diagnostic_fields,
+                    **({"stderr_sha256": stderr_collector.complete_digest() if stderr_complete else None}
+                       if launch_observer is not None else {}),
                     "label": safe_label,
                     "pid": proc.pid,
                     "pgid": pgid,

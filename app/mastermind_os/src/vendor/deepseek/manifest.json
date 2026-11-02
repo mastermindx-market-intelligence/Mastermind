@@ -22,6 +22,12 @@
       "sha256": "eaa266bb77dfb646738d0fdd79be4f1c4bc5490f7bf3f4127f9ffb72ef741ff8",
       "modifications": "NONE",
       "consumer": "src/conversations/SourceMarkdown.tsx"
+    },
+    {
+      "upstream_path": "packages/client/ui-chat/src/client/chat/use-scroll-follow.ts",
+      "local_path": "use-scroll-follow.ts",
+      "sha256": "fd0734320e326292e614991476c1ffe492a40b90e44534b47a0368528a9415f0",
+      "modifications": "NONE"
     }
   ],
   "excluded": [

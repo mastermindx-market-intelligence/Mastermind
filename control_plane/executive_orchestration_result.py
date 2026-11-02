@@ -6,6 +6,7 @@ as immutable evidence.
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import json
@@ -28,6 +29,9 @@ PLAN_SCHEMA_V1 = "mastermind.execution_plan/v1"
 PLAN_SCHEMA_V2 = "mastermind.execution_plan/v2"
 PLAN_SCHEMA_V3 = "mastermind.execution_plan/v3"
 PLAN_SCHEMA_V4 = "mastermind.execution_plan/v4"
+PLAN_SCHEMA_V5 = "mastermind.execution_plan/v5"
+AGGREGATION_SCHEMA_V1 = "mastermind.aggregation_result/v1"
+AGGREGATION_SCHEMA_V2 = "mastermind.aggregation_result/v2"
 MAX_CANONICAL_RESULT_BYTES = 8_388_608
 ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -96,7 +100,9 @@ def _lineage_schema_properties() -> dict[str, dict[str, Any]]:
     }
 
 
-def _role_body_schema(role: str) -> dict[str, Any]:
+def _role_body_schema(
+    role: str, *, aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+) -> dict[str, Any]:
     """Executable JSON Schema 2020-12 body for one frozen role.
 
     Relational checks (for example, a review target matching the persisted
@@ -108,6 +114,12 @@ def _role_body_schema(role: str) -> dict[str, Any]:
 
     if role not in ROLES:
         raise OrchestrationResultError("role is not in the closed orchestration set")
+    if (
+        type(aggregation_schema_version) is not str
+        or aggregation_schema_version not in {AGGREGATION_SCHEMA_V1, AGGREGATION_SCHEMA_V2}
+        or (role != "aggregation" and aggregation_schema_version != AGGREGATION_SCHEMA_V1)
+    ):
+        raise OrchestrationResultError("aggregation producer schema version is not admitted")
     text = _schema_string()
     digest = _schema_digest()
     identifier = _schema_identifier()
@@ -168,6 +180,21 @@ def _role_body_schema(role: str) -> dict[str, Any]:
         v4_step["properties"]["placement"]["properties"]["model"] = _schema_string(
             minimum=1, maximum=128
         )
+        v5_step = json.loads(json.dumps(v4_step))
+        v5_step["properties"]["ordinal"]["maximum"] = 15
+        v5_step["properties"]["prerequisite_step_ids"]["maxItems"] = 15
+        v5_step["properties"]["delegation"] = {"anyOf": [
+            {"type": "null"},
+            _schema_object({
+                "descendant_limit": {"type": "integer", "minimum": 2, "maximum": 15},
+                "max_depth": {"type": "integer", "minimum": 2, "maximum": 3},
+            }),
+        ]}
+        v5_step["required"].append("delegation")
+        v5_step["allOf"] = [{
+            "if": {"properties": {"delegation": {"type": "object"}}},
+            "then": {"properties": {"review_required": {"const": False}}},
+        }]
         plan_body = _schema_object(
             {
                 "schema_version": {
@@ -176,28 +203,37 @@ def _role_body_schema(role: str) -> dict[str, Any]:
                         {"const": PLAN_SCHEMA_V2},
                         {"const": PLAN_SCHEMA_V3},
                         {"const": PLAN_SCHEMA_V4},
+                        {"const": PLAN_SCHEMA_V5},
                     ]
                 },
                 "root_job_id": identifier,
                 "plan_attempt_id": identifier,
                 "steps": {
-                    **_schema_array(v1_step, minimum=1, maximum=8),
-                    "items": {"anyOf": [v1_step, v2_step, v3_step, v4_step]},
+                    **_schema_array(v1_step, minimum=1, maximum=16),
+                    "items": {"anyOf": [v1_step, v2_step, v3_step, v4_step, v5_step]},
                 },
             }
         )
         plan_body["allOf"] = [
             {
                 "if": {"properties": {"schema_version": {"const": version}}},
-                "then": {"properties": {"steps": {"items": step_schema}}},
+                "then": {"properties": {"steps": {"items": step_schema,
+                         "maxItems": 16 if version == PLAN_SCHEMA_V5 else 8}}},
             }
             for version, step_schema in (
                 (PLAN_SCHEMA_V1, v1_step),
                 (PLAN_SCHEMA_V2, v2_step),
                 (PLAN_SCHEMA_V3, v3_step),
                 (PLAN_SCHEMA_V4, v4_step),
+                (PLAN_SCHEMA_V5, v5_step),
             )
         ]
+        plan_body["properties"]["coordinator_job_id"] = identifier
+        plan_body["allOf"].append({
+            "if": {"properties": {"schema_version": {"const": PLAN_SCHEMA_V5}}},
+            "then": {"required": ["coordinator_job_id"]},
+            "else": {"not": {"required": ["coordinator_job_id"]}},
+        })
         return plan_body
 
     if role in {"work", "repair"}:
@@ -274,9 +310,9 @@ def _role_body_schema(role: str) -> dict[str, Any]:
             "qualifying_review_result_digest": nullable_digest,
         }
     )
-    return _schema_object(
+    legacy = _schema_object(
         {
-            "schema_version": {"const": "mastermind.aggregation_result/v1"},
+            "schema_version": {"const": AGGREGATION_SCHEMA_V1},
             "root_job_id": identifier,
             "handoff_digest": digest,
             "policy_sha": digest,
@@ -287,6 +323,15 @@ def _role_body_schema(role: str) -> dict[str, Any]:
             "evidence_digests": evidence,
         }
     )
+    if aggregation_schema_version == AGGREGATION_SCHEMA_V1:
+        return legacy
+    nested = copy.deepcopy(legacy)
+    nested["properties"]["schema_version"] = {"const": AGGREGATION_SCHEMA_V2}
+    nested["properties"]["coordinator_job_id"] = identifier
+    nested["required"].append("coordinator_job_id")
+    nested["properties"]["revisions"]["maxItems"] = 16
+    nested["properties"]["revisions"]["items"]["properties"]["ordinal"]["maximum"] = 15
+    return nested
 
 
 def orchestration_result_schema(
@@ -296,16 +341,30 @@ def orchestration_result_schema(
     run_id: str | None = None,
     worker_id: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = PLAN_SCHEMA_V1,
+    aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
 ) -> dict[str, Any]:
     """Return the closed executable envelope schema for ``role``.
 
     The unbound form is the stable golden schema.  The supervisor supplies the
     four optional constants so a provider cannot swap Job, Attempt, worker, or
     root identity while still satisfying the same role shape.
+
+    The default planner and aggregator remain V1. Selecting a newer closed
+    schema does not select a native adapter or grant Runtime admission for it.
     """
 
     if role not in ROLES:
         raise OrchestrationResultError("role is not in the closed orchestration set")
+    admitted_plan_versions = {
+        PLAN_SCHEMA_V1: 0, PLAN_SCHEMA_V3: 2, PLAN_SCHEMA_V4: 3, PLAN_SCHEMA_V5: 4,
+    }
+    if (
+        type(plan_schema_version) is not str
+        or plan_schema_version not in admitted_plan_versions
+        or (role != "plan" and plan_schema_version != PLAN_SCHEMA_V1)
+    ):
+        raise OrchestrationResultError("plan producer schema version is not admitted")
     for name, value in {
         "job_id": job_id,
         "run_id": run_id,
@@ -318,14 +377,20 @@ def orchestration_result_schema(
     def bound_identifier(value: str | None) -> dict[str, Any]:
         return {"const": value} if value is not None else _schema_identifier()
 
-    role_body = _role_body_schema(role)
+    role_body = _role_body_schema(role, aggregation_schema_version=aggregation_schema_version)
     if role == "plan":
-        # The public provider contract remains the frozen V1-only schema.
+        # Project one closed version; removing conditional guards alone leaks
+        # the union's V5 properties and array limit into the frozen V1 wire.
         role_body.pop("allOf")
-        role_body["properties"]["schema_version"] = {"const": PLAN_SCHEMA_V1}
+        role_body["properties"]["schema_version"] = {"const": plan_schema_version}
         role_body["properties"]["steps"]["items"] = role_body["properties"][
             "steps"
-        ]["items"]["anyOf"][0]
+        ]["items"]["anyOf"][admitted_plan_versions[plan_schema_version]]
+        role_body["properties"]["steps"]["maxItems"] = 16 if plan_schema_version == PLAN_SCHEMA_V5 else 8
+        if plan_schema_version == PLAN_SCHEMA_V5:
+            role_body["required"].append("coordinator_job_id")
+        else:
+            del role_body["properties"]["coordinator_job_id"]
     if root_job_id is not None:
         role_body = json.loads(json.dumps(role_body))
         role_body["properties"]["root_job_id"] = {"const": root_job_id}
@@ -351,10 +416,16 @@ def orchestration_result_schema(
     }
 
 
-def role_schema_digest(role: str) -> str:
+def role_schema_digest(
+    role: str, *, plan_schema_version: str = PLAN_SCHEMA_V1,
+    aggregation_schema_version: str = AGGREGATION_SCHEMA_V1,
+) -> str:
     """Content identity of the unbound executable schema for one role."""
 
-    return canonical_digest(orchestration_result_schema(role))
+    return canonical_digest(orchestration_result_schema(
+        role, plan_schema_version=plan_schema_version,
+        aggregation_schema_version=aggregation_schema_version,
+    ))
 
 
 def product_acceptance_review_result_schema(
@@ -572,10 +643,13 @@ def _lineage(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
+    plan_keys = {"schema_version", "root_job_id", "plan_attempt_id", "steps"}
+    if isinstance(value, Mapping) and value.get("schema_version") == PLAN_SCHEMA_V5:
+        plan_keys.add("coordinator_job_id")
     raw = _closed(
         value,
         name="plan role_result",
-        keys={"schema_version", "root_job_id", "plan_attempt_id", "steps"},
+        keys=plan_keys,
     )
     schema_version = raw["schema_version"]
     if schema_version not in {
@@ -583,6 +657,7 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
         PLAN_SCHEMA_V2,
         PLAN_SCHEMA_V3,
         PLAN_SCHEMA_V4,
+        PLAN_SCHEMA_V5,
     }:
         raise OrchestrationResultError("unsupported plan schema")
     expected_root = outer.get("expected_root_job_id")
@@ -595,7 +670,8 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
         raise OrchestrationResultError("plan_attempt_id must equal outer run_id")
     steps: list[dict[str, Any]] = []
     step_ids: set[str] = set()
-    for index, item in enumerate(_array(raw["steps"], name="steps", minimum=1, maximum=8)):
+    maximum_steps = 16 if schema_version == PLAN_SCHEMA_V5 else 8
+    for index, item in enumerate(_array(raw["steps"], name="steps", minimum=1, maximum=maximum_steps)):
         step_keys = {
             "ordinal", "step_id", "objective", "business_impact",
             "review_required", "requested_authorities", "allowed_write_paths",
@@ -604,19 +680,21 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
         if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3}:
             step_keys.add("placement")
         elif (
-            schema_version == PLAN_SCHEMA_V4
+            schema_version in {PLAN_SCHEMA_V4, PLAN_SCHEMA_V5}
             and isinstance(item, Mapping)
             and "placement" in item
         ):
             step_keys.add("placement")
-        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}:
+        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5}:
             step_keys.add("prerequisite_step_ids")
+        if schema_version == PLAN_SCHEMA_V5:
+            step_keys.add("delegation")
         step = _closed(
             item,
             name=f"steps[{index}]",
             keys=step_keys,
         )
-        if _integer(step["ordinal"], name="ordinal", minimum=0, maximum=7) != index:
+        if _integer(step["ordinal"], name="ordinal", minimum=0, maximum=maximum_steps-1) != index:
             raise OrchestrationResultError("step ordinal must equal its array position")
         step_id = _identifier(step["step_id"], name="step_id")
         if step_id in step_ids:
@@ -657,7 +735,7 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "cost_class": step["cost_class"],
         }
-        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4} and "placement" in step:
+        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5} and "placement" in step:
             placement_value = step["placement"]
             placement_keys = (
                 set(placement_value) if isinstance(placement_value, Mapping) else set()
@@ -666,7 +744,7 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
             valid_placement_keys = (
                 placement_keys == required_placement_keys
                 or (
-                    schema_version == PLAN_SCHEMA_V4
+                    schema_version in {PLAN_SCHEMA_V4, PLAN_SCHEMA_V5}
                     and placement_keys == required_placement_keys | {"model"}
                 )
             )
@@ -689,26 +767,40 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
                     nonempty=True,
                 ),
             }
-            if schema_version == PLAN_SCHEMA_V4 and "model" in placement:
+            if schema_version in {PLAN_SCHEMA_V4, PLAN_SCHEMA_V5} and "model" in placement:
                 resolved["placement"]["model"] = _text(
                     placement["model"],
                     name=f"steps[{index}].placement.model",
                     maximum=128,
                     nonempty=True,
                 )
-        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}:
+        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5}:
             prerequisites = _unique_strings(
                 step["prerequisite_step_ids"],
                 name=f"steps[{index}].prerequisite_step_ids",
                 minimum=0,
-                maximum=7,
+                maximum=maximum_steps-1,
                 validator=_identifier,
             )
             resolved["prerequisite_step_ids"] = list(prerequisites)
+        if schema_version == PLAN_SCHEMA_V5:
+            delegation = step["delegation"]
+            resolved["delegation"] = None
+            if delegation is not None:
+                delegation = _closed(delegation, name="delegation",
+                                     keys={"descendant_limit", "max_depth"})
+                if resolved["review_required"]:
+                    raise OrchestrationResultError("coordinator review is owned by its subtree")
+                resolved["delegation"] = {
+                    "descendant_limit": _integer(delegation["descendant_limit"],
+                        name="descendant_limit", minimum=2, maximum=15),
+                    "max_depth": _integer(delegation["max_depth"],
+                        name="max_depth", minimum=2, maximum=3),
+                }
         steps.append(resolved)
         if not isinstance(step["cost_class"], str) or step["cost_class"] not in {"default", "small"}:
             raise OrchestrationResultError("step cost_class is invalid")
-    if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}:
+    if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5}:
         for index, step in enumerate(steps):
             prerequisites = step.get("prerequisite_step_ids", [])
             seen: set[str] = set()
@@ -737,6 +829,8 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": schema_version,
         "root_job_id": root_job_id,
+        **({"coordinator_job_id": _identifier(raw["coordinator_job_id"], name="coordinator_job_id")}
+           if schema_version == PLAN_SCHEMA_V5 else {}),
         "plan_attempt_id": raw["plan_attempt_id"],
         "steps": steps,
     }
@@ -831,19 +925,23 @@ def _nullable_identifier(value: Any, *, name: str) -> str | None:
     return None if value is None else _identifier(value, name=name)
 
 
-def _validate_aggregation(value: Any, *, outer_job_id: str) -> dict[str, Any]:
+def _validate_aggregation(value: Any, *, outer_job_id: str, expected_root_job_id: str) -> dict[str, Any]:
     keys = {
         "schema_version", "root_job_id", "handoff_digest", "policy_sha",
         "plan_attempt_id", "plan_digest", "revisions", "aggregate_summary",
         "evidence_digests",
     }
+    nested = isinstance(value, dict) and value.get("schema_version") == "mastermind.aggregation_result/v2"
+    if nested:
+        keys.add("coordinator_job_id")
     raw = _closed(value, name="aggregation role_result", keys=keys)
-    if raw["schema_version"] != "mastermind.aggregation_result/v1":
+    if raw["schema_version"] not in {"mastermind.aggregation_result/v1", "mastermind.aggregation_result/v2"}:
         raise OrchestrationResultError("unsupported aggregation schema")
-    if raw["root_job_id"] != outer_job_id:
+    if (expected_root_job_id is not None and raw["root_job_id"] != expected_root_job_id
+            or raw.get("coordinator_job_id", raw["root_job_id"]) != outer_job_id):
         raise OrchestrationResultError("aggregation root_job_id must equal outer job_id")
     revisions: list[dict[str, Any]] = []
-    for index, item in enumerate(_array(raw["revisions"], name="revisions", minimum=1, maximum=8)):
+    for index, item in enumerate(_array(raw["revisions"], name="revisions", minimum=1, maximum=16 if nested else 8)):
         revision = _closed(
             item, name=f"revisions[{index}]",
             keys={
@@ -853,7 +951,7 @@ def _validate_aggregation(value: Any, *, outer_job_id: str) -> dict[str, Any]:
                 "qualifying_review_result_digest",
             },
         )
-        if _integer(revision["ordinal"], name="ordinal", minimum=0, maximum=7) != index:
+        if _integer(revision["ordinal"], name="ordinal", minimum=0, maximum=15 if nested else 7) != index:
             raise OrchestrationResultError("revision ordinal must equal array position")
         review_required = _boolean(revision["review_required"], name="review_required")
         review_values = [
@@ -881,8 +979,9 @@ def _validate_aggregation(value: Any, *, outer_job_id: str) -> dict[str, Any]:
             raise OrchestrationResultError("revisions contains a duplicate object")
         revisions.append(resolved_revision)
     return {
-        "schema_version": "mastermind.aggregation_result/v1",
+        "schema_version": raw["schema_version"],
         "root_job_id": raw["root_job_id"],
+        **({"coordinator_job_id": _identifier(raw["coordinator_job_id"], name="coordinator_job_id")} if nested else {}),
         "handoff_digest": _digest(raw["handoff_digest"], name="handoff_digest"),
         "policy_sha": _digest(raw["policy_sha"], name="policy_sha"),
         "plan_attempt_id": _identifier(raw["plan_attempt_id"], name="plan_attempt_id"),
@@ -945,7 +1044,7 @@ def validate_envelope(
     elif expected_role == "repair":
         role_result = _validate_work(raw["role_result"], repair=True)
     else:
-        role_result = _validate_aggregation(raw["role_result"], outer_job_id=expected_job_id)
+        role_result = _validate_aggregation(raw["role_result"], outer_job_id=expected_job_id, expected_root_job_id=expected_root_job_id)
     next_actions = [
         _text(item, name=f"next_actions[{index}]")
         for index, item in enumerate(
@@ -1044,6 +1143,8 @@ GOLDEN_ROLE_SCHEMA_DIGESTS = {
 
 
 __all__ = [
+    "AGGREGATION_SCHEMA_V1",
+    "AGGREGATION_SCHEMA_V2",
     "GOLDEN_ROLE_SCHEMA_DIGESTS",
     "MAX_CANONICAL_RESULT_BYTES",
     "OrchestrationResultError",

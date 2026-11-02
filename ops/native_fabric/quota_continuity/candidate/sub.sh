@@ -263,6 +263,18 @@ _claude_worker_profile() {
     echo "POOL_MAX_TURNS must not exceed 400" >&2
     return 2
   fi
+  # Request ceilings attenuate this profile; they never raise an incumbent
+  # operator limit or a model/complexity default. This is the existing CLI fuse,
+  # not a second token counter, retry policy, or acceptance decision.
+  local request_turns="${POOL_REQUEST_MAX_TURNS:-}"
+  if [ -n "$request_turns" ]; then
+    case "$request_turns" in ''|*[!0-9]*|0*) echo "invalid POOL_REQUEST_MAX_TURNS" >&2; return 2 ;; esac
+    if [ "${#request_turns}" -gt 3 ] || [ "$request_turns" -gt 400 ]; then
+      echo "POOL_REQUEST_MAX_TURNS must not exceed 400" >&2
+      return 2
+    fi
+    [ "$turns" -le "$request_turns" ] || turns="$request_turns"
+  fi
   CLAUDE_WORKER_MAX_TURNS="$turns"
 }
 
@@ -453,6 +465,17 @@ if [ "$DENIED" = "1" ]; then
   # observability only: failure to append never changes the refusal or rc 78.
   python3 "$HERE/pool_ledger.py" append     --pool "$POOL" --task-class "$POOL" --rc 78     --signal other --reason project_bash_denied     >/dev/null 2>&1 || true
   exit 78
+fi
+
+# Normalise the already-qualified Grok Build default before the economic
+# filter and before invoking the native CLI. Explicit historical 4.6 pins remain
+# valid; unknown models cannot silently inherit a provider-side default.
+if [ "$POOL" = grok ]; then
+  case "$MODEL" in
+    '') MODEL=grok-4.7 ;;
+    grok-4.6|grok-4.7) ;;
+    *) echo "LOCAL_GROK_MODEL_REFUSED unsupported_model" >&2; exit 78 ;;
+  esac
 fi
 
 # Additive economic filter; all physical/project/provider gates still apply.
@@ -903,8 +926,15 @@ exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --d
     python3 "$HERE/pool_ledger.py" append --pool ocfree --task-class oc-free --model "$model" --rc "$_rc" --signal ok 2>/dev/null || true
     exit "$_rc" ;;
   cursor)
+    # This direct legacy launcher may forward an explicitly validated model,
+    # but cannot enroll new Cursor models or rewrite the default.  In particular
+    # Grok 4.7 selection is separately held pending provider qualification.
+    case "$MODEL" in
+      ''|composer-2.5|cursor-grok-4.6-high) ;;
+      *) echo "LOCAL_CURSOR_MODEL_REFUSED unsupported_model" >&2; exit 78 ;;
+    esac
     _rc=0
-    python3 "$HERE/slot.py" cursor --wait 3600 -- bash -c 'cd "$1" && exec cursor-agent -p --trust --force --sandbox disabled --output-format text "$2" </dev/null' _ "$CWD" "$PROMPT" || _rc=$?
+    python3 "$HERE/slot.py" cursor --wait 3600 -- bash -c 'cd "$1" || exit 2; if [ -n "$3" ]; then exec cursor-agent -p --trust --force --sandbox disabled --output-format text --model "$3" "$2" </dev/null; else exec cursor-agent -p --trust --force --sandbox disabled --output-format text "$2" </dev/null; fi' _ "$CWD" "$PROMPT" "$MODEL" || _rc=$?
     python3 "$HERE/pool_ledger.py" append --pool cursor --task-class cursor --rc "$_rc" --signal ok 2>/dev/null || true
     exit "$_rc" ;;
   *) echo "pool must be grok, qwen, minimax, glm, minimax-codex, glm-codex, go-codex, go-claude, oc-free or cursor" >&2; exit 2 ;;

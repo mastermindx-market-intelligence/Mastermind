@@ -19,7 +19,7 @@ class DeepSeekClientProvenanceTests(unittest.TestCase):
         self.assertEqual(self.manifest["revision"], "687f282e8625c6b8d11ff58211a90524be2e4317")
         self.assertEqual(
             [entry["local_path"] for entry in self.manifest["files"]],
-            ["keyboard-composition.ts", "incremental-markdown.ts"],
+            ["keyboard-composition.ts", "incremental-markdown.ts", "use-scroll-follow.ts"],
         )
 
     def test_exact_donor_bytes(self) -> None:

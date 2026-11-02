@@ -36,17 +36,21 @@ _ACTIONS = (
     "executive.services.stop",
     "executive.services.restart",
     "executive.services.start_readside",
+    "executive.services.start_paid",
+    "executive.services.stop_paid",
     "executive.services.stop_readside",
     "executive.worker_auth.verify_only",
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
     "executive.worker_auth.issue_due10_incident_grant",
 )
+_PAID_ACTIONS = frozenset({"executive.services.start_paid", "executive.services.stop_paid"})
 _INCIDENT_ACTION = "executive.worker_auth.issue_due10_incident_grant"
 _STATUS_ACTION = "status"
 _SLOT_IDS = ("codex-01", "codex-pro-01", "codex-pro-02", "codex-pro-03")
 _CREDENTIAL_KINDS = ("service-account", "personal-access-token", "device-auth")
 _EFFECT_ONLY_FLAGS = (
+    ("--expected-definition-sha256", "expected_definition_sha256"),
     ("--slot-id", "slot_id"),
     ("--expected-credential-kind", "expected_credential_kind"),
     ("--workspace-binding-class", "workspace_binding_class"),
@@ -64,6 +68,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Invoke one reviewed Mastermind privileged action")
     parser.add_argument("action", choices=_ACTIONS + (_STATUS_ACTION,))
     parser.add_argument("--request-id")
+    parser.add_argument("--expected-definition-sha256")
     parser.add_argument("--slot-id", choices=_SLOT_IDS)
     parser.add_argument("--expected-credential-kind", choices=_CREDENTIAL_KINDS)
     parser.add_argument("--workspace-binding-class")
@@ -96,7 +101,11 @@ def build_request(argv: Sequence[str]) -> dict[str, object]:
                 parser.error(f"incident issuance does not accept {flag}")
     if args.requalify_native_probe_drift_sha256 is not None and args.request_id is None:
         _parser().error("native-probe drift requires an explicit --request-id")
+    if args.action in _PAID_ACTIONS and args.request_id is None:
+        _parser().error("paid lifecycle requires an explicit --request-id")
     values: dict[str, str] = {}
+    if args.expected_definition_sha256 is not None:
+        values["expected_definition_sha256"] = args.expected_definition_sha256
     if args.slot_id is not None:
         values["slot_id"] = args.slot_id
     if args.expected_credential_kind is not None:

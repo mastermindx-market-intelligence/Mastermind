@@ -137,14 +137,21 @@ class AdmissionRequest:
 
 
 def _validate_five_tool_shape(payload: Any) -> dict[str, Any]:
-    """Step 1 — reuse the EXISTING public ``submit_ceo_intent`` validator.
+    """Validate the authenticated App shape through the canonical request law.
+
+    Legacy profiles reuse the frozen MCP adapter. The explicit native profile
+    is App-only; accepting its shape does not issue an execution capability.
 
     Raises :class:`AdmissionError` (never a bare ``GatewayError``) so this
     module owns one closed vocabulary end to end.
     """
 
     try:
+        if isinstance(payload, Mapping) and payload.get("execution_profile") == "native_research_only":
+            return ceo_request.normalize_high_level_request(payload)
         return validate_tool_arguments(MODIFYING_TOOL, payload)
+    except ceo_request.CeoRequestError as exc:
+        raise AdmissionError("invalid_input", exc.message) from exc
     except GatewayError as exc:
         raise AdmissionError("invalid_input", exc.message) from exc
 
@@ -221,6 +228,13 @@ async def compose_admission(request: AdmissionRequest) -> AdmissionOutcome:
     frame = _build_v2_frame(
         request_ref=request_ref, grounding=grounding, semantic_request=semantic_request
     )
+    if semantic_request.get("execution_profile") == "native_research_only":
+        from control_plane.direct_native_execution import SUBMIT_SCHEMA
+        from integrations.mastermind_executive_app.principal_namespace import principal_scope_from_identity
+        frame["schema"] = SUBMIT_SCHEMA
+        frame["principal_scope"] = principal_scope_from_identity(
+            issuer_digest=request.principal.issuer_digest,subject_digest=request.principal.subject_digest,
+            client_ref=request.principal.client_ref,resource=request.principal.resource)
     response = await request.client.send_frame(request.ceo_ingress_socket_path, frame)
     return _classify_send_response(response, request_ref=request_ref)
 

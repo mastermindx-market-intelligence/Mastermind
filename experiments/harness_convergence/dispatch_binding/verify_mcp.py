@@ -250,7 +250,8 @@ PROFILE_MUTATIONS = {
 def profile_checks() -> dict:
     owner = ROOT.parents[2] / 'integrations/acp_worker'
     originals = {name: (owner / name).read_bytes() for name in [
-        'dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs', 'dsh_mcp_grant.mjs']}
+        'dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs', 'dsh_mcp_grant.mjs',
+        'dsh_attempt_overlay.mjs']}
     donor = {p.name: p.read_bytes() for p in (CACHE / 'mcp-donor').glob('*.ts')}
     positive = {**suite('profile-final', 'donor', set(), profile=True),
                 **profile_observations()}
@@ -362,8 +363,8 @@ def grant_checks() -> dict:
         env=ENV, capture_output=True, text=True, timeout=30)
     output = result.stdout + result.stderr
     (CACHE / 'grant-projection-final.log').write_text(output)
-    assert result.returncode == 0 and 'Ran 11 tests' in output and '\nOK\n' in output
-    report = {'python_projection': {'tests': 11, 'passed': 11, 'exit_code': 0,
+    assert result.returncode == 0 and 'Ran 12 tests' in output and '\nOK\n' in output
+    report = {'python_projection': {'tests': 12, 'passed': 12, 'exit_code': 0,
                                    'log_sha256': digest(output.encode())},
               'runtime_projection': grant_unit('grant-admission-final', set())}
     owner = ROOT.parents[2] / 'integrations/acp_worker/dsh_mcp_grant.mjs'
@@ -444,6 +445,7 @@ def main() -> dict:
         '../../../integrations/acp_worker/dsh_tool_profile.mjs',
         '../../../integrations/acp_worker/dsh_dispatch_preflight.mjs',
         '../../../integrations/acp_worker/dsh_mcp_grant.mjs',
+        '../../../integrations/acp_worker/dsh_attempt_overlay.mjs',
         '../../../control_plane/dsh_mcp_client_projection.py',
         '../../../control_plane/executive_agent_capabilities.py',
         '../../../tests/test_dsh_mcp_client_projection.py',

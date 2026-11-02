@@ -19,6 +19,7 @@ import re
 import stat
 import subprocess
 
+from integrations.mastermind_executive_app.os_assets import OS_ASSET_PROFILE_FILE_COUNTS
 from ops.executive_os import os_public_edge_transition as planner
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest
@@ -276,7 +277,10 @@ def _load_stage(stage, expected_digest):
     manifests, captures = {}, {}
     for kind in ("old", "new"):
         index = d["indexes"][kind]
-        require(type(index) is dict and len(index) in (4, 10, 12), "asset index topology")
+        # Staged indexes also contain the manifest: validate their bounded size
+        # against the same closed profiles as the final asset/route validator.
+        require(type(index) is dict and len(index) in {count + 1 for count in OS_ASSET_PROFILE_FILE_COUNTS},
+                "asset index topology")
         require(list(sorted(index.values())) == [f"{kind}-{i:02d}.blob" for i in range(len(index))],
                 "asset index labels differ")
         required.update(index.values())
