@@ -49,6 +49,31 @@ Pin:
 
 Do not review a mutable branch name as if it were an immutable artifact.
 
+
+### Formal review: select the eligible GitHub identity, not a ceremonial seat
+
+For independent GitHub review, a prior commission naming one MastermindX
+reviewer login is a placement preference, not an exclusivity rule.
+When no current exact-seat legal/permission/source requirement applies, **any
+already-connected, authorized MastermindX GitHub account** may perform the native
+independent review. Do not stall merely because a different named Dot/account was
+mentioned. Confirm the connector's real GitHub login and, when available, user ID;
+do not claim to act as another login. Establish independence per **target PR**:
+audit commits, authors, committers, `Co-authored-by` trailers, substantive code/
+review contribution, conflicts, and current repository review restrictions. Prior
+unrelated base merges, closed unmerged cross-reference PRs, or unrelated work do not
+alone make the reviewer the target PR's author.
+
+Census the target PR, prior voting/non-voting reviews and outstanding findings;
+adversarially inspect the actual source, dependency/integration diff, exact head,
+hosted checks and evidence bounds. Immediately before the single intended native
+review write, re-check the head, review eligibility, permissions and prior submissions.
+Stop on a changed head, true disqualification, explicit denial, an in-flight/possibly
+committed write, or an unresolved effect; reconcile rather than duplicate. Submit a
+real attributable GitHub review, verify its review ID/URL and pin, then report honestly.
+A green CI result, source approval, issue comment or other account's historical review
+does not substitute for current-head formal review or owed production acceptance.
+
 ## Step 2A — Review reuse after protected-base movement
 
 For release-sensitive work, `semantic review and integration proof are separate receipts`.
