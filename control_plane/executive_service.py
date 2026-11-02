@@ -7906,14 +7906,14 @@ class ExecutiveControlService:
                 self._coo_action_tasks.discard(task)
 
     def _next_bound_coo_root(
-        self, *, prestart_refusals: dict[str, Exception] | None = None
+        self, *, prestart_refusals: dict[str, Exception] | None = None,
+        previous_root_id: str | None = None,
     ) -> str | None:
-        """Select one root, optionally collecting ephemeral pre-start diagnostics.
+        """Select a bounded COO root without hiding original-run reconciliation.
 
-        Defer an unstarted unusable root, or prefer independent ready work
-        over a root with an unresolved exact dispatch effect. Preserve that
-        original root for fallback reconciliation without replaying its claim.
-        No persistent exclusion, new queue or retry state is introduced.
+        A positively qualified, never-started independent root gets one
+        opportunity between reconciliations of an unresolved earlier root.
+        No extra queue, durable exclusion, provider retry or scheduler exists.
         """
         if self.config.coo_foreground_only:
             return None
@@ -7943,6 +7943,7 @@ class ExecutiveControlService:
                 continue
             if not self._is_bound_coo_root(root):
                 continue
+            prestart_ready = False
             if (
                 root.status is JobStatus.QUEUED
                 and root.attempt_count == 0
@@ -7961,17 +7962,33 @@ class ExecutiveControlService:
                     try:
                         if not self._maintenance_workspace_pending(root):
                             self._require_initial_coo_workspace(root)
+                            prestart_ready = True
                     except (OSError, ServiceError, StateConflict) as exc:
                         if prestart_refusals is not None:
                             prestart_refusals[root.job_id] = exc
                         continue
-            if runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id) is not None:
-                # This root remains on its original reconciliation carrier.
-                # Its unknown effect does not fence an unrelated ready root.
+            try:
+                unresolved = (
+                    runtime.jobs.pending_cycle_dispatch_effect_unknown(root.job_id)
+                    is not None
+                )
+            except StateConflict:
+                # A malformed original-root marker also remains a per-root
+                # reconciliation/refusal problem, not independent admission.
+                unresolved = True
+            if unresolved:
                 if first_reconciling_root is None:
                     first_reconciling_root = root.job_id
                 continue
-            return root.job_id
+            if first_reconciling_root is None:
+                return root.job_id
+            # A prior independent opportunity cannot permanently hide A.
+            # B must be a freshly qualified prestart, not just an eligible
+            # RUNNING/CHECKPOINTED root with no actionable work.
+            if previous_root_id not in (None, first_reconciling_root):
+                return first_reconciling_root
+            if prestart_ready:
+                return root.job_id
         return first_reconciling_root
 
     def _live_bound_coo_root_id(self) -> str | None:
@@ -8047,6 +8064,7 @@ class ExecutiveControlService:
         if self.config.coo_foreground_only:
             return
         assert self._coo_shutdown_event is not None
+        previous_root_id: str | None = None
         while not self._coo_shutdown_event.is_set():
             try:
                 await asyncio.wait_for(
@@ -8080,7 +8098,8 @@ class ExecutiveControlService:
                 selected_root_id = live_root_id
                 if selected_root_id is None:
                     selected_root_id = self._next_bound_coo_root(
-                        prestart_refusals=prestart_refusals
+                        prestart_refusals=prestart_refusals,
+                        previous_root_id=previous_root_id,
                     )
                     for refused_root_id, refusal in prestart_refusals.items():
                         self._record_coo_tick_refusal(refused_root_id, refusal)
@@ -8088,6 +8107,9 @@ class ExecutiveControlService:
                 # root that has not yet been selected for any action.
                 root_id = selected_root_id
                 if root_id is not None:
+                    # Tick-local provenance only; a failed/no-op B cannot
+                    # defer an earlier unresolved A for two consecutive ticks.
+                    previous_root_id = root_id
                     await self._run_coo_cycle(root_id)
                 elif prestart_refusals:
                     self._coo_last_tick_at = datetime.now(timezone.utc).isoformat(
