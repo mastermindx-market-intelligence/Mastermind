@@ -2181,8 +2181,9 @@ def _read_installed_migration_preparation(parent, expected_digest, directory, gu
     if any(parent[key] != inner['descriptor'][key]
            for key in _DESCRIPTOR_UNSTARTED_PREPROOF_V5_TO_V7_KEYS - {'schema_version', 'successor_sha'}):
         raise MaintenanceError("prepared migration successor changed a frozen parent binding")
-    if installed_raw != _normal_installed_preparation_config(inner['source_control'],
-            parent['superseded_unstarted_migration_preparation_sha']):
+    if installed_raw != _normal_installed_preparation_config(
+            _installed_preparation_producer_input(inner),
+            parent['superseded_unstarted_migration_preparation_sha'], observed_raw=installed_raw):
         raise MaintenanceError("installed preparation source config differs")
     material = sealed_json(directory/_V5_TO_V7_EVIDENCE_NAME)
     owner = _evidence_owner()
@@ -2343,17 +2344,30 @@ def _initial_migration_evidence(descriptor, config, material):
 _INSTALLED_PARENT_CONTROL_NAME = "installed-parent-control.json"
 
 
-def _normal_installed_preparation_config(source_raw: bytes, release_sha: str) -> bytes:
-    """Whole unchanged normal-input producer plus the one admitted socket migration.
+def _installed_preparation_producer_input(parent):
+    """The authenticated immediate parent's actual normal-producer input."""
+    return (parent['installed_control_raw']
+            if parent['descriptor']['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR
+            else parent['source_control'])
 
-    The macro coordinate and every optional/privileged value come from the
-    sealed source input, never the caller or the current config under test.
-    This pure derivation grants no installation or activation authority.
+
+def _normal_installed_preparation_config(source_raw: bytes, release_sha: str, *,
+                                         observed_raw: bytes | None = None) -> bytes:
+    """Reproduce the whole normal producer, with its three declared coordinates.
+
+    The source SHA/admin repository are forced by the authenticated edge.
+    Macro comes from this edge's held Root current config or hash-pinned
+    historical snapshot, never a new caller argument or today's global root.
+    The real producer validates the whole input/output and preserves every
+    other field; callers still compare the complete serialized bytes and
+    retain independent raw CAS/seals/installation/FD authority. The two-arg
+    form remains the deterministic unchanged-Macro producer, not admission.
     """
     from ops.executive_os.prepare_control_successor import _parse, build_successor
     source = _parse(source_raw)
+    observed = source if observed_raw is None else _parse(observed_raw)
     value = build_successor(source, source_sha=release_sha,
-                            macro_root=source['ceo_ingress_app_macro_root'])
+                            macro_root=observed['ceo_ingress_app_macro_root'])
     terminal = {'terminal_return_armed', 'terminal_return_socket_path'}
     if terminal & set(value):
         if not terminal <= set(value):
@@ -2380,8 +2394,9 @@ def _installed_preparation_snapshot(descriptor, directory, *, guard=None):
         guard.file(path)
     raw = sealed_bytes(path, _MAX_DOCUMENT_BYTES)
     if (hashlib.sha256(raw).hexdigest() != descriptor['installed_parent_control_config_sha256']
-            or raw != _normal_installed_preparation_config(parent['source_control'],
-                descriptor['superseded_unstarted_migration_preparation_sha'])):
+            or raw != _normal_installed_preparation_config(
+                _installed_preparation_producer_input(parent),
+                descriptor['superseded_unstarted_migration_preparation_sha'], observed_raw=raw)):
         raise MaintenanceError("installed preparation source config differs")
     return raw
 
@@ -2434,7 +2449,9 @@ def _prepare_migration_preparation_successor(args):
                 args.superseded_migration_preparation_descriptor_sha256, guard,
                 installed=bool(installed_parent), successor_sha=target)
             old = parent['descriptor']
-            expected_config = (_normal_installed_preparation_config(parent['source_control'], parent_sha)
+            expected_config = (_normal_installed_preparation_config(
+                                   _installed_preparation_producer_input(parent), parent_sha,
+                                   observed_raw=current.raw)
                                if installed_parent else parent['source_control'])
             if installed_parent:
                 if hashlib.sha256(current.raw).hexdigest() != expected_installed:
@@ -4092,7 +4109,8 @@ class Maintenance:
                 raise MaintenanceError("prepared successor preparing marker differs")
         if self.descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
             installed_raw = _installed_preparation_snapshot(self.descriptor, self.bundle, guard=guard)
-            if config_holder.raw != _normal_installed_preparation_config(installed_raw, sha):
+            if config_holder.raw != _normal_installed_preparation_config(
+                    installed_raw, sha, observed_raw=config_holder.raw):
                 raise MaintenanceError('installed preparation admission config differs')
             _require_preparation_install(sha)
         self.database = _quiescent_database(config, lock, guard)
@@ -4151,7 +4169,8 @@ class Maintenance:
                 _prepared_migration_parent(self.descriptor, guard=guard)
             if self.descriptor['schema_version'] == SCHEMA_INSTALLED_PREPARED_MIGRATION_SUCCESSOR:
                 installed_raw = _installed_preparation_snapshot(self.descriptor, self.bundle, guard=guard)
-                if config_holder.raw != _normal_installed_preparation_config(installed_raw, sha):
+                if config_holder.raw != _normal_installed_preparation_config(
+                        installed_raw, sha, observed_raw=config_holder.raw):
                     raise MaintenanceError('installed preparation config changed before run marker')
                 _require_preparation_install(sha)
                 config_holder.check(); lock.check(); initial.check(); guard.check()
