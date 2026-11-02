@@ -215,13 +215,13 @@ def guarded(out: dict, key: str, argv: list, timeout: int, env=None, limit: int 
 def hold_unqualified_apply(out: dict, key: str) -> None:
     """Refuse an unqualified external producer BEFORE its --apply side effect.
 
-    The existing fleet_sparsify.py and fleet_repack.py are not source-enrolled
-    with the complete B10 receipt contract. A post-effect ledger cannot undo
-    an uncertain effect. Until immutable producer source, complete receipt
-    semantics and installed preimage are independently qualified, there is
-    deliberately no executable admission path for either helper.
+    The external fleet_sparsify.py, fleet_repack.py, and the installed
+    generated_cache_trim.py are not source/preimage-qualified for apply.
+    A post-effect ledger cannot undo an uncertain effect. Until immutable
+    producer source, effect safety, receipt semantics, and installed preimage
+    are independently qualified, there is no apply admission for these helpers.
     """
-    if key not in ('fleet_sparse', 'repack'):
+    if key not in ('fleet_sparse', 'repack', 'generated_cache_trim'):
         raise ValueError('unexpected producer admission key')
     out[key] = 'PRE_EFFECT_HOLD: producer source and completion schema unqualified'
     out[key + '_rc'] = 78
@@ -682,6 +682,10 @@ def finish(out: dict) -> int:
     # satisfy the applied-receipt contract above.
     if out.get('stale_packs_hold') == STALE_PACK_HOLD:
         incomplete.append('stale_packs.held_unqualified_helper')
+    # An unreviewed generated-cache helper cannot be retrospectively
+    # qualified by a success-shaped stdout or a zero exit code.
+    if out.get('generated_cache_trim_hold') == 'HELD_UNQUALIFIED_GENERATED_CACHE_HELPER':
+        incomplete.append('generated_cache_trim.held_unqualified_helper')
     # The incumbent scratch_reap.py prints a final JSON ledger even when it
     # has zero eligible trees. Exit 0 with empty/truncated output, an unrelated
     # diagnostic line, or a partial scan cannot prove a completed sweep.
@@ -1053,16 +1057,15 @@ def main() -> int:
                                   + str(exc)[:200])
             out['stale_packs_rc'] = 78
 
-        # pass 0.6 (Studio only): prune age-gated, ignored Terminal dependency/build
-        # caches while keeping the worktrees, branch refs, dirty source and user
-        # artifacts intact. Part of THIS sweeper lock; never a second daemon.
-        # The helper fails closed on locks, active cwd/processes, unexpected Git
-        # ownership, unknown cache contents, source-status drift or journal gaps.
+        # pass 0.6 (Studio only): the installed generated_cache_trim.py has not
+        # been source-enrolled, preimage-verified, or reviewed for an apply-capable
+        # execution. Its receipt can arrive AFTER a deletion, so even a degraded
+        # final ledger cannot prove safety. Keep the original sweep lock/timer,
+        # but refuse THIS helper before spawning any child or deleting any cache.
+        # No new cleaner, inventory command, permission, or scheduler is added.
         if os.uname().nodename.split('.')[0] == 'm2studio':
-            guarded(out, 'generated_cache_trim',
-                    [sys.executable, str(HERE / 'generated_cache_trim.py'),
-                     '--apply', '--min-age-days', '10', '--cache-idle-days', '3',
-                     '--max-worktrees', '3'], 240, limit=1800)
+            out['generated_cache_trim_hold'] = 'HELD_UNQUALIFIED_GENERATED_CACHE_HELPER'
+            hold_unqualified_apply(out, 'generated_cache_trim')
 
         # pass 1: the known producer (check_contract_delta.py) with the pressure-adaptive age gate
         guarded(out, 'temp_gc', [sys.executable, str(HERE / 'temp_worktree_gc.py'), '--apply', '--json',
