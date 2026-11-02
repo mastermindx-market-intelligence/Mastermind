@@ -764,8 +764,13 @@ min_free_mem = entry.get("min_free_mem_gb", 0)
 if (isinstance(min_free_mem, bool) or not isinstance(min_free_mem, (int, float))
         or not 0 <= min_free_mem <= 256):
     raise SystemExit(3)
+# A Linux worker must be explicitly enrolled in the physical Tctl guard.
+# Missing/false enrollment is policy corruption, not an implicit exemption.
+platform = entry.get("platform")
+if platform not in ("linux", "darwin"):
+    raise SystemExit(3)
 thermal_enabled = entry.get("require_thermal", False)
-if type(thermal_enabled) is not bool:
+if type(thermal_enabled) is not bool or (platform == "linux" and thermal_enabled is not True):
     raise SystemExit(3)
 thermal_limit = entry.get("cpu_tctl_limit_c") if thermal_enabled else 0
 if (isinstance(thermal_limit, bool)
