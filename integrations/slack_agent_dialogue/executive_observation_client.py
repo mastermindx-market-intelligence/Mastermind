@@ -201,6 +201,7 @@ class ExecutiveDialogueObservationClient(
         if path in {
             Path("/var/run/mastermind-executive/control.sock"),
             Path("/var/run/mastermind-agent-relay/agent-relay.sock"),
+            Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock"),
         }:
             raise ValueError("Executive observation client cannot use a fallback socket")
         if (

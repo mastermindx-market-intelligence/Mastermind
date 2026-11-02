@@ -193,13 +193,16 @@ def setup(tmp_path,monkeypatch):
 
 @pytest.fixture
 def unbegun(tmp_path,monkeypatch):
-    """Admitted v6 Runtime and probes with no physical outcome yet."""
+    """Admitted v7 Runtime and probes with no physical outcome yet."""
     yield from _build(tmp_path,monkeypatch,physical=False)
 
 
 @pytest.fixture
 def v5(tmp_path,monkeypatch):
-    """The actual production schema: no M2 tables are active."""
+    """Frozen historical v5 fixture, separate from the production v7 schema."""
+    monkeypatch.setattr(rt, '_MIGRATIONS', rt._MIGRATIONS[:5])
+    monkeypatch.setattr(rt, 'SCHEMA_VERSION', 5)
+    monkeypatch.setattr(rt, '_NORMALIZED_V7_SCHEMA_DIGEST', rt._NORMALIZED_V5_SCHEMA_DIGEST)
     yield from _build(tmp_path,monkeypatch,schema=False,physical=False)
 
 def claim(s,prepared=True):

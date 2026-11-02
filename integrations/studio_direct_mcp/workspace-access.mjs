@@ -34,7 +34,7 @@ export const STUDIO_WORKSPACE_TOOLS = Object.freeze([
 
 const PUBLICATION_DESCRIPTIONS = [
   'Read publication status for one existing managed workspace. Optional repository is a closed host-enrolled alias; omission preserves the legacy Mastermind route. The installed owner supplies the workspace and source binding. No workspace allocation, commit or push is performed.',
-  'MODIFYING. Commit current committable changes in one existing managed workspace through the existing exact-HEAD-fenced publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. No caller path, branch, remote, credential or command. This operation is local-only and has no push capability.',
+  'MODIFYING. Commit current committable changes in one existing managed workspace through the existing exact-HEAD-fenced publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. Optional merge fences retain the exact host-fixed protected-base ancestry and prepared tree. No caller path, branch, remote, credential or command. This operation is local-only and has no push capability.',
   'MODIFYING. Push the exact expected HEAD of one existing clean managed workspace through the existing same-branch, canonical-origin publisher. Optional repository is a closed host-enrolled alias; omission preserves Mastermind. No force, tag, arbitrary destination or credential input. Unknown effects convey no retry or retargeting authority.',
 ];
 export const STUDIO_REPOSITORY_GIT_TOOLS = Object.freeze(STUDIO_GIT_PUBLISH_TOOLS.map((tool, i) => Object.freeze({
@@ -201,7 +201,7 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
   }
   async function publication(method, args) {
     const keys = ['status', 'commissionStatus'].includes(method) ? ['operation_id', 'repository'] : method === 'commit'
-      ? ['operation_id', 'repository', 'expected_head_sha', 'message'] : method === 'commitCommission'
+      ? ['operation_id', 'repository', 'expected_head_sha', 'message', 'merge'] : method === 'commitCommission'
         ? ['operation_id', 'repository', 'expected_head_sha', 'expected_content_sha256']
         : ['operation_id', 'repository', 'expected_head_sha'];
     closed(args, keys);

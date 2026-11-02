@@ -27,6 +27,26 @@ Advance the highest-leverage unfinished capability through the real critical pat
 A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
 not permission to end the whole turn while another in-scope critical-path lane remains executable.
 
+## Durable project plan at the start, not only at handoff
+
+For any multi-phase initiative, first recover the Agent OS workstream waves and the
+latest dated handoff (the pinned plan), then the repo master plan's task tree, or
+create a useful initial task tree when no legitimate one exists. Follow
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` from this same protected pin. Record stable
+task/subtask IDs, dependencies, `DONE_WHEN`, expected evidence and review on the
+task tree. Keep wave status, `next_action` and `do_not_redo` on the Agent OS records.
+Verify the first durable GitHub save and the authorized handoff readback as available
+**before major delegation or construction**.
+This is a phase-level safety requirement, not an approval loop or a requirement to
+pre-write every tiny implementation command. If a writer is unavailable, identify
+which record is missing and never pretend an unsaved plan is durable.
+
+On material progress, accepted rulings, child returns, dependency changes and risky
+session boundaries, revise the affected task-tree nodes or wave fields through that
+owner's writer, read back the revision, and amend the latest dated Agent OS handoff.
+Keep completed work and pending effects precise. A saved plan/checkpoint does not end
+the active turn or grant a new operator, runtime or chat authority.
+
 ## Start and recover without administrative ceremony
 
 These are decision checks, not additional forms or approval messages. Apply them to Web, Claude,
@@ -66,6 +86,17 @@ occurred before tool dispatch from a lost/ambiguous response after dispatch. Use
 bounded call history/status/readback when available. If the refused call is proven never to have reached
 the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
 do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
+
+**Action-scoped refusal is not mission-wide refusal.** If one tool request is denied, record the
+precise action, target, originating carrier, receipt, and whether any effect dispatched. Hold that
+specific denied action. Do not treat the refusal as proof that all other tasks, repositories,
+read-only inspections, or Fabric operations are barred. Continue the highest-value independent
+task using an admitted worker where allowed, with a distinct task identity and no replay of the
+denied effect. A different task must be genuinely separable in authority, target, and intended
+effect—not a decomposed substitute for the rejected operation. A request confirmed pre-dispatch
+with `EFFECT_NONE` may be recovered only within the bounds already allowed for that failure
+category. `EFFECT_UNKNOWN` must be reconciled at the original target before any further operation
+depending on it.
 
 Establish refusal provenance before projecting it onto another session. Identify the actual
 tool/provider receipt, originating surface/carrier, action/target, and dispatch/effect state.

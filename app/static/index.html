@@ -347,6 +347,10 @@ body.page-mm td.l { text-align: left; }
 .mm-verdict-chip.reduce, .mm-verdict-chip.trim { background: color-mix(in srgb, var(--warn) 15%, var(--panel2)); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
 .mm-verdict-chip.exit_pending { background: color-mix(in srgb, var(--down) 15%, var(--panel2)); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
 .mm-verdict-chip.avoid { background: color-mix(in srgb, var(--down) 15%, var(--panel2)); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
+/* queued-change timing line under a verdict chip (fills at the next open, or awaiting settlement).
+   It may wrap: at phone width a no-wrap line widened the Verdict column and pushed the chip
+   itself out of the scroll viewport, hiding the very change this line qualifies. */
+.mm-q-when { display:block; margin-top:2px; font-size:11px; line-height:1.25; color:var(--muted); font-weight:500; white-space:normal; }
 
 #positions tbody tr.pos-row {
   cursor: pointer;
@@ -1968,6 +1972,11 @@ body.page-mm .mm-perf-nav-value {
   font-weight: 800;
   letter-spacing: -.035em;
 }
+/* PBR-SELF-UNAVAILABLE: an unread account is a state, not a value; it never takes the numeral's emphasis */
+.mm-perf-nav-value[data-availability="unavailable"],
+body.page-mm .mm-perf-nav-value[data-availability="unavailable"] { color: var(--muted); }
+/* PBR-SELF-UNAVAILABLE: the heartbeat is a health cue, so it stops (static, muted) while the book is unreadable */
+.mm-hb[data-availability="unavailable"] { background: var(--muted); animation: none; }
 body.page-mm .mm-perf-stat {
   justify-content: center;
   min-width: 0;
@@ -2749,39 +2758,41 @@ html[data-theme="light"] body.page-mm {
 <!-- ── PERFORMANCE HEADER ─────────────────────────────────────────────────── -->
 <div class="mm-section">
   <div class="panel span12" id="performance" style="grid-column:span 12">
-    <h2><span class="l-en">Performance — $1M Paper Account</span><span class="l-zh">业绩 — $1M 模拟账户</span></h2>
+    <h2><span class="l-en">Performance — Simulated Account</span><span class="l-zh">业绩 — 模拟账户</span></h2>
+    <p class="mm-perf-stat-sub" id="perf-evidence" role="status" aria-live="polite"></p>
     <div class="mm-live-status" id="live-marks-status" role="status" aria-live="polite">
       <span class="dot"></span><span>Loading market clock…</span>
     </div>
     <div class="mm-perf-grid" id="perf-grid">
       <!-- NAV big number -->
       <div class="mm-perf-nav">
-        <div class="mm-perf-nav-label"><span class="l-en">Current NAV</span><span class="l-zh">当前净值</span></div>
-        <div class="mm-perf-nav-value" id="perf-nav">$1,000,000</div>
+        <div class="mm-perf-nav-label" id="perf-nav-label"><span class="l-en">NAV</span><span class="l-zh">净值</span></div>
+        <div class="mm-perf-nav-value" id="perf-nav">—</div>
       </div>
       <div class="mm-perf-divider"></div>
       <!-- Total return -->
       <div class="mm-perf-stat">
-        <div class="mm-perf-stat-label"><span class="l-en">Total Return</span><span class="l-zh">总回报</span></div>
-        <div class="mm-perf-stat-value neu" id="perf-ret">+0.00%</div>
+        <div class="mm-perf-stat-label"><span class="l-en">Change from Start</span><span class="l-zh">相对初始净值变化</span></div>
+        <div class="mm-perf-stat-value neu" id="perf-ret">—</div>
         <div class="mm-perf-stat-sub" id="perf-since"><span class="l-en">since inception</span><span class="l-zh">自成立以来</span></div>
       </div>
       <!-- versus the active book's configured benchmark -->
       <div class="mm-perf-stat">
         <div class="mm-perf-stat-label" id="perf-bench-label"><span class="l-en">vs benchmark</span><span class="l-zh">相对基准</span></div>
-        <div class="mm-perf-stat-value neu" id="perf-spy">+0.00%</div>
-        <div class="mm-perf-stat-sub"><span class="l-en">alpha vs benchmark</span><span class="l-zh">相对基准超额</span></div>
+        <div class="mm-perf-stat-value neu" id="perf-spy">—</div>
+        <div class="mm-perf-stat-sub"><span class="l-en">return difference</span><span class="l-zh">回报差</span></div>
       </div>
       <!-- Day change -->
       <div class="mm-perf-stat">
-        <div class="mm-perf-stat-label"><span class="l-en">Today</span><span class="l-zh">今日</span></div>
-        <div class="mm-perf-stat-value neu" id="perf-day">+0.00%</div>
-        <div class="mm-perf-stat-sub"><span class="l-en">day change</span><span class="l-zh">日内涨跌</span></div>
+        <div class="mm-perf-stat-label"><span class="l-en">Last observed change</span><span class="l-zh">最近记录变动</span></div>
+        <div class="mm-perf-stat-value neu" id="perf-day">—</div>
+        <div class="mm-perf-stat-sub" id="perf-day-range"><span class="l-en">between recorded observations</span><span class="l-zh">记录之间的变化</span></div>
       </div>
       <!-- Max drawdown -->
       <div class="mm-perf-stat">
-        <div class="mm-perf-stat-label"><span class="l-en">Max Drawdown</span><span class="l-zh">最大回撤</span></div>
+        <div class="mm-perf-stat-label"><span class="l-en">Recorded Drawdown</span><span class="l-zh">记录最大回撤</span></div>
         <div class="mm-perf-stat-value neu" id="perf-dd">—</div>
+        <div class="mm-perf-stat-sub" id="perf-dd-range"><span class="l-en">over recorded observations</span><span class="l-zh">已记录观察区间</span></div>
         <div class="mm-perf-stat-sub" id="perf-cash-lbl"><span class="l-en">cash: —</span><span class="l-zh">现金: —</span></div>
       </div>
     </div>
@@ -2795,12 +2806,12 @@ html[data-theme="light"] body.page-mm {
       <div class="mm-ec-legend" id="ec-legend">
         <span class="mm-ec-leg-item">
           <span class="mm-ec-leg-line" style="background:var(--up)"></span>
-          <span id="ec-leg-portfolio">Portfolio (live since —)</span>
+          <span id="ec-leg-portfolio">Portfolio (recorded since —)</span>
         </span>
         <span class="mm-ec-leg-item">
           <span class="mm-ec-leg-line" style="background:var(--muted);opacity:.55;border-top:2px dashed var(--muted);height:0;margin-top:1px"></span>
           <!-- Benchmark symbol is book-specific and set by renderEquityCurve(). -->
-          <span id="ec-leg-bench">S&amp;P 500 ($1M ref)</span>
+          <span id="ec-leg-bench">Benchmark reference</span>
         </span>
         <span class="mm-ec-range" id="ec-range-label"></span>
       </div>
@@ -3103,8 +3114,9 @@ html[data-theme="light"] body.page-mm {
     <div class="panel span12" id="sd-header">
       <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap">
         <div>
-          <div class="mm-hero-eyebrow"><span class="mm-hb"></span>&nbsp;<span class="l-en">SELF-DIRECTED &mdash; YOUR PAPER BOOK</span><span class="l-zh">自主交易 &mdash; 你的模拟组合</span></div>
-          <div class="mm-perf-nav-value" id="sd-nav" style="font-size:32px;margin-top:4px">$1,000,000</div>
+          <div class="mm-hero-eyebrow"><span class="mm-hb" id="sd-hb"></span>&nbsp;<span class="l-en">SELF-DIRECTED &mdash; YOUR PAPER BOOK</span><span class="l-zh">自主交易 &mdash; 你的模拟组合</span></div>
+          <div class="mm-perf-nav-value" id="sd-nav" style="font-size:32px;margin-top:4px">—</div>
+          <div class="mm-perf-stat-sub" id="sd-nav-status" hidden></div>
           <div style="margin-top:7px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
             <span class="mm-paper">PAPER</span>
             <span class="mm-sd-mkt closed" id="sd-mkt"><span class="dot"></span><span id="sd-mkt-txt">—</span></span>
@@ -3210,24 +3222,24 @@ html[data-theme="light"] body.page-mm {
 // ── i18n dictionary ──────────────────────────────────────────────────────────
 var I18N = {
   // Performance section
-  'perf.title':           { en: 'Performance — $1M Paper Account', zh: '业绩 — $1M 模拟账户' },
-  'perf.current_nav':     { en: 'Current NAV', zh: '当前净值' },
-  'perf.total_return':    { en: 'Total Return', zh: '总回报' },
+  'perf.title':           { en: 'Performance — Simulated Account', zh: '业绩 — 模拟账户' },
+  'perf.current_nav':     { en: 'NAV', zh: '净值' },
+  'perf.total_return':    { en: 'Change from Start', zh: '相对初始净值变化' },
   'perf.since_inception': { en: 'since inception', zh: '自成立以来' },
   'perf.since':           { en: 'since', zh: '自' },
   'perf.vs_spy':          { en: 'vs SPY', zh: '相对标普500' },
-  'perf.alpha_vs_bench':  { en: 'alpha vs benchmark', zh: '相对基准超额' },
-  'perf.today':           { en: 'Today', zh: '今日' },
-  'perf.day_change':      { en: 'day change', zh: '日内涨跌' },
-  'perf.max_drawdown':    { en: 'Max Drawdown', zh: '最大回撤' },
+  'perf.alpha_vs_bench':  { en: 'return difference', zh: '回报差' },
+  'perf.today':           { en: 'Last observed change', zh: '最近记录变动' },
+  'perf.day_change':      { en: 'between recorded observations', zh: '记录之间的变化' },
+  'perf.max_drawdown':    { en: 'Recorded Drawdown', zh: '记录最大回撤' },
   'perf.cash_lbl':        { en: 'cash:', zh: '现金:' },
   // Equity curve
   'ec.title':             { en: 'Equity Curve', zh: '净值曲线' },
-  'ec.portfolio_live':    { en: 'Portfolio (live since', zh: '组合（实盘自' },
-  'ec.spy_ref':           { en: 'S&P 500 ($1M ref)', zh: '标普500（$1M参考）' },
+  'ec.portfolio_live':    { en: 'Portfolio (recorded since', zh: '组合（记录始于' },
+  'ec.spy_ref':           { en: 'Benchmark reference', zh: '基准参考序列' },
   'ec.loading':           { en: 'Loading equity curve…', zh: '加载净值曲线中…' },
-  'ec.no_data':           { en: 'Live track accruing — no series data yet', zh: '实盘追踪中，暂无数据' },
-  'ec.tooltip_realized':  { en: '(realized)', zh: '（实盘）' },
+  'ec.no_data':           { en: 'No recorded performance observations available', zh: '暂无可用的业绩记录' },
+  'ec.tooltip_realized':  { en: '(recorded)', zh: '（已记录）' },
   'ec.tooltip_pre':       { en: '(pre-inception)', zh: '（成立前）' },
   'ec.nav':               { en: 'NAV:', zh: '净值:' },
   'ec.spy_lbl':           { en: 'SPY ref:', zh: '标普参考:' },
@@ -3440,6 +3452,11 @@ var I18N = {
   'pos.unrealized':       { en: 'Unrealized P&L', zh: '未实现盈亏' },
   'pos.v_hold':           { en: 'HOLDING', zh: '持有中' },
   'pos.v_exit_pending':   { en: 'EXIT QUEUED', zh: '已排队卖出' },
+  // queued full-target change for a lot we still hold — distinct from the (pending, unfilled) row
+  'pos.q_exit':           { en: 'EXIT QUEUED', zh: '已排队卖出' },
+  'pos.q_trim':           { en: 'TRIM QUEUED', zh: '已排队减仓' },
+  'pos.q_add':            { en: 'ADD QUEUED', zh: '已排队加仓' },
+  'pos.q_unclassified':   { en: 'CHANGE QUEUED', zh: '已排队调整' },
   'pos.v_add':            { en: 'ADDING', zh: '加仓中' },
   'pos.v_trim':           { en: 'TRIMMING', zh: '减仓中' },
   'pos.v_reduce':         { en: 'REDUCING', zh: '减仓中' },
@@ -3515,6 +3532,10 @@ var I18N = {
   'sd.cancel':            { en: 'cancel', zh: '取消' },
   'sd.hist_empty':        { en: 'No trades yet — your buys and sells appear here.', zh: '暂无交易 —— 你的买卖记录将显示在此。' },
   'sd.pending_note':      { en: 'queued — fills at next open', zh: '排队中 —— 下次开盘成交' },
+  'sd.unavailable':       { en: 'unavailable', zh: '不可用' },
+  'sd.unavailable_reason': { en: 'Book unavailable — the account could not be read, so no balances are shown.', zh: '组合数据不可用 —— 无法读取账户，因此不显示任何余额。' },
+  'sd.hist_unavailable':  { en: 'Trade history unavailable — the fill log could not be read.', zh: '交易记录不可用 —— 无法读取成交记录。' },
+  'sd.mkt.unknown':       { en: 'Market status unavailable', zh: '市场状态不可用' },
 
   // ── Desk observability page ──
   'desk.asof':            { en: 'As of', zh: '截至' },
@@ -3861,12 +3882,68 @@ var fmtPctSign = function(v) {
 };
 
 // ── PERFORMANCE HEADER ────────────────────────────────────────────────────────
+function _performanceEvidenceText(p, isZh) {
+  var a = p && p.availability;
+  if (!a) return '';
+  var msg;
+  if (a.status === 'unavailable') {
+    msg = isZh ? '业绩证据不可用；未代填资金或零回报。' : 'Performance evidence unavailable; no balance or zero return has been substituted.';
+  } else if (a.valuation_basis === 'last_recorded_nav') {
+    msg = (isZh ? '最近记录净值：' : 'Last recorded NAV: ') + (a.as_of || '—') +
+      (isZh ? '。此快照未证明当前持仓估值。' : '. This snapshot does not establish the value of current holdings.');
+  } else if (a.valuation_basis === 'provided_prices') {
+    msg = isZh ? '暂定估值；所给价格尚未绑定统一有效时间。' : 'Provisional valuation; supplied prices do not establish a common effective time.';
+  } else if (a.valuation_basis === 'cash_only') {
+    msg = isZh ? '已读取纯现金账户；账户有效时间未验证。' : 'Observed cash-only account; its effective time is unverified.';
+  } else {
+    msg = isZh ? '业绩证据尚未完整。' : 'Performance evidence is incomplete.';
+  }
+  if (a.history_status !== 'available') msg += isZh ? ' 历史记录缺失或不完整。' : ' History is missing or incomplete.';
+  if (p.vs_benchmark_pct == null) msg += isZh ? ' 共同日期的基准比较不可用。' : ' A comparison over common benchmark dates is unavailable.';
+  else msg += isZh ? ' 基准使用共同日期的缓存收盘价，总回报调整未验证。' : ' Benchmark comparison uses common dates and cached closes; total-return adjustments are unverified.';
+  if (a.account_history_binding === 'book_path_only' && a.valuation_basis === 'last_recorded_nav') {
+    msg += isZh ? ' 账户与历史记录的对应关系未核对。' : ' Account-to-history reconciliation is unverified.';
+  }
+  if (p.total_return_pct != null && p.external_flow_adjustment === 'not_applied') {
+    msg += isZh ? ' 净值变化未调整外部资金流。' : ' NAV change is not adjusted for external cash flows.';
+  }
+  return msg;
+}
+
+// Close one area per contiguous observed segment. A gap never becomes a zero-valued vertex.
+function _equityAreaPath(vals, xOf, yOf, floor, start, end) {
+  var paths = [], points = [];
+  function closeSegment() {
+    if (points.length >= 2) {
+      var first = points[0], last = points[points.length-1];
+      paths.push('M' + xOf(first[0]).toFixed(1) + ' ' + floor.toFixed(1) + ' ' +
+        points.map(function(p) { return 'L' + xOf(p[0]).toFixed(1) + ' ' + yOf(p[1]).toFixed(1); }).join(' ') +
+        ' L' + xOf(last[0]).toFixed(1) + ' ' + floor.toFixed(1) + ' Z');
+    }
+    points = [];
+  }
+  for (var i = start; i <= end; i++) {
+    if (typeof vals[i] !== 'number' || !Number.isFinite(vals[i])) closeSegment();
+    else points.push([i, vals[i]]);
+  }
+  closeSegment();
+  return paths.join(' ');
+}
+
 function renderPerformance() {
-  var p = _perf;
-  if (!p) return;
-  var benchmarkSymbol = p.benchmark || 'SPY';
+  var p = _perf || {availability: {status:'unavailable', history_status:'unavailable'}};
+  var benchmarkSymbol = p.benchmark || 'Benchmark';
   var benchmarkName = p.benchmark_name || benchmarkSymbol;
   var benchmarkNameZh = p.benchmark_name_zh || benchmarkName;
+
+  var isZhPerf = document.documentElement.getAttribute('data-lang') === 'zh';
+  var evidenceEl = E('perf-evidence');
+  if (evidenceEl) evidenceEl.textContent = _performanceEvidenceText(p, isZhPerf);
+  var a = p.availability || {};
+  var navLabel = E('perf-nav-label');
+  if (navLabel) navLabel.textContent = a.valuation_basis === 'last_recorded_nav'
+    ? (isZhPerf ? '最近记录净值' : 'Last recorded NAV')
+    : (a.status === 'provisional' ? (isZhPerf ? '暂定净值' : 'Provisional NAV') : (isZhPerf ? '净值' : 'NAV'));
 
   // NAV
   var navEl = E('perf-nav');
@@ -3911,7 +3988,13 @@ function renderPerformance() {
     dayEl.className = 'mm-perf-stat-value ' + d.cls;
   }
 
-  // Max drawdown
+  var dayRangeEl = E('perf-day-range');
+  var dayWindow = p.day_change_window;
+  if (dayRangeEl) dayRangeEl.textContent = dayWindow && dayWindow.from && dayWindow.to
+    ? dayWindow.from + ' → ' + dayWindow.to
+    : (isZhPerf ? '记录之间的变化' : 'between recorded observations');
+
+  // Max drawdown over actual recorded observations only.
   var ddEl = E('perf-dd');
   if (ddEl) {
     var dd = p.max_drawdown_pct;
@@ -3919,17 +4002,22 @@ function renderPerformance() {
     ddEl.className = 'mm-perf-stat-value ' + (dd != null && Math.abs(dd) > 0.5 ? 'neg' : 'neu');
   }
 
+  var ddRangeEl = E('perf-dd-range');
+  var ddWindow = p.drawdown_window;
+  if (ddRangeEl) ddRangeEl.textContent = ddWindow && ddWindow.from && ddWindow.to
+    ? ddWindow.from + ' → ' + ddWindow.to
+    : (isZhPerf ? '已记录观察区间' : 'over recorded observations');
+
   // cash sub-label
   var cashLbl = E('perf-cash-lbl');
-  if (cashLbl && p.cash != null) {
+  if (cashLbl) {
     cashLbl.textContent = t('perf.cash_lbl') + ' ' + fmtNav(p.cash);
   }
 }
 
 // ── EQUITY CURVE ──────────────────────────────────────────────────────────────
-// Series kinds: "pre_inception" (flat $1M) and "realized" (live NAV).
-// We draw: flat $1M line for pre_inception → solid NAV line for realized.
-// No "hypothetical" / dashed segment. SPY always shows real up/down.
+// Recorded NAV is distinct from explicitly labeled pre-inception capital reference.
+// Unavailable NAV dates stay gaps; benchmark closes are a separate reference series.
 function renderEquityCurve() {
   var wrap = E('ec-wrap');
   if (!wrap) return;
@@ -3937,7 +4025,7 @@ function renderEquityCurve() {
   var series = (p && p.series) || [];
   var isZhEc = document.documentElement.getAttribute('data-lang') === 'zh';
   // The backend emits both the data symbol and human label; use the native index name in the UI.
-  var benchSymbol = (p && p.benchmark) || 'SPY';
+  var benchSymbol = (p && p.benchmark) || 'Benchmark';
   var bench = (p && (isZhEc ? p.benchmark_name_zh : p.benchmark_name)) || benchSymbol;
   var benchDisplay = bench === benchSymbol ? bench : bench + ' (' + benchSymbol + ')';
 
@@ -3948,13 +4036,11 @@ function renderEquityCurve() {
     legPortEl.textContent = t('ec.portfolio_live') + ' ' + rsDate + (isZhEc ? '）' : ')');
   }
   var legBenchEl = E('ec-leg-bench');
-  if (legBenchEl) legBenchEl.textContent = benchDisplay + (isZhEc ? '（$1M参考）' : ' ($1M ref)');
+  if (legBenchEl) legBenchEl.textContent = benchDisplay + (isZhEc ? '（参考序列）' : ' (reference series)');
 
   // Range label
   var rangeEl = E('ec-range-label');
-  if (rangeEl && series.length) {
-    rangeEl.textContent = series[0].date + ' → ' + series[series.length-1].date;
-  }
+  if (rangeEl) rangeEl.textContent = series.length ? series[0].date + ' → ' + series[series.length-1].date : '';
 
   if (!series.length) {
     wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
@@ -3963,7 +4049,7 @@ function renderEquityCurve() {
 
   // Build nav values: pre_inception points are pinned at starting_nav ($1M flat);
   // realized points use their actual nav value from the series.
-  var startNav = (p && p.starting_nav) || 1000000;
+  var startNav = p && typeof p.starting_nav === 'number' && Number.isFinite(p.starting_nav) && p.starting_nav > 0 ? p.starting_nav : null;
   var navVals = series.map(function(s) {
     // Support both the old "hypothetical" kind and the new "pre_inception" kind
     if (s.kind === 'pre_inception' || s.kind === 'hypothetical') return startNav;
@@ -3998,8 +4084,11 @@ function renderEquityCurve() {
   var realNavVals = series.map(function(s) { return s.nav; });
   // drop null / NaN points before computing the extent — a single missing nav or
   // spy_nav would otherwise poison Math.min/max into NaN and blank the whole chart
-  var allVals = realNavVals.concat(spyVals).filter(function(v) { return v != null && !isNaN(v); });
-  if (!allVals.length) allVals = [1e6];
+  var allVals = realNavVals.concat(spyVals).filter(function(v) { return typeof v === 'number' && Number.isFinite(v); });
+  if (!allVals.length) {
+    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0">' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
+    return;
+  }
   var minV = Math.min.apply(null, allVals);
   var maxV = Math.max.apply(null, allVals);
   var pad = (maxV - minV) * 0.06 || 5000;
@@ -4040,8 +4129,10 @@ function renderEquityCurve() {
   if (xTickIdxs[xTickIdxs.length-1] !== n-1) xTickIdxs.push(n-1);
 
   function fmtNavShort(v) {
-    if (v >= 1e6) return _ccySym() + (v/1e6).toFixed(3) + 'M';
-    return _ccySym() + Math.round(v/1000) + 'K';
+    var scale = Math.abs(v) >= 1e6 ? 1e6 : (Math.abs(v) >= 1000 ? 1000 : 1);
+    var suffix = scale === 1e6 ? 'M' : (scale === 1000 ? 'K' : '');
+    var decimals = Math.max(0, Math.min(6, Math.ceil(-Math.log10(niceStep / scale))));
+    return _ccySym() + (v / scale).toFixed(decimals) + suffix;
   }
   function fmtDateAxis(s) {
     if (!s) return '';
@@ -4051,12 +4142,10 @@ function renderEquityCurve() {
 
   // area fill for realized portion
   var areaStart = realIdx >= 0 ? realIdx : 0;
-  var areaPath = 'M' + xOf(areaStart).toFixed(1) + ' ' + (PAD.t + IH).toFixed(1) + ' ';
-  for (var k = areaStart; k < n; k++) areaPath += 'L' + xOf(k).toFixed(1) + ' ' + yOf(navVals[k]).toFixed(1) + ' ';
-  areaPath += 'L' + xOf(n-1).toFixed(1) + ' ' + (PAD.t + IH).toFixed(1) + ' Z';
+  var areaPath = _equityAreaPath(navVals, xOf, yOf, PAD.t + IH, areaStart, n-1);
 
   // zero-line at starting nav
-  var zeroY = yOf(startNav);
+  var zeroY = startNav == null ? null : yOf(startNav);
 
   // unique defs id
   var uid = 'ec' + Date.now();
@@ -4081,7 +4170,7 @@ function renderEquityCurve() {
   });
 
   // zero / inception baseline (dashed)
-  if (zeroY >= PAD.t && zeroY <= PAD.t + IH) {
+  if (zeroY != null && zeroY >= PAD.t && zeroY <= PAD.t + IH) {
     svg += '<line x1="' + PAD.l + '" y1="' + zeroY.toFixed(1) + '" x2="' + (PAD.l + IW) + '" y2="' + zeroY.toFixed(1) + '" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 3" opacity="0.35"/>';
   }
 
@@ -4105,13 +4194,19 @@ function renderEquityCurve() {
     svg += '<path d="' + pathStr(navVals, 0, n-1) + '" fill="none" stroke="var(--up)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>';
   }
 
+  // Isolated observed points remain visible when gaps prevent a connecting line.
+  navVals.forEach(function(v, i) {
+    if (typeof v === 'number' && Number.isFinite(v) && series[i].kind === 'realized') {
+      svg += '<circle cx="' + xOf(i).toFixed(1) + '" cy="' + yOf(v).toFixed(1) + '" r="2.5" fill="var(--up)"/>';
+    }
+  });
   svg += '</g>';
 
-  // LIVE vertical marker
+  // Start of the recorded track, not a claim that its latest mark is live.
   if (realIdx >= 0 && realIdx < n) {
     var rx = xOf(realIdx).toFixed(1);
     svg += '<line x1="' + rx + '" y1="' + PAD.t + '" x2="' + rx + '" y2="' + (PAD.t + IH) + '" stroke="var(--info)" stroke-width="1.5" stroke-dasharray="3 2" opacity="0.7"/>';
-    svg += '<text x="' + (parseFloat(rx) + 4) + '" y="' + (PAD.t + 12) + '" font-size="9.5" fill="var(--info)" opacity="0.85" font-family="SF Mono,ui-monospace,Menlo,monospace">LIVE</text>';
+    svg += '<text x="' + (parseFloat(rx) + 4) + '" y="' + (PAD.t + 12) + '" font-size="9.5" fill="var(--info)" opacity="0.85" font-family="SF Mono,ui-monospace,Menlo,monospace">START</text>';
   }
 
   // x-axis ticks + labels
@@ -4629,6 +4724,70 @@ function renderSafety() {
 }
 
 // ── POSITIONS ─────────────────────────────────────────────────────────────────
+// PBR-HELD-PENDING-CHANGE:BEGIN
+// A queued full-target decision naming a lot we STILL hold must be visible on that lot's row.
+// /api/trades already projects it truthfully (app/web.py::_pending_target_projection); the
+// Positions verdict cell used to keep rendering the stale book verdict ("HOLDING"), so the
+// primary holdings view contradicted the accepted decision the queue already carried.
+// Pure + ES5 (var/function only, no page globals): it reads only its two arguments and never
+// mutates them, so the same object can be re-rendered or diffed without side effects.
+function _heldPendingChange(ticker, trades) {
+  if (!ticker) return null;
+  var want = String(ticker).toUpperCase();
+  if (!want) return null;
+  if (!trades || typeof trades !== 'object') return null;
+  var pt = trades.pending_target;
+  if (!pt || typeof pt !== 'object') return null;
+  // Only an accepted, queued target is intent. invalid/unavailable/none are fail-closed reads
+  // with no executable rows behind them and must never be presented as a queued change.
+  if (String(pt.status).toLowerCase() !== 'queued') return null;
+  var rows = pt.rows;
+  if (!rows || typeof rows.length !== 'number') return null;
+  var row = null;
+  for (var i = 0; i < rows.length; i++) {
+    var candidate = rows[i];
+    if (candidate && typeof candidate === 'object' &&
+        String(candidate.ticker).toUpperCase() === want) { row = candidate; break; }
+  }
+  if (!row) return null;
+
+  // Classified directions only. A target queued for a held name whose direction is not
+  // classified stays 'unclassified' — the queue is shown, but no direction is guessed.
+  // hold/blocked/buy/filtered/unknown are carries or filters, not changes to this held lot.
+  var kind;
+  var action = String(row.action);
+  switch (action.toLowerCase()) {
+    case 'exit': kind = 'exit'; break;
+    case 'trim': kind = 'trim'; break;
+    case 'add': kind = 'add'; break;
+    case 'comparison_unavailable':
+    case 'unpriceable': kind = 'unclassified'; break;
+    default: return null;
+  }
+
+  var finiteOrNull = function(v) {
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
+  };
+  var strOrNull = function(v) {
+    if (typeof v !== 'string') return null;
+    var s = v.replace(/^\s+|\s+$/g, '');
+    return s ? s : null;
+  };
+  var fillAfter = strOrNull(row.fill_after);
+  if (fillAfter === null) fillAfter = strOrNull(pt.fill_after);
+  var queuedAt = strOrNull(row.queued_at);
+  if (queuedAt === null) queuedAt = strOrNull(pt.queued_at);
+
+  return {
+    kind: kind,
+    action: action,
+    targetWeight: finiteOrNull(row.target_weight),
+    currentWeight: finiteOrNull(row.current_weight),
+    fillAfter: fillAfter,
+    queuedAt: queuedAt
+  };
+}
+// PBR-HELD-PENDING-CHANGE:END
 function renderPositions() {
   var b = _book || {};
   var positions = b.positions || [];
@@ -4675,7 +4834,22 @@ function renderPositions() {
     var vLabel = vKey ? t(vKey) : verdict.toUpperCase();
     var posName = securityName(p);
 
-    rows += '<tr class="pos-row" data-idx="' + i + '" onclick="toggleExpand(' + i + ')">' +
+    // A lot we still hold can already carry an accepted queued change (see _heldPendingChange).
+    // Only the verdict cell changes: shares, marks, P&L, weight, sleeve, held date and the thesis
+    // row stay exactly as they are, because nothing is filled until the next open.
+    var qc = p.pending ? null : _heldPendingChange(p.ticker, _trades);
+    var qAttr = '';
+    var verdictCell = '<td><span class="mm-verdict-chip ' + verdict + '">' + vLabel + '</span></td>';
+    if (qc) {
+      var qCls = { exit: 'exit_pending', trim: 'trim', add: 'add', unclassified: 'hold' }[qc.kind] || 'hold';
+      var qKey = { exit: 'pos.q_exit', trim: 'pos.q_trim', add: 'pos.q_add', unclassified: 'pos.q_unclassified' }[qc.kind] || 'pos.q_unclassified';
+      var qWhen = qc.fillAfter ? (t('pend.fills_at_lbl') + ' ' + fmtDate(qc.fillAfter)) : t('pend.awaiting_lbl');
+      verdictCell = '<td><span class="mm-verdict-chip ' + qCls + '">' + t(qKey) + '</span>' +
+        '<span class="mm-q-when">' + esc(qWhen) + '</span></td>';
+      qAttr = ' data-queued-change="' + qc.kind + '"';
+    }
+
+    rows += '<tr class="pos-row" data-idx="' + i + '"' + qAttr + ' onclick="toggleExpand(' + i + ')">' +
       '<td><span class="pos-ticker">' + esc(p.ticker) + '</span>' + (p.pending ? ' <span class="mm-pend-chip">' + t('pend.status') + '</span>' : '') + (posName ? '<span class="pos-name" style="display:block;font-size:11px;color:var(--muted);font-weight:500;line-height:1.2">' + esc(posName) + '</span>' : '') + '</td>' +
       '<td class="l mm-hide-sm"><span class="mm-sleeve-chip ' + sleeveClass + '">' + sleeveName + '</span></td>' +
       '<td class="mm-hide-sm">' + (p.stage != null ? p.stage : '—') + '</td>' +
@@ -4683,7 +4857,7 @@ function renderPositions() {
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + entryStr + '</td>' +
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + curStr + '</td>' +
       '<td class="' + u.cls + '">' + u.txt + '</td>' +
-      '<td><span class="mm-verdict-chip ' + verdict + '">' + vLabel + '</span></td>' +
+      verdictCell +
       '<td class="mm-hide-sm">' + rsStr + '</td>' +
       '<td class="mm-hide-sm">' + conflStr + '</td>' +
       '<td class="l mm-hide-sm" style="font-size:11.5px;color:var(--muted)">' + heldStr + '</td>' +
@@ -5860,6 +6034,9 @@ window.openThesisFromPositions = function(id) { showView('research'); openThesis
 // ══ SELF-DIRECTED BOOK (third portfolio) ══════════════════════════════════════
 var _self = null;          // /api/self_directed   (book: positions, allocation, market, pending)
 var _selfHist = null;      // /api/self_directed/history (blotter + pending + summary)
+// A load that has not finished yet is 'pending' (keep the neutral placeholders) — distinct from a
+// load that finished and could not read the account (render `unavailable`).
+var _selfSettled = false, _selfHistSettled = false;
 var _selfSel = null;       // selected order-ticket name {ticker, price, name}
 var _selfSearchTimer = null, _selfActiveIdx = -1, _selfResults = [];
 var _selfExpanded = null;  // ticker whose thesis / quick-trade row is open
@@ -5879,6 +6056,7 @@ function refreshSelf() {
   ]).then(function(res) {
     if (res[0].status === 'fulfilled' && res[0].value) _self = res[0].value;
     if (res[1].status === 'fulfilled' && res[1].value) _selfHist = res[1].value;
+    _selfSettled = true; _selfHistSettled = true;
     renderSelf();
   });
 }
@@ -5899,9 +6077,49 @@ function renderSelf() {
   selfUpdateEst();
 }
 
+// PBR-SELF-UNAVAILABLE:BEGIN
+// Pure read-state for the Self-Directed book / blotter. 'pending' = no load has settled yet
+// (keep the neutral placeholders); 'unavailable' = a load settled and the account could not be
+// read, so nothing may be inferred; 'ok' = render the book exactly as delivered.
+function _selfBookState(book, settled) {
+  if (!settled) return 'pending';
+  if (!book || typeof book !== 'object') return 'unavailable';
+  if (book.status === 'unavailable') return 'unavailable';
+  if (typeof book.nav !== 'number' || !isFinite(book.nav)) return 'unavailable';
+  return 'ok';
+}
+
+function _selfHistState(hist, settled) {
+  if (!settled) return 'pending';
+  if (!hist || typeof hist !== 'object') return 'unavailable';
+  if (hist.status === 'unavailable') return 'unavailable';
+  if (!Array.isArray(hist.history)) return 'unavailable';
+  return 'ok';
+}
+// PBR-SELF-UNAVAILABLE:END
+
 function renderSelfHeader() {
   var b = _self || {}, a = b.allocation || {};
-  if (E('sd-nav'))   E('sd-nav').textContent = fmtNav(b.nav != null ? b.nav : 1000000);
+  var st = _selfBookState(_self, _selfSettled);
+  var stEl = E('sd-nav-status');
+  if (stEl) { stEl.textContent = ''; stEl.hidden = true; }
+  if (E('sd-nav')) E('sd-nav').removeAttribute('data-availability');
+  if (E('sd-hb'))  E('sd-hb').removeAttribute('data-availability');
+  if (st === 'pending') return;             // pre-load placeholders stay exactly as shipped
+  if (st === 'unavailable') {
+    var un = t('sd.unavailable');
+    if (E('sd-nav'))       { E('sd-nav').textContent = un; E('sd-nav').setAttribute('data-availability', 'unavailable'); }
+    if (E('sd-hb'))        E('sd-hb').setAttribute('data-availability', 'unavailable');
+    if (E('sd-cash'))      { E('sd-cash').textContent = un; E('sd-cash').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-invested'))  { E('sd-invested').textContent = un; E('sd-invested').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-unreal'))    { E('sd-unreal').textContent = un; E('sd-unreal').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-return'))    { E('sd-return').textContent = un; E('sd-return').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-cash-pct'))  E('sd-cash-pct').textContent = '';
+    if (E('sd-gross'))     E('sd-gross').textContent = '';
+    if (stEl) { stEl.textContent = t('sd.unavailable_reason'); stEl.hidden = false; }
+    return;
+  }
+  if (E('sd-nav'))   E('sd-nav').textContent = fmtNav(b.nav);
   if (E('sd-cash'))  E('sd-cash').textContent = b.cash != null ? fmtNav(b.cash) : '—';
   if (E('sd-cash-pct')) E('sd-cash-pct').textContent = a.cash_pct != null ? pctInt(a.cash_pct) : '';
   if (E('sd-invested')) E('sd-invested').textContent = b.invested != null ? fmtNav(b.invested) : '—';
@@ -5921,7 +6139,7 @@ function renderSelfHeader() {
 }
 
 function _mktLabel(m) {
-  if (!m) return { cls: 'closed', txt: t('sd.mkt.closed') };
+  if (!m || !m.session) return { cls: 'closed', txt: t('sd.mkt.unknown') };
   if (m.session === 'open') return { cls: 'open', txt: t('sd.mkt.open') };
   var no = m.next_open ? (' ' + String(m.next_open).replace('T', ' ') + ' ET') : '';
   var key = m.session === 'pre' ? 'sd.mkt.pre' : m.session === 'post' ? 'sd.mkt.post' : 'sd.mkt.closed';
@@ -5949,6 +6167,10 @@ function renderSelfMarket() {
 
 function renderSelfAlloc() {
   var host = E('sd-alloc-host'); if (!host) return;
+  if (_selfBookState(_self, _selfSettled) === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.unavailable_reason') + '</div>';
+    return;
+  }
   var b = _self || {}, a = b.allocation || {};
   var pos = ((b.positions) || []).filter(function(p){ return p.weight != null && p.weight > 0; });
   if (!pos.length) {
@@ -5977,6 +6199,10 @@ function renderSelfAlloc() {
 
 function renderSelfPositions() {
   var host = E('sd-positions-host'); if (!host) return;
+  if (_selfBookState(_self, _selfSettled) === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.unavailable_reason') + '</div>';
+    return;
+  }
   var pos = ((_self || {}).positions) || [];
   if (!pos.length) {
     host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span><span class="l-en">No positions yet — place your first order above.</span><span class="l-zh">暂无持仓 — 请在上方下单。</span></div>';
@@ -6071,6 +6297,10 @@ function renderSelfPending() {
 
 function renderSelfHistory() {
   var host = E('sd-history-host'); if (!host) return;
+  if (_selfHistState(_selfHist, _selfHistSettled) === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.hist_unavailable') + '</div>';
+    return;
+  }
   var d = _selfHist || {}, hist = d.history || [];
   if (!hist.length) { host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.hist_empty') + '</div>'; return; }
   var realCls = d.n_closed ? (d.realized_total > 0 ? 'mm-pnl-pos' : d.realized_total < 0 ? 'mm-pnl-neg' : '') : '';
@@ -6078,8 +6308,8 @@ function renderSelfHistory() {
   var winTxt = (d.win_rate != null) ? Math.round(d.win_rate * 100) + '%' : '—';
   var summary = '<div class="mm-th-summary">' +
     '<div class="mm-th-stat"><div class="mm-th-stat-val ' + realCls + '">' + realTxt + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_realized') + '</div></div>' +
-    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_closed || 0) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_closed') + '</div></div>' +
-    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_buys || 0) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_buys') + '</div></div>' +
+    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_closed != null ? d.n_closed : t('sd.unavailable')) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_closed') + '</div></div>' +
+    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_buys != null ? d.n_buys : t('sd.unavailable')) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_buys') + '</div></div>' +
     '<div class="mm-th-stat"><div class="mm-th-stat-val">' + winTxt + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_win') + '</div></div>' +
   '</div>';
   var rows = '';
@@ -6175,7 +6405,9 @@ function renderSelfSelected(loading) {
   el.innerHTML = '<div class="mm-sd-sel-top"><span class="mm-sd-sel-tk">' + esc(s.ticker) + '</span>' +
     (s.name ? '<span class="mm-sd-sel-nm">' + esc(s.name) + '</span>' : '') +
     '<span class="mm-sd-sel-px">' + px + '</span></div>' +
-    '<div class="mm-sd-sel-sub">' + t('sd.buying_power') + ' ' + fmtNav((_self || {}).cash || 0) + '</div>';
+    '<div class="mm-sd-sel-sub">' + t('sd.buying_power') + ' ' +
+      (typeof (_self || {}).cash === 'number' && isFinite((_self || {}).cash)
+        ? fmtNav((_self || {}).cash) : t('sd.unavailable')) + '</div>';
 }
 
 var _selfUnit = 'shares';   // 'shares' | 'dollars' — order-ticket sizing unit
@@ -6196,7 +6428,9 @@ window.selfUpdateEst = function() {
   if (!est) return;
   var s = _selfSel, amt = parseFloat((E('sd-shares') || {}).value);
   if (!s) { est.textContent = ''; if (buy) buy.disabled = true; if (sell) sell.disabled = true; return; }
-  var px = s.price, held = _heldShares(s.ticker), cash = (_self || {}).cash || 0;
+  var px = s.price, held = _heldShares(s.ticker), rawCash = (_self || {}).cash;
+  var bookUnknown = _selfBookState(_self, _selfSettled) === 'unavailable';
+  var cashKnown = typeof rawCash === 'number' && isFinite(rawCash);
   var dollars = _selfUnit === 'dollars';
   var shares = (px != null && amt > 0) ? (dollars ? amt / px : amt) : 0;
   var parts = [];
@@ -6204,12 +6438,13 @@ window.selfUpdateEst = function() {
     parts.push(dollars ? ('≈ ' + fmtShares(shares) + ' ' + t('sd.shares_unit'))
                        : ('≈ ' + fmtNav(amt * px)));
   }
-  parts.push(t('sd.buying_power') + ' ' + fmtNav(cash));
+  parts.push(t('sd.buying_power') + ' ' + (cashKnown ? fmtNav(rawCash) : t('sd.unavailable')));
   if (held > 0) parts.push(t('sd.you_hold') + ' ' + fmtShares(held) + ' ' + t('sd.shares_unit'));
   est.textContent = parts.join(' · ');
   var canBuy = px != null && amt > 0, canSell = px != null && amt > 0 && held > 0;
-  if (buy) buy.disabled = !canBuy || _selfBusy;
-  if (sell) sell.disabled = !canSell || _selfBusy;
+  // An account we cannot read must not trade blind: the ticket stays inert until it settles readable.
+  if (buy) buy.disabled = bookUnknown || !canBuy || _selfBusy;
+  if (sell) sell.disabled = bookUnknown || !canSell || _selfBusy;
 };
 
 function _selfMsg(cls, txt) { var el = E('sd-msg'); if (el) { el.className = 'mm-sd-msg ' + cls; el.innerHTML = txt; } }
@@ -8609,7 +8844,7 @@ function _mergeLiveMarks(data) {
   if (!data || data.portfolio !== _portfolio) return;
   _liveMarks = data;
   if (_portfolio === 'self_directed') {
-    if (data.book) _self = data.book;
+    if (data.book) { _self = data.book; _selfSettled = true; }
     renderSelf();
   } else {
     var byTicker = {};
@@ -8645,6 +8880,9 @@ function _mergeLiveMarks(data) {
     if (!_perf) _perf = { series: [] };
     Object.assign(_perf, data.performance || {});
     _safeRender('performance-live', renderPerformance);
+    if (Object.prototype.hasOwnProperty.call(data.performance || {}, 'series')) {
+      _safeRender('equity-curve-live', renderEquityCurve);
+    }
     _safeRender('positions-live', renderPositions);
     _safeRender('auto-banner-live', renderAutoBanner);
   }
@@ -8652,9 +8890,9 @@ function _mergeLiveMarks(data) {
   if (meta) {
     meta.status = meta.status || {};
     var perf = data.performance || {};
-    if (perf.current_nav != null) meta.status.nav = perf.current_nav;
-    if (perf.total_return_pct != null) meta.status.total_return_pct = perf.total_return_pct;
-    if (perf.day_change_pct != null) meta.status.day_change_pct = perf.day_change_pct;
+    if (Object.prototype.hasOwnProperty.call(perf, 'current_nav')) meta.status.nav = perf.current_nav;
+    if (Object.prototype.hasOwnProperty.call(perf, 'total_return_pct')) meta.status.total_return_pct = perf.total_return_pct;
+    if (Object.prototype.hasOwnProperty.call(perf, 'day_change_pct')) meta.status.day_change_pct = perf.day_change_pct;
     renderPortfolioSwitch();
   }
   renderLiveMarksStatus();
@@ -8715,6 +8953,8 @@ function _fetchPortfolioCritical(id, onAvailability) {
       if (book && book.account_preview) {
         snapshot.performance = Object.assign({ series: [] }, book.account_preview);
       }
+      // Legacy account previews cannot qualify unavailable performance values.
+      if (snapshot.performance && !snapshot.performance.availability) delete snapshot.performance;
       return snapshot;
     });
 }
@@ -8773,8 +9013,8 @@ function _applyPortfolioSnapshot(snapshot) {
   if (Object.prototype.hasOwnProperty.call(snapshot, 'trades')) _trades = snapshot.trades;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'performance')) _perf = snapshot.performance;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'risk')) _risk = snapshot.risk;
-  if (snapshot.self) _self = snapshot.self;
-  if (snapshot.selfHistory) _selfHist = snapshot.selfHistory;
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'self')) { _self = snapshot.self; _selfSettled = true; }
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'selfHistory')) { _selfHist = snapshot.selfHistory; _selfHistSettled = true; }
   _rejected = (_book && _book.rejected) ? _book.rejected : [];
   _updateScopedPanelAvailability(!snapshot.complete);
 }

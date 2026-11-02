@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -45,11 +46,13 @@ from control_plane.worker_execution_contract import (
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
+    PaidModelProcessRef,
     WorkerRecoveryBinding,
     WorkerRecoveryContractError,
     WorkerRunStatus,
 )
 from control_plane.worker_adapter import WorkerExecutionAdapter
+from control_plane import executive_paid_supervisor as paid_supervisor
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
@@ -143,6 +146,15 @@ class NoEligibleWorkerCapacity(SupervisorError):
         super().__init__(f"no eligible worker capacity for {job_id}")
 
 
+def _is_direct_native_job(job: Job) -> bool:
+    """A closed routing hint only; Runtime still owns admission and access."""
+    if not isinstance(job.constraints, Mapping) or job.constraints.get("direct_native_policy") != "mastermind.direct_native_readonly/v1":
+        return False
+    from control_plane.direct_native_execution import job_is_direct
+
+    return job_is_direct(job)
+
+
 def validate_effective_grant(
     job: Job, attempt: Attempt, decision: AuthorityDecision
 ) -> dict[str, Any] | None:
@@ -161,7 +173,8 @@ def validate_effective_grant(
         or ("WRITE_BRANCH" in decision.requested and decision.worktree != job.worktree)
     ):
         raise SupervisorError("preauthorized decision does not match Job authority scope")
-    if job.orchestration_role is None:
+    direct = _is_direct_native_job(job)
+    if job.orchestration_role is None and not direct:
         if attempt.effective_grant is not None or attempt.effective_grant_digest is not None:
             raise SupervisorError("role-null Attempt carries orchestration grant evidence")
         return None
@@ -202,6 +215,16 @@ def validate_effective_grant(
     ).hexdigest()
     if digest != attempt.effective_grant_digest:
         raise SupervisorError("orchestration Attempt effective grant digest drifted")
+    if direct and (
+        job.orchestration_role is not None
+        or set(job.requested_authorities) != {"READ", "RESEARCH"}
+        or len(job.requested_authorities) != 2
+        or set(value["authorities"]) != {"READ", "RESEARCH"}
+        or len(value["authorities"]) != 2
+        or job.allowed_write_paths or job.validation_commands
+        or value["write_paths"] != [] or value["validation_argv"] != []
+    ):
+        raise SupervisorError("direct native Attempt requires its exact read-only grant")
     return dict(value)
 
 
@@ -528,6 +551,7 @@ def worker_result_schema(
     effective_grant_digest: str | None = None,
     orchestration_role: str | None = None,
     root_job_id: str | None = None,
+    aggregation_schema_version: str = "mastermind.aggregation_result/v1",
 ) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
@@ -544,10 +568,13 @@ def worker_result_schema(
             run_id=run_id,
             worker_id=worker_id,
             root_job_id=root_job_id,
+            aggregation_schema_version=aggregation_schema_version,
         )
         result["x-mastermind-effective-grant-digest"] = effective_grant_digest
         return result
 
+    if aggregation_schema_version != "mastermind.aggregation_result/v1":
+        raise SupervisorError("aggregation producer schema requires an aggregation role")
     string_list = {"type": "array", "items": {"type": "string"}}
     result = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1019,7 +1046,8 @@ def verify_commission_for_job(
 ) -> VerifiedCommission | None:
     """Verify exact commission bytes from canonical strict-v2 root provenance."""
 
-    if job.orchestration_role is None:
+    direct = _is_direct_native_job(job)
+    if job.orchestration_role is None and not direct:
         return None
     try:
         with runtime.store.read() as connection:
@@ -1029,6 +1057,8 @@ def verify_commission_for_job(
     except StateConflict as exc:
         raise SupervisorError(f"immutable commission source is invalid: {exc}") from exc
     if source is None:
+        if direct:
+            raise SupervisorError("direct native Job lost its admitted commission source")
         return None
     if workspace is None:
         raise SupervisorError("commission-bound Job has no assigned workspace")
@@ -1046,6 +1076,8 @@ def verify_commission_for_job(
             raise SupervisorError("commission local blob identity is unavailable")
         content = _read_local_commission_blob(workspace, local.blob_oid)
     else:
+        if direct:
+            raise SupervisorError("direct native commission requires complete prepared local objects")
         content = _fetch_remote_commission(
             repository=ref.repository,
             commit=commit,
@@ -1071,7 +1103,7 @@ def verify_commission_for_job(
     )
 
 
-PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v1"
+PLANNER_ROUTING_OPTIONS_SCHEMA = "mastermind.planner_routing_options/v2"
 _PLANNER_ROUTING_MODEL_LIMIT = 16
 
 
@@ -1086,14 +1118,27 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
 
     if job.orchestration_role != "plan":
         return None
-    root_id = str(job.root_job_id or "")
+    root_id = str(job.parent_job_id or "")
     root = runtime.jobs.get_job(root_id)
     if root is None:
         raise SupervisorError("planner routing options lost their root Job")
+    from control_plane.executive_coo_hierarchy import root_grant, validate_grant
+    grant = (root.orchestration_provenance or {}).get("hierarchy_grant")
+    hierarchy = {
+        "plan_schema": "mastermind.execution_plan/v5",
+        "root_job_id": root.root_job_id,
+        "coordinator_job_id": root.job_id,
+        "coordinator_depth": root.depth,
+        "grant": validate_grant(grant) if grant is not None else root_grant(),
+        "budget_includes": ["planner", "coordinator", "work", "review", "repair"],
+        "coordinator_step": {"delegation": {"descendant_limit": "reserved subtree allowance", "max_depth": "absolute maximum depth"}},
+        "leaf_step": {"delegation": None},
+    }
     raw_union = root.constraints.get("work_placement_union")
     if not isinstance(raw_union, list) or not raw_union:
         return {
             "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+            "hierarchy": hierarchy,
             "default_mode": "AUTO",
             "default_route": {
                 "provider_realm": root.constraints.get("provider"),
@@ -1102,7 +1147,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
                 ),
                 "model": root.constraints.get("model"),
             },
-            "manual_override_plan_schema": "mastermind.execution_plan/v4",
+            "manual_override_plan_schema": "mastermind.execution_plan/v5",
             "pools": [],
             "degraded": ["work_placement_union_unavailable"],
         }
@@ -1153,6 +1198,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
 
     return {
         "schema_version": PLANNER_ROUTING_OPTIONS_SCHEMA,
+            "hierarchy": hierarchy,
         "default_mode": "AUTO",
         "default_route": {
             "provider_realm": root.constraints.get("provider"),
@@ -1161,7 +1207,7 @@ def _planner_routing_options(runtime: Runtime, job: Job) -> dict[str, Any] | Non
             ),
             "model": root.constraints.get("model"),
         },
-        "manual_override_plan_schema": "mastermind.execution_plan/v4",
+        "manual_override_plan_schema": "mastermind.execution_plan/v5",
         "pools": sorted(
             pools,
             key=lambda item: (item["provider_realm"], item["quota_class"]),
@@ -1222,13 +1268,25 @@ class ExecutiveSupervisor:
         if cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
             from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
 
-            if (type(adapter) is not AttendedFabricWorkerAdapter
+            if (not (type(adapter) is AttendedFabricWorkerAdapter
+                         or paid_supervisor.is_paid_adapter(adapter))
                     or adapter.runtime is not runtime
                     or require_complete_launch_attestation is not True
                     or (process_controller is not None and process_controller is not adapter)):
                 raise SupervisorError(
                     "Fabric cleanup requires the exact reviewed adapter, Runtime, "
                     "complete launch attestation and original remote process owner"
+                )
+        if paid_supervisor.is_paid_adapter(adapter):
+            if (cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
+                    or shared_run_gid is not None or secret_canary_verdict is not None
+                    or subscription_canary_claim_provider is not None
+                    or subscription_canary_binding_id is not None
+                    or type(worker_user) is not str or not worker_user.strip()
+                    or type(worker_uid) is not int or worker_uid < 0
+                    or type(worker_gid) is not int or worker_gid < 0):
+                raise SupervisorError(
+                    "paid Supervisor requires actual remote identity and private local Control inputs"
                 )
         self.cleanup_policy = cleanup_policy
         if exact_target_provider is not None and not callable(exact_target_provider):
@@ -1480,6 +1538,89 @@ class ExecutiveSupervisor:
             "verified_bytes": len(commission.content),
         }
 
+    def _result_schema(
+        self,
+        *,
+        job: Job,
+        attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Select the aggregation producer from Runtime's immutable handoff.
+
+        The handoff is revalidated by its existing owner against the admitted
+        plan and current tree. Service configuration cannot reselect an older
+        Job/Attempt's output version after a restart.
+        """
+
+        aggregation_version = "mastermind.aggregation_result/v1"
+        if job.orchestration_role == "aggregation":
+            if attempt.job_id != job.job_id:
+                raise SupervisorError("aggregation producer Attempt differs from its Job")
+            handoff = self.runtime.jobs.get_cycle_handoff(job.job_id)
+            aggregation_version = (
+                handoff.get("aggregate_result_schema")
+                if isinstance(handoff, Mapping) else None
+            )
+            if (
+                type(aggregation_version) is not str
+                or aggregation_version not in {
+                    "mastermind.aggregation_result/v1", "mastermind.aggregation_result/v2",
+                }
+            ):
+                raise SupervisorError("aggregation producer schema is not admitted by the handoff")
+        result = worker_result_schema(
+            job_id=job.job_id,
+            run_id=attempt.attempt_id,
+            worker_id=attempt.worker_id,
+            effective_grant_digest=(
+                attempt.effective_grant_digest if effective_grant is not None else None
+            ),
+            orchestration_role=job.orchestration_role,
+            root_job_id=(job.root_job_id if job.orchestration_role else None),
+            aggregation_schema_version=aggregation_version,
+        )
+        if _is_direct_native_job(job):
+            # Native's strict bounded JSON-schema reader rejects unknown x-*
+            # keywords. The actual grant remains bound by the typed launch spec
+            # and sealed receipts; this supported annotation is only context.
+            result.pop("x-mastermind-effective-grant-digest", None)
+            result["description"] = f"Direct read-only effective grant SHA256: {attempt.effective_grant_digest}"
+            result["properties"]["artifacts"]["maxItems"] = 0
+        return result
+
+    def _validate_aggregation_schema(
+        self,
+        *,
+        job: Job,
+        attempt: Attempt,
+        effective_grant: Mapping[str, Any] | None,
+        schema_path: Path,
+    ) -> None:
+        """Refuse retained producer-schema drift before launch or adoption."""
+
+        if job.orchestration_role != "aggregation":
+            return
+        from control_plane.executive_orchestration_result import canonical_digest
+
+        expected = self._result_schema(
+            job=job, attempt=attempt, effective_grant=effective_grant,
+        )
+        try:
+            info = schema_path.lstat()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) & 0o022
+            ):
+                raise SupervisorError("aggregation producer schema is not control-owned")
+            retained = json.loads(schema_path.read_text(encoding="utf-8"))
+            matches = canonical_digest(retained) == canonical_digest(expected)
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise SupervisorError("aggregation producer schema cannot be verified") from exc
+        if not matches:
+            raise SupervisorError("aggregation producer schema differs from immutable handoff")
+
     def _write_schema(
         self,
         run_dir: Path,
@@ -1488,6 +1629,9 @@ class ExecutiveSupervisor:
         attempt: Attempt,
         effective_grant: Mapping[str, Any] | None = None,
     ) -> Path:
+        schema = self._result_schema(
+            job=job, attempt=attempt, effective_grant=effective_grant,
+        )
         run_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
         os.chmod(run_dir, 0o770 if self.shared_run_gid is not None else 0o700)
         input_dir = run_dir / "input"
@@ -1515,18 +1659,7 @@ class ExecutiveSupervisor:
                 return schema_path
         _write_private_json(
             schema_path,
-            worker_result_schema(
-                job_id=job.job_id,
-                run_id=attempt.attempt_id,
-                worker_id=attempt.worker_id,
-                effective_grant_digest=(
-                    attempt.effective_grant_digest
-                    if effective_grant is not None
-                    else None
-                ),
-                orchestration_role=job.orchestration_role,
-                root_job_id=(job.root_job_id if job.orchestration_role else None),
-            ),
+            schema,
         )
         if self.shared_run_gid is not None:
             for path, mode in (
@@ -1567,6 +1700,19 @@ class ExecutiveSupervisor:
         from control_plane.product_acceptance_review_owner import read_retained_product_review_input
         selected = read_retained_product_review_input(self.runtime, job=job, attempt=attempt)
         return "" if selected is None else selected.prompt_suffix()
+
+    def _reviewed_role_prompt_suffix(self, job: Job, attempt: Attempt) -> str:
+        if job.orchestration_role != "review":
+            return ""
+        from control_plane.reviewed_role_input import (
+            ReviewedRoleInputError, reviewed_role_prompt_suffix,
+        )
+        # The helper qualifies the actual paid SUBJECT, never the Codex
+        # reviewer's profile, and preserves non-paid legacy prompts unchanged.
+        try:
+            return reviewed_role_prompt_suffix(self.runtime, job=job, attempt=attempt)
+        except ReviewedRoleInputError as exc:
+            raise SupervisorError("reviewed subject input is not qualified") from exc
 
     def _prompt(
         self,
@@ -1661,30 +1807,44 @@ class ExecutiveSupervisor:
             packet["routing_options"] = routing_options
         if effective_grant is not None:
             packet["effective_grant_digest"] = attempt.effective_grant_digest
-            packet["orchestration"] = {
-                "role": job.orchestration_role,
-                "root_job_id": job.root_job_id,
-                "plan_attempt_id": job.plan_attempt_id,
-                "plan_digest": job.plan_digest,
-                "plan_step_id": job.plan_step_id,
-                "repair_round": job.repair_round,
-                "supersedes_job_id": job.supersedes_job_id,
-                "reviews_job_id": job.reviews_job_id,
-                "creation_provenance": job.orchestration_provenance,
-            }
+            if _is_direct_native_job(job):
+                packet["direct_native_policy"] = "mastermind.direct_native_readonly/v1"
+            else:
+                packet["orchestration"] = {
+                    "role": job.orchestration_role,
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": job.plan_attempt_id,
+                    "plan_digest": job.plan_digest,
+                    "plan_step_id": job.plan_step_id,
+                    "repair_round": job.repair_round,
+                    "supersedes_job_id": job.supersedes_job_id,
+                    "reviews_job_id": job.reviews_job_id,
+                    "creation_provenance": job.orchestration_provenance,
+                }
             if job.orchestration_role == "aggregation":
                 packet["orchestration"]["aggregation_handoff"] = (
                     self.runtime.jobs.get_cycle_handoff(job.job_id)
                 )
         return (
-            "You are the one-shot Mastermind Executive worker for the JSON job packet below.\n"
-            "Treat every authority and path as an exact allow-list. Do not push, open a PR, "
-            "merge, deploy, access credentials, call the network, or mutate financial/runtime "
-            "state. You may use read-only repository inspection and bounded edit operations "
-            "needed to write the declared paths. Do not execute or self-attest validation "
-            "commands; set validations=[] exactly. The supervisor will run every persisted "
-            "argv directly after your process exits. "
-            "Return only one JSON object matching the provided output schema. "
+            (
+                "You are the paid model-only Mastermind worker for the sealed JSON packet below.\n"
+                "Analyze only the supplied text. No filesystem, repository, network, command, "
+                "tool, credential, subagent, provider-session or lifecycle capability is granted. "
+                "Paths and source commit identities are Control-owned input context, not evidence "
+                "of a remote checkout or file access. Do not claim inspection, tests, Git changes, "
+                "deployment, enrollment or external acquisition. Set validations=[] and artifacts=[]; "
+                "return only one JSON object matching the supplied result schema. "
+                if paid_supervisor.is_paid_adapter(self.adapter) else (
+                    "You are the one-shot Mastermind Executive worker for the JSON job packet below.\n"
+                    "Treat every authority and path as an exact allow-list. Do not push, open a PR, "
+                    "merge, deploy, access credentials, call the network, or mutate financial/runtime "
+                    "state. You may use read-only repository inspection and bounded edit operations "
+                    "needed to write the declared paths. Do not execute or self-attest validation "
+                    "commands; set validations=[] exactly. The supervisor will run every persisted "
+                    "argv directly after your process exits. "
+                    "Return only one JSON object matching the provided output schema. "
+                )
+            )
             + (
                 "For this orchestration role, only the closed COMPLETED typed envelope is "
                 "accepted; process or protocol failure must terminate through the supervisor, "
@@ -1695,6 +1855,7 @@ class ExecutiveSupervisor:
             + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
             + self._commission_prompt_suffix(commission, inline_commission)
             + self._product_acceptance_review_suffix(job, attempt)
+            + self._reviewed_role_prompt_suffix(job, attempt)
         )
 
     def _launch_spec(
@@ -1777,7 +1938,8 @@ class ExecutiveSupervisor:
             expected_worker_gid=self.worker_gid,
             shared_run_gid=self.shared_run_gid,
             secret_canary_verdict=self.secret_canary_verdict,
-            require_secret_canary=self.require_complete_launch_attestation,
+            require_secret_canary=(self.require_complete_launch_attestation
+                                   and not paid_supervisor.is_paid_adapter(self.adapter)),
             **spec_kwargs,
         )
 
@@ -1851,7 +2013,12 @@ class ExecutiveSupervisor:
         """
 
         profile_id = str(job.constraints.get("execution_profile_id") or "")
+        paid = paid_supervisor.is_paid_adapter(self.adapter)
+        if paid and profile_id != "fabric.paid.glm.sealed-input.v1":
+            raise SupervisorError("paid adapter requires its exact execution profile")
         if not profile_id:
+            if _is_direct_native_job(job):
+                raise SupervisorError("direct native Job requires its sealed execution profile")
             worker = self.runtime.workers.get_worker(lease.attempt.worker_id)
             if worker is not None and str(worker.worker_type).strip().lower() == "attended-fabric":
                 raise SupervisorError("Fabric requires the exact finite attended read-only profile")
@@ -1900,7 +2067,9 @@ class ExecutiveSupervisor:
             or not adapter_supports_execution_surface(
                 adapter_id, profile.execution_surface
             )
-            or profile.auth_realm != "dedicated-worker-account"
+            or profile.auth_realm != (
+                "paid-lease-bound-account" if paid else "dedicated-worker-account"
+            )
             or profile.approval_policy != "never"
             or profile.network_policy != "disabled"
             or profile.native_helper_policy.value != "DISABLED"
@@ -1911,11 +2080,35 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "sealed worker refuses an incompatible execution profile or unimplemented surface"
             )
+        if _is_direct_native_job(job) and (
+            adapter_id != "codex-cli" or quota.provider != "codex"
+            or paid or self.cleanup_policy is not CleanupPolicy.DEDICATED_UID
+            or effective_grant is None
+            or profile_id != "sealed.worker.readonly.no-extensions.v1"
+            or profile.execution_surface != "codex-exec"
+            or profile.sandbox_policy != "read-only" or profile.write_capable
+            or profile.resource_grants or profile.skill_grants
+            or self.require_complete_launch_attestation is not True
+        ):
+            raise SupervisorError("direct native Job requires the sealed native read-only owner")
         authorities = (
             effective_grant["authorities"]
             if effective_grant is not None
             else job.requested_authorities
         )
+        if paid and (
+            adapter_id != "canonical-paid-fabric"
+            or self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
+            or effective_grant is None
+            or set(authorities) not in ({"READ"}, {"READ", "RESEARCH"})
+            or effective_grant["write_paths"] != []
+            or effective_grant["validation_argv"] != []
+            or job.orchestration_role not in {"work", "repair"}
+            or profile.execution_surface != "glm-model-only"
+            or profile.sandbox_policy != "read-only" or profile.write_capable
+            or profile.resource_grants or profile.skill_grants
+        ):
+            raise SupervisorError("paid adapter requires its exact sealed-input grant")
         if adapter_id == "attended-fabric" and (
             profile_id != "fabric.attended.claude.bounded.v1"
             or self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
@@ -1954,6 +2147,11 @@ class ExecutiveSupervisor:
         effective_grant: Mapping[str, Any] | None = None,
         recovery_prompt_path: Path | None = None,
     ) -> dict[str, Any]:
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            return paid_supervisor.launch_metadata(
+                self, job=job, lease=lease, spec=spec, process_ref=process_ref,
+                effective_grant=effective_grant, recovery_prompt_path=recovery_prompt_path,
+            )
         quota = self.runtime.workers.get_quota_class(
             lease.attempt.worker_id, lease.attempt.quota_class
         )
@@ -2082,15 +2280,40 @@ class ExecutiveSupervisor:
     async def start_job(self, job_id: str) -> ActiveRun:
         """Claim and launch one legacy role-null Job."""
 
+        if _is_direct_native_job(self._job(job_id)):
+            raise SupervisorError("direct native Job requires its authenticated dispatch owner")
         lease = self.runtime.broker.claim(job_id, lease_owner=self.instance_id)
         if lease is None:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
         return await self._start_claimed_job(job_id, lease)
 
+    async def start_direct_native_job(
+        self, job_id: str, *, access: Any
+    ) -> ActiveRun | OrchestrationDispatchOutcome:
+        """Claim once through Runtime; every retained replay is a no-launch return."""
+        job = self._job(job_id)
+        if not _is_direct_native_job(job):
+            raise SupervisorError("Job is not admitted for direct native execution")
+        self.runtime.jobs.direct_native_provenance(job_id)
+        outcome = self.runtime.attempts.claim_job(
+            job_id, command_id=f"direct-native-dispatch:{job_id}",
+            lease_owner=self.instance_id, _direct_native_access=access,
+        )
+        if outcome is None:
+            raise NoEligibleWorkerCapacity(job_id)
+        if type(outcome) is OrchestrationDispatchOutcome:
+            return outcome  # Includes CLAIMED: replay is never permission to launch.
+        if (type(outcome) is not AttemptLease or outcome.attempt.job_id != job_id
+                or outcome.attempt.status is not AttemptStatus.CLAIMED):
+            raise SupervisorError("direct native claim returned an invalid fresh lease")
+        return await self._start_claimed_job(job_id, outcome, _direct_native_access=access)
+
     async def start_cycle_job(
         self, job_id: str, *, command_id: str
     ) -> ActiveRun | OrchestrationDispatchOutcome:
         """Use the existing exact child claim; replay never reissues a target."""
+        if _is_direct_native_job(self._job(job_id)):
+            raise SupervisorError("direct native Job is not a COO cycle child")
         target = (
             self._exact_target_provider(job_id)
             if self._exact_target_provider is not None else None
@@ -2122,6 +2345,7 @@ class ExecutiveSupervisor:
     async def _start_claimed_job(
         self, job_id: str, lease: AttemptLease, *,
         exact_target: ExactWorkerClaimTarget | None = None,
+        _direct_native_access: Any = None,
     ) -> ActiveRun:
         """Launch one already claimed exact Job and persist its principal."""
 
@@ -2161,15 +2385,33 @@ class ExecutiveSupervisor:
                 ),
             )
             spec = self._enrich_spec_with_canary_claim(spec, job)
-            if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            if paid_supervisor.is_paid_adapter(self.adapter):
+                spec = await self.adapter.prepare_paid_launch_spec(spec, lease=lease)
+            elif self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
                 spec = await self.adapter.prepare_attended_launch_spec(spec, lease=lease)
             recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
             _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
             if exact_target is not None:
                 exact_target.revalidate_source()
                 self.runtime.attempts._validate_exact_target_launch(exact_target, lease)
+            self._validate_aggregation_schema(
+                job=job, attempt=lease.attempt, effective_grant=effective_grant,
+                schema_path=schema_path,
+            )
+            review_input_suffix = self._reviewed_role_prompt_suffix(job, lease.attempt)
+            if review_input_suffix and not spec.prompt.endswith(review_input_suffix):
+                raise SupervisorError("review subject changed after input sealing")
+            if _is_direct_native_job(job):
+                self.runtime.require_direct_native_launch_access(
+                    job_id, lease.attempt.attempt_id, _direct_native_access, lease=lease
+                )
             start_invoked = True
-            if getattr(self.adapter, "requires_attempt_lease", False) is True:
+            if paid_supervisor.is_paid_adapter(self.adapter):
+                process_ref = await self.adapter.start(spec, lease=lease, control_recovery={
+                    "input_root": str(schema_path.parent.resolve(strict=True)),
+                    "source_workspace": str(workspace),
+                })
+            elif getattr(self.adapter, "requires_attempt_lease", False) is True:
                 process_ref = await self.adapter.start(spec, lease=lease)
             else:
                 process_ref = await self.adapter.start(spec)
@@ -2189,7 +2431,8 @@ class ExecutiveSupervisor:
                 pgid=process_ref.pgid,
                 process_start_identity=process_ref.process_start_identity,
                 boot_id=process_ref.boot_session_id,
-                provider_session_id=process_ref.provider_session_id,
+                provider_session_id=(None if paid_supervisor.is_paid_adapter(self.adapter)
+                                     else process_ref.provider_session_id),
                 stdout_path=process_ref.stdout_path,
                 stderr_path=process_ref.stderr_path,
                 result_path=process_ref.result_path,
@@ -2200,9 +2443,11 @@ class ExecutiveSupervisor:
                 fence_generation=lease.attempt.fence_generation,
                 lease_token=lease.lease_token,
                 required_launch_attestation_schema=(
-                    LAUNCH_ATTESTATION_SCHEMA_VERSION
-                    if self.require_complete_launch_attestation
-                    else None
+                    "mastermind.executive_paid_model_launch_attestation/v1"
+                    if paid_supervisor.is_paid_adapter(self.adapter) else (
+                        LAUNCH_ATTESTATION_SCHEMA_VERSION
+                        if self.require_complete_launch_attestation else None
+                    )
                 ),
             )
             # Persist a useful recovery point while the worker is still live.
@@ -2477,7 +2722,12 @@ class ExecutiveSupervisor:
             "assignment_seal_receipt": assignment,
             "assignment_seal_receipt_digest": canonical_digest(assignment),
         }
-        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            evidence = paid_supervisor.terminal_evidence(
+                self, active, collection=collection, validations=validations,
+                assignment=assignment, envelope=envelope,
+            )
+        elif self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
             retained = self._read_private_receipt(
                 assignment_path.with_name("remote-assignment-observation.json"),
                 name="original remote assignment observation",
@@ -2514,6 +2764,68 @@ class ExecutiveSupervisor:
         }
         payload["terminal_evidence_digest"] = canonical_digest(payload)
         return payload
+
+    def _direct_native_terminal_payload(
+        self, *, active: ActiveRun, job: Job, output: Mapping[str, Any],
+        collection_path: Path, validation_path: Path, assignment_path: Path,
+    ) -> dict[str, Any]:
+        """Retain a role-null direct result using the genuine sealed receipts.
+
+        Runtime independently deep-validates this receipt before completion.
+        No role result, aggregation, product acceptance or self-hash is invented.
+        """
+        if (not _is_direct_native_job(job) or job.orchestration_role is not None
+                or active.effective_grant is None
+                or self.cleanup_policy is not CleanupPolicy.DEDICATED_UID
+                or paid_supervisor.is_paid_adapter(self.adapter)):
+            raise SupervisorError("direct native terminal requires the native sealed owner")
+        grant = self._effective_grant(job, active.lease.attempt)
+        if grant != active.effective_grant:
+            raise SupervisorError("direct native effective grant changed before completion")
+        from control_plane.codex_worker import validate_json_schema
+        from control_plane.executive_orchestration_result import canonical_digest
+
+        envelope = _jsonable(output)
+        try:
+            validate_json_schema(envelope, self._result_schema(
+                job=job, attempt=active.lease.attempt, effective_grant=grant))
+        except Exception as exc:
+            raise SupervisorError("direct native result protocol refused") from exc
+        _validate_output_scope(job, envelope)
+        if envelope["status"] != "COMPLETED" or envelope["artifacts"] != []:
+            raise SupervisorError("direct native completion refuses outputs or noncompletion")
+        provenance = self.runtime.jobs.direct_native_provenance(job.job_id)
+        if type(provenance) is not dict:
+            raise SupervisorError("direct native completion lost original admission")
+        collection = self._read_private_receipt(collection_path, name="direct collection receipt")
+        validations = self._read_private_receipt(validation_path, name="direct validation receipt")
+        assignment = self._read_private_receipt(assignment_path, name="direct assignment seal receipt")
+        result = collection.get("collection", {}).get("result")
+        if (not isinstance(result, dict) or result.get("artifact_manifest") != []
+                or result.get("structured_output") != envelope):
+            raise SupervisorError("direct collection differs from the retained result")
+        evidence = {
+            "schema_version": "mastermind.sealed_worker_result_evidence/v1",
+            "collection_receipt": collection,
+            "collection_receipt_digest": canonical_digest(collection),
+            "validation_receipts": validations,
+            "validation_receipts_digest": canonical_digest(validations),
+            "assignment_seal_receipt": assignment,
+            "assignment_seal_receipt_digest": canonical_digest(assignment),
+        }
+        return {
+            "schema_version": "mastermind.direct_native_terminal/v1",
+            "status": "COMPLETED", "job_id": job.job_id,
+            "attempt_id": active.lease.attempt.attempt_id,
+            "admission_digest": canonical_digest(provenance),
+            "payload": {key: envelope[key] for key in (
+                "summary", "current_state", "completed_steps", "next_actions")},
+            "result_evidence": evidence, "result_envelope": envelope,
+            "result_envelope_digest": canonical_digest(envelope),
+            "artifact_receipt_digest": canonical_digest(result["artifact_manifest"]),
+            "validation_receipt_digest": evidence["validation_receipts_digest"],
+            "effective_grant_digest": active.lease.attempt.effective_grant_digest,
+        }
 
     def _terminal_assignment_receipt_path(self, attempt_id: str) -> Path:
         return self._receipt_path(
@@ -2932,6 +3244,9 @@ class ExecutiveSupervisor:
         """
         if self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP:
             return
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            paid_supervisor.owned_terminal_cleanup(self, active.process_ref)
+            return
         floor = datetime.fromisoformat(active.process_ref.started_at.replace("Z", "+00:00")).timestamp()
         task = asyncio.create_task(self.adapter.prepare_fabric_cleanup(
             active.process_ref, operation=operation, observed_after=floor))
@@ -2964,6 +3279,16 @@ class ExecutiveSupervisor:
         this exact observation request. The second read returns the same retained
         package, not a freshly restamped or newly synthesized absence receipt.
         """
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            if operation == "unbound_absence":
+                raise SupervisorError(
+                    "paid unbound claim requires same-owner reconciliation; no absence or refund is proven"
+                )
+            from control_plane.paid_model_recovery import PaidModelRecoveryBinding
+            ref = (PaidModelRecoveryBinding.from_dict(
+                subject.launch_metadata["paid_recovery_binding"]
+            ).validate_wire().process_ref if isinstance(subject, Attempt) else subject)
+            return paid_supervisor.owned_terminal_cleanup(self, ref)
         from control_plane.fabric_cleanup_contract import validate_fabric_cleanup_receipt
 
         if self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP:
@@ -3205,6 +3530,17 @@ class ExecutiveSupervisor:
 
         async def ensure_sealed() -> Path:
             nonlocal seal_path
+            if seal_path is None and paid_supervisor.is_paid_adapter(self.adapter):
+                # Only Control input/result retention; remote cleanup is a
+                # separate original-owned paid receipt, never a fake UID sweep.
+                try:
+                    seal_path = paid_supervisor.retain_control_assignment(self, active)
+                except TerminalAssignmentSealError:
+                    raise
+                except Exception as exc:
+                    raise TerminalAssignmentSealError(
+                        "paid original cleanup or Control retention remains unproven"
+                    ) from exc
             if seal_path is None and self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
                 try:
                     seal_path = await self.retain_and_acknowledge_remote_assignment(active)
@@ -3267,12 +3603,13 @@ class ExecutiveSupervisor:
             )
             return cancelled, (), None, await ensure_sealed()
         output = receipt.result.structured_output
+        direct = _is_direct_native_job(job)
         if receipt.result.status == WorkerRunStatus.SUCCEEDED and isinstance(output, Mapping):
             validation_receipts: tuple[ValidationReceipt, ...] = ()
             validation_path: Path | None = None
             try:
                 self._revalidate_authority(job, self.runtime.attempts.get_attempt(attempt.attempt_id) or attempt)
-                if job.orchestration_role is None:
+                if job.orchestration_role is None and not direct:
                     _validate_output_scope(job, output)
                     payload: JobPayload | dict[str, Any] = _payload_from_output(output)
                 else:
@@ -3305,7 +3642,7 @@ class ExecutiveSupervisor:
                             validation_path,
                             await ensure_sealed(),
                         )
-                if job.orchestration_role is None:
+                if job.orchestration_role is None and not direct:
                     self.runtime.attempts.checkpoint_attempt(
                         attempt.attempt_id,
                         fence_generation=fence,
@@ -3314,12 +3651,14 @@ class ExecutiveSupervisor:
                     )
                 if str(output.get("status")) == "COMPLETED":
                     assignment_path = await ensure_sealed()
-                    if job.orchestration_role is not None:
+                    if job.orchestration_role is not None or direct:
                         if validation_path is None:  # pragma: no cover - helper invariant
                             raise SupervisorError(
                                 "orchestration completion lost its validation receipt"
                             )
-                        payload = self._orchestration_terminal_payload(
+                        producer = (self._direct_native_terminal_payload if direct
+                                    else self._orchestration_terminal_payload)
+                        payload = producer(
                             active=active,
                             job=job,
                             output=output,
@@ -3492,7 +3831,8 @@ class ExecutiveSupervisor:
             and ref.pgid == attempt.pgid
             and ref.process_start_identity == attempt.process_start_identity
             and ref.boot_session_id == attempt.boot_id
-            and ref.provider_session_id == attempt.provider_session_id
+            and (None if type(ref) is PaidModelProcessRef else ref.provider_session_id)
+            == attempt.provider_session_id
             and ref.stdout_path == attempt.stdout_path
             and ref.stderr_path == attempt.stderr_path
             and ref.result_path == attempt.result_path
@@ -3521,6 +3861,8 @@ class ExecutiveSupervisor:
         WorkerLaunchSpec,
         Mapping[str, Any] | None,
     ]:
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            return paid_supervisor.validated_recovery_binding(self, attempt)
         raw = attempt.launch_metadata.get("worker_recovery_binding")
         if not isinstance(raw, Mapping):
             raise SupervisorError(
@@ -3591,6 +3933,10 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "worker recovery orchestration grant changed"
             )
+        self._validate_aggregation_schema(
+            job=job, attempt=attempt, effective_grant=effective_grant,
+            schema_path=spec.result_schema_path,
+        )
         attestation = attempt.launch_metadata.get("launch_attestation")
         identity = (
             attestation.get("process_identity")
@@ -3665,9 +4011,12 @@ class ExecutiveSupervisor:
                     )
                     or body[end:] != (self._commission_prompt_suffix(
                         commission.ref_dict(), commission.content.decode("utf-8")
-                    ) + self._product_acceptance_review_suffix(job, attempt))
+                    ) + self._product_acceptance_review_suffix(job, attempt)
+                      + self._reviewed_role_prompt_suffix(job, attempt))
                     or not isinstance(attestation, Mapping)
-                    or attestation.get("prompt_sha256") != hashlib.sha256(
+                    or (attestation.get("evidence", {}).get("prompt_sha256")
+                        if paid_supervisor.is_paid_adapter(self.adapter)
+                        else attestation.get("prompt_sha256")) != hashlib.sha256(
                         spec.prompt.encode("utf-8")
                     ).hexdigest()
                 ):
@@ -3750,9 +4099,11 @@ class ExecutiveSupervisor:
                 fence_generation=attempt.fence_generation,
                 lease_token=lease.lease_token,
                 required_launch_attestation_schema=(
-                    _codex_worker_contract()[1]
-                    if self.require_complete_launch_attestation
-                    else None
+                    "mastermind.executive_paid_model_launch_attestation/v1"
+                    if paid_supervisor.is_paid_adapter(self.adapter) else (
+                        _codex_worker_contract()[1]
+                        if self.require_complete_launch_attestation else None
+                    )
                 ),
             )
             current = self.runtime.attempts.get_attempt(attempt.attempt_id)
@@ -3797,6 +4148,18 @@ class ExecutiveSupervisor:
         presence: ProcessPresence,
     ) -> ReconcileReceipt:
         process_was_live = presence is ProcessPresence.LIVE
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                return ReconcileReceipt(
+                    attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                    status=ReconcileStatus.LIVE_QUARANTINED,
+                    process_was_live=process_was_live,
+                    error="paid synchronous reconciliation requires its existing off-loop service path",
+                )
         if attempt.attempt_id in self._recovered_attempt_ids:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
@@ -3884,11 +4247,22 @@ class ExecutiveSupervisor:
                 error=str(exc)[:1000],
             )
         try:
-            adopted = self._normalise_recovered_lease(adopted)
-            if getattr(self.adapter, "requires_recovery_lease", False) is True:
-                ref = reattach(spec, binding, lease=adopted)
+            if paid_supervisor.is_paid_adapter(self.adapter):
+                pending = reattach(spec, binding, lease=adopted)
+                if not inspect.isawaitable(pending):
+                    raise SupervisorError("paid recovery requires its actual async owner status result")
+                ref = asyncio.run(pending)
+                if type(ref) is not PaidModelProcessRef:
+                    raise SupervisorError("paid recovery did not return its exact process reference")
+                # Status and source readback settle before recovered state is
+                # projected. No restart, new launch or original pin is minted.
+                adopted = self._normalise_recovered_lease(adopted)
             else:
-                ref = reattach(spec, binding)
+                adopted = self._normalise_recovered_lease(adopted)
+                if getattr(self.adapter, "requires_recovery_lease", False) is True:
+                    ref = reattach(spec, binding, lease=adopted)
+                else:
+                    ref = reattach(spec, binding)
         except Exception as exc:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
@@ -4078,11 +4452,23 @@ class ExecutiveSupervisor:
                 # Rich-session generations have their own writer/epoch law;
                 # sealed-worker LOST reconciliation must never fence them.
                 continue
+            if (paid_supervisor.is_paid_adapter(self.adapter)
+                    and not isinstance(attempt.launch_metadata.get("paid_recovery_binding"), Mapping)):
+                # A missing original start result is not absence. Never route
+                # this paid claim through v1 UID cleanup, termination or refund.
+                outcomes.append(ReconcileReceipt(
+                    attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                    status=ReconcileStatus.IDENTITY_AMBIGUOUS,
+                    process_was_live=False,
+                    error="paid claim has no retained start binding; same-owner reconciliation required",
+                ))
+                continue
             presence = self.process_controller.presence(attempt)
             process_was_live = presence is ProcessPresence.LIVE
             uid_sweep: Mapping[str, Any] | None = None
             recovery_raw = attempt.launch_metadata.get(
-                "worker_recovery_binding"
+                "paid_recovery_binding" if paid_supervisor.is_paid_adapter(self.adapter)
+                else "worker_recovery_binding"
             )
             if (
                 presence

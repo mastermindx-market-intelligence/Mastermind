@@ -1829,6 +1829,8 @@ def _agent_os_state(rows, *, generated_at="2026-09-01T01:18:31Z"):
         ("ceo-sol", steward.Seat.CEO),
         ("coo-fable", steward.Seat.COO),
         ("fable", steward.Seat.COO),
+        ("astra-meta-ceo", steward.Seat.CEO),
+        ("fable-meta-ceo", steward.Seat.CEO),
     ],
 )
 def test_build_autonomy_snapshot_maps_each_recognized_owner_token_to_its_seat(
@@ -1860,6 +1862,10 @@ def test_build_autonomy_snapshot_maps_each_recognized_owner_token_to_its_seat(
         ("REAL-WS-GROK", {"owner": "grok-cn-c"}),
         ("REAL-WS-NO-OWNER-KEY", {}),  # owner key entirely absent
         ("REAL-WS-EMPTY-OWNER", {"owner": ""}),
+        ("REAL-WS-ASTRA-CASE", {"owner": "Astra-meta-ceo"}),
+        ("REAL-WS-ASTRA-SPACE", {"owner": "astra-meta-ceo "}),
+        ("REAL-WS-FABLE-PREFIX", {"owner": "meta-fable-meta-ceo"}),
+        ("REAL-WS-FABLE-SUFFIX", {"owner": "fable-meta-ceo-worker"}),
         (
             "REAL-WS-PROSE-OWNER",
             {"owner": "Eval-OS session (COO Fable lane)"},

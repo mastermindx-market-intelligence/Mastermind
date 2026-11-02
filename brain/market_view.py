@@ -59,6 +59,7 @@ import json
 import math
 import os
 from datetime import date, datetime, timezone
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Optional
 
@@ -78,6 +79,8 @@ _RRG_PATH: Path = _ROOT / "vendor" / "macro" / "site" / "marketdata" / "subsecto
 _GROUP_FLOW_PATH: Path = _ROOT / "vendor" / "macro" / "site" / "basketdata" / "flow.json"
 
 _SCHEMA_VERSION = "market_view.v1"
+_SOURCE_UNSET = object()
+_ASSESSMENT_CLOCK: ContextVar[datetime | None] = ContextVar("market_view_clock", default=None)
 
 # ---- the golden key orders (load-bearing: the artifact is injected into LLM prompts) ----
 # The Tier-A embedded-key planes, in coverage-audit priority order, then cycles(), then the
@@ -202,6 +205,7 @@ def _freshness(asof: Any, *, now: datetime | None = None) -> dict[str, Any]:
     That helper clamps future dates to age zero, so source-date admissibility must
     be checked separately. Unknown or future source dates cannot sign the tilt.
     """
+    now = now if now is not None else _ASSESSMENT_CLOCK.get()
     asof_text = str(asof) if asof is not None else None
     checked_on = (now if now is not None else datetime.now(tz=timezone.utc)).date()
     age = (_rf._trading_days_since(asof_text) if now is None else
@@ -603,7 +607,7 @@ def _adapt_macro_risk(raw: dict[str, Any]) -> dict[str, Any]:
 # cycles() plane — call the ONE reader, never re-read the json
 # ---------------------------------------------------------------------------
 
-def _adapt_cycles(raw: dict[str, Any]) -> dict[str, Any]:
+def _adapt_cycles(raw: dict[str, Any], *, snapshot: Any = _SOURCE_UNSET) -> dict[str, Any]:
     """The sector-cycle plane — VALIDATED (entry-tilt survives the walk-forward; veto refuted).
 
     Calls ``regime_frame.cycles()`` (the sole reader) — does NOT re-read sector_cycles.json.
@@ -612,7 +616,8 @@ def _adapt_cycles(raw: dict[str, Any]) -> dict[str, Any]:
     an entry-favored-dominated board reads risk_on.
     """
     try:
-        snapshot = _rf.cycles_with_meta()
+        if snapshot is _SOURCE_UNSET:
+            snapshot = _rf.cycles_with_meta()
         cyc = snapshot.get("sectors") if isinstance(snapshot, dict) else {}
         source_asof = snapshot.get("asof") if isinstance(snapshot, dict) else None
     except Exception:  # noqa: BLE001
@@ -760,7 +765,7 @@ def _adapt_regime_nowcast(nc_out: Any) -> dict[str, Any]:
 # Published Macro context planes — advisory/annotate-only
 # ---------------------------------------------------------------------------
 
-def _adapt_rrg() -> dict[str, Any]:
+def _adapt_rrg(raw: Any = _SOURCE_UNSET) -> dict[str, Any]:
     """Adapt Macro's published subsector-rotation/RRG contract.
 
     RRG quadrants describe relative rotation, not portfolio risk.  The plane therefore
@@ -769,7 +774,8 @@ def _adapt_rrg() -> dict[str, Any]:
     risk-on/off vote from sector labels.
     """
     try:
-        raw = json.loads(_RRG_PATH.read_text())
+        if raw is _SOURCE_UNSET:
+            raw = json.loads(_RRG_PATH.read_text())
     except FileNotFoundError:
         return _absent_record(
             "site/marketdata/subsector_rotation.json (RRG)",
@@ -841,7 +847,7 @@ def _adapt_rrg() -> dict[str, Any]:
     )
 
 
-def _adapt_group_flow() -> dict[str, Any]:
+def _adapt_group_flow(raw: Any = _SOURCE_UNSET) -> dict[str, Any]:
     """Adapt the display-only group concentration/flow context.
 
     The producer explicitly says the score is uncalibrated and non-directional.  Preserve
@@ -849,7 +855,8 @@ def _adapt_group_flow() -> dict[str, Any]:
     this concentration proxy into a risk vote or a sizing input.
     """
     try:
-        raw = json.loads(_GROUP_FLOW_PATH.read_text())
+        if raw is _SOURCE_UNSET:
+            raw = json.loads(_GROUP_FLOW_PATH.read_text())
     except FileNotFoundError:
         return _absent_record(
             "site/basketdata/flow.json (display-only concentration proxy)",
@@ -1527,6 +1534,7 @@ def view(
     liquidity_transmission_out: Any = None,
     prev_view: Any = None,
     seq: int = 0,
+    _captured_sources: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble THE market view for *region* (deterministic, zero LLM).
 
@@ -1538,7 +1546,8 @@ def view(
     Returns the market_view.v1 dict in golden key order (TOP_LEVEL_ORDER); the artifact feeds
     LLM prompts so key-order is load-bearing.
     """
-    raw = _rf._read_raw(region)
+    captured = _captured_sources
+    raw = _rf._read_raw(region) if captured is None else captured.get("regime")
     if not isinstance(raw, dict):
         raw = {}
 
@@ -1554,15 +1563,21 @@ def view(
     planes["market_drivers"] = _adapt_market_drivers(raw)
     planes["dislocation"] = _adapt_dislocation(raw)
     planes["macro_risk"] = _adapt_macro_risk(raw)
-    planes["cycles"] = _adapt_cycles(raw)
+    planes["cycles"] = (_adapt_cycles(raw) if captured is None else
+                         _adapt_cycles(raw, snapshot=_rf.cycles_with_meta(
+                             raw=captured.get("cycles"),
+                             today=_ASSESSMENT_CLOCK.get().date())))
     planes["distribution_tells"] = _adapt_distribution_tells(distribution_tells_out)
     planes["liquidity_quality"] = _adapt_liquidity_quality(liquidity_quality_out)
     planes["regime_nowcast"] = _adapt_regime_nowcast(regime_nowcast_out)
-    planes["rotation_tensor"] = _adapt_rotation_tensor()
-    planes["anticipation"] = _adapt_anticipation()
+    planes["rotation_tensor"] = (_adapt_rotation_tensor() if captured is None else
+        _absent_record("data/market_view/rotation_tensor.json", "not captured by market-wide publisher"))
+    planes["anticipation"] = (_adapt_anticipation() if captured is None else
+        _absent_record("data/anticipation", "not captured by market-wide publisher"))
     # Published, context-only Macro contracts.  Both remain advisory and non-directional.
-    planes["rrg"] = _adapt_rrg()
-    planes["group_flow"] = _adapt_group_flow()
+    planes["rrg"] = _adapt_rrg() if captured is None else _adapt_rrg(captured.get("rrg"))
+    planes["group_flow"] = (_adapt_group_flow() if captured is None else
+                            _adapt_group_flow(captured.get("group_flow")))
     # Remaining H4 handoffs stay explicit nulls until their point-in-time contracts exist.
     planes["event_calendar"] = _absent_record("engine.event_calendar",
                                               "H4 handoff — pending")
@@ -1647,7 +1662,7 @@ def view(
         "schema_version": _SCHEMA_VERSION,
         "region": region,
         "asof": asof,
-        "built_at": datetime.now(tz=timezone.utc).isoformat(),
+        "built_at": (_ASSESSMENT_CLOCK.get() or datetime.now(tz=timezone.utc)).isoformat(),
         "seq": int(seq),
         "planes": ordered_planes,
         "net_posture_tilt": tilt,
@@ -1657,11 +1672,32 @@ def view(
         "label_vs_planes": lvp,
         "posture_floor_defense": posture_floor_defense,
         "assembly": assembly,
-        "budget_ref": _budget_ref(region),
+        "budget_ref": _budget_ref(region) if captured is None else {"lead_budget": None, "inputs": None},
         "brief": brief,
     }
     # enforce golden top-level order (defensive: build a fresh ordered dict)
     return {k: out[k] for k in TOP_LEVEL_ORDER}
+
+
+def captured_view(
+    sources: dict[str, Any], *, now: datetime, prev_view: Any = None, seq: int = 0
+) -> dict[str, Any]:
+    """Project one captured source set; no market, book, series or budget reads.
+
+    Optional independent organs remain explicitly absent. Configuration is read
+    through the existing doctrine owner; the publisher fences its bytes.
+    """
+    if now.tzinfo is None:
+        raise ValueError("captured view requires an aware clock")
+    token = _ASSESSMENT_CLOCK.set(now.astimezone(timezone.utc))
+    try:
+        raw = sources.get("regime") or {}
+        return view(
+            "us", prev_view=prev_view, seq=seq, _captured_sources=sources,
+            liquidity_quality_out=raw.get("liquidity_quality"),
+        )
+    finally:
+        _ASSESSMENT_CLOCK.reset(token)
 
 
 def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:

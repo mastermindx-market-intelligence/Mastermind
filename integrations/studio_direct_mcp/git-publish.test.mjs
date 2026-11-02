@@ -239,7 +239,7 @@ test('typed commit stays closed-world and does not require remote observation', 
       message: 'test: local-only typed commit',
     });
     assert.equal(remoteObservationAttempted, false);
-    assert.equal(result.status, 'OK');
+    assert.equal(result.status, 'OK', JSON.stringify(result));
     assert.equal(result.effect_state, 'APPLIED');
     assert.equal(result.code, 'APPLIED');
     assert.equal('remote_head_sha' in result, false);
@@ -1114,4 +1114,166 @@ test('foreign index lock is preserved after the fenced ref update', async () => 
     const {stdout: headOut} = await git(f.workspace, 'rev-parse', 'HEAD');
     assert.equal(headOut.trim(), result.commit_head_sha);
   } finally {await f.cleanup();}
+});
+
+
+async function preparedMergeFixture() {
+  const f = await fixture();
+  await git(f.workspace, 'checkout', '-b', 'fixture-protected', f.head);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'protected runtime\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: protected successor');
+  f.protectedBase = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', f.protectedBase);
+  await git(f.workspace, 'checkout', f.branch);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'requested CEO selection\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: original source');
+  f.head = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await assert.rejects(git(f.workspace, 'merge-tree', '--write-tree', f.head, f.protectedBase),
+    (error) => error.code === 1 && error.stdout.includes('CONFLICT'));
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'protected runtime\nrequested CEO selection\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  f.tree = (await git(f.workspace, 'write-tree')).stdout.trim();
+  f.args = { operation_id: f.operationId, expected_head_sha: f.head,
+    message: 'test: preserve reviewed integration ancestry',
+    merge: { expected_protected_base_sha: f.protectedBase, expected_tree_sha: f.tree } };
+  return f;
+}
+
+test('merge schema accepts only optional exact parent and tree fences', () => {
+  const schema = STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.inputSchema;
+  assert.equal(schema.required.includes('merge'), false);
+  assert.equal(schema.properties.merge.additionalProperties, false);
+  assert.deepEqual(schema.properties.merge.required, ['expected_protected_base_sha', 'expected_tree_sha']);
+  assert.deepEqual(Object.keys(schema.properties.merge.properties), schema.properties.merge.required);
+});
+
+test('typed merge preserves reviewed conflict resolution and actual protected ancestry without network', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    const commands = [];
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      if (file === GIT) {
+        const command = gitCommand(args);
+        commands.push(command);
+        assert.ok(!['fetch', 'push', 'ls-remote', 'clone'].includes(command), 'commit must remain local-only');
+      }
+      return execFile(file, args, options);
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.status, 'OK');
+    const record = (await git(f.workspace, 'show', '-s', '--format=%T%n%P', result.commit_head_sha)).stdout.trim().split('\n');
+    assert.deepEqual(record, [f.tree, `${f.head} ${f.protectedBase}`]);
+    assert.equal((await git(f.workspace, 'status', '--porcelain')).stdout, '');
+    await git(f.workspace, 'merge-base', '--is-ancestor', f.protectedBase, result.commit_head_sha);
+    await git(f.workspace, 'merge-tree', '--write-tree', result.commit_head_sha, f.protectedBase);
+    assert.equal((await readFile(path.join(f.workspace, 'proof.txt'), 'utf8')), 'protected runtime\nrequested CEO selection\n');
+    assert.equal(commands.filter((command) => command === 'commit-tree').length, 1);
+    assert.equal((await git(f.workspace, 'ls-remote', '--heads', 'origin')).stdout, '');
+  } finally { await f.cleanup(); }
+});
+
+test('merge can record missing ancestry with an unchanged reviewed tree and binds its second parent in the action reference', async () => {
+  const f = await fixture();
+  try {
+    const tree = (await git(f.workspace, 'rev-parse', 'HEAD^{tree}')).stdout.trim();
+    const refs = [];
+    for (const message of ['protected one', 'protected two']) {
+      const base = (await git(f.workspace, 'commit-tree', tree, '-p', f.head, '-m', message)).stdout.trim();
+      await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', base);
+      const result = await createGitPublisher(f.config).commit({ operation_id: f.operationId,
+        expected_head_sha: f.head, message: 'test: same reviewed tree',
+        merge: { expected_protected_base_sha: base, expected_tree_sha: tree } });
+      assert.equal(result.effect_state, 'APPLIED');
+      assert.equal((await git(f.workspace, 'show', '-s', '--format=%P', result.commit_head_sha)).stdout.trim(), `${f.head} ${base}`);
+      refs.push(result.action_ref);
+      await git(f.workspace, 'reset', '--hard', f.head);
+    }
+    assert.notEqual(refs[0], refs[1]);
+    const ordinary = await createGitPublisher(f.config).commit({ operation_id: f.operationId,
+      expected_head_sha: f.head, message: 'test: unchanged ordinary commit' });
+    assert.equal(ordinary.code, 'NO_COMMITTABLE_CHANGES');
+  } finally { await f.cleanup(); }
+});
+
+for (const merge of [null, [], {}, { expected_protected_base_sha: 'a'.repeat(40) },
+  { expected_protected_base_sha: 'A'.repeat(40), expected_tree_sha: 'b'.repeat(40) },
+  { expected_protected_base_sha: 'a'.repeat(40), expected_tree_sha: 'b'.repeat(40), ref: 'refs/heads/foreign' }]) {
+  test(`malformed merge object is rejected before owner or Git effects: ${JSON.stringify(merge)}`, async () => {
+    const f = await fixture();
+    try {
+      let calls = 0;
+      const publisher = createGitPublisher(f.config, { execFile: async () => { calls++; throw new Error('unexpected effect'); } });
+      await assert.rejects(publisher.commit({ operation_id: f.operationId,
+        expected_head_sha: f.head, message: 'test: invalid merge', merge }), /merge requires/);
+      assert.equal(calls, 0);
+      assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+    } finally { await f.cleanup(); }
+  });
+}
+
+for (const mismatch of ['protected', 'missing_protected', 'tree', 'head', 'duplicate', 'already_contained']) {
+  test(`merge ${mismatch} fence refuses without moving the owned ref or real index`, async () => {
+    const f = await preparedMergeFixture();
+    try {
+      const args = structuredClone(f.args);
+      const codes = { protected: 'PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE', missing_protected: 'PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE',
+        tree: 'EXPECTED_TREE_MISMATCH', head: 'EXPECTED_HEAD_MISMATCH', duplicate: 'DUPLICATE_MERGE_PARENT',
+        already_contained: 'PROTECTED_BASE_ALREADY_CONTAINED' };
+      if (mismatch === 'protected') args.merge.expected_protected_base_sha = 'b'.repeat(40);
+      if (mismatch === 'missing_protected') await git(f.workspace, 'update-ref', '-d', 'refs/remotes/origin/master');
+      if (mismatch === 'tree') args.merge.expected_tree_sha = 'c'.repeat(40);
+      if (mismatch === 'head') args.expected_head_sha = 'd'.repeat(40);
+      if (mismatch === 'duplicate' || mismatch === 'already_contained') {
+        const base = mismatch === 'duplicate' ? f.head : (await git(f.workspace, 'rev-parse', `${f.head}^`)).stdout.trim();
+        await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', base);
+        args.merge.expected_protected_base_sha = base;
+      }
+      const indexPath = (await git(f.workspace, 'rev-parse', '--git-path', 'index')).stdout.trim();
+      const index = await readFile(path.resolve(f.workspace, indexPath));
+      const result = await createGitPublisher(f.config).commit(args);
+      assert.equal(result.effect_state, 'NOT_APPLIED');
+      assert.equal(result.code, codes[mismatch]);
+      assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+      assert.deepEqual(await readFile(path.resolve(f.workspace, indexPath)), index);
+    } finally { await f.cleanup(); }
+  });
+}
+
+test('changed protected snapshot during preparation is refused before branch mutation', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    let changed = false;
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      const result = await execFile(file, args, options);
+      if (file === GIT && gitCommand(args) === 'commit-tree' && !changed) {
+        changed = true;
+        await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', f.head);
+      }
+      return result;
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.code, 'PROTECTED_BASE_CHANGED_DURING_PREPARATION');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+  } finally { await f.cleanup(); }
+});
+
+test('merge readback rejects a commit with the wrong parent before updating the owned branch', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      const result = await execFile(file, args, options);
+      if (file === GIT && gitCommand(args) === 'show' && args.includes('--format=%T%n%P')) {
+        return { ...result, stdout: `${f.tree}\n${f.head}\n` };
+      }
+      return result;
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.code, 'MERGE_COMMIT_IDENTITY_MISMATCH');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+  } finally { await f.cleanup(); }
 });

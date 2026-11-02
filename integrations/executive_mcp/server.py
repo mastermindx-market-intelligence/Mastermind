@@ -74,6 +74,8 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/context",
     "/os/executive/submit",
     "/os/executive/status",
+    "/os/executive/direct-native/result",
+    "/os/executive/direct-native/consume",
 )
 
 #: Three fixed POST routes served by the opt-in selected-session transport.
@@ -83,6 +85,7 @@ _OS_SESSION_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/session/context",
     "/os/executive/session/send",
     "/os/executive/session/reply",
+    "/os/executive/session/references",
 )
 
 __all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
@@ -575,6 +578,7 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/operator/activity/current",
             ))
@@ -584,6 +588,7 @@ class _ExecutivePathFence:
                 "/workspace/mission/v3/current",
                 "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/result-references/current",
                 "/workspace/plan/current",
                 "/workspace/operator/activity/current",
             ))
@@ -1005,6 +1010,8 @@ def _build_profile_mcp_app(
     os_session_transport_handler = None
     if enable_os_executive_transport:
         from integrations.mastermind_executive_app.os_transport import OsExecutiveTransportApp
+        from integrations.mastermind_executive_app.direct_native import DirectNativeResultClient
+        from integrations.mastermind_executive_app.gateway import CeoIngressClient
 
         if (
             profile_server_name != "mastermind-executive"
@@ -1038,6 +1045,8 @@ def _build_profile_mcp_app(
             submit_authenticator=os_authenticator,
             clock=configured.clock,
             commission_preparer=os_commission_preparer,
+            direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
+                connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
         )
         if os_session_bridge_client is not None:
             # The opt-in selected-session leaf reuses this factory's audited
@@ -1328,6 +1337,7 @@ def _build_profile_mcp_app(
                              "/workspace/mission/v3/current",
                              "/workspace/mission/v4/current",
                              "/workspace/result/current",
+                             "/workspace/result-references/current",
                              "/workspace/plan/current",
                              "/workspace/operator/activity/current"))
     if content_app is not None:
@@ -1618,6 +1628,7 @@ def build_web_ceo_v3_mcp_app(
     session_reply_handler: Any,
     session_summon_handler: Any,
     session_reply_read_tool=None,
+    session_reply_references_tool=None,
     workspace_app=None,
     content_app=None,
     os_app=None,
@@ -1696,6 +1707,15 @@ def build_web_ceo_v3_mcp_app(
                     "reply read must read the same installed Session Bridge client"
                 )
         configuration = session_reply_read_tool.extend_host_configuration(configuration)
+    if session_reply_references_tool is not None:
+        from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+        if type(session_reply_references_tool) is not NativeReplyReferencesTool:
+            raise TypeError("the canonical original-reference tool is required")
+        if os_session_bridge_client is not None:
+            client = getattr(session_reply_references_tool, "_client", None)
+            if client is not os_session_bridge_client:
+                raise TypeError("reference discovery must share the installed Session Bridge client")
+        configuration = session_reply_references_tool.extend_host_configuration(configuration)
     return _build_profile_mcp_app(settings, public_mcp=True, **configuration)
 
 
@@ -1709,6 +1729,7 @@ def build_web_ceo_v3_with_coo_mcp_app(
     session_reply_handler: Any,
     session_summon_handler: Any,
     session_reply_read_tool=None,
+    session_reply_references_tool=None,
     workspace_app=None,
     content_app=None,
     os_app=None,
@@ -1747,6 +1768,7 @@ def build_web_ceo_v3_with_coo_mcp_app(
         session_reply_handler=session_reply_handler,
         session_summon_handler=session_summon_handler,
         session_reply_read_tool=session_reply_read_tool,
+        session_reply_references_tool=session_reply_references_tool,
         workspace_app=workspace_app,
         content_app=content_app,
         os_app=os_app,
@@ -1768,6 +1790,7 @@ def build_web_ceo_sessions_mcp_app(
     session_reply_handler: Any,
     session_summon_handler: Any,
     session_reply_read_tool=None,
+    session_reply_references_tool=None,
     workspace_app=None,
     content_app=None,
     os_app=None,
@@ -1805,6 +1828,15 @@ def build_web_ceo_sessions_mcp_app(
         if type(session_reply_read_tool) is not NativeReplyReadTool:
             raise TypeError("the canonical reply-read tool is required")
         configuration = session_reply_read_tool.extend_host_configuration(configuration)
+    if session_reply_references_tool is not None:
+        from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+        if type(session_reply_references_tool) is not NativeReplyReferencesTool:
+            raise TypeError("the canonical original-reference tool is required")
+        if False:
+            client = getattr(session_reply_references_tool, "_client", None)
+            if client is not os_session_bridge_client:
+                raise TypeError("reference discovery must share the installed Session Bridge client")
+        configuration = session_reply_references_tool.extend_host_configuration(configuration)
     return _build_profile_mcp_app(settings, **configuration)
 
 

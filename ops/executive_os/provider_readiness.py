@@ -34,6 +34,7 @@ try:
     from ops.executive_os.provider_identity_policy import (
         COMPANY_WORKSPACE_BINDING_CLASS,
         COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256,
+        NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256,
         PERSONAL_PRO_WORKER_BINDING_CLASS,
         EXPECTED_AUTH_MODE,
         WORKSPACE_BINDING_CLASSES,
@@ -43,6 +44,7 @@ except ModuleNotFoundError:  # pragma: no cover - installed direct-script mode
     from provider_identity_policy import (  # type: ignore[no-redef]
         COMPANY_WORKSPACE_BINDING_CLASS,
         COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256,
+        NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256,
         PERSONAL_PRO_WORKER_BINDING_CLASS,
         EXPECTED_AUTH_MODE,
         WORKSPACE_BINDING_CLASSES,
@@ -1017,6 +1019,54 @@ def _company_device_drift_preimage(
     )
 
 
+def validate_native_probe_drift_predecessor_document(
+    value: Mapping[str, Any], *,
+    auth_identity: Mapping[str, Any], binary_identity: Mapping[str, Any],
+    expected_kind: str, workspace_binding_class: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    """Validate this native incident's timestamp-only drift, not auth continuity."""
+    validate_company_device_drift_predecessor_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+    if value["credential_lstat"]["size"] != auth_identity["size"]:
+        raise ReadinessError("native_probe_drift_credential_size_changed")
+
+
+def classify_native_probe_drift_requalification(
+    value: Mapping[str, Any], *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any], expected_kind: str,
+    workspace_binding_class: str, new_credential_expires_at: str,
+    worker_uid: int = WORKER_UID, worker_gid: int = WORKER_GID,
+) -> None:
+    validate_native_probe_drift_predecessor_document(
+        value, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_kind=expected_kind, workspace_binding_class=workspace_binding_class,
+        worker_uid=worker_uid, worker_gid=worker_gid,
+    )
+    current = datetime.now(UTC)
+    deadline = _timestamp(new_credential_expires_at, code="credential_expiry_malformed")
+    if not current + MIN_ACCEPTANCE_MARGIN < deadline <= current + MAX_REQUALIFICATION_HORIZON:
+        raise ReadinessError("native_probe_drift_deadline_out_of_bounds")
+
+
+def _native_probe_drift_preimage(
+    args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
+    binary_identity: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if (args.requalify_native_probe_drift_sha256 != NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256
+            or args.receipt != RECEIPT_PATH or args.auth != AUTH_PATH
+            or args.binary != CODEX_BINARY):
+        raise ReadinessError("native_probe_drift_unreviewed_preimage_or_path")
+    return _explicit_requalification_preimage(
+        args, auth_identity=auth_identity, binary_identity=binary_identity,
+        expected_digest=args.requalify_native_probe_drift_sha256,
+        classifier=classify_native_probe_drift_requalification,
+    )
+
+
 def _device_revalidation_preimage(
     args: argparse.Namespace, *, auth_identity: Mapping[str, Any],
     binary_identity: Mapping[str, Any],
@@ -1826,6 +1876,7 @@ def _parser() -> argparse.ArgumentParser:
     reuse_replacement.add_argument("--requalify-same-generation-terminal-sha256")
     reuse_replacement.add_argument("--renew-device-revalidation-sha256")
     reuse_replacement.add_argument("--requalify-company-device-drift-sha256")
+    reuse_replacement.add_argument("--requalify-native-probe-drift-sha256")
     reuse_replacement.add_argument("--recover-current-pin-grant-sha256")
     reuse.add_argument("--successor-request-id")
     reserve = sub.add_parser("reserve")
@@ -1843,6 +1894,7 @@ def _parser() -> argparse.ArgumentParser:
     replacement.add_argument("--requalify-same-generation-terminal-sha256")
     replacement.add_argument("--renew-device-revalidation-sha256")
     replacement.add_argument("--requalify-company-device-drift-sha256")
+    replacement.add_argument("--requalify-native-probe-drift-sha256")
     replacement.add_argument("--recover-current-pin-grant-sha256")
     replacement.add_argument(
         "--refresh-expired",
@@ -1978,6 +2030,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             if (args.successor_request_id is not None
                     and args.recover_current_pin_grant_sha256 is None):
                 raise ReadinessError("recovery_arguments_are_recovery_only")
+            if args.requalify_native_probe_drift_sha256 is not None:
+                _native_probe_drift_preimage(
+                    args, auth_identity=current_auth_identity(
+                        args.auth, worker_uid=args.worker_uid, worker_gid=args.worker_gid,
+                    ), binary_identity=current_binary_identity(args.binary),
+                )
+                return 10
             if args.requalify_company_device_drift_sha256 is not None:
                 _company_device_drift_preimage(
                     args, auth_identity=current_auth_identity(
@@ -2082,11 +2141,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.identity_json is None:
                 raise ReadinessError("identity_json_required")
             identity_payload = _read_json(args.identity_json)
-            if (args.requalify_company_device_drift_sha256 is not None
+            if (args.requalify_native_probe_drift_sha256 is not None
+                    or args.requalify_company_device_drift_sha256 is not None
                     or args.requalify_terminal_adverse_sha256 is not None
                     or args.requalify_same_generation_terminal_sha256 is not None
                     or args.renew_device_revalidation_sha256 is not None):
-                preimage = (_company_device_drift_preimage
+                preimage = (_native_probe_drift_preimage
+                            if args.requalify_native_probe_drift_sha256 is not None
+                            else _company_device_drift_preimage
                             if args.requalify_company_device_drift_sha256 is not None
                             else _device_revalidation_preimage
                             if args.renew_device_revalidation_sha256 is not None
@@ -2097,7 +2159,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     args, auth_identity=auth_identity, binary_identity=binary_identity,
                 )
                 fresh = _safe_identity(identity_payload)
-                if (args.requalify_company_device_drift_sha256 is not None
+                if ((args.requalify_native_probe_drift_sha256 is not None
+                        or args.requalify_company_device_drift_sha256 is not None)
                         and fresh["refusal"] is not None):
                     raise ReadinessError("drift_requalification_fresh_identity_refused")
                 observed = _timestamp(fresh["observed_at"], code="identity_timestamp_malformed")
@@ -2119,7 +2182,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     worker_uid=args.worker_uid, worker_gid=args.worker_gid,
                 )
                 identity_guard = None
-                if args.requalify_company_device_drift_sha256 is not None:
+                if (args.requalify_native_probe_drift_sha256 is not None
+                        or args.requalify_company_device_drift_sha256 is not None):
                     # Freeze both observations across the durable archive and
                     # final receipt CAS. A race leaves old bytes and evidence.
                     expected_auth = dict(auth_identity)
@@ -2133,7 +2197,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 refresh_expired_receipt(
                     args.receipt, receipt, expected_identity=receipt_identity,
                     workspace_binding_class=args.workspace_binding_class, worker_gid=args.worker_gid,
-                    expected_receipt_sha256=(args.requalify_company_device_drift_sha256
+                    expected_receipt_sha256=(args.requalify_native_probe_drift_sha256
+                                             or args.requalify_company_device_drift_sha256
                                              or args.requalify_terminal_adverse_sha256
                                              or args.requalify_same_generation_terminal_sha256
                                              or args.renew_device_revalidation_sha256),

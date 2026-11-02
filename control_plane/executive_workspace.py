@@ -2369,3 +2369,97 @@ def release_linked_worktree(
         removed=True,
         reason="clean recoverable linked worktree removed; branch/ref history retained",
     )
+
+
+# This capability is local to the allocator's actual return. Persisted DTOs and
+# coincident paths cannot manufacture same-call allocation completion.
+_CREATED_CHILD_CLONE = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _CreatedChildClone:
+    receipt: WorkspaceReceipt
+    identity: dict[str, object]
+    _origin: object
+
+
+def child_workspace_directory_identity(path: Path) -> dict[str, int]:
+    """Stable directory custody; never pin mutable timestamps as live identity."""
+    path = Path(path)
+    try:
+        canonical = path.resolve(strict=True)
+        info = path.lstat()
+    except OSError as exc:
+        raise WorkspaceError("child workspace directory is unavailable") from exc
+    if not path.is_absolute() or canonical != path:
+        raise WorkspaceError("child workspace directory is not canonical")
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise WorkspaceError("child workspace is not a real directory")
+    return dict(device=info.st_dev, inode=info.st_ino, uid=info.st_uid,
+                gid=info.st_gid, mode=stat.S_IMODE(info.st_mode))
+
+
+def _child_git_file_identity(path: Path) -> dict[str, object]:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise WorkspaceError("child Git metadata is unavailable") from exc
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise WorkspaceError("child Git metadata is not a single regular file")
+        h = hashlib.sha256()
+        while block := os.read(fd, 1024 * 1024):
+            h.update(block)
+        after = os.fstat(fd)
+        stable = lambda i: (i.st_dev,i.st_ino,i.st_uid,i.st_gid,i.st_mode,i.st_nlink,
+                            i.st_size,i.st_mtime_ns,i.st_ctime_ns)
+        if stable(before) != stable(after) or stable(before) != stable(path.lstat()):
+            raise WorkspaceError("child Git metadata changed during identity read")
+        return dict(device=before.st_dev, inode=before.st_ino, uid=before.st_uid,
+                    gid=before.st_gid, mode=stat.S_IMODE(before.st_mode),
+                    size=before.st_size, sha256=h.hexdigest())
+    finally:
+        os.close(fd)
+
+
+def _child_clone_identity(workspace: Path) -> dict[str, object]:
+    env = git_observation_env({
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "HOME": str(workspace.parent / ".supervisor-home"),
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+    })
+    return {"workspace": child_workspace_directory_identity(workspace),
+            "git": child_workspace_directory_identity(workspace / '.git'),
+            "git_files": {name: _child_git_file_identity(workspace / '.git' / name)
+                          for name in ('config', 'index', 'HEAD')},
+            "head": _run(['git', '-C', str(workspace), 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=None, env=env),
+            "status": _run(['git', '-C', str(workspace), 'status', '--porcelain=v1', '--untracked-files=all'], cwd=None, env=env)}
+
+
+def verify_child_clone_identity(workspace: Path, expected: dict, *, control_uid: int, shared_gid: int) -> None:
+    if (type(expected) is not dict or set(expected) != {"workspace", "git", "git_files", "head", "status"}
+            or expected["status"] != ""
+            or expected != _child_clone_identity(workspace)):
+        raise WorkspaceError("child workspace allocator identity changed")
+    validate_shared_git_handoff(workspace, control_uid=control_uid, shared_gid=shared_gid)
+
+
+def is_created_child_clone(value: object) -> bool:
+    return type(value) is _CreatedChildClone and value._origin is _CREATED_CHILD_CLONE
+
+
+def create_readonly_child_clone(source_repository: Path, workspace_root: Path, *,
+                                job_id: str, base_sha: str, branch: str,
+                                shared_gid: int) -> _CreatedChildClone:
+    """Actual existing allocator, no remote acquisition or write-path grant."""
+    receipt = prepare_credentialless_clone(source_repository, workspace_root,
+        job_id=job_id, base_sha=base_sha, branch=branch, shared_gid=shared_gid,
+        shared_write_paths=(), commission_dependency=None)
+    workspace = Path(receipt.workspace_path)
+    expected = _child_clone_identity(workspace)
+    if expected["head"] != base_sha:
+        raise WorkspaceError("child clone did not resolve the assigned source commit")
+    verify_child_clone_identity(workspace, expected, control_uid=os.geteuid(), shared_gid=shared_gid)
+    return _CreatedChildClone(receipt, expected, _CREATED_CHILD_CLONE)
