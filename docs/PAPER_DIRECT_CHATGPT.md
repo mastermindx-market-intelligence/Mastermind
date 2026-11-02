@@ -171,9 +171,9 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    Directory plugin uses continuous review/rescan. **Business and Enterprise/Edu**
    admins can **Refresh existing published custom workspace MCP app tools in place**
    from workspace settings with management permission and a valid connection,
-   then review/publish action updates and start a new chat. Enterprise/Edu also
-   offers action-level Refresh in Action control. Keep reusing the existing
-   tunnel/backend; if Refresh is unavailable, hold the exact admin/platform
+   then review/publish action updates and start a new chat. Enterprise/Edu Action control also supports
+   per-action Refresh. Keep reusing the existing tunnel/backend; if Refresh
+   is unavailable, hold the exact admin/platform
    gate instead of creating a parallel duplicate app/tunnel. If
    ChatGPT still shows older file-exclusive wording after the runtime is current, record
    `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not treat stale transport metadata as a document lease.
