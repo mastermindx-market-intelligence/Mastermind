@@ -235,7 +235,7 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
   [ -n "$dep" ] || { echo equal; return 0; }
   [ "$dep" = "$SDK_TRIO" ] || { echo "G7b: dependency drift beyond the #1714 trio: $(echo $dep) - STOP, seat" >&2; return 1; }
   local plines sdk sdk_bad rest lockbody
-  plines=$(git -C "$wt" diff -U0 "$old" "$sha" -- pyproject.toml | grep -E '^[-+][^-+]' | grep -vE '^[-+][[:space:]]*#')
+  plines=$(git -C "$wt" diff -U0 "$old" "$sha" -- pyproject.toml | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vE '^[-+][[:space:]]*#')
   sdk=$(printf '%s\n' "$plines" | grep 'claude-agent-sdk' | grep -v '^$')                 # the floor's -/+ lines
   sdk_bad=$(printf '%s\n' "$sdk" | grep '^+' | grep -vc 'claude-agent-sdk>=0\.2')          # a new floor must stay in the 0.2 series
   rest=$(printf '%s\n' "$plines" | grep -v 'claude-agent-sdk' | grep -v '^$')
@@ -244,7 +244,7 @@ g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_p
     echo "G7b: pyproject drift is not the claude-agent-sdk floor / the ruled dev bound (D-G7B-1): $(echo $rest) - STOP, seat" >&2; return 1
   fi
   if [ -n "$sdk" ]; then echo floor_pending; return 0; fi   # #1714 trio: rev-2 semantics, T2 runs in floor_pending mode
-  lockbody=$(git -C "$wt" diff -U0 "$old" "$sha" -- requirements/ | grep -E '^[-+][^-+]' | grep -vcE '^[-+][[:space:]]*#')
+  lockbody=$(git -C "$wt" diff -U0 "$old" "$sha" -- requirements/ | grep -E '^[-+]' | grep -vE '^(--- |\+\+\+ )' | grep -vcE '^[-+][[:space:]]*#')   # rev 3.1: column-0 option lines (-r, --index-url, -e) count as body lines; only the ---/+++ headers are dropped
   [ "$lockbody" = 0 ] || { echo "G7b: $lockbody non-comment gate-lock line(s) changed without an SDK floor (pins/extras/hashes) - STOP, seat" >&2; return 1; }
   echo equal
 }
@@ -255,7 +255,8 @@ s0() {
   [ -z "${PBR_EV:-}" ] || stop "PBR_EV is set; s0 always creates a new evidence dir (unset PBR_EV)"
   env_guard
   [ -n "${OPERATOR_SESSION_ID:-}" ] || stop "set OPERATOR_SESSION_ID to the executing session id (worktree identity)"
-  local day=${PBR_DAY:-2026-10-23}
+  local day=${PBR_DAY:-}
+  [ -n "$day" ] || stop "set PBR_DAY=YYYY-MM-DD to the window day (rev 3.1 removed the 2026-10-23 default)"
   "$PY" -I -B -c 'import datetime,sys; sys.exit(0 if datetime.date.fromisoformat(sys.argv[1]).weekday() < 5 else 1)' "$day" \
     || stop "PBR_DAY=$day is not a Mon-Fri date (W1 is a weekday window)"
   if [ "$day" = 2026-10-23 ]; then
@@ -269,7 +270,7 @@ s0() {
   local name wt
   name="pbr-install-w1-$(date -u +%Y%m%dT%H%M%SZ)"
   wt=$(printf '{"cwd": "%s", "name": "%s", "session_id": "%s"}' "$SEAT_WT" "$name" "$OPERATOR_SESSION_ID" \
-       | "$PY_WT" -B "$WT_TOOL" create | tail -n 1) || stop "worktree create failed"   # no -I: Python 3.14 isolated mode implies -P and hides the helper's sibling pool_storage module (rev 3)
+       | "$PY_WT" -E -s -B "$WT_TOOL" create | tail -n 1) || stop "worktree create failed"   # -E -s -B, not -I: Python 3.14 isolated mode implies -P and hides the helper's sibling pool_storage module (rev 3); env/user-site isolation kept (rev 3.1)
   [ -d "$wt" ] || stop "worktree create returned '$wt'"
   local sha remote
   sha=$(git -C "$wt" rev-parse HEAD) || stop "rev-parse"
@@ -897,10 +898,11 @@ rollback_c() {  # transactional re-deploy of OLD through deploy_code_to_vps.sh (
 }
 rollback_c_result() { STEP=R-c-result; load; classify rc "$OLD" "$EV/rollback/rc.deploy.log"; state ROLLED_BACK R-c; say "R-c OK - run proof-old"; }
 
-g7b_selftest() {  # helper import check + seven synthetic repos + one live read of SEAT_WT (git only, no host contact); rc 0 = all PASS
+g7b_selftest() {  # helper import check + nine synthetic repos + one live read of SEAT_WT (git only, no host contact); rc 0 = all PASS
   STEP=g7b-selftest
   local root fail=0 r live
   root=$(mktemp -d) || stop "mktemp"
+  G7B_SELFTEST_ROOT=$root; trap 'rm -rf "$G7B_SELFTEST_ROOT"' EXIT   # global: a local is out of scope when the EXIT trap runs under set -u
   _g=(git -c user.name=t -c user.email=t@t -c commit.gpgsign=false)
   _pp() {  # _pp <sdk spec> <pytest spec> <comment-or-empty> <extra dependency line-or-empty> <out>
     printf '[project]\ndependencies = [\n    "claude-agent-sdk>=%s",\n%s]\n[project.optional-dependencies]\ndev = [\n%s    "pytest>=%s",\n]\n' "$1" "$4" "$3" "$2" > "$5"
@@ -928,7 +930,7 @@ g7b_selftest() {  # helper import check + seven synthetic repos + one live read 
     _expect "$1" "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" "$2"
   }
   local cmt=$'    # pytest 9.2.0 reds five existing tests at teardown; hold below 9.2\n'
-  if "$PY_WT" -B "$WT_TOOL" --help > /dev/null 2>&1; then say "g7b-selftest c0_wt_tool: PASS (helper imports without -I)"; else say "g7b-selftest c0_wt_tool: FAIL ($PY_WT -B $WT_TOOL --help)"; fail=1; fi
+  if "$PY_WT" -E -s -B "$WT_TOOL" --help > /dev/null 2>&1; then say "g7b-selftest c0_wt_tool: PASS (helper imports under -E -s -B)"; else say "g7b-selftest c0_wt_tool: FAIL ($PY_WT -E -s -B $WT_TOOL --help)"; fail=1; fi
   r=$(_mk c1_unrelated) || stop "mk"; echo new > "$r/README.md"; _run c1_unrelated equal
   r=$(_mk c2_sdk_floor) || stop "mk"; _pp 0.2.120 '8,<10' '' '' "$r/pyproject.toml"
     _lock bbbb 0.2.120 s2 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock bbbb 0.2.120 s2 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
@@ -946,11 +948,18 @@ g7b_selftest() {  # helper import check + seven synthetic repos + one live read 
   r=$(_mk c7_sdk_plus_dev) || stop "mk"; _pp 0.2.120 '8,<9.2' "$cmt" '' "$r/pyproject.toml"
     _lock eeee 0.2.120 s2 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock eeee 0.2.120 s2 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
     _run c7_sdk_plus_dev floor_pending
+  r=$(_mk c9_sdk_floor_0_3) || stop "mk"; _pp 0.3 '8,<10' '' '' "$r/pyproject.toml"
+    _lock ffff 0.3.0 s3 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock ffff 0.3.0 s3 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c9_sdk_floor_0_3 STOP
+  r=$(_mk c10_lock_col0_option) || stop "mk"; _pp 0.1 '8,<9.2' "$cmt" '' "$r/pyproject.toml"
+    _lock cccc 0.1.0 s1 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock cccc 0.1.0 s1 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    printf -- '--index-url https://example.invalid/simple\n' >> "$r/requirements/gate-linux-x86_64-py312.lock"
+    _run c10_lock_col0_option STOP
   live=$(git -C "$SEAT_WT" rev-parse --verify -q origin/master) || stop "SEAT_WT origin/master unreadable"
   _expect "c8_live(OLD..origin/master@${live:0:8})" "$SEAT_WT" "$OLD" "$live" ANY
   rm -rf "$root"
   [ "$fail" = 0 ] || stop "g7b-selftest FAILED"
-  say "g7b-selftest PASS (9 cases)"
+  say "g7b-selftest PASS (11 cases)"
 }
 
 status() { load; cat "$EV/state.env"; ls "$EV/gates"; tail -n 5 "$EV/logs/stops.log" 2>/dev/null; return 0; }
