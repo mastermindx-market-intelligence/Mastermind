@@ -98,6 +98,9 @@ Each test configuration passed 68 ordinary tests (48 app, 6 local report,
 14 update-verifier), with seven synthetic Keychain tests explicitly ignored.
 The three stale-cleanup canaries above were then separately invoked on the
 same immutable source and all passed, including explicit fixture cleanup.
+The four existing synthetic storage, competing-rotation, preconnect rollback
+and signout canaries were also rerun on that source and all passed; their
+existing cleanup paths remain unchanged.
 Evidence logs: `/tmp/mmos-native-c4-repaired-qualification-20261102.log` and
 `/tmp/mmos-native-c4-synthetic-canaries-20261102.log` on the M2 host. No real
 native client or Executive resource was configured for these runs.

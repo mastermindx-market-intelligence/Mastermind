@@ -5533,6 +5533,14 @@ class ExecutiveControlService:
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)
                         return
+                elif parsed.get("schema") == CCR_READ_FRAME_SCHEMA:
+                    ceiling = WORKSPACE_MAX_RESPONSE_BYTES
+                    try:
+                        validate_ccr_read_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
                 elif parsed.get("schema") == FRAME_SCHEMA_V3:
                     ceiling = MAX_PLAN_RESPONSE_BYTES
                     try:

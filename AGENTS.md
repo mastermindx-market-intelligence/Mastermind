@@ -203,6 +203,10 @@ universal procedure owner. Read it before creating or relying on a temporary wat
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
 
+### Independent-review discoverability for every assigned session
+
+Before requesting or claiming independent PR/source review, load [the common session review routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md). Check this exact session's authenticated Subagent Fabric tools and original review state; for a distinctly authorized manual review, one verified ChatGPT Dot may receive a source-linked Slack commission. Do not duplicate a running/uncertain/denied review, mislabel Slack pickup as START, or equate a Dot technical verdict with formal non-author GitHub approval. The existing GitHub review ingress and Runtime remain authoritative; a source link does not prove a fresh-session installation.
+
 ## Agent OS — the organizational knowledge plane
 
 Canonical store: the **Macro repo's `agentos/`** directory

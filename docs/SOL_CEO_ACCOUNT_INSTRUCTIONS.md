@@ -80,6 +80,10 @@ EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their 
 owners. When the original session is itself the target of a proof, retain that precise
 proof obligation; it must not freeze unrelated permitted implementation or diagnosis.
 
+## Cross-session independent review
+
+Whenever an independent source/architecture review is required, use the shared [session review routing procedure](SESSION_INDEPENDENT_REVIEW_ROUTING.md). Discover actual Fabric capabilities in this session and preserve exact original root/effects before commissioning. One separately authorized Dot technical reviewer may be addressed through the existing Slack review channel when qualified; Slack delivery is not reviewer START, a refusal never authorizes cross-provider fallback, and a Dot source verdict is not formal non-author GitHub approval.
+
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and

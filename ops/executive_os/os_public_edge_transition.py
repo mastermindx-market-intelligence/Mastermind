@@ -21,8 +21,8 @@ import re
 import stat
 
 from ops.executive_os.os_public_edge import (
-    GET_ROUTES, HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, POST_ROUTES, asset_routes,
-    INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES,
+    GET_ROUTES, HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTE,
+    MCP_ROUTES, POST_ROUTES, TRANSITION_ROUTE_PROFILES, asset_routes,
 )
 
 PLAN_SCHEMA = "mastermind.os_public_edge_transition.plan.v1"
@@ -115,6 +115,32 @@ def _branch_handlers(handlers: object) -> list:
     raise ValueError("OS edge transition wrapper depth refused")
 
 
+_STRIPPED_REQUEST_HEADERS = ("Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                             "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP")
+
+
+def _expected_proxy(relay_port: int, upstream_host: str) -> dict:
+    return {
+        "handler": "reverse_proxy",
+        "upstreams": [{"dial": f"127.0.0.1:{relay_port}"}],
+        "headers": {"request": {
+            "delete": list(_STRIPPED_REQUEST_HEADERS),
+            "set": {"Host": [upstream_host], "X-Forwarded-For": ["127.0.0.1"],
+                    "X-Forwarded-Proto": ["https"]},
+        }},
+    }
+
+
+def _proxy_matches(observed: object, relay_port: int, upstream_host: str) -> bool:
+    if type(observed) is not dict:
+        return False
+    candidate = dict(observed)
+    # The adapter emits no transport; an explicit plain-HTTP one is the same behavior.
+    if candidate.get("transport") == {"protocol": "http"}:
+        del candidate["transport"]
+    return candidate == _expected_proxy(relay_port, upstream_host)
+
+
 def _locate(fullconfig: object, current_routes: tuple[str, ...],
             relay_port: int) -> tuple:
     _relay(relay_port)
@@ -154,26 +180,19 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
             break
         inner = nested
         path += (0, "handle", 0, "routes")
-    if len(inner) != 3:
+    # Two accepted shapes: the original GET/POST/abort and, with the public MCP
+    # entrypoint (#1656), GET/POST/MCP-metadata-GET/MCP-POST/abort in that order.
+    if len(inner) not in (3, 5):
         raise ValueError("OS edge transition inner route set refused")
-    # Preserve every complete historical/read-expanded profile admitted by
-    # protected source. The new Control Room profile must be complete in both
-    # methods; its partial or mixed route sets never become migration authority.
-    profiles = {
-        "incumbent": (sorted(set(LEGACY_GET_ROUTES) | set(current_routes)),
-                      sorted(list(LEGACY_GET_ROUTES) + list(current_routes)),
-                      sorted(set(INCUMBENT_GET_ROUTES) | set(current_routes)),
-                      sorted(list(INCUMBENT_GET_ROUTES) + list(current_routes))),
-        "expanded": (sorted(set(GET_ROUTES) | set(current_routes)),
-                     sorted(list(GET_ROUTES) + list(current_routes))),
-    }
+    # Match a complete admitted pair, not independent subsets or a cross-product.
+    # Comparing list and set forms permits only the known index.html /os/ overlap.
     get_path = post_path = None
-    get_profile = post_profile = None
+    get_matches = post_matches = set()
     methods = set()
     for position, item in enumerate(inner):
         if type(item) is not dict:
             raise ValueError("OS edge transition inner route refused")
-        if position == 2:
+        if position == len(inner) - 1:
             if item != {"handle": [{"handler": "static_response", "abort": True}]}:
                 raise ValueError("OS edge transition terminal route refused")
             if item["handle"][0]["abort"] is not True:
@@ -188,35 +207,53 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
             raise ValueError("OS edge transition inner matcher refused")
         method, paths = match[0]["method"], match[0]["path"]
         if (type(method) is not list or len(method) != 1 or method[0] not in ("GET", "POST")
-                or method[0] in methods or type(paths) is not list
-                or any(type(value) is not str for value in paths)):
+                or type(paths) is not list or any(type(value) is not str for value in paths)):
             raise ValueError("OS edge transition inner matcher refused")
-        methods.add(method[0])
         handlers = _branch_handlers(item["handle"])
-        if method == ["GET"]:
-            get_profile = next((name for name, admitted in profiles.items()
-                                if sorted(paths) in admitted), None)
-            if get_profile is None or len(handlers) != 1:
-                raise ValueError("OS edge transition observed GET routes differ")
-            get_path = path + (position, "match", 0, "path")
-        else:
-            if (len(paths) != len(set(paths)) or len(handlers) != 2
-                    or handlers[0] != {"handler": "request_body", "max_size": 64000}
-                    or type(handlers[0].get("max_size")) is not int):
-                raise ValueError("OS edge transition observed POST route differs")
-            if sorted(paths) in (sorted(LEGACY_POST_ROUTES), sorted(INCUMBENT_POST_ROUTES)):
-                post_profile = "incumbent"
-            elif sorted(paths) == sorted(POST_ROUTES):
-                post_profile = "expanded"
+        if position >= 2:
+            # Fixed, immutable MCP branches: only the two OS path lists change.
+            if position == 2:
+                same = method == ["GET"] and paths == [MCP_METADATA_ROUTE] and len(handlers) == 1
             else:
-                raise ValueError("OS edge transition observed POST route differs")
-            post_path = path + (position, "match", 0, "path")
-        proxy = handlers[-1]
-        if (proxy.get("handler") != "reverse_proxy"
-                or proxy.get("upstreams") != [{"dial": f"127.0.0.1:{relay_port}"}]):
+                same = (method == ["POST"] and paths == list(MCP_ROUTES) and len(handlers) == 2
+                        and handlers[0] == {"handler": "request_body", "max_size": MCP_MAX_BODY}
+                        and type(handlers[0].get("max_size")) is int)
+            if not same:
+                raise ValueError("OS edge transition observed MCP route differs")
+        else:
+            if method[0] in methods:
+                raise ValueError("OS edge transition inner matcher refused")
+            methods.add(method[0])
+            if method == ["GET"]:
+                get_matches = {
+                    index for index, (fixed_get, _) in enumerate(TRANSITION_ROUTE_PROFILES)
+                    if sorted(paths) in (
+                        sorted(set(fixed_get) | set(current_routes)),
+                        sorted(list(fixed_get) + list(current_routes)),
+                    )
+                }
+                if not get_matches or len(handlers) != 1:
+                    raise ValueError("OS edge transition observed GET routes differ")
+                get_path = path + (position, "match", 0, "path")
+            else:
+                post_matches = {
+                    index for index, (_, fixed_post) in enumerate(TRANSITION_ROUTE_PROFILES)
+                    if sorted(paths) == sorted(fixed_post)
+                }
+                if (len(paths) != len(set(paths)) or not post_matches
+                        or len(handlers) != 2
+                        or handlers[0] != {"handler": "request_body", "max_size": 64000}
+                        or type(handlers[0].get("max_size")) is not int):
+                    raise ValueError("OS edge transition observed POST route differs")
+                post_path = path + (position, "match", 0, "path")
+        # Every branch's proxy must be the whole rendered handler, not merely the
+        # right upstream: a changed Host, header list, rewrite or transport would
+        # alter what the gateway sees. Only /mcp presents the gateway's loopback Host.
+        upstream_host = "127.0.0.1" if position == 3 and len(inner) == 5 else HOST
+        if not _proxy_matches(handlers[-1], relay_port, upstream_host):
             raise ValueError("OS edge transition relay upstream refused")
     if (methods != {"GET", "POST"} or get_path is None or post_path is None
-            or get_profile != post_profile):
+            or not get_matches.intersection(post_matches)):
         raise ValueError("OS edge transition mixed or incomplete route profile")
     return get_path, post_path
 

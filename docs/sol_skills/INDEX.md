@@ -147,6 +147,16 @@ admission, retry, transfer, effect, or production authority.
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed
 completion. Reviews against original outcome, not merely implementation quality.
 
+### `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md`
+For a *new independent PR/source review*, load this shared session-side guide from the **same
+verified protected Mastermind commit** before choosing an avenue. It explains when the
+current session may use actually admitted Fabric versus a separately authorized Slack
+Dot assessment, preserving existing author/reviewer identity, original effects, and
+the non-author formal GitHub review gate. The guide is **not** an additional runtime,
+reviewer registry, permission, credential, watcher or retry authority. Source enrollment
+here does not install a ChatGPT Project instruction, Fabric plugin or native skill;
+prove each live surface separately.
+
 ### `COMMISSION_WAVE.md`
 Use when Chairman intent authorizes Sol to send bounded work to Fable/another operator or,
 once production-proven, to create one Executive CEO request.
