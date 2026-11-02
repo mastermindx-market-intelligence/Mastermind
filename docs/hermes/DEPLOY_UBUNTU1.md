@@ -64,6 +64,72 @@ empty, inaccessible or unsafe pointers fail closed rather than falling back
 to an inline key. Only the role's selected primary credential reaches its
 native model child; its sibling's provider credential is not forwarded.
 
+## Native HTTPS egress — mandatory, not automatically provisioned
+
+Native BYOK source is no longer permitted to spawn a model child without a
+role-private, canonical localhost HTTPS CONNECT proxy setting. Keep
+`IPAddressDeny=any`, `IPAddressAllow=localhost` and
+`RestrictAddressFamilies=AF_UNIX AF_INET` in both units. No direct public
+egress, `IPAddressAllow=any`, arbitrary proxy hostname, embedded proxy
+credential, inherited shell proxy, shared proxy endpoint, or role substitution
+is allowed.
+
+The **existing private 0600 Secretary** file additionally needs these
+operator-provisioned settings (port shown as an example only):
+
+```text
+HERMES_NATIVE_EGRESS_ROLE=mmsecretary
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651
+```
+
+The **separate private 0600 Meta-CEO** file needs its own intended role and
+a different proxy endpoint (example port only):
+
+```text
+HERMES_NATIVE_EGRESS_ROLE=mmmeta
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652
+```
+
+`integrations.hermes_runtime.egress.native_egress_child_env` validates these
+two fields from that role's private secrets, never the interactive shell, and
+passes only `HTTPS_PROXY` plus a fixed localhost `NO_PROXY` to the native
+model child. Empty, external, noncanonical, URL-credentialed, privileged-port,
+wrong-role and unqualified settings refuse before the child starts. ModelArk
+and Z.AI keys remain independently loaded from the previously reviewed
+credential pointers; neither key is forwarded to the proxy by this module.
+
+**The proxy process is not created, installed or certified by this repository.**
+A currently authorized host network owner must separately provide and
+validate an existing compatible role-specific loopback HTTP CONNECT proxy
+that enforces the Secretary's exact commercial ModelArk destination
+`ark.ap-southeast.bytepluses.com:443` and the Meta-CEO's exact Z.AI
+destination `api.z.ai:443`, with TLS validation by the native model
+client. Deny all other destinations, including unrestricted tunneling; never
+use the proxy as a backdoor for Slack, general browsing, Fabric, or a second
+authority plane. It must not be accessible across role boundaries without
+the required host-side policy. Verify the installed Linux systemd cgroup
+actually enforces the network rules and the pinned native HTTP client honors
+the explicit HTTPS proxy. These are real-host canaries, not source-test claims.
+
+`hermesctl doctor` reports missing per-role proxy setup under
+`network_proxy:mmsecretary` / `network_proxy:mmmeta`, refuses shared
+bot/gateway/proxy identity as core readiness, and returns
+`core_text_status=CONFIG_READY_NOT_LIVE_PROVEN` only when its core
+configuration prerequisites are satisfied. It continues reporting optional
+Mac computer-use, future Fabric/Steward and Dot-account gaps independently;
+its overall status/exit behavior is unchanged. No doctor, local HTTP 200,
+proxy URL or stored model choice constitutes a live inference receipt.
+
+For actual acceptance, obtain authenticated pinned Hermes structured
+one-shot output through `chat -Q --query-file - --format stream-json` inside
+the approved service/network confinement, validate it using
+`integrations.hermes_harness.native_turn_evidence` from the companion
+stacked PR, prove remote TLS/provider usage and blocked destinations,
+then observe an authorized exact-parent thread reply from each distinct
+role bot through the existing Agent Dialogue owner. Keep the incumbent Grok
+Secretary operating until independent review, protected release and rollback
+proof are complete.
+
 MiniMax, Cursor pool and Steward MCP credentials and endpoints remain separate
 future qualification routes. Their optional pointer names include
 `MINIMAX_TOKEN_PLAN_KEY_FILE`, `CURSOR_API_KEY_FILE` and
