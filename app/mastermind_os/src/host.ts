@@ -1,4 +1,5 @@
 import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
+import { decodeBrowserScopedFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
 import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
@@ -74,6 +75,8 @@ export interface RawClient {
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
+  /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
+  readAttendedFabricCatalog?(request: { signal: AbortSignal }): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   /** Fixed authenticated one-cache Control Room state; no operator writes. */
   readControlRoomState?(request: { signal: AbortSignal }): Promise<unknown>;
@@ -135,6 +138,7 @@ export interface MissionHost {
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
+  readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
   readPrograms?: ProgramRead;
   readControlRoomState?: (request: { signal: AbortSignal }) => Promise<ControlRoomRead>;
   readControlRoomDiscovery?: (request: { signal: AbortSignal }) => Promise<ControlRoomDiscovery>;
@@ -312,13 +316,21 @@ export function bindMissionHost(
         const selected = attendedSelection(request);
         if (!selected) throw new Error("FABRIC_SELECTION_INVALID");
         const started = epoch;
-        check(request.signal, started);
-        const state = client.getState();
-        if (state.status !== "signed_in" || !state.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
-        const raw = await client.readAttendedFabric!({ ...selected, signal: request.signal });
-        check(request.signal, started);
-        const current = client.getState();
-        if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        const source = client.invalidationGeneration!();
+        const read = client.readAttendedFabric!;
+        const verify = () => {
+          check(request.signal, started);
+          if (!Number.isSafeInteger(source) ||
+              source !== client.invalidationGeneration?.() ||
+              typeof read !== "function" || read !== client.readAttendedFabric)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("FABRIC_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await read.call(client, { ...selected, signal: request.signal });
+        verify();
         return decodeAttendedStatus(raw, selected);
       },
     } : {}),
@@ -369,6 +381,27 @@ export function bindMissionHost(
           if (!decoded) throw new Error("MISSION_V4_RESPONSE_INVALID");
           return decoded;
         } finally { guard.dispose(); }
+      },
+    } : {}),
+    ...(client.readAttendedFabricCatalog && client.invalidationGeneration ? {
+      async readAttendedFabricCatalog({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        const source = client.invalidationGeneration!();
+        const read = client.readAttendedFabricCatalog!;
+        const verify = () => {
+          check(signal, started);
+          if (!Number.isSafeInteger(source) ||
+              source !== client.invalidationGeneration?.() ||
+              typeof read !== "function" || read !== client.readAttendedFabricCatalog)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("FABRIC_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await read.call(client, { signal });
+        verify();
+        return decodeBrowserScopedFabricCatalog(raw);
       },
     } : {}),
     async readPrograms({ signal }) {
