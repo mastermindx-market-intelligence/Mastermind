@@ -481,6 +481,8 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             return {"server": client.server, "tools": [dict(catalog[n], bridge_access=("read" if n in READ_TOOLS else "edit"))
                     for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS],
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS - FILE_MANAGE_TOOLS),
+                    # Exact evidence for full-catalog review, never a dispatch allowlist.
+                    "full_catalog": catalog,
                     "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
         if editing and not schema["accepted_for_write"]:
             raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server identity or catalog schema changed; inspect read-only and review compatibility before editing.")

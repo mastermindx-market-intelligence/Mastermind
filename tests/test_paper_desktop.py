@@ -591,6 +591,29 @@ class CoreTests(unittest.TestCase):
         result = self.call("catalog")
         self.assertIn("launch_shell", result["blocked_tools"])
         self.assertNotIn("launch_shell", [x["name"] for x in result["tools"]])
+    def test_catalog_exposes_exact_review_evidence_without_admitting_tools(self):
+        catalog = self.client.catalog()
+        catalog["launch_shell"].update({
+            "description": "Unknown upstream tool: evidence only, never callable.",
+            "annotations": {"destructiveHint": True},
+            "inputSchema": {"type": "object", "properties": {"command": {"type": "string"}},
+                            "required": ["command"], "additionalProperties": False},
+        })
+        self.client.catalog = lambda: copy.deepcopy(catalog)
+        result = self.call("catalog", _catalog_pin=b.SUPPORTED_CATALOG_SHA256)
+        self.assertEqual(result["full_catalog"], catalog)
+        self.assertEqual(b.digest(result["full_catalog"]), result["catalog_sha256"])
+        self.assertEqual(b.digest(json.loads(json.dumps(result["full_catalog"]))),
+                         result["catalog_sha256"])
+        self.assertFalse(result["write_schema"]["accepted_for_write"])
+        allowed = {item["name"] for item in result["tools"]}
+        for name in result["blocked_tools"]:
+            self.assertNotIn(name, allowed)
+            for action in ("read", "edit"):
+                with self.subTest(tool=name, action=action):
+                    with self.assertRaisesRegex(b.Refusal, "TOOL_NOT_ALLOWED"):
+                        self.call(action, tool=name)
+        self.assertEqual(self.client.calls, [])
     def test_status_does_not_invent_quota(self):
         result = self.call("status")
         self.assertIsNone(result["quota_remaining"])
