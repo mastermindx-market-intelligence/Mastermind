@@ -167,8 +167,8 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    source/runtime revision changes tool descriptions or collaboration metadata, review and refresh
    the **same app's** approved action snapshot. For a developer-mode MCP connection, deploy/restart
    the reviewed server, open that existing connection in ChatGPT Plugins, select **Refresh**, confirm
-   the advertised tool metadata changed, and then start a new conversation. A published Plugin
-   Directory plugin uses continuous review/rescan. **Business and Enterprise/Edu**
+   the advertised tool metadata changed, and then start a new conversation. A published Plugin Directory
+   plugin uses continuous review/rescan. **Business and Enterprise/Edu**
    admins can **Refresh existing published custom workspace MCP app tools in place**
    from workspace settings with management permission and a valid connection,
    then review/publish action updates and start a new chat. Enterprise/Edu Action control also supports
