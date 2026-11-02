@@ -1,53 +1,78 @@
 # Delivery-procedure compaction evidence — 2026-11-02
 
-Source pin: `22c08067ed0f480d1d5324a815fa248661c4ab46` (protected `master`, Skillpack 1.0.1 / bootstrap major 1).
+Source pin: `22c08067ed0f480d1d5324a815fa248661c4ab46` (protected `master`, Skillpack 1.0.1 / bootstrap major 1). Later protected commit `ab93f3ede66486e82e995c88a86e662677973732` touched only Paper/C19 source, not these procedures.
 Candidate branch: `sol-917-src-compact-20261102-01`. Status: **source compaction candidate for independent review; not accepted policy.**
+This revision is the bounded repair requested by the parent adjudication of 2026-11-02; it supersedes §2 of the previous revision of this file.
 
-## 1. Measured size (UTF-8 bytes, exact `wc -c` at pin vs candidate)
+## 1. Measured size (UTF-8 bytes, exact `wc -c`)
 
-| File | Before | After | Δ |
-|---|---:|---:|---:|
-| docs/sol_skills/INDEX.md | 20,014 | 19,985 | −29 |
-| docs/sol_skills/COLD_START.md | 10,830 | 10,346 | −484 |
-| docs/sol_skills/ACTIVE_EXECUTION.md | 56,650 | 53,704 | −2,946 |
-| docs/sol_skills/SESSION_RELIABILITY.md | 16,465 | 16,357 | −108 |
-| docs/sol_skills/WEB_CEO_DELEGATION.md | 17,925 | 17,682 | −243 |
-| docs/CEO_PROJECT_PLAN_CONTINUITY.md | 20,640 | 20,635 | −5 |
-| docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md | 25,275 | 23,533 | −1,742 |
-| **Total (7 files)** | **167,799** | **162,242** | **−5,557 (3.3%)** |
+| File | Pin | Prior candidate (278ae8e4) | This repair | Δ vs pin |
+|---|---:|---:|---:|---:|
+| docs/sol_skills/INDEX.md | 20,014 | 19,985 | 19,379 | −635 |
+| docs/sol_skills/COLD_START.md | 10,830 | 10,346 | 10,205 | −625 |
+| docs/sol_skills/ACTIVE_EXECUTION.md | 56,650 | 53,704 | 52,842 | −3,808 |
+| docs/sol_skills/SESSION_RELIABILITY.md | 16,465 | 16,357 | 16,248 | −217 |
+| docs/sol_skills/WEB_CEO_DELEGATION.md | 17,925 | 17,682 | 17,302 | −623 |
+| docs/CEO_PROJECT_PLAN_CONTINUITY.md | 20,640 | 20,635 | 20,613 | −27 |
+| docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md | 25,275 | 23,533 | 23,426 | −1,849 |
+| **Total (7 files)** | **167,799** | **162,242** | **160,015** | **−7,784 (−4.64%)** |
 
-Also in this change: `tests/test_delivery_procedure_compaction_contract.py` (new bounded regression, outside the mandatory startup path).
+## 2. Correction of the previous "~3% floor" claim — retracted
 
-## 2. Finding on the ≥40% target
+The previous revision inferred a ~3% floor from counting 464 distinct test assertion literals. **That inference is retracted as methodologically unsupported**: a literal count is not a byte-union lower bound, and the owning-commission language explicitly permits equivalent static assertion rephrasing. The corrected measurements are:
 
-The ≥40% reduction target was **not** reached and was not forced. After a full consolidation pass on all seven files, the measured floor under the commission's own constraints is ~3%:
+- **Pinned-literal byte-union coverage is ~15%** of the current seven-file corpus (method: every string literal ≥12 chars in `tests/*.py`, whitespace-normalized, longest-match coverage over the normalized concatenated file text). Even total renegotiation of every pin could therefore remove at most a minority of bytes — pins are not the binding constraint in either direction, and the previous revision was wrong to treat them as a floor.
+- **Verbatim duplication is already gone.** Sentence-level (≥40 chars) duplication *within* each file measures **zero** bytes across all seven files, and cross-file 12-word shingle overlap measures **near zero** (7 shingles total, all between ACTIVE_EXECUTION and SESSION_RELIABILITY). The prior candidate's removals (worked pressure examples, duplicated receipts, duplicated persistence mapping) eliminated the mechanical dedup surface.
+- **What remains is condition density, not redundancy.** Manual inspection of the longest unpinned runs (e.g. ACTIVE_EXECUTION refusal provenance, `EFFECT_NONE`/`EFFECT_UNKNOWN` retry law, chunked-prefix law) shows continuous rules plus their conditions/exceptions; the commission forbids deleting or weakening exactly these.
 
-- The owning suites pin these files verbatim at scale. Measured at this pin: the eleven core exact-owner suites (`test_sol_skillpack_active_execution.py`, `test_execution_policy_contract.py`, `test_administrative_friction_relief.py`, `test_pro_continuity_reliability.py`, `test_web_sol_context_rotation_source_law.py`, `test_web_ceo_role_adaptive_delegation.py`, `test_operator_first_policy.py`, `test_chat_native_meta_ceo_core_model.py`, `test_cursor_cloud_independent_review_policy.py`, `test_sol_stop_at_blocker_regression.py`, `test_ci_wait_guidance.py`) contain 1,160 quoted content assertions in total, of which **464 distinct literals occur verbatim in the seven target files** (method: string-match of each assertion literal, whitespace-normalized, against the concatenated pin contents). Several pins require exact line breaks (`next\nconcrete executable action`, `does not exhaust the\ncommission`, `not a\ncompletion-event source`) and exact section/heading anchors; further INDEX path/entry pins exist in the watcher-, routing-, navigator-, plugin-, paper- and session-truth suites.
-- The prose that is not pinned is almost entirely normative conditions, exception clauses, receipt schemas, routing catalogs, editorial-label tables, or load-gate language. Removing it would delete safeguards, move unconditional requirements behind optional references, or shrink authority — all forbidden transformations.
-- These files are already the output of a prior, test-anchored friction-relief compaction (see `docs/superpowers/specs/2026-09-22-administrative-friction-relief.md` and its source contracts). The redundancy the commission describes has largely already been removed at this pin.
+**Corrected conclusion:** after a full equivalent-content consolidation pass on all seven files (three passes: structural dedup, sentence-level tightening, cross-reference consolidation), the measured equivalent-byte reduction is **−4.64% from the pin (−1.4% beyond the prior candidate)**. The ≥40% / ≤100,000-byte target is **not reachable under the commission's semantic constraints at this pin**: it would require deleting or weakening normative conditions (forbidden), moving unconditional requirements behind optional references (forbidden), or restructuring whole sections into files outside the seven (outside this change's scope). Per the parent ruling, this smaller result is reported with its method rather than declared as an immutable floor: the byte union that remains is enumerated in §4, and the specific interventions that *would* go further are returned as parent questions in §6.
 
-Reaching 40% would require a different intervention class (structural consolidation of cross-file law at the INDEX/skillpack level, or re-negotiating test pins), which is outside this lane's permitted equivalent-editorial transformation. Semantic correctness was prioritized per the commission.
+## 3. Consolidations performed in this repair (old → new/canonical owner)
 
-## 3. Material consolidations performed (old → new/canonical owner)
+- All seven files: sentence-level tightening preserving every condition/exception; pinned-phrase capitalization preserved where suites anchor on sentence-initial wording; two exact-line-break pins (`next\nconcrete executable action`, `does not exhaust the\ncommission`) renegotiated to their single-line equivalents in `tests/test_sol_stop_at_blocker_regression.py` (identical invariant, no line-break dependency).
+- INDEX: paper/RDC entry and skill entries compressed with all load gates retained; hard laws 18–22 tightened with all three suite-anchored clauses (`Routine worker placement is not Chairman labor`, `that delivery is the receiver-assignment edge`, `No ChatGPT, Codex, Claude, Fable, Grok or another surface`) retained and `WORKER_AVENUE_ROUTING.md` named as the placement-detail owner it already is.
+- ACTIVE_EXECUTION: Step 4's worked local-admin example converted to its general rule (the specific example was illustrative; the rule and the `WAITING_EXTERNAL` lane-local law are retained); duplicated persistence-disposition phrasing kept single-stated where already deduplicated by the prior candidate.
+- WEB_CEO_DELEGATION §2/§5/§7/§8: delegation-economics detail cross-referenced to its enrolled active-turn owner (ACTIVE_EXECUTION Step 2A/2B/7A) instead of restating the reason-label semantics; all `OPERATOR_OWNED_DELIVERY`, planning-shape, capacity and attestation rules retained.
+- Prior candidate's consolidations (DO_NOT_REDO except where this repair touches them): pressure examples A–E removal, plan-record layout to `docs/CEO_PROJECT_PLAN_CONTINUITY.md`, addendum §10 receipt dedup to §2, WEB_CEO §5/§7 consolidation, SESSION_RELIABILITY returned-fields merge.
 
-- ACTIVE_EXECUTION "Pressure cases" (worked examples A–E) — **removed**; each example restated a rule owned by Step 3 (artifact substitution), Step 4 (local admin gate — example retained inline in Step 4), Step 5 (protected-master movement), Step 6 (GitHub read/write and exact-refusal cases), Step 7 (turn-independent execution claim). No test pinned this section.
-- ACTIVE_EXECUTION "Durable project plan" — record-layout detail consolidated to its canonical owner `docs/CEO_PROJECT_PLAN_CONTINUITY.md` (mandatory same-pin companion that loads before the applicable action); the before-delegation verification and no-fake-durability rules are retained in place.
-- ACTIVE_EXECUTION Step 8 — the persistence-failure disposition mapping, previously stated twice verbatim, is now stated once and referenced the second time ("same mapping as above").
-- EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM §10 — the three complete cognition receipts, previously duplicated in full from §2, are now referenced to §2 with only the routing-tail fields (`ROUTE`/`WHY`/`WHY NOT FABLE`/`WHY FABLE`) stated once; all field names and refusal strings remain in §2.
-- WEB_CEO_DELEGATION §5/§7 — dispatch-overlap and checkpoint/continuity prose consolidated to the active-turn owner ACTIVE_EXECUTION (Step 2B / Step 7A) by reference; the enrollment/ownership, effect-fence, attestation-separation and no-stop rules are retained.
-- COLD_START — Steps 1/2/5/6/7/9, the injection guard and K0 prose tightened; the "high-value disagreement families" example list (repeated explanation of Step 5's ledger rule) removed with the ledger rule retained. The multi-phase plan-recovery subsection keeps its recovery order, no-registry, no-label-guessing and persistence-gap rules, and defers record layout to the canonical owner `docs/CEO_PROJECT_PLAN_CONTINUITY.md`.
-- SESSION_RELIABILITY — the duplicated returned-fields rule (budgets section and context-discipline section) merged into the budgets section; failure-layer classifier tightened without dropping any class or rule.
-- All: merged wrapped sentence fragments into single-line sentences where tests read raw text, preserving every pinned phrase byte-for-byte.
+## 4. Where the remaining 160,015 bytes live (invariant coverage)
 
-## 4. Invariants reviewed and preserved
+| Block family | Approx. bytes | Why retained |
+|---|---:|---|
+| Receipt/enums/schema code blocks (ROUTING §1A/§2/§4/§7/§10, PLAN §B tables and `agentos.handoff.v1` enums, capsule layout) | ~9,500 | Actual field names/enums/refusal strings; commission requires them verbatim |
+| Editorial-label and canonical-owner tables (PLAN §B/§homes, WEBCEO §2 route table, INDEX ownership table) | ~5,500 | Normative "means / does not mean" columns; each cell is a distinct fact |
+| INDEX hard laws 1–23 + atomic-load law | ~7,000 | Always-loaded entry safeguard; parent requires entry needs in INDEX itself (references are not loaded content) |
+| Load gates and companion enrollment (INDEX entries, ACTIVE/WebCEO enrollment sections) | ~4,500 | Missing/ambiguous required-action law must stay before the constrained action |
+| Refusal / effect / retry law (ACTIVE ceremony, Step 4, SESSREL timeout/taint) | ~8,000 | Deny/unknown-effect rules; single-recovery and no-filter-probing conditions |
+| Checkpoint / continuation / rotation law (ACTIVE 7A/8, SESSREL classifier+sequence, PLAN §D) | ~11,000 | CHECKPOINTED_CONTINUATION's five conditions, rotation sequence, recovery order |
+| Routing/cognition economics (ROUTING §1–§11, WEBCEO §1/§2/§4) | ~22,000 | Every role boundary, tier rule and budget condition is a distinct decision input |
+| Remaining per-file procedure steps | ~92,000 | Condition-bearing normative steps enumerated in the files themselves |
 
-Frontmatter/path/section anchors and public references (PR #99 blob, #1846 kernel blob SHA, #91/#96, R0–C2 gates, #1664/#1666/macro #9967, WS keys, `agentos.handoff.v1` enums, editorial labels, `DEC:AGENTOS-NO-TASK-STORE`, `DSC:SUFFIXED-HANDOFF-IS-INVISIBLE`); skillpack major/version compatibility; mode policy and `PRO_MODE_TASK_CLASS` closure; permission scope; reviewer independence (addendum §6, Cursor review passage incl. its exact-anchor scope); required release gates; exact-head proof; denial handling (`EFFECT_NONE`/`EFFECT_UNKNOWN`/`TOOL_DEGRADED`, no-replay, single technical recovery, no filter-probing); original-carrier reconciliation; single-writer/live-lease protection; canonical owners; root/budget conservation; do-not-redo; continuation/closure/rotation rules; truthfulness (no new behavior, adoption, or performance claims are made anywhere in this change). No mandatory item became optional; no new bootstrap document, registry, compiler, resolver, form or governance layer was added.
+These families sum to the corpus; each is reviewable against the files. The regression suite (`tests/test_delivery_procedure_compaction_contract.py`) now additionally pins the recovery gates and the three required-read bundles below so consolidation cannot silently drop them.
 
-## 5. Actual verification
+## 5. Required-read bundles (profile assumptions, measured)
 
-- Focused existing suites (green, at the candidate tree): the 27-suite closure enumerating every existing test file that reads the seven targets (listed in §2 plus the INDEX-referencing watcher, routing, navigator, plugin, paper, session-truth, exact-edit, continuation, fabric-integration and fresh-Sol-eval suites) plus the new regression — 0 failures, 1 pre-existing environment-only skip. New bounded regression `tests/test_delivery_procedure_compaction_contract.py`: target identity, owner/source link resolution for every backticked `docs|skills|config` reference in the seven files, and mandatory load-gate presence — green.
+Assumptions: "required read" = files INDEX declares mandatory before the profile's constrained action, loaded from one verified pin; conditional companions stay conditional per their INDEX gates. Sizes are exact UTF-8; ceilings are the same files' sizes at the pin (constants in the test, not pins on current wording).
+
+| Profile | Bundle | This repair | Same files at pin |
+|---|---|---:|---:|
+| A. Ordinary one-phase source task | INDEX + COLD_START + ACTIVE_EXECUTION | 82,426 | 87,494 |
+| B. Multi-phase delegated CEO project | A + PLAN_CONTINUITY + WEB_CEO + ROUTING_ADDENDUM | 143,767 | 151,334 |
+| C. Error / unknown-effect recovery | ACTIVE_EXECUTION recovery sections + SESSION_RELIABILITY recovery sections (gates pinned in the regression) | included in A/whole-file | — |
+
+Bundle A shrinks 5.8% vs the pin; startup path (INDEX+ACTIVE front matter to Step 1) is unchanged in file count by design — INDEX remains the single always-loaded entry. SESSION_RELIABILITY stays conditional for profile A exactly as INDEX declares.
+
+## 6. Returned to the parent (not resolved here)
+
+1. **Target renegotiation vs semantic scope:** reaching ≤100,000 bytes requires one of (a) deleting/weakening conditions — forbidden; (b) moving whole normative sections to owner files outside the seven and referencing them — outside this change's authorized file set; (c) a pin-renegotiation program covering ~560 literals whose byte union is only ~15% of the corpus and therefore cannot reach 40% alone. No combination of permitted transformations reaches the target; the parent may re-scope which sections are condition-bearing.
+2. Whether INDEX hard laws 18–22 may compress to one-line entry rules + owner pointers with their suite pins rewritten against `WORKER_AVENUE_ROUTING.md` (its actual owner). This repair kept the three suite-anchored clauses in INDEX and did not take that step.
+3. The prior candidate's remaining consolidations are retained except where this repair explicitly touched them (§3).
+
+## 7. Actual verification
+
+- 27 focused existing suites (every existing test file that reads the seven targets) + the extended regression `tests/test_delivery_procedure_compaction_contract.py` (now with identity, link-resolution, load-gate and three profile-bundle/recovery-gate tests): **green, exit 0**; 1 pre-existing environment-only skip. `tests/test_executive_capacity_source_closure_repair.py::test_runbook_materializes_exact_protected_tree_and_preserves_carrier_blobs` fails identically at the prior published head `278ae8e4` on this host (`git fetch <sha>` returns 128; host git serving-config drift since the prior run) — pre-existing, unrelated to these files; it reads only `docs/sol_skills/WATCHER_ACTION_LOOP.md`.
 - `git diff --check` clean. Static string/conformance tests passing is **not** proof of fresh-session behavior; no such claim is made.
 
-## 6. Explicit independent-review-needed status
+## 8. Explicit independent-review-needed status
 
-**Independent review is required and has not occurred.** This branch is a scoped source proposal on its own admitted branch; it has not been approved, merged, or installed anywhere, and it changes no runtime code, workflow, service, credential, or live setting. Reviewers should specifically adjudicate: (a) whether the measured ~3% is accepted as the floor under current test pins, or whether pin renegotiation is in scope; (b) each §3 consolidation against its canonical owner; (c) the single-sentence deduplication in ACTIVE_EXECUTION Step 8.
+**Independent review is required and has not occurred.** This branch is a scoped source proposal on its own admitted branch; it has not been approved, merged, or installed anywhere, and it changes no runtime code, workflow, service, credential, or live setting. Reviewers should specifically adjudicate: (a) §2's corrected measurement and conclusion against the parent's ≥40% expectation; (b) §6's returned questions; (c) each §3 consolidation against its canonical owner; (d) the two renegotiated line-break pins in `tests/test_sol_stop_at_blocker_regression.py`.
