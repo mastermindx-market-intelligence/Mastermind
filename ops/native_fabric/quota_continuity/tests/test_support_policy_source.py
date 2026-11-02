@@ -93,7 +93,7 @@ class SupportPolicySource(unittest.TestCase):
 
 
 class CurrentGenerationClosure(unittest.TestCase):
-    def test_actual_96_member_builder_uses_ordinary_verified_selection(self):
+    def test_actual_current_builder_uses_ordinary_verified_selection(self):
         import contextlib
         import io
         import os
@@ -119,9 +119,9 @@ class CurrentGenerationClosure(unittest.TestCase):
         self.assertEqual((built/'native-source-inventory.json').read_bytes(),
                          (rollout/'native-source-inventory.json').read_bytes())
         manifest=json.loads(raw)
-        self.assertEqual(len(manifest),96)
+        self.assertEqual(set(manifest), {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         '4fdda035fe029d44f2e07121e7614661eeba02116d05b0b104a6c2973b3120b9')
+                         'f282689b9e3a5cb0af95595489f3036ce63dac533f24ac6247256f7955835423')
         controller=(built/'native-code-stage/ext/remote_sub.sh').read_bytes()
         self.assertEqual(controller,(harness.ROOT/'candidate/remote_sub.sh').read_bytes())
         self.assertEqual(hashlib.sha256(controller).hexdigest(),manifest['ext/remote_sub.sh'])

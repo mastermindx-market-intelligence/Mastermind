@@ -223,6 +223,18 @@ put it in the appropriate durable source before closing.
 
 Do not solve the question by expanding the Skillpack with live company state.
 
+### Project-plan continuity check
+
+For a multi-phase project, verify that the same-pinned
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` is satisfied: workstream waves and the latest
+dated handoff are the pinned plan; the versioned master plan is the task tree and
+lists stable step/substep IDs with editorial labels only. `DO_NOT_REDO`, the next
+action, and live effects stay on the handoff and `control_plane`. Report the
+workstream key, the handoff path, the task-tree path/SHA, and any unresolved
+cross-owner projection or effect explicitly. Do not create a second `latest`
+store, require a plan-SHA field the handoff schema does not have, or overclaim
+an unmerged plan as adopted organizational truth.
+
 ## Step 11 — State the next action precisely
 
 End with exactly one primary continuation action and its gate, plus any independent parallel work.
