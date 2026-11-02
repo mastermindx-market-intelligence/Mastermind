@@ -22,11 +22,11 @@ import native_generation as native  # the incumbent generation descriptor owner
 
 BASE_MANIFEST_SHA256 = "0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec"
 PREDECESSOR = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
-EXPECTED_CANDIDATE = "e07708073e957d9a3f043fc6d12d5fafbf8e2f6f67411c6012a88e92fadeea61"
+EXPECTED_CANDIDATE = "5522b68a16fe7a013065d4f12738023dd3842b37b1f056f1fd34ef3d8effdd37"
 MEMBER_DIGESTS = {
     "ext/pick.py": (
         "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
-        "5220f2ff947e06da3de3dbe64fac456997122bd616aedc23b2daa25993f5d2de",
+        "bdc8f9ea6484735ef6a9d3b6d94b1d9d30f6bd9079360b8e02928cf0469d5e47",
     ),
     "ext/host_pick.py": (
         "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
