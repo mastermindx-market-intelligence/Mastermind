@@ -4,7 +4,7 @@ PBR #1693, RUNTIME lane. **Commands only.** RUNTIME executed nothing on the host
 
 | | |
 |---|---|
-| Approval | Seat ruling 2026-10-22: Option A, conditional; needrestart exclusion approved as a release-row item; the SDK pin is NOT in this window. |
+| Approval | Seat ruling 2026-10-22: Option A, conditional; needrestart exclusion approved as a release-row item; the SDK pin is NOT in this window. **Rev 3 (2026-11-02, seat takeover of the RUNTIME lane):** the 2026-10-23 window was lost (the seat session died at the Fable usage limit 18:02Z 10-22 before its 03:25Z wake; no s0 ran; nothing was installed: `.deployed_git_sha` = OLD on 11-02 01:19Z). Re-run Mon 2026-11-02 with `PBR_DAY=2026-11-02` on s0 (same timeline, same gates, same hold); G7b widened by seat ruling D-G7B-1 and a git-only `g7b-selftest` step added; the s0 worktree-helper call drops `-I` (Python 3.14 isolated mode implies `-P`, which hides the helper's sibling `pool_storage` module, so rev 2 failed at s0 step 0.1 on the seat Mac); nothing else changed. |
 | Executor | The seat. The deploy key is Mac-held. |
 | Inputs | `INSTALL_PROOF_PLAN.md` §1 (T1–T4), §2, §4, §5 and §7. |
 | Driver | `runbook/install_w1.sh`. One subcommand per step. State lives in `$PBR_EV/state.env`, so every step runs from a fresh, stateless shell. |
@@ -16,7 +16,7 @@ PBR #1693, RUNTIME lane. **Commands only.** RUNTIME executed nothing on the host
 | OLD (installed now) | `ff16c192cc7b932e59c28c4fe30aeaf27bcb7595`. s1 proves it with T1(pre). |
 | SHA (to install) | `origin/master` at window open. s0 fixes it, and G8 re-proves it at s2 and s3. On 2026-10-22 13:10Z master was `3a6d165fe398507bac179ab76b4ee01aa13116db`: 181 changed paths vs OLD, no deletions. That is the wave-1 merges (#1711 #1715 #1716 #1718 #1734 and ECON/RESEARCH merges) plus, since `fc4db8de`, non-bot `ops/native_fabric/grok47`, Executive OS edge/assets and docs. At 14:27Z master was `3d1cd77dfe84fee87922eb970e1a84cfdd9a0555` (+4 paths: #1719, the Self-Directed `unavailable` rendering in `app/web.py` and `app/static/index.html`, plus its test and evidence): 184 paths vs OLD, no deletions, G7a/G7b still empty. The SHA keeps moving until the hold; only G7a/G7b decide eligibility. |
 | G7a (deploy/runtime mechanics drift OLD→SHA) | Empty (re-checked at `3d1cd77d`): `scripts/deploy_code_to_vps.sh`, `deploy_from_git.sh`, `refresh_datadog_release_tag.sh`, `app/main.py`, `portfolio/forward_evaluation.py`, `app/scheduler.py`. |
-| G7b (dependency drift) | Empty, so `T2_MODE=equal`. If #1714 lands first: `T2_MODE=floor_pending`. The venv is still not upgraded in this window (separate T2 step), and T2 must show an unchanged venv. |
+| G7b (dependency drift) | Empty → `T2_MODE=equal`. The #1714 trio with the `claude-agent-sdk>=0.2` floor → `T2_MODE=floor_pending` (the venv is still not upgraded in this window; T2 must show an unchanged venv). **Rev 3 / D-G7B-1:** the trio carrying only #1899's dev-only pytest bound (`"pytest>=8,<10"` → `"pytest>=8,<9.2"`, comment lines aside) with comment-only lock changes (every pin, extra and hash unchanged; pytest stays 9.1.1) → `T2_MODE=equal`; s0 records `gates/G7b.RULING` and `identity/dep_drift.diff`. Any other pyproject line, any non-comment lock line without the SDK floor, or any file beyond the trio → STOP. On 2026-11-02 01:30Z `ff16c192..origin/master` was exactly the dev-bound case (rev 2 would have stopped at s0). |
 | Forward-evaluation marker | Active: `start.json`, `deployment_sha=3c4ef7f8…`, `evaluation_start=2026-08-11`. G6 passes. The deploy takes the FORWARD_START_ACTIVE path (no init/finalize), and the marker must stay byte-identical (checked in s4). |
 | Merge-queue hold | **No merge to `master` from 03:30Z until s3 has launched (to be safe, until 05:40Z).** Master is shared with non-PBR work (fabric and Executive OS merged at ~13:00Z on 10-22). If master moves after s0, G8 fails at s2/s3, and the wrapper would refuse anyway (rc 2). Recovery before 05:20Z: a new `s0` (new evidence dir), `s1`, then `s2`. |
 | Never | Touch `/opt/mastermind-live-data`; rsync/scp toward the VPS outside the repo's deploy script; re-run s3; deploy a third SHA; copy `.env`/keys; run the SDK pin. |
@@ -29,7 +29,7 @@ These are sha256 values. s0 re-verifies the three helpers; a mismatch aborts.
 
 | File | sha256 |
 |---|---|
-| `runbook/install_w1.sh` | `2de95021c61fc27ed349155cccd21f7f963dbed7a50c0de026f56f9b05328f11` |
+| `runbook/install_w1.sh` | `bdb83a97b7c5fefe943a55c3a591d4e5ece762598988bc6e2848bca4572fe872` |
 | `runbook/pbr_rb.py` | `536e038bb357e88926edf2613840b5d74431ccfb63c88dbe08a889f3abfa14ac` |
 | `runbook/remote_blob_manifest.py` | `49b3ca7d8b53074f1b6491eccc6371c8b214c75f86c6b75c6f126a6dcd4852bf` |
 | `runbook/remote_dists.py` | `b15841d63d3480ea5b8af68ab2d321f2f65d546fa74365153979e127c32776e0` |
@@ -44,7 +44,7 @@ RB=research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook
 B=$(mktemp -d)
 git -C "$SEAT_WT" fetch -q origin claude/ssd-pbr-runtime-85f3de87bc7b8894
 git -C "$SEAT_WT" show "FETCH_HEAD:$RB/install_w1.sh" > "$B/install_w1.sh"
-echo "2de95021c61fc27ed349155cccd21f7f963dbed7a50c0de026f56f9b05328f11  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
+echo "bdb83a97b7c5fefe943a55c3a591d4e5ece762598988bc6e2848bca4572fe872  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
 env -u PBR_EV OPERATOR_SESSION_ID=<executing session id> /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
 # s0's last line prints:  export PBR_EV=/Volumes/Mastermind/evidence/pbr/install-<UTCyyyymmddThhmmZ>_<sha8>
 ```
@@ -123,7 +123,7 @@ env -u PBR_EV OPERATOR_SESSION_ID=<id> /opt/homebrew/bin/bash --noprofile --norc
 6. Runs the composition gates:
    - **G7**: OLD is an ancestor of SHA.
    - **G7a**: the mechanics diff is empty.
-   - **G7b**: dependency drift is empty, or exactly the #1714 trio with only the `claude-agent-sdk>=0.2` floor changed. This sets `T2_MODE`.
+   - **G7b**: dependency drift is empty, exactly the #1714 trio with only the `claude-agent-sdk>=0.2` floor changed, or (rev 3, D-G7B-1) the trio with only the dev pytest bound and comment-only locks. This sets `T2_MODE`. Run `g7b-selftest` (9 git-only cases, no host contact) before s0; it must print `g7b-selftest PASS`.
 7. Writes `identity/old_to_sha.name-status.txt`.
 
 **PASS output**
@@ -144,7 +144,7 @@ Check that SHA equals the master the seat expects at the hold. Check that `$PBR_
 | Worktree creation failed, or HEAD != remote master (master moved during s0) | Remove the new worktree and re-run s0. |
 | Helper pin mismatch | STOP, ask RUNTIME. |
 | G7a non-empty | Seat ruling. The runbook's mirrors of the deploy mechanics would be stale. |
-| G7b drift beyond the trio | STOP, seat. |
+| G7b drift beyond the trio, a non-comment lock change without the SDK floor, or a pyproject line other than the SDK floor / the ruled dev bound | STOP, seat. |
 
 ### s1: pre-change capture (read-only)
 
@@ -526,6 +526,7 @@ manifest.json                sha256 of every file (s6)
 - needrestart verify: a fake conf gives rc 3 before, rc 0 after, rc 4 on a parse error. The regex matches `mastermind(.service)`, not `mastermind-restart.service`.
 - `pbr_rb` gates/app-started/t1/t4/health/cycle/close against dated fixtures.
 - G1/G2E waiver paths.
+- `g7b-selftest`: c0 worktree helper imports without `-I`; c1 unrelated → equal; c2 SDK floor → floor_pending; c3 dev bound + header-only locks → equal; c4 dev bound + lock pin → STOP; c5 other dependency → STOP; c6 extra requirements file → STOP; c7 SDK + dev → floor_pending; c8 live OLD→origin/master → not STOP.
 - G3 against a fake host with systemd-255-shaped stubs (`systemctl show` prints a date whatever the flags; `busctl` prints `t <µs>`), 9/9 cases plus 4 assertions:
   - the observed 14:21Z value (06:33:10Z) → PASS; the redrawn 14:24Z value (06:53:33Z) → PASS; exactly 05:55:00Z → PASS;
   - 05:54:59.999Z → stop; 04:40Z (inside W1) → stop; `t 0` → stop; a `busctl` error → stop; a non-`t` reply → stop;

@@ -41,6 +41,10 @@ MECH=(scripts/deploy_code_to_vps.sh scripts/deploy_from_git.sh scripts/refresh_d
 SDK_TRIO="pyproject.toml
 requirements/gate-linux-x86_64-py312.lock
 requirements/gate-macos-arm64-py312.lock"
+# G7b rev 3 (seat ruling D-G7B-1, 2026-11-02): the only non-SDK pyproject drift admitted OLD->SHA is #1899's
+# dev-only pytest bound; with no SDK floor the gate locks must keep every pin/extra/hash (comment-only changes).
+G7B_DEV_DRIFT='-    "pytest>=8,<10",
++    "pytest>=8,<9.2",'
 SHOW_PROPS="-p ActiveState -p SubState -p MainPID -p ActiveEnterTimestamp -p ExecMainStartTimestamp -p NRestarts -p FragmentPath -p DropInPaths -p NeedDaemonReload -p ControlGroup -p Result -p InvocationID"
 VPS=(ssh -i "$KEY" -o BatchMode=yes -o ConnectTimeout=20 "$HOST")
 
@@ -225,6 +229,26 @@ g6_forward() {
 }
 gates_all() { g5_clock; g8_master; g12_events; g2_cgroup; g3_apt; g4_gate; g6_forward; }
 
+g7b_classify() {  # g7b_classify <wt> <old> <sha>: stdout T2_MODE (equal|floor_pending) rc 0; stderr reason rc 1. git reads only.
+  local wt=$1 old=$2 sha=$3 dep
+  dep=$(git -C "$wt" diff --name-only "$old" "$sha" -- pyproject.toml requirements/ | sort) || { echo "G7b: git diff failed" >&2; return 1; }
+  [ -n "$dep" ] || { echo equal; return 0; }
+  [ "$dep" = "$SDK_TRIO" ] || { echo "G7b: dependency drift beyond the #1714 trio: $(echo $dep) - STOP, seat" >&2; return 1; }
+  local plines sdk sdk_bad rest lockbody
+  plines=$(git -C "$wt" diff -U0 "$old" "$sha" -- pyproject.toml | grep -E '^[-+][^-+]' | grep -vE '^[-+][[:space:]]*#')
+  sdk=$(printf '%s\n' "$plines" | grep 'claude-agent-sdk' | grep -v '^$')                 # the floor's -/+ lines
+  sdk_bad=$(printf '%s\n' "$sdk" | grep '^+' | grep -vc 'claude-agent-sdk>=0\.2')          # a new floor must stay in the 0.2 series
+  rest=$(printf '%s\n' "$plines" | grep -v 'claude-agent-sdk' | grep -v '^$')
+  [ "$sdk_bad" = 0 ] || { echo "G7b: the claude-agent-sdk floor is not a >=0.2 floor: $(echo $sdk) - STOP, seat" >&2; return 1; }
+  if [ -n "$rest" ] && [ "$rest" != "$G7B_DEV_DRIFT" ]; then
+    echo "G7b: pyproject drift is not the claude-agent-sdk floor / the ruled dev bound (D-G7B-1): $(echo $rest) - STOP, seat" >&2; return 1
+  fi
+  if [ -n "$sdk" ]; then echo floor_pending; return 0; fi   # #1714 trio: rev-2 semantics, T2 runs in floor_pending mode
+  lockbody=$(git -C "$wt" diff -U0 "$old" "$sha" -- requirements/ | grep -E '^[-+][^-+]' | grep -vcE '^[-+][[:space:]]*#')
+  [ "$lockbody" = 0 ] || { echo "G7b: $lockbody non-comment gate-lock line(s) changed without an SDK floor (pins/extras/hashes) - STOP, seat" >&2; return 1; }
+  echo equal
+}
+
 # ------------------------------------------------------------------ s0: bootstrap + G7 (Mac + git only)
 s0() {
   STEP=s0
@@ -245,7 +269,7 @@ s0() {
   local name wt
   name="pbr-install-w1-$(date -u +%Y%m%dT%H%M%SZ)"
   wt=$(printf '{"cwd": "%s", "name": "%s", "session_id": "%s"}' "$SEAT_WT" "$name" "$OPERATOR_SESSION_ID" \
-       | "$PY_WT" -I -B "$WT_TOOL" create | tail -n 1) || stop "worktree create failed"
+       | "$PY_WT" -B "$WT_TOOL" create | tail -n 1) || stop "worktree create failed"   # no -I: Python 3.14 isolated mode implies -P and hides the helper's sibling pool_storage module (rev 3)
   [ -d "$wt" ] || stop "worktree create returned '$wt'"
   local sha remote
   sha=$(git -C "$wt" rev-parse HEAD) || stop "rev-parse"
@@ -286,12 +310,12 @@ EOF
   git -C "$wt" merge-base --is-ancestor "$OLD" "$sha" || stop "G7: OLD $OLD is not an ancestor of $sha"
   local mech; mech=$(git -C "$wt" diff --name-only "$OLD" "$sha" -- "${MECH[@]}")
   [ -z "$mech" ] || stop "G7a: deploy/runtime mechanics changed since OLD: $(echo $mech) - seat ruling (the runbook's mirrors would be stale)"
-  local dep t2=equal; dep=$(git -C "$wt" diff --name-only "$OLD" "$sha" -- pyproject.toml requirements/ | sort)
-  if [ -n "$dep" ]; then
-    [ "$dep" = "$SDK_TRIO" ] || stop "G7b: dependency drift beyond the #1714 trio: $(echo $dep) - STOP, seat"
-    local other; other=$(git -C "$wt" diff -U0 "$OLD" "$sha" -- pyproject.toml | grep -E '^[-+][^-+]' | grep -vc 'claude-agent-sdk>=0\.2')
-    [ "$other" = 0 ] || stop "G7b: pyproject drift is not only the claude-agent-sdk floor - STOP, seat"
-    t2=floor_pending
+  local t2; t2=$(g7b_classify "$wt" "$OLD" "$sha" 2> "$EV/gates/G7b.reason") || stop "$(cat "$EV/gates/G7b.reason")"
+  rm -f "$EV/gates/G7b.reason"
+  git -C "$wt" diff -U0 "$OLD" "$sha" -- pyproject.toml requirements/ > "$EV/identity/dep_drift.diff" || stop "dep drift diff"
+  if [ -s "$EV/identity/dep_drift.diff" ]; then
+    printf 'G7b (rev 3): dependency drift OLD->SHA classified T2_MODE=%s under seat ruling D-G7B-1; see identity/dep_drift.diff\n' "$t2" \
+      > "$EV/gates/G7b.RULING" || stop "G7b ruling record"
   fi
   state T2_MODE "$t2"
   git -C "$wt" diff --name-status "$OLD" "$sha" > "$EV/identity/old_to_sha.name-status.txt"
@@ -873,6 +897,62 @@ rollback_c() {  # transactional re-deploy of OLD through deploy_code_to_vps.sh (
 }
 rollback_c_result() { STEP=R-c-result; load; classify rc "$OLD" "$EV/rollback/rc.deploy.log"; state ROLLED_BACK R-c; say "R-c OK - run proof-old"; }
 
+g7b_selftest() {  # helper import check + seven synthetic repos + one live read of SEAT_WT (git only, no host contact); rc 0 = all PASS
+  STEP=g7b-selftest
+  local root fail=0 r live
+  root=$(mktemp -d) || stop "mktemp"
+  _g=(git -c user.name=t -c user.email=t@t -c commit.gpgsign=false)
+  _pp() {  # _pp <sdk spec> <pytest spec> <comment-or-empty> <extra dependency line-or-empty> <out>
+    printf '[project]\ndependencies = [\n    "claude-agent-sdk>=%s",\n%s]\n[project.optional-dependencies]\ndev = [\n%s    "pytest>=%s",\n]\n' "$1" "$4" "$3" "$2" > "$5"
+  }
+  _lock() {  # _lock <header sha> <sdk pin> <sdk hash> <pytest pin> <out>
+    printf '# pyproject.toml sha256: %s\n# Regenerate: pip-compile --generate-hashes ... pyproject.toml\nclaude-agent-sdk==%s \\\n    --hash=sha256:%s\npytest==%s \\\n    --hash=sha256:p1\n' "$1" "$2" "$3" "$4" > "$5"
+  }
+  _mk() {  # _mk <name>: repo at the OLD shape, one commit; prints its path
+    local d=$root/$1
+    mkdir -p "$d/requirements" && "${_g[@]}" -C "$d" init -q || return 1
+    _pp 0.1 '8,<10' '' '' "$d/pyproject.toml"
+    _lock aaaa 0.1.0 s1 9.1.1 "$d/requirements/gate-linux-x86_64-py312.lock"
+    _lock aaaa 0.1.0 s1 9.1.1 "$d/requirements/gate-macos-arm64-py312.lock"
+    echo old > "$d/README.md"
+    "${_g[@]}" -C "$d" add -A && "${_g[@]}" -C "$d" commit -qm old || return 1
+    echo "$d"
+  }
+  _expect() {  # _expect <case> <repo> <old> <new> <want: equal|floor_pending|STOP|ANY>
+    local got rc; got=$(g7b_classify "$2" "$3" "$4" 2>/dev/null); rc=$?; [ "$rc" -eq 0 ] || got=STOP
+    if [ "$got" = "$5" ] || { [ "$5" = ANY ] && [ "$got" != STOP ]; }; then say "g7b-selftest $1: PASS ($got)"
+    else say "g7b-selftest $1: FAIL want=$5 got=$got"; fail=1; fi
+  }
+  _run() {  # _run <case> <want>: commit the working change in $r, classify HEAD~1..HEAD
+    "${_g[@]}" -C "$r" add -A && "${_g[@]}" -C "$r" commit -qm new || stop "selftest commit $1"
+    _expect "$1" "$r" "$(git -C "$r" rev-parse HEAD~1)" "$(git -C "$r" rev-parse HEAD)" "$2"
+  }
+  local cmt=$'    # pytest 9.2.0 reds five existing tests at teardown; hold below 9.2\n'
+  if "$PY_WT" -B "$WT_TOOL" --help > /dev/null 2>&1; then say "g7b-selftest c0_wt_tool: PASS (helper imports without -I)"; else say "g7b-selftest c0_wt_tool: FAIL ($PY_WT -B $WT_TOOL --help)"; fail=1; fi
+  r=$(_mk c1_unrelated) || stop "mk"; echo new > "$r/README.md"; _run c1_unrelated equal
+  r=$(_mk c2_sdk_floor) || stop "mk"; _pp 0.2.120 '8,<10' '' '' "$r/pyproject.toml"
+    _lock bbbb 0.2.120 s2 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock bbbb 0.2.120 s2 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c2_sdk_floor floor_pending
+  r=$(_mk c3_dev_bound) || stop "mk"; _pp 0.1 '8,<9.2' "$cmt" '' "$r/pyproject.toml"
+    _lock cccc 0.1.0 s1 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock cccc 0.1.0 s1 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c3_dev_bound equal
+  r=$(_mk c4_dev_bound_lockpin) || stop "mk"; _pp 0.1 '8,<9.2' "$cmt" '' "$r/pyproject.toml"
+    _lock cccc 0.1.0 s1 9.2.0 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock cccc 0.1.0 s1 9.2.0 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c4_dev_bound_lockpin STOP
+  r=$(_mk c5_other_dep) || stop "mk"; _pp 0.1 '8,<10' '' $'    "requests>=2",\n' "$r/pyproject.toml"
+    _lock dddd 0.1.0 s1 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock dddd 0.1.0 s1 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c5_other_dep STOP
+  r=$(_mk c6_extra_file) || stop "mk"; echo x > "$r/requirements/extra.txt"; _run c6_extra_file STOP
+  r=$(_mk c7_sdk_plus_dev) || stop "mk"; _pp 0.2.120 '8,<9.2' "$cmt" '' "$r/pyproject.toml"
+    _lock eeee 0.2.120 s2 9.1.1 "$r/requirements/gate-linux-x86_64-py312.lock"; _lock eeee 0.2.120 s2 9.1.1 "$r/requirements/gate-macos-arm64-py312.lock"
+    _run c7_sdk_plus_dev floor_pending
+  live=$(git -C "$SEAT_WT" rev-parse --verify -q origin/master) || stop "SEAT_WT origin/master unreadable"
+  _expect "c8_live(OLD..origin/master@${live:0:8})" "$SEAT_WT" "$OLD" "$live" ANY
+  rm -rf "$root"
+  [ "$fail" = 0 ] || stop "g7b-selftest FAILED"
+  say "g7b-selftest PASS (9 cases)"
+}
+
 status() { load; cat "$EV/state.env"; ls "$EV/gates"; tail -n 5 "$EV/logs/stops.log" 2>/dev/null; return 0; }
 
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0   # sourced (fixture tests): define functions only
@@ -896,5 +976,6 @@ case "${1:-}" in
   rollback-c) rollback_c ;;
   rollback-c-result) rollback_c_result ;;
   status) status ;;
-  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s4a [label]|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|needrestart-check [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status" >&2; exit 2 ;;
+  g7b-selftest) g7b_selftest ;;
+  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s4a [label]|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|needrestart-check [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status|g7b-selftest" >&2; exit 2 ;;
 esac
