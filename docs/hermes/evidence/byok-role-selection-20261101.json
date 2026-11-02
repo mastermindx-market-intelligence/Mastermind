@@ -1,12 +1,13 @@
 {
   "fixture_only": true,
-  "independent_review": "PR1917 Fabric review terminal admission-refused by host thermal guard; no review result; GitHub nonauthor requested",
+  "independent_review": "Historical independent #1885 reviewer returned REQUEST_CHANGES (Slack receipt, not GitHub review); new exact #1917 head still awaits a new nonauthor review",
   "live_runtime_started": false,
   "local_runtime_limitations": [
     "/proc/net/tcp absent on Darwin",
     "/proc RSS unsupported on Darwin",
     "Existing runtime fixture /tmp vs /private/tmp identity assertion",
-    "Existing system-unit-directory test uses Linux path resolution"
+    "Existing system-unit-directory test uses Linux path resolution",
+    "Five unchanged Linux-specific runtime cases on macOS; detailed failure count retained"
   ],
   "operation": "hermes-byok-role-selection-20261101-sol-001",
   "owned_path_digests": [
@@ -60,21 +61,21 @@
     },
     {
       "path": "integrations/hermes_runtime/supervisor.py",
-      "sha256": "3ee0ebbf804fa240fd1b31e705f7dfb96692d0b7034260fc1091262b0199f3a1"
+      "sha256": "a1f971db078814970e882b14d22584e6d7bffbf1869fe6c950de918434f65043"
     }
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
   "previous_head_linux_evidence": {
     "does_not_qualify_current_postimage": true,
-    "harness_six_suites": "41343689059 SUCCESS Python3.12/3.13",
-    "head": "b54dc95ec02a5f591bf3fc3a5a1491de104be2ac",
-    "runtime": "41343689090 SUCCESS"
+    "harness_six_suites": "41344050929 SUCCESS Python3.12/3.13",
+    "head": "aaa8dcf81f9d47829f2e3fe3422e4457f9b559e8",
+    "runtime": "41344050754 SUCCESS"
   },
   "procedure_pin": "1f1b30d1352d2a975624e558bd9da097e4cba417",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-01T19:53:04.365051+00:00",
+  "recorded_at": "2026-11-02T01:38:49.785069+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -89,8 +90,8 @@
       "tests": 25
     },
     "hermes_harness": {
-      "passed": 45,
-      "tests": 45
+      "passed": 49,
+      "tests": 49
     },
     "hermes_models": {
       "passed": 22,
@@ -112,12 +113,24 @@
       "tests": 34
     }
   },
+  "review_findings": {
+    "current_child_fixes_unreviewed": [
+      "Native BYOK alias policy runs synchronously before any Hermes census subprocess",
+      "Census subprocess environment excludes dashboard/Slack/provider credentials",
+      "Inner-loop unexpected exceptions become failed health and foreground supervisor exit"
+    ],
+    "no_production_receipt": true,
+    "prior_review_head": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+    "prior_review_state": "REQUEST_CHANGES_NOT_PUBLISHED_GITHUB",
+    "review_receipt": "https://mastermindxgroup.slack.com/archives/C0CBC6AEAQZ/p1793411234006469?thread_ts=1793398782.443479"
+  },
   "review_refusal": {
     "reason": "host_temperature_at_or_above_limit",
     "response_sha256": "2d31cdc7325e4bfd050d10c337339cf619c6ae77d976836152c4ac0d2c8b29f7",
     "retry_allowed": false,
     "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
   },
-  "source_manifest_sha256": "03a5d72e4de00e2db32f2acb2841c889d7045de91a6ab3a16cccd14cd6ca32f1",
+  "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
+  "source_manifest_sha256": "fd015d3757a03d6a95e934a14d7d74106f80a1d521f5afb23f591824bb552d3a",
   "test_host": "m2studio / macOS"
 }

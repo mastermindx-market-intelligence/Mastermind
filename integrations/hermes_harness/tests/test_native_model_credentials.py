@@ -9,11 +9,13 @@ from pathlib import Path
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from integrations.hermes_harness.native_byok import render_disarmed_native_byok
 from integrations.hermes_harness.native_model_credential import primary_model_env
 from integrations.hermes_harness.stack import compose_profile
 from integrations.hermes_runtime.errors import RuntimeRefusal
+from integrations.hermes_runtime.memory import HighWaterLog
 from integrations.hermes_runtime.secrets import Secrets, load_secrets
 from integrations.hermes_runtime.supervisor import ServiceRuntime
 from integrations.hermes_runtime.tests._support import STUB, TOKEN
@@ -175,6 +177,69 @@ class NativeCredentialTests(unittest.TestCase):
         with self.assertRaises(RuntimeRefusal) as exc:
             rt._model_child_env()
         self.assertEqual(exc.exception.code, "NATIVE_MODEL_KEY_REUSE_REFUSED")
+
+    def test_byok_alias_refusal_happens_before_any_hermes_subprocess(self) -> None:
+        rt = self._runtime(
+            extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n",
+            dashboard_password=None,
+        )
+        with mock.patch(
+            "integrations.hermes_runtime.supervisor.subprocess.run",
+            side_effect=AssertionError("credential reached tools-list census"),
+        ) as census:
+            with self.assertRaises(RuntimeRefusal) as refused:
+                rt.start()
+        self.assertEqual(refused.exception.code, "NATIVE_GATEWAY_PASSWORD_ALIAS_REFUSED")
+        census.assert_not_called()
+        self.assertIsNone(rt.gateway)
+        self.assertIsNone(rt._thread)
+        self.assertEqual(rt.child_starts, 0)
+
+    def test_tool_census_env_contains_no_privileged_bearer(self) -> None:
+        rt = self._runtime(extras=(
+            "BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n"
+            "ZAI_API_KEY=" + FAKE_ZAI + "\n"
+            "HERMES_SLACK_BOT_TOKEN=synthetic-slack-bearer-123456\n"
+        ))
+        env = rt._registry_env()
+        self.assertEqual(set(env), {"PATH", "HOME", "HERMES_HOME", "LANG"})
+        self.assertNotIn(FAKE_BYTEPLUS, env.values())
+        self.assertNotIn(FAKE_ZAI, env.values())
+        self.assertNotIn(TOKEN, env.values())
+        self.assertNotIn(rt.secrets.dashboard_password, env.values())
+
+    def test_unexpected_supervisor_thread_error_becomes_terminal_failure(self) -> None:
+        rt = self._runtime(extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n")
+        with mock.patch.object(rt, "_loop", side_effect=OSError("sensitive synthetic fixture")):
+            rt._loop_guarded()
+        code, health = rt.health_snapshot()
+        self.assertEqual(code, 503)
+        self.assertEqual(health["status"], "failed")
+        self.assertTrue(rt.failed)
+        self.assertEqual(rt.refusal_code, "RUNTIME_SUPERVISOR_EXCEPTION")
+        self.assertNotIn("sensitive", repr((health, rt.refusal_code)))
+        self.assertIsNone(rt.child_pid)
+
+    def test_subprocess_spawn_failure_marks_supervisor_failed(self) -> None:
+        rt = self._runtime(extras="BYTEPLUS_MODELARK_API_KEY=" + FAKE_BYTEPLUS + "\n")
+        rt.memory = HighWaterLog(self.state / "memory" / "high-water.log")
+        # No actual spawn or port bind: test the exact supervised failure path.
+        with mock.patch(
+            "integrations.hermes_runtime.supervisor.reserve_loopback_port", return_value=19997,
+        ), mock.patch(
+            "integrations.hermes_runtime.supervisor.build_serve_argv",
+            return_value=["/tmp/synthetic-never-executed"],
+        ), mock.patch(
+            "integrations.hermes_runtime.supervisor.subprocess.Popen",
+            side_effect=OSError("synthetic spawn failure"),
+        ):
+            rt._loop_guarded()
+        code, health = rt.health_snapshot()
+        self.assertEqual(code, 503)
+        self.assertEqual(health["status"], "failed")
+        self.assertEqual(rt.refusal_code, "RUNTIME_SUPERVISOR_EXCEPTION")
+        self.assertEqual(rt.child_starts, 1)
+        self.assertIsNone(rt.child_pid)
 
     def test_uninstalled_shadow_profile_cannot_request_key(self) -> None:
         p = compose_profile("mmsecretary", state_dir=self.state, secrets_file=self.secret)

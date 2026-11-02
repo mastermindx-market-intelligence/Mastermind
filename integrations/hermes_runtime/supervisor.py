@@ -83,6 +83,9 @@ class ServiceRuntime:
         self.memory: HighWaterLog | None = None
 
     def start(self) -> None:
+        # Check native BYOK/alias policy before *any* Hermes subprocess,
+        # including the tools-list census. A failed preflight starts nothing.
+        self._model_child_env()
         self._check_registry()
         self.profile.hermes_home.mkdir(parents=True, exist_ok=True)
         os.chmod(self.profile.hermes_home, 0o700)
@@ -93,7 +96,7 @@ class ServiceRuntime:
             self.secrets.token,
             self.health_snapshot,
         )
-        self._thread = threading.Thread(target=self._loop, name="hermes-runtime-supervisor", daemon=True)
+        self._thread = threading.Thread(target=self._loop_guarded, name="hermes-runtime-supervisor", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
@@ -138,6 +141,19 @@ class ServiceRuntime:
     def _env(self) -> dict[str, str]:
         # CLI/tool census receives no model provider credential.
         return child_env(self.secrets, home=self.profile.hermes_home, extra=self.extra_child_env)
+
+    def _registry_env(self) -> dict[str, str]:
+        """Tool discovery receives no dashboard, Slack or provider bearer.
+
+        Keep the existing child-env validation for synthetic stub inputs, but
+        pass only paths, locale and approved stub metadata to the census.
+        """
+        source = self._env()
+        required = {"PATH", "HOME", "HERMES_HOME", "LANG"}
+        return {
+            key: value for key, value in source.items()
+            if key in required or key.startswith("HERMES_STUB_")
+        }
 
     def _model_child_env(self) -> dict[str, str]:
         """Forward only the reviewed primary credential to a pinned BYOK child.
@@ -228,7 +244,7 @@ class ServiceRuntime:
             proc = subprocess.run(
                 build_tools_argv(self.hermes_bin, self.profile.role),
                 capture_output=True,
-                env=self._env(),
+                env=self._registry_env(),
                 timeout=30,
                 check=False,
             )
@@ -247,6 +263,34 @@ class ServiceRuntime:
         )
         if proc.returncode != 0:
             raise RuntimeRefusal("TOOLS_LIST_FAILED")
+
+    def _loop_guarded(self) -> None:
+        """Convert unexpected inner-loop exceptions into observable failure.
+
+        Otherwise a daemon thread can die silently while the foreground
+        supervisor stays alive indefinitely and systemd sees no failure.
+        """
+        try:
+            self._loop()
+            return
+        except RuntimeRefusal as exc:
+            code = exc.code
+        except Exception:
+            # Never log exception text: third-party exceptions can contain
+            # credential material or full environment values.
+            code = "RUNTIME_SUPERVISOR_EXCEPTION"
+        with self._lock:
+            child = self._child
+            self.refusal_code = code
+            self.failed = True
+        if child is not None:
+            try:
+                _terminate(child)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        with self._lock:
+            self._child = None
+            self.child_pid = None
 
     def _loop(self) -> None:
         assert self.memory is not None
