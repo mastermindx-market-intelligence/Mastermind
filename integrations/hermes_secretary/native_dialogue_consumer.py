@@ -109,6 +109,16 @@ class HermesCanonicalTurnConsumer:
         self.current_role = current_role
         self.infer_text = infer_text
 
+    async def _require_current_role(self, refusal_code: str) -> None:
+        try:
+            selected = await _await_if_needed(self.current_role(self.native_session_id))
+        except Exception:
+            # Host resolver exceptions may include credentials or private
+            # binding details: expose only a stable code.
+            raise ConsumerRefusal("ROLE_BINDING_UNAVAILABLE") from None
+        if selected != self.role:
+            raise ConsumerRefusal(refusal_code)
+
     async def run(self, *, operation_key: str, in_reply_to: str) -> dict[str, Any]:
         """Read original carrier, infer once if new, then exact-send through owner.
 
@@ -119,8 +129,7 @@ class HermesCanonicalTurnConsumer:
         if (_SAFE_OPERATION.fullmatch(operation_key or "") is None
                 or _SAFE_MESSAGE.fullmatch(in_reply_to or "") is None):
             raise ConsumerRefusal("CALLER_IDENTITY_INVALID")
-        if await _await_if_needed(self.current_role(self.native_session_id)) != self.role:
-            raise ConsumerRefusal("ROLE_CURRENT_BINDING_REFUSED")
+        await self._require_current_role("ROLE_CURRENT_BINDING_REFUSED")
         # This exact reader is inherited from, and kept synchronous with, the
         # incumbent NativeReplyWriter's own trusted binding validation.
         probe = {"operation_key": operation_key, "in_reply_to": in_reply_to,
@@ -172,8 +181,7 @@ class HermesCanonicalTurnConsumer:
                 or not answer.strip() or _ANSWER_SECRET.search(answer)
                 or any(ord(ch) < 32 and ch not in "\n\t" for ch in answer)):
             raise ConsumerRefusal("MODEL_REPLY_UNQUALIFIED")
-        if await _await_if_needed(self.current_role(self.native_session_id)) != self.role:
-            raise ConsumerRefusal("ROLE_CHANGED_DURING_MODEL_TURN")
+        await self._require_current_role("ROLE_CHANGED_DURING_MODEL_TURN")
         # The writer reruns its own exact source/resolver checks and owner-side
         # READY/COMMIT fence after awaited model inference. It handles duplicate
         # and effect-unknown results without a second logical send.
