@@ -13,6 +13,7 @@ import fcntl
 import hashlib
 import hmac
 import ipaddress
+import json
 from http import HTTPStatus
 import os
 from pathlib import Path
@@ -31,7 +32,12 @@ ALLOWED = {
     ("POST", "systemone"),
     ("POST", "embeddings"),
     ("GET", "models"),
+    # Read-only account observations, opt-in and one-key-only. Never admin writes.
+    ("GET", "api/whoami"),
+    ("GET", "api/v1/key"),
+    ("GET", "api/v1/credits"),
 }
+ACCOUNT_METADATA = frozenset({"api/whoami", "api/v1/key", "api/v1/credits"})
 RESPONSE_HEADERS = {"content-type", "cache-control", "x-request-id", "retry-after", "x-gateway-warning", "content-encoding"}
 
 
@@ -48,10 +54,15 @@ class Settings:
     max_inflight_per_key: int = 128
     max_queue_wait_s: float = 600.0
     max_body_bytes: int = 8 * 1024 * 1024
+    enable_account_metadata: bool = False  # off by default; only one provider key can be introspected
 
     def __post_init__(self) -> None:
         if not 1 <= len(self.api_keys) <= 4 or not all(self.api_keys):
             raise ValueError("configure 1-4 nonempty EXPLABS_KEY_N values")
+        if type(self.enable_account_metadata) is not bool:
+            raise ValueError("account metadata enablement must be boolean")
+        if self.enable_account_metadata and len(self.api_keys) != 1:
+            raise ValueError("account metadata requires exactly one provider key")
         if len(set(self.api_keys)) != len(self.api_keys):
             raise ValueError("duplicate provider keys would circumvent the per-key ceiling")
         if len(self.proxy_token) < 24:
@@ -68,7 +79,11 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         keys = tuple(v for i in range(1, 5) if (v := os.environ.get(f"EXPLABS_KEY_{i}", "").strip()))
+        metadata_flag = os.environ.get("EXPLABS_ACCOUNT_METADATA_ENABLED", "0").strip()
+        if metadata_flag not in {"0", "1"}:
+            raise ValueError("EXPLABS_ACCOUNT_METADATA_ENABLED must be 0 or 1")
         return cls(
+            enable_account_metadata=metadata_flag == "1",
             api_keys=keys,
             proxy_token=os.environ.get("FABRIC_PROXY_TOKEN", "").strip(),
             state_dir=Path(os.environ.get("FABRIC_GATEWAY_STATE_DIR", ".state")).expanduser(),
@@ -394,6 +409,9 @@ def create_app(
             return JSONResponse({"error": {"message": "unauthorized", "type": "authentication_error"}}, status_code=401)
         if (request.method, endpoint) not in ALLOWED:
             return JSONResponse({"error": {"message": "route not supported", "type": "invalid_request_error"}}, status_code=404)
+        if endpoint in ACCOUNT_METADATA and not cfg.enable_account_metadata:
+            # Neither status nor raw provider metadata is exposed to inference-only workers by default.
+            return JSONResponse({"error": {"message": "account metadata disabled"}}, status_code=404)
         declared_length = request.headers.get("content-length")
         if declared_length and declared_length.isdigit() and int(declared_length) > cfg.max_body_bytes:
             return JSONResponse({"error": {"message": "request body too large"}}, status_code=413)
@@ -469,7 +487,10 @@ def create_app(
         try:
             upstream_request = upstream_client.build_request(
                 request.method,
-                f"{UPSTREAM}/{endpoint}",
+                (
+                    f"{UPSTREAM.removesuffix('/v1')}/{endpoint}"
+                    if endpoint in ACCOUNT_METADATA else f"{UPSTREAM}/{endpoint}"
+                ),
                 headers=headers,
                 content=bytes(body) if request.method == "POST" else None,
             )
@@ -494,6 +515,14 @@ def create_app(
             await request.app.state.admissions.release(slot)
             return JSONResponse({"error": {"message": "upstream redirect refused"}}, status_code=502)
         if upstream_response.status_code >= 400:
+            if endpoint in ACCOUNT_METADATA:
+                # Local clients only need the refusal status; don't reveal provider account error bodies.
+                await upstream_response.aclose()
+                await request.app.state.admissions.release(slot)
+                return JSONResponse(
+                    {"error": {"message": "provider account metadata refused"}},
+                    status_code=upstream_response.status_code,
+                )
             # httpx.aread() decodes compressed bodies; never pass the old encoding header.
             response_headers.pop("content-encoding", None)
             try:
@@ -516,6 +545,47 @@ def create_app(
             # Never use a different key to evade those provider restrictions.
             return Response(content=bytes(data), status_code=upstream_response.status_code, headers=response_headers)
 
+        if endpoint in ACCOUNT_METADATA:
+            # Return only the specific identity/funding fields used by Brain.
+            # A provider metadata response may include key identifiers or other
+            # account secrets: never reflect arbitrary provider JSON.
+            try:
+                raw = bytearray()
+                async for part in upstream_response.aiter_bytes():
+                    if len(raw) + len(part) > min(cfg.max_body_bytes, 64 * 1024):
+                        return JSONResponse(
+                            {"error": {"message": "provider account metadata too large"}},
+                            status_code=502,
+                        )
+                    raw.extend(part)
+                decoded = json.loads(raw)
+                if not isinstance(decoded, dict):
+                    raise ValueError("metadata is not an object")
+                if endpoint == "api/whoami":
+                    org_id, org_slug = decoded.get("org_id"), decoded.get("org_slug")
+                    if not (isinstance(org_id, str) and 0 < len(org_id) <= 256
+                            and isinstance(org_slug, str) and 0 < len(org_slug) <= 256):
+                        raise ValueError("invalid organization metadata")
+                    safe = {"org_id": org_id, "org_slug": org_slug}
+                else:
+                    data = decoded.get("data")
+                    if not isinstance(data, dict):
+                        raise ValueError("invalid account metadata")
+                    names = (
+                        ("limit", "limit_remaining")
+                        if endpoint == "api/v1/key" else ("total_credits", "total_usage")
+                    )
+                    safe = {"data": {name: data.get(name) for name in names}}
+                return JSONResponse(safe)
+            except (ValueError, UnicodeError, httpx.RequestError):
+                return JSONResponse(
+                    {"error": {"message": "invalid provider account metadata"}},
+                    status_code=502,
+                )
+            finally:
+                await upstream_response.aclose()
+                await request.app.state.admissions.release(slot)
+
         async def stream_bytes():
             async for part in upstream_response.aiter_raw():
                 yield part
@@ -528,6 +598,11 @@ def create_app(
             admissions=request.app.state.admissions,
             slot=slot,
         )
+
+    @app.get("/api/{endpoint:path}")
+    async def account_metadata(endpoint: str, request: Request) -> Response:
+        # Reuse the one authenticated, rate-admitted forwarding owner.
+        return await proxy("api/" + endpoint, request)
 
     return app
 
