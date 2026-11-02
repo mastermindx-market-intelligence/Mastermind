@@ -575,7 +575,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           const csp = (event: SecurityPolicyViolationEvent) => {
             if ((event.effectiveDirective === "frame-src" ||
                  event.effectiveDirective === "default-src") &&
-                event.blockedURI.startsWith(ISSUER))
+                (event.blockedURI === new URL(ISSUER).origin ||
+                 event.blockedURI.startsWith(ISSUER)))
               finish("SILENT_AUTH_UNAVAILABLE");
           };
           const listener = (event: MessageEvent) => {

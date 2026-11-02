@@ -20,7 +20,7 @@ function harness() {
   const navigate = vi.fn();
   const fireCsp = () => {
     for (const fn of [...listeners]) fn({
-      effectiveDirective: "frame-src", blockedURI: ISSUER + "authorize",
+      effectiveDirective: "frame-src", blockedURI: new URL(ISSUER).origin,
     } as unknown as MessageEvent);
   };
   const makeClient = () => createWebAuth({
