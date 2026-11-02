@@ -41,7 +41,7 @@ class NativeCredentialTests(unittest.TestCase):
         )
         egress = (
             f"HERMES_NATIVE_EGRESS_ROLE={role}\n"
-            f"HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:{18651 if role == 'mmsecretary' else 18652}\n"
+            f"HERMES_NATIVE_HTTPS_PROXY=http://{'127.0.0.2' if role == 'mmsecretary' else '127.0.0.3'}:{18651 if role == 'mmsecretary' else 18652}\n"
             if include_proxy else ""
         )
         self.secret.write_text(
@@ -78,7 +78,7 @@ class NativeCredentialTests(unittest.TestCase):
         self.assertNotIn(TOKEN, native.values())
         self.assertNotIn(FAKE_ZAI, native.values())
         self.assertEqual(native["HERMES_SLACK_BOT_USER_ID"], "UPROJECTBOT001")
-        self.assertEqual(native["HTTPS_PROXY"], "http://127.0.0.1:18651")
+        self.assertEqual(native["HTTPS_PROXY"], "http://127.0.0.2:18651")
         self.assertNotIn("HTTP_PROXY", native)
         self.assertNotIn("ALL_PROXY", native)
         self.assertNotIn("HERMES_NATIVE_HTTPS_PROXY", native)
@@ -114,7 +114,7 @@ class NativeCredentialTests(unittest.TestCase):
                    "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n",
             include_proxy=False,
         )
-        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:18651"}):
+        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.2:18651"}):
             with self.assertRaises(RuntimeRefusal) as exc:
                 rt._model_child_env()
         self.assertEqual(exc.exception.code, "NATIVE_EGRESS_PROXY_NOT_ENROLLED")
