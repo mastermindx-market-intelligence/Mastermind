@@ -65,6 +65,31 @@ failed, or effect-unknown reviewer or silently move an established carrier.
 
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
 
+### Parent recovery projection is source-stage diagnostics, NOT an unattended consumer
+
+The proposed `fabric_status` / `fabric_wait` **Web facade source** may include a
+read-only `parent_recovery` sibling of the unchanged native `status` DTO. This
+projection is **staging-only**: it does not install a native adapter, connect to
+the Mastermind OS `AttendedFabricInspector` (which reads/validates the existing
+native DTO separately), arm the Executive Wake ledger, schedule a parent, deliver
+a message, prove a provider START, retry or accept a reviewer. Existing
+`config/wake_session_targets.json` is globally disarmed; this document does not
+change that or authorize any target. Source tests/green CI are not deployment.
+
+A `disposition` describes the observed **state to reconcile**, not a license to
+act. An adapter status may legitimately have `root_id:null`; the view still
+labels `EFFECT_UNKNOWN`, terminal failure, or an active original controller,
+but `root_verified:false` keeps `parent_attention_required:false` and all
+`wake_proven`, `retry_authorized`, `dispatch_authorized`, and
+`result_consumption_authorized` flags **false**. For a prelaunch refusal,
+`request_root_id` is only correlation: `RECONCILE_PRELAUNCH_REFUSAL` does not
+attest a ledger root or enable attention. `controller_return:UNCONFIRMED` always
+requires same-run reconciliation even if a leaf looks successful. A separate,
+authorized Executive/Agent OS consumer must bind the original source/root and
+actual RuntimeBinding and prove trusted delivery/ACK before any unattended
+parent wake may be claimed. Do not feed this staging view back into
+`fabric_request` or treat it as an automatic review-recovery policy.
+
 ## Optional per-request turn ceiling
 
 `fabric_request.max_turns` is an integer from 1 through 400. It narrows one new

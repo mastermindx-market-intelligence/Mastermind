@@ -2009,18 +2009,21 @@ def test_remote_commission_cannot_borrow_control_local_git(
         raise AssertionError("remote commission must not borrow Control-local source")
 
     monkeypatch.setattr("control_plane.executive_supervisor._commission_git_probe", forbidden)
-    monkeypatch.setattr("control_plane.executive_supervisor._fetch_remote_commission", forbidden)
+    def unavailable_remote(**_kwargs):
+        calls.append("canonical_remote_reader")
+        raise RuntimeError("immutable remote bytes unavailable")
+    monkeypatch.setattr("control_plane.executive_supervisor._fetch_remote_commission", unavailable_remote)
     supervisor = ExecutiveOperatorSupervisor(
         runtime, claimed_adapter_factory=forbidden,
         workspace_identity_source=lambda _attempt, _job: identity,
         prompt_source=_CommissionPromptSource(),
     )
     with pytest.raises(ExecutiveOperatorSupervisorError,
-                       match="commission-bound Job has no assigned workspace"):
+                       match="immutable remote bytes unavailable"):
         asyncio.run(supervisor.start_cycle_job(
             planner.job_id,
             command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
         ))
-    assert calls == []
+    assert calls == ["canonical_remote_reader"]
     with runtime.store.read() as connection:
         assert connection.execute("SELECT COUNT(*) FROM harness_session_epochs").fetchone()[0] == 0
