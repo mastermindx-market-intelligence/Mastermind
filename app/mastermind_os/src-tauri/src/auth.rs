@@ -707,13 +707,18 @@ async fn ensure_native_token(app: &AppHandle, resource: Resource) -> Result<(Str
     Ok((token.value.clone(), inner.generation))
 }
 
+// Refresh while the credential is inside refresh_one's 45-second threshold.
+// Scheduling 60 seconds before expiry silently made refresh_one return early
+// without ever creating the next timer, so idle sessions still expired.
+fn native_refresh_deadline(expires: Instant, now: Instant) -> Instant {
+    let early = expires.checked_sub(Duration::from_secs(35)).unwrap_or(expires);
+    let floor = now + Duration::from_secs(10);
+    if early < floor { floor } else { early }
+}
 fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, generation: u64) {
     tauri::async_runtime::spawn(async move {
         let target = if resource.persistent() {
-            // Short-lived tokens must not cause an immediate refresh storm.
-            let early = expires.checked_sub(Duration::from_secs(60)).unwrap_or(expires);
-            let floor = Instant::now() + Duration::from_secs(20);
-            if early < floor { floor } else { early }
+            native_refresh_deadline(expires, Instant::now())
         } else { expires };
         tokio::time::sleep_until(tokio::time::Instant::from_std(target)).await;
         let unchanged = app.state::<NativeAuth>().lock().is_ok_and(|inner|
@@ -1980,6 +1985,17 @@ mod retained_activity_selection_tests {
         assert_eq!(RETAINED_ACTIVITY_SCHEMA, "mastermind.workspace_retained_activity.v1");
         assert_eq!(RETAINED_ACTIVITY_CAP, PLAN_RESPONSE_CAP);
     }
+    #[test]
+    fn native_idle_refresh_timer_enters_renewal_window() {
+        let now = Instant::now();
+        let expires = now + Duration::from_secs(3600);
+        let at = native_refresh_deadline(expires, now);
+        assert_eq!(expires.duration_since(at), Duration::from_secs(35));
+        assert!(expires.duration_since(at) < Duration::from_secs(45));
+        assert_eq!(native_refresh_deadline(now + Duration::from_secs(3), now),
+            now + Duration::from_secs(10));
+    }
+
     #[test]
     fn native_offline_scope_is_workspace_only_and_build_gated() {
         let url = authorization_url("public-client", Resource::Acquisition, "state", "verifier");
