@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import signal
@@ -129,16 +130,23 @@ def _canary(profile_path: Path, hermes_bin: Path) -> int:
     current = state / "current"
     manifest_path = state / "install-manifest.json"
     receipt_path = current / "install-receipt.json"
+    native_config = profile.hermes_home / "profiles" / profile.role / "config.yaml"
     if (not current.is_symlink() or manifest_path.is_symlink()
-            or receipt_path.is_symlink()
+            or receipt_path.is_symlink() or profile_path.is_symlink()
+            or native_config.is_symlink() or not native_config.is_file()
             or not manifest_path.is_file() or not receipt_path.is_file()):
         raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED")
     try:
         release = current.readlink()
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        saved_profile = profile_path.read_bytes()
+        saved_native = native_config.read_bytes()
     except (OSError, ValueError, UnicodeError):
         raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED") from None
+    if (not 0 < len(saved_profile) <= 64 * 1024
+            or not 0 < len(saved_native) <= 64 * 1024):
+        raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED")
     if (release.parts[:1] != ("releases",) or len(release.parts) != 2
             or not release.parts[1].isdigit()
             or not isinstance(manifest, dict) or not isinstance(receipt, dict)
@@ -152,7 +160,9 @@ def _canary(profile_path: Path, hermes_bin: Path) -> int:
             or receipt.get("upstream_attested") is not True
             or receipt.get("status") != "RELEASE_WRITTEN"
             or receipt.get("role") != profile.role
-            or receipt.get("sha") != PINNED_UPSTREAM_SHA):
+            or receipt.get("sha") != PINNED_UPSTREAM_SHA
+            or receipt.get("profile_sha256") != hashlib.sha256(saved_profile).hexdigest()
+            or receipt.get("hermes_config_sha256") != hashlib.sha256(saved_native).hexdigest()):
         raise RuntimeRefusal("CANARY_INSTALL_NOT_ATTESTED")
     assert_checkout_sha(current / "upstream")
     secrets = load_secrets(profile.secrets_file)
