@@ -80,14 +80,14 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         self._write_role("mmsecretary", (
             f"BYTEPLUS_MODELARK_API_KEY_FILE={modelark}\n"
             "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
             "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\n"
             "HERMES_SLACK_BOT_TOKEN=test-secretary-slack-token-only-123456\n"
         ))
         self._write_role("mmmeta", (
             f"ZAI_API_KEY_FILE={zai}\n"
             "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652\n"
             "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
             "HERMES_SLACK_BOT_TOKEN=test-meta-slack-token-only-123456\n"
         ), gateway="test-meta-gateway-token-123456",
@@ -104,13 +104,13 @@ class NativeDoctorCredentialTests(unittest.TestCase):
     def test_core_text_rejects_shared_roles_even_if_each_proxy_url_is_valid(self):
         self._write_role("mmsecretary", (
             "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
             "HERMES_SLACK_BOT_USER_ID=USHAREDBOT001\n"
             "HERMES_SLACK_BOT_TOKEN=shared-token-fixture-123456\n"
         ))
         self._write_role("mmmeta", (
             "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
             "HERMES_SLACK_BOT_USER_ID=USHAREDBOT001\n"
             "HERMES_SLACK_BOT_TOKEN=shared-token-fixture-123456\n"
         ))
@@ -124,14 +124,14 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         self._write_role("mmsecretary", (
             f"BYTEPLUS_MODELARK_API_KEY_FILE={key}\n"
             "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
             "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\n"
             "HERMES_SLACK_BOT_TOKEN=secretary-distinct-slack-token-123456\n"
         ))
         self._write_role("mmmeta", (
             f"ZAI_API_KEY_FILE={key}\n"
             "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652\n"
             "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
             "HERMES_SLACK_BOT_TOKEN=meta-distinct-slack-token-123456\n"
         ), gateway="test-meta-gateway-distinct-123456",
@@ -143,13 +143,13 @@ class NativeDoctorCredentialTests(unittest.TestCase):
     def test_incumbent_grok_peer_id_cannot_be_reused(self):
         self._write_role("mmsecretary", (
             "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651\n"
             "HERMES_SLACK_BOT_USER_ID=U0BTCHX8HMF\n"
             "HERMES_SLACK_BOT_TOKEN=secretary-fake-separate-credential-123456\n"
         ))
         self._write_role("mmmeta", (
             "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652\n"
             "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
             "HERMES_SLACK_BOT_TOKEN=metaceo-fake-separate-credential-123456\n"
         ), gateway="test-meta-gateway-distinct-123456",
