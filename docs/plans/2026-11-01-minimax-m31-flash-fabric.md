@@ -14,10 +14,10 @@
 - Relevant overlapping drafts: Mastermind #947 (held attended MiniMax), #1365 (native model/host routing selector), #1788 (native source composition). Check exact changed paths and current writers before edits.
 
 ## Task tree (editorial labels, not runtime Job state)
-### P1 — source/host census and safe plan integration (in_progress)
+### P1 — source/host census and safe plan integration (source-complete)
 Dependencies: none. Owner: current assigned coordinator; existing Fabric source/Capacity owners retain their domains. Confirm native pool model allowlist, launcher, subscription key source, profile, host availability, review/CI contract, and writer collision. Evidence: source paths and revisions, one defensible canonical implementation surface; no secrets.
 
-### P2 — implement M3.1 Flash qualified model path (ready after P1)
+### P2 — implement M3.1 Flash qualified model path (source built; native review/release pending)
 Dependencies: P1. Owner: one enrolled source worker or current accountable implementation writer, not concurrent writers of the same files. Extend existing provider/pool model registry and required launcher model validation plus associated fixtures. Preserve `MiniMax-M3` legacy route if necessary for active jobs. Add opt-in exact-model selection and eligible AUTO decision only after qualification; do not change general policy from held to enabled. Evidence: exact changed files, deterministic routing assertions, negative unsupported-model/credential/host/error tests, CI/test receipt.
 
 ### P3 — runtime and billing-boundary canary (blocked until P2)
@@ -28,3 +28,13 @@ Dependencies: P2, P3 according to owning rollout gates. Independent non-author r
 
 ## Continuation frontier
 As of plan creation: native M3.1 Flash registration/installation/worker proof NOT VERIFIED; only official entitlement and the old M3 source path have been confirmed. Next action: read exact current native source/allowlist and select the one legitimate writer for P2, while preserving any actual host eligibility refusals. This plan is repository implementation evidence and becomes an Agent OS handoff only after its lawful projection.
+
+## 2026-11-02 implementation and proof checkpoint
+- Original Fabric source worker minimax-m31-flash-fabric-20261101-p2: terminal rc=1; GLM wrapper reported unrecognized_model on glm-5.3-flash. No usable source return; retry disallowed. New Fabric source-review attempt minimax-m31-flash-pr1919-review-01 was schema-rejected (INVALID_ARGUMENT/max_turns), NOT_FOUND, retry disallowed. Do not replay either operation.
+- Single GitHub source carrier: Mastermind PR #1919 on sol/minimax-m31-flash-fabric-20261101, author mastermindxryan. New fast role is MiniMax-M3.1-Flash; original MiniMax-M3 routine/hard/subagent defaults remain. Source picker and Grok overlay now allow exact M3.1 Flash pins only inside MiniMax pool; other models/pools refuse. New MiniMax pin cannot contaminate the GLM host-account model. Claude and Codex wrappers recognize the 1M window, 900K compaction, and bounded turns. M3.1 workers require plan-key prefix sk-cp- after incumbent slot admission, preserving legacy M3 behavior.
+- Isolated Ubuntu0 source checkout tests: 6/6 new MiniMax and 52/52 incumbent Grok/Fabric unittest tests PASS; three shell syntax files PASS, Python compilation PASS. Full pytest was blocked by missing numpy in the lean host interpreter; hosted CI remains authoritative.
+- M2 native installed generation v24: 28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce, selection sequence 24. Exact source-only patch at ops/native_fabric/patches/minimax_m31_flash_generation24.patch. Immutable preimages SHA256: pick.py=4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b, sub.sh=7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2, mm_codex_exec.sh=0c31ceaa0467e4eb82f5220adb59328677e28e48a9ea7786a09bb0d78f1919f4. Candidate SHA256: pick.py=dc1e22321e3abafd4c8a9de6898ee3f5d891f36bdc86e9fdcd3dbbd3d6344fb7, sub.sh=45ef4e9f5dda022ea60fd8d2b3311a2f983ea6659e382b96412df92f089d43ce, mm_codex_exec.sh=b77b36c5aab464ed31988ac90ce09c90f74794a12f8344311a92f2d4de3a94cb. Exact isolated git apply --check, full replay and output-hash equality PASS. Installed generation unchanged; no publisher action.
+- Installed read-only preview before mutation: M3.1 refused model not admitted for selected pool/task, M3 returned PREVIEW_ONLY reserved=false. Signed M2 pools.yaml default_model is still MiniMax-M3; AUTO remains unchanged pending real canary.
+- GitHub non-author reviewer mastermindx-2 formally requested; no review verdict. Grok Secretary coordination message delivered at https://mastermindxgroup.slack.com/archives/C0CBC6AEAQZ/p1793587392708969 (DELIVERY ONLY, not ACK/START).
+- DONE_WHEN remains unmet. Next: bind exact-head CI and independent non-author review; on accepted source, incumbent immutable native release owner rechecks selected predecessor and produces a manifest-qualified new generation, publishes/selects, then run one true subscription-backed Fabric M3.1 Flash task to retained response. Verify model/account/host and original parent consumption before changing AUTO default. NO self-review, merge, PAYG, duplicate worker or unreviewed live policy changes.
+- Classification: BUILT_NOT_PROVEN source; native install and real M Plan worker NOT PROVEN.
