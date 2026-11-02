@@ -139,6 +139,27 @@ print("SIGNED_MODEL_POLICY_PASS")
 """)
         self.assertIn("SIGNED_MODEL_POLICY_PASS", result)
 
+    def test_minimax_host_readiness_rejects_older_telemetry_only_for_this_pool(self):
+        result = self.run_candidate(r"""
+import pick,host_pick,placement_view
+from unittest.mock import patch
+registry={"ubuntu0":{"roles":["lanes"],"platform":"linux"}}
+calls=[]
+def recorded_view(registry, state_dir, mode, **kwargs):
+    calls.append((mode, kwargs.get("max_age", 600)))
+    return {"host_choice":"ubuntu0","host_eligibility":{"hosts":[]}}
+with (patch.object(host_pick,"load_registry",return_value=registry),
+      patch.object(placement_view,"build_placement_view",side_effect=recorded_view),
+      patch.object(pick,"_HOST_POOL_MODES",
+                   {"minimax":("minimax",),"grok":("grok",)})):
+    routes=pick._eligible_host_routes("auto",route_key="m31-freshness")
+assert calls == [("minimax",180),("grok",600)], calls
+assert routes["minimax"]==("ubuntu0","minimax")
+assert routes["grok"]==("ubuntu0","grok")
+print("STRICT_MINIMAX_FRESHNESS_PASS")
+""")
+        self.assertIn("STRICT_MINIMAX_FRESHNESS_PASS", result)
+
     def test_placement_view_targets_minimax_only(self):
         result = self.run_candidate(r"""
 from unittest.mock import patch
