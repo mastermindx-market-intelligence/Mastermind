@@ -224,6 +224,47 @@ continuation behavior before automatic migration. Native parent restart and
 automatic wake after the submitting process ends require the existing native
 conversation/lifecycle owner. This candidate does not supply that owner.
 
+## Jev advisory transport
+
+`candidate/jev_advisory.py` is the typed advisory client. It is advisory only:
+it creates no worker, holds no admission, lease or acceptance authority, and it
+makes exactly one System One POST per evaluation, with no retry and no account
+rotation. The native request boundary keeps its own `FABRIC_JEV_MODE=off`
+default, so the advisory stays off unless an owner explicitly selects `shadow`
+or `assist`.
+
+Two owner-selected transports exist. `direct` is the default and is unchanged:
+it posts to the vendor System One endpoint with the vendor key, and it stays
+available for the existing explicit standalone configurations.
+
+`shared_gateway` is optional and default off. It posts to an owner-run loopback
+proxy that already holds the vendor key and owns the organization-scoped
+RPM/credit budget. It is selected only by:
+
+| Variable | Meaning |
+| --- | --- |
+| `JEV_TRANSPORT` | `shared_gateway` selects the loopback proxy. `direct` (the default) keeps the vendor endpoint. Any other value is refused. |
+| `JEV_GATEWAY_ENDPOINT` | Exactly `http://<loopback>:<port>/v1/systemone`, or the same shape over `https` for an owner-approved encrypted tunnel that terminates on loopback. |
+| `JEV_GATEWAY_TOKEN` | The local scoped bearer that the proxy admits. The proxy requires at least 24 characters. |
+
+The endpoint is validated before any socket is opened. Only a loopback address
+literal or the reserved `localhost` name is accepted, and no name is ever
+resolved, so a rebound DNS answer cannot redirect the advisory. Userinfo, a
+query, a fragment, any other path, a missing or privileged port and any address
+outside loopback are refused. Redirects are not followed.
+
+In shared-gateway mode the advisory never falls back to the direct vendor key,
+never rotates a credential, never skips the shared budget, never retries and
+never rewrites the `jev-latest` slug. A missing endpoint or token, an unusable
+token and a refused endpoint fail closed with a bounded `JEV_UNAVAILABLE` code
+(`GATEWAY_NOT_CONFIGURED`, `GATEWAY_TOKEN_INVALID`, `GATEWAY_ENDPOINT_INVALID`,
+`TRANSPORT_INVALID`) before any request is sent. The vendor key stays inside
+the proxy and the local scoped bearer is never forwarded upstream.
+
+This binding only changes where the advisory sends its one request. It adds no
+quota engine, no credential registry and no queue, lease or authorization
+plane, and it changes no admission decision.
+
 ## Source and validation layout
 
 `candidate/` contains the proposed native files. `source/` contains inspected
