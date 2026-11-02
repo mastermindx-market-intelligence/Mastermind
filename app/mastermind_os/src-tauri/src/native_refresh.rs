@@ -54,16 +54,32 @@ fn pending_exists(client_id: &str, audience: &str) -> Result<bool, &'static str>
 }
 #[cfg(target_os = "macos")]
 pub(crate) fn begin_rotation(client_id: &str, audience: &str, old: &str) -> Result<(), &'static str> {
-    use security_framework::passwords::set_generic_password;
-    if pending_exists(client_id, audience)? { return Err("REFRESH_OUTCOME_UNCONFIRMED"); }
+    use security_framework::os::macos::keychain::SecKeychain;
+    // The old get-then-set marker was only serialized within one process.
+    // Across two app processes it could overwrite an existing marker and allow
+    // both instances to send the same rotating token. Use Keychain's atomic
+    // add-only operation: a duplicate is an existing owner, not a retry grant.
     let original = load(client_id, audience)?.ok_or("AUTHENTICATION_REQUIRED")?;
     if original != old { return Err("REFRESH_TOKEN_CHANGED"); }
     let mut h = Sha256::new();
     h.update(b"mastermind.os.rotation.v1\0");
     h.update(old.as_bytes());
     let marker = format!("{:x}", h.finalize());
-    set_generic_password(SERVICE, &format!("{}:pending", account(client_id, audience)), marker.as_bytes())
-        .map_err(|_| "KEYCHAIN_WRITE_FAILED")
+    let keychain = SecKeychain::default().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+    keychain.add_generic_password(
+        SERVICE,
+        &format!("{}:pending", account(client_id, audience)),
+        marker.as_bytes(),
+    ).map_err(|error| {
+        if error.code() == -25299 { "REFRESH_OUTCOME_UNCONFIRMED" }
+        else { "KEYCHAIN_WRITE_FAILED" }
+    })?;
+    // A successful create must also be visible through the read path used by
+    // subsequent launches; no network effect is attempted if it is not.
+    if !pending_exists(client_id, audience)? {
+        return Err("KEYCHAIN_WRITE_FAILED");
+    }
+    Ok(())
 }
 #[cfg(target_os = "macos")]
 pub(crate) fn finish_rotation(client_id: &str, audience: &str, previous: &str, next: &str) -> Result<(), &'static str> {
@@ -158,6 +174,46 @@ mod tests {
             Some(synthetic.to_owned()));
         delete(&client, &audience).expect("Keychain delete");
         assert_eq!(load(&client, &audience).expect("Keychain absence"), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "explicit synthetic cross-instance Keychain rotation test on unlocked macOS only"]
+    fn atomic_keychain_rotation_marker_rejects_competing_writers() {
+        let client = format!("mmos-atomic-keychain-canary-{}", std::process::id());
+        let audience = format!("https://fixture.invalid/keychain-lock/{}", std::process::id());
+        let original = "synthetic-rotating-access-probe-credential-0001";
+        let successor = "synthetic-rotating-access-probe-credential-0002";
+        // Test teardown is independent of the explicit body assertions.
+        struct Cleanup(String, String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = super::delete(&self.0, &self.1); }
+        }
+        let _cleanup = Cleanup(client.clone(), audience.clone());
+        assert_eq!(load(&client, &audience).expect("initial read"), None);
+        save(&client, &audience, original).expect("synthetic seed");
+        // Two separately constructed callers race on the same *Keychain item*,
+        // not on the app's process-local mutex.
+        let gate = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let gate = gate.clone();
+            let (c, a, o) = (client.clone(), audience.clone(), original.to_owned());
+            tasks.push(std::thread::spawn(move || {
+                gate.wait();
+                begin_rotation(&c, &a, &o)
+            }));
+        }
+        gate.wait();
+        let results: Vec<_> = tasks.into_iter().map(|t| t.join().expect("thread")).collect();
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1, "{results:?}");
+        assert!(results.iter().any(|result| result.as_ref().err()
+            == Some(&"REFRESH_OUTCOME_UNCONFIRMED")));
+        assert_eq!(load(&client, &audience).unwrap_err(), "REFRESH_OUTCOME_UNCONFIRMED");
+        finish_rotation(&client, &audience, original, successor).expect("rotation");
+        assert_eq!(load(&client, &audience).expect("rotated read"), Some(successor.to_owned()));
+        delete(&client, &audience).expect("teardown");
+        assert_eq!(load(&client, &audience).expect("absence"), None);
     }
 
     #[test]
