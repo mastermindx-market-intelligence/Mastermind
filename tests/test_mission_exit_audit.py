@@ -198,6 +198,8 @@ def test_cli_growth_race_rejected(tmp_path, monkeypatch, capsys):
     ("carrier", "/Users/private/secret-file"),
     ("carrier", "file:///home/private"),
     ("action_id", "ghp_AbCdEfGhIjKl"),
+    ("action_id", "xpl_" + "b" * 42),
+    ("carrier", "token-" + "x" * 40),
 ])
 def test_held_effect_refs_cannot_print_secret_or_path(tmp_path, capsys, field, value):
     d = snapshot()

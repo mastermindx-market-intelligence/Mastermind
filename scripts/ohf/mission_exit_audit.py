@@ -86,6 +86,8 @@ def _public_effect_ref(value: Any) -> bool:
     return (
         _ref(value)
         and PUBLIC_EFFECT_REF_RE.fullmatch(value) is not None
+        and any(c in value for c in (":", "-", "."))
+        and all(len(part) <= 24 for part in re.split(r"[-.:]", value))
         and redact_evidence_text(value) == value
     )
 
