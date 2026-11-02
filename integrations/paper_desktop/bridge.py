@@ -555,6 +555,18 @@ def semantic_schema(value, *, _named_fields=False):
     return value
 
 
+def _same_reviewed_json(left, right):
+    """JSON values are type-sensitive: safety true is not numeric 1.
+
+    Python dict equality aliases bool and int; canonical JSON bytes do not.
+    Invalid/nonserializable vendor inputs fail closed, never match a review.
+    """
+    try:
+        return encode(left) == encode(right)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        return False
+
+
 def compatible_tool_contract(tool_name, descriptor):
     """Return reviewed profile and safe extra root-field names, or None.
 
@@ -572,10 +584,10 @@ def compatible_tool_contract(tool_name, descriptor):
     if not isinstance(annotations, dict):
         return None
     for reviewed in REVIEWED_TOOL_CONTRACTS.get(tool_name, ()):
-        if annotations != reviewed["annotations"]:
+        if not _same_reviewed_json(annotations, reviewed["annotations"]):
             continue
         known = semantic_schema(reviewed["inputSchema"])
-        if actual == known:
+        if _same_reviewed_json(actual, known):
             return {"profile": reviewed, "optional_new_inputs": []}
         new_fields = set(actual.get("properties", {})) - set(known.get("properties", {}))
         if not new_fields or not isinstance(actual.get("required", []), list):
@@ -587,7 +599,7 @@ def compatible_tool_contract(tool_name, descriptor):
             continue
         restricted = dict(actual, properties={
             key: value for key, value in actual["properties"].items() if key not in new_fields})
-        if restricted == known:
+        if _same_reviewed_json(restricted, known):
             return {"profile": reviewed, "optional_new_inputs": sorted(new_fields)}
     return None
 
@@ -1050,6 +1062,18 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
     with desktop_lock(lock_root):
         client.initialize()
         if action == "status":
+            # Status calls get_basic_info implicitly. Qualify its live read
+            # annotations/input schema *before* any Paper tool is dispatched.
+            # A private exact-pin unit fixture retains its historical seam;
+            # MCP/CLI callers cannot override the default production pin.
+            if _catalog_pin == SUPPORTED_CATALOG_SHA256:
+                status_catalog = client.catalog()
+                status_schema = schema_receipt(
+                    client, status_catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
+                if (not status_schema["server_name_compatible"]
+                        or not status_schema["server_version_compatible"]
+                        or not status_schema["snapshot_tool_compatible"]):
+                    raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
             return {"state": "CONNECTED", "server": client.server, "endpoint": ENDPOINT,
                     "document": snapshot(client, execution_binding=execution_binding),
                     "quota_remaining": None, "plan": "UNKNOWN"}
@@ -1058,7 +1082,8 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         if action == "catalog":
             return {"server": client.server, "tools": [
                         dict(catalog[n], bridge_access=(
-                            "read" if n in READ_TOOLS else
+                            ("read" if compatible_tool_contract(n, catalog[n]) is not None
+                             else "read_held_schema") if n in READ_TOOLS else
                             "edit" if n in schema["compatible_write_tools"] else "edit_held_schema"))
                         for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS],
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS - FILE_MANAGE_TOOLS),
@@ -1072,19 +1097,30 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         # callers cannot select it and always use the tool-scoped contracts.
         custom_exact_pin = (_catalog_pin != SUPPORTED_CATALOG_SHA256
                             and (_catalog_pin is None or schema["catalog_sha256"] == _catalog_pin))
+        if action == "read" and not custom_exact_pin:
+            # An explicit guarded read also invokes the snapshot getter.
+            # Refuse altered/unsafe implicit getter contracts before either
+            # the guard read or the requested tool can reach Paper.
+            if (not schema["server_name_compatible"]
+                    or not schema["server_version_compatible"]
+                    or (expected_snapshot is not None
+                        and not schema["snapshot_tool_compatible"])):
+                raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
         qualified = (compatible_tool_contract(tool, catalog[tool])
-                     if editing and not custom_exact_pin else None)
-        if editing and not custom_exact_pin:
+                     if (editing or action == "read") and not custom_exact_pin else None)
+        if (editing or action == "read") and not custom_exact_pin:
             if qualified is None:
                 raise Refusal("TOOL_SCHEMA_CHANGED",
                               "Only this tool is unavailable; other compatible Paper operations remain active.")
-            # Do not pass newly added optional upstream inputs without separate
-            # source review. We can keep using the unchanged approved arguments.
+            # The read-only MCP wrapper is not sufficient protection against
+            # vendor drift. For reads *and* writes, dispatch only the reviewed
+            # root input keys; benign optional vendor extensions stay unusable.
+            # We can keep using the unchanged approved arguments.
             known_inputs = set(qualified["profile"]["inputSchema"].get("properties", {}))
             upstream_keys = set(arguments) - ({"sourceFileId"} if action == "file_manage" else set())
             if upstream_keys - known_inputs:
                 raise Refusal("UNREVIEWED_TOOL_ARGUMENTS")
-            if tool == "set_text_content":
+            if editing and tool == "set_text_content":
                 # Legacy Paper uses textContent; 0.5.16+ uses html.
                 fields = qualified["profile"]["inputSchema"]["properties"]["updates"]["items"]["properties"]
                 item_key = "html" if "html" in fields else "textContent"

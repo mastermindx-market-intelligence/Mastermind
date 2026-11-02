@@ -255,5 +255,114 @@ class ContractResilienceTests(unittest.TestCase):
             self.assertEqual([name for name, _ in c.calls].count("create_artboard"), 0)
 
 
+    def test_read_annotations_drift_refuses_before_vendor_dispatch(self):
+        cat = copy.deepcopy(M2)
+        cat["get_node_info"]["annotations"] = {
+            "readOnlyHint": False, "destructiveHint": True}
+        self.assertIsNone(b.compatible_tool_contract("get_node_info", cat["get_node_info"]))
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Client(cat)
+            args = {"fileId": FILE_ID, "nodeId": "text-1"}
+            with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                b.execute("read", tool="get_node_info", arguments=args,
+                          client=c, lock_root=Path(tmp))
+            self.assertEqual(c.calls, [], "unsafe read descriptor was dispatched")
+            good = Client()
+            observed = b.execute("read", tool="get_node_info", arguments=args,
+                                 client=good, lock_root=Path(tmp))
+            self.assertEqual(observed["state"], "OBSERVED")
+            self.assertEqual(good.calls, [("get_node_info", args)])
+
+    def test_read_optional_future_input_is_ignored_not_forwarded(self):
+        cat = copy.deepcopy(M2)
+        cat["get_node_info"]["inputSchema"]["properties"]["futureFlag"] = {
+            "type": "boolean"}
+        profile = b.compatible_tool_contract("get_node_info", cat["get_node_info"])
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["optional_new_inputs"], ["futureFlag"])
+        self.assertIn("get_node_info",
+                      b.schema_receipt(Client(cat), cat)["optional_vendor_inputs_ignored"])
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Client(cat)
+            with self.assertRaisesRegex(b.Refusal, "UNREVIEWED_TOOL_ARGUMENTS"):
+                b.execute("read", tool="get_node_info",
+                          arguments={"fileId": FILE_ID, "nodeId": "text-1",
+                                     "futureFlag": True},
+                          client=c, lock_root=Path(tmp))
+            self.assertEqual(c.calls, [], "unreviewed optional input was forwarded")
+            args = {"fileId": FILE_ID, "nodeId": "text-1"}
+            self.assertEqual(b.execute("read", tool="get_node_info", arguments=args,
+                                       client=c, lock_root=Path(tmp))["state"], "OBSERVED")
+            self.assertEqual(c.calls, [("get_node_info", args)])
+
+    def test_json_boolean_is_never_equivalent_to_number_in_safety_annotations(self):
+        for name, hint in (("get_basic_info", "readOnlyHint"),
+                           ("set_text_content", "destructiveHint")):
+            with self.subTest(tool=name):
+                cat = copy.deepcopy(M2)
+                self.assertIs(cat[name]["annotations"][hint], True)
+                cat[name]["annotations"][hint] = 1
+                self.assertIsNone(b.compatible_tool_contract(name, cat[name]))
+                r = b.schema_receipt(Client(cat), cat)
+                if name == "get_basic_info":
+                    self.assertFalse(r["snapshot_tool_compatible"])
+                    self.assertFalse(r["accepted_for_write"])
+                    with tempfile.TemporaryDirectory() as tmp:
+                        c = Client(cat)
+                        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                            b.execute("status", client=c, lock_root=Path(tmp))
+                        with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                            b.execute("read", tool="get_basic_info",
+                                      arguments={"fileId": FILE_ID},
+                                      client=c, lock_root=Path(tmp))
+                        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                            b.execute("read", tool="get_node_info",
+                                      arguments={"fileId": FILE_ID, "nodeId": "text-1"},
+                                      expected_snapshot="a" * 64,
+                                      client=c, lock_root=Path(tmp))
+                        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                            b.execute("edit", tool="set_text_content",
+                                      arguments={"fileId": FILE_ID,
+                                                 "updates": [{"nodeId": "text-1",
+                                                              "html": "<b>safe</b>"}]},
+                                      expected_snapshot="a" * 64,
+                                      operation_id="bad-implicit-guard",
+                                      allow_write=True, client=c, lock_root=Path(tmp))
+                        self.assertEqual(c.calls, [])
+                else:
+                    self.assertNotIn("set_text_content", r["compatible_write_tools"])
+                    self.assertIn("create_artboard", r["compatible_write_tools"])
+                    with tempfile.TemporaryDirectory() as tmp:
+                        c = Client(cat)
+                        with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                            b.execute("edit", tool=name,
+                                      arguments={"fileId": FILE_ID,
+                                                 "updates": [{"nodeId": "text-1",
+                                                              "html": "<b>safe</b>"}]},
+                                      expected_snapshot="a" * 64,
+                                      operation_id="bad-typed-write",
+                                      allow_write=True, client=c, lock_root=Path(tmp))
+                        self.assertEqual(c.calls, [])
+
+    def test_prepare_blocks_unsafe_implicit_snapshot_without_paper_calls(self):
+        import sys
+        from unittest.mock import patch
+        cat = copy.deepcopy(M2)
+        cat["get_basic_info"]["annotations"]["readOnlyHint"] = 1
+        path = ROOT / "integrations/paper_desktop/prepare.py"
+        with patch.dict(sys.modules, {"bridge": b}):
+            prep_spec = importlib.util.spec_from_file_location(
+                "paper_selfheal_prepare_check", path)
+            prep = importlib.util.module_from_spec(prep_spec)
+            prep_spec.loader.exec_module(prep)
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Client(cat)
+            with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                prep.prepare_document(FILE_ID, "a" * 64, "guarded-prepare",
+                                      allow_prepare=True, client=c,
+                                      lock_root=Path(tmp))
+            self.assertEqual(c.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
