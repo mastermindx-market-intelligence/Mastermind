@@ -473,3 +473,12 @@ REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
     'sha256': '726544463fa6c4058512a558f70e5d0c585f9742594d20363f873b0b2d0fb8e7',
     'sites': ((244, 76, 79, 'int', '587'), (244, 107, 112, 'int', '0o755'), (257, 124, 127, 'int', '501')),
 }
+
+# Same independently reviewed initialize UA string-length cap as a057927b;
+# full W3 composition/source review2fcbe954 preserves that exact Constant.
+# Bind the reviewed W3 postimage, including retained-input evidence, only.
+# This is not a UID exemption or a scanner/defaults change.
+REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
+    'sha256': 'f6b94b81eec07354bf74ae6d589e76b43255604006b11cf7a7712a02fe513379',
+    'sites': ((190, 46, 49, 'int', '512'),),
+}
