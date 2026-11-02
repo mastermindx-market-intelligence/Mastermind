@@ -33,6 +33,24 @@
     "sampling": "at most 250ms readiness poll; configured RSS high-water interval unchanged",
     "unready": "503 starting, backend_ready=false, even if child_running=true"
   },
+  "candidate_qualification_guard": {
+    "actual_source_advertisement_bytes": 158531,
+    "generic_untrusted_cap_bytes": 131072,
+    "live_provider_or_company_call": false,
+    "local_candidate_unittest": "48/48 PASS",
+    "negative_cases": [
+      "modified large schema fails size+source drift",
+      "source owner changed with matching new advertisement still fails owner drift+size",
+      "new/renamed/write tools continue denied",
+      "no live MCP connection"
+    ],
+    "previous_head": "c2e5897e97a8401eb99dfd5988ce8ef5aa7169db",
+    "previous_head_workflow": "41381723582 FAILURE both Python 3.12 and Python 3.13",
+    "prior_failure": "original source six-tool advertisement exceeds 128KiB generic cap",
+    "rule": "only exact byte-for-byte original source owner can exceed generic cap; all altered or drifted advertisements remain refused",
+    "sha256_exact_pinned_owner": "23f13aa028a564889da10285ecdfd648a9a451fa2635d0251fd2340b45821837",
+    "source_only": true
+  },
   "company_grounding_consumer": {
     "auth_owner": "integrations.business_mcp_auth.claims",
     "authorized_company_call_proven": false,
@@ -128,6 +146,18 @@
       "sha256": "e8c5da80ca8632b0f490cb014e063689e43488027dd9ff791d208354a0460c88"
     },
     {
+      "path": "integrations/hermes_qualification/README.md",
+      "sha256": "89f411eb51584da366c743a35f039e07e2923af83bfe3c46741c792d5fbd13c3"
+    },
+    {
+      "path": "integrations/hermes_qualification/steward_contract.py",
+      "sha256": "fd502ddd4a08543f22739a14988b988c940269dc763edd697a5ad7c112c7b26d"
+    },
+    {
+      "path": "integrations/hermes_qualification/tests/test_steward_contract.py",
+      "sha256": "f329b2bc904ddcd24b1865c9ece0202c98d13dcefd9363d7a2132e8ff2af46ee"
+    },
+    {
       "path": "integrations/hermes_runtime/profile.py",
       "sha256": "7b3ed18775409a14d66bd655b330e5450afb9d14e47e72588174a902198b2419"
     },
@@ -166,17 +196,18 @@
   ],
   "parent_sha": "267e1e00e657ab5a87266b6fb4f19bab4e2a95bc",
   "previous_head_linux_evidence": {
-    "broad_repo_ci": "41378586771 IN_PROGRESS last observed",
-    "does_not_qualify_new_postimage": true,
-    "head": "a2d4a97cfc6dbc2551bfb9d734ec230da494e996",
-    "hermes_harness": "41378586779 SUCCESS",
-    "hermes_runtime": "41378586869 SUCCESS"
+    "broad_repo_ci": "41381723472 QUEUED last observed",
+    "does_not_qualify_current_postimage": true,
+    "head": "c2e5897e97a8401eb99dfd5988ce8ef5aa7169db",
+    "hermes_candidate_qualification": "41381723582 FAILURE 2 Python versions; source size fence mismatch",
+    "hermes_harness": "41381723479 SUCCESS",
+    "hermes_runtime": "41381723414 SUCCESS"
   },
   "procedure_pin": "19cb00cfed26b68f0a8a5cdc0f2f1a9463a3feec",
   "product_claim": "SOURCE_ONLY_NATIVE_ROLE_SELECTION",
   "provider_calls": 0,
   "python": "3.12.13",
-  "recorded_at": "2026-11-02T03:10:53.619370+00:00",
+  "recorded_at": "2026-11-02T03:16:09.622204+00:00",
   "remaining_acceptance": [
     "Exact-head Linux suite/CI",
     "Independent non-author source review",
@@ -232,6 +263,6 @@
     "run_id": "hermes-role-selection-pr1917-review-20261101-sol-001"
   },
   "source_manifest_contract": "sha256 of compact sorted JSON owned_path_digests (path and sha256)",
-  "source_manifest_sha256": "3405ca148b5568c9fdc1b9bd6c907e9aaa7088b9a012673b4bbc554138a33311",
+  "source_manifest_sha256": "bbaa1a92da0edea1d1014d6002338a94763a0b361bfef0838229e974424799cf",
   "test_host": "m2studio / macOS"
 }
