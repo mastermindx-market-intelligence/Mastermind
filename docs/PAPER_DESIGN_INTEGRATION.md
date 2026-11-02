@@ -1,3 +1,64 @@
+## Upgrade-resilient tool-scoped Paper compatibility (proposed source, 2026-11-02)
+
+PROBLEM: the historic full-catalog SHA admission rule made every
+otherwise-working Paper edit unavailable when any upstream tool was
+added/removed or when an unrelated description changed. Paper's release
+version has already been diagnostic-only; it is NOT a version-equality bug.
+Previous reviewed full-catalog digests remain recorded as historical
+provenance, but they are no longer the normal whole-service write gate
+in this proposed bridge 0.1.8.
+
+DECISION: derive reviewed, per-tool input contracts from the four retained
+full-catalog fixtures (0.5.14/0.5.15/0.5.16/0.5.18). For each vendor call,
+enumerate the live catalog on the incumbent loopback client and compare
+the requested operation's JSON-schema structure and safety annotations
+against those source-owned contracts. Ignore harmless presentation fields,
+required/enum ordering, unrelated new/removed vendor tools, and new optional
+top-level inputs that have no default (the bridge rejects callers supplying
+such newly added optional inputs before dispatch). Vendor version is logged
+only. Do NOT auto-admit a new tool name or a changed required parameter,
+type, nested input schema, constraint, default or destructive/read-only
+annotation. The source-owned bridge allowlists remain unchanged.
+
+FAILURE ISOLATION: a material mismatch in one writing tool returns
+TOOL_SCHEMA_CHANGED for that tool only, before any upstream dispatch.
+Other still-qualified edits and read-only access continue. The critical
+get_basic_info document/snapshot schema and paper-desktop server identity
+must remain compatible for any write, since unsafe targeting would affect
+every operation. All existing explicit fileId/snapshot/operation-ID,
+per-desktop mutex, guarded file management, no replay and EFFECT_UNKNOWN
+requirements are unchanged. paper_catalog reports catalog_policy,
+full_catalog_known, compatible_write_tools, incompatible_write_tools,
+optional_vendor_inputs_ignored, and marks held operations edit_held_schema.
+paper_prepare readiness means at least one write tool is compatible, not
+that every edit is permitted; the actual chosen tool is revalidated on its
+own paper_edit call.
+
+SELF-HEALING BOUNDARY: benign changes are accepted automatically at the
+very next tool call without a daemon, restart, new tunnel, new auth plane or
+release-hash hotpatch. Material semantic changes still require an explicit
+reviewed source update for only the affected operation; no software can
+prove unchanged behavior solely from an input schema. Immutable
+v17 and v18 remain historical, rejected-for-release candidates: the
+later source review found unqualified reads and unsafe verification
+under mid-operation vendor descriptor drift. Proposed immutable v20
+requalifies each reviewed read/write tool and its outgoing arguments,
+including implicit get_basic_info and the post-edit verification getter.
+In addition, after the FIRST get_basic_info read it requalifies the
+critical live getter again before any SECOND file-only snapshot call;
+unsafe drift refuses without dispatching the second getter. If
+post-write verification cannot safely proceed, retain EFFECT_UNKNOWN
+with no replay, not an invented successful receipt. v19 is now a
+preserved but superseded, release-ineligible runtime generation.
+
+The v20 source remains BUILT_NOT_PROVEN until a new independent exact-head
+review, required hosted CI, protected merge of the #1925 -> #1935 ->
+#1942 chain, original Ryan same-label installer selection, and a real
+exact-target scratch edit, readback, screenshot and reconnect receipt.
+Synthetic tests and read-only live catalog checks are not deployment
+acceptance. Preserve prior immutable runtime generations and do not
+select or overwrite v17/v18/v19 candidates.
+
 ## M1 Paper 0.5.16 exact catalog compatibility candidate - 2026-11-02
 
 This source-only follow-up is based on PR #1925's unchanged semantic source head
