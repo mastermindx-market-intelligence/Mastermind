@@ -68,3 +68,104 @@ Native adoption requires a controlled attended Astra session at the actual inten
 5. Separately reconcile real worker returns, original-parent custody and any uncertain effects through their existing owners. A new session must not claim an old parent's child by inference.
 
 An end-to-end long-horizon canary additionally needs real delegation, result retention, review, acceptance and continued phase execution. This orientation adapter does not provide idle wake, guarantee automatic post-crash execution, or implement the missing semantic-continuation source builder.
+
+## Owner boundary inside an already active turn (P7.T5)
+
+`project_owner_continuation.py` adds a read-only, attended companion to this
+adapter. It does not wait for a new SessionStart. The original assigned owner
+can invoke the reviewed source directly from its current project workspace:
+
+```sh
+python3 -B /ABSOLUTE/REVIEWED/MASTERMIND/integrations/session_bridge/project_owner_continuation.py \
+  --workspace-root /ABSOLUTE/PROJECT/WORKSPACE \
+  --charter-root /ABSOLUTE/EXISTING/CHARTER \
+  --macro-root /ABSOLUTE/QUALIFIED/MACRO \
+  --workstream WS:EXISTING-WORKSTREAM \
+  --owner ORIGINAL-OWNER-ROLE --owner-session ORIGINAL-NATIVE-SESSION \
+  --budget 4000
+```
+
+The process's actual `cwd` and existing `CODEX_THREAD_ID` must match the explicit
+focus. These observations do not authenticate a caller, grant assignment, bind a
+Runtime Job, or establish custody. The command supplies context to the already
+running owner; it cannot start, resume, block, or force a model turn. It does not
+invoke Stop or create a subscriber, watcher, queue, registry, or persistent cursor.
+No command is derived from a title, `next_action`, note, handoff, or other prose.
+
+The companion uses the exact frozen source copy at
+`mmtask_restore/payload/mmtask`, SHA-256
+`711ba4f46c80e518d99167877738db9e92182b78bf7b4e3052bcfee79316d54a`.
+It calls that owner's actual `next_tasks` and `recovery_scope_issues`, then applies
+narrower focus/freshness filters. It is not a replacement task selector. The
+source restoration package and its offline/private-HOME qualification are
+explained in [its README](mmtask_restore/README.md). The installed helper is never
+loaded or changed by this companion.
+
+A missing, legacy, empty, or unbound task buffer supplies passive canonical
+recovery context. No task is manufactured. The owner must use the incumbent
+explicit rebind/import procedure only after verifying the real workstream,
+latest handoff, original versioned plan, source custody and effects. The command
+never writes the charter or interprets a recovery suggestion as permission.
+An artifact listed under `omitted_due_to_budget` has **not** been read; acquire
+the original plan at its recorded source before pickup.
+
+A candidate is at most one existing READY row in the exact workstream owned by
+the focused role, admitted by the incumbent selector, mapped to one active
+imported wave, without recorded reason/supersession or an already-started task
+for that owner. Duplicate or multiple candidates are never truncated into a
+singleton. Task and buffer timestamps must be timezone-qualified, nonfuture,
+and no older than the configured observational limit (default one hour).
+The buffer's imported source SHA and workstream path/status must agree with the
+compiler's observed source SHA and structured active workstream record. A
+freshly edited READY row cannot bypass an old/unqualified import or closed
+canonical record. A new unrelated canonical commit can conservatively require
+an ordinary import; the companion never performs it.
+
+That agreement establishes consistency, **not** latest protected-master
+freshness, authenticity, effect eligibility or release. Source, current
+commission, permissions, outstanding effects, exact holds, live writers and
+actual original-parent custody remain action-time checks through their existing
+owners. `action_recommendation` is always false and `effect_eligibility` is
+`UNOBSERVED`. A candidate must not override an explicit stop or an unobserved
+hold. A historical handoff's blocked label is likewise not a blanket authority
+for every independent project task. Inspect the exact scope of each real hold.
+
+After current eligibility is independently established, the already-active
+owner uses normal `mmtask show`/`start`, performs its authorized bounded action,
+consumes the actual result and records the required acceptance through that same
+owner. Started, accepted and superseded rows cease to be new candidates. Stable
+candidate identity uses workstream, task/evidence generation and the canonical
+`source_records_digest`; raw bundle hashes, generated timestamps and incidental
+checkout SHA changes are not new observations of progress. Repeating an unchanged
+read without uptake returns the same inert identity, without prompts or effects.
+
+The new companion delivers the complete **parsed** owner bundle, including all
+omission/degradation fields; its raw acquisition observation still binds the
+original compiler bytes. No owner fields are dropped to make the 32-KiB output
+bound pass. Both entrypoints check the final serialized context including owner
+metadata; oversized output becomes a small unavailable result, never a preview
+presented as complete. Legacy adapter calls still preserve their original
+verbatim-bundle format and behavior.
+
+For an optional actual original-owner **resume** event, the existing adapter
+accepts `--charter-root`, `--owner`, and `--owner-session` together. Configure only
+a separately reviewed synchronous `resume` handler with the normal 35-second
+bound and `additionalContextLimit: 0`. Other events with that owner mode return
+no projection. A new/forked session cannot acquire the old focus by matching
+cwd. This is a definition interface, not an installed hook or native-loading
+proof: no definition, trusted hash, global Fabric Stop helper or local helper is
+changed here. In-session boundaries without a new resume use the attended
+command above; no SessionStart event is forged.
+
+Portable tests use explicit inert inputs and the committed frozen helper, not
+M2 HOME paths or `vendor/macro_src/scripts`. A separate recorded M2 rehearsal
+uses the actual compiler, reads the omitted original plan and latest handoff at
+their recorded source, and uses the frozen task owner only in a disposable
+charter: empty/unbound recovery, current owned candidate, actual source assertion,
+consumed/accepted result and suppressed reentry. It proves that bounded source
+consumer path; it does not prove automatic wake, a new model turn, native hook
+installation or an end-to-end product/Runtime job.
+
+The compiler's old W3 `next_action` mentioning PR1289 is a concrete stale-prose
+example: that PR subsequently landed. It is never converted into a new task by
+this integration, and no historical operation is reopened.
