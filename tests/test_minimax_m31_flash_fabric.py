@@ -5,7 +5,10 @@ worker launch, subscription spend, or installed native-generation mutation.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import shutil
+import tempfile
 import os
 from pathlib import Path
 import subprocess
@@ -16,14 +19,25 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric"
 SOURCE = NATIVE / "quota_continuity/source"
-PICKERS = (
-    SOURCE / "pick.py",
-    NATIVE / "grok47/overlay/pick.py",
-)
-SHELLS = (
-    SOURCE / "sub.sh",
-    NATIVE / "grok47/overlay/sub.sh",
-)
+# Historical Grok/continuity sources are immutable release preimages.
+# Test the NEW native candidate by applying the reviewed patch in a scratch
+# directory; never edit, rehash, or overwrite those accepted snapshots.
+BASES = {
+    "pick.py": NATIVE / "quota_continuity/candidate/pick.py",
+    "sub.sh": NATIVE / "grok47/overlay/sub.sh",
+    "mm_codex_exec.sh": NATIVE / "quota_continuity/candidate/mm_codex_exec.sh",
+}
+PATCH = NATIVE / "patches/minimax_m31_flash_generation24.patch"
+PREIMAGE_SHA256 = {
+    "pick.py": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
+    "sub.sh": "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
+    "mm_codex_exec.sh": "0c31ceaa0467e4eb82f5220adb59328677e28e48a9ea7786a09bb0d78f1919f4",
+}
+CANDIDATE_SHA256 = {
+    "pick.py": "dc1e22321e3abafd4c8a9de6898ee3f5d891f36bdc86e9fdcd3dbbd3d6344fb7",
+    "sub.sh": "45ef4e9f5dda022ea60fd8d2b3311a2f983ea6659e382b96412df92f089d43ce",
+    "mm_codex_exec.sh": "b77b36c5aab464ed31988ac90ce09c90f74794a12f8344311a92f2d4de3a94cb",
+}
 
 
 def load_picker(path: Path):
@@ -36,6 +50,31 @@ def load_picker(path: Path):
 
 
 class MiniMaxM31FlashRouting(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._tmp = tempfile.TemporaryDirectory(prefix="minimax-m31-native-test-")
+        cls.stage = Path(cls._tmp.name)
+        ext = cls.stage / "ext"
+        ext.mkdir()
+        for name, source in BASES.items():
+            raw = source.read_bytes()
+            assert hashlib.sha256(raw).hexdigest() == PREIMAGE_SHA256[name], name
+            (ext / name).write_bytes(raw)
+        for args in (["git", "apply", "--check", str(PATCH)],
+                     ["git", "apply", str(PATCH)]):
+            action = subprocess.run(args, cwd=cls.stage, capture_output=True,
+                                    text=True, timeout=15)
+            assert action.returncode == 0, action.stderr
+        for name, expected in CANDIDATE_SHA256.items():
+            assert hashlib.sha256((ext / name).read_bytes()).hexdigest() == expected, name
+        cls.pickers = (ext / "pick.py",)
+        cls.shells = (ext / "sub.sh",)
+        cls.codex = ext / "mm_codex_exec.sh"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
+
     def setUp(self):
         self.policy = {
             "pools": {
@@ -62,8 +101,8 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                                        host_modes={"minimax": "minimax",
                                                    "glm": "glm"})
 
-    def test_both_pickers_preserve_old_default_and_admit_only_exact_pin(self):
-        for path in PICKERS:
+    def test_native_patch_preserves_old_default_and_admits_only_exact_pin(self):
+        for path in self.pickers:
             with self.subTest(path=path):
                 picker = load_picker(path)
                 self.assertEqual(
@@ -85,7 +124,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                 self.assertIn("MODEL=MiniMax-M3 ", old)
 
     def test_wrong_pool_and_unreviewed_model_fail_closed(self):
-        for path in PICKERS:
+        for path in self.pickers:
             with self.subTest(path=path):
                 picker = load_picker(path)
                 for model, pool in (
@@ -99,7 +138,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                         self.assertTrue(result.startswith("NONE reason="), result)
 
     def test_native_host_preview_never_treats_minimax_pin_as_glm_model(self):
-        for path in PICKERS:
+        for path in self.pickers:
             with self.subTest(path=path):
                 picker = load_picker(path)
                 original_selection = picker._selection_model
@@ -135,7 +174,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                 self.assertEqual(glm_inputs, [None])
 
     def test_claude_profiles_keep_1m_context_and_compaction_headroom(self):
-        for path in SHELLS:
+        for path in self.shells:
             with self.subTest(path=path):
                 text = path.read_text()
                 body = text.split("CLAUDE_WORKER_MAX_TURNS=120\n", 1)[1]
@@ -155,7 +194,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                     self.assertEqual(result.stdout.strip(), "1000000 900000 240")
 
     def test_m31_plan_key_gate_refuses_payg_but_preserves_legacy_m3(self):
-        for path in SHELLS:
+        for path in self.shells:
             with self.subTest(path=path):
                 text = path.read_text()
                 self.assertLess(
@@ -180,7 +219,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                     self.assertEqual(test.returncode, expected, test.stderr)
                     self.assertNotIn(token, test.stdout + test.stderr)
 
-        text = (SOURCE / "mm_codex_exec.sh").read_text()
+        text = self.codex.read_text()
         self.assertLess(text.index("export MINIMAX_API_KEY="),
                         text.index("MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED"))
         start = 'case "$MODEL" in\n  MiniMax-M3.1-Flash|minimax-m3.1-flash)'
@@ -201,7 +240,7 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
             self.assertNotIn(token, test.stdout + test.stderr)
 
     def test_codex_profile_recognizes_m31_and_rejects_excess_context(self):
-        source = (SOURCE / "mm_codex_exec.sh").read_text()
+        source = self.codex.read_text()
         segment = source.split("CODEX_CONTEXT_ARGS=()\n", 1)[1]
         segment = segment.split("\nSTUDIO_MCP_CODEX_OVERRIDE=", 1)[0]
         program = ('MODEL="$1"\nCODEX_CONTEXT_ARGS=()\n' + segment
