@@ -17,12 +17,18 @@ def _env(monkeypatch):
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_MAX_INFLIGHT", "2")
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_DAILY_CAP_USD", "10")
     monkeypatch.setenv("EXPLABS_API_KEY", "fake-key-a")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_GATEWAY_BASE_URL", "http://127.0.0.1:18731/v1")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_GATEWAY_PROXY_TOKEN",
+                       "fixture-local-account-a-" + "a" * 24)
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_ENABLED", "1")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_SERVING_VERIFIED", "1")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_ORG_SLUG", "org-b")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_MAX_INFLIGHT", "2")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "10")
     monkeypatch.setenv("EXPLABS_API_KEY_2", "fake-key-b")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_GATEWAY_BASE_URL", "http://127.0.0.1:18732/v1")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_GATEWAY_PROXY_TOKEN",
+                       "fixture-local-account-b-" + "b" * 24)
 
 
 def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_gets=None, expected_max_tokens=1500):
@@ -32,10 +38,12 @@ def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_ge
     limits = limits if limits is not None else {"fake-key-a": 10.0, "fake-key-b": 10.0}
 
     def serve(request):
-        key = request.headers["Authorization"].removeprefix("Bearer ")
-        assert key in orgs
+        supplied = request.headers["Authorization"].removeprefix("Bearer ")
         path = request.url.path
         if request.method == "GET":
+            key = supplied
+            assert key in orgs
+            assert request.url.host == "api.experientiallabs.ai"
             if seen_gets is not None:
                 seen_gets.append((key, path))
             if path == "/api/whoami":
@@ -55,6 +63,16 @@ def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_ge
                 )
             raise AssertionError(f"unexpected GET path: {path}")
         assert request.method == "POST" and path == "/v1/chat/completions"
+        # Provider keys are ONLY used for read-only owner identity/cap reads.
+        # The inference POST uses the host-owned gateway's scoped local bearer.
+        if supplied == "fixture-local-account-a-" + "a" * 24:
+            key = "fake-key-a"
+            assert request.url.host == "127.0.0.1" and request.url.port == 18731
+        elif supplied == "fixture-local-account-b-" + "b" * 24:
+            key = "fake-key-b"
+            assert request.url.host == "127.0.0.1" and request.url.port == 18732
+        else:
+            raise AssertionError("provider token must not go to the inference POST")
         assert json.loads(request.content) == {
             "model": "deepseek-v4.1-flash",
             "messages": [{"role": "user", "content": "one independent task"}],
@@ -671,3 +689,139 @@ def test_missing_billing_lane_flag_holds_account_even_with_zero_cost(monkeypatch
     with pytest.raises(explabs_client.ExperientialError, match="no_eligible_account"):
         pool.complete("", "one independent task")
     assert calls == ["fake-key-b"]
+
+
+# ---------------------------------------------------------------------------
+# All new Brain inference must join the existing gateway's per-org RPM owner.
+# The two provider keys are used only for read-only origin/cap probes.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("missing", [
+    "EXPLABS_ACCOUNT_1_GATEWAY_BASE_URL",
+    "EXPLABS_ACCOUNT_1_GATEWAY_PROXY_TOKEN",
+    "EXPLABS_ACCOUNT_2_GATEWAY_BASE_URL",
+    "EXPLABS_ACCOUNT_2_GATEWAY_PROXY_TOKEN",
+])
+def test_local_shared_gateway_is_required_before_any_account_probe(monkeypatch, missing):
+    _env(monkeypatch)
+    monkeypatch.delenv(missing)
+    seen_gets = []
+    http, calls = _transport(seen_gets=seen_gets)
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert not explabs_pool.available()
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
+        pool.complete("", "one independent task")
+    assert not seen_gets and not calls
+
+
+@pytest.mark.parametrize("invalid", [
+    "http://localhost:18732/v1",
+    "http://127.0.0.1:18732/v1/../admin",
+    "http://127.0.0.1:18732/v1%2fadmin",
+    "http://127.0.0.1:18732/v1?token=bad",
+    "https://api.experientiallabs.ai/v1",
+    "http://203.0.113.10:18732/v1",
+    "http://127.0.0.2:18732/v1",
+    "http://127.0.0.1:18732/v1/",
+    "http://127.0.0.1:0/v1",
+    "http://127.0.0.1:80/v1",
+])
+def test_public_named_or_ambiguous_gateway_address_never_receives_token(monkeypatch, invalid):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_GATEWAY_BASE_URL", invalid)
+    seen_gets = []
+    http, calls = _transport(seen_gets=seen_gets)
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert not explabs_pool.available()
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
+        pool.complete("", "one independent task")
+    assert not seen_gets and not calls
+
+
+@pytest.mark.parametrize("duplicate_field", [
+    "EXPLABS_ACCOUNT_2_GATEWAY_BASE_URL",
+    "EXPLABS_ACCOUNT_2_GATEWAY_PROXY_TOKEN",
+])
+def test_distinct_organizations_require_distinct_gateway_admission_identity(
+        monkeypatch, duplicate_field):
+    _env(monkeypatch)
+    suffix = duplicate_field.removeprefix("EXPLABS_ACCOUNT_2_")
+    monkeypatch.setenv(duplicate_field, __import__("os").environ[
+        "EXPLABS_ACCOUNT_1_" + suffix
+    ])
+    seen_gets = []
+    http, calls = _transport(seen_gets=seen_gets)
+    assert not explabs_pool.available()
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
+        explabs_pool.AccountPool(http_client=http).complete("", "one independent task")
+    assert not seen_gets and not calls
+
+
+@pytest.mark.parametrize("changed", [
+    "EXPLABS_ACCOUNT_2_GATEWAY_BASE_URL",
+    "EXPLABS_ACCOUNT_2_GATEWAY_PROXY_TOKEN",
+])
+def test_a_live_pool_refuses_gateway_route_or_token_rotation(monkeypatch, changed):
+    _env(monkeypatch)
+    http, calls = _transport()
+    pool = explabs_pool.AccountPool(http_client=http)
+    pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]
+    replacement = (
+        "http://127.0.0.1:18733/v1" if changed.endswith("BASE_URL")
+        else "fixture-rotated-local-token-" + "x" * 24
+    )
+    monkeypatch.setenv(changed, replacement)
+    with pytest.raises(explabs_client.ExperientialError,
+                       match="explabs_pool_gateway_route_changed"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]
+
+
+def test_pool_mode_refuses_direct_vendor_completion_without_shared_route(monkeypatch):
+    _env(monkeypatch)
+    requests = []
+    http = httpx.Client(transport=httpx.MockTransport(
+        lambda req: requests.append(req) or httpx.Response(200, json={})
+    ))
+    with pytest.raises(explabs_client.ExperientialError,
+                       match="explabs_pool_requires_shared_gateway"):
+        explabs_client.complete("", "one independent task", client=http,
+                                api_key="fake-key-b")
+    assert requests == []
+
+
+def test_shared_gateway_receives_only_scoped_bearer_not_provider_key(monkeypatch):
+    _env(monkeypatch)
+    requests = []
+    def local(req):
+        requests.append(req)
+        assert req.url.host == "127.0.0.1"
+        assert req.url.path == "/v1/chat/completions"
+        assert req.headers["Authorization"] == (
+            "Bearer fixture-local-account-b-" + "b" * 24
+        )
+        assert "fake-key-b" not in str(req.headers)
+        return httpx.Response(200, json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": 0},
+            "is_byok": False,
+        })
+    with httpx.Client(transport=httpx.MockTransport(local)) as client_http:
+        result = explabs_client.complete(
+            "", "one independent task", client=client_http,
+            api_key="fake-key-b",
+            shared_gateway_url="http://127.0.0.1:18732/v1",
+            local_proxy_token="fixture-local-account-b-" + "b" * 24,
+        )
+    assert result.text == "OK"
+    assert len(requests) == 1
+
+
+def test_account_representation_cannot_expose_either_credential(monkeypatch):
+    _env(monkeypatch)
+    account = explabs_pool._configs()[1]
+    assert "fake-key-b" not in repr(account)
+    assert "fixture-local-account-b-" not in repr(account)

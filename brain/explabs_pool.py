@@ -29,10 +29,12 @@ _SLOTS = (("1", "EXPLABS_API_KEY", "EXPLABS_ACCOUNT_1"), ("2", "EXPLABS_API_KEY_
 @dataclass(frozen=True)
 class Account:
     slot: str
-    key: str
+    key: str = field(repr=False)
     expected_org: str
     max_inflight: int
     max_daily_usd: float
+    gateway_base_url: str
+    gateway_proxy_token: str = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -89,11 +91,22 @@ def _configs() -> tuple[Account, ...]:
         max_daily_usd = _money(os.environ.get(stem + "_DAILY_CAP_USD"))
         if max_daily_usd is None or max_daily_usd <= 0:
             raise gateway.ExperientialError("explabs_pool_daily_cap_required")
-        accounts.append(Account(slot, key, org, cap, max_daily_usd))
+        base_url = gateway.pinned_local_gateway_url(
+            os.environ.get(stem + "_GATEWAY_BASE_URL", "")
+        )
+        token = gateway.scoped_gateway_token(
+            os.environ.get(stem + "_GATEWAY_PROXY_TOKEN", "")
+        )
+        accounts.append(Account(slot, key, org, cap, max_daily_usd, base_url, token))
     if not accounts:
         raise gateway.ExperientialError("explabs_pool_no_enabled_accounts")
     if len({a.expected_org for a in accounts}) != len(accounts):
         raise gateway.ExperientialError("explabs_pool_requires_distinct_orgs")
+    if (len({a.gateway_base_url for a in accounts}) != len(accounts) or
+            len({a.gateway_proxy_token for a in accounts}) != len(accounts)):
+        # Distinct organizations cannot be sent into one local quota
+        # namespace, nor accidentally share the same scoped bearer.
+        raise gateway.ExperientialError("explabs_pool_requires_distinct_gateway_routes")
     return tuple(accounts)
 
 
@@ -123,6 +136,7 @@ class AccountPool:
         self._last_chosen = "2"
         self._bound_orgs: tuple[str, ...] | None = None
         self._bound_keys: tuple[str, ...] | None = None  # in-memory only, never logged
+        self._bound_gateways: tuple[tuple[str, str], ...] | None = None
         self._verified_org_ids: tuple[str, ...] | None = None
         self._eligible_set_verified = False
 
@@ -200,6 +214,14 @@ class AccountPool:
         ):
             raise gateway.ExperientialError("explabs_pool_key_rotation_requires_restart")
         self._bound_keys = current_keys
+        current_gateways = tuple((a.gateway_base_url, a.gateway_proxy_token) for a in accounts)
+        if self._bound_gateways is not None and (
+            len(self._bound_gateways) != len(current_gateways)
+            or any(old[0] != new[0] or not hmac.compare_digest(old[1], new[1])
+                   for old, new in zip(self._bound_gateways, current_gateways))
+        ):
+            raise gateway.ExperientialError("explabs_pool_gateway_route_changed")
+        self._bound_gateways = current_gateways
         if self._bound_orgs is not None and self._bound_orgs != expected:
             # An identity change requires an explicitly new pool object, not
             # silently reusing health or usage from another organization.
@@ -325,6 +347,8 @@ class AccountPool:
                 client=self._client,
                 api_key=account.key,
                 max_tokens=max_tokens,
+                shared_gateway_url=account.gateway_base_url,
+                local_proxy_token=account.gateway_proxy_token,
             )
         except gateway.ExperientialError as exc:
             with self._lock:
