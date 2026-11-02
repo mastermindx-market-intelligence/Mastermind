@@ -22,10 +22,10 @@ class ThermalHostPreleaseTests(unittest.TestCase):
             **self.route, "HOST": "ubuntu1",
         }
         self.registry = {
-            "ubuntu0": {"ssh_alias": "ubuntu0", "require_thermal": True,
-                        "cpu_tctl_limit_c": 84},
-            "ubuntu1": {"ssh_alias": "ubuntu1", "require_thermal": True,
-                        "cpu_tctl_limit_c": 84},
+            "ubuntu0": {"ssh_alias": "ubuntu0", "platform": "linux",
+                        "require_thermal": True, "cpu_tctl_limit_c": 84},
+            "ubuntu1": {"ssh_alias": "ubuntu1", "platform": "linux",
+                        "require_thermal": True, "cpu_tctl_limit_c": 84},
         }
         self.options = {"host": "auto", "pool": None,
                         "requested_model": None, "route_key": "review-one"}
@@ -119,6 +119,32 @@ class ThermalHostPreleaseTests(unittest.TestCase):
                     lambda *_: self.fail("no route authorized"),
                     observe=lambda *_: self.fail("invalid host must not probe"))
 
+    def test_linux_thermal_enrollment_missing_or_disabled_refuses(self):
+        for value in (None, False):
+            entry = self.registry["ubuntu0"]
+            if value is None:
+                entry.pop("require_thermal", None)
+            else:
+                entry["require_thermal"] = value
+            with self.subTest(thermal_enrollment=value):
+                with patch.object(host_pick, "load_registry", return_value=self.registry):
+                    with self.assertRaisesRegex(
+                            task.FabricTaskError, "THERMAL_PREFLIGHT_POLICY_INVALID"):
+                        task._prelease_select_cool_host(
+                            self.route, self.options,
+                            lambda *_: self.fail("must not reselect malformed host"),
+                            observe=lambda *_: self.fail("must not probe malformed host"))
+
+    def test_missing_platform_cannot_skip_thermal_policy(self):
+        self.registry["ubuntu0"].pop("platform")
+        with patch.object(host_pick, "load_registry", return_value=self.registry):
+            with self.assertRaisesRegex(task.FabricTaskError,
+                                        "THERMAL_PREFLIGHT_POLICY_INVALID"):
+                task._prelease_select_cool_host(
+                    self.route, self.options,
+                    lambda *_: self.fail("must not route malformed host"),
+                    observe=lambda *_: self.fail("must not probe malformed host"))
+
     def test_non_capacity_refusal_remains_explicit(self):
         with patch.object(host_pick, "load_registry", return_value=self.registry):
             with self.assertRaisesRegex(task.FabricTaskError,
@@ -129,6 +155,8 @@ class ThermalHostPreleaseTests(unittest.TestCase):
                     observe=lambda *_: 99.0)
 
     def test_unenrolled_host_does_not_gain_extra_admission(self):
+        # macOS registry entries intentionally use another admission path.
+        self.registry["ubuntu0"]["platform"] = "darwin"
         self.registry["ubuntu0"]["require_thermal"] = False
         with patch.object(host_pick, "load_registry", return_value=self.registry):
             self.assertEqual(task._prelease_select_cool_host(

@@ -27,10 +27,10 @@ class ThermalRequestContract(unittest.TestCase):
         self.routed = []
         self.readings = {"ubuntu0": 92.0, "ubuntu1": 58.0}
         self.registry = {
-            "ubuntu0": {"ssh_alias": "ubuntu0", "require_thermal": True,
-                        "cpu_tctl_limit_c": 84},
-            "ubuntu1": {"ssh_alias": "ubuntu1", "require_thermal": True,
-                        "cpu_tctl_limit_c": 84},
+            "ubuntu0": {"ssh_alias": "ubuntu0", "platform": "linux",
+                        "require_thermal": True, "cpu_tctl_limit_c": 84},
+            "ubuntu1": {"ssh_alias": "ubuntu1", "platform": "linux",
+                        "require_thermal": True, "cpu_tctl_limit_c": 84},
         }
         self.source = task._prelease_select_cool_host
         def select(task_class, **options):
@@ -112,6 +112,16 @@ class ThermalRequestContract(unittest.TestCase):
         self.assertEqual(self.launched, [])
         self.assertEqual(len(self.routed), 1)
         self.assertFalse(self.artifact(".request-launch.json").exists())
+
+    def test_missing_linux_thermal_enrollment_cannot_launch(self):
+        self.registry["ubuntu0"].pop("require_thermal")
+        with self.assertRaisesRegex(task.FabricTaskError,
+                                    "THERMAL_PREFLIGHT_POLICY_INVALID"):
+            self.invoke()
+        self.assertEqual(self.launched, [])
+        self.assertFalse(self.artifact(".request-launch.json").exists())
+        self.assertEqual(task.inspect_run("thermal-review")["state"],
+                         "REQUEST_REFUSED_BEFORE_LAUNCH")
 
     def test_opt_in_is_required_and_legacy_request_unchanged(self):
         self.assertEqual(self.invoke(enabled=False), 0)

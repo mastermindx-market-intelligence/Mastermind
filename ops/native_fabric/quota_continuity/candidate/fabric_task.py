@@ -774,8 +774,16 @@ def _prelease_select_cool_host(
         entry = registry.get(host)
         if not isinstance(entry, dict):
             raise FabricTaskError("THERMAL_PREFLIGHT_HOST_UNREGISTERED")
-        if ("require_thermal" in entry and
-                type(entry["require_thermal"]) is not bool):
+        # A Linux worker without explicit thermal enrollment is a malformed
+        # placement policy, not permission to bypass a physical guard. The
+        # incumbent remote launcher also defaults missing enrollment to false;
+        # fail here instead of inheriting that unsafe ambiguity.
+        platform = entry.get("platform")
+        if (platform not in ("linux", "darwin")
+                or ("require_thermal" in entry
+                    and type(entry["require_thermal"]) is not bool)
+                or (platform == "linux"
+                    and entry.get("require_thermal") is not True)):
             raise FabricTaskError("THERMAL_PREFLIGHT_POLICY_INVALID")
         if entry.get("require_thermal") is not True:
             return current
