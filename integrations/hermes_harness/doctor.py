@@ -17,6 +17,7 @@ from integrations.hermes_models.contract import PROFILE_PRIMARY, PROVIDERS, prov
 from integrations.hermes_models.credentials import CredentialUnavailable, load_credential
 from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
 from integrations.hermes_runtime.errors import RuntimeRefusal
+from integrations.hermes_runtime.egress import native_egress_child_env
 from integrations.hermes_runtime.secrets import load_secrets
 
 SCHEMA = "mastermind.hermes_harness.doctor.v1"
@@ -75,6 +76,14 @@ def doctor(
         path = root / ".config" / "hermes-runtime" / name
         if not _gateway_file_ok(path):
             missing.append(f"credential_file:{name}")
+    # Check the actual selected role-private systemd file, never ambient
+    # HTTP(S)_PROXY or an unrelated role/user secrets file.
+    for role in PROFILE_PRIMARY:
+        try:
+            _spec, secrets_path = _native_primary_source(root, role)
+            native_egress_child_env(role, load_secrets(secrets_path).values)
+        except (RuntimeRefusal, OSError, ValueError, KeyError):
+            missing.append(f"network_proxy:{role}")
     for name in _ENDPOINTS:
         if not env.get(name, "").strip():
             missing.append(f"endpoint:{name}")
@@ -88,11 +97,29 @@ def doctor(
     missing.extend(_agent_identity_gaps(root, roster_path=roster_path))
     missing.append("id:DOT_BOT_USER_IDS")
     missing = sorted(set(missing))
+    # The core text/Slack role does not require Mac actuation, Cursor,
+    # vision or unarmed Steward/Fabric. Its configuration can qualify
+    # independently, but must never be reported as provider/Slack LIVE.
+    core_ids = {
+        "credential:BYTEPLUS_MODELARK_API_KEY", "credential:ZAI_API_KEY",
+        "grant:pinned_upstream_checkout", "grant:ubuntu1_systemd_user_manager",
+    }
+    core_prefixes = (
+        "credential_file:mm", "network_proxy:mm", "credential:hermes-",
+        "id:hermes-", "config:hermes_agents:",
+    )
+    core_missing = sorted(v for v in missing if v in core_ids or v.startswith(core_prefixes))
     return {
         "schema": SCHEMA,
         "status": "MISSING" if missing else "READY",
         "missing": missing,
         "missing_count": len(missing),
+        "core_text_status": "CONFIG_MISSING" if core_missing else "CONFIG_READY_NOT_LIVE_PROVEN",
+        "core_text_missing": core_missing,
+        "core_text_missing_count": len(core_missing),
+        "native_egress_host_policy_verified": False,
+        "provider_authenticated": False,
+        "slack_roundtrip_verified": False,
         "m2studio_machine_id": M2STUDIO_MACHINE,
         "pinned_sha": PINNED_UPSTREAM_SHA,
         "provider_env_names": sorted({spec.credential_env for spec in PROVIDERS.values()}),
@@ -107,6 +134,8 @@ def format_doctor(report: Mapping[str, object]) -> str:
         f"schema: {report.get('schema')}",
         f"status: {report.get('status')}",
         f"missing_count: {len(rows)}",
+        f"core_text_status: {report.get('core_text_status')}",
+        f"core_text_missing_count: {report.get('core_text_missing_count')}",
         "missing:",
     ]
     for item in rows:
