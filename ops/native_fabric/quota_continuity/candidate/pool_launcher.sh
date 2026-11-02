@@ -12,10 +12,12 @@ SUB="$KIT_DIR/ext/sub.sh"
 LEDGER="$KIT_DIR/ext/pool_ledger.py"
 
 usage() {
-  echo "usage: pool <run|remote|onboard|hosts|placement|refresh|pick|status|plan|stats|ledger> [args...]" >&2
+  echo "usage: pool <preview|request|run|remote|onboard|hosts|placement|refresh|pick|status|plan|stats|ledger> [args...]" >&2
   echo "  run    <grok|cursor|qwen|minimax|glm|glm-codex|minimax-codex|go-codex|go-claude|oc-free> \"<prompt>\" [cwd] [model]" >&2
   echo "  remote <host|auto> <mode> <packet_file> <remote_cwd> [model] [--out F] [--dry-run]   # R34 remote placement" >&2
   echo "  hosts  <mode> [--seat-ok]        # host eligibility table (R34 remote-first)" >&2
+  echo "  preview --id ID --class CLASS [--pool auto|POOL] [--model auto|MODEL]  # NO EFFECT" >&2
+  echo "  request --id ID --class CLASS --stdin [--pool POOL] [--model MODEL] [--strict-manual-pin]" >&2
   echo "  pick   <task-class> [--prefer <pool>] [--pool <pool>] [--needs vision] [--subject-pool <pool>]" >&2
   echo "  placement --mode <mode> [--json]  # read-only host/provider/route boundaries" >&2
   echo "  refresh HOST [HOST...]            # bounded selected-host telemetry refresh" >&2
@@ -34,6 +36,8 @@ fi
 CMD="$1"; shift
 
 case "$CMD" in
+  preview) exec python3 "$KIT_DIR/ext/fabric_task.py" preview "$@" ;;
+  request) exec python3 "$KIT_DIR/ext/fabric_task.py" request "$@" ;;
   run)
     POOL="${1:?pool}"; PROMPT="${2:?prompt}"; CWD="${3:-$PWD}"; MODEL="${4:-}"
     exec bash "$SUB" "$POOL" "$PROMPT" "$CWD" "$MODEL" ;;

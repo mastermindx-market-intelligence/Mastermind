@@ -104,6 +104,62 @@ Apply
 `docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md`
 when this procedure is protected.
 
+## Step 2B — GitHub-native Cursor Cloud as an independent *source-review* avenue
+
+A Chairman/Sol-authorized `@cursor` GitHub PR comment may commission a distinct Cursor Cloud
+Agent to perform a bounded read-only adversarial review **without Subagent Fabric**. This is
+an eligible manual review avenue when the selected Fabric provider is unavailable, unplaced
+or terminally failed and its original operation/effects are reconciled. It is **not** an
+Executive OS model/provider alias, Job, Attempt, Fabric acceptance, automatic failover,
+or substitute for a mission that expressly requires proof of Fabric admission/START.
+
+Never route around an explicit safety/permission/qualification denial, a refused Attempt
+with `retry_allowed=false`, an active reviewer, or `EFFECT_UNKNOWN`; changing to Cursor is
+not permission to retry the *same refused operation* on a different provider. An already
+commissioned review must be reconciled on its original carrier before assigning a genuinely
+distinct, newly authorized review operation. A fresh operation name, GitHub comment or
+reviewer identity does not reconcile an original `EFFECT_UNKNOWN` review or waive its
+refusal. Apply the same approved cost/confidentiality and external-code-access conditions
+as any third-party cloud reviewer.
+
+The exact procedure and guarded `@cursor` packet are in
+`docs/CURSOR_CLOUD_INDEPENDENT_REVIEW.md`. Require **all** of these observations:
+
+1. **Source-bound commission.** The existing GitHub PR is real and authorized, and one
+   commissioned comment names repository, PR number, complete immutable head SHA, intended
+   base/diff, adversarial scope, source-only write prohibitions, and return-to-existing-PR.
+   Do not commission a duplicate on ambiguous/missing bot feedback.
+2. **Distinct agent evidence.** Read back the GitHub comment, a legitimate Cursor bot
+   response with the new Cloud Agent identity/link, and the actual independent agent's
+   completed findings and exact-head checks. `Taking a look!` or an agent link alone
+   proves at most a launch acknowledgement, **not** terminal review or acceptance.
+3. **No source effects.** Verify the PR head remains identical and the agent has not
+   pushed, modified a branch, opened a PR, changed permissions, deployed, or merged.
+   Test claims need receipts; untrusted PR code must not run with credentials.
+4. **Identity-separated verdict.** An identified Cloud Agent's read-only analysis may
+   count as an independent *technical/source-review assessment* if it is distinct
+   from the builder and its exact-head evidence is independently adjudicated.
+   In Mastermind #1515, GitHub issue-comment `user.login` was `cursor[bot]`, while
+   the agent-reported authenticated GitHub/MCP principal was
+   `chriswong6031-creator`, a PR source author; the distinct Cursor Cloud Agent was
+   `bc-03e22133-a364-4ec8-98c4-3db18becba0c`. This is
+   **SOURCE-REVIEW-ONLY / NON_AUTHOR_APPROVAL_NOT_PROVEN**, never formal independent
+   `APPROVED`: an ordinary PR issue comment (bot- or author-posted) is never a
+   submitted formal GitHub PR review. A branch-protection non-author review still
+   requires a **genuine separate authenticated GitHub reviewer** and an actual
+   submitted review at the exact head; do not infer either from the issue-comment
+   `user.login`, the Cloud Agent identity, or its in-agent principal.
+5. **Ordinary release law persists.** Current-head CI, security findings, current-base
+   integration, required formal GitHub approvals, protected merge queue and real
+   production-path proof are separate gates. A Cursor technical PASS cannot close
+   GitHub→Executive/Fabric→formal-review→Slack acceptance.
+
+Record one source-linked receipt: PR/head/base, original Fabric attempt/effect disposition
+(if relevant), `@cursor` comment ID, bot/agent identity and link, terminal result comment
+and evidence, immutable-source verification, technical findings/verdict, *actual formal
+GitHub reviewer ID and reviewed commit or NOT_PROVEN*, and the next protected gate.
+Do not add another review queue, lifecycle state registry, claim/approval plane or watcher.
+
 ## Step 3 — Ask the Sol review questions
 
 For every substantive return, answer:

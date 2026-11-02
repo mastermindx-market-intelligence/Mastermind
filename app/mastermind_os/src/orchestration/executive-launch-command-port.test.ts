@@ -1556,6 +1556,23 @@ describe("T14 App-outcome shape matrix", () => {
 });
 
 describe("requested CEO custody", () => {
+
+  it("keeps direct native launch valid when planner CEO choices are configured", () => {
+    const idle = makeClient(() => barePreflight("not_found"));
+    const nativeConfig: LaunchBindingConfig = { ...RESEARCH_CONFIG,
+      profiles: [{ ref: "native_research_only", label: "Native research" }], attemptLimit: 1 };
+    const form = { ...RESEARCH_FORM, profileRef: "native_research_only" };
+    const legacy = makeBinding(idle.client, nativeConfig).makeLaunchIntent(form);
+    expect(legacy).not.toBeNull();
+    const binding = makeBinding(idle.client, { ...nativeConfig,
+      frontierModels: [{ ref: "frontier.one", label: "CEO" }] });
+    const direct = binding.makeLaunchIntent(form);
+    expect(direct).not.toBeNull();
+    expect(direct!.payload.operation_key).toBe(legacy!.payload.operation_key);
+    expect(direct!.payload).not.toHaveProperty("frontier_model_alias");
+    expect(binding.makeLaunchIntent({ ...form, frontierModelAlias: "frontier.one" })).toBeNull();
+    expect(idle.log).toEqual([]);
+  });
   const choices = [{ ref: "frontier.one", label: "One" }, { ref: "frontier.two", label: "Two" }];
   const idle = makeClient(() => barePreflight("not_found"));
   it("keeps the selected alias in the payload and exact operation identity", () => {

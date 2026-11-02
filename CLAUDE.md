@@ -50,6 +50,21 @@ changes; do not rebuild an existing system without evidence it is unusable.
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
 
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+Agent OS workstream waves and latest dated handoff as the pinned plan, and the
+versioned GitHub master plan as the task tree only. If no task tree exists, create
+and read back one with stable task/subtask IDs, dependencies and acceptance evidence
+**before major delegation or implementation**. The next action stays on the workstream
+and handoff.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
+
 ### Start assigned work; do not wait for administrative ceremony
 
 A current explicit handoff is sufficient assignment at the human/session layer; record pickup
@@ -126,6 +141,10 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 - **Slack delivery is not target consumption**, and neither delivery nor a historical native task ID
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
+
+### Independent-review routing across sessions
+
+For independent PR/source review, load [the single shared session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) and check actual admitted Fabric tool/root/effect evidence. A separately authorized Dot can receive one source-bound Slack technical-review assignment when genuinely eligible; no duplicate or refused-operation workaround, fictional START, or formal GitHub approval inferred from a Slack result. Existing Executive/GitHub authority remains controlling.
 
 ## Agent OS — the organizational knowledge plane
 

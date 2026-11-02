@@ -12,15 +12,64 @@ import stat
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 
 HOST = "mcp.mastermind-x.com"
-POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
-GET_ROUTES = (
+# Historical profiles are exact transition inputs, never caller-defined routes.
+LEGACY_POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
+SESSION_READ_POST_ROUTES = (
+    "/os/executive/session/context", "/os/executive/session/reply",
+    "/os/executive/session/references",
+)
+CONTROL_ROOM_ACTION_ROUTES = (
+    "/workspace/control-room/open", "/workspace/control-room/bind",
+    "/workspace/control-room/unbind", "/workspace/control-room/refresh-builds",
+)
+READER_POST_ROUTES = LEGACY_POST_ROUTES + SESSION_READ_POST_ROUTES
+CONTROL_ROOM_POST_ROUTES = LEGACY_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
+# Session context/reply/references are reads. The effectful session/send route
+# is deliberately absent; this composition does not change its authorization.
+POST_ROUTES = READER_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
+LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
     "/workspace/work/current", "/workspace/mission/current",
     "/workspace/mission/v3/current", "/workspace/result/current",
-    "/workspace/plan/current",
-    "/workspace/operator/activity/current",
     "/workspace/window/current",
 )
+CONTROL_ROOM_LEGACY_GET_ROUTES = LEGACY_GET_ROUTES + (
+    "/workspace/plan/current", "/workspace/operator/activity/current",
+)
+READER_GET_ROUTES = CONTROL_ROOM_LEGACY_GET_ROUTES + (
+    "/workspace/result-references/current",
+)
+CONTROL_ROOM_READ_ROUTES = (
+    "/workspace/control-room/state/current",
+    "/workspace/control-room/discover/current",
+    "/workspace/mission/v4/current",
+)
+CONTROL_ROOM_GET_ROUTES = CONTROL_ROOM_LEGACY_GET_ROUTES + CONTROL_ROOM_READ_ROUTES
+GET_ROUTES = READER_GET_ROUTES + CONTROL_ROOM_READ_ROUTES
+# Preserve exactly the profiles admitted by the two predecessor contracts.
+# Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
+# partial upgrades, wildcards and extra paths cannot become transition inputs.
+TRANSITION_ROUTE_PROFILES = (
+    (LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
+    (LEGACY_GET_ROUTES, READER_POST_ROUTES),
+    (READER_GET_ROUTES, LEGACY_POST_ROUTES),
+    (READER_GET_ROUTES, READER_POST_ROUTES),
+    (CONTROL_ROOM_LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
+    (CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES),
+    (GET_ROUTES, POST_ROUTES),
+)
+
+# Retain the published reader-profile names for existing callers.
+INCUMBENT_GET_ROUTES = READER_GET_ROUTES
+INCUMBENT_POST_ROUTES = READER_POST_ROUTES
+# Public MCP entrypoint (#1656). Two dedicated branches, kept out of GET_ROUTES
+# so a previously installed 3-branch config stays plannable: the RFC 9728
+# protected-resource metadata document and the Streamable HTTP POST. The /mcp
+# branch presents a loopback Host because the gateway's SDK transport fence
+# admits only loopback hosts; Caddy still performs no authentication.
+MCP_METADATA_ROUTE = "/.well-known/oauth-protected-resource/mcp"
+MCP_ROUTES = ("/mcp",)
+MCP_MAX_BODY = 64000
 _TEMPLATE = Path(__file__).with_name("os_public_edge.caddy.template")
 
 
@@ -49,7 +98,8 @@ def render(manifest: object, relay_port: int) -> str:
         raise ValueError("OS edge relay port refused")
     routes = asset_routes(manifest)
     template = _TEMPLATE.read_text(encoding="utf-8")
-    if template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 2:
+    if (template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 4
+            or template.count("path " + " ".join(POST_ROUTES) + "\n") != 1):
         raise ValueError("OS edge template differs")
     return template.replace("__ASSET_PATHS__", " ".join(routes)).replace("__RELAY_PORT__", str(relay_port))
 
@@ -77,6 +127,7 @@ def stage(*, manifest: object, relay_port: int, output: Path) -> dict:
         "sha256": hashlib.sha256(content).hexdigest(),
         "relay_port": relay_port,
         "routes": {"get": sorted(set(GET_ROUTES) | set(asset_routes(manifest))), "post": list(POST_ROUTES)},
+        "mcp": {"get": [MCP_METADATA_ROUTE], "post": list(MCP_ROUTES)},
         "installed": False,
     }
 

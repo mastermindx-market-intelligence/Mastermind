@@ -91,6 +91,12 @@ jobs:
         run: cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
       - name: Test native Rust targets
         run: cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml
+      # Real macOS compilation of the opt-in source path; no registered client,
+      # Keychain identity or Auth0 tenant is provided to the CI runner.
+      - name: Check opt-in native rotating refresh path
+        run: MM_NATIVE_REFRESH_ENABLED=1 cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
+      - name: Test opt-in native rotating refresh path
+        run: MM_NATIVE_REFRESH_ENABLED=1 cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml
       - name: Construct unsigned macOS app
         run: ./node_modules/.bin/tauri build --ci --no-sign --bundles app -- --locked
       - name: Verify package and locked inputs

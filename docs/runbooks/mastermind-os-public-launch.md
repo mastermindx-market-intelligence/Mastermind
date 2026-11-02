@@ -108,9 +108,35 @@ Build the actual OS assets with real public client/config values. Stage Caddy us
 "python -m ops.executive_os.os_public_edge --source <build-dir> --relay-port <port>
 --out <new-candidate-file>". The renderer verifies the asset manifest against actual
 files. Its fixed template allows only OS assets, callback, canonical Workspace GETs
-and three Executive POSTs, bounds request bodies, removes spoofable forwarding
+and the exact three incumbent Executive POSTs plus three session READ-only
+POSTs (session/context, session/reply, session/references); session/send remains
+closed at the public edge under the held F2 pre-network authorization review.
+The existing transition planner accepts only the previously sealed three-path
+POST set or the exact six-path read-expanded set, and stages the latter without
+loading Caddy. It bounds request bodies, removes spoofable forwarding
 headers and fixes the upstream authority. Validate and qualify routing before the
 existing Caddy owner loads the candidate.
+
+The same fixed template also carries the public MCP entrypoint on
+mcp.mastermind-x.com (Chairman decision on #1656): exactly GET
+/.well-known/oauth-protected-resource/mcp (RFC 9728 metadata) and POST /mcp
+(Streamable HTTP, body capped by Caddy at 64000 bytes, below the gateway's own
+65536-byte ceiling), both ahead of the terminal abort. Caddy performs no
+authentication: the gateway still returns the 401 challenge and validates every
+token. /mcp is proxied with a loopback Host because the gateway's DNS-rebinding
+fence admits only loopback hosts. Staging this route does not make the endpoint
+usable, and installing it is not neutral: without the gateway's opt-in
+public_mcp_resource key the verifier accepts a token for any configured resource
+(OS and tunnel audiences included). Installation therefore waits for (1) the
+installed gateway to run with public_mcp_resource set to exactly
+https://mcp.mastermind-x.com/mcp, which restricts /mcp to that audience and
+advertises this host with a per-host resource_metadata challenge, (2) the sealed
+M2 installed-config change that adds the key (the preflight refuses a bad value),
+and (3) the Auth0 API audience to exist (see docs/EXECUTIVE_MCP.md section 8). The
+mode is exclusive per gateway process, so the OpenAI tunnel entrypoint stays
+reachable only through a second gateway instance with its own sealed config. A
+Caddy-only install yields a 401 whose challenge points at the tunnel resource, or
+an OAuth discovery failure, while still admitting those other audiences.
 
 The intended DNS A record is mcp.mastermind-x.com → 146.190.142.17.
 Do not claim DNS/certificate/routing readiness from rendered configuration.
@@ -143,3 +169,93 @@ Installed acceptance is separate from source tests:
 5. Save exact source head, nonsecret receipts, test/build results and remaining
    installed gates on the same product PR. JOB-013 is unrelated acceptance
    evidence and must not become an app pointer.
+
+## R2 historical original-answer installed-browser qualification (held until release)
+
+This is the acceptance path for the existing #1473 Runtime original-reference
+producer and #1542 Web Office historical-answer consumer. It is **not** a source
+test, a fixture-created Job, native-parent consumption, or permission to install.
+Run it only against an exact independently reviewed, protected, actually
+installed source after the F2 READ-only-token pre-network effectful-SEND review
+has been resolved and the original issuer's EFFECT_UNKNOWN operation remains
+fenced. Do not repair F2 through an alternate carrier or grant.
+
+### Preconditions that must be proved, not assumed
+
+1. Retain the immutable installed Runtime/Office source SHA(s), release manifest
+   digest, active Executive process path/configuration revision, and actual edge
+   Caddy readback. A CI-green or mergeable PR is insufficient. The installed
+   Runtime must contain `integrations/session_bridge/reference_tools.py`,
+   the authenticated private `session_reply_references` tool, and the
+   `POST /os/executive/session/references` leaf. The public edge admits the
+   exact three incumbent Executive endpoints plus the three new READ-only
+   `session/context`, `session/reply` and `session/references` paths.
+   Its `session/send` route remains excluded until separately authorized.
+2. Use the **existing** signed-in Web Office principal, configured Executive
+   OAuth resource and verified browser selection. Retain only nonsecret policy,
+   subject/client digest and auth-generation attestations; never copy, print,
+   record to HAR, or paste bearer tokens, Auth0 codes, cookies or JWT bodies.
+   A credential-less app build, mock transport or native Tauri test is not
+   the installed Web Office journey.
+3. Identify two already authorized, distinct **original** operations A and B
+   under the same verified selection and principal. A has a canonical native
+   committed reply; B is independently pending. Do not manufacture another
+   SEND, ACK, worker/attempt or replacement operation just to satisfy the
+   scenario. Especially do not reproduce the held CODEX EFFECT_UNKNOWN issuer.
+   If this real safe precondition is unavailable, record `NOT_PROVEN` and stop
+   that proof lane.
+
+### Browser proof: reload A while B stays pending
+
+1. Before reload, capture the browser's selected work/root, principal-scope
+   **digest**, installed source/build identity and the existing pending
+   B pointer's `operationKey`, `kind=message`, `targetKey`. Its canonical
+   storage is the incumbent IndexedDB
+   `mastermind-os-session-pending-v1` / `pointers` store, keyed by the verified
+   64-hex principal scope. Inspect the record **read-only**; do not write,
+   clear, migrate or export other scopes. The Launch pointer database is not
+   this one.
+2. Record a redacted request count baseline for
+   `/os/executive/session/send` and `/os/executive/submit` **before** the
+   recovery journey; also record original B's Runtime command/event ids and
+   relevant published/queued count from the canonical owner where available.
+   The read journey itself must cause **zero new effectful outbound requests**.
+3. Reload the actual signed-in Office Web page and choose the same selected
+   work/root. The history viewer must call only authenticated
+   `session/references` (bounded, possibly multiple signed-cursor READ pages)
+   and, after choosing A, the original `session/reply` with exactly A's
+   original `operation_key`. For every reference, the public projection must
+   preserve `REFERENCE_ONLY`, the original `read_ref` and
+   `request_ref` derived from that operation, fixed high-water, same root,
+   principal isolation and no duplicate history row. Cursor replay, drift,
+   loss of authorization and malformed/oversized content must refuse closed.
+4. Only when the verified `session/reply` returns the **native committed**
+   original A, matching its canonical request/read refs, may the bounded
+   answer text/next step appear. Treat `parent_consumed=false` as
+   **not consumed**, never as ACK. Confirm active answer A is not rendered a
+   second time as a historical card.
+5. After opening A, verify the IndexedDB B record is byte-/field-identical
+   to the pre-reload B pointer and remains pending in the UI/Runtime. Compare
+   outbound effectful network counters to the baseline: no repeat SEND,
+   publication, submit or new Job/Attempt, and no parent ACK. Capture one
+   sanitized screenshot or browser proof reference with the restored A and
+   pending B together. Do not include private message body unless the
+   authorized test's evidence sink is approved for it.
+6. As negative cases, switch to another work/root and back (A→B→A),
+   revoke/expire the current browser auth, or force a bounded READ failure
+   with an authorized test fixture. Any old A must disappear synchronously;
+   a late reply must not republish it or clear pending B. Without a real
+   installed signed-in negative-path fixture, label that case `NOT_PROVEN`.
+
+### Distinct terminal evidence
+
+Log the final observed release/route revision, exact selection, original
+operation/ref digests, browser evidence identifiers, pre/post pending B
+comparison, observed network counts and separately the native
+`reply_committed` versus parent-consumed state, with actual source citations.
+Never promote `REFERENCE_ONLY`, OAuth success, reply COMMIT, CI pass,
+screenshots, or a static pointer-store fixture into parent consumption,
+installation acceptance or PROVEN_LIVE by themselves. Native Tauri requires its
+own lawful READ transport admission and signed-app callback journey. Final
+`PROVEN_LIVE` requires the real signed-in path and outstanding security/release
+gates, not this runbook.

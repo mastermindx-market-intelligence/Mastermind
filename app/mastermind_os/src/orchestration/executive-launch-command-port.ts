@@ -200,7 +200,9 @@ export class ExecutiveLaunchCommandPort implements FiniteCommandPort {
     if (!listedChoice(this.config.projects, form.projectRef)) return null;
     if (!PROFILES.has(form.profileRef)) return null;
     if (!listedChoice(this.config.profiles, form.profileRef)) return null;
-    if (this.config.frontierModels !== undefined) {
+    if (form.profileRef === "native_research_only") {
+      if (form.frontierModelAlias !== undefined) return null;
+    } else if (this.config.frontierModels !== undefined) {
       if (typeof form.frontierModelAlias !== "string" ||
           !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(form.frontierModelAlias) ||
           /[^a-z0-9._-]/.test(form.frontierModelAlias) ||

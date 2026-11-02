@@ -32,6 +32,29 @@ Read `../../references/authority-boundaries.md` before interpreting any app, rec
 6. Falsify false completion: architecture is not implementation; implementation is not installed; installed is not production-proven.
 7. Return `PASS`, `REQUEST_CHANGES`, or `BLOCKED_BY_CURRENT_SOURCE` with file and line or exact evidence.
 
+## Review routing across Web, native sessions and Slack Dots
+
+Before commissioning independent review, read `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` at the same compatible protected source pin. Its decision table selects an actual admitted Fabric reviewer when eligible or a separately commissioned Dot review via the existing Slack carrier when lawful. Preserve reviewer independence, exact PR head, original operation/effects, no provider/account failover after denial and distinction between technical findings versus formal GitHub non-author review. It is not another GitHub webhook, provider selector or approval mechanism.
+
+## Independent review route: Cursor Cloud on the existing GitHub PR
+
+When a bounded independent security review is needed, first reconcile any existing
+Subagent Fabric reviewer/Attempt and its effect. For a genuinely new authorized review
+when Fabric is unavailable, the GitHub-native `@cursor` Cloud Agent is a **valid
+manual source-review route**: follow current protected `REVIEW_RETURN.md` Step 2B
+and `docs/CURSOR_CLOUD_INDEPENDENT_REVIEW.md`. Commission only one read-only
+exact-40-hex-SHA review on the original PR, prohibit edits/new PRs/merge/deploy,
+and verify the Cursor bot's unique agent identity **and terminal findings**.
+A `Taking a look!` acknowledgement is never a completed review.
+
+Count a completed, independently adjudicated Cursor result as technical source
+review evidence only. If GitHub posts it through the PR author's account,
+formal **non-author approval is NOT proven**; obtain an actual distinct GitHub
+reviewer `APPROVED` on that head when required. Never use this avenue to
+circumvent an explicit permission/safety denial, `retry_allowed=false`,
+`EFFECT_UNKNOWN`, an unresolved original execution, or a Fabric-specific
+real-path acceptance requirement.
+
 ## Output
 
 ```text

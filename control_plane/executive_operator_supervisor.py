@@ -1046,6 +1046,93 @@ class ExecutiveOperatorSupervisor:
         )
         return session, turn, operation
 
+    def _recovery_owner_identity(
+        self, job: Job, lease: AttemptLease, session: OperatorSessionReceipt
+    ) -> WorkspaceIdentity:
+        """Prove the exact recovery owner and return its sealed workspace.
+
+        The returned identity is only the canonical Runtime-sealed requested
+        workspace of the exact current G1 writer recovered under this exact
+        lease: ``_recovery_session`` already proved the requested/observed
+        launch match, and this proof re-reads the durable Attempt, the lease
+        token/fence currency, the Job assignment and that same CURRENT writer
+        before the identity may stand in for the absent local workspace.  The
+        ``WorkspaceIdentity`` type alone is not admission and no model or
+        caller label can mint it; the remote path is never stat'ed or resolved
+        here.
+        """
+        current = self.runtime.attempts.get_attempt(lease.attempt.attempt_id)
+        identity_keys = ("attempt_id", "job_id", "worker_id", "quota_class",
+                         "fence_generation", "lease_owner", "authority_policy_hash")
+        if (not isinstance(current, Attempt)
+                or current.status not in {
+                    AttemptStatus.CLAIMED,
+                    AttemptStatus.RUNNING,
+                    AttemptStatus.CHECKPOINTED,
+                }
+                or current.execution_mode != "OPERATOR_HARNESS"
+                or current.requested_execution_profile != lease.attempt.requested_execution_profile
+                or current.requested_execution_profile_digest != lease.attempt.requested_execution_profile_digest
+                or any(getattr(current, key) != getattr(lease.attempt, key)
+                       for key in identity_keys)):
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery lease is not the current Attempt owner"
+            )
+        current_job = self.runtime.jobs.get_job(job.job_id)
+        if (current_job is None
+                or current_job.orchestration_role != "plan"
+                or current_job.current_attempt_id != current.attempt_id
+                or current_job.assigned_worker_id != current.worker_id
+                or current_job.assigned_quota_class != current.quota_class
+                or current_job.worktree != job.worktree
+                or current_job.constraints != job.constraints):
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery Job binding moved"
+            )
+        try:
+            with self.runtime.store.read() as connection:
+                leased = self.runtime.operator_harness._leased(
+                    connection,
+                    attempt_id=lease.attempt.attempt_id,
+                    fence_generation=lease.attempt.fence_generation,
+                    lease_token=lease.lease_token,
+                    timestamp=self.runtime.store.now_ms(),
+                    statuses={AttemptStatus.CLAIMED, AttemptStatus.RUNNING,
+                              AttemptStatus.CHECKPOINTED},
+                )
+        except StateConflict:
+            leased = None
+        if not leased:
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery lease token is no longer current"
+            )
+        requested = session.launch.requested
+        if (requested.worker_id != current.worker_id
+                or requested.authority_policy_hash
+                != current.authority_policy_hash):
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery requested profile is not this Attempt's"
+            )
+        current_session, _existing_turn, _existing_turn_operation = (
+            self._recovery_session(lease, require_turn=False)
+        )
+        if current_session != session:
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery current writer moved during recovery"
+            )
+        sealed = requested.workspace
+        if (type(sealed) is not WorkspaceIdentity
+                or sealed.workspace_path != job.worktree
+                or sealed.base_sha != job.constraints.get("base_sha")
+                or any(type(getattr(sealed, field)) is not int
+                       or getattr(sealed, field) < 0
+                       for field in ("device", "inode", "uid", "gid"))
+                or sealed.inode == 0):
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery sealed workspace is not the exact durable assignment"
+            )
+        return sealed
+
     def _cleanup_failed_session(
         self,
         *,
@@ -1150,7 +1237,9 @@ class ExecutiveOperatorSupervisor:
             verified_commission = verify_commission_for_job(
                 self.runtime, job,
                 (None if self._workspace_identity_source is not None
-                 else Path(job.worktree).resolve(strict=True))
+                 else Path(job.worktree).resolve(strict=True)),
+                owner_workspace_identity=(requested.workspace
+                    if self._workspace_identity_source is not None else None),
             )
         except Exception as exc:
             raise ExecutiveOperatorSupervisorError(
@@ -1159,6 +1248,9 @@ class ExecutiveOperatorSupervisor:
         prompt_by_turn: dict[str, str] = {
             "pending": self._prompt(job, lease, verified_commission)
         }
+        from control_plane.operator_continuation_delivery import _continuation_for_claim
+        continuation = _continuation_for_claim(self.runtime, job, lease, requested,
+            verified_commission, prompt_by_turn["pending"])
 
         def load_turn(turn: Any) -> str:
             try:
@@ -1180,7 +1272,7 @@ class ExecutiveOperatorSupervisor:
         turn_operation = self._turn_operation_id(
             attempt_id,
             verified_commission,
-        )
+        ) if continuation is None else continuation.operation
         stop_operation = OperationId(f"ohf-op:stop:{attempt_id}")
         session: OperatorSessionReceipt | None = None
         try:
@@ -1189,10 +1281,11 @@ class ExecutiveOperatorSupervisor:
                 requested=requested,
                 operation_id=start_operation,
             )
-
             # Initialization has its own native-contract and served-model
-            # attestation. Recheck retained selection before the first useful turn.
+            # attestation. Validate before continuation preparation or useful work.
             self._require_adapter_contract(job, adapter)
+            if continuation is not None:
+                prompt_by_turn["pending"] = continuation.prepare(session)
 
             def bound_prompt(turn: Any) -> str:
                 value = prompt_by_turn.pop("pending")
@@ -1204,6 +1297,9 @@ class ExecutiveOperatorSupervisor:
                 session,
                 operation_id=turn_operation,
                 timeout_seconds=300.0,
+                **({"_before_role_seal": lambda receipt, raw:
+                    continuation.consume_before_seal(receipt, raw, adapter, session)}
+                    if continuation is not None else {}),
             )
             raw = adapter.observe_raw_role_result(turn.turn)
             if retain_native:
@@ -1409,6 +1505,11 @@ class ExecutiveOperatorSupervisor:
         self, attempt_id: str
     ) -> ReconcileReceipt:
         previous = self.runtime.attempts.get_attempt(attempt_id)
+        if previous is not None and previous.status is not AttemptStatus.CANCEL_REQUESTED:
+            from control_plane.operator_continuation_delivery import _continuation_recovery_held
+            if _continuation_recovery_held(self.runtime, previous):
+                return ReconcileReceipt(attempt_id=attempt_id, job_id=previous.job_id,
+                    status=ReconcileStatus.LIVE_QUARANTINED, process_was_live=False)
         if previous is None:
             raise ExecutiveOperatorSupervisorError(
                 "operator recovery Attempt disappeared"
@@ -1504,6 +1605,15 @@ class ExecutiveOperatorSupervisor:
                            or sealed_result_json is not None)
             verified_commission = None
             if not containment:
+                owner_workspace_identity = None
+                if self._workspace_identity_source is not None:
+                    # The selected-host identity is only ever the canonical
+                    # Runtime-sealed requested workspace of the exact current
+                    # G1 writer under this exact recovery lease, re-proven
+                    # before and after the blocking source verification.
+                    owner_workspace_identity = self._recovery_owner_identity(
+                        job, lease, session
+                    )
                 try:
                     verified_commission = verify_commission_for_job(
                         self.runtime,
@@ -1511,11 +1621,32 @@ class ExecutiveOperatorSupervisor:
                         (Path(job.worktree).resolve(strict=True)
                          if job.worktree and self._workspace_identity_source is None
                          else None),
+                        owner_workspace_identity=owner_workspace_identity,
                     )
                 except Exception as exc:
                     raise ExecutiveOperatorSupervisorError(
                         f"operator immutable commission verification failed: {exc}"
                     ) from exc
+                if owner_workspace_identity is not None:
+                    # The canonical fetch blocks; the lease, durable assignment
+                    # and current writer are re-proven before any adapter or
+                    # resumed turn may consume the verified commission.
+                    self._recovery_owner_identity(job, lease, session)
+                # Source verification can block while a continuation PREPARE or
+                # cross-realm hold becomes durable. Never resume through that hold.
+                current_attempt = self.runtime.attempts.get_attempt(attempt_id)
+                if current_attempt is None:
+                    raise ExecutiveOperatorSupervisorError(
+                        "operator recovery Attempt disappeared after source verification"
+                    )
+                from control_plane.operator_continuation_delivery import _continuation_recovery_held
+                if _continuation_recovery_held(self.runtime, current_attempt):
+                    return ReconcileReceipt(
+                        attempt_id=attempt_id,
+                        job_id=lease.attempt.job_id,
+                        status=ReconcileStatus.LIVE_QUARANTINED,
+                        process_was_live=False,
+                    )
             # Cancellation and sealed-result consumption need only containment.
             # Do not require fresh source/provider admission or load turn input.
             if containment:
