@@ -76,12 +76,15 @@ def doctor(
         path = root / ".config" / "hermes-runtime" / name
         if not _gateway_file_ok(path):
             missing.append(f"credential_file:{name}")
+    role_private = {}
     # Check the actual selected role-private systemd file, never ambient
     # HTTP(S)_PROXY or an unrelated role/user secrets file.
     for role in PROFILE_PRIMARY:
         try:
             _spec, secrets_path = _native_primary_source(root, role)
-            native_egress_child_env(role, load_secrets(secrets_path).values)
+            secrets = load_secrets(secrets_path)
+            role_private[role] = secrets
+            native_egress_child_env(role, secrets.values)
         except (RuntimeRefusal, OSError, ValueError, KeyError):
             missing.append(f"network_proxy:{role}")
     for name in _ENDPOINTS:
@@ -95,6 +98,26 @@ def doctor(
     if not manager:
         missing.append("grant:ubuntu1_systemd_user_manager")
     missing.extend(_agent_identity_gaps(root, roster_path=roster_path))
+    # Each role needs independently revocable credentials, separate Slack
+    # identity, and its own policy-enforced egress proxy. Never log values.
+    for role, secrets in role_private.items():
+        if secrets.dashboard_password == secrets.token:
+            missing.append(f"isolation:gateway_dashboard_alias:{role}")
+    if len(role_private) == len(PROFILE_PRIMARY):
+        secretary = role_private["mmsecretary"]
+        meta = role_private["mmmeta"]
+        for key, left, right in (
+            ("gateway_token", secretary.token, meta.token),
+            ("dashboard_password", secretary.dashboard_password, meta.dashboard_password),
+            ("slack_bot_token", secretary.values.get("HERMES_SLACK_BOT_TOKEN", ""),
+             meta.values.get("HERMES_SLACK_BOT_TOKEN", "")),
+            ("slack_user_id", secretary.values.get("HERMES_SLACK_BOT_USER_ID", ""),
+             meta.values.get("HERMES_SLACK_BOT_USER_ID", "")),
+            ("egress_proxy", secretary.values.get("HERMES_NATIVE_HTTPS_PROXY", ""),
+             meta.values.get("HERMES_NATIVE_HTTPS_PROXY", "")),
+        ):
+            if left and right and left == right:
+                missing.append(f"isolation:shared_{key}")
     missing.append("id:DOT_BOT_USER_IDS")
     missing = sorted(set(missing))
     # The core text/Slack role does not require Mac actuation, Cursor,
@@ -106,7 +129,7 @@ def doctor(
     }
     core_prefixes = (
         "credential_file:mm", "network_proxy:mm", "credential:hermes-",
-        "id:hermes-", "config:hermes_agents:",
+        "id:hermes-", "config:hermes_agents:", "isolation:",
     )
     core_missing = sorted(v for v in missing if v in core_ids or v.startswith(core_prefixes))
     return {
