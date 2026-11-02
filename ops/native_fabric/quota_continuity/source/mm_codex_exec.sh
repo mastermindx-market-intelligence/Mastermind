@@ -25,7 +25,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # the host's mutable config is not evidence that a launched worker uses it.
 CODEX_CONTEXT_ARGS=()
 case "$MODEL" in
-  MiniMax-M3|minimax-m3|MiniMax-M3.1-Flash|minimax-m3.1-flash)
+  MiniMax-M3|minimax-m3)
     _ctx="${POOL_MAX_CONTEXT_TOKENS:-1000000}"
     case "$_ctx" in ''|*[!0-9]*|0*) echo "CODEX_CONTEXT_REFUSED reason=window_invalid" >&2; exit 78 ;; esac
     if [ "${#_ctx}" -gt 7 ] || [ "$_ctx" -lt 100000 ] || [ "$_ctx" -gt 1000000 ]; then
@@ -103,16 +103,6 @@ cleanup_codex_home() {
 }
 trap cleanup_codex_home EXIT
 export MINIMAX_API_KEY="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.minimax/config.json")))["api_key"])')"
-
-# This is checked only after the original MiniMax slot is acquired.
-# M3.1 Flash must never silently use a pay-as-you-go API key.
-case "$MODEL" in
-  MiniMax-M3.1-Flash|minimax-m3.1-flash)
-    case "$MINIMAX_API_KEY" in
-      sk-cp-*) ;;
-      *) echo "MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED" >&2; exit 78 ;;
-    esac ;;
-esac
 
 if [ ! -f "$PROMPT_FILE" ]; then
   echo "mm_codex_exec: prompt file not found: $PROMPT_FILE" >&2
