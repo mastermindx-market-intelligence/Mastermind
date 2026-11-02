@@ -12,27 +12,32 @@ def _env(monkeypatch):
     monkeypatch.setenv("EXPLABS_BASE_URL", explabs_client.BASE_URL)
     monkeypatch.setenv("EXPLABS_MODEL", "deepseek-v4.1-flash")
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "1")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_SERVING_VERIFIED", "1")
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_ORG_SLUG", "org-a")
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_MAX_INFLIGHT", "2")
     monkeypatch.setenv("EXPLABS_ACCOUNT_1_DAILY_CAP_USD", "10")
     monkeypatch.setenv("EXPLABS_API_KEY", "fake-key-a")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_ENABLED", "1")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_SERVING_VERIFIED", "1")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_ORG_SLUG", "org-b")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_MAX_INFLIGHT", "2")
     monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "10")
     monkeypatch.setenv("EXPLABS_API_KEY_2", "fake-key-b")
 
 
-def _transport(*, response=None, orgs=None, remaining=None):
+def _transport(*, response=None, orgs=None, remaining=None, limits=None, seen_gets=None):
     calls = []
     orgs = orgs or {"fake-key-a": ("id-a", "org-a"), "fake-key-b": ("id-b", "org-b")}
     remaining = remaining or {"fake-key-a": 5.0, "fake-key-b": 5.0}
+    limits = limits if limits is not None else {"fake-key-a": 10.0, "fake-key-b": 10.0}
 
     def serve(request):
         key = request.headers["Authorization"].removeprefix("Bearer ")
         assert key in orgs
         path = request.url.path
         if request.method == "GET":
+            if seen_gets is not None:
+                seen_gets.append((key, path))
             if path == "/api/whoami":
                 oid, slug = orgs[key]
                 return httpx.Response(200, json={"org_id": oid, "org_slug": slug})
@@ -42,7 +47,7 @@ def _transport(*, response=None, orgs=None, remaining=None):
                 )
             if path == "/api/v1/key":
                 return httpx.Response(
-                    200, json={"data": {"limit": 10.0, "limit_remaining": remaining[key]}},
+                    200, json={"data": {"limit": limits[key], "limit_remaining": remaining[key]}},
                 )
             if path == "/api/v1/credits":
                 return httpx.Response(
@@ -285,3 +290,178 @@ def test_verified_organization_identity_is_sticky(monkeypatch):
     with pytest.raises(explabs_client.ExperientialError, match="org_identity_changed"):
         pool.complete("", "one independent task")
     assert calls == ["fake-key-a"]
+
+
+def test_only_b_enabled_uses_b_without_probing_denied_account_a(monkeypatch):
+    """Existing 403 on A is not a reason to probe A or block a verified B."""
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    observed_gets = []
+    http, calls = _transport(
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+        seen_gets=observed_gets,
+    )
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert explabs_pool.available() is True
+    result = pool.complete("", "one independent task")
+    assert result.account_slot == "2"
+    assert calls == ["fake-key-b"]
+    assert observed_gets
+    assert all(key == "fake-key-b" for key, _ in observed_gets)
+    assert sum(path == "/api/v1/key" for _, path in observed_gets) == 2
+    assert pool.status()["1"]["verified"] is False
+
+
+def test_no_enabled_org_prevents_any_api_request(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_ENABLED", "0")
+    seen_gets = []
+    http, calls = _transport(seen_gets=seen_gets)
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert explabs_pool.available() is False
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
+        pool.complete("", "one independent task")
+    assert calls == [] and seen_gets == []
+
+
+def test_b_one_dollar_policy_blocks_uncapped_provider_key(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    seen_gets = []
+    http, calls = _transport(
+        limits={"fake-key-a": 10.0, "fake-key-b": None},
+        seen_gets=seen_gets,
+    )
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="initial_verification_required"):
+        pool.complete("", "one independent task")
+    assert calls == []
+    assert all(key == "fake-key-b" for key, _ in seen_gets)
+    assert pool.status()["2"]["blocked"] == "explabs_pool_gateway_cap_not_verified"
+
+
+def test_b_one_dollar_policy_rejects_higher_provider_cap(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    http, calls = _transport(
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.01},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    with pytest.raises(explabs_client.ExperientialError, match="initial_verification_required"):
+        explabs_pool.AccountPool(http_client=http).complete("", "one independent task")
+    assert calls == []
+
+
+def test_b_daily_cap_zero_headroom_blocks_without_inference(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    http, calls = _transport(
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 0.0},
+    )
+    with pytest.raises(explabs_client.ExperientialError, match="no_eligible_account"):
+        explabs_pool.AccountPool(http_client=http).complete("", "one independent task")
+    assert calls == []
+
+
+def test_revalidate_gateway_cap_before_each_independent_completion(monkeypatch):
+    """A stale cached identity must not hide a provider daily-cap increase."""
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    limits = {"fake-key-a": 10.0, "fake-key-b": 1.0}
+    remaining = {"fake-key-a": 5.0, "fake-key-b": 1.0}
+    http, calls = _transport(limits=limits, remaining=remaining)
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert pool.complete("", "one independent task").account_slot == "2"
+    limits["fake-key-b"] = 5.0
+    with pytest.raises(explabs_client.ExperientialError, match="gateway_cap_not_verified"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-b"]
+    assert pool.status()["2"]["blocked"] == "explabs_pool_gateway_cap_not_verified"
+
+
+def test_enabling_second_org_requires_new_pool_instance(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    http, calls = _transport(
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert pool.complete("", "one independent task").account_slot == "2"
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "1")
+    with pytest.raises(explabs_client.ExperientialError, match="key_rotation_requires_restart"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-b"]
+
+
+def test_serving_receipt_required_before_enabling_b(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_SERVING_VERIFIED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+    seen_gets = []
+    http, calls = _transport(seen_gets=seen_gets)
+    pool = explabs_pool.AccountPool(http_client=http)
+    assert explabs_pool.available() is False
+    with pytest.raises(explabs_client.ExperientialError, match="explabs_pool_disabled"):
+        pool.complete("", "one independent task")
+    assert calls == [] and seen_gets == []
+
+
+def test_paid_daily_cap_429_is_held_not_treated_as_resettable_rate_limit(monkeypatch):
+    _env(monkeypatch)
+
+    def answer(key, count):
+        if key == "fake-key-a":
+            return httpx.Response(
+                429,
+                json={"error": {
+                    "code": "insufficient_quota",
+                    "message": "key_daily_cap reached",
+                }},
+                headers={"Retry-After": "5"},
+            )
+        return None
+
+    http, calls = _transport(response=answer)
+    pool = explabs_pool.AccountPool(http_client=http)
+    with pytest.raises(explabs_client.ExperientialError, match="insufficient_quota"):
+        pool.complete("", "one independent task")
+    assert calls == ["fake-key-a"]  # Cannot transfer the failed attempt
+    assert pool.status()["1"]["blocked"] == "explabs_http_429:insufficient_quota"
+    assert pool.status()["1"]["cooldown"] is False
+
+
+def test_included_free_gateway_cost_does_not_claim_paid_usage(monkeypatch):
+    _env(monkeypatch)
+    monkeypatch.setenv("EXPLABS_ACCOUNT_1_ENABLED", "0")
+    monkeypatch.setenv("EXPLABS_ACCOUNT_2_DAILY_CAP_USD", "1")
+
+    def answer(key, count):
+        return httpx.Response(200, json={
+            "model": "deepseek-v4.1-flash",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}}],
+            "usage": {"prompt_tokens": 9, "completion_tokens": 3,
+                      "cost": 0.0, "is_byok": False},
+            "provider": "experiential_cloud",
+        })
+
+    http, calls = _transport(
+        response=answer,
+        limits={"fake-key-a": 10.0, "fake-key-b": 1.0},
+        remaining={"fake-key-a": 5.0, "fake-key-b": 1.0},
+    )
+    outcome = explabs_pool.AccountPool(http_client=http).complete("", "one independent task")
+    assert outcome.cost_usd == 0.0
+    assert outcome.is_byok is False
+    assert (outcome.input_tokens, outcome.output_tokens) == (9, 3)
+    assert calls == ["fake-key-b"]

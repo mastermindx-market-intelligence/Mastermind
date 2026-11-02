@@ -64,13 +64,20 @@ def _money(value: object) -> float | None:
     return num if math.isfinite(num) else None
 
 
-def _configs() -> tuple[Account, Account]:
+def _configs() -> tuple[Account, ...]:
+    """Return explicitly enabled accounts; disabled orgs are never probed."""
     accounts = []
     for slot, key_name, stem in _SLOTS:
+        if os.environ.get(stem + "_ENABLED") != "1":
+            continue
+        # Operator sets serving verification only after a separate canary
+        # and provider billing-policy confirmation. Merely listing a model
+        # in /v1/models is not proof of a callable serving lane.
+        if os.environ.get(stem + "_SERVING_VERIFIED") != "1":
+            raise gateway.ExperientialError("explabs_pool_serving_unverified")
         key = os.environ.get(key_name, "")
         org = os.environ.get(stem + "_ORG_SLUG", "").strip()
-        enable = os.environ.get(stem + "_ENABLED") == "1"
-        if not enable or not key or not org:
+        if not key or not org:
             raise gateway.ExperientialError("explabs_pool_account_not_configured")
         raw = os.environ.get(stem + "_MAX_INFLIGHT", "2")
         try:
@@ -83,9 +90,11 @@ def _configs() -> tuple[Account, Account]:
         if max_daily_usd is None or max_daily_usd <= 0:
             raise gateway.ExperientialError("explabs_pool_daily_cap_required")
         accounts.append(Account(slot, key, org, cap, max_daily_usd))
-    if accounts[0].expected_org == accounts[1].expected_org:
+    if not accounts:
+        raise gateway.ExperientialError("explabs_pool_no_enabled_accounts")
+    if len({a.expected_org for a in accounts}) != len(accounts):
         raise gateway.ExperientialError("explabs_pool_requires_distinct_orgs")
-    return accounts[0], accounts[1]
+    return tuple(accounts)
 
 
 def available() -> bool:
@@ -112,10 +121,10 @@ class AccountPool:
         self._lock = threading.RLock()
         self._health = {"1": _Health(), "2": _Health()}
         self._last_chosen = "2"
-        self._bound_orgs: tuple[str, str] | None = None
-        self._bound_keys: tuple[str, str] | None = None  # in-memory only, never logged
-        self._verified_org_ids: tuple[str, str] | None = None
-        self._pair_verified = False
+        self._bound_orgs: tuple[str, ...] | None = None
+        self._bound_keys: tuple[str, ...] | None = None  # in-memory only, never logged
+        self._verified_org_ids: tuple[str, ...] | None = None
+        self._eligible_set_verified = False
 
     def _get(self, url: str, key: str) -> dict:
         transport = self._client.get if self._client is not None else httpx.get
@@ -140,6 +149,21 @@ class AccountPool:
             raise gateway.ExperientialError("explabs_probe_invalid_response")
         return obj
 
+    def _read_spend_cap(self, account: Account) -> float:
+        """Verify the upstream daily *charged USD* cap before every dispatch."""
+        key_meta = self._get(_API_HOST + "/api/v1/key", account.key).get("data")
+        if not isinstance(key_meta, dict):
+            raise gateway.ExperientialError("explabs_probe_invalid_response")
+        key_cap = _money(key_meta.get("limit"))
+        remaining = _money(key_meta.get("limit_remaining"))
+        if (key_cap is None or key_cap <= 0 or
+                key_cap > account.max_daily_usd + 1e-9 or
+                remaining is None or remaining < 0 or remaining > key_cap + 1e-9):
+            # Key cap must be enforced by the provider. A local policy alone
+            # cannot safely bound charges across processes or hosts.
+            raise gateway.ExperientialError("explabs_pool_gateway_cap_not_verified")
+        return remaining
+
     def _probe(self, account: Account, model: str) -> Observation:
         identity = self._get(_API_HOST + "/api/whoami", account.key)
         org_slug = identity.get("org_slug")
@@ -153,17 +177,10 @@ class AccountPool:
             and isinstance(row.get("id"), str)
         }:
             raise gateway.ExperientialError("explabs_pool_model_not_listed")
-        key_meta = self._get(_API_HOST + "/api/v1/key", account.key).get("data")
+        remaining = self._read_spend_cap(account)
         credit_meta = self._get(_API_HOST + "/api/v1/credits", account.key).get("data")
-        if not isinstance(key_meta, dict) or not isinstance(credit_meta, dict):
+        if not isinstance(credit_meta, dict):
             raise gateway.ExperientialError("explabs_probe_invalid_response")
-        key_cap = _money(key_meta.get("limit"))
-        remaining = _money(key_meta.get("limit_remaining"))
-        if (key_cap is None or key_cap <= 0 or
-                key_cap > account.max_daily_usd + 1e-9 or remaining is None):
-            # A local target is NOT a hard spending cap; require the gateway's
-            # actual enforced, per-key daily cap and verified remaining budget.
-            raise gateway.ExperientialError("explabs_pool_gateway_cap_not_verified")
         total_credits = _money(credit_meta.get("total_credits"))
         total_usage = _money(credit_meta.get("total_usage"))
         credits = (
@@ -172,13 +189,14 @@ class AccountPool:
         )
         return Observation(org_id, org_slug, model, remaining, credits)
 
-    def _ensure_fresh(self, accounts: tuple[Account, Account], model: str) -> None:
+    def _ensure_fresh(self, accounts: tuple[Account, ...], model: str) -> None:
         now = self._clock()
-        expected = (accounts[0].expected_org, accounts[1].expected_org)
-        current_keys = (accounts[0].key, accounts[1].key)
-        if self._bound_keys is not None and not all(
-            hmac.compare_digest(old, new)
-            for old, new in zip(self._bound_keys, current_keys)
+        expected = tuple(a.expected_org for a in accounts)
+        current_keys = tuple(a.key for a in accounts)
+        if self._bound_keys is not None and (
+            len(self._bound_keys) != len(current_keys)
+            or not all(hmac.compare_digest(old, new)
+                       for old, new in zip(self._bound_keys, current_keys))
         ):
             raise gateway.ExperientialError("explabs_pool_key_rotation_requires_restart")
         self._bound_keys = current_keys
@@ -205,22 +223,24 @@ class AccountPool:
                 state.blocked = str(exc)  # sanitized machine code only
         observations = [self._health[a.slot].observation for a in accounts]
         if all(observations):
-            if observations[0].org_id == observations[1].org_id:
-                for state in self._health.values():
+            observed_ids = tuple(obs.org_id for obs in observations)
+            if len(set(observed_ids)) != len(observed_ids):
+                for account in accounts:
+                    state = self._health[account.slot]
                     state.observation = None
                     state.blocked = "explabs_pool_duplicate_org"
                 raise gateway.ExperientialError("explabs_pool_duplicate_org")
-            observed_ids = (observations[0].org_id, observations[1].org_id)
             if self._verified_org_ids is not None and self._verified_org_ids != observed_ids:
                 raise gateway.ExperientialError("explabs_pool_org_identity_changed")
             self._verified_org_ids = observed_ids
-            self._pair_verified = True
-        if not self._pair_verified:
-            # Both orgs must be independently verified before FIRST dispatch.
-            # Later a blocked account can be skipped for distinct NEW requests.
+            self._eligible_set_verified = True
+        if not self._eligible_set_verified:
+            # Verify every ENABLED org before first dispatch. Disabled/blocked
+            # organizations are never probed and cannot be chosen. Subsequent
+            # new requests may use an already verified healthy eligible org.
             raise gateway.ExperientialError("explabs_pool_initial_verification_required")
 
-    def _pick(self, accounts: tuple[Account, Account]) -> Account:
+    def _pick(self, accounts: tuple[Account, ...]) -> Account:
         eligible = []
         for a in accounts:
             state = self._health[a.slot]
@@ -258,6 +278,18 @@ class AccountPool:
             self._ensure_fresh(accounts, model)
             account = self._pick(accounts)
             state = self._health[account.slot]
+            try:
+                current_remaining = self._read_spend_cap(account)
+            except gateway.ExperientialError as exc:
+                state.blocked = str(exc)
+                state.observation = None
+                raise
+            if current_remaining <= 0:
+                raise gateway.ExperientialError("explabs_pool_daily_cap_exhausted")
+            if state.observation is not None:
+                state.observation = replace(
+                    state.observation, key_remaining_usd=current_remaining
+                )
             state.inflight += 1
             self._last_chosen = account.slot
         try:
