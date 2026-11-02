@@ -43,3 +43,52 @@ Terminal #1200 has an existing responsive-test repair dependency #1220; no dupli
 No mass draft-to-ready changes. Intentional held/inert/source-only work remains held. Do not rebase unchanged semantic candidates solely for ancestry. Do not launch duplicate reviewers over active or uncertain attempts. No same-author GitHub approval or source-author merge, admin bypass, disabled checks, timeout inflation, hidden retries, new credential/account, provider activation or application deployment. A requested reviewer is not a running reviewer; queued work is not a merge; passing source tests are not real consumer acceptance.
 
 A release claim is false unless GitHub reports the exact merged PR/commit. A repair claim is false without an exact changed candidate and a regression that distinguishes the original failure. An independent-review claim is false without an actual distinct reviewer and an exact reviewed head. Any unresolved effect remains on its original carrier.
+
+
+## Verified progress - 2026-11-02 release recovery
+
+### Coverage clarification
+
+The initial 1,572 total is the initial search snapshot, not an assertion that every PR received source review. A subsequent compact full census returned Mastermind 515 (including this new evidence PR): 402 drafts, 460 without a review decision, 51 CHANGES_REQUESTED, four APPROVED. Terminal full census returned 167: 87 drafts, 161 without a review decision, four CHANGES_REQUESTED, two APPROVED. Macro search count was 891; detailed coverage remains the 100 most recently updated candidates because the full compact query returned HTTP 502. No unchanged retry or full-Macro-review claim.
+
+### R2/R4: #1930 reviewed and advanced to the protected queue
+
+Exact candidate: `c1cebc105681247f4af69a9845d3fed528289448`. Source author: chriswong6031-creator. Independent reviewer: mastermindxryan; this session authored none of that candidate. Review `5741621748` is formal APPROVED at the exact SHA: https://github.com/mastermindx-market-intelligence/Mastermind/pull/1930#pullrequestreview-5741621748 . Source review covered all three changed paths, preflight ordering, full-shard coverage and fan-in, unchanged permissions/security guards and six discriminating preflight mutations.
+
+Local policy/fan-in run: 140 cases, exit 0. Running the actual three preflight node IDs returned **one passed, two skipped**, exit 0. The two changed-path checks intentionally skip when `ENFORCE_STRICT_CHANGED_PATH_POLICY` is unset; local validation did not force strict mode. The review was corrected in place to make this distinction explicit. Hosted Linux nine successful checks are separate evidence, not inferred from the local run.
+
+After exact-head, independent approval, clean/mergeable and successful-check readback, a normal expected-head `gh pr merge --squash` request returned **added to the merge queue**. Readback still OPEN / merged=false, auto-merge enabled with squash. Native queue later reported #1932 position 1, #1828 position 2, #1930 position 3, all AWAITING_CHECKS. This is queue admission, **not a completed merge or deployment**. No author approval, admin bypass or direct protected-branch push.
+
+### R3/R4: #1616 original source repaired and published
+
+Prior head `88b5f6360b94e6ad627dfe88aa4ce3580918bcd7`, original operation `ci-accel-1607-20261018-sol-001`, original branch `sol/web-ci-accel-1607-20261018-sol-001`. Source custody and takeover are recorded in comment 6585397952. Before modifying: remote/local source matched, tracked files were clean, exact-workspace process check found no active writer, and the canonical workspace acquisition reused the original registration. Existing untracked/ignored outputs were preserved.
+
+Protected master `fbce94601823718a22466a99aeea692679266a16` was composed into that same branch. The two workflow conflicts were resolved by retaining all current H1 real no-ACL/provider probes, finite 60-minute job / 45-minute step limits, complete canonical discovery and strict fan-in. Exactly five candidate files differ from protected master. Workflow byte comparison proves only four three-to-six substitutions: max-parallel, matrix indices, pytest jobs and fan-in jobs. Every other protected workflow byte is unchanged.
+
+Actual local validation: **201 passed, zero skipped/failures/errors, exit 0**, across `test_ci_pytest_policy.py`, `test_ci_parallel_fanin.py`, `test_h1_positive_gate.py`, `test_h1_controlled_provider_fixture.py` and `test_h1_preflight_failure_metadata.py`. All five source SHA-256 hashes were checked unchanged between tests and commit. Six-shard plan covers **1,549 canonical test files** in counts 258 / 236 / 263 / 238 / 277 / 277. Three-way fallback remains present; no collection omission, timeout inflation or hidden test skip was introduced.
+
+An initial publication response was inconsistent with durable readback; no second carrier or replacement branch was created. Original HEAD/reflog/object/MERGE_HEAD and process evidence proved no commit had persisted. The concrete blocker was the pre-commit `git diff --cached --check` against the outdated branch ancestor: it reported 3,962 lines of inherited upstream whitespace, including retained patch fixtures. The candidate check against the protected target master returned exit 0 and zero output. Correcting the comparison base is not disabling a hook/check; no hooks were bypassed and no unrelated upstream files were rewritten.
+
+New commit **`98caac5795c595ed03d0b7d64acf270c3e3d3121`** was then verified locally with no merge in progress and clean tracked state. Canonical same-operation `studio_git_push_current_branch`, expected-head fenced, returned **APPLIED** with matching local and remote full SHA and clean=true. GitHub PR readback independently matched this SHA. Source-bound evidence: https://github.com/mastermindx-market-intelligence/Mastermind/pull/1616#issuecomment-6585751658 . New-head hosted CI has actually started all six pytest shards plus analysis jobs; no successful hosted completion is yet claimed.
+
+The repairing account is the source author, mastermindxryan, and must NOT approve or merge #1616. MastermindX1 remains the requested formal reviewer. Existing CHANGES_REQUESTED has not been dismissed. A new exact-head technical Fabric commission was submitted as `review-mm1616-98caac57-20261102`, root/parent `web-github-release-triage-20261102`. Initial receipt CONTROLLER_CREATED, PID3760, worker_started=null; this is NOT proof of worker STARTED/RUNNING or accepted review. Record its terminal result on this same source path. Formal GitHub review, hosted checks and merge-group checks remain separate gates.
+
+Dependency: #1930 is queued and adds an explicit three-index preflight regression; compose that regression to six if it lands before #1616. #1570 remains a separate later source repair and must preserve these H1 checks and adapt same-SHA proof to seven expected jobs. Do not recreate either candidate.
+
+### R3: shared failure identified, not blindly retried
+
+#1924 failed job 125129685512 exceeded its existing 45-minute shard limit. Completed module summaries account for approximately 2,478.7 seconds; `test_capacity_host_artifacts` alone took about 1,027 seconds for 466 cases. The earlier #1932 merge-group run 41440685198 also failed shard 1 while shards 0/2 and OS checks passed. These observations motivate the existing measured six-way distribution, not blanket reruns or higher limits. No assertion failure or infrastructure outage is claimed from timeout evidence alone.
+
+### Refused and held lanes
+
+#1933 exact-head technical review `review-mm1933-5d08bae4-20261102-a`, same root, returned REQUEST_REFUSED_BEFORE_LAUNCH. Controller69003 exited75; no result, acceptance or proven worker start. Retry and same-run replay were both false. Exact refusal cause was not exposed. No replacement reviewer/provider/carrier or replay of that refused work was launched. #1924's earlier refused review likewise remains held. #1616 is a distinct newly repaired candidate, not a substitute execution of either refused task.
+
+Terminal #1035's two source-contract failures remain diagnosed but unmodified; Terminal #1200's existing repair #1220 was preserved. Macro #10525's original authority-refusal investigation was not bypassed. No mass draft promotion, closing, self-merge, application release, deployment or product acceptance is claimed.
+
+### Exact remaining frontier
+
+1. Reconcile the existing #1616 technical-review commission on its original run/root, adjudicate an actual result only if available, and obtain a fresh independent formal GitHub review at 98caac57. Source author cannot supply that approval.
+2. Consume actual #1930/#1932 protected queue and #1616 hosted results at a material phase boundary, without duplicate queue entries or idle polling. A merge needs GitHub merged=true plus the actual merge commit.
+3. If #1930 lands before #1616, compose its exact matrix regression on #1616's original branch, retest and invalidate/recommission only changed-head review as required.
+4. Following those prerequisites, advance original #1570 proof-reuse repair; preserve seven-job composition and real H1 gates.
+5. Terminal #1035 and Macro #10525 remain independent bounded lanes, with the exact constraints above. This triage is not organizational completion and the current artifact remains PLAN_NOT_ORG_LINKED until consumed by an established Agent OS owner.
