@@ -1198,6 +1198,15 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             return {"state": "EFFECT_UNKNOWN", "operation_id": operation_id, "tool": tool,
                     "result": result, "before": before, "retry_allowed": False, "reason": "UPSTREAM_TOOL_ERROR_MAY_BE_PARTIAL"}
         try:
+            # A write has already been dispatched. A newly unqualified getter
+            # is not a safe verification path: retain EFFECT_UNKNOWN/no replay.
+            if not custom_exact_pin:
+                after_schema = schema_receipt(client, client.catalog(), server_pin=_server_pin,
+                                              catalog_pin=_catalog_pin)
+                if (not after_schema["server_name_compatible"]
+                        or not after_schema["server_version_compatible"]
+                        or not after_schema["snapshot_tool_compatible"]):
+                    raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
             after = snapshot(client, supplied_file, execution_binding=execution_binding)
             matched = same_document(before["identity"], after["basic_info"])
             if action == "file_manage" and tool == "rename_resource":
