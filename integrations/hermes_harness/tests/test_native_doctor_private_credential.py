@@ -25,11 +25,11 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         self.directory = self.home / ".config" / "hermes-runtime"
         self.directory.mkdir(parents=True)
 
-    def _write_role(self, role: str, extra: str = ""):
+    def _write_role(self, role: str, extra: str = "", *, gateway: str = GATEWAY, dashboard: str = DASHBOARD):
         path = self.directory / f"{role}.secrets.env"
         path.write_text(
-            "HERMES_GATEWAY_TOKEN=" + GATEWAY + "\n"
-            "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + DASHBOARD + "\n"
+            "HERMES_GATEWAY_TOKEN=" + gateway + "\n"
+            "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=" + dashboard + "\n"
             + extra,
             encoding="utf-8",
         )
@@ -73,6 +73,51 @@ class NativeDoctorCredentialTests(unittest.TestCase):
         self.assertIn("grant:executive_admission", outcome["missing"])
         self.assertNotIn(FAKE_ZAI, str(outcome))
         self.assertNotIn(FAKE_MODELARK, str(outcome))
+
+    def test_core_text_configuration_can_qualify_without_optional_grants(self):
+        modelark = self._key_file("modelark.key", FAKE_MODELARK)
+        zai = self._key_file("zai.key", FAKE_ZAI)
+        self._write_role("mmsecretary", (
+            f"BYTEPLUS_MODELARK_API_KEY_FILE={modelark}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMESEC00001\n"
+            "HERMES_SLACK_BOT_TOKEN=test-secretary-slack-token-only-123456\n"
+        ))
+        self._write_role("mmmeta", (
+            f"ZAI_API_KEY_FILE={zai}\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
+            "HERMES_SLACK_BOT_TOKEN=test-meta-slack-token-only-123456\n"
+        ), gateway="test-meta-gateway-token-123456",
+           dashboard="test-meta-dashboard-token-123456")
+        report = self._doctor()
+        self.assertEqual(report["core_text_missing"], [])
+        self.assertEqual(report["core_text_status"], "CONFIG_READY_NOT_LIVE_PROVEN")
+        self.assertEqual(report["status"], "MISSING")
+        self.assertIn("grant:executive_admission", report["missing"])
+        self.assertFalse(report["native_egress_host_policy_verified"])
+        self.assertFalse(report["provider_authenticated"])
+        self.assertFalse(report["slack_roundtrip_verified"])
+
+    def test_core_text_rejects_shared_roles_even_if_each_proxy_url_is_valid(self):
+        self._write_role("mmsecretary", (
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=USHAREDBOT001\n"
+            "HERMES_SLACK_BOT_TOKEN=shared-token-fixture-123456\n"
+        ))
+        self._write_role("mmmeta", (
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=USHAREDBOT001\n"
+            "HERMES_SLACK_BOT_TOKEN=shared-token-fixture-123456\n"
+        ))
+        report = self._doctor()
+        self.assertIn("isolation:shared_gateway_token", report["core_text_missing"])
+        self.assertIn("isolation:shared_slack_user_id", report["core_text_missing"])
+        self.assertIn("isolation:shared_egress_proxy", report["core_text_missing"])
 
     def test_bad_pointer_is_not_covered_by_inline_provider_key(self):
         self._write_role(
