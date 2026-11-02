@@ -25,7 +25,7 @@ Labels below are editorial only, not Agent OS waves or Executive states. Depende
 | P1.R3 | Finish #1936 independent-root progression using the incumbent COO selector. | Existing installed-release owner; qualified generation and real service-path proof | Source merged f287cc1f8e020724ff48052b6ae1907f6e029969. Actual selected installed release078f6ee5 still contains the old selector. Exact-body disposable comparison reproduces old selection of blocked A versus merged selection of ready B, then original A reconciliation; no production effect. See #1936 comment6589017358. Existing release custody and all original unknown effects remain held. | blocked |
 | P1.R4 | Resolve #1924 hosted timeout and finish existing review routing. | Eligible non-author protected release; then served entry-point adoption | Original branch6e1f1b62a9e3e8069de5d60d2c3edfea827444e4 consumes released six-shard CI, preserves all15 feature blobs, and passed76 focused cases. Exact-head CI41528759464 SUCCESS at21:52:16Z, six shards plus required test; all security checks pass. Preserve historical substantive review5732838469. Scoped release helper turnaround1924-6e1f-native-admission-20261102 returned terminalrc75 host-load admission refusal; source readback shows stillOPEN/noqueue. No retry, source exclusion or self-merge. Full release brief6589621298. | reviewed |
 | P1.R5 | Qualify #1931 proof-gap auditor and existing Fabric UI consumer. | Existing installed-release owner; actual OS/served consumer | Source merged aea6046e78de44686b6ac7824ee55508d5a98a10 with independent review5742119938. Merged CLI consumed fresh actual #1924 evidence and correctly returned INCOMPLETE for then-pending CI and missing governed production proof. Installed release lacks the module; running OS binary predates the merge and has no qualifying source/build identity. See #1931 comment6589022772. Original refused paid review remains held, not retried or replaced. | reviewed |
-| P1.R6 | Consume released #1616 throughput repair and adapt original #1570 proof reuse. | Original #1570 current-head security review, CI and protected release | #1616 merged22c08067; group41518522230 and push41522114032 passed6shards+test; independence qualification6587602788 remains. Original #1570 now publishede3a509836a97e020e5966c8a163404a770e3a76c, treec324012532a0c990023f3eb6a289615f3ef119e2, integratesab93 on samebranch. 432 focused tests plus81 real-owner-API casesPASS. Failed builder reconciled; no alternateworker/provider. Fresh reviewturnaround1570-e3a509-security-review-20261102 commissioned, not accepted; hostedCI41534811171 pending. Details6589728654. Historical6176 repeatedpytestseconds are an opportunity, not achievedsavings or installedreuse. | implementation_complete |
+| P1.R6 | Consume released #1616 throughput repair and adapt original #1570 proof reuse. | Original #1570 current-head security review, CI and protected release | #1616 merged22c08067; group41518522230 and push41522114032 passed6shards+test; independence qualification6587602788 remains. Original #1570 now publishede3a509836a97e020e5966c8a163404a770e3a76c, treec324012532a0c990023f3eb6a289615f3ef119e2, integratesab93 on samebranch. 432 focused tests plus81 real-owner-API casesPASS. Failed builder reconciled; no alternateworker/provider. Fresh reviewturnaround1570-e3a509-security-review-20261102 was refused before launch; no result/retry. HostedCI41534811171 pending; formal CHANGES_REQUESTED remains. Details6589728654. Historical6176 repeatedpytestseconds are an opportunity, not achievedsavings or installedreuse. | implementation_complete |
 | P1.R7 | Expose safe native prelaunch refusal reasons through the existing receipt/status owner. | #1959 independent exact-head review, then native generation composition | New prospective exact-preimage patch #1959 at99e6ace09157c0bc9f6450d28ee2bf9d1dc6b06c.31 focused cases,53 facade regressions,18 committed source fences pass; two genuine preimage RED cases. Active candidate/installed generation unchanged. No raw errors, new registry, admission or retry authority; real caller proof remains required after lawful selection. | implementation_complete |
 | P2.C1 | Reconcile WS:ORCHESTRATOR-PROJECT-CONTINUITY through its existing Agent OS carrier. | Macro #10181 current source qualification and normal release | Existing #10181 at 9d0c4b134ad6e845332e123f79189d440c00220d already corrects W0/W1/W2 and retains real W1 evidence; do not create a duplicate correction. #656 and #1289 now merged, so the November frontier must preserve that delta without inventing native acceptance. Require actual current committed compile-context selection. Original Macro #10181 now published at c0658dfb69d38dfa37bf6235d7a161babdc3ef11, with current November 2 handoff selected by the real compiler. Independent release/mainline and installed-source adoption are still owed. | implementation_complete |
 | P2.C2 | Prove normal and interrupted continuation through existing OHF/continuity consumers. | P1.R2, P2.C1; actual eligible runtime | Fresh served scenarios must advance independent work, reject unsafe replay, preserve accepted work, and recover without Chairman restating the task. Source-string tests cannot close this node. A real adapter overflow was reproduced and repaired losslessly on #10181: 107 compiler tests pass; the actual component returns 28605/32768 bytes with all accounting. This is not native-model or interrupted-session acceptance. | in_progress |
@@ -120,11 +120,13 @@ all real H1 fixture commands and1+23 positive validators remain unchanged.
 
 The new immutable-head independent technical review is
 turnaround1570-e3a509-security-review-20261102, controller25229, original root
-andparent. At commission only CONTROLLER_CREATED is proven; no START/result or
-acceptance is inferred. Formal CHANGES_REQUESTED5732944963 and the existing
-requested reviewer remain. Consume this exact review carrier and new-head
-CI41534811171 before any release claim; never duplicate/rehome an unknown or
-refused request. Full source-bound review brief is comment6589728654.
+andparent. Its terminal facade is REQUEST_REFUSED_BEFORE_LAUNCH, no result,
+root unverified and retryfalse. One bounded original controller read returned
+only MMX_FABRIC_EXIT=75; the specific refusal reason is UNKNOWN, not inferred
+from another run or later capacity. Formal CHANGES_REQUESTED5732944963 and
+the existing requested reviewer remain. No duplicate/rehome or self-review is
+authorized. New-head CI41534811171 is separate proof. Full source-bound brief
+is comment6589728654.
 
 The distinct #1924 release-maintenance child
 turnaround1924-6e1f-native-admission-20261102 (controller3219) is terminalrc75,
@@ -143,3 +145,29 @@ Next material actions: consume the current #1570 review/CI, retain #1924's exact
 non-author release gate, and qualify installed owner composition only when the
 existing release/admission constraints permit. Source/task-tree publication is
 not Agent OS adoption, a running parent, an automatic wake or product acceptance.
+
+
+The #1931 operator consumer was exercised again after canonical CI41528759464
+completed SUCCESS at the same6e1f source. With only the owner-derived CI observation
+updated, the actual merged CLI removed current_head_ci from its gaps and retained
+ONLY governed_production_result. It returned exit1/INCOMPLETE and kept all five
+source-write/dispatch/retry/merge/production-activation authorizations false.
+Receipt SHA256f14c8a3f87a22dd5f51e435b3aaaa04f64c966979ab33a4e72c1bcf3961c65d8.
+This demonstrates useful changing-input operator behavior, not automatic native
+UI, installed Control, or admitted production-result acceptance.
+
+R7 remains the existing four-file source-only exact-preimage proposal #1959 at
+99e6ace09157c0bc9f6450d28ee2bf9d1dc6b06c. No existing R7 technical review/result
+was present in a fresh source read. Its first independent commission is
+turnaround1959-99e6-native-diagnostic-review-20261102, controller58168, original
+root/parent, native route/default limits. Only controller creation is proven at
+this source checkpoint; consume the original result, not an invented START.
+No earlier refused review is part of that commission. The existing requested
+formal reviewer remains; all native composition/installation/caller proof gates
+remain. See the corresponding #917 source-linked continuation for the latest
+child receipt, which may advance after this immutable document.
+
+This same #1957 source carrier also integrates protectedab93f3ed solely to
+consume the released six-shard CI/dependency safeguards rather than launch its
+old three-shard workflow. No protected workflow or runtime implementation is
+modified by this records-only branch. The original baseline stays byte-identical.

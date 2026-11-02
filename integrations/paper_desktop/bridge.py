@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.6"
+VERSION = "0.1.7"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
@@ -37,9 +37,15 @@ SUPPORTED_CATALOG_SHA256 = "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec4024
 # commands remain blocked; changed set_text_content requires rich HTML.
 # A descriptor change other than these exact reviewed digests must fail closed.
 PAPER_RICH_TEXT_CATALOG_SHA256 = "16e6b93f0c51a1574ba8acee4df732052898707a04731d3817530971a88fdefd"
+# Paper Desktop 0.5.16 on M1 is a *distinct*, independently observed
+# 37-tool full catalog. Exactly six existing descriptors differ from the
+# 1b9aff baseline; no tool name was added or removed, and HTML is required.
+# Source: tests/fixtures/paper_desktop/955e92_full_catalog.json.
+PAPER_M1_RICH_TEXT_CATALOG_SHA256 = "955e92cd0477027dcc5fe666810e49393f42f453c1c362e64cd0f3b3ab9f10cf"
 REVIEWED_CATALOG_SHA256_ALTERNATES = frozenset({
     "f3483e001d4f07f5a49144ca52a4f9e14ba046e35546dda05d6cd37c9d2b4728",
     PAPER_RICH_TEXT_CATALOG_SHA256,
+    PAPER_M1_RICH_TEXT_CATALOG_SHA256,
 })
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
@@ -488,8 +494,11 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
                     for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS],
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS - FILE_MANAGE_TOOLS),
                     "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
-        if editing and schema["catalog_sha256"] == PAPER_RICH_TEXT_CATALOG_SHA256 and tool == "set_text_content":
-            # Paper 0.5.18 replaced the required textContent field with html.
+        if (editing and schema["catalog_sha256"] in {
+                PAPER_RICH_TEXT_CATALOG_SHA256,
+                PAPER_M1_RICH_TEXT_CATALOG_SHA256
+        } and tool == "set_text_content"):
+            # Paper 0.5.16/0.5.18 require html, not legacy textContent.
             # Refuse legacy payloads BEFORE dispatch so an ordinary schema
             # error cannot become an ambiguous or wrong-content edit.
             updates = arguments.get("updates")

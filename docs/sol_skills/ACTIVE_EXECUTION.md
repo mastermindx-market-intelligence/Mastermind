@@ -192,6 +192,19 @@ reserved to them. A real blocker has an affected action, evidence and a reachabl
 condition in the existing checkpoint; this is not a new ledger. These checks create no new lifecycle,
 scheduler, lock service, retry budget, authority grant or background execution.
 
+**Stop-at-blocker falsifier.** Before ending an incomplete delivery, identify the next
+concrete executable action and its existing owner/target. A tested local candidate, issue
+record, review request, CI observation or detailed blocker report does not exhaust the
+commission. If publication receives a confirmed pre-effect *technical* refusal, retain
+the same original operation for requalification only on relevant recovery evidence;
+meanwhile advance a genuinely independent authorized source, test or real-path
+acceptance step. An explicit permission/safety denial still ends retries of that exact
+effect; an uncertain effect remains frozen on its original carrier. Do not route around
+either with a new branch, provider or GitHub writer. Only report every lane blocked
+after the Step 6 negative-capability evidence has been obtained for the exact next
+action in each useful lane. This is an execution decision, not another form, approval
+round, polling cadence or status artifact.
+
 ## Step 1 — Freeze the active-turn frame
 
 After recovery/reconciliation, keep one compact working frame:

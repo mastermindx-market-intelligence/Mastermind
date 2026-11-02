@@ -69,6 +69,11 @@ export function AttendedFabricInspector({ host, locale = "en" }: { host?: Missio
     </form>}
     {error && <p role="alert" className="fi-warning">{error}</p>}
     {shown && <div className="fi-detail" aria-label={t("Direct Fabric observation", "直接 Fabric 观测")}>
+      {shown.value.state === "TERMINAL" && shown.value.rc === 0 && shown.value.accepted !== true && <p className="fi-warning" role="status">
+        {shown.value.result_available
+          ? t("Exit 0: result not accepted. Review the original retained Fabric result through its existing acceptance owner; source repairs and production readiness are not proven.", "退出码为 0，但结果尚未验收。请通过现有验收负责人审查原始 Fabric 结果；源代码修复与生产就绪均未得到证明。")
+          : t("Exit 0: retained result unavailable. Reconcile the original run before acceptance; source repairs and production readiness are not proven.", "退出码为 0，但保留结果不可用。验收前请核对原始运行；源代码修复与生产就绪均未得到证明。")}
+      </p>}
       {shown.value.state === "EFFECT_UNKNOWN" && <p className="fi-warning">{t("Effects are unresolved. This observation does not authorize replay or failover.", "效果尚未核实，此观测不授权重放或切换。")}</p>}
       {shown.value.root_id === null && <p className="fi-warning">{t("The source did not establish root or parent lineage.", "来源尚未确认根或父级关系。")}</p>}
       <dl>{fields.map(([label, v]) => <div key={String(label)}><dt>{label}</dt><dd>{value(v)}</dd></div>)}</dl>
