@@ -35,7 +35,9 @@ Safety contract:
   from it and is undone by the ``start``/``enable`` this tool already owes. Once
   ``recover_enable_done`` is recorded the tool never enables again: a label found
   disabled then is ``EFFECT_UNKNOWN`` (``GATEWAY_DISABLED_AFTER_RECOVERY``) and needs
-  the operator to enable it. A crash between the ``enable`` returning and that record
+  the operator to ``enable`` it (and ``bootstrap`` it if it was also booted out), then
+  ``reconcile``; the tool cannot close a transaction while leaving the label disabled.
+  A crash between the ``enable`` returning and that record
   being written leaves one more ``enable`` to run on the next pass.
 * The only compensating act is ``launchctl enable`` when the stop did not take
   effect and both files are provably still the before-images.
@@ -122,6 +124,9 @@ GATEWAY_PLIST_PROFILE = installed._EXPECTED_PLIST_PROFILES["gateway"]
 MAX_CONFIG_BYTES = 65_536
 MAX_PLIST_BYTES = 262_144
 MAX_LAUNCHCTL_OUTPUT_BYTES = 262_144
+# The row grammar of `launchctl print-disabled`, identical to ``require_gateway_enabled`` in ``service-control.sh``.
+_DISABLED_ROW_LABEL = re.compile(r'"[A-Za-z0-9._-]+"')
+_DISABLED_ROW_VERDICTS = ("enabled", "disabled", "true", "false")
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 
@@ -788,22 +793,28 @@ class ProductionHost:
         no row for the label means enabled. Output that is not exactly one header, rows and one
         footer is unreadable and refused (fail closed), the stance of ``require_gateway_enabled``
         in ``service-control.sh``; an empty or header-less listing must not read as "enabled".
+        Every row must match that parser's grammar exactly: three fields, a quoted label from
+        ``[A-Za-z0-9._-]``, ``=>`` and a known verdict, and a label may appear only once. A row in any
+        other shape (an unquoted or re-spaced label, a trailing comma) is refused, never skipped.
         """
         quoted = '"' + LABEL + '"'
         position = 0  # 0 before the header, 1 inside the table, 2 after the footer
         verdicts = []
+        labels = set()
         for line in self._launchctl_output("print-disabled", "system").splitlines():
-            text = line.strip()
-            if not text:
+            fields = line.split()
+            if not fields:
                 continue
-            if position == 0 and text.split() == ["disabled", "services", "=", "{"]:
+            if position == 0 and fields == ["disabled", "services", "=", "{"]:
                 position = 1
-            elif position == 1 and text == "}":
+            elif position == 1 and fields == ["}"]:
                 position = 2
-            elif position == 1 and "=>" in text:
-                head, _, tail = text.partition("=>")
-                if head.strip() == quoted:
-                    verdicts.append(tail.strip().rstrip(",").strip())
+            elif (position == 1 and len(fields) == 3 and _DISABLED_ROW_LABEL.fullmatch(fields[0])
+                  and fields[1] == "=>" and fields[2] in _DISABLED_ROW_VERDICTS
+                  and fields[0] not in labels):
+                labels.add(fields[0])
+                if fields[0] == quoted:
+                    verdicts.append(fields[2])
             else:
                 raise UpdateRefused("LAUNCHCTL_PRINT_DISABLED_UNEXPECTED")
         if position != 2:

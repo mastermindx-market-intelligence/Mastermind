@@ -491,7 +491,9 @@ file placed under a production tree is refused as well.
     `start`/`enable` the tool already owes. Once the compensating `enable` has
     completed and is recorded, the tool never enables again: a label found
     disabled then is EFFECT_UNKNOWN `GATEWAY_DISABLED_AFTER_RECOVERY` and needs
-    the operator to enable it. A candidate is verified only when the readback
+    the operator to `enable` it (and `bootstrap` it if it was also booted out),
+    then `reconcile`; the tool cannot close a transaction while leaving the label
+    disabled. A candidate is verified only when the readback
     join, the loopback probes **and** a launchd process-identity proof pass, and
     the proof brackets the probes: the running gateway must have the after-image
     argv, program, working directory and service user and keep one stable pid
