@@ -90,7 +90,8 @@ def _read(path: Path, *, lines: bool = False,
 
     The byte cap is the only pre-parse guard. The row cap judges the rows a reader selects
     from: ``view`` (e.g. the effective view of an append-only ledger) when given, else the
-    parsed rows. ``sha256`` and ``row_count`` stay computed on the raw file."""
+    parsed rows. ``sha256`` stays computed on the raw file bytes; ``row_count`` on the
+    parsed rows before selection."""
     source: dict = {"file": path.name, "status": "missing", "sha256": None,
                     "modified_at": None, "issues": []}
     signature = None
