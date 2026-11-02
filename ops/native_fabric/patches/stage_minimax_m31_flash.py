@@ -64,9 +64,18 @@ def stage(base: Path, output: Path) -> dict:
     """Create a fresh CLOSED source stage. No installed/selected effects."""
     base = base.resolve(strict=True)
     output = output.absolute()
+    # This producer is SOURCE-ONLY. A redirected output parent must never
+    # turn a scratch stage into a write to the installed native publication
+    # store or back into the reviewed input closure.
+    real_parent = output.parent.resolve(strict=True)
+    if "native-code-releases" in real_parent.parts:
+        raise ValueError("source stage cannot target native release store")
     if output.exists() or output.is_symlink():
         raise ValueError("output already exists; never overwrite")
-    if output == base or output.is_relative_to(base) or base.is_relative_to(output):
+    real_output = real_parent / output.name
+    if (output == base or output.is_relative_to(base) or base.is_relative_to(output)
+            or real_output == base or real_output.is_relative_to(base)
+            or base.is_relative_to(real_output)):
         raise ValueError("source/output overlap")
 
     inventory = _json_file(base / "native-source-inventory.json")
