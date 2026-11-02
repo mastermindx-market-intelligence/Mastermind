@@ -40,6 +40,8 @@ class NativeModelSelectionTests(unittest.TestCase):
         self.secret.write_text(
             "HERMES_GATEWAY_TOKEN=synthetic-gateway-distinct-123456\n"
             "HERMES_DASHBOARD_BASIC_AUTH_PASSWORD=synthetic-dashboard-distinct-123456\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
             "BYTEPLUS_MODELARK_API_KEY=" + FAKE + "\n"
             "ZAI_API_KEY=synthetic-other-role-do-not-forward-123456\n",
             encoding="utf-8",
