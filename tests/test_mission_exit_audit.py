@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -140,3 +143,78 @@ def test_cli_unhashable_enum_is_typed_input_error(tmp_path, capsys):
     assert main([str(file)]) == 2
     result = json.loads(capsys.readouterr().out)
     assert result == {"schema": OUTPUT_SCHEMA, "disposition": "INPUT_UNVERIFIED", "error": "invalid_or_unreadable_snapshot"}
+
+
+def test_cli_fifo_rejected_without_blocking(tmp_path):
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("POSIX FIFO unavailable")
+    fifo = tmp_path / "unopened.fifo"
+    os.mkfifo(fifo)
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.ohf.mission_exit_audit", str(fifo)],
+        cwd=FIXTURE.parents[2], text=True, capture_output=True, timeout=3,
+    )
+    assert proc.returncode == 2
+    assert json.loads(proc.stdout)["disposition"] == "INPUT_UNVERIFIED"
+    assert proc.stderr == ""
+
+
+def test_cli_symlink_not_followed(tmp_path, capsys):
+    target = tmp_path / "private.json"
+    target.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    link = tmp_path / "alias.json"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    assert main([str(link)]) == 2
+    assert json.loads(capsys.readouterr().out)["disposition"] == "INPUT_UNVERIFIED"
+
+
+def test_cli_oversized_regular_file_rejected(tmp_path, capsys):
+    p = tmp_path / "too_big.json"
+    p.write_bytes(b" " * 131073)
+    assert main([str(p)]) == 2
+    assert json.loads(capsys.readouterr().out)["disposition"] == "INPUT_UNVERIFIED"
+
+
+def test_cli_growth_race_rejected(tmp_path, monkeypatch, capsys):
+    import scripts.ohf.mission_exit_audit as module
+    p = tmp_path / "growing.json"
+    p.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    original = module.os.open
+
+    def growing_open(file, flags, *args, **kwargs):
+        p.write_bytes(b" " * 131073)
+        return original(file, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", growing_open)
+    assert main([str(p)]) == 2
+    assert json.loads(capsys.readouterr().out)["disposition"] == "INPUT_UNVERIFIED"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("action_id", "sk-abcdefghij"),
+    ("carrier", "/Users/private/secret-file"),
+    ("carrier", "file:///home/private"),
+    ("action_id", "ghp_AbCdEfGhIjKl"),
+])
+def test_held_effect_refs_cannot_print_secret_or_path(tmp_path, capsys, field, value):
+    d = snapshot()
+    d["effect"][field] = value
+    with pytest.raises(InvalidSnapshot):
+        audit(d)
+    p = tmp_path / "packet.json"
+    p.write_text(json.dumps(d), encoding="utf-8")
+    assert main([str(p)]) == 2
+    emitted = capsys.readouterr().out
+    assert value not in emitted
+    assert json.loads(emitted)["disposition"] == "INPUT_UNVERIFIED"
+
+
+def test_safe_opaque_effect_identifiers_survive_exactly():
+    d = snapshot()
+    d["effect"].update(action_id="fabric:run", carrier="studio:carrier")
+    held = audit(d)["held_actions"]
+    assert held[0]["action_id"] == "fabric:run"
+    assert held[0]["carrier"] == "studio:carrier"

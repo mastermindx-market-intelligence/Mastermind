@@ -11,14 +11,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Any
 
+from scripts.ohf.redaction import redact_evidence_text
+
 SCHEMA = "mastermind.mission_exit_audit_input/v1"
 OUTPUT_SCHEMA = "mastermind.mission_exit_audit_output/v1"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+PUBLIC_EFFECT_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,319}$")
+MAX_SNAPSHOT_BYTES = 131072
 REQUIREMENTS = (
     "accepted_worker_result",
     "source_implementation",
@@ -70,6 +76,20 @@ def _ref(value: Any) -> bool:
     return isinstance(value, str) and 1 <= len(value) <= 320 and "\n" not in value
 
 
+def _public_effect_ref(value: Any) -> bool:
+    """Only safe opaque identifiers may be reflected in output.
+
+    This structural rule rejects private paths/control characters; the existing
+    house sanitizer rejects credential-shaped values and exact env secrets.
+    The source owner must supply an opaque ID, not a path, URL or secret.
+    """
+    return (
+        _ref(value)
+        and PUBLIC_EFFECT_REF_RE.fullmatch(value) is not None
+        and redact_evidence_text(value) == value
+    )
+
+
 def _true_and_ref(obj: dict[str, Any], flag: str, receipt: str) -> bool:
     return obj.get(flag) is True and _ref(obj.get(receipt))
 
@@ -102,7 +122,7 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(effect_class, str) or effect_class not in VALID_EFFECTS:
         raise InvalidSnapshot("unknown effect class")
     if effect["class"] != "NONE":
-        if not _ref(effect.get("action_id")) or not _ref(effect.get("carrier")):
+        if not _public_effect_ref(effect.get("action_id")) or not _public_effect_ref(effect.get("carrier")):
             raise InvalidSnapshot("held action requires bounded exact action and carrier references")
         if effect.get("dispatched") is not None and not _bool(effect.get("dispatched")):
             raise InvalidSnapshot("effect.dispatched must be true, false or null")
@@ -192,14 +212,56 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _read_snapshot(path: Path) -> str:
+    """Bounded, identity-checked regular-file read; no FIFO/device/symlink open.
+
+    Check file identity and metadata before/after a bounded read. These checks
+    detect normal replacement/growth races; adversarial concurrent mutation of
+    a privileged local filesystem remains outside this read-only tool's trust.
+    """
+    initial = path.lstat()
+    if not stat.S_ISREG(initial.st_mode) or not 0 <= initial.st_size <= MAX_SNAPSHOT_BYTES:
+        raise InvalidSnapshot("input is not a bounded regular file")
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if nofollow is None or nonblock is None:
+        raise InvalidSnapshot("safe input open unavailable")
+    fd = os.open(path, os.O_RDONLY | nofollow | nonblock | getattr(os, "O_CLOEXEC", 0))
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not 0 <= opened.st_size <= MAX_SNAPSHOT_BYTES:
+            raise InvalidSnapshot("opened input is not a bounded regular file")
+        if (initial.st_dev, initial.st_ino) != (opened.st_dev, opened.st_ino):
+            raise InvalidSnapshot("input changed before open")
+        chunks = []
+        remaining = MAX_SNAPSHOT_BYTES + 1
+        while remaining:
+            chunk = os.read(fd, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
+        after = os.fstat(fd)
+        path_after = path.lstat()
+        def identity(st):
+            return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+        if (len(data) > MAX_SNAPSHOT_BYTES or len(data) != opened.st_size
+                or identity(initial) != identity(opened)
+                or identity(opened) != identity(after)
+                or identity(after) != identity(path_after)):
+            raise InvalidSnapshot("input changed during bounded read")
+        return data.decode("utf-8")
+    finally:
+        os.close(fd)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only Mastermind mission-exit evidence audit")
     parser.add_argument("snapshot", type=Path, help="local JSON of canonical owner observations")
     args = parser.parse_args(argv)
     try:
-        if args.snapshot.stat().st_size > 131072:
-            raise InvalidSnapshot("snapshot too large")
-        raw = args.snapshot.read_text(encoding="utf-8")
+        raw = _read_snapshot(args.snapshot)
         report = audit(json.loads(raw))
     except (OSError, ValueError):
         # Do not reflect error payloads or file paths, which could contain secrets.
