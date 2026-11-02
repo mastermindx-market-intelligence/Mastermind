@@ -113,12 +113,26 @@ the explicit HTTPS proxy. These are real-host canaries, not source-test claims.
 
 `hermesctl doctor` reports missing per-role proxy setup under
 `network_proxy:mmsecretary` / `network_proxy:mmmeta`, refuses shared
-bot/gateway/proxy identity as core readiness, and returns
-`core_text_status=CONFIG_READY_NOT_LIVE_PROVEN` only when its core
-configuration prerequisites are satisfied. It continues reporting optional
-Mac computer-use, future Fabric/Steward and Dot-account gaps independently;
-its overall status/exit behavior is unchanged. No doctor, local HTTP 200,
-proxy URL or stored model choice constitutes a live inference receipt.
+bot/gateway/proxy identity and incumbent Grok Secretary bot-ID reuse as core
+readiness, and returns `core_text_status=CONFIG_READY_NOT_LIVE_PROVEN`
+only when its core configuration prerequisites are satisfied. It continues
+reporting optional Mac computer-use, future Fabric/Steward and Dot-account gaps
+independently; its overall status/exit behavior remains fail-closed.
+
+To qualify **only the two core text-bot configuration prerequisites** without
+requiring unrelated Mac/Fabric/vision features, use:
+
+```sh
+python3 integrations/hermes_harness/hermesctl doctor --core-text-config-only --json
+```
+
+This explicitly scoped command exits zero only for `CONFIG_READY_NOT_LIVE_PROVEN`.
+The JSON still says `status: MISSING` when future/optional capabilities are
+missing; it does not permit Slack send, model inference, Executive admission,
+host deployment, arbitrary traffic or proxy installation. Unscoped
+`hermesctl doctor` keeps the previous conservative full-readiness exit status.
+No doctor, local HTTP 200, proxy URL or selected model constitutes a live
+authenticated inference receipt.
 
 For actual acceptance, obtain authenticated pinned Hermes structured
 one-shot output through `chat -Q --query-file - --format stream-json` inside
