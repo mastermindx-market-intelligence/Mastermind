@@ -98,6 +98,17 @@ wrong-role and unqualified settings refuse before the child starts. ModelArk
 and Z.AI keys remain independently loaded from the previously reviewed
 credential pointers; neither key is forwarded to the proxy by this module.
 
+**Pinned donor source-level proxy contract:** at
+`NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`,
+`agent/process_bootstrap.py::_get_proxy_from_env` selects `HTTPS_PROXY`
+ahead of `HTTP_PROXY` and `ALL_PROXY`. `build_keepalive_http_client`
+passes the selected value to the OpenAI-wire `httpx.Client(proxy=...,
+verify=...)`, and `agent/agent_runtime_helpers.py` creates primary
+OpenAI-compatible model clients through that helper. This confirms the
+**intended source transport** honors the injected proxy, rather than relying
+on ambient shell proxy discovery; it still does not prove the installed
+binary, proxy listener, hostname allowlist, TLS peer or remote inference.
+
 **The proxy process is not created, installed or certified by this repository.**
 A currently authorized host network owner must separately provide and
 validate an existing compatible role-specific loopback HTTP CONNECT proxy
