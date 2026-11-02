@@ -1929,9 +1929,12 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
     qwen_candidate_model = None
     if host is not None:
         try:
-            glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
-                model=(requested_model if requested_model not in
-                       ("cursor-grok-4.6-high", "grok-4.6", "grok-4.7") else None))[0]
+            # A MiniMax/Grok model pin is never a GLM account-model hint.
+            glm_models = {str(value).casefold() for value in _glm_models(load_pools()).values()}
+            glm_pin = (requested_model if str(requested_model or "").casefold()
+                       in glm_models else None)
+            glm_candidate_model = _selection_model(
+                "glm", task_class, load_pools(), needs, model=glm_pin)[0]
             qwen_candidate_model = _selection_model("bailian", task_class, load_pools(), needs)[0]
             routes = _eligible_host_routes(
                 host, glm_model=glm_candidate_model,
