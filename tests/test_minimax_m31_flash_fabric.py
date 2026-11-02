@@ -154,6 +154,49 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertEqual(result.stdout.strip(), "1000000 900000 240")
 
+    def test_m31_plan_key_gate_refuses_payg_but_preserves_legacy_m3(self):
+        for path in SHELLS:
+            with self.subTest(path=path):
+                text = path.read_text()
+                self.assertLess(
+                    text.index('python3 "$HERE/slot.py" minimax --wait'),
+                    text.index("MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED"),
+                )
+                clause = text.split("# M3.1 Flash is commissioned", 1)[1]
+                clause = clause.split("export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN", 1)[0]
+                program = 'ANTHROPIC_AUTH_TOKEN="$1"\\n' + clause + '\\nprintf "ADMITTED\\n"\\n'
+                for token, model, expected in (
+                    ("sk-cp-fixture", "MiniMax-M3.1-Flash", 0),
+                    ("sk-api-fixture", "MiniMax-M3.1-Flash", 78),
+                    ("sk-api-fixture", "MiniMax-M3", 0),
+                ):
+                    test = subprocess.run(
+                        ["/bin/bash", "-c", program, "fixture", token, model],
+                        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                        capture_output=True, text=True, timeout=8,
+                    )
+                    self.assertEqual(test.returncode, expected, test.stderr)
+                    self.assertNotIn(token, test.stdout + test.stderr)
+
+        text = (SOURCE / "mm_codex_exec.sh").read_text()
+        self.assertLess(text.index("export MINIMAX_API_KEY="),
+                        text.index("MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED"))
+        body = text.split("# This is checked only after the original MiniMax slot is acquired.", 1)[1]
+        body = body.split("\\nesac", 1)[0] + "\\nesac\\n"
+        program = 'MODEL="$1"\\nMINIMAX_API_KEY="$2"\\n' + body + 'echo ADMITTED\\n'
+        for model, token, expected in (
+            ("MiniMax-M3.1-Flash", "sk-cp-fixture", 0),
+            ("MiniMax-M3.1-Flash", "sk-api-fixture", 78),
+            ("MiniMax-M3", "sk-api-fixture", 0),
+        ):
+            test = subprocess.run(
+                ["/bin/bash", "-c", program, "fixture", model, token],
+                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                capture_output=True, text=True, timeout=8,
+            )
+            self.assertEqual(test.returncode, expected, test.stderr)
+            self.assertNotIn(token, test.stdout + test.stderr)
+
     def test_codex_profile_recognizes_m31_and_rejects_excess_context(self):
         source = (SOURCE / "mm_codex_exec.sh").read_text()
         segment = source.split("CODEX_CONTEXT_ARGS=()\n", 1)[1]
