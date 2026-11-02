@@ -2,6 +2,8 @@
 import asyncio
 import hashlib
 import json
+import os
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -37,13 +39,43 @@ def compose(tmp_path, monkeypatch, raw, **kwargs):
     captured = {}
     client = object()
     monkeypatch.setattr(broker, "WorkerBrokerClient", lambda *args, **kwargs: client)
-    monkeypatch.setattr(cli, "activate_launchd_socket", lambda name: object())
+    monkeypatch.setattr(cli, "activate_launchd_socket", _workspace_aware_listener(raw))
     def service(config, **bindings):
         captured.update(bindings)
         return SimpleNamespace(config=config)
     monkeypatch.setattr(cli, "ExecutiveControlService", service)
     service = cli._service_from_config(raw, **kwargs)
     return service, captured["supervisor_factory"](runtime), client
+
+
+def _workspace_aware_listener(raw):
+    """Return a launchd listener factory that yields a real AF_UNIX socket for
+    the workspace Control Room launchd name and ``object()`` for everything
+    else. The room path is whatever the (possibly already patched) socket_path
+    value in raw points at; tests that swap the canonical path must also patch
+    ``control_plane.workspace_control_room_lifecycle._TRUSTED_SOCKET_PARENT_UID``.
+    """
+    import control_plane.workspace_control_room_lifecycle as lifecycle_mod
+    from tests.executive_installed_control_fixture import unix_listener
+    cache = {}
+
+    def factory(name):
+        if name == "WorkspaceControlRoom" and "workspace_control_room" in raw:
+            if name not in cache:
+                socket_path = raw["workspace_control_room"]["socket_path"]
+                if os.path.exists(socket_path):
+                    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                    listener.bind(socket_path)
+                    os.chmod(socket_path, 0o600)
+                    listener.listen(8)
+                else:
+                    listener, socket_path = unix_listener()
+                    raw["workspace_control_room"]["socket_path"] = socket_path
+                cache[name] = listener
+            return cache[name]
+        return object()
+
+    return factory
 
 
 def test_cleanup_policy_is_shared_contract_and_supervisor_reexport():

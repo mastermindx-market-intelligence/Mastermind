@@ -3,7 +3,9 @@
 Default CLI behavior is read-only preflight. Explicit execution is a mechanism,
 not writer admission: the existing workflow owner must first settle all writers
 and qualify dependencies, source, original host retention and recovery. Nothing
-here schedules, retries, installs, deletes evidence, or releases a BUILDING run.
+here schedules, retries issued effects, installs, deletes evidence, or adopts
+another process's BUILDING run. A still-present original parent may finish one
+validated, wholly unissued tail after waiting for its own child.
 The secure configuration/manifest digest must come from the existing owner.
 """
 from __future__ import annotations
@@ -38,6 +40,7 @@ FIELDS = frozenset({
     "manifest_sha256", "retention_root", "public_checkout", "runner_work_root",
 })
 CAPTURE = re.compile(rb"ingest_research: original_capture_sha256=([0-9a-f]{64})\n\Z")
+CONTINUATION_CAPTURE = re.compile(rb"research_producer: continuation_capture_sha256=([0-9a-f]{64})\n\Z")
 
 
 class OriginalRunUnsettled(RuntimeRefused):
@@ -184,10 +187,124 @@ raise SystemExit(_child(c,i,p))
 """
 
 
+def _continuation_child(config, identity, run_dir, original_capture):
+    """Fresh private executor commissioned only by the original waiting parent.
+
+    This function is not an authenticated external API or a resume command.
+    The original parent's control flow owns the actual wait/capture provenance.
+    Any failed continuation stays in the same reserved run; no recursive retry.
+    """
+    import hashlib
+    import runpy
+    import sqlite3
+
+    for project in ("mastermind", "macro"):
+        verify_archive_release(
+            config[project + "_release"], config[project + "_commit"],
+            config[project + "_tree"], project=project,
+            manifest_path=config["manifest_path"],
+            expected_manifest_sha256=config["manifest_sha256"],
+            manifest_owner_uid=os.getuid(), release_owner_uid=os.getuid())
+    if any(name in {"engine", "lib"} or name.startswith(("engine.", "lib."))
+           for name in sys.modules):
+        _refuse("PRODUCER_IMPORT_ALREADY_LOADED")
+    if os.environ.get("RESEARCH_LOCAL_STORE"):
+        _refuse("PRODUCER_LOCAL_STORE_OVERRIDE_REFUSED")
+    sys.dont_write_bytecode = True
+    sys.path.insert(0, config["macro_release"])
+    from engine.research_vault.generation_recovery import inspect_settled_publication
+    from engine.research_vault.generation_continuation import _continue_after_original_exit
+    from engine.research_vault import r2_store, producer_generation, excerpt
+
+    expected = {"source_commit": config["macro_commit"], "run": identity["generation_run"]}
+    original = Path(run_dir) / "journal.jsonl"
+    inspect_settled_publication(original, expected_identity=expected,
+                               original_capture_sha256=original_capture)
+    # The protocol check above precedes any Store construction. A no-Store or
+    # unsupported original cut cannot turn into another ingestion attempt.
+    store = r2_store.build_store(single_attempt_writes=True)
+    if store is None:
+        _refuse("PRODUCER_STORE_UNAVAILABLE")
+    completed = _continue_after_original_exit(
+        store, original, expected_identity=expected,
+        original_capture_sha256=original_capture)
+    # Capture survives a later local snapshot failure, but a nonzero exit still
+    # fails the workflow. It never grants another continuation attempt.
+    print("research_producer: continuation_capture_sha256="
+          + completed["continuation_capture_sha256"], flush=True)
+    canonical = completed["catalog_bytes"]
+    cli = runpy.run_path(str(Path(config["macro_release"]) / "scripts/ingest_research.py"),
+                         run_name="research_producer_projection")
+    mirror = cli["_public_mirror_bytes"](canonical)
+    if mirror is None:
+        _refuse("PRODUCER_PUBLIC_MIRROR_UNAVAILABLE")
+    document = json.loads(canonical)
+    corpus_path = original.with_name(original.name + ".workspace") / "corpus.sqlite"
+    # Never project an unrelated or subsequently changed local corpus. The
+    # COMPLETE record already binds the actual store corpus independently.
+    if corpus_path.stat().st_size > producer_generation.CORPUS_MAX_BYTES:
+        _refuse("PRODUCER_PUBLIC_MIRROR_UNAVAILABLE")
+    corpus_bytes = corpus_path.read_bytes()
+    if hashlib.sha256(corpus_bytes).hexdigest() != document[producer_generation.GENERATION_FIELD]["corpus_sha256"]:
+        _refuse("PRODUCER_PUBLIC_MIRROR_UNAVAILABLE")
+    ids = {row["id"] for row in document.get("items", []) if isinstance(row, dict) and row.get("id")}
+    # SQLite percent-DECODES the path of a ``file:`` URI, so the raw f-string
+    # form silently retargeted any corpus whose retention path carries ``%``,
+    # ``?`` or ``#`` — opening a decoy at the decoded path, or failing the
+    # open outright. ``as_uri()`` re-encodes the exact digest-checked corpus
+    # above, and the read-only snapshot is computed BEFORE anything public is
+    # written, so a wrong or unreadable corpus cannot leave a partially
+    # published mirror behind.
+    connection = sqlite3.connect(corpus_path.as_uri() + "?mode=ro", uri=True)
+    try:
+        excerpts = excerpt.snapshot(connection, ids)
+    finally:
+        connection.close()
+    public = Path(config["public_checkout"]) / "data/research_vault"
+    public.mkdir(parents=True, exist_ok=True)
+    # Both public candidates are staged on the public filesystem and only then
+    # atomically replaced, so an excerpt.snapshot failure above or a
+    # write_repo_snapshot refusal below leaves the existing public catalog and
+    # excerpts pair byte-identical. The excerpt stage is seeded with the
+    # committed snapshot so the existing collapse guard reads the REAL prior
+    # excerpts, never an absent temp path. Cleanup touches only these two
+    # staged names, and no cross-file crash atomicity is claimed.
+    staged_catalog = public / f".catalog.json.staged-{os.getpid()}"
+    staged_excerpts = public / f".excerpts.json.staged-{os.getpid()}"
+    try:
+        committed = public / "excerpts.json"
+        if committed.is_file():
+            _write_new(staged_excerpts, committed.read_bytes())
+        # Same public-safe excerpt projection as the ordinary CLI; no original
+        # journal, corpus bytes, generation record or receipts enter the mirror.
+        if not excerpt.write_repo_snapshot(excerpts, staged_excerpts):
+            _refuse("PRODUCER_PUBLIC_MIRROR_UNAVAILABLE")
+        _write_new(staged_catalog, mirror)
+        for staged, target in ((staged_catalog, public / "catalog.json"),
+                               (staged_excerpts, public / "excerpts.json")):
+            os.chmod(staged, 0o644)
+            os.replace(staged, target)
+    finally:
+        for staged in (staged_catalog, staged_excerpts):
+            try:
+                os.unlink(staged)
+            except FileNotFoundError:
+                pass
+    return 0
+
+
+_CONTINUATION_BOOTSTRAP = """import json,sys
+c,i,p,h=json.loads(sys.argv[1])
+sys.path.insert(0,c['mastermind_release'])
+from ops.research_producer.launch import _continuation_child
+raise SystemExit(_continuation_child(c,i,p,h))
+"""
+
+
 def execute(config, run_id, attempt):
     """Explicit original invocation; callers retain admission and recovery duties.
 
-    Never retries or kills the subprocess. An interrupted/lost parent does not
+    Never retries issued effects or kills a subprocess. An interrupted/lost parent does not
     prove settlement. Existing run directories are permanent collision fences;
     their absence or a new workflow attempt is not recovery authorization.
     """
@@ -204,21 +321,13 @@ def execute(config, run_id, attempt):
         raise OriginalRunUnsettled("PRODUCER_ORIGINAL_RUN_REQUIRES_RECONCILIATION") from None
 
 
-def _run_reserved(config, plan, run_dir, retention):
-    _sync_directory(retention)
-    _write_new(run_dir / "launch.json", _document(plan))
-    private_tmp = run_dir / "tmp"
-    private_tmp.mkdir(mode=0o700)
-    _sync_directory(run_dir)
-    command = [sys.executable, "-I", "-B", "-c", _BOOTSTRAP,
-               json.dumps([config, plan["identity"], str(run_dir)])]
+def _run_private_child(command, *, cwd, environment, output_path, capture_pattern):
+    """Return only after the actual child wait and durable private-output close."""
     captures, pending, log_bytes, overflow = [], b"", 0, False
-    fd = os.open(run_dir / "output.log", os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    fd = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
                  | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as log:
-        environment = dict(os.environ)
-        environment.update(TMPDIR=str(private_tmp), TMP=str(private_tmp), TEMP=str(private_tmp))
-        child = subprocess.Popen(command, cwd=config["mastermind_release"], env=environment,
+        child = subprocess.Popen(command, cwd=cwd, env=environment,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         # Drain even after the bound: killing a producer cannot establish whether
         # its last request settled. Oversized output suppresses capture receipt.
@@ -233,7 +342,7 @@ def _run_reserved(config, plan, run_dir, retention):
                 lines = pending.split(b"\n")
                 pending = lines.pop()
                 for line in lines:
-                    match = CAPTURE.fullmatch(line + b"\n")
+                    match = capture_pattern.fullmatch(line + b"\n")
                     if match:
                         captures.append(match.group(1).decode())
                 if len(pending) > 65536 or len(captures) > 1:
@@ -244,6 +353,22 @@ def _run_reserved(config, plan, run_dir, retention):
         log.flush()
         os.fsync(log.fileno())
     capture = captures[0] if len(captures) == 1 and not overflow else None
+    return rc, capture, overflow
+
+
+def _run_reserved(config, plan, run_dir, retention):
+    _sync_directory(retention)
+    _write_new(run_dir / "launch.json", _document(plan))
+    private_tmp = run_dir / "tmp"
+    private_tmp.mkdir(mode=0o700)
+    _sync_directory(run_dir)
+    command = [sys.executable, "-I", "-B", "-c", _BOOTSTRAP,
+               json.dumps([config, plan["identity"], str(run_dir)])]
+    environment = dict(os.environ)
+    environment.update(TMPDIR=str(private_tmp), TMP=str(private_tmp), TEMP=str(private_tmp))
+    rc, capture, overflow = _run_private_child(
+        command, cwd=config["mastermind_release"], environment=environment,
+        output_path=run_dir / "output.log", capture_pattern=CAPTURE)
     result = {"state": "ORIGINAL_PROCESS_EXITED", "identity": plan["identity"],
               "macro_commit": config["macro_commit"],
               "mastermind_commit": config["mastermind_commit"],
@@ -252,6 +377,26 @@ def _run_reserved(config, plan, run_dir, retention):
               "publication_complete": None, "recovery_authorized": False}
     _write_new(run_dir / "process-result.json", _document(result))
     _sync_directory(run_dir)
+    # This edge is reached only in the original parent after its actual wait.
+    # No saved process-result, run-dir adoption or manual resume enters it.
+    # The fresh pinned child first checks the original closed plan without a
+    # Store. Unknown/unsupported cuts refuse, even when postimages match.
+    if rc != 0 and capture is not None and not overflow:
+        _write_new(run_dir / "continuation-launch.json", _document({
+            "identity": plan["identity"], "original_capture_sha256": capture,
+            "manifest_sha256": config["manifest_sha256"]}))
+        _sync_directory(run_dir)
+        continuation_command = [sys.executable, "-I", "-B", "-c", _CONTINUATION_BOOTSTRAP,
+            json.dumps([config, plan["identity"], str(run_dir), capture])]
+        tail_rc, tail_capture, tail_overflow = _run_private_child(
+            continuation_command, cwd=config["mastermind_release"], environment=environment,
+            output_path=run_dir / "continuation-output.log", capture_pattern=CONTINUATION_CAPTURE)
+        tail = {"state": "ORIGINAL_CONTINUATION_PROCESS_EXITED", "exit_code": tail_rc,
+                "continuation_capture_sha256": tail_capture,
+                "output_bound_exceeded": tail_overflow}
+        _write_new(run_dir / "continuation-process-result.json", _document(tail))
+        _sync_directory(run_dir)
+        result["continuation"] = tail
     return result
 
 
@@ -268,8 +413,14 @@ def main(argv=None):
         result = (execute if args.execute else preflight)(config, args.run_id, args.attempt)
         # Only fixed-schema public metadata. Raw child output stays private.
         print(json.dumps(result, sort_keys=True), flush=True)
-        return (0 if not args.execute else
-                0 if result["exit_code"] == 0 and result["original_capture_sha256"] else 1)
+        if not args.execute:
+            return 0
+        original_ok = result["exit_code"] == 0 and bool(result["original_capture_sha256"])
+        tail = result.get("continuation", {})
+        tail_ok = (tail.get("exit_code") == 0
+                   and bool(tail.get("continuation_capture_sha256"))
+                   and tail.get("output_bound_exceeded") is False)
+        return 0 if original_ok or tail_ok else 1
     except Exception as exc:
         # No arbitrary exception, configured path, Store error or raw log leak.
         code = str(exc) if isinstance(exc, RuntimeRefused) else "PRODUCER_LAUNCH_FAILED"

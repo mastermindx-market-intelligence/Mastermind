@@ -262,8 +262,17 @@ def activate(wrapper, release, expected_sha):
             raise ValueError('WRAPPER_CHANGED_DURING_PREPARE')
         if pinned_consumers(wrapper,sha(updated)):
             raise ValueError('PINNED_CONSUMER_RELEASE_REQUIRED')
-        os.replace(name,wrapper)
-        if wrapper.read_bytes()!=updated:raise ValueError('WRAPPER_READBACK_FAILED')
+        # Once rename is attempted, an exception cannot establish NOT_APPLIED:
+        # the new wrapper may already be at its final path. Freeze this
+        # carrier for exact wrapper/backup/consumer reconciliation, never
+        # classify the exception as an ordinary pre-write refusal.
+        try:
+            os.replace(name,wrapper)
+            observed=wrapper.read_bytes()
+        except OSError:
+            raise ValueError('WRAPPER_ACTIVATION_EFFECT_UNKNOWN') from None
+        if observed!=updated:
+            raise ValueError('WRAPPER_ACTIVATION_EFFECT_UNKNOWN')
         return {'state':'PROMPT_HOOK_INSTALLED','wrapper_sha256':sha(updated),'backup':str(backup)}
     finally:
         if os.path.exists(name):os.unlink(name)

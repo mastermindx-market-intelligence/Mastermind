@@ -81,7 +81,7 @@ def attest_binary_document(path, *, allowed_versions):
                   'binary': dataclasses.asdict(binary)})
 
 
-def build_finite_control_delta(*, definition_dir, worker_artifacts):
+def build_finite_control_delta(*, definition_dir, worker_artifacts, native_capacity_v2=None):
     """Pure staging delta for the existing root-owned Control publisher.
 
     No arm/submit flag, activation receipt, quota or service is produced here.
@@ -107,9 +107,23 @@ def build_finite_control_delta(*, definition_dir, worker_artifacts):
             or physical.worker_source_config_digest != _digest(worker_bytes)
             or worker.get('harness_binding_id') != canary.BINDING):
         raise AttendedDefinitionError('finite Control delta differs from its original worker')
-    return dict(fabric_bridge_armed=False, fabric_bindings_path=str(directory/'bindings.json'),
+    value = dict(fabric_bridge_armed=False, fabric_bindings_path=str(directory/'bindings.json'),
         fabric_bindings_sha256=_digest(bindings_bytes),
         fabric_attended_probe={'worker_config_path': str(directory/'worker.json')})
+    if native_capacity_v2 is not None:
+        from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
+        from scripts.executive_os_phase1c import _validate_fabric_bridge_config, ServiceError
+        enrollment = validate_native_subscription_capacity_enrollment(
+            worker.get('native_capacity_enrollment'))
+        if (type(native_capacity_v2) is not dict
+                or native_capacity_v2.get('macro_release') != enrollment['registration_source']['release_commit']):
+            raise AttendedDefinitionError('native Control source differs from its worker')
+        value['native_capacity_v2'] = dict(native_capacity_v2)
+        try:
+            _validate_fabric_bridge_config(value)
+        except ServiceError:
+            raise AttendedDefinitionError('native Control source pin is invalid') from None
+    return value
 
 
 def _entry(release_root, commit_sha, tree_sha, manifest_sha256, arguments):

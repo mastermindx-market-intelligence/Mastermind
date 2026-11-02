@@ -27,6 +27,26 @@ Advance the highest-leverage unfinished capability through the real critical pat
 A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
 not permission to end the whole turn while another in-scope critical-path lane remains executable.
 
+## Durable project plan at the start, not only at handoff
+
+For any multi-phase initiative, first recover the Agent OS workstream waves and the
+latest dated handoff (the pinned plan), then the repo master plan's task tree, or
+create a useful initial task tree when no legitimate one exists. Follow
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` from this same protected pin. Record stable
+task/subtask IDs, dependencies, `DONE_WHEN`, expected evidence and review on the
+task tree. Keep wave status, `next_action` and `do_not_redo` on the Agent OS records.
+Verify the first durable GitHub save and the authorized handoff readback as available
+**before major delegation or construction**.
+This is a phase-level safety requirement, not an approval loop or a requirement to
+pre-write every tiny implementation command. If a writer is unavailable, identify
+which record is missing and never pretend an unsaved plan is durable.
+
+On material progress, accepted rulings, child returns, dependency changes and risky
+session boundaries, revise the affected task-tree nodes or wave fields through that
+owner's writer, read back the revision, and amend the latest dated Agent OS handoff.
+Keep completed work and pending effects precise. A saved plan/checkpoint does not end
+the active turn or grant a new operator, runtime or chat authority.
+
 ## Start and recover without administrative ceremony
 
 These are decision checks, not additional forms or approval messages. Apply them to Web, Claude,
@@ -66,6 +86,32 @@ occurred before tool dispatch from a lost/ambiguous response after dispatch. Use
 bounded call history/status/readback when available. If the refused call is proven never to have reached
 the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
 do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
+
+**Action-scoped refusal is not mission-wide refusal.** If one tool request is denied, record the
+precise action, target, originating carrier, receipt, and whether any effect dispatched. Hold that
+specific denied action. Do not treat the refusal as proof that all other tasks, repositories,
+read-only inspections, or Fabric operations are barred. Continue the highest-value independent
+task using an admitted worker where allowed, with a distinct task identity and no replay of the
+denied effect. A different task must be genuinely separable in authority, target, and intended
+effect—not a decomposed substitute for the rejected operation. A request confirmed pre-dispatch
+with `EFFECT_NONE` may be recovered only within the bounds already allowed for that failure
+category. `EFFECT_UNKNOWN` must be reconciled at the original target before any further operation
+depending on it.
+
+Establish refusal provenance before projecting it onto another session. Identify the actual
+tool/provider receipt, originating surface/carrier, action/target, and dispatch/effect state.
+A handoff's claim, an assistant's own refusal, a current system/developer policy restriction,
+a human-imposed scope restriction, and a current tool denial are different evidence.
+Preserve the named held effect while checking the record;
+never replay it to discover whether the earlier refusal was real. An unverified historical
+claim is not proof of a current platform-wide restriction or a requirement for an invented
+clearance receipt. Permitted non-effectful local inspection may establish the current surface.
+A later direct human instruction in the current session's own instruction record can revise
+human-imposed scope; a handoff's report of an earlier grant remains a claim to verify.
+It cannot clear an applicable
+system/developer restriction, real tool/provider denial, live lease or EFFECT_UNKNOWN. Local
+Codex/Claude native tools do not require optional Web/Studio Direct/Executive connectivity;
+they remain subject to their actual grants and all applicable effect fences.
 
 EFFECT_NONE is not retry permission. The first explicit safety or permission denial ends retry for
 that action. Do not rephrase it or change tools, carriers, accounts, models or providers to get the
@@ -145,6 +191,19 @@ re-plan, not a third identical loop. Ask a human only for the precise decision o
 reserved to them. A real blocker has an affected action, evidence and a reachable resolver/return
 condition in the existing checkpoint; this is not a new ledger. These checks create no new lifecycle,
 scheduler, lock service, retry budget, authority grant or background execution.
+
+**Stop-at-blocker falsifier.** Before ending an incomplete delivery, identify the next
+concrete executable action and its existing owner/target. A tested local candidate, issue
+record, review request, CI observation or detailed blocker report does not exhaust the
+commission. If publication receives a confirmed pre-effect *technical* refusal, retain
+the same original operation for requalification only on relevant recovery evidence;
+meanwhile advance a genuinely independent authorized source, test or real-path
+acceptance step. An explicit permission/safety denial still ends retries of that exact
+effect; an uncertain effect remains frozen on its original carrier. Do not route around
+either with a new branch, provider or GitHub writer. Only report every lane blocked
+after the Step 6 negative-capability evidence has been obtained for the exact next
+action in each useful lane. This is an execution decision, not another form, approval
+round, polling cadence or status artifact.
 
 ## Step 1 — Freeze the active-turn frame
 

@@ -2,15 +2,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { bindMissionHost, type AuthState, type RawClient } from "../host";
-import { attendedSelection, decodeAttendedStatus } from "./attended-status";
+import { attendedSelection, decodeAttendedStatus, type AttendedStatus } from "./attended-status";
 import { AttendedFabricInspector } from "./AttendedFabricInspector";
 
 afterEach(cleanup);
 const selected = { rootId: "source-root", runId: "source-run" };
-const raw = () => ({ schema: "mastermind.fabric_task_status.v1", run_id: "source-run", root_id: "source-root", parent_run_id: "source-root",
+const raw = (): AttendedStatus => ({ schema: "mastermind.fabric_task_status.v1", run_id: "source-run", root_id: "source-root", parent_run_id: "source-root",
   state: "TERMINAL", rc: 0, signal: "ok", result_available: true, result_bytes: 3672, accepted: false, accepted_by: null,
   acceptance_state: "NOT_ACCEPTED", acceptance_reason: "NO_OUTCOME" });
-function client(read = vi.fn(async () => raw())) {
+function client(read: () => Promise<AttendedStatus> = vi.fn(async () => raw())) {
   let state: AuthState = { status: "signed_in", acquisition: true, content: false, reason: null }, gen = 0;
   const listeners: Array<(s: AuthState) => void> = [];
   const c: RawClient = { getState: () => state, invalidationGeneration: () => gen,
@@ -72,7 +72,7 @@ describe("direct Fabric status-only boundary", () => {
   });
   it("rejects a reply after same-display-state identity generation changes", async () => {
     let resolve!: (value: ReturnType<typeof raw>) => void;
-    const a = client(vi.fn(() => new Promise(r => { resolve = r; }))); const host = bindMissionHost(a.c);
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(r => { resolve = r; }))); const host = bindMissionHost(a.c);
     const promise = host.readAttendedFabric!({ ...selected, signal: new AbortController().signal }); a.change(); resolve(raw());
     await expect(promise).rejects.toThrow("READ_CANCELLED");
   });
@@ -80,6 +80,28 @@ describe("direct Fabric status-only boundary", () => {
     const a = client(), abort = new AbortController(); abort.abort();
     await expect(bindMissionHost(a.c).readAttendedFabric!({ ...selected, signal: abort.signal })).rejects.toThrow("READ_CANCELLED");
     expect(a.read).not.toHaveBeenCalled();
+  });
+  it("shows that rc0 without accepted result requires original-run adjudication", async () => {
+    const a = client(); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText(/Exit 0: result not accepted/)).toBeTruthy());
+    expect(screen.getByText(/source repairs and production readiness are not proven/)).toBeTruthy();
+    expect(a.read).toHaveBeenCalledTimes(1);
+  });
+  it("distinguishes missing retained bytes from an accepted terminal result", async () => {
+    const missing = client(vi.fn(async (): Promise<AttendedStatus> => ({ ...raw(), result_available: false, result_bytes: null,
+      accepted: null, acceptance_state: "UNVERIFIED" })));
+    const first = render(<AttendedFabricInspector host={bindMissionHost(missing.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText(/Exit 0: retained result unavailable/)).toBeTruthy());
+    first.unmount();
+    const accepted = client(vi.fn(async (): Promise<AttendedStatus> => ({ ...raw(), accepted: true, accepted_by: "reviewer",
+      acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" })));
+    render(<AttendedFabricInspector host={bindMissionHost(accepted.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText("ACCEPTED")).toBeTruthy());
+    expect(screen.queryByText(/Exit 0: result not accepted/)).toBeNull();
+    expect(screen.queryByText(/Exit 0: retained result unavailable/)).toBeNull();
   });
   it("reads only on explicit inspection and renders same-run metadata", async () => {
     const a = client(); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
@@ -90,7 +112,7 @@ describe("direct Fabric status-only boundary", () => {
   });
   it("discards delayed replies after selection changes", async () => {
     let resolve!: (value: ReturnType<typeof raw>) => void;
-    const a = client(vi.fn(() => new Promise(r => { resolve = r; }))); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(r => { resolve = r; }))); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
     fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
     fireEvent.change(screen.getByLabelText("Existing run ID"), { target: { value: "other-run" } }); resolve(raw());
     await waitFor(() => expect(screen.getByRole("button", { name: "Inspect run" })).toBeTruthy());

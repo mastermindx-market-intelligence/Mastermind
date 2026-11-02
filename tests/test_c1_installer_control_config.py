@@ -202,7 +202,7 @@ SAFE_OPTIONAL_DEFAULTS = {
     "ceo_submit_armed": False,
     "exact_worker_claim_target": {"mode": "disabled"},
     "terminal_return_armed": False,
-    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+    "terminal_return_socket_path": "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
 }
 
 
@@ -260,6 +260,41 @@ def test_existing_optional_values_are_not_replaced(tmp_path: Path) -> None:
     completed, destination = _run_default_control_config(tmp_path, source=source)
     assert completed.returncode == 0, completed.stderr
     assert json.loads(destination.read_text()) == value
+
+
+@pytest.mark.parametrize("armed", [False, True])
+def test_exact_legacy_terminal_socket_migrates_only_while_disarmed(tmp_path: Path, armed: bool) -> None:
+    value = _render_default_control_config(tmp_path)
+    value.update(SAFE_OPTIONAL_DEFAULTS)
+    value["terminal_return_armed"] = armed
+    value["terminal_return_socket_path"] = "/var/run/mastermind-agent-relay/agent-relay.sock"
+    source = tmp_path / "legacy-control.json"
+    source.write_text(json.dumps(value))
+    before = (tmp_path / "control.json").read_bytes()
+    completed, destination = _run_default_control_config(tmp_path, source=source)
+    if armed:
+        assert completed.returncode != 0
+        assert "armed terminal-return socket migration refused" in completed.stderr
+        assert destination.read_bytes() == before
+    else:
+        assert completed.returncode == 0, completed.stderr
+        after = json.loads(destination.read_text())
+        assert after["terminal_return_armed"] is False
+        assert after["terminal_return_socket_path"] == SAFE_OPTIONAL_DEFAULTS["terminal_return_socket_path"]
+        assert source.read_text() == json.dumps(value)
+
+
+def test_unknown_legacy_socket_source_refused_without_mutation(tmp_path: Path) -> None:
+    value = _render_default_control_config(tmp_path)
+    value.update(SAFE_OPTIONAL_DEFAULTS)
+    value["terminal_return_socket_path"] = "/var/run/untrusted-relay/agent-relay.sock"
+    source = tmp_path / "foreign-control.json"
+    source.write_text(json.dumps(value))
+    before = (tmp_path / "control.json").read_bytes()
+    completed, destination = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode != 0
+    assert "unrecognized terminal-return socket path refused" in completed.stderr
+    assert destination.read_bytes() == before
 
 
 @pytest.mark.parametrize("missing", ["terminal_return_armed", "terminal_return_socket_path"])

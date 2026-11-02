@@ -43,14 +43,14 @@ def validate_parallel_workflow(text: str) -> None:
         or not isinstance(matrix, dict)
         or set(matrix) != {"index"}
         or not isinstance(indices, list)
-        or [type(i) for i in indices] != [int, int, int]
-        or indices != [0, 1, 2]
+        or [type(i) for i in indices] != [int] * 6
+        or indices != list(range(6))
         or strategy.get("fail-fast") is not False
-        or strategy.get("max-parallel") != 3
+        or strategy.get("max-parallel") != 6
         or shards.get("if") is not None
         or shards.get("continue-on-error") is not None
     ):
-        raise ci_pytest.PolicyError("parallel CI must execute all three shard indices")
+        raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
     if (
         gate.get("name") != "test"
         or gate.get("needs") != ["pytest_shards"]
@@ -58,6 +58,23 @@ def validate_parallel_workflow(text: str) -> None:
         or gate.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")
+
+    # Guard each hosted job's total wall-clock budget, not just pytest time.
+    # The merge queue gives all required checks 100 minutes. Shard zero uses
+    # additional Paper/Fabric qualifications and previously hit 45m at cleanup.
+    shard_timeout = shards.get("timeout-minutes")
+    gate_timeout = gate.get("timeout-minutes")
+    if (
+        type(shard_timeout) is not int
+        or not 45 <= shard_timeout <= 60
+        or type(gate_timeout) is not int
+        or not 1 <= gate_timeout <= 8
+        or gate_timeout > shard_timeout
+        or shard_timeout + gate_timeout > 100
+    ):
+        raise ci_pytest.PolicyError(
+            "parallel CI timeouts must be finite, bounded, and within merge queue budget"
+        )
 
     shard_steps = shards.get("steps", [])
     gate_steps = gate.get("steps", [])
@@ -101,8 +118,10 @@ def validate_parallel_workflow(text: str) -> None:
         or proof.get("env") != {"GH_TOKEN": "${{ github.token }}"}
         or proof.get("run") != "python -m scripts.ci_postmerge_proof"
         or shard_steps.index(proof) >= shard_steps.index(runner)
-        or set(runner) != {"name", "if", "run"}
-        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}"
+        or set(runner) != {"name", "if", "run", "timeout-minutes"}
+        or type(runner.get("timeout-minutes")) is not int
+        or runner.get("timeout-minutes") != 45
+        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}"
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
@@ -117,6 +136,18 @@ def validate_parallel_workflow(text: str) -> None:
         ]
         if len(matches) != 1 or matches[0].get("if") != "matrix.index == 0":
             raise ci_pytest.PolicyError("non-pytest CI gates must run in shard zero")
+    # Reuse may omit only the full pytest step, never the released fast
+    # preflight or either real Linux initializer qualification.
+    for name, condition in {
+        "Fast source-bound release preflight": None,
+        "H1 initializer Linux fast preflight": "matrix.index == 2",
+        "H1 required real Linux no-ACL positive journey": "matrix.index == 2",
+    }.items():
+        matches = [step for step in shard_steps if step.get("name") == name]
+        if len(matches) != 1 or matches[0].get("if") != condition:
+            raise ci_pytest.PolicyError(
+                "release preflight and H1 gates must not be omitted or reuse-gated"
+            )
     # Preserve the incumbent protected Fabric compatibility gate's *actual*
     # executable surface. Merely pinning its name and shard index permits a
     # false-green gate if its Node or private-service tests are silently cut.
@@ -158,7 +189,7 @@ def validate_parallel_workflow(text: str) -> None:
         "exit 1",
         "fi",
         "# Same discovery/exclusion/total-cover plan, never a test skip.",
-        "python scripts/ci_pytest.py --plan-only --jobs 3",
+        "python scripts/ci_pytest.py --plan-only --jobs 6",
     ]
     actual_lines = [line.strip() for line in code.splitlines() if line.strip()] if isinstance(code, str) else []
     env = final.get("env")
@@ -182,8 +213,8 @@ def validate_parallel_workflow(text: str) -> None:
 def shard_plan(
     root: Path, *, jobs: int, index: int
 ) -> tuple[dict, tuple[str, ...], str]:
-    if jobs != 3:
-        raise ci_pytest.PolicyError("parallel CI requires exactly three jobs")
+    if jobs != 6:
+        raise ci_pytest.PolicyError("parallel CI requires exactly six jobs")
     if index not in range(jobs):
         raise ci_pytest.PolicyError("parallel CI shard index is outside the plan")
     gate = ci_pytest.resolve_gate(root)

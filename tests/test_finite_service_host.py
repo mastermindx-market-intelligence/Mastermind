@@ -46,7 +46,7 @@ def qualified_host(monkeypatch, tmp_path):
         socket_path=lifecycle.SOCKET,binary=binary,binary_receipt_path=str(receipt_path),
         binary_receipt_sha256=lifecycle.digest(receipt),realm_generation=1,
         release_root=str(lifecycle.SYSTEM/'releases'/SHA),release_commit=SHA,release_tree='b'*40,
-        release_manifest_sha256=mh,python_binary=lifecycle.PYTHON,host_ref='fixture-host',model_class='routine',
+        release_manifest_sha256=mh,python_binary=lifecycle.PYTHON,host_ref='host-'+'a'*64,model_class='routine',
         execution_profile_digest=ModelRouter.load().capability_registry.resolve('fabric.attended.claude.bounded.v1').profile_digest,
         routing_root_id=lifecycle.ROOT_ID,routing_parent_run_id=lifecycle.ROOT_ID,max_turns=2,
         capacity_capability_id='fixture-capacity')

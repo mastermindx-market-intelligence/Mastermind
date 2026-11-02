@@ -1,0 +1,5 @@
+book,rows,rows_classified,rows_no_evidence_or_undeterminable,lines_FRESH,lines_CARRIED,lines_UNATTESTED,lines_UNPRICED,rows_QUALIFIED,rows_PROVISIONAL,rows_WITHHELD
+US,40,22,18,141,0,0,5,20,0,2
+autonomous,91,77,14,321,1,0,0,76,1,0
+hk,89,1,89,0,7,0,0,0,1,0
+china,88,1,88,0,9,0,0,0,1,0

@@ -2,7 +2,7 @@
 
 This is not a release authority, check replacement, queue, or background
 observer. On a protected master push only, a successful *same-SHA* native
-merge_group CI workflow with all three shards and its required test may be
+merge_group CI workflow with all six shards and its required test may be
 reused. Missing, ambiguous, stale, unauthorized or invalid evidence means
 "reuse=false": the incumbent shard runs normally. Non-pytest gates still run.
 """
@@ -21,7 +21,7 @@ from typing import Any
 _REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 _WORKFLOW = ".github/workflows/ci.yml"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
-_JOB_NAMES = {"pytest shard 0", "pytest shard 1", "pytest shard 2", "test"}
+_JOB_NAMES = {f"pytest shard {index}" for index in range(6)} | {"test"}
 _API = "https://api.github.com"
 _MAX_RESPONSE = 256_000
 
@@ -151,10 +151,12 @@ def find_reusable_run(
     group_end = _time(run["updated_at"])
     push_start = _time(current["created_at"])
     jobs = read_json(f"{prefix}/actions/runs/{identifier}/attempts/{attempt}/jobs?per_page=100")
-    if not isinstance(jobs, dict) or jobs.get("total_count") != 4:
+    if (not isinstance(jobs, dict)
+        or type(jobs.get("total_count")) is not int
+        or jobs["total_count"] != len(_JOB_NAMES)):
         return None
     members = jobs.get("jobs")
-    if not isinstance(members, list) or len(members) != 4:
+    if not isinstance(members, list) or len(members) != len(_JOB_NAMES):
         return None
     seen: set[str] = set()
     check_ids: set[int] = set()
@@ -187,7 +189,7 @@ def find_reusable_run(
         # Verify the actual executable steps in the prior integrated run.
         required = (
             {"Run repository test gate"} if name == "test"
-            else {"Run repository test shard"}
+            else {"Run repository test shard", "Fast source-bound release preflight"}
         )
         if name == "pytest shard 0":
             required |= {
@@ -195,6 +197,11 @@ def find_reusable_run(
                 "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
                 "Compile source",
                 "Validate shell scripts",
+            }
+        if name == "pytest shard 2":
+            required |= {
+                "H1 initializer Linux fast preflight",
+                "H1 required real Linux no-ACL positive journey",
             }
         steps = job.get("steps")
         if not isinstance(steps, list):

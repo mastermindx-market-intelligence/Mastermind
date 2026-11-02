@@ -653,7 +653,8 @@ def test_open_rejects_unknown_target_surface(tmp_path):
     assert "target_surface" in json.loads(body)["detail"]
 
 
-def test_open_claude_code_in_desktop_end_to_end_through_server(tmp_path):
+def test_open_claude_code_in_desktop_end_to_end_through_server(tmp_path, monkeypatch):
+    monkeypatch.setattr(claude_surface, "_has_multiple_parall_claude_wrappers", lambda: False)
     project = tmp_path / "project"
     project.mkdir()
     store = tmp_path / "claude-projects"

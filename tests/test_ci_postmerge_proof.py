@@ -66,20 +66,27 @@ def _push() -> dict:
 
 def _steps(index: int) -> list[dict]:
     names = (
-        ["Verify Paper direct pinned MCP SDK",
-         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
-         "Compile source", "Validate shell scripts", "Run repository test shard"]
-        if index == 0 else
-        ["Run repository test gate"] if index == 3 else
-        ["Run repository test shard"]
+        ["Run repository test gate"] if index == 6 else
+        ["Fast source-bound release preflight", "Run repository test shard"]
     )
+    if index == 0:
+        names[:0] = [
+            "Verify Paper direct pinned MCP SDK",
+            "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "Compile source", "Validate shell scripts",
+        ]
+    if index == 2:
+        names[:0] = [
+            "H1 initializer Linux fast preflight",
+            "H1 required real Linux no-ACL positive journey",
+        ]
     return [{"name": name, "status": "completed", "conclusion": "success"} for name in names]
 
 
 def _jobs() -> dict:
-    names = ["pytest shard 0", "pytest shard 1", "pytest shard 2", "test"]
+    names = [f"pytest shard {index}" for index in range(6)] + ["test"]
     return {
-        "total_count": 4,
+        "total_count": 7,
         "jobs": [
             {
                 "id": 117196531521 + index,
@@ -207,8 +214,8 @@ def test_unproven_source_never_queries_api(key: str, replacement: str):
         ("jobs", ("jobs", 0, "steps", 4, "conclusion"), "skipped"),
         ("jobs", ("jobs", 1, "steps", 0, "conclusion"), "skipped"),
         ("jobs", ("jobs", 2, "steps", 0, "name"), "echo bypass"),
-        ("jobs", ("jobs", 3, "steps", 0, "conclusion"), "skipped"),
-        ("jobs", ("jobs", 3, "steps"), []),
+        ("jobs", ("jobs", 6, "steps", 0, "conclusion"), "skipped"),
+        ("jobs", ("jobs", 6, "steps"), []),
         ("recheck", ("run_attempt",), 2),
         ("recheck", ("conclusion",), "failure"),
         ("recheck", ("head_sha",), "f" * 40),
@@ -361,3 +368,46 @@ def test_verified_output_requires_exact_five_api_reads(
     monkeypatch.setattr(proof, "_github_read", lambda path, token: _read(_subject())(path))
     assert proof.main() == 0
     assert output.read_text() == "reuse=true\n"
+
+
+_REQUIRED_STEPS = [
+    (index, name)
+    for index in range(7)
+    for name in [step["name"] for step in _steps(index)]
+]
+
+
+@pytest.mark.parametrize(("index", "name"), _REQUIRED_STEPS)
+@pytest.mark.parametrize("mode", ["missing", "skipped", "duplicate"])
+def test_all_seven_jobs_require_unique_successful_mandatory_steps(index, name, mode):
+    subject = _subject()
+    steps = subject["jobs"]["jobs"][index]["steps"]
+    selected = next(step for step in steps if step["name"] == name)
+    if mode == "missing":
+        steps.remove(selected)
+    elif mode == "duplicate":
+        steps.append(deepcopy(selected))
+    else:
+        selected["conclusion"] = "skipped"
+    assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
+
+
+@pytest.mark.parametrize("index", range(7))
+def test_each_of_six_shards_and_required_gate_is_mandatory(index):
+    subject = _subject()
+    subject["jobs"]["jobs"].pop(index)
+    subject["jobs"]["total_count"] = 6
+    assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
+
+
+@pytest.mark.parametrize("case", ["old-three-shard-proof", "incomplete-page", "noninteger-count"])
+def test_seven_job_proof_refuses_legacy_or_incomplete_job_shape(case):
+    subject = _subject()
+    if case == "old-three-shard-proof":
+        subject["jobs"]["jobs"] = subject["jobs"]["jobs"][:3] + subject["jobs"]["jobs"][6:]
+        subject["jobs"]["total_count"] = 4
+    elif case == "incomplete-page":
+        subject["jobs"]["total_count"] = 8
+    else:
+        subject["jobs"]["total_count"] = 7.0
+    assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None

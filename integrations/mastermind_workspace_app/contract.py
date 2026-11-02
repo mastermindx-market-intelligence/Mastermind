@@ -17,7 +17,7 @@ from common.executive_workspace_contract import (  # noqa: F401
     FRAME_SCHEMA_V2,
     FRAME_SCHEMA_V3, PLAN_BODY_SCHEMA, PLAN_OBSERVATION_SCHEMA,
     MAX_PLAN_RESPONSE_BYTES, PLAN_REFUSAL_REASONS,
-    v3_selection, validate_v3_frame, plan_unavailable,
+    v3_selection, validate_v3_frame, plan_unavailable, validate_available_plan_observation,
     PROGRAMS_SCHEMA,
     OBSERVATION_SCHEMA,
     RESULT_OBSERVATION_SCHEMA,

@@ -41,7 +41,7 @@ sudo '<qualified Executive Python>' -I -S -B \
 ```
 
 The resulting artifact contains only `app/mastermind_os/dist` and
-`build-receipt.json`. The incumbent asset validator enforces its three/nine-file
+`build-receipt.json`. The incumbent asset validator enforces its closed three/nine/thirteen-file
 layout, MIME set, `/os/` index references, hashes and budgets. The receipt binds
 the source commit/tree, lockfile/build configuration/helper hashes, public build
 input, non-root builder/tool metadata and asset manifest. Root-sealed paths,
@@ -89,17 +89,23 @@ manifests and the reserved loopback relay port. The planner refuses unless the
 observed config has exactly one `mcp.mastermind-x.com` host route whose GET
 matcher already carries exactly the incumbent fixed routes plus the current
 manifest's asset paths (either the normalized set or the known fixed+index `/os/` duplicate is accepted;
-no other repeat is permitted), exactly the three POST paths, and exactly the two existing
-reverse_proxy upstreams at the loopback reserved port. Duplicate hosts, extra
+no other repeat is permitted), either the previous sealed three POST paths or
+the exact six-path candidate (the same three plus READ-only session/context,
+session/reply and session/references), and exactly the two existing reverse_proxy
+upstreams at the loopback reserved port. The effectful session/send route stays
+excluded under the F2 authorization review. Duplicate hosts, extra
 or ambiguous matchers, wildcards, extra paths and wrong upstreams refuse.
 
 `prepare-config` admits the sorted unique union of the retired and candidate
 asset routes plus the fixed GET routes, so the publisher can prepare both allowlists before the host switch; actual
 asset availability remains a separately verified host/publisher obligation; `final-config` admits only the candidate asset routes
-plus the fixed routes, so only retired asset paths are removed. Every other
-config field — POST handlers, header rewrites, body limits, TLS, unrelated
-sites, the relay — is preserved semantically; only the selected GET path list
-differs, and caller inputs are never mutated. For a shared non-index asset
+plus the fixed routes, so only retired asset paths are removed. Both staged
+configs change an observed legacy POST matcher only to the exact read-expanded
+six-path matcher (or preserve it if already expanded); they never open
+session/send or other extra routes. The POST handlers, header rewrites, body
+limits, TLS, unrelated sites and relay remain semantically unchanged. Only the
+selected GET and the controlled POST path lists can differ; caller inputs are
+never mutated. For a shared non-index asset
 name, the planner compares manifest-declared SHA256, byte count and MIME;
 `shared_assets_verified` names only that comparison, and no asset bytes are
 read here. The existing host/preparer must verify actual bytes and availability.
@@ -140,3 +146,49 @@ config, the host switch, and the final cleanup, under full request equality,
 custody checks and no replay after uncertainty. This staging is preparation
 only: it does not compose, install or publish a production release, and it
 adds no new policy approval gate.
+
+
+## Rich client artifact profile
+
+The previous protected 11-file profile (Noir nine plus the two exact third-party
+notices) remains fully supported. Exact admitted profiles are 3, 9, 11 and 13;
+only 13 adds the two SourceMarkdown lazy chunks, and publication index sizes
+include one additional manifest entry each. Neither notices nor chunks are
+optional within their respective profiles.
+
+The thirteen-file profile extends the complete nine-file Noir layout with exactly
+one `assets/SourceMarkdown-<hash>.js`, one matching-name-family CSS chunk, and the
+two fixed plain-text notices `third-party/deepseek-harness-LICENSE.txt` and
+`third-party/deepseek-client-dependency-NOTICES.txt`. Both chunks and both notices
+are required together. The JS and CSS content hashes are independent; no invented
+same-hash constraint is applied. No other feature chunk, source map, secret,
+license name, partial set or directory is admitted. Index HTML still references
+only the existing index JS/CSS; those load the lazy reader through its existing
+bundle. The launcher derives required directories from the already-admitted names
+and retains all current immutable byte/hash, symlink, seal and budget checks.
+
+The existing public-edge planner and static application consume that same closed
+name/MIME owner; adding this profile does not introduce wildcard HTTP routes or
+change authentication, request methods, CSP, provider admission or service arming.
+It repairs source/build compatibility only. Production packaging/publication must
+still use the existing accepted release owner and all of its custody gates.
+
+
+### Staged public-edge publication compatibility
+
+The original publisher's staged file index contains the manifest *plus* each admitted
+asset, so the four closed asset profiles have 4, 10, 12 and 14 index entries.
+`ops/executive_os/os_public_edge_publication.py` obtains the allowed index
+cardinalities from `OS_ASSET_PROFILE_FILE_COUNTS`, the same deterministic
+closed-profile owner used by `os_asset_mimes`. Validate cardinality *before*
+reading caller-supplied stage labels; then the normal manifest/byte/receipt checks
+prove exact names, digest and source identity. Do not add wildcards or an
+independent hardcoded 14-file route policy.
+
+`tests/test_os_public_edge_publication.py` includes a full inert 9-to-13
+two-phase publication test, parameterized to cover both valid 9-to-13 and
+11-to-13 transitions from a qualified bundle and old seal through stage,
+prepare, cutover readiness and finalization. The test-host release switch and
+HTTP stand-in are fixtures only. These checks **do not** prove root-sealed
+production publication, permission activation, provider SEND or authentic
+original-parent consumption.

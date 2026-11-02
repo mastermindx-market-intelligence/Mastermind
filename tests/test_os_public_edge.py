@@ -1,38 +1,81 @@
 import copy
 import hashlib
+import json
 import os
+import shutil
+import subprocess
 
 import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
-from ops.executive_os.os_public_edge import asset_routes, render, stage
+from ops.executive_os.os_public_edge import POST_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, asset_routes, render, stage
 
 
-def manifest(noir=False):
+def manifest(noir=False, notices=False):
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
     if noir:
         names += ["assets/atelier-office-a.jpg", "assets/Manrope-Variable-a.ttf",
                   "assets/Inter-Variable-a.woff2", "licenses/fonts/Inter-OFL.txt",
                   "licenses/fonts/Manrope-OFL.txt", "licenses/fonts/Manrope-FONTLOG.txt"]
+    if notices:
+        names += ["third-party/deepseek-client-dependency-NOTICES.txt",
+                  "third-party/deepseek-harness-LICENSE.txt"]
     return {"schema": "mastermind.os_assets.v1", "files": [
         {"path": name, "byte_count": 1, "sha256": "a" * 64, "mime": mime}
         for name, mime in os_asset_mimes(names).items()
     ]}
 
 
-@pytest.mark.parametrize("noir", [False, True])
-def test_both_accepted_topologies_have_exact_routes(noir):
-    value = manifest(noir)
+@pytest.mark.parametrize("noir,notices,count", [(False, False, 3), (True, False, 9), (True, True, 11)])
+def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
+    value = manifest(noir, notices)
     routes = asset_routes(value)
-    assert len(routes) == (9 if noir else 3)
+    assert len(routes) == count
     config = render(value, 49152)
     assert config.count("reverse_proxy 127.0.0.1:49152") == 2
-    assert "path /os/executive/context /os/executive/submit /os/executive/status" in config
+    # All public POSTs are explicit paths. The new session routes are READ
+    # only; effectful session/send stays closed until the held F2 gate clears.
+    assert "path " + " ".join(POST_ROUTES) + "\n" in config
+    assert POST_ROUTES == LEGACY_POST_ROUTES + (
+        "/os/executive/session/context", "/os/executive/session/reply",
+        "/os/executive/session/references")
+    assert "/os/executive/session/send" not in config
     assert "max_size 64KB" in config
     assert config.rstrip().endswith("abort\n  }\n}")
     assert "/mcp" not in config
     for route in routes:
         assert route in config
+    if notices:
+        for name in ("deepseek-client-dependency-NOTICES.txt", "deepseek-harness-LICENSE.txt"):
+            assert "/os/third-party/" + name in routes
+            item = next(item for item in value["files"] if item["path"] == "third-party/" + name)
+            assert item["mime"] == "text/plain; charset=utf-8"
+
+
+@pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "duplicate", "traversal", "mime"])
+def test_notice_layout_remains_closed(damage):
+    value = manifest(True, True)
+    if damage == "missing":
+        value["files"].pop()
+    elif damage == "renamed":
+        value["files"][-1]["path"] = "third-party/other-LICENSE.txt"
+    elif damage == "extra":
+        extra = copy.deepcopy(value["files"][-1])
+        extra["path"] = "third-party/extra.txt"
+        value["files"].append(extra)
+    elif damage == "duplicate":
+        value["files"][-1] = copy.deepcopy(value["files"][-2])
+    elif damage == "traversal":
+        value["files"][-1]["path"] = "third-party/../deepseek-harness-LICENSE.txt"
+    else:
+        value["files"][-1]["mime"] = "text/javascript; charset=utf-8"
+    with pytest.raises(ValueError):
+        render(value, 49152)
+
+
+def test_legacy_plus_notices_is_not_an_admitted_five_file_layout():
+    with pytest.raises(ValueError, match="fixed OS asset set"):
+        manifest(False, True)
 
 
 @pytest.mark.parametrize("path", [
@@ -100,3 +143,49 @@ def test_dangling_symlink_and_writable_output_directory_refuse(tmp_path):
             stage(manifest=manifest(), relay_port=49152, output=tmp_path / "other")
     finally:
         os.chmod(tmp_path, 0o700)
+
+
+
+@pytest.mark.parametrize("noir", [False, True])
+def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir):
+    """Native adapter proof, not a Caddy reload or live-host admission.
+
+    Skip when Caddy is not installed on a CI runner, while preserving the
+    pure-renderer and JSON-transition tests on all hosts.
+    """
+    executable = shutil.which("caddy")
+    if executable is None:
+        pytest.skip("Caddy binary absent: inert native-adapter qualification unavailable")
+    caddyfile = tmp_path / "r2-read-only-edge.caddy"
+    caddyfile.write_text(render(manifest(noir), 49152), encoding="utf-8")
+    actual = subprocess.run(
+        [executable, "adapt", "--config", str(caddyfile), "--adapter", "caddyfile"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=12, check=False,
+    )
+    assert actual.returncode == 0, actual.stderr[:1000]
+    config = json.loads(actual.stdout)
+    servers = config["apps"]["http"]["servers"]
+    assert len(servers) == 1
+
+    route_matchers = []
+    def visit(node):
+        if type(node) is dict:
+            if "match" in node and "handle" in node:
+                for match in node["match"]:
+                    if "method" in match:
+                        route_matchers.append(match)
+            for child in node.values():
+                visit(child)
+        elif type(node) is list:
+            for child in node:
+                visit(child)
+    visit(servers)
+    assert len(route_matchers) == 2
+    by_method = {tuple(match["method"]): match for match in route_matchers}
+    assert set(by_method) == {("GET",), ("POST",)}
+    assert set(by_method[("POST",)]) == {"method", "path"}
+    assert by_method[("POST",)]["path"] == list(POST_ROUTES)
+    assert "/os/executive/session/send" not in by_method[("POST",)]["path"]
+    assert set(by_method[("GET",)]["path"]) == set(GET_ROUTES) | set(asset_routes(manifest(noir)))
+    assert config["apps"]["http"]["servers"]

@@ -50,6 +50,21 @@ changes; do not rebuild an existing system without evidence it is unusable.
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
 
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+Agent OS workstream waves and latest dated handoff as the pinned plan, and the
+versioned GitHub master plan as the task tree only. If no task tree exists, create
+and read back one with stable task/subtask IDs, dependencies and acceptance evidence
+**before major delegation or implementation**. The next action stays on the workstream
+and handoff.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
+
 ### Start assigned work; do not wait for administrative ceremony
 
 A current explicit handoff is sufficient assignment at the human/session layer; record pickup
@@ -176,6 +191,14 @@ Agenda remains the sole priority queue; the boot packet ignores legacy
 Use the existing admitted routing for this assignment. Portfolio model tiers in
 `config/agents.yml` describe application reasoning; they are not permission to spawn
 Claude-native children. Observe the host's actual native-model, capacity and tool grants.
-Prefer economical qualified Fabric workers for separable work. When no eligible route is
-available before effects begin, continue permitted direct work rather than inventing a
-new queue, forcing a forbidden native model, or waiting for a historical principal.
+Prefer economical qualified Fabric workers for separable work. For an **assigned M2
+Claude orchestrator**, first read the dedicated, executable invocation guidance
+in `skills/mastermind-claude-fabric-delegation/SKILL.md` (user-home installation:
+`~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md`). It names the
+incumbent M2 `fabric_task.py` adapter and actual tool sequence; a file or role
+alone cannot authenticate a root or grant admission. A Fabric-spawned operator
+with an admitted per-run capability receives its own `fabric_operator_scope` /
+`fabric_child_*` recipe automatically in the launch packet. Ordinary leaves do
+not delegate. When no eligible route is available before effects begin,
+continue permitted direct work rather than inventing a new queue, forcing a
+forbidden native model, or waiting for a historical principal.
