@@ -72,7 +72,7 @@ describe("direct Fabric status-only boundary", () => {
   });
   it("rejects a reply after same-display-state identity generation changes", async () => {
     let resolve!: (value: ReturnType<typeof raw>) => void;
-    const a = client(vi.fn(() => new Promise(r => { resolve = r; }))); const host = bindMissionHost(a.c);
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(r => { resolve = r; }))); const host = bindMissionHost(a.c);
     const promise = host.readAttendedFabric!({ ...selected, signal: new AbortController().signal }); a.change(); resolve(raw());
     await expect(promise).rejects.toThrow("READ_CANCELLED");
   });
@@ -112,7 +112,7 @@ describe("direct Fabric status-only boundary", () => {
   });
   it("discards delayed replies after selection changes", async () => {
     let resolve!: (value: ReturnType<typeof raw>) => void;
-    const a = client(vi.fn(() => new Promise(r => { resolve = r; }))); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(r => { resolve = r; }))); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
     fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
     fireEvent.change(screen.getByLabelText("Existing run ID"), { target: { value: "other-run" } }); resolve(raw());
     await waitFor(() => expect(screen.getByRole("button", { name: "Inspect run" })).toBeTruthy());
