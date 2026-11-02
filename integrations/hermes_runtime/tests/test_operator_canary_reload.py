@@ -121,7 +121,12 @@ class OperatorReloadTests(unittest.TestCase):
                 unit,
             )
             self.assertIn("IPAddressDeny=any", unit)
-            self.assertIn("IPAddressAllow=localhost", unit)
+            self.assertIn("IPAddressAllow=127.0.0.1/32", unit)
+            own = "127.0.0.2" if role == "mmsecretary" else "127.0.0.3"
+            other = "127.0.0.3" if role == "mmsecretary" else "127.0.0.2"
+            self.assertIn(f"IPAddressAllow={own}/32", unit)
+            self.assertNotIn(f"IPAddressAllow={other}/32", unit)
+            self.assertNotIn("IPAddressAllow=localhost", unit)
             self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET", unit)
             self.assertIn("EnvironmentFile=" + str(self.secrets_file), unit)
             self.assertNotIn("synthetic-operator-token-not-live", unit)
