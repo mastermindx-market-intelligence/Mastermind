@@ -293,6 +293,25 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     emit();
   };
   if (configured) add("storage", onStorage);
+  // BroadcastChannel is a same-origin, nonpersistent logout signal. Unlike
+  // localStorage events, it still delivers when quota rejects setItem.
+  // Only an explicit logout is broadcast; never send a token or a draft.
+  let logoutBroadcast: BroadcastChannel | null = null;
+  if (configured && typeof BroadcastChannel !== "undefined") {
+    try {
+      logoutBroadcast = new BroadcastChannel(logoutKey);
+      logoutBroadcast.onmessage = (event: MessageEvent) => {
+        if (event.data !== "USER_SIGNED_OUT") return;
+        redirectGrant = null;
+        explicitlySignedOut = true;
+        cancel();
+        tokens.acquisition = null;
+        tokens.content = null;
+        lastError = null;
+        emit();
+      };
+    } catch { /* storage marker remains another logout signal */ }
+  }
   const check = (ticket: number) => {
     if (ticket !== generation) throw new Error("TRANSACTION_CANCELLED");
   };
@@ -765,6 +784,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     // Apply the local privacy boundary before any storage operations. A quota
     // refusal may reject setItem while read operations still succeed.
     explicitlySignedOut = true;
+    try { logoutBroadcast?.postMessage("USER_SIGNED_OUT"); } catch { /* unavailable */ }
     try { localStorage.setItem(logoutKey, "1"); } catch { /* unavailable */ }
     try { localStorage.removeItem(priorKey); } catch { /* unavailable */ }
     try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* unavailable */ }

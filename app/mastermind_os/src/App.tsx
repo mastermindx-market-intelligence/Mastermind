@@ -3435,6 +3435,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           qualifiedAnswer={presentedSessionAnswer}
           onQualifiedAnswerCommitted={answerView.acknowledgeRender}
           notesPresentation="collapsed"
+          retainUnsentOnExpiry={passiveExpiryHold.current && authState?.content === false}
           projection={observedConversation.projection}
           draft={observedConversation.draft}
           onDraftChange={observedConversation.changeDraft}

@@ -39,6 +39,22 @@ function Harness({ projection }: { projection: OfficeProjection }) {
 }
 
 describe("Atelier observed conversation window", () => {
+  it("keeps an already-written note copyable but read-only when Content is withheld", async () => {
+    const original = (await input()).projection;
+    const noContent = structuredClone(original);
+    noContent.conversation.source.state = "WITHHELD";
+    noContent.conversation.value = null;
+    const note = "Private conversation note must remain copyable.";
+    const view = render(<ConversationWindow projection={noContent} draft={note}
+      notesPresentation="collapsed" retainUnsentOnExpiry onDraftChange={vi.fn()} />);
+    const field = screen.getByRole("textbox", { name: "Unsent notes" }) as HTMLTextAreaElement;
+    expect(field.value).toBe(note);
+    expect(field.readOnly).toBe(true);
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+    view.rerender(<ConversationWindow projection={noContent} draft=""
+      notesPresentation="collapsed" retainUnsentOnExpiry onDraftChange={vi.fn()} />);
+    expect(screen.queryByRole("textbox", { name: "Unsent notes" })).toBeNull();
+  });
   it("holds unattended redirects while conversation notes are unsent", async () => {
     const view = render(<Harness projection={(await input()).projection} />);
     expect(canNavigateForAutomaticSignIn()).toBe(true);

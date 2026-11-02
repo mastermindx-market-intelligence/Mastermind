@@ -31,7 +31,10 @@ export function useObservedConversation(authGeneration: number, selection: Missi
   };
   return {
     projection, clear,
-    draft: contentAllowed === false ? "" : readDraft(drafts, context),
+    // When permission expires, projection evidence stays WITHHELD, but a
+    // previously authored unsent local note remains copyable/read-only.
+    // Explicit logout and a new grant clear it via invalidateAuth().
+    draft: readDraft(drafts, context),
     // The root App may still have user-authored text on an off-view pane,
     // even when its qualified Content permission is temporarily unavailable.
     hasUnsentDraft: () => readDraft(latestDrafts.current, current.current).length > 0,
