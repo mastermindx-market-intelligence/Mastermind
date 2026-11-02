@@ -98,6 +98,42 @@ class MiniMaxM31FlashRouting(unittest.TestCase):
                         result = self.selected(picker, model, pool)
                         self.assertTrue(result.startswith("NONE reason="), result)
 
+    def test_native_host_preview_never_treats_minimax_pin_as_glm_model(self):
+        for path in PICKERS:
+            with self.subTest(path=path):
+                picker = load_picker(path)
+                original_selection = picker._selection_model
+                glm_inputs = []
+
+                def selected_model(pool, task_class, doc=None, needs=None, model=None):
+                    if pool == "glm":
+                        glm_inputs.append(model)
+                        return "glm-5.3-flash", ""
+                    if pool == "bailian":
+                        return "qwen3.8-flash", ""
+                    return original_selection(pool, task_class, doc, needs, model=model)
+
+                with (
+                    patch.object(picker, "load_pools", return_value=self.policy),
+                    patch.object(picker, "_selection_model", side_effect=selected_model),
+                    patch.object(picker, "_eligible_host_routes",
+                                 return_value={"minimax": ("fixture-host", "minimax")}),
+                    patch.object(picker, "policy_allows", return_value=(True, "ok")),
+                    patch.object(picker, "_needs_ok", return_value=(True, "ok")),
+                    patch.object(picker, "_subject_ok", return_value=(True, "ok")),
+                    patch.object(picker, "hard_filter", return_value=(True, "ok")),
+                    patch.object(picker, "floor_demotes", return_value=False),
+                    patch.object(picker, "is_execute_class", return_value=False),
+                    patch.object(picker, "launch_policy", return_value={"allowed": True}),
+                ):
+                    result = picker._format_pick_host(
+                        "fix_build", host="auto", pool="minimax",
+                        requested_model="MiniMax-M3.1-Flash",
+                    )
+                self.assertIn("MODEL=MiniMax-M3.1-Flash ", result)
+                self.assertIn("HOST=fixture-host MODE=minimax", result)
+                self.assertEqual(glm_inputs, [None])
+
     def test_claude_profiles_keep_1m_context_and_compaction_headroom(self):
         for path in SHELLS:
             with self.subTest(path=path):
