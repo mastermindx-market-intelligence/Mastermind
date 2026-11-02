@@ -68,7 +68,7 @@ native model child; its sibling's provider credential is not forwarded.
 
 Native BYOK source is no longer permitted to spawn a model child without a
 role-private, canonical localhost HTTPS CONNECT proxy setting. Keep
-`IPAddressDeny=any`, `IPAddressAllow=localhost` and
+`IPAddressDeny=any`, role-specific `IPAddressAllow=127.0.0.1/32` plus\n`IPAddressAllow=127.0.0.2/32` for Secretary or\n`IPAddressAllow=127.0.0.3/32` for Meta-CEO, and
 `RestrictAddressFamilies=AF_UNIX AF_INET` in both units. No direct public
 egress, `IPAddressAllow=any`, arbitrary proxy hostname, embedded proxy
 credential, inherited shell proxy, shared proxy endpoint, or role substitution
@@ -79,7 +79,7 @@ operator-provisioned settings (port shown as an example only):
 
 ```text
 HERMES_NATIVE_EGRESS_ROLE=mmsecretary
-HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651
 ```
 
 The **separate private 0600 Meta-CEO** file needs its own intended role and
@@ -87,7 +87,7 @@ a different proxy endpoint (example port only):
 
 ```text
 HERMES_NATIVE_EGRESS_ROLE=mmmeta
-HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652
 ```
 
 `integrations.hermes_runtime.egress.native_egress_child_env` validates these
@@ -108,6 +108,27 @@ OpenAI-compatible model clients through that helper. This confirms the
 **intended source transport** honors the injected proxy, rather than relying
 on ambient shell proxy discovery; it still does not prove the installed
 binary, proxy listener, hostname allowlist, TLS peer or remote inference.
+
+**Critical cross-role isolation:** `IPAddressAllow=localhost` was
+originally broad (`127.0.0.0/8` and `::1/128`) and allowed either role
+to connect to a sibling proxy on a different localhost port. The updated
+unit now permits only **its own** 127.0.0.2/32 or 127.0.0.3/32 proxy
+address, plus 127.0.0.1/32 for the existing native Hermes gateway. The
+proxy must actually bind the selected role IP (not 0.0.0.0 or 127.0.0.1),
+and the host must prove that effective parent/system/user slice rules do
+not add a broader localhost allowance.
+
+systemd notes that cgroup eBPF-based `IPAddressAllow/Deny` can be silently
+ineffective on unsupported kernels, delegation layouts or container
+managers. `systemd --user` unit text, local `/api/health` 200 and
+`systemctl show` values are **not enforcement proof**. Before using either
+provider credential, separately test **from each actual running unit cgroup**:
+own proxy permitted, sibling proxy forbidden, unauthorized 127/8
+destination forbidden, direct public 443 forbidden, and only the intended
+host:443 CONNECT allowed by the operator-owned proxy. Test both
+directions, including negative results, and retain the host-bound receipts.
+Without proven enforcement, STOP production qualification; do not assume
+that different IP aliases by themselves provide isolation.
 
 **The proxy process is not created, installed or certified by this repository.**
 A currently authorized host network owner must separately provide and
@@ -285,7 +306,7 @@ from `--fetch`.
 - `hermes-runtime-mmsecretary.service` and `hermes-runtime-mmmeta.service` in the user unit directory
 - a `default.target.wants` symlink for each
 - loopback ports `127.0.0.1:8765` (Secretary) and `127.0.0.1:8865` (Meta-CEO)
-- `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, `IPAddressAllow=localhost`
+- `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, only\n  role-specific host-prefix `IPAddressAllow` rules (no blanket `localhost` 127/8)
 - `EnvironmentFile=` pointing at that unit's 0600 secrets file, and no secret bytes in the unit
 - provider overlay `provider-overlay.yaml` and `vision-overlay.yaml` under the role's `hermes-home`
 
