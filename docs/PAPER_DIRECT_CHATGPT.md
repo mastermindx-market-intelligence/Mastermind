@@ -39,6 +39,22 @@ discovery. Current fleet truth is narrower: Ryan Business has the accepted live 
 prepare/edit journey; C1/C2/C3/C4/Chris Admin host tunnel services are live/ready but each still
 requires its own attended ChatGPT app enrollment before that seat's direct app is accepted.
 
+## Future Paper releases: isolated tool compatibility (proposed; not installed)
+
+A later source candidate replaces normal production full-catalog SHA
+matching with reviewed per-tool structural input contracts; see
+docs/PAPER_DESIGN_INTEGRATION.md. Paper's version number remains
+observational. Added unrelated tools and description-only changes cannot
+disable existing edits. Only tools with changed required inputs,
+semantics-bearing input schemas or safety annotations are withheld, with a
+typed TOOL_SCHEMA_CHANGED response, while unaffected tools remain usable.
+Global write refusal remains for changes to the critical document identity
+schema or server name. The adapter does not silently update upstream
+mutations, change the underlying tunnel, or restart Paper Desktop. The
+normal existing direct app will benefit automatically only after the reviewed
+source is merged and its seat runtime installer-selected with real guarded
+scratch-file acceptance.
+
 ## Paper release compatibility — 2026-10-01
 
 Write qualification does not lock to a Paper release number. The bridge records the observed
