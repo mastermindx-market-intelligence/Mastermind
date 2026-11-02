@@ -351,7 +351,10 @@
       '</div>';
   }
   function bodySignedIn(a) {
-    return planCardHTML() + emailGroupHTML(a) + pwGroupHTML() + notifGroupHTML() +
+    // The account broker currently labels plans using user_metadata, not the
+    // canonical billing entitlement. Never advertise a paywall from that hint.
+    return (a.plan_verified === true && a.plan === "free" ? planCardHTML() : "") +
+      emailGroupHTML(a) + pwGroupHTML() + notifGroupHTML() +
       securityGroupHTML(a) + dangerGroupHTML();
   }
   function bodySignedOut(a) {
@@ -368,7 +371,8 @@
           '<div class="mmacc-name">' + esc(a.name || a.email || T('account')) + '</div>' +
           '<div class="mmacc-sub">' + esc(T('signed_in')) + ' · ' + esc(provLabel) + '</div>' +
         '</div>' +
-        '<span class="mmacc-plan-pill">' + esc(a.plan_label || 'Free') + '</span>' +
+        // A user_metadata fallback is not a verified Free/Pro billing result.
+        '<span class="mmacc-plan-pill">' + esc(a.plan_verified === true && a.plan_label ? a.plan_label : T('account')) + '</span>' +
         (withClose ? '<button class="mmacc-x" data-act="close" aria-label="' + esc(T('close')) + '">✕</button>' : '') +
       '</div>';
   }
