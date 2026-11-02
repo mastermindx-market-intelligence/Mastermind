@@ -105,7 +105,7 @@ byte-pinned migration selected with `upgrade --c2-business-merge-publisher-only`
 It does not extend `--publisher-only-fleet-v10` eligibility. Supply the existing
 account's exact source, node, backend and port plus
 `--publisher-expected-manifest-sha256
-7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421`.
+9f2f1cdecdd99b1673181b0109d8e6b11896d95541ad42d5e087fb64c2646d3b`.
 The pin binds all predecessor module hashes, config, plist, runtime seal and
 source identity. Only the reviewed merge-capable `git-publish.mjs` and
 `workspace-access.mjs` bytes are admitted; the existing closed repository grants,

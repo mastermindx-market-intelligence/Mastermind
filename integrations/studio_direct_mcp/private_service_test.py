@@ -2384,7 +2384,7 @@ class TestC2BusinessMergePublisher(unittest.TestCase):
 
     def test_production_manifest_pin(self):
         self.assertEqual(svc.C2_BUSINESS_MERGE_MANIFEST_SHA256,
-                         "7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421")
+                         "9f2f1cdecdd99b1673181b0109d8e6b11896d95541ad42d5e087fb64c2646d3b")
 
     def test_preflight_no_writes_and_apply_changes_only_two_modules(self):
         with self.fixture() as (args, roots, cfg):

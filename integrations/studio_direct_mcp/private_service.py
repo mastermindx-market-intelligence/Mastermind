@@ -193,7 +193,7 @@ C2_BUSINESS_TARGET_PATCH_SHA256 = {
 # Other installed gateways differ in bundle/permissions and are NOT eligible.
 # Exact observed enrolled C2 Business v2/12-file installation, not a fleet grant.
 # This byte pin binds every module, config, plist, runtime seal and source identity.
-C2_BUSINESS_MERGE_MANIFEST_SHA256 = "7abe4829585ee24332007f79918f982d07333397aaa1fccc3cc14d1cb345d421"
+C2_BUSINESS_MERGE_MANIFEST_SHA256 = "9f2f1cdecdd99b1673181b0109d8e6b11896d95541ad42d5e087fb64c2646d3b"
 
 FLEET_V10_ENROLLED_ACCOUNTS = frozenset(("chatgpt1", "chatgpt3"))
 
