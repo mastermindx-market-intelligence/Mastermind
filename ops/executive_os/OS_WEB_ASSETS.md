@@ -89,23 +89,24 @@ manifests and the reserved loopback relay port. The planner refuses unless the
 observed config has exactly one `mcp.mastermind-x.com` host route whose GET
 matcher already carries exactly the incumbent fixed routes plus the current
 manifest's asset paths (either the normalized set or the known fixed+index `/os/` duplicate is accepted;
-no other repeat is permitted), and a coherent method-specific route profile:
-either the original three POST routes plus the original fixed GET routes, or
-the expanded fixed two Control Room GET and four Control Room POST routes on
-top of those incumbents. Mixed profiles fail closed; the two existing
-reverse_proxy upstreams remain bound to the reserved loopback port. Duplicate
-hosts, ambiguous matchers, wildcards, foreign paths and wrong upstreams refuse.
+no other repeat is permitted), and a complete fixed route profile. Existing
+profiles retain either the historical eight GET routes or the incumbent eleven
+GET routes, paired with the sealed three POST routes or the six routes including
+READ-only session/context, session/reply and session/references. The new Control
+Room profile contains all fourteen GET and ten POST routes together. Partial or
+mixed Control Room expansions fail closed. The effectful session/send route
+remains excluded. The two existing reverse_proxy upstreams stay bound to the
+reserved loopback port. Duplicate hosts, extra or ambiguous matchers, wildcards,
+foreign paths and wrong upstreams refuse.
 
-`prepare-config` admits the sorted unique union of the retired and candidate
-asset routes plus the expanded fixed GET routes, while admitting only the
-four new Control Room POST paths alongside the existing three Executive POST
-paths. This exact protected pair can be prepared before the host release: the
-old Python path fence will still reject unimplemented routes. Actual asset
-availability remains a separately verified host/publisher obligation;
-`final-config` admits only candidate assets plus the expanded fixed routes.
-Only the selected GET and POST path lists may change. POST handlers and body
-limits, header rewrites, TLS, unrelated sites and loopback relay are preserved
-semantically; caller inputs are never mutated. For a shared non-index asset
+`prepare-config` admits the sorted unique union of retired and candidate assets
+plus the full fixed GET routes and the full fixed POST routes. This exact pair
+can be prepared before the host switch; an old Python path fence still rejects
+unimplemented routes. Actual asset availability remains a separately verified
+host/publisher obligation. `final-config` admits only candidate assets plus the
+same complete fixed routes. Only the selected GET and POST path lists change.
+POST handlers, body limits, header rewrites, TLS, unrelated sites and the relay
+remain semantically unchanged; caller inputs are never mutated. For a shared non-index asset
 name, the planner compares manifest-declared SHA256, byte count and MIME;
 `shared_assets_verified` names only that comparison, and no asset bytes are
 read here. The existing host/preparer must verify actual bytes and availability.

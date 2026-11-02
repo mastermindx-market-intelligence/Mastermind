@@ -58,7 +58,11 @@ class OfflineComposition:
 
 
 class GrokCandidateSelection(OfflineComposition, selection.GrokUpgrade):
-    """Same exact pin, policy, Cursor denial and alias confidentiality cases."""
+    """Run overlay contract against current reviewed F1 candidate semantics."""
+
+    # Candidate F1 admission policy intentionally uses a stricter typed denial;
+    # the byte-pinned Grok overlay still uses unknown requested_model.
+    EXPECTED_UNKNOWN_MODEL_DENIAL = "NONE reason=requested model not admitted for selected pool/task"
 
 
 class GrokCandidateRuntime(OfflineComposition, runtime.Grok47WorkerContracts):

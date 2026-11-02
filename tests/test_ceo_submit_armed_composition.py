@@ -1551,9 +1551,10 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
     from tests.executive_identity_review import _reviewed_ast_dump
+    reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
-            or hashlib.sha256(source.encode()).hexdigest() !=
-            'd25d4525a6d4720b9c0dd2ee6943f151db521a10d34210db32052dff3814f126'):
+            or reviewed_source_sha !=
+            '717f28e2b15efc26dbb6536defb577c3fdd4275b00f877672be72983fb81f164'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

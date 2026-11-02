@@ -1,3 +1,58 @@
+## M1 Paper 0.5.16 exact catalog compatibility candidate - 2026-11-02
+
+This source-only follow-up is based on PR #1925's unchanged semantic source head
+e7016693f602f9f8c2dc52c99ac7111d4a641773, not on a deployed v15
+runtime. M1 Studio was independently observed running Paper Desktop 0.5.16
+and canonical full 37-tool SHA256
+955e92cd0477027dcc5fe666810e49393f42f453c1c362e64cd0f3b3ab9f10cf.
+The complete observed catalog is checked in at
+tests/fixtures/paper_desktop/955e92_full_catalog.json.
+
+Compared to approved 37-tool 1b9aff baseline, no tools were added or removed.
+Exactly six descriptors changed: get_comment_thread, get_jsx, get_node_info,
+set_text_content, update_styles, write_html. Like the independently reviewed
+M2 Paper 0.5.18 41-tool catalog, M1 requires updates[].html rather than legacy
+textContent. New bridge 0.1.7 admits only this reviewed full digest as an
+additional explicit alternative, keeps the old approved catalogs, blocks
+all prior four M1 resource tools, rejects obsolete text edits before upstream
+dispatch, and proposes new immutable v16 pin without mutating v2-v15.
+
+This is NOT a review, merged source, Paper app update, M1 deployment or
+production write receipt. The actual M1 active v12/v14 runtime remains
+unchanged pending its own independent review, accepted release and real
+exact-file guarded editing/visual proof. Never silently use the M2 digest for
+M1 version 0.5.16.
+
+## Paper 0.5.18 exact-catalog compatibility candidate - 2026-11-01
+
+The M2 Paper Desktop has two installations: /Applications/Paper.app v0.5.11
+and the intended ~/Applications/Paper.app v0.5.18. A graceful transition to
+the latter restored a direct paper_inspect CONNECTED response for explicit
+MASTERMIND PAGES file 01M2WGNCX9475G79JRKJTCM08P. This is a connection
+receipt, not a live write or restart-resilience acceptance result.
+
+The captured 0.5.18 41-tool full catalog is retained as
+tests/fixtures/paper_desktop/16e6b_full_catalog.json; its canonical SHA-256 is
+16e6b93f0c51a1574ba8acee4df732052898707a04731d3817530971a88fdefd.
+Compared to accepted 37-tool 1b9aff..., no names were removed; the four new
+resource tools archive_resources, create_folder, move_resources and
+unarchive_resources stay uncallable. Ten existing descriptors changed,
+including rich HTML set_text_content (updates[].html replaces
+updates[].textContent), get_jsx styling default, and optional resource
+parameters. The guarded successor bridge 0.1.6 admits this exact full-catalog
+digest and refuses obsolete text-edit payloads before dispatch, retaining
+all file/snapshot/operation/unknown-effect constraints. Historical catalog
+receipts remain accepted. Any future descriptor drift fails closed.
+
+This is a source-only candidate, not a live activation. Immutable
+runtime_stage.py v15 is proposed as a new hash-pinned generation; do not alter
+v2-v14. After an independent non-author review, accepted source release, and
+installer-controlled seat replacement with original manifest/seat identity,
+prove on the same direct carrier: accepted live schema, exact scratch-file read
+and prepare, a bounded guarded edit using updates[].html, same-file post-read,
+screenshot, and reconnect without duplicate clients. Never manually repin the
+installed v13 bridge or claim deployment from green synthetic tests.
+
 # Paper.design integration - bounded local and web design capability
 
 ## Guarded file/page administration candidate (2026-10-22; NOT installed)

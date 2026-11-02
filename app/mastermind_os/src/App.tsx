@@ -12,6 +12,14 @@ import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { ConversationWindow } from "./conversations/ConversationWindow";
+import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
+import { RetainedResults } from "./RetainedResults";
+import { RetainedRootChoice } from "./RetainedRootChoice";
+import { normalizeResultReferencesSelection } from "./result-references";
+import { parseDirectConsumeTarget } from "./direct-native-result";
+import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
+import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
+import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
 import { useObservedConversation } from "./conversations/useObservedConversation";
 import {
   OperationController,
@@ -162,6 +170,12 @@ type WorkState =
 function isRetainedOperation(value: unknown): value is OperationPointer {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const pointer = value as Record<string, unknown>;
+  if (pointer.kind === "consume") {
+    return Object.keys(pointer).length === 3 &&
+      Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
+      typeof pointer.operationKey === "string" && /^mmos-consume-[0-9a-f]{40}$/.test(pointer.operationKey) &&
+      typeof pointer.targetKey === "string" && parseDirectConsumeTarget(pointer.targetKey) !== null;
+  }
   return Object.keys(pointer).every(key => ["operationKey", "kind", "targetKey"].includes(key)) &&
     typeof pointer.operationKey === "string" && pointer.operationKey.length > 0 &&
     typeof pointer.kind === "string" && ["launch", "message", "stop"].includes(pointer.kind) &&
@@ -1300,6 +1314,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       reason: "SOURCE_READ_PENDING",
     }),
     [programRevision, setProgramRevision] = useState(0),
+    [programIndexEpoch, setProgramIndexEpoch] = useState(0),
+    [retainedRoot, setRetainedRoot] = useState<{
+      pair: MissionSelection;
+      index: ProgramIndex;
+      epoch: number;
+      authRevision: number;
+      host: MissionHost | undefined;
+      hostGeneration: string | number;
+      missionWorkRef: string | null;
+      candidates: string;
+    } | null>(null),
     [controlRoom, setControlRoom] = useState<ControlRoomState>({
       state: "UNAVAILABLE", reason: "NOT_READ", ownerRevision: -1,
     }),
@@ -1472,6 +1497,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
+  const answerView = useQualifiedOriginalAnswer();
+  // React may abandon an interrupted render. Only the committed layout
+  // publishes a current identity to the private reply acceptance fence.
+  useLayoutEffect(() => {
+    answerView.setCurrent(sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+      active: active === "Conversations",
+    } : null);
+  }, [active, signedIn, sessionBinding, sessionOwner?.principalScope,
+    sessionOwner?.generation, authRevision, selection?.workRef, selection?.rootJobId]);
   const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
     const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
     const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
@@ -1479,7 +1518,29 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
       liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
   };
+  const makeSessionController = (
+    binding: MountedExecutiveSessionBinding,
+    ctx: { principalScope: string; generation: string },
+    sequence: number,
+  ): OperationController => {
+    const identity = { binding, principalScope: ctx.principalScope, generation: ctx.generation,
+      selectionSeq: sequence, authRevision };
+    // The real mounted host supplies the existing native qualified reader.
+    // An older unqualified fixture is fail-dark: it cannot clear an original
+    // hint by promoting a receipt without a validated answer.
+    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswer>({
+      port: binding.port,
+      readAnswer: (pointer, signal) => typeof binding.port.readQualifiedAnswer === "function"
+        ? binding.port.readQualifiedAnswer(pointer, signal)
+        : Promise.resolve({ receipt: { ...pointer, disposition: "unknown", reason: "UNKNOWN_RECEIPT" }, answer: null }),
+      isCurrent: () => ownsSession(binding, ctx, sequence) && answerView.isCurrent(identity),
+      onAdmission: () => { if (ownsSession(binding, ctx, sequence)) answerView.invalidate(); },
+      onAnswer: (pointer, answer) => answerView.stage(identity, pointer, answer),
+    });
+    return new OperationController(wrapper, binding.store);
+  };
   const invalidateSessionPresentation = () => {
+    answerView.invalidate();
     sessionSlot.current?.controller.invalidate();
     sessionSlot.current = null;
     const held = sessionPending.current;
@@ -1606,12 +1667,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       return;
     if (cur) cur.controller.invalidate();
     sessionSlot.current = {
-      controller: new OperationController(sessionBinding.port, sessionBinding.store),
+      controller: makeSessionController(sessionBinding, sessionOwner, selectionSeq.current),
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
     };
-  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation]);
+  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation, authRevision]);
   useEffect(() => {
     // Discover the retained hint without invoking prepare, submit or even a
     // status request. This is available before any launch catalog is loaded.
@@ -1683,6 +1744,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     setSessionRefusal(null);
   }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
     selection?.workRef, selection?.rootJobId]);
+  useEffect(() => {
+    if (active !== "Conversations") answerView.leavePresentation();
+  }, [active]);
+
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
     recoveryFlight.current++;
@@ -1750,6 +1815,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         setReopenedOperation(null);
         recoveryFlight.current++;
         setRecoverInFlight(false);
+        answerView.invalidate();
         sessionSlot.current?.controller.invalidate();
         const heldSession = sessionPending.current;
         if (heldSession) {
@@ -1998,6 +2064,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           !controller.signal.aborted
         ) {
           setIndex(programsFromControlRoom(raw));
+          setProgramIndexEpoch(current);
           office.acceptPrograms(officeRead, observation);
         }
       })
@@ -2700,7 +2767,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       sessionSlot.current.generation !== ctx.generation
     ) {
       sessionSlot.current?.controller.invalidate();
-      controller = new OperationController(binding.port, binding.store);
+      controller = makeSessionController(binding, ctx, selectionSeq.current);
       sessionSlot.current = {
         controller,
         binding,
@@ -2915,6 +2982,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   );
   const sessionLive =
     !!sessionBinding && signedIn && !!sessionOwner && !!sessionTargetKey;
+  // A qualified original READ is scoped to the current selected-session
+  // owner, even if the old target is now unavailable for NEW sends.
+  const presentedSessionAnswer = answerView.visible(
+    sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+    } : null,
+  );
   const sessionContinuationUnavailable =
     sessionBinding && !sessionLive ? "SESSION_UNAVAILABLE" : undefined;
   const sessionContinuationPanel = sessionBinding ? (
@@ -3177,6 +3255,73 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       Refresh Work
     </button>
   );
+  const retainedResultHost = window.MastermindMissionHost;
+  const retainedHostGeneration = retainedResultHost?.invalidationGeneration?.() ?? 0;
+  const retainedProgram = retainedRoot && index.state === "AVAILABLE"
+    ? index.programs.filter(p => p.workRef === retainedRoot.pair.workRef)
+    : [];
+  // This is a separate read-only choice, never the Mission/action selection.
+  // Every new Programs read invalidates it, including A-B-A source changes.
+  const currentRetainedRoot = retainedRoot &&
+    retainedRoot.index === index && retainedRoot.epoch === programIndexEpoch &&
+    retainedRoot.epoch === programRequest.current &&
+    retainedRoot.authRevision === authRevision &&
+    retainedRoot.host === retainedResultHost &&
+    retainedRoot.hostGeneration === retainedHostGeneration &&
+    retainedRoot.missionWorkRef === (selection?.workRef ?? null) &&
+    (!authState || authState.acquisition) && retainedProgram.length === 1 &&
+    retainedProgram[0].rootState === "CONFLICT" &&
+    retainedProgram[0].rootCandidates.length > 1 &&
+    retainedRoot.candidates === JSON.stringify(retainedProgram[0].rootCandidates) &&
+    retainedProgram[0].rootCandidates.includes(retainedRoot.pair.rootJobId)
+      ? retainedRoot : null;
+  useLayoutEffect(() => {
+    if (retainedRoot && !currentRetainedRoot) setRetainedRoot(null);
+  }, [retainedRoot, currentRetainedRoot]);
+  const chooseRetainedRoot = (pair: MissionSelection) => {
+    const normalized = normalizeResultReferencesSelection(pair);
+    if (!normalized || index.state !== "AVAILABLE" ||
+        programIndexEpoch !== programRequest.current ||
+        (authState && !authState.acquisition)) return;
+    const programmes = index.programs.filter(p => p.workRef === normalized.workRef);
+    if (programmes.length !== 1 || programmes[0].rootState !== "CONFLICT" ||
+        programmes[0].rootCandidates.length < 2 ||
+        !programmes[0].rootCandidates.includes(normalized.rootJobId)) return;
+    setRetainedRoot({ pair: normalized, index, epoch: programIndexEpoch,
+      authRevision, host: retainedResultHost, hostGeneration: retainedHostGeneration,
+      missionWorkRef: selection?.workRef ?? null,
+      candidates: JSON.stringify(programmes[0].rootCandidates) });
+  };
+  const selectedHistoryPanel = currentRetainedRoot && retainedResultHost?.readResultReferences &&
+    retainedResultHost.readResult ? <RetainedResults
+      key={JSON.stringify([authRevision, programIndexEpoch, retainedHostGeneration,
+        currentRetainedRoot.pair])}
+      selection={currentRetainedRoot.pair} authGeneration={authRevision}
+      hostGeneration={retainedHostGeneration} locale={locale}
+      missionState="UNAVAILABLE"
+      readReferences={retainedResultHost.readResultReferences}
+      readResult={retainedResultHost.readResult}
+      renderResult={(selected, document) =>
+        <ResultCard state={{ kind: "READY", selection: selected, document }} />}
+    /> : null;
+  const retainedResultsPanel = selection && !directSelected &&
+    retainedResultHost?.readResultReferences && retainedResultHost.readResult &&
+    (!authState || authState.acquisition) ? (
+      <RetainedResults
+        key={JSON.stringify([authRevision, selectionSeq.current, selection,
+          retainedResultHost.invalidationGeneration?.() ?? 0])}
+        selection={selection}
+        authGeneration={authRevision}
+        hostGeneration={retainedResultHost.invalidationGeneration?.() ?? 0}
+        locale={locale}
+        missionState={d?.read_state.state ?? "UNAVAILABLE"}
+        readReferences={retainedResultHost.readResultReferences}
+        readResult={retainedResultHost.readResult}
+        renderResult={(selected, document) => (
+          <ResultCard state={{ kind: "READY", selection: selected, document }} />
+        )}
+      />
+    ) : null;
   let content: React.ReactNode;
   if (active === "Today")
     content = (
@@ -3210,6 +3355,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         <ConversationWindow
           locale={locale}
           continuation={sessionContinuationPanel}
+          historicalAnswers={<HistoricalOriginalAnswers
+            binding={sessionBinding}
+            selection={selection}
+            principalScope={sessionOwner?.principalScope ?? null}
+            generation={sessionOwner?.generation ?? null}
+            authRevision={authRevision}
+            selectionSeq={selectionSeq.current}
+            activeReadRef={presentedSessionAnswer?.answer.readRef}
+          />}
+          qualifiedAnswer={presentedSessionAnswer}
+          onQualifiedAnswerCommitted={answerView.acknowledgeRender}
           notesPresentation="collapsed"
           projection={observedConversation.projection}
           draft={observedConversation.draft}
@@ -3286,6 +3442,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             </div>
           </section>
           {!directSelected ? <ProjectTabs active={projectTab ?? "Overview"} onChange={setProjectTab} /> : null}
+          {retainedResultsPanel}
           {directSelected ? directResultPanel : !d ? (
             <section className="card empty-panel">
               <h2>{projectTab}</h2>
@@ -3354,8 +3511,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ) : index.programs.length ? (
           <div className="programs">
             {index.programs.map((p) => (
+              <div key={p.workRef}>
               <button
-                key={p.workRef}
                 disabled={!p.rootJobId}
                 onClick={() => open(p.workRef, p.rootJobId)}
               >
@@ -3368,10 +3525,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                   {p.rootJobId
                     ? `Mission ${p.rootJobId}`
                     : p.rootState === "CONFLICT"
-                      ? `Root conflict: ${p.rootCandidates.join(", ") || "multiple responsibility rows"}`
+                      ? (locale === "zh-CN" ? "任务根存在冲突：当前任务仍未确定。" : "Root conflict: the current Mission stays unresolved.")
                       : "Root unknown; no mission was guessed"}
                 </small>
               </button>
+              {p.rootState === "CONFLICT" && p.rootCandidates.length > 1 ? <RetainedRootChoice workRef={p.workRef} rootCandidates={p.rootCandidates}
+                rootState={p.rootState} locale={locale}
+                selectedRootJobId={currentRetainedRoot?.pair.workRef === p.workRef
+                  ? currentRetainedRoot.pair.rootJobId : null}
+                onChooseRoot={chooseRetainedRoot} /> : null}
+              {currentRetainedRoot?.pair.workRef === p.workRef ? selectedHistoryPanel : null}
+              </div>
             ))}
           </div>
         ) : index.state === "AVAILABLE" ? (
@@ -3479,6 +3643,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       <>
         {directResultPanel}
         <Mission d={d} />
+        {retainedResultsPanel}
         {missionV3 && isDocv3(missionV3) ? (
           <ResultRefs
             d={missionV3}

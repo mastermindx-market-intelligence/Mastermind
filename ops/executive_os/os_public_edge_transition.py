@@ -22,6 +22,7 @@ import stat
 
 from ops.executive_os.os_public_edge import (
     GET_ROUTES, HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, POST_ROUTES, asset_routes,
+    INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES,
 )
 
 PLAN_SCHEMA = "mastermind.os_public_edge_transition.plan.v1"
@@ -155,11 +156,14 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
         path += (0, "handle", 0, "routes")
     if len(inner) != 3:
         raise ValueError("OS edge transition inner route set refused")
-    # A live edge may be either exact fixed-route generation; mixed
-    # generations cannot qualify as the source for a protected publication.
+    # Preserve every complete historical/read-expanded profile admitted by
+    # protected source. The new Control Room profile must be complete in both
+    # methods; its partial or mixed route sets never become migration authority.
     profiles = {
         "incumbent": (sorted(set(LEGACY_GET_ROUTES) | set(current_routes)),
-                      sorted(list(LEGACY_GET_ROUTES) + list(current_routes))),
+                      sorted(list(LEGACY_GET_ROUTES) + list(current_routes)),
+                      sorted(set(INCUMBENT_GET_ROUTES) | set(current_routes)),
+                      sorted(list(INCUMBENT_GET_ROUTES) + list(current_routes))),
         "expanded": (sorted(set(GET_ROUTES) | set(current_routes)),
                      sorted(list(GET_ROUTES) + list(current_routes))),
     }
@@ -196,11 +200,11 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
                 raise ValueError("OS edge transition observed GET routes differ")
             get_path = path + (position, "match", 0, "path")
         else:
-            if (len(handlers) != 2
+            if (len(paths) != len(set(paths)) or len(handlers) != 2
                     or handlers[0] != {"handler": "request_body", "max_size": 64000}
                     or type(handlers[0].get("max_size")) is not int):
                 raise ValueError("OS edge transition observed POST route differs")
-            if sorted(paths) == sorted(LEGACY_POST_ROUTES):
+            if sorted(paths) in (sorted(LEGACY_POST_ROUTES), sorted(INCUMBENT_POST_ROUTES)):
                 post_profile = "incumbent"
             elif sorted(paths) == sorted(POST_ROUTES):
                 post_profile = "expanded"

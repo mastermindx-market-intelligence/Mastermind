@@ -12,23 +12,36 @@ import stat
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 
 HOST = "mcp.mastermind-x.com"
-# The deployed public edge may still hold the previous exact fixed profile.
-# Preserve it for a fail-closed, two-phase Caddy publication migration; no
-# wildcard or unregistered URL is admitted by either profile.
+# These are exact preimages of the installed public edge, not caller input.
 LEGACY_POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
-POST_ROUTES = LEGACY_POST_ROUTES + (
+# The incumbent session endpoints are READ-only under their verified OAuth owner.
+# Effectful /os/executive/session/send remains excluded under the F2 guard.
+INCUMBENT_POST_ROUTES = LEGACY_POST_ROUTES + (
+    "/os/executive/session/context",
+    "/os/executive/session/reply",
+    "/os/executive/session/references",
+)
+POST_ROUTES = INCUMBENT_POST_ROUTES + (
     "/workspace/control-room/open", "/workspace/control-room/bind",
     "/workspace/control-room/unbind", "/workspace/control-room/refresh-builds",
 )
+# Keep the historical installed91c1 eight-route profile byte-for-byte.
 LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
     "/workspace/work/current", "/workspace/mission/current",
     "/workspace/mission/v3/current", "/workspace/result/current",
+    "/workspace/window/current",
+)
+INCUMBENT_GET_ROUTES = (
+    "/os/", "/os/auth/callback", "/workspace/programs/current",
+    "/workspace/work/current", "/workspace/mission/current",
+    "/workspace/mission/v3/current", "/workspace/result/current",
+    "/workspace/result-references/current",
     "/workspace/plan/current",
     "/workspace/operator/activity/current",
     "/workspace/window/current",
 )
-GET_ROUTES = LEGACY_GET_ROUTES + (
+GET_ROUTES = INCUMBENT_GET_ROUTES + (
     "/workspace/control-room/state/current",
     "/workspace/control-room/discover/current",
     "/workspace/mission/v4/current",
@@ -61,7 +74,8 @@ def render(manifest: object, relay_port: int) -> str:
         raise ValueError("OS edge relay port refused")
     routes = asset_routes(manifest)
     template = _TEMPLATE.read_text(encoding="utf-8")
-    if template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 2:
+    if (template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 2
+            or template.count("path " + " ".join(POST_ROUTES) + "\n") != 1):
         raise ValueError("OS edge template differs")
     return template.replace("__ASSET_PATHS__", " ".join(routes)).replace("__RELAY_PORT__", str(relay_port))
 
