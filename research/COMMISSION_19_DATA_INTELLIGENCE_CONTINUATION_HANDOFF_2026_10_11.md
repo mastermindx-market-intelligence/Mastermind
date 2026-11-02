@@ -1217,7 +1217,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 - **Mastermind #1901 (ledger r17)** merged 2026-10-31T14:34:47Z as `aefeaf619fc4`, confirmed by GraphQL readback (`merged`, `mergeCommit`). The master push runs on it passed: CI 41210792809 and CodeQL 41210789639. #1243 pointer: comment 6544826736. The review worktree was removed after the merge.
 - **Macro #10297** (Agent OS: the 10-31 seat takeover, the W15 wave and `DSC:EDGAR-SUBMISSIONS-ACCEPTANCE-DATETIME-IS-TRUE-UTC`) merged 2026-10-31T23:45:06Z as `9ab25923f554`. This closes r16's Agent OS item.
 - **Macro #10259** (WP26 zero-stock guard, D14) merged 2026-10-31T23:50:55Z as `8afb5dbf90bd`.
-- Both Macro PRs were merged by the sweeper identity `chriswong6031-creator`; the seat merged neither. Readback by GraphQL at 2026-11-01T00:02Z.
+- Both Macro PRs were merged by the sweeper identity; the seat merged neither. Readback by GraphQL at 2026-11-01T00:02Z.
 
 **FACTS — why green Macro PRs sat unmerged** (sweeper run log, `merge-on-green` run 41214647799, and `scripts/merge_on_green.py` on main)
 - Main commit `97623101eb79` changed the CI check definitions, and the sweeper then marked every older green "proof stale". Two more changes followed: `92881169bb88` (cited by the 22:33Z sweep) and `fa06210782d5` (Macro #10248, 23:20Z; cited by the 23:39Z sweep).
