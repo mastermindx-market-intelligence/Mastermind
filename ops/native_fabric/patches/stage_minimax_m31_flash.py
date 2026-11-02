@@ -22,11 +22,19 @@ import native_generation as native  # the incumbent generation descriptor owner
 
 BASE_MANIFEST_SHA256 = "0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec"
 PREDECESSOR = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
-EXPECTED_CANDIDATE = "37c4ab4f9db5a1aab3bfd4831cdad5e001e3ceefcc6ad2d0789fdceee058d9a8"
+EXPECTED_CANDIDATE = "42762224b705ebe0f67951f287529efca57a6dc8ec8abdfec5abc8bda9804ab6"
 MEMBER_DIGESTS = {
     "ext/pick.py": (
         "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
-        "dc1e22321e3abafd4c8a9de6898ee3f5d891f36bdc86e9fdcd3dbbd3d6344fb7",
+        "e5e962cd306bfc27e53eb1db50b3a908c8c7d72323dbfb3db5eeaafa2ef47ede",
+    ),
+    "ext/host_pick.py": (
+        "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
+        "8e76d4276e4b77b55ea6845de2f0e8d44509cc2e799a1f5818516c09cb161682",
+    ),
+    "ext/placement_view.py": (
+        "315519caa4644f9b6a431153556c5ce2080f921ce9ec4b0ddbff172517e3feb3",
+        "51b46fb6160b35fc06b6e18a2e8d1e5a68da043f57882be74b64aef4c9373b88",
     ),
     "ext/sub.sh": (
         "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
