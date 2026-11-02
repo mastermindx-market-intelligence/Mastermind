@@ -81,6 +81,28 @@ describe("direct Fabric status-only boundary", () => {
     await expect(bindMissionHost(a.c).readAttendedFabric!({ ...selected, signal: abort.signal })).rejects.toThrow("READ_CANCELLED");
     expect(a.read).not.toHaveBeenCalled();
   });
+  it("shows that rc0 without accepted result requires original-run adjudication", async () => {
+    const a = client(); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText(/Exit 0: result not accepted/)).toBeTruthy());
+    expect(screen.getByText(/source repairs and production readiness are not proven/)).toBeTruthy();
+    expect(a.read).toHaveBeenCalledTimes(1);
+  });
+  it("distinguishes missing retained bytes from an accepted terminal result", async () => {
+    const missing = client(vi.fn(async () => ({ ...raw(), result_available: false, result_bytes: null,
+      accepted: null, acceptance_state: "UNVERIFIED" })));
+    const first = render(<AttendedFabricInspector host={bindMissionHost(missing.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText(/Exit 0: retained result unavailable/)).toBeTruthy());
+    first.unmount();
+    const accepted = client(vi.fn(async () => ({ ...raw(), accepted: true, accepted_by: "reviewer",
+      acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" })));
+    render(<AttendedFabricInspector host={bindMissionHost(accepted.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText("ACCEPTED")).toBeTruthy());
+    expect(screen.queryByText(/Exit 0: result not accepted/)).toBeNull();
+    expect(screen.queryByText(/Exit 0: retained result unavailable/)).toBeNull();
+  });
   it("reads only on explicit inspection and renders same-run metadata", async () => {
     const a = client(); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
     expect(a.read).not.toHaveBeenCalled(); fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
