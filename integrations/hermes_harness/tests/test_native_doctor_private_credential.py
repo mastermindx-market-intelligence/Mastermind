@@ -121,16 +121,16 @@ class NativeDoctorCredentialTests(unittest.TestCase):
 
     def test_incumbent_grok_peer_id_cannot_be_reused(self):
         self._write_role("mmsecretary", (
-            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\\n"
-            "HERMES_SLACK_BOT_USER_ID=U0BTCHX8HMF\\n"
-            "HERMES_SLACK_BOT_TOKEN=secretary-fake-separate-credential-123456\\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmsecretary\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18651\n"
+            "HERMES_SLACK_BOT_USER_ID=U0BTCHX8HMF\n"
+            "HERMES_SLACK_BOT_TOKEN=secretary-fake-separate-credential-123456\n"
         ))
         self._write_role("mmmeta", (
-            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\\n"
-            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\\n"
-            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\\n"
-            "HERMES_SLACK_BOT_TOKEN=metaceo-fake-separate-credential-123456\\n"
+            "HERMES_NATIVE_EGRESS_ROLE=mmmeta\n"
+            "HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.1:18652\n"
+            "HERMES_SLACK_BOT_USER_ID=UHERMEMETA0001\n"
+            "HERMES_SLACK_BOT_TOKEN=metaceo-fake-separate-credential-123456\n"
         ), gateway="test-meta-gateway-distinct-123456",
            dashboard="test-meta-dashboard-distinct-123456")
         report = self._doctor()
