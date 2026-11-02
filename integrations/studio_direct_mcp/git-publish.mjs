@@ -354,6 +354,19 @@ function commitActionRef(operationId, branch, oldHead, tree, message, protectedB
   return hash.update('\0').update(tree).update('\0').update(message).digest('hex');
 }
 
+// A rejected *one-ref* push and a lost push response are different effects.
+// Inspect only Git's machine-readable porcelain status for this exact pinned
+// destination, never untrusted remote prose or a generic exit code.
+function explicitlyRejectedExactRef(error, ref) {
+  if (error?.code !== 1 || error?.killed === true || error?.signal) return false;
+  const output = [error?.stdout, error?.stderr]
+    .filter((value) => typeof value === 'string').join('\n');
+  return output.split(/\r?\n/).some((line) => {
+    const match = line.match(/^!\t([^\t\r\n]+)\t\[remote rejected\](?:\s*\([^\r\n]*\))?\s*$/);
+    return match !== null && match[1].endsWith(`:${ref}`);
+  });
+}
+
 function publicStatus(state) {
   return {
     operation_id: state.operationId,
@@ -1108,6 +1121,25 @@ export function createGitPublisher(config, dependencies = {}) {
             code: 'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN',
             action_ref: ref,
             push_attempted: true,
+            ...publicStatus(afterFailure),
+          };
+        }
+        // Do not turn an explicit porcelain ref rejection into EFFECT_UNKNOWN
+        // when the same pinned destination is authoritatively unchanged.
+        // This classifies the requested ref only; it does not classify the
+        // host's reason or authorize an automatic retry or carrier switch.
+        if (explicitlyRejectedExactRef(error, before.ref) &&
+            afterFailure.remoteHead === before.remoteHead) {
+          return {
+            schema: 'mastermind.studio_git_push_result.v1',
+            status: 'REFUSED',
+            effect_state: 'NOT_APPLIED',
+            code: 'REMOTE_REF_REJECTED_UNCHANGED',
+            action_ref: ref,
+            push_attempted: true,
+            retry_allowed: false,
+            diagnostic_scope: 'SAME_CARRIER_READ_ONLY',
+            rejection_reason: 'UNDETERMINED',
             ...publicStatus(afterFailure),
           };
         }
