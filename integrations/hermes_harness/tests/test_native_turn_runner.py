@@ -97,6 +97,8 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
                 ("HERMES_SLACK_BOT_TOKEN", "PRIVATE-NOT-LIVE"),
                 ("HTTP_PROXY", "http://127.0.0.1:1234"),
                 ("ZAI_API_KEY", "SYNTHETIC_WRONG_ROLE_KEY"),
+                ("HERMES_STUB_TOOLS", "/private/rogue-file"),
+                ("EXTRA_SECRET_AUTH", "PRIVATE_AUTH_SENTINEL"),
             ]:
                 bad = {**env, key: value}
                 with self.subTest(key=key, value=value):
