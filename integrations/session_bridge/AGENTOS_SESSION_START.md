@@ -187,3 +187,28 @@ adjacent integer, normalization, changed hash, wrong path/column, or new identit
 literal is not covered. Legacy records keep the existing ASCII requirement.
 This is source-review accounting, not runtime authorization or a generic scanner
 exemption; the consequential matcher change requires nonauthor review.
+
+### Repeat the attended source rehearsal locally
+
+From an active Codex turn with Python, PyYAML, Git, and a local Macro checkout
+that already contains the pinned commit, run:
+
+```sh
+python3 -B /ABSOLUTE/REVIEWED/MASTERMIND/integrations/session_bridge/rehearse_project_owner.py \
+  --macro-repo /ABSOLUTE/MACRO/CHECKOUT --result /ABSOLUTE/NEW/receipt.json
+```
+
+The rehearsal reads a local archive of a specified immutable Macro revision.
+It creates a temporary, independent Git repository with no remotes or alternate
+object stores, plus a fresh home and charter. The private commit identifies this
+subset, separately from the donor commit. The import explicitly uses
+`--no-fetch`. During owner pickup the fixture permits only read-only Git
+commands inside its temporary root and records their names. The action verifies
+the seven frozen package members. Acceptance and two subsequent reads show that
+the task was consumed. The receipt describes source behavior in that attended
+turn. It does not establish that an installed Codex hook delivered context.
+
+An earlier development rehearsal omitted `--no-fetch` and invoked a pull on
+a shared mirror. Its tracking ref and fetch metadata changed while the checkout
+HEAD stayed in place. That run is excluded from isolation evidence. The
+standalone rehearsal above is the reproducible path.
