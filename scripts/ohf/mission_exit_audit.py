@@ -5,6 +5,13 @@ owners. The caller remains responsible for authenticating observations, freshnes
 writer custody, and actual acceptance. This is NOT an Executive lifecycle, retry,
 dispatch, credential, or finalization authority.
 
+An optional ``lanes`` section additionally classifies the *claimed session exit*
+against observed lane state: it separates lawful continuation after a lane-local
+``WAITING_EXTERNAL`` from a mere status/checkpoint/CI-summary exit, and the lawful
+all-lanes stop (or safety/effect-unknown fence) from a premature stop. These are
+read-only classifications of supplied observations -- still no lifecycle, retry,
+dispatch, credential, or finalization authority, and never served-model proof.
+
 Run: python -m scripts.ohf.mission_exit_audit /path/to/snapshot.json
 """
 from __future__ import annotations
@@ -52,6 +59,31 @@ ACTION = {
 VALID_SCOPES = {"analysis", "implementation", "review", "none"}
 VALID_RUN_STATES = {"NONE", "QUEUED", "STARTED", "TERMINAL", "UNKNOWN"}
 VALID_EFFECTS = {"NONE", "SAFETY_DENIED", "PERMISSION_DENIED", "EFFECT_UNKNOWN"}
+# Lane/exit-claim vocabulary (optional ``lanes`` snapshot section). States mirror
+# the incumbent protected law: WAITING_EXTERNAL is lane-local (pending review,
+# CI, capacity, or owner reply blocks only the dependent lane); SAFE_WORK_REMAINING
+# marks an independent safe unblocked lane; BLOCKED_PROVEN requires exact current
+# negative-capability evidence; FENCED is a safety-denied or effect-unknown hold
+# that must be backed by this snapshot's held effect; DONE is verified/accepted.
+VALID_LANE_STATES = {
+    "DONE",
+    "WAITING_EXTERNAL",
+    "SAFE_WORK_REMAINING",
+    "BLOCKED_PROVEN",
+    "FENCED",
+}
+# CONTINUE keeps working the next safe unblocked lane in the same healthy turn.
+# CHECKPOINT_SUMMARY_STOP claims a checkpoint/status/CI-summary exit; it is only
+# lawful as a checkpointed continuation whose resume surface is a real accepted/
+# started durable executor (a request, notification, delivery, or trigger is not
+# that executor). WAIT_EXTERNAL_EXECUTOR claims ending solely to wait on such an
+# executor. ALL_LANES_BLOCKED_STOP claims every scoped lane is proven blocked.
+VALID_EXIT_CLAIMS = {
+    "CONTINUE",
+    "CHECKPOINT_SUMMARY_STOP",
+    "WAIT_EXTERNAL_EXECUTOR",
+    "ALL_LANES_BLOCKED_STOP",
+}
 
 
 class InvalidSnapshot(ValueError):
@@ -94,6 +126,87 @@ def _public_effect_ref(value: Any) -> bool:
 
 def _true_and_ref(obj: dict[str, Any], flag: str, receipt: str) -> bool:
     return obj.get(flag) is True and _ref(obj.get(receipt))
+
+
+def _audit_lanes(snapshot: dict[str, Any], effect_class: str) -> dict[str, Any]:
+    """Classify the claimed session exit against observed lane state.
+
+    Read-only discrimination over operator-collected observations, added 2026-11-02:
+    a lane-local ``WAITING_EXTERNAL`` (pending review/CI/owner) never justifies a
+    mission-wide stop while a safe independent lane remains; a checkpoint/status/
+    CI-summary exit is not continuation unless its resume surface is a real
+    accepted/started durable executor; an all-lanes stop is lawful only when every
+    scoped lane carries proven blocks or a held safety/effect fence. Missing or
+    malformed lane evidence fails closed. The returned flags never authorize any
+    action and are never served-model behavioral proof.
+    """
+    lanes = _object(snapshot.get("lanes"), "lanes")
+    items = lanes.get("items")
+    if not isinstance(items, list) or not items or not all(isinstance(x, dict) for x in items):
+        raise InvalidSnapshot("lanes.items must be a nonempty list of lane objects")
+    states: list[str] = []
+    seen_ids: set[str] = set()
+    for item in items:
+        lane_id = item.get("id")
+        if not _ref(lane_id) or lane_id in seen_ids:
+            raise InvalidSnapshot("lane ids must be unique bounded references")
+        seen_ids.add(lane_id)
+        state = item.get("state")
+        if not isinstance(state, str) or state not in VALID_LANE_STATES:
+            raise InvalidSnapshot("unknown lane state")
+        if state == "FENCED" and effect_class == "NONE":
+            raise InvalidSnapshot("fenced lane requires the snapshot's held effect")
+        states.append(state)
+    exit_claim = lanes.get("exit_claim")
+    if not isinstance(exit_claim, str) or exit_claim not in VALID_EXIT_CLAIMS:
+        raise InvalidSnapshot("unknown exit claim")
+    durable_wait = False
+    wait_executor = lanes.get("wait_executor")
+    if wait_executor is not None:
+        wait_executor = _object(wait_executor, "wait_executor")
+        executor_ref = wait_executor.get("ref")
+        if executor_ref is not None and not _ref(executor_ref):
+            raise InvalidSnapshot("wait executor reference must be a bounded reference")
+        started = wait_executor.get("started") is True
+        if started and executor_ref is None:
+            raise InvalidSnapshot("started wait executor requires a lawful return reference")
+        durable_wait = started
+    cycles = lanes.get("support_cycles_without_delta", 0)
+    if type(cycles) is not int or cycles < 0:
+        raise InvalidSnapshot("support_cycles_without_delta must be a nonnegative integer")
+
+    waiting = states.count("WAITING_EXTERNAL") > 0
+    safe_work = states.count("SAFE_WORK_REMAINING") > 0
+    all_blocked = all(s in ("BLOCKED_PROVEN", "FENCED", "DONE") for s in states) and any(
+        s in ("BLOCKED_PROVEN", "FENCED") for s in states
+    )
+    # Two support/status-only cycles without a capability delta or newly resolved
+    # blocker are NO_DELTA_LOOP and force a changed tactic/lane plus a real
+    # capability step before finalization. A truthful all-lanes-proven-blocked
+    # state is the incumbent ALL_SCOPED_LANES_BLOCKED terminal, not a support loop.
+    no_delta_loop = cycles >= 2 and not all_blocked
+    stop_claim = exit_claim != "CONTINUE"
+    checkpoint_continuation = durable_wait and not safe_work
+    lawful_stop = (
+        (exit_claim == "ALL_LANES_BLOCKED_STOP" and all_blocked)
+        or (
+            exit_claim in ("WAIT_EXTERNAL_EXECUTOR", "CHECKPOINT_SUMMARY_STOP")
+            and checkpoint_continuation
+        )
+    )
+    return {
+        "lane_local_wait_blocks_only_its_lane": waiting and safe_work,
+        "remaining_safe_work": safe_work,
+        "all_lanes_proven_blocked": all_blocked,
+        "no_delta_loop_forces_tactic_change": no_delta_loop,
+        "status_summary_is_not_continuation": (
+            exit_claim == "CHECKPOINT_SUMMARY_STOP" and not checkpoint_continuation
+        ),
+        "wait_requires_started_durable_executor": (
+            exit_claim == "WAIT_EXTERNAL_EXECUTOR" and not durable_wait
+        ),
+        "premature_exit_detected": stop_claim and not lawful_stop,
+    }
 
 
 def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -192,7 +305,7 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     # The caller must verify these observations against each canonical owner;
     # all green checks only mean the supplied packet is ready for adjudication.
     ready = not gaps and not held
-    return {
+    report = {
         "schema": OUTPUT_SCHEMA,
         "disposition": "READY_FOR_CANONICAL_ADJUDICATION" if ready else "INCOMPLETE",
         "checks_passed": [key for key in REQUIREMENTS if key in req and checks[key]],
@@ -212,6 +325,11 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
         "production_activation_authorized": False,
         "fresh_owner_readback_required": True,
     }
+    # Exit-claim classification is additive: snapshots without a ``lanes`` section
+    # keep the exact incumbent output contract (no lane flags ever appear).
+    if root.get("lanes") is not None:
+        report.update(_audit_lanes(root, effect["class"]))
+    return report
 
 
 def _read_snapshot(path: Path) -> str:

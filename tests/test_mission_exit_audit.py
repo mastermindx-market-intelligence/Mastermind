@@ -15,10 +15,31 @@ from scripts.ohf.mission_exit_audit import (
 )
 
 FIXTURE = Path(__file__).resolve().parents[1] / "research/fixtures/mission_exit_byteplus_20261101.json"
+PROPHET_FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "research/fixtures/mission_exit_prophet10289_20261102.json"
+)
+
+# Exit-claim discrimination flags, present only when the snapshot carries a
+# ``lanes`` section (additive; the incumbent contract without lanes is pinned
+# by test_lanes_absent_keeps_incumbent_output_contract).
+LANE_FLAGS = (
+    "lane_local_wait_blocks_only_its_lane",
+    "remaining_safe_work",
+    "all_lanes_proven_blocked",
+    "no_delta_loop_forces_tactic_change",
+    "status_summary_is_not_continuation",
+    "wait_requires_started_durable_executor",
+    "premature_exit_detected",
+)
 
 
 def snapshot():
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+def prophet_snapshot():
+    return json.loads(PROPHET_FIXTURE.read_text(encoding="utf-8"))
 
 
 def test_byteplus_terminal_analysis_is_not_release_or_accepted_work():
@@ -230,3 +251,216 @@ def test_deeply_nested_json_fails_closed_without_traceback(tmp_path, capsys):
     assert main([str(p)]) == 2
     result = json.loads(capsys.readouterr().out)
     assert result == {"schema": OUTPUT_SCHEMA, "disposition": "INPUT_UNVERIFIED", "error": "invalid_or_unreadable_snapshot"}
+
+
+# ---------------------------------------------------------------------------
+# Lane-local WAITING_EXTERNAL vs status/checkpoint/CI-summary exit, and the
+# lawful all-lanes stop / safety-effect fence (2026-11-02 discriminator slice).
+# Source-contract regressions over operator-supplied observations only; these
+# are NOT served-model behavioral proof -- the fresh-session evaluation owner
+# (SXA01–SXA07 packets) still owes that separate evidence gate.
+# ---------------------------------------------------------------------------
+
+
+def test_prophet10289_sanitized_local_passes_are_not_acceptance_or_release():
+    report = audit(prophet_snapshot())
+    assert report["disposition"] == "INCOMPLETE"
+    # 142 local passes and rc0 do not close any required proof gate.
+    assert report["checks_passed"] == []
+    assert {g["requirement"] for g in report["gaps"]} == {
+        "accepted_worker_result", "source_implementation",
+        "current_head_ci", "independent_source_review",
+    }
+    assert report["terminal_exit_is_not_acceptance"] is True
+    assert report["analysis_is_not_implementation"] is False
+    # Lane discrimination: CI/review are lane-local waits, the unstaged
+    # 145-test guard suite is remaining safe work, so the sanitized observed
+    # exit (a checkpoint/status-summary stop after two no-delta support
+    # cycles) is a premature exit, not continuation or a fenced stop.
+    assert report["lane_local_wait_blocks_only_its_lane"] is True
+    assert report["remaining_safe_work"] is True
+    assert report["all_lanes_proven_blocked"] is False
+    assert report["no_delta_loop_forces_tactic_change"] is True
+    assert report["status_summary_is_not_continuation"] is True
+    assert report["premature_exit_detected"] is True
+    assert all(report[flag] is False for flag in (
+        "source_write_authorized", "dispatch_authorized", "retry_authorized",
+        "merge_authorized", "production_activation_authorized"
+    ))
+    assert report["fresh_owner_readback_required"] is True
+
+
+def test_sanitized_fixture_pins_incident_numbers_in_refs():
+    data = prophet_snapshot()
+    assert "142" in data["worker"]["result_ref"]
+    assert "145" in data["lanes"]["items"][2]["id"]
+    assert data["lanes"]["items"][0]["id"].startswith("macro:pr-10289-hosted")
+    assert data["lanes"]["items"][1]["state"] == "WAITING_EXTERNAL"
+
+
+def test_same_facts_with_continue_claim_is_not_premature():
+    # The discriminator: identical mission/lane facts, only the claimed exit
+    # changes. Continuing the unstaged guard-test lane is lawful continuation
+    # after a lane-local WAITING_EXTERNAL; the summary stop was not.
+    data = prophet_snapshot()
+    data["lanes"]["exit_claim"] = "CONTINUE"
+    report = audit(data)
+    assert report["premature_exit_detected"] is False
+    assert report["status_summary_is_not_continuation"] is False
+    assert report["lane_local_wait_blocks_only_its_lane"] is True
+    assert report["remaining_safe_work"] is True
+    assert report["no_delta_loop_forces_tactic_change"] is True
+
+
+def test_staging_the_guard_lane_removes_remaining_safe_work_flag():
+    data = prophet_snapshot()
+    data["lanes"]["items"][2]["state"] = "DONE"
+    report = audit(data)
+    assert report["remaining_safe_work"] is False
+    assert report["lane_local_wait_blocks_only_its_lane"] is False
+    # A checkpoint-summary exit still is not continuation: the CI/review waits
+    # have no started durable executor to hand the mission to.
+    assert report["status_summary_is_not_continuation"] is True
+    assert report["premature_exit_detected"] is True
+
+
+def test_all_lanes_proven_blocked_stop_is_lawful_fence():
+    data = prophet_snapshot()
+    data["effect"] = {
+        "class": "SAFETY_DENIED",
+        "action_id": "macro:held-source-write",
+        "carrier": "macro:original-pr-carrier",
+        "dispatched": False,
+    }
+    data["lanes"] = {
+        "items": [
+            {"id": "macro:source-write-lane", "state": "FENCED"},
+            {"id": "macro:permission-ceremony-lane", "state": "BLOCKED_PROVEN"},
+            {"id": "macro:finished-read-lane", "state": "DONE"},
+        ],
+        "exit_claim": "ALL_LANES_BLOCKED_STOP",
+        "wait_executor": {"started": False, "ref": None},
+        "support_cycles_without_delta": 2,
+    }
+    report = audit(data)
+    assert report["all_lanes_proven_blocked"] is True
+    # A truthful proven-blocked terminal is the incumbent ALL_SCOPED_LANES_BLOCKED
+    # shape, not a support loop and not a premature exit.
+    assert report["no_delta_loop_forces_tactic_change"] is False
+    assert report["premature_exit_detected"] is False
+    assert report["held_actions"][0]["instruction"] == (
+        "do not retry the denied action through any carrier"
+    )
+
+
+def test_one_fenced_lane_with_independent_work_is_not_mission_stop():
+    # The safety/effect-unknown fence is lane-scoped: it holds the denied or
+    # uncertain effect on its original carrier while independent lanes advance.
+    data = prophet_snapshot()
+    data["effect"] = {
+        "class": "EFFECT_UNKNOWN",
+        "action_id": "macro:deployment-mutation",
+        "carrier": "studio:original-carrier",
+        "dispatched": None,
+    }
+    data["lanes"] = {
+        "items": [
+            {"id": "macro:uncertain-deployment-lane", "state": "FENCED"},
+            {"id": "macro:independent-review-lane", "state": "SAFE_WORK_REMAINING"},
+        ],
+        "exit_claim": "ALL_LANES_BLOCKED_STOP",
+    }
+    report = audit(data)
+    assert report["all_lanes_proven_blocked"] is False
+    assert report["premature_exit_detected"] is True
+    assert report["held_actions"][0]["instruction"] == (
+        "reconcile only through original carrier; no replay or failover"
+    )
+    assert report["retry_authorized"] is False
+
+
+def test_fenced_lane_without_held_effect_refused():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [{"id": "macro:claimed-fence", "state": "FENCED"}]
+    with pytest.raises(InvalidSnapshot):
+        audit(data)
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda d: d["lanes"].update(items=[]),
+    lambda d: d["lanes"].update(items=[{"id": "macro:one", "state": "DONE"},
+                                       {"id": "macro:one", "state": "DONE"}]),
+    lambda d: d["lanes"]["items"][0].update(state="MAYBE_BLOCKED"),
+    lambda d: d["lanes"].update(exit_claim="STOP_BECAUSE_CI_GREEN"),
+    lambda d: d["lanes"].update(support_cycles_without_delta=-1),
+    lambda d: d["lanes"].update(support_cycles_without_delta="2"),
+    lambda d: d["lanes"].update(support_cycles_without_delta=True),
+    lambda d: d["lanes"].update(wait_executor={"started": True, "ref": None}),
+    lambda d: d["lanes"].update(wait_executor={"started": True, "ref": 123}),
+    lambda d: d["lanes"].update(wait_executor={"started": False, "ref": ["x"]}),
+    lambda d: d["lanes"].update(items="macro:not-a-list"),
+    lambda d: d.update(lanes=["not-an-object"]),
+])
+def test_malformed_lane_evidence_refused(mutation):
+    data = prophet_snapshot()
+    mutation(data)
+    with pytest.raises(InvalidSnapshot):
+        audit(data)
+
+
+def test_wait_claim_requires_started_durable_executor():
+    # Ending solely to wait is lawful only with a real accepted/started durable
+    # executor with a lawful return path; a request, notification, delivery, or
+    # trigger is not that executor.
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "macro:pr-10289-hosted-exact-head-ci", "state": "WAITING_EXTERNAL"},
+        {"id": "macro:pr-10289-independent-review", "state": "WAITING_EXTERNAL"},
+    ]
+    data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
+    data["lanes"].pop("support_cycles_without_delta")
+    report = audit(data)
+    assert report["wait_requires_started_durable_executor"] is True
+    assert report["premature_exit_detected"] is True
+    assert report["remaining_safe_work"] is False
+    data["lanes"]["wait_executor"] = {"started": True, "ref": "fabric:nightly-guard-run"}
+    report = audit(data)
+    assert report["wait_requires_started_durable_executor"] is False
+    assert report["premature_exit_detected"] is False
+
+
+def test_checkpointed_continuation_requires_executor_not_summary():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "macro:pr-10289-hosted-exact-head-ci", "state": "WAITING_EXTERNAL"},
+    ]
+    assert audit(data)["premature_exit_detected"] is True
+    data["lanes"]["wait_executor"] = {"started": True, "ref": "fabric:successor-executor"}
+    report = audit(data)
+    assert report["status_summary_is_not_continuation"] is False
+    assert report["premature_exit_detected"] is False
+
+
+@pytest.mark.parametrize("cycles,expected", [(0, False), (1, False), (2, True), (5, True)])
+def test_no_delta_loop_requires_two_support_cycles(cycles, expected):
+    data = prophet_snapshot()
+    data["lanes"]["support_cycles_without_delta"] = cycles
+    assert audit(data)["no_delta_loop_forces_tactic_change"] is expected
+
+
+def test_lanes_absent_keeps_incumbent_output_contract():
+    report = audit(snapshot())
+    assert set(LANE_FLAGS).isdisjoint(report)
+    assert set(LANE_FLAGS) <= set(audit(prophet_snapshot()))
+
+
+def test_prophet10289_discriminator_via_cli(tmp_path, capsys):
+    p = tmp_path / "prophet10289.json"
+    p.write_text(PROPHET_FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+    assert main([str(p)]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["schema"] == OUTPUT_SCHEMA
+    assert result["disposition"] == "INCOMPLETE"
+    assert result["premature_exit_detected"] is True
+    assert result["lane_local_wait_blocks_only_its_lane"] is True
+    assert result["status_summary_is_not_continuation"] is True

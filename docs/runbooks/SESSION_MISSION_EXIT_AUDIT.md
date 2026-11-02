@@ -35,6 +35,43 @@ owners and apply the platform's existing authorization and effect fences. The
 may proceed only if genuinely independent in target, authority and effect, as
 already determined by current protected law.
 
+## Lane and exit-claim discrimination (2026-11-02)
+
+An optional `lanes` snapshot section classifies the **claimed session exit**
+against observed lane state. It exists to separate three outcomes that static
+summaries conflate:
+
+1. lawful **continuation** while a lane-local `WAITING_EXTERNAL` (pending review,
+   CI, capacity, owner reply) blocks only its own lane and a safe independent
+   lane remains (`CONTINUE` claim);
+2. a **premature exit** that ends on a status/checkpoint/CI summary, or ends to
+   wait without a real accepted/started durable executor with a lawful return
+   path (`CHECKPOINT_SUMMARY_STOP` / `WAIT_EXTERNAL_EXECUTOR` claims); and
+3. the lawful **all-lanes stop or safety/effect-unknown fence**
+   (`ALL_LANES_BLOCKED_STOP` claim with every scoped lane `BLOCKED_PROVEN` or a
+   `FENCED` hold backed by this snapshot's held effect).
+
+Two support/status-only cycles without a capability delta report
+`no_delta_loop_forces_tactic_change`. The flags are read-only classifications of
+supplied observations; they authorize nothing and are not served-model proof.
+Snapshots without `lanes` keep the exact incumbent output.
+
+Sanitized realistic sample (November 2026 Prophet A2 settlement-preflight shape:
+142 local test passes, the requested 145-test guard suite not staged, independent
+review unreturned, hosted exact-head CI pending — the observed session exit was a
+checkpoint/status-summary stop):
+
+```sh
+python3 -m scripts.ohf.mission_exit_audit research/fixtures/mission_exit_prophet10289_20261102.json
+```
+
+It must report `premature_exit_detected: true` with `all_lanes_proven_blocked:
+false` — local test passes and a summary do not close the staged guard tests,
+review, or hosted-CI gates. Served-model behavioral evidence for the matching
+evaluator packets (SXA01–SXA07 in `research/fixtures/mission_exit_behavior_cases_20261101.json`)
+remains with the existing fresh-Sol evaluation owner and is a separate, unmet
+adoption gate.
+
 ## Integration sequence and boundaries
 
 1. Source tests + exact-head CI and independent review of this diagnostic.
