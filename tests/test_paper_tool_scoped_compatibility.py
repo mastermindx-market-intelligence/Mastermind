@@ -123,6 +123,18 @@ class ContractResilienceTests(unittest.TestCase):
             self.assertEqual(observed["state"], "APPLIED_RESPONSE_OBSERVED")
             self.assertEqual([name for name, _ in c.calls].count("write_html"), 1)
 
+    def test_schema_dialect_change_is_not_treated_as_presentation_only(self):
+        cat = copy.deepcopy(M2)
+        original = cat["write_html"]["inputSchema"]["$schema"]
+        cat["write_html"]["inputSchema"]["$schema"] = (
+            "https://json-schema.org/draft/2019-09/schema"
+            if "2019-09" not in original else
+            "https://json-schema.org/draft/2020-12/schema")
+        r = b.schema_receipt(Client(cat), cat)
+        self.assertNotIn("write_html", r["compatible_write_tools"])
+        self.assertIn("create_artboard", r["compatible_write_tools"])
+        self.assertTrue(r["accepted_for_write"])
+
     def test_required_new_input_or_default_restricts_only_changed_tool(self):
         for variant in ("required", "default", "enum", "annotation"):
             with self.subTest(variant=variant):
