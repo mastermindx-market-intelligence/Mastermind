@@ -175,7 +175,7 @@ class SyntheticRunnerTests(unittest.TestCase):
     def test_timeout_kills_child_without_implicit_retry(self):
         self._write("sleep")
         with self.assertRaises(RuntimeRefusal) as cm:
-            self._run(timeout_seconds=0.2)
+            self._run(timeout_seconds=1.1)
         self.assertEqual(cm.exception.code, "NATIVE_CANARY_TIMEOUT")
 
     def test_cgroup_refuses_before_child_spawn(self):
