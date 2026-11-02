@@ -612,6 +612,65 @@ def test_a_timeout_after_a_possible_send_fails_stop_without_a_retry():
         gateway.stop()
 
 
+def test_the_child_receives_the_provider_frames_unmodified():
+    gateway = MockGateway().start()
+    try:
+        endpoint, _, _ = build(binding_for(gateway))
+        with endpoint:
+            status, body = raw_post(endpoint)
+        assert status == 200
+        assert body == DEFAULT_FRAMES
+    finally:
+        gateway.stop()
+
+
+def test_an_owner_supplied_idempotency_key_reaches_the_gateway_as_a_header():
+    gateway = MockGateway().start()
+    try:
+        endpoint, _, _ = build(
+            binding_for(gateway), idempotency_key_loader=lambda: "attempt-request-1"
+        )
+        with endpoint:
+            client = sdk_client(endpoint)
+            list(client.chat.completions.create(
+                model=MODEL,
+                messages=[{"role": "user", "content": "Say ok"}],
+                stream=True,
+            ))
+        assert gateway.requests[0]["headers"]["idempotency-key"] == "attempt-request-1"
+    finally:
+        gateway.stop()
+
+
+def test_an_unusable_idempotency_key_is_refused_before_the_gateway():
+    gateway = MockGateway().start()
+    try:
+        endpoint, outcomes, _ = build(
+            binding_for(gateway), idempotency_key_loader=lambda: "bad key"
+        )
+        with endpoint:
+            assert raw_post(endpoint)[0] == 409
+        assert gateway.requests == []
+        assert outcomes[0].kind == "refused"
+    finally:
+        gateway.stop()
+
+
+def test_a_non_event_stream_success_is_an_ambiguous_effect():
+    gateway = MockGateway(content_type="application/json", frames=b'{"ok":true}').start()
+    try:
+        endpoint, outcomes, failures = build(binding_for(gateway))
+        with endpoint:
+            assert raw_post(endpoint)[0] == 409
+            assert raw_post(endpoint)[0] == 409
+        assert len(gateway.requests) == 1
+        assert endpoint.stopped_forwarding
+        assert failures == ["effect_unknown"]
+        assert outcomes[0].kind == "effect_unknown"
+    finally:
+        gateway.stop()
+
+
 def test_the_typed_effect_unknown_contract_of_the_existing_endpoint_is_preserved():
     gateway = MockGateway().start()
     try:
