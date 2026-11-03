@@ -2254,7 +2254,7 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
         })
         self.assertEqual(
             svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
-            "00524608d1f517264cd133b173289a0ea20b217d40ce2ecd9022fb1063286a25",
+            "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c",
         )
         self.assertNotEqual(
             svc.FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256["git-publish.mjs"],
