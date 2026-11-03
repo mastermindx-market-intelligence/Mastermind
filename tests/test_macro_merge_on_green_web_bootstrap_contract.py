@@ -21,13 +21,9 @@ def _contains_macro_release_instruction(text: str) -> bool:
     return all(
         snippet in _approved_project_block(text)
         for snippet in (
-            "9A. Macro:",
+            "9A. Macro `merge-on-green`:",
             "docs/DELIVERY_WORKFLOW.md",
-            "`merge-on-green`",
-            "requires CI",
-            "non-author review",
-            "no HOLD",
-            "no native --auto",
+            "Never bulk-arm.",
         )
     )
 
@@ -54,7 +50,7 @@ def test_outside_fence_release_note_does_not_count_as_installed_instruction():
     kernel = KERNEL.read_text(encoding="utf-8")
     assert _contains_macro_release_instruction(kernel)
     moved = kernel.replace(
-        "9A. Macro: docs/DELIVERY_WORKFLOW.md. `merge-on-green` requires CI, non-author review, no HOLD; no native --auto.",
+        "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm.",
         "",
     )
     assert moved != kernel, "the exact projected rule must exist in the source"
