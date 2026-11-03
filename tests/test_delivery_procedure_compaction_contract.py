@@ -310,3 +310,291 @@ def test_tool_heavy_and_multi_phase_profiles_include_reliability() -> None:
     ordinary = tuple(SKILLPACK_FILES)[:4]
     assert _bundle_bytes(ordinary) < sum(_PIN_BYTES[p] for p in ordinary)
     assert _bundle_bytes(_ALL_TARGETS) < sum(_PIN_BYTES[p] for p in _ALL_TARGETS)
+
+
+# ---------------------------------------------------------------------------
+# Clause-loss regressions for the consolidated delivery procedures (2026-11-02
+# second pass).
+#
+# Each entry names the canonical owner of an obligation family and the distinct
+# clauses that together establish it. A family is only complete when every
+# clause is still present at that owner, so a consolidation that folds one
+# protected condition away is detected instead of silently reducing the
+# procedure. The mutant cases below delete a clause from its owner and require
+# the family to become incomplete, and two of the families are additionally
+# checked against INDEPENDENT guards that already existed in this repository
+# (the stop-at-blocker protective contract and the repaired leaf-content
+# contract), so a dropped clause is caught by code that is not this table.
+CONSOLIDATED_FAMILIES = (
+    (
+        "denied-effect-unknown",
+        "docs/sol_skills/ACTIVE_EXECUTION.md",
+        (
+            "A platform refusal is action-scoped until evidence proves otherwise",
+            "Action-scoped refusal is not mission-wide refusal.",
+            "EFFECT_NONE is not retry permission",
+            "`EFFECT_UNKNOWN` must be reconciled at the original target",
+            "do not enter an identical third loop",
+            "first explicit safety or permission denial ends retry",
+            "never as refusal evasion",
+            "TOOL_DEGRADED / EFFECT_NONE",
+        ),
+    ),
+    (
+        "live-writer-custody",
+        "docs/sol_skills/ACTIVE_EXECUTION.md",
+        (
+            "Responsibility survives a chat; a chat does not own work forever",
+            "fresh live claim, source-writer custody and pending effects",
+            "unknown is not expired",
+            "compare-and-swap/fencing",
+            "no lease, writer or pending effect is displaced",
+            "Do not wait indefinitely for an abandoned conversation to ACK",
+            "The active assigned session owns the next recovery action",
+        ),
+    ),
+    (
+        "provider-capacity-and-transport",
+        "docs/sol_skills/ACTIVE_EXECUTION.md",
+        (
+            "Preserve provider capacity; do not turn a refusal into filter-probing",
+            "scarce-capacity pressure",
+            "do not repeatedly rephrase the same effect",
+            "Do not contaminate provider-refusal evidence with transport loss",
+            "not a blocked-call datum for throttling analysis",
+            "Cause and effect state stay separate",
+            "explicit supported refusal/classification",
+        ),
+    ),
+    (
+        "closure-continuation",
+        "docs/sol_skills/ACTIVE_EXECUTION.md",
+        (
+            "PROVEN_OUTCOME",
+            "EXACT_HUMAN_GATE",
+            "ALL_SCOPED_LANES_BLOCKED",
+            "DURABLE_EXECUTION_RUNNING",
+            "CHECKPOINTED_CONTINUATION",
+            "`MORE_WORK_EXISTS` when safe independent work remains",
+            "`NOT_CANONICALLY_PERSISTED`",
+            "MISSION_COMPLETE: false",
+        ),
+    ),
+    (
+        "capability-discovery",
+        "docs/sol_skills/ACTIVE_EXECUTION.md",
+        (
+            "`UNKNOWN` / `UNPROBED` is never equivalent to `UNAVAILABLE`",
+            "Never perform a dummy mutation solely to prove capability",
+            "the truthful active-turn state remains `MORE_WORK_EXISTS`",
+            "Step 6 negative-capability evidence",
+            "A listed/online device is not proof its backend can execute",
+        ),
+    ),
+    (
+        "session-reliability-budgets",
+        "docs/sol_skills/SESSION_RELIABILITY.md",
+        (
+            "8 KiB or 150 lines",
+            "16 KiB",
+            "100 matches",
+            "32 KiB",
+            "15 seconds",
+            "30 seconds",
+            "12 KiB / 1500 words",
+            "A timeout is never permission to replay the command",
+        ),
+    ),
+    (
+        "session-reliability-failure-layers",
+        "docs/sol_skills/SESSION_RELIABILITY.md",
+        (
+            "STREAM_ATTACHMENT_UNCERTAIN",
+            "TURN_EXECUTION_ENDED",
+            "SESSION_UNSTABLE",
+            "WORKSPACE_OR_EFFECT_UNCERTAIN",
+            "NOT_CANONICALLY_PERSISTED",
+            "A successor must reconcile and persist",
+        ),
+    ),
+    (
+        "delegation-economics-and-capacity",
+        "docs/sol_skills/WEB_CEO_DELEGATION.md",
+        (
+            "CONCENTRATED_JUDGMENT",
+            "SUSTAINED_ORCHESTRATION",
+            "OPERATOR_OWNED_DELIVERY",
+            "Model Router fixes the first lawful suitability tier",
+            "not live admission",
+            "ordinary return adjudication",
+            "shared principal subscription pool",
+            "EFFECT_UNKNOWN",
+        ),
+    ),
+    (
+        "mode-and-provider-economics",
+        "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
+        (
+            "COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT",
+            "CHAT_REASONING_MODE: NON_PRO_DEFAULT",
+            "CHAT_REASONING_MODE: PRO_MODE_EXCEPTION",
+            "COGNITION_ROUTE: METERED_EXCEPTION",
+            "PRO_MODE_TASK_CLASS",
+            "PRO_MODE_REFUSED / USE_NON_PRO_MODE",
+            "METERED_ROUTE_REFUSED / WAITING_FOR_LAWFUL_ROUTE",
+            "WHY NOT FABLE",
+            "WHY FABLE",
+        ),
+    ),
+    (
+        "routing-defaults-and-fable-admission",
+        "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
+        (
+            "C0_MECHANICAL",
+            "C1_ROUTINE_BOUNDED",
+            "C2_COMPLEX_BOUNDED",
+            "C3_FRONTIER_JUDGMENT",
+            "FRONTIER_WITNESS",
+            "why this route can reliably satisfy the mission",
+        ),
+    ),
+    (
+        "universal-hard-laws",
+        "docs/sol_skills/INDEX.md",
+        (
+            "One logical modifying operation binds to one carrier",
+            "Never blind-retry an effect-unknown modifying operation",
+            "Fable is scarce principal capacity, not the default worker",
+            "that delivery is the receiver-assignment edge",
+            "No ChatGPT, Codex, Claude, Fable, Grok or another surface",
+            "A genuine blocker or external wait freezes that lane, not the whole turn",
+            "never makes that buried reply a successor-child assignment",
+        ),
+    ),
+    (
+        "load-and-modification-gates",
+        "docs/sol_skills/INDEX.md",
+        (
+            "from **that same commit SHA**",
+            "modifying workflow is unavailable",
+            "Apply gates to the specific next action, not every possible future action",
+            "Repository-only source work does not require a healthy Executive runtime",
+            "No new permission is created by this scoping rule",
+            "whenever a session expects more than three tool calls",
+            "substantial Web CEO work",
+            "**multi-phase project**",
+        ),
+    ),
+    (
+        "plan-record-ownership-and-enums",
+        "docs/CEO_PROJECT_PLAN_CONTINUITY.md",
+        (
+            "DEC:AGENTOS-NO-TASK-STORE",
+            "agentos.handoff.v1",
+            "agentos.workstream.v1",
+            "DSC:SUFFIXED-HANDOFF-IS-INVISIBLE",
+            "PLAN_NOT_ORG_LINKED",
+            "NOT_CANONICALLY_PERSISTED",
+            "implementation_complete",
+            "P1.T2.S3",
+        ),
+    ),
+    (
+        "cold-start-recovery-and-guard",
+        "docs/sol_skills/COLD_START.md",
+        (
+            "Historical ownership is not current liveness",
+            "active assigned session retains the recovery action",
+            "The checkpoint is navigation, not fresh execution authority",
+            "a **claim to evaluate**",
+        ),
+    ),
+)
+
+_FAMILY_IDS = [family for family, _rel, _clauses in CONSOLIDATED_FAMILIES]
+
+
+def _family_complete(text: str, clauses: tuple[str, ...]) -> bool:
+    return all(clause in text for clause in clauses)
+
+
+@pytest.mark.parametrize("family,rel,clauses", CONSOLIDATED_FAMILIES, ids=_FAMILY_IDS)
+def test_obligation_family_is_complete_at_its_canonical_owner(
+    family: str, rel: str, clauses: tuple[str, ...]
+) -> None:
+    text = _read(rel)
+    missing = [clause for clause in clauses if clause not in text]
+    assert not missing, f"{family}: canonical owner {rel} lost {missing}"
+
+
+@pytest.mark.parametrize("family,rel,clauses", CONSOLIDATED_FAMILIES, ids=_FAMILY_IDS)
+def test_clause_loss_from_the_canonical_owner_breaks_its_obligation_family(
+    family: str, rel: str, clauses: tuple[str, ...]
+) -> None:
+    text = _read(rel)
+    for clause in clauses:
+        mutated = text.replace(clause, "")
+        assert clause not in mutated, f"{family}: mutant did not remove {clause!r}"
+        assert not _family_complete(mutated, clauses), (
+            f"{family}: dropping {clause!r} left the family apparently complete"
+        )
+
+
+def _policy_clause_from(text: str) -> str:
+    return text.split("**Stop-at-blocker falsifier.**", 1)[1].split(
+        "## Step 1 — Freeze the active-turn frame", 1
+    )[0]
+
+
+def test_stop_at_blocker_clause_loss_is_rejected_by_the_independent_repository_guard() -> None:
+    """The stop-at-blocker mutants are caught by the owning test module, not here."""
+    import sys
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    try:
+        import test_sol_stop_at_blocker_regression as blocker
+    finally:
+        sys.path.pop(0)
+
+    clause = _policy_clause_from(_read("docs/sol_skills/ACTIVE_EXECUTION.md"))
+    assert blocker._has_protective_contract(clause)
+    for deleted in (
+        "pre-effect *technical* refusal",
+        "explicit permission/safety denial",
+        "uncertain effect remains frozen",
+        "Do not route around",
+        "Step 6 negative-capability evidence",
+        "genuinely independent authorized",
+    ):
+        damaged = clause.replace(deleted, "", 1)
+        assert deleted not in damaged, f"mutant did not remove {deleted!r}"
+        assert not blocker._has_protective_contract(damaged), (
+            f"the owning repository guard accepted a clause missing {deleted!r}"
+        )
+
+
+def test_pressure_case_clause_loss_is_rejected_by_the_independent_leaf_guard() -> None:
+    """Deleting a repaired leaf body is caught by the leaf-content contract."""
+    heading = "### B2 — exact write refusal is proven"
+    terms = ("dummy mutation", "platform-wide write claim")
+    text = _read("docs/sol_skills/ACTIVE_EXECUTION.md")
+    assert _leaf_body(text, heading).strip()
+    start = text.index(heading)
+    end = text.index("\n### ", start + len(heading))
+    region = text[start:end]
+    damaged = text[:start] + region.replace("dummy mutation", "the mutation", 1) + text[end:]
+    assert "dummy mutation" not in damaged[start : start + len(region)]
+    with pytest.raises(AssertionError):
+        _require_leaf_content(damaged, heading, terms)
+
+
+def test_consolidated_companion_points_at_owners_that_are_mandatory_before_the_action() -> None:
+    """The delegation companion names the owners of the rules it no longer repeats."""
+    text = " ".join(_read("docs/sol_skills/WEB_CEO_DELEGATION.md").split())
+    assert "Canonical owners:" in text
+    assert "ACTIVE_EXECUTION (Steps 2A, 2B, 3, 8)" in text
+    assert "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md" in text
+    assert "mandatory for every meaningful worker/model delegation" in text
+    assert "Load those owners from the same pin before the action they constrain" in text
+    for owner in ("docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md", "docs/sol_skills/ACTIVE_EXECUTION.md"):
+        assert (ROOT / owner).is_file()

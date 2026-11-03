@@ -68,7 +68,7 @@ Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research o
 Use when Chairman intent authorizes Sol to send bounded work to Fable/another operator or, once production-proven, to create one Executive CEO request.
 
 ### `WORKER_AVENUE_ROUTING.md`
-Mandatory companion for every Chairman-mediated/manual Slack worker handoff or routing recommendation. Sol chooses one preferred capability avenue; routine concrete placement is not Chairman labor. It preserves the closed Chairman-facing avenue vocabulary, pre-START capacity-selectable rebinding, exact-session-required continuation, post-START stickiness, and the rule that deliberate live delivery to a concrete eligible session is the receiver-assignment edge. `CHAIRMAN_SELECTS` remains only an explicit manual exception when the current live Chairman opts into manual quota allocation for that exact operation.
+Mandatory companion for every Chairman-mediated/manual Slack worker handoff or routing recommendation. Sol chooses one preferred capability avenue; routine concrete placement is not Chairman labor. It preserves the closed Chairman-facing avenue vocabulary, pre-START capacity-selectable rebinding, exact-session-required continuation, post-START stickiness, and the rule that deliberate live delivery to a concrete eligible session is the receiver-assignment edge.
 
 ### `WATCHER_ACTION_LOOP.md`
 Use whenever Sol arms/operates a watcher/condition-watch for a worker or COO dialogue, or a scheduled watcher detects a material return. It prevents a notification-only watcher from stopping at "Sol action required" when current authority and gates already permit same-carrier CEO action.

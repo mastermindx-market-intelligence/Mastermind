@@ -10,7 +10,7 @@
 
 Choose the **lowest-marginal-cost / least-scarce route that can reliably complete the bounded mission while preserving required quality, authority and independence**. Personal-Pro subscription/account, Chat web surface, and reasoning mode are separate: access to a Personal-Pro account or included Chat web does not select turn-billed Pro reasoning mode.
 
-Do not send work to Fable merely because Fable is available, important, large, or titled COO, and do not move Sol-class executive reasoning to a metered API, Workspace Agent, ChatGPT Work or Business-credit surface merely because that surface is easier to automate. Before every meaningful delegation, classify: task kind; ambiguity; technical/product risk; repository/system scope; architecture/authority sensitivity; expected continuity; whether the mission is sufficiently frozen for a bounded worker; whether included-plan Chat cognition can perform the Sol-class reasoning reliably; and whether any proposed metered surface has a bounded approved economic exception. Importance and difficulty are not ambiguity: a critical but fully specified migration may still belong to a bounded engineering worker with stronger review, and programmatic convenience is not economic or product necessity.
+Do not send work to Fable merely because it is available, important, large, or titled COO, and do not move Sol-class executive reasoning to a metered API, Workspace Agent, ChatGPT Work or Business-credit surface because that surface is easier to automate. Before every meaningful delegation classify: task kind; ambiguity; technical/product risk; repository/system scope; architecture/authority sensitivity; expected continuity; whether the mission is frozen enough for a bounded worker; whether included-plan Chat cognition can perform the Sol-class reasoning reliably; whether any proposed metered surface holds a bounded approved economic exception. Importance and difficulty are not ambiguity: a critical but fully specified migration may still belong to a bounded engineering worker with stronger review, and programmatic convenience is not economic or product necessity.
 
 ## 1A. Difficulty-signal calibration law
 
@@ -23,7 +23,7 @@ Worker selection must not use one vague "difficulty" label. Before a bounded mis
 - `topology`: parent, worker, subagent, reviewer or coordinator role;
 - required capabilities, context breadth and continuity.
 
-**Topology is not difficulty.** Delegation to a subagent, reviewer, worker or child does not make a task harder, and a provider's generic `subagent` model setting must not silently promote a routine child above the routine worker default; if a child mission actually requires a stronger tier, the parent must classify that bounded child by its own complexity and record the escalation reason.
+**Topology is not difficulty.** Delegation to a subagent, reviewer, worker or child does not make a task harder, and a provider's generic `subagent` model setting must not silently promote a routine child above the routine worker default; if a child mission requires a stronger tier, the parent must classify that bounded child by its own complexity and record the escalation reason.
 
 **Business impact is not difficulty.** `material` or `critical` business impact can require independent review, stronger validation, rollback planning or Chairman/authority gates while the builder remains a routine bounded worker; do not translate it into `critical` execution risk or `high` ambiguity.
 
@@ -46,7 +46,7 @@ C3_FRONTIER_JUDGMENT
   coordination that cannot be safely decomposed first
 ```
 
-Default down, escalate on evidence: `C0`/`C1` use the least-scarce qualified fast/routine worker; `C2` may use a stronger standard/hard worker; `C3` is the only complexity class that justifies a frontier principal/model merely because of reasoning difficulty, and it must name at least one concrete `FRONTIER_WITNESS` from the C3 definition above. None of these is a frontier witness by itself: an important, expensive, customer-facing or production-bound program; many files, a large repository or a long prompt; the ability to write code or run tests; a subagent, coordinator, reviewer or child topology; an available or under-quota frontier model; or orchestrator uncertainty caused by not yet decomposing the mission. When the task is large but separable, first split it into bounded missions and classify each child; do not promote the whole program because one subproblem is difficult.
+Default down, escalate on evidence: `C0`/`C1` use the least-scarce qualified fast/routine worker; `C2` may use a stronger standard/hard worker; `C3` is the only complexity class that justifies a frontier principal/model merely because of reasoning difficulty, and it must name at least one concrete `FRONTIER_WITNESS` from the C3 definition above. None of these is a frontier witness by itself: an important, expensive, customer-facing or production-bound program; many files, a large repository or a long prompt; the ability to write code or run tests; a subagent, coordinator, reviewer or child topology; an available or under-quota frontier model; or orchestrator uncertainty caused by not yet decomposing the mission. When the task is large but separable, split it into bounded missions and classify each child; do not promote the whole program because one subproblem is difficult.
 
 For meaningful external-worker routing, preserve these decision facts in the existing routing / commission evidence where that carrier already supports them:
 
@@ -63,7 +63,7 @@ These fields are explanatory classification evidence, not a new router, lifecycl
 
 ## 1B. Operator-first completion economics
 
-For sustained delivery, the default economical operator owns decomposition, worker commissioning, ordinary return adjudication, independent review, bounded repair and domain integration. Prefer qualified admitted GLM/Grok-class operators outside the scarce principal subscription pool when the whole completion cycle benefits; the operator delegates easy bounded labor rather than performing it all. This refines the delivery-management defaults in Sections 3 and 5, not their reserved principal, quality or authority responsibilities. Role and topology never manufacture a frontier witness. Deterministic work remains deterministic; each bounded child retains its own task fit.
+For sustained delivery, the default economical operator owns decomposition, worker commissioning, ordinary return adjudication, independent review, bounded repair and domain integration. Prefer qualified admitted GLM/Grok-class operators outside the scarce principal subscription pool when the whole completion cycle benefits; the operator delegates easy bounded labor rather than performing it all. This refines the delivery-management defaults in Sections 3 and 5, not their reserved principal, quality or authority responsibilities. Role and topology never manufacture a frontier witness; deterministic work remains deterministic; each bounded child retains its own task fit.
 
 Sol/Opus remain program executives and exceptional specialists rather than mandatory routine management, and Astra/Fable remain optional strategic principals. Omit any layer that adds only relay cost. Direct CEO -> worker remains allowed when its complete closure is cheaper or a concrete existing direct-work exception applies; the direct commissioning owner retains adjudication. The goal is accepted outcomes per conserved original-root budget including principal consumption, not a cheaper model doing one part while premium parents still manage every return.
 
@@ -186,7 +186,7 @@ Chat-native Sol recovers intent and freezes architecture
 -> metered Sol cognition enters only under the complete exception receipt
 ```
 
-One independently useful capability per commission remains the default. A major program may legitimately contain several worker tiers and several bounded Sol responsibilities. Routing is per bounded mission, not per program prestige. Scale through durable responsibilities, parking, bounded fanout and session recycling rather than keeping hundreds of reasoning tabs actively generating.
+One independently useful capability per commission remains the default. A major program may legitimately contain several worker tiers and several bounded Sol responsibilities. Routing is per bounded mission, not per program prestige. Scale through durable responsibilities, parking, bounded fanout and session recycling, not hundreds of generating tabs.
 
 ## 6. Builder / reviewer separation
 
@@ -209,9 +209,7 @@ Choosing a model, plan, application, workspace, or execution surface never grant
 
 ## 8. Runtime-alias honesty
 
-`docs/EXECUTIVE_WORKER_ROUTING.md` and `config/executive_worker_routes.json` describe the currently implemented Executive routing aliases and runtime capability; this addendum is broader CEO/manual routing policy. Therefore: do not claim Chat, Sonnet, Opus, Fable, Cursor, Work, Workspace Agent, API or any named account is Executive-runtime-armed unless current canonical runtime evidence proves it; do not fabricate provider aliases, model slugs, credentials, quotas, budgets or session identities to make the organizational policy look implemented; converge future runtime routing toward this policy through the existing deterministic router, Capacity owners and Executive OS claim path, not a second router/queue; and treat Chat creation, model selection, prompt delivery and visible browser activity as never ACK, START, execution or RESULT, and an API or Workspace-Agent trigger acceptance as never target consumption or lifecycle progress.
-
-Manual/session delegation may use an approved available surface even when the Executive runtime alias does not yet exist, but that remains manual transport and must not be mislabeled as Executive dispatch.
+`docs/EXECUTIVE_WORKER_ROUTING.md` and `config/executive_worker_routes.json` describe the currently implemented Executive routing aliases and runtime capability; this addendum is broader CEO/manual routing policy. Therefore: do not claim Chat, Sonnet, Opus, Fable, Cursor, Work, Workspace Agent, API or any named account is Executive-runtime-armed unless current canonical runtime evidence proves it; do not fabricate provider aliases, model slugs, credentials, quotas, budgets or session identities to make the organizational policy look implemented; converge future runtime routing toward this policy through the existing deterministic router, Capacity owners and Executive OS claim path, not a second router/queue; and treat Chat creation, model selection, prompt delivery and visible browser activity as never ACK, START, execution or RESULT, and an API or Workspace-Agent trigger acceptance as never target consumption or lifecycle progress. Manual/session delegation may use an approved available surface even when the Executive runtime alias does not yet exist, but that remains manual transport and must not be mislabeled as Executive dispatch.
 
 ## 9. No blind failover
 
@@ -233,7 +231,7 @@ For a Fable commission, replace `WHY NOT FABLE` with:
 WHY FABLE: <specific principal-level reason ordinary bounded workers are insufficient>
 ```
 
-The receipt is explanatory/audit evidence. It is not lifecycle truth and does not replace Executive admission/claim records when those are applicable.
+The receipt is explanatory/audit evidence, not lifecycle truth, and does not replace Executive admission/claim records where those apply.
 
 ## 11. Default principle
 
