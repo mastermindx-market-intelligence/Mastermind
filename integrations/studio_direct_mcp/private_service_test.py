@@ -3356,7 +3356,10 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     return FakeResult(113, "", "unexpected diagnostic")
                 return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
             recorder = CmdRecorder(handler=handle)
-            with mock.patch.object(svc, "_run", recorder):
+            # Persistently indeterminate launchd must remain EFFECT_UNKNOWN;
+            # advance only this synthetic clock to the bounded settle deadline.
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc.time, "monotonic", side_effect=[100.0, 111.0]):
                 with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
                     svc.cmd_stop(args)
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
@@ -3565,7 +3568,10 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     return FakeResult(113, "", "unexpected diagnostic")
                 return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
             recorder = CmdRecorder(handler=handle)
-            with mock.patch.object(svc, "_run", recorder):
+            # Persistently indeterminate launchd must remain EFFECT_UNKNOWN;
+            # advance only this synthetic clock to the bounded settle deadline.
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc.time, "monotonic", side_effect=[100.0, 111.0]):
                 with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
                     svc.cmd_stop(args)
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
