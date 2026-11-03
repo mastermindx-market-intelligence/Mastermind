@@ -567,6 +567,7 @@ original Job/Attempt, native Fabric, broker, host, lease, and settlement ownersh
 | C3 frontier judgment | At least 14,400 seconds (4h) | Finite 14,400-second maximum; original-root budget and quotas remain |
 | go-codex special mode | Existing ~210-second controller default | Excluded from long-horizon lift |
 | canonical paid sealed-model service | Existing source 7,200-second contract | Not admitted to the new long-horizon tier without its own qualification |
+| GLM signed-capability routes (e.g. glm-codex) | Existing 7,200-second controller window | Explicit pre-lease narrowing and log until the separate GLM gateway/issuer can be qualified for more than 7,500 seconds |
 
 The remote controller reserves two poll intervals before its terminal fuse for
 worker cleanup/result observation. The child runner, native lease window, provider

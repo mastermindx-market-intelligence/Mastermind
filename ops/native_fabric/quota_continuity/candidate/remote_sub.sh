@@ -973,6 +973,17 @@ if [ -n "${POOL_COMMISSION_REMAINING_SECONDS:-}" ]; then
   [ "$MAX_SECS" -le "$POOL_COMMISSION_REMAINING_SECONDS" ] || MAX_SECS="$POOL_COMMISSION_REMAINING_SECONDS"
 fi
 
+
+# The separate signed GLM shim capability gateway still enforces <=7500s.
+# Do not request a four-hour window on a two-hour-capability generation.
+# This is a visible prelease narrowing, not a new provider retry or entitlement.
+if [ "$MODE" = glm-codex ] || [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
+  if [ "$MAX_SECS" -gt 7200 ]; then
+    log "GLM_CAPABILITY_WINDOW_NARROWED requested=$MAX_SECS supported=7200"
+    MAX_SECS=7200
+  fi
+fi
+
 ADMISSION_WAIT_SECS="${REMOTE_SUB_ADMISSION_WAIT_SECS:-20}"
 ADMISSION_RETRY_SECS="${REMOTE_SUB_ADMISSION_RETRY_SECS:-2}"
 case "$ADMISSION_WAIT_SECS" in ''|*[!0-9]*) echo "invalid REMOTE_SUB_ADMISSION_WAIT_SECS" >&2; RC=2; exit "$RC";; esac
@@ -1563,7 +1574,7 @@ fi
 if [ "$MODE" = "glm-codex" ] || [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
   if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ] || commission_run capability-ready "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       'curl -fsS --max-time 3 http://127.0.0.1:4141/health | python3 -c '"'"'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("worker_capabilities")=="lease-v1" else 1)'"'"''       >/dev/null 2>&1; then
     CAP_TTL=$((CHILD_TIMEOUT + 300))
-    [ "$CAP_TTL" -gt 15000 ] && CAP_TTL=15000
+    [ "$CAP_TTL" -gt 7500 ] && CAP_TTL=7500
     [ "$CAP_TTL" -lt 60 ] && CAP_TTL=60
     if [ "$CANONICAL_PAID_ACTIVE" -eq 0 ]; then
     GLM_CAP_LOCAL="$(mktemp "${TMPDIR:-/tmp}/glm_remote_capability.XXXXXX")" || {

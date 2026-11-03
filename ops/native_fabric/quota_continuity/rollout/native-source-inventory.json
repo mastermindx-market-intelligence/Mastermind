@@ -138,10 +138,10 @@
       "source": "source/fabric_operator_issue.py"
     },
     "ext/fabric_operator_owner.py": {
-      "bytes": 24246,
+      "bytes": 24247,
       "installed_preimage_sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
-      "sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
-      "source": "source/fabric_operator_owner.py"
+      "sha256": "3ad724e47e064874e558e0983c9e6cfc92411e741bd5d822d3823da674ddbce9",
+      "source": "candidate/fabric_operator_owner.py"
     },
     "ext/fabric_operator_stop.py": {
       "bytes": 8979,
@@ -570,9 +570,9 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 104634,
+      "bytes": 105071,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "a5acdd6f67fa2d466799dfa4758871051c24ddae697edd8a2dbab602889c6633",
+      "sha256": "f7cef5088476a62d5033d446349fee3728f2e2b11cae8f32b4dbf97410031332",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {

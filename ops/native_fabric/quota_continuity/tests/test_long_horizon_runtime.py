@@ -38,7 +38,7 @@ class LongHorizonRuntimeTests(unittest.TestCase):
         # broker, network, provider or worker is reachable.
         script = (
             'log() { :; }; RC=0; POLL_SECS=30; '
-            + 'MODE=' + mode + '; MAX_SECS=' + str(initial) + '; '
+            + 'MODE=' + mode + '; CANONICAL_PAID_ACTIVE=0; MAX_SECS=' + str(initial) + '; '
             + 'POOL_TASK_COMPLEXITY=' + complexity + '; '
             + 'POOL_COMMISSION_REMAINING_SECONDS=' + original_remaining + '; '
             + fragment + '\n'
@@ -54,6 +54,7 @@ class LongHorizonRuntimeTests(unittest.TestCase):
             ("C1_ROUTINE_BOUNDED", "glm", 210, "210|0|0"),
             ("C2_COMPLEX_BOUNDED", "glm", 210, "7200|7200|0"),
             ("C3_FRONTIER_JUDGMENT", "glm", 210, "14400|14400|0"),
+            ("C3_FRONTIER_JUDGMENT", "glm-codex", 210, "7200|14400|0"),
             ("C3_FRONTIER_JUDGMENT", "go-codex", 210, "210|0|0"),
         ):
             with self.subTest(complexity=complexity, mode=mode):
@@ -133,6 +134,43 @@ class LongHorizonRuntimeTests(unittest.TestCase):
         self.assertEqual(int(window[1]) - int(window[0]), 14340)
         with self.assertRaises(AssertionError):
             observe(7200)
+
+    def test_operator_root_may_opt_into_four_hours_only(self):
+        import tempfile
+        from fabric_operator_owner import OperatorOwner
+        from fabric_operator_contract import DelegationRefused, MAX_GRANT_SECONDS
+        self.assertEqual(MAX_GRANT_SECONDS, 14400)
+        with tempfile.TemporaryDirectory(prefix="fabric-op-long-window-") as tmp:
+            home = Path(tmp)
+            (home / "broker").mkdir(mode=0o700)
+            import sqlite3
+            db = home / "broker/leases.sqlite"
+            sqlite3.connect(db).close()
+            db.chmod(0o600)
+            lock = home / "broker/leases.lock"
+            lock.touch(mode=0o600)
+            owner = OperatorOwner(here=home, clock=lambda: 10000.0)
+            granted = owner.authorize_root("original-root", 1, 24400.0)
+            self.assertEqual(granted["expires_at"], 24400.0)
+            with self.assertRaises(DelegationRefused):
+                owner.authorize_root("other-root", 1, 24401.0)
+            with self.assertRaises(DelegationRefused):
+                owner.authorize_root("original-root", 1, 18000.0)
+
+    def test_glm_capability_route_remains_bounded_to_qualified_window(self):
+        # The upstream GLM signed-capability issuer is still <=7500s.
+        for complexity, initial in (("C2_COMPLEX_BOUNDED", 7200),
+                                    ("C3_FRONTIER_JUDGMENT", 14400)):
+            with self.subTest(complexity=complexity):
+                rc, output, error = self._runtime_floor(complexity, initial,
+                                                       mode="glm-codex")
+                self.assertEqual(rc, 0, error)
+                self.assertEqual(output.split("|")[0], "7200")
+        issuer = ROOT / "source/glm_remote_capability.py"
+        self.assertIn("not 1 <= ttl <= 7500", issuer.read_text())
+        remote = (CANDIDATE / "remote_sub.sh").read_text()
+        self.assertIn("GLM_CAPABILITY_WINDOW_NARROWED", remote)
+        self.assertIn('[ "$CAP_TTL" -gt 7500 ] && CAP_TTL=7500', remote)
 
     def test_selected_owners_retained_and_special_no_slot_limited(self):
         remote = (CANDIDATE / "remote_sub.sh").read_text()

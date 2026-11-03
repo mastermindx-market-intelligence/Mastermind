@@ -147,6 +147,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 'ext/native_remote.py': native_root.parent / 'grok47/overlay/native_remote.py',
                 'ext/sub.sh': native_root.parent / 'grok47/overlay/sub.sh',
                 'ext/oc_free_exec.sh': native_root / 'source/oc_free_exec.sh',
+                'ext/fabric_operator_owner.py': native_root / 'source/fabric_operator_owner.py',
             }
             for name, predecessor in baseline_sources.items():
                 original = predecessor.read_bytes()
