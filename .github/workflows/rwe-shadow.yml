@@ -74,7 +74,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pip-tools
-          pip-compile --quiet --generate-hashes --extra dev \
+          pip-compile --quiet --generate-hashes --extra dev --extra browser-mcp \
             --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
           echo "minted=true" >> "$GITHUB_ENV"
 

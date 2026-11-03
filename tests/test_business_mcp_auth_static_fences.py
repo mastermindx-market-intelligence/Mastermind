@@ -38,8 +38,12 @@ def test_business_auth_dependencies_are_security_pinned() -> None:
     assert '"PyJWT[crypto]==2.14.0"' in text
     assert "business-mcp = [" in text
     parsed = tomllib.loads(text)
-    business = parsed["project"]["optional-dependencies"]["business-mcp"]
-    assert "PyYAML==6.0.3" in business
+    extras = parsed["project"]["optional-dependencies"]
+    for name in ("dev", "business-mcp", "browser-mcp"):
+        assert [item for item in extras[name] if item.lower().startswith("mcp")] == ["mcp==1.28.1"]
+        assert [item for item in extras[name] if item.lower().startswith("pyjwt")] == ["PyJWT[crypto]==2.14.0"]
+    assert "PyYAML==6.0.3" in extras["business-mcp"]
+    assert "Pillow==12.3.0" in extras["browser-mcp"]
 
 
 def test_security_dependencies_are_not_base_runtime_dependencies() -> None:

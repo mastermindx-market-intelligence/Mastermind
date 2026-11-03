@@ -1,12 +1,13 @@
 # RWE-P0 hash-locked test-gate environment
 # Platform: Linux / x86_64
 # Interpreter: CPython 3.12.14; isolated official pip-tools7.6.1
-# Source: pyproject.toml (extra "dev")
-# pyproject.toml sha256: 39bc85fcfac095a2c57788d42e6cf214472180898c1aca9ebf5c69ad30746b02
-# Header refreshed for the pytest>=8,<9.2 dev bound: a pip-tools7.6.1 re-run
-# with --reuse-hashes (Darwin/arm64, CPython 3.12) reproduced every pin, extra
-# and hash below byte-for-byte; pytest stays 9.1.1. Prior refresh: PyJWT 2.14.0.
-# Regenerate: pip-compile --generate-hashes --reuse-hashes --quiet --extra dev --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
+# Source: pyproject.toml (extras "dev", "browser-mcp")
+# pyproject.toml sha256: d0f85572a285de0cbaffbab75cc215248cebd1ce54b2e398c97f7a0bb6ea80f3
+# Integration qualification: protected dev pytest>=8,<9.2 and the Browser MCP
+# direct constraints mcp1.28.1, PyJWT[crypto]2.14.0, Pillow12.3.0.
+# Both parents have byte-identical generated package pins/extras/hashes below.
+# This is an exact closure comparison, not a fresh cross-platform pip-compile.
+# Regenerate: pip-compile --generate-hashes --reuse-hashes --quiet --extra dev --extra browser-mcp --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
 # Official default PyPI index used with isolated PIP_CONFIG_FILE=/dev/null.
 # pip-tools7.6.1 retains the spurious --no-index command comment below;
 # no --no-index flag was supplied to the actual generator.

@@ -2,8 +2,8 @@
 
 The helper borrows one already-open host-owned artifact directory descriptor.
 It does not open or close a runtime root or store owner, create a service,
-own an executor, launch processes, or scan artifact directories. Closed
-per-action names only.
+own an executor, or launch processes. Closed per-action names only. A bounded
+complete enumeration of this same store supports owner recovery; no new index.
 
 Artifacts belong to the existing Action runtime. Patch and command reuse the
 same borrowed fd and the same claim/create/finalize/read operations with a
@@ -30,6 +30,8 @@ from contextlib import contextmanager
 from typing import Any, Literal
 
 ACTION_CLAIM_SCHEMA = "mastermind.workbench_action_claim.v1"
+ACTION_RESOURCE_CLAIM_SCHEMA = "mastermind.workbench_browser_resource_claim.v2"
+BROWSER_RESOURCE_DESCRIPTOR_SCHEMA = "mastermind.workbench_browser_resource_descriptor.v1"
 ACTION_RESULT_SCHEMA = "mastermind.workbench_action_result.v1"
 ACTION_PROCESS_SCHEMA = "mastermind.workbench_command_process.v1"
 ACTION_PURPOSE_TEXT_PATCH = "text_patch"
@@ -48,6 +50,8 @@ ACTION_ARTIFACT_KINDS = frozenset(
     {"claim", "process", "result", "stdout", "stderr"}
 )
 MAX_CLAIM_BYTES = 4096
+MAX_RESOURCE_CLAIM_BYTES = 24 * 1024
+MAX_RECOVERY_ACTIONS = 4096
 MAX_RESULT_BYTES = 16384
 MAX_PROCESS_BYTES = 4096
 MAX_BLOB_BYTES = 65536
@@ -146,11 +150,62 @@ class ActionArtifactIdentity:
 
 
 @dataclasses.dataclass(frozen=True)
+class BrowserResourceDescriptor:
+    """Original owner inputs persisted atomically with one browser start claim.
+
+    The generic artifact owner validates the closed serialization. The browser
+    owner separately validates the signed token and frozen profile authority.
+    JSON is kept as immutable canonical text rather than a mutable dictionary.
+    """
+
+    start_ref: str
+    owner_pid: int
+    owner_start_identity: str
+    profile_grant_json: str
+
+    def __post_init__(self) -> None:
+        if (type(self.start_ref) is not str or not 1 <= len(self.start_ref) <= 16384
+                or not self.start_ref.isascii()
+                or type(self.owner_pid) is not int or not 1 < self.owner_pid < 2**31
+                or type(self.owner_start_identity) is not str
+                or not 1 <= len(self.owner_start_identity) <= 256
+                or any(ord(c) < 32 or ord(c) > 126 for c in self.owner_start_identity)
+                or self.owner_start_identity != self.owner_start_identity.strip()
+                or type(self.profile_grant_json) is not str):
+            raise ActionArtifactError("invalid browser resource descriptor")
+        raw = self.profile_grant_json.encode("utf-8")
+        if len(raw) > 8192:
+            raise ActionArtifactError("invalid browser resource descriptor")
+        value = _strict_json(raw)
+        if type(value) is not dict or _canonical_json(value).decode("utf-8") != self.profile_grant_json:
+            raise ActionArtifactError("invalid browser resource descriptor")
+
+    def document(self) -> dict[str, Any]:
+        self.__post_init__()
+        return {"schema": BROWSER_RESOURCE_DESCRIPTOR_SCHEMA,
+                "start_ref": self.start_ref, "owner_pid": self.owner_pid,
+                "owner_start_identity": self.owner_start_identity,
+                "profile_grant": _strict_json(self.profile_grant_json.encode("utf-8"))}
+
+    @classmethod
+    def from_document(cls, value: object) -> BrowserResourceDescriptor:
+        if (type(value) is not dict or set(value) != {
+                "schema", "start_ref", "owner_pid", "owner_start_identity", "profile_grant"}
+                or value["schema"] != BROWSER_RESOURCE_DESCRIPTOR_SCHEMA
+                or type(value["profile_grant"]) is not dict):
+            raise ActionArtifactError("invalid browser resource descriptor")
+        return cls(start_ref=value["start_ref"], owner_pid=value["owner_pid"],
+                   owner_start_identity=value["owner_start_identity"],
+                   profile_grant_json=_canonical_json(value["profile_grant"]).decode("utf-8"))
+
+
+@dataclasses.dataclass(frozen=True)
 class ActionClaimRecord:
     schema: str
     identity: ActionArtifactIdentity
     claimed_at_ms: int
     phase: str
+    descriptor: BrowserResourceDescriptor | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -391,10 +446,15 @@ def claim_action(
     identity: ActionArtifactIdentity,
     *,
     claimed_at_ms: int,
+    descriptor: BrowserResourceDescriptor | None = None,
 ) -> ClaimOutcome:
-    """Durable O_EXCL claim. Caller holds the store writer for the whole action.
+    """Durable O_EXCL claim; the caller holds the store writer while claiming.
 
-    Existing, one-sided, or uncertain evidence is never overwritten or replayed.
+    Existing owners retain their whole-action lock protocol. Browser actions
+    may release it for external I/O only when created=True; duplicates never
+    dispatch, and the creator reacquires the writer and qualifies this exact
+    claim before finalization. Existing, one-sided, or uncertain evidence is
+    never overwritten or replayed.
     """
 
     store = revalidate_artifact_store(store)
@@ -402,6 +462,10 @@ def claim_action(
     _assert_store_binding(store, identity)
     if type(claimed_at_ms) is not int or not 0 <= claimed_at_ms < 2**63:
         raise ActionArtifactError("invalid claim timestamp")
+    if descriptor is not None:
+        if type(descriptor) is not BrowserResourceDescriptor or identity.purpose != ACTION_PURPOSE_BROWSER_RESOURCE:
+            raise ActionArtifactError("invalid browser resource descriptor")
+        descriptor.__post_init__()
     classified = classify_action(store, identity)
     if not classified.claimable:
         return ClaimOutcome(
@@ -429,18 +493,20 @@ def claim_action(
             if orphan is not None:
                 return ClaimOutcome(created=False, claim=None, uncertain=True)
     store.raise_if_cleanup_uncertain()
+    schema = ACTION_RESOURCE_CLAIM_SCHEMA if descriptor is not None else ACTION_CLAIM_SCHEMA
     body = {
-        "schema": ACTION_CLAIM_SCHEMA,
+        "schema": schema,
         "identity": dataclasses.asdict(identity),
         "claimed_at_ms": claimed_at_ms,
         "phase": "claimed",
+        **({"descriptor": descriptor.document()} if descriptor is not None else {}),
     }
     try:
         _write_exclusive_json(
             store,
             artifact_name(identity.action_id, "claim"),
             body,
-            max_bytes=MAX_CLAIM_BYTES,
+            max_bytes=MAX_RESOURCE_CLAIM_BYTES if descriptor is not None else MAX_CLAIM_BYTES,
         )
     except FileExistsError:
         existing = _read_claim_record(store, identity, require_match=True)
@@ -452,10 +518,8 @@ def claim_action(
     except ActionArtifactUncertain:
         return ClaimOutcome(created=False, claim=None, uncertain=True)
     record = ActionClaimRecord(
-        schema=ACTION_CLAIM_SCHEMA,
-        identity=identity,
-        claimed_at_ms=claimed_at_ms,
-        phase="claimed",
+        schema=schema, identity=identity, claimed_at_ms=claimed_at_ms,
+        phase="claimed", descriptor=descriptor,
     )
     return ClaimOutcome(created=True, claim=record, uncertain=False)
 
@@ -633,7 +697,7 @@ def read_action_claim(
     _assert_store_binding(store, identity)
     name = artifact_name(identity.action_id, "claim")
     try:
-        with _opened_regular_file(store, name, max_bytes=MAX_CLAIM_BYTES,
+        with _opened_regular_file(store, name, max_bytes=MAX_RESOURCE_CLAIM_BYTES,
                                   missing_ok=True) as held:
             record = None
             if held is not None:
@@ -707,7 +771,7 @@ def classify_action(
     try:
         claim_name = artifact_name(identity.action_id, "claim")
         result_name = artifact_name(identity.action_id, "result")
-        with _opened_regular_file(store, claim_name, max_bytes=MAX_CLAIM_BYTES,
+        with _opened_regular_file(store, claim_name, max_bytes=MAX_RESOURCE_CLAIM_BYTES,
                                   missing_ok=True) as claimed:
             with _opened_regular_file(store, result_name, max_bytes=MAX_RESULT_BYTES,
                                       missing_ok=True) as completed:
@@ -744,6 +808,68 @@ def classify_action(
         return ActionClassification(effect, claim, result, True, status)
     except (ActionArtifactError, OSError, ValueError, TypeError, UnicodeError, RecursionError):
         return ActionClassification("EFFECT_UNKNOWN", claim, result, True, "uncertain")
+
+
+def classify_named_action(store: ActionArtifactStore, action_id: str) -> ActionClassification:
+    """Read one closed claim name and qualify its full identity/result pair."""
+    revalidate_artifact_store(store)
+    raw = _read_regular_file(store, artifact_name(action_id, "claim"),
+                             max_bytes=MAX_RESOURCE_CLAIM_BYTES, missing_ok=False)
+    claim = _decode_claim(raw, None, require_match=False)
+    if claim.identity.action_id != action_id:
+        raise ActionArtifactUncertain("action name identity mismatch")
+    _assert_store_binding(store, claim.identity)
+    classified = classify_action(store, claim.identity)
+    if classified.claim is None or classified.claim != claim:
+        raise ActionArtifactUncertain("action evidence changed")
+    return classified
+
+
+def enumerate_action_evidence(
+    store: ActionArtifactStore, *, maximum_actions: int = MAX_RECOVERY_ACTIONS,
+) -> tuple[ActionClassification, ...]:
+    """Qualify a complete bounded store snapshot while the caller holds its writer.
+
+    Overflow, foreign names and orphan evidence refuse the entire recovery pass.
+    Pending/unknown claims remain visible and are never silently truncated.
+    This is not a public discovery index or an automatic retry mechanism.
+    """
+    if type(maximum_actions) is not int or not 1 <= maximum_actions <= MAX_RECOVERY_ACTIONS:
+        raise ActionArtifactError("invalid recovery bound")
+    revalidate_artifact_store(store)
+    names: dict[str, set[str]] = {}
+    try:
+        with os.scandir(store.dir_fd) as entries:
+            for entry in entries:
+                action_id, separator, kind = entry.name.partition(".")
+                if separator != "." or _HEX32.fullmatch(action_id) is None or kind not in ACTION_ARTIFACT_KINDS:
+                    raise ActionArtifactUncertain("unrecognized action evidence")
+                kinds = names.setdefault(action_id, set())
+                if len(names) > maximum_actions:
+                    raise ActionArtifactUncertain("action recovery bound exceeded")
+                kinds.add(kind)
+        result = []
+        for action_id, kinds in sorted(names.items()):
+            if "claim" not in kinds:
+                raise ActionArtifactUncertain("orphan action evidence")
+            classified = classify_named_action(store, action_id)
+            claim = classified.claim
+            if "process" in kinds:
+                if claim.identity.purpose not in {ACTION_PURPOSE_CLOSED_COMMAND, ACTION_PURPOSE_BROWSER_RESOURCE}:
+                    raise ActionArtifactUncertain("unexpected action process")
+                if read_action_process(store, claim.identity) is None:
+                    raise ActionArtifactUncertain("action process disappeared")
+            if kinds & {"stdout", "stderr"}:
+                if claim.identity.purpose != ACTION_PURPOSE_CLOSED_COMMAND or "process" not in kinds:
+                    raise ActionArtifactUncertain("orphan action output")
+                for kind in kinds & {"stdout", "stderr"}:
+                    if read_action_blob(store, action_id, kind) is None:
+                        raise ActionArtifactUncertain("action output disappeared")
+            result.append(classified)
+        revalidate_artifact_store(store)
+        return tuple(result)
+    except (OSError, UnicodeError, TypeError, ValueError, RecursionError) as error:
+        raise ActionArtifactUncertain("action enumeration uncertain") from error
 
 
 def _check_store_stat(value: os.stat_result) -> None:
@@ -1077,35 +1203,43 @@ def _decode_process(raw: bytes, identity: ActionArtifactIdentity) -> ActionProce
     )
 
 
+def _canonical_json(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
 def _decode_claim(raw, identity, *, require_match):
     body = _strict_json(raw)
-    if type(body) is not dict or set(body) != {
-        "schema",
-        "identity",
-        "claimed_at_ms",
-        "phase",
-    }:
+    if type(body) is not dict:
         raise ActionArtifactUncertain("invalid claim")
-    if body["schema"] != ACTION_CLAIM_SCHEMA or body["phase"] != "claimed":
+    schema = body.get("schema")
+    expected = {"schema", "identity", "claimed_at_ms", "phase"}
+    descriptor = None
+    if schema == ACTION_RESOURCE_CLAIM_SCHEMA:
+        expected.add("descriptor")
+        if len(raw) > MAX_RESOURCE_CLAIM_BYTES:
+            raise ActionArtifactUncertain("invalid claim")
+        descriptor = BrowserResourceDescriptor.from_document(body.get("descriptor"))
+    elif schema != ACTION_CLAIM_SCHEMA or len(raw) > MAX_CLAIM_BYTES:
+        raise ActionArtifactUncertain("invalid claim")
+    if set(body) != expected or body["phase"] != "claimed":
         raise ActionArtifactUncertain("invalid claim")
     if type(body["claimed_at_ms"]) is not int or not 0 <= body["claimed_at_ms"] < 2**63:
         raise ActionArtifactUncertain("invalid claim")
     parsed = _parse_identity(body["identity"])
+    if descriptor is not None and parsed.purpose != ACTION_PURPOSE_BROWSER_RESOURCE:
+        raise ActionArtifactUncertain("descriptor purpose mismatch")
     if require_match and parsed != identity:
         raise ActionArtifactUncertain("claim identity mismatch")
-    record = ActionClaimRecord(
-        schema=ACTION_CLAIM_SCHEMA,
-        identity=parsed,
-        claimed_at_ms=body["claimed_at_ms"],
-        phase="claimed",
-    )
-    return record
+    return ActionClaimRecord(schema=schema, identity=parsed,
+                             claimed_at_ms=body["claimed_at_ms"],
+                             phase="claimed", descriptor=descriptor)
 
 
 def _read_claim_record(store, identity, *, require_match) -> _RecordRead:
     try:
         raw = _read_regular_file(store, artifact_name(identity.action_id, "claim"),
-                                 max_bytes=MAX_CLAIM_BYTES, missing_ok=True)
+                                 max_bytes=MAX_RESOURCE_CLAIM_BYTES, missing_ok=True)
         if raw is None:
             return _RecordRead("missing", None)
         return _RecordRead("ok", _decode_claim(raw, identity, require_match=require_match))

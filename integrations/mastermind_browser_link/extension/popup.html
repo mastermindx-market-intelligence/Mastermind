@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mastermind Browser Link</title>
+  <link rel="stylesheet" href="popup.css">
+  <script type="module" src="popup.mjs"></script>
+</head>
+<body>
+  <header>
+    <span class="mark" aria-hidden="true">M</span>
+    <div><p class="eyebrow">MASTERMIND</p><h1>Browser Link</h1></div>
+  </header>
+  <main>
+    <section class="connection" aria-labelledby="connection-label">
+      <span id="connection-dot" class="dot" aria-hidden="true"></span>
+      <div><h2 id="connection-label">Checking connection…</h2><p id="connection-detail">Your sharing status will appear here.</p></div>
+    </section>
+    <section aria-labelledby="share-heading">
+      <h2 id="share-heading">Choose what agents can use</h2>
+      <p>Share the current tab with authorized Mastermind agents.</p>
+      <label class="creation-option"><input id="allow-create" type="checkbox"> Allow agents to open and share new website tabs and windows</label>
+      <p class="creation-detail">New pages are shared after they finish loading at the requested website. Stop sharing this tab to withdraw its creation permission.</p>
+      <button id="share-current" class="primary" type="button" disabled>Share current tab</button>
+    </section>
+    <section class="shared-section" aria-labelledby="shared-heading">
+      <div class="section-heading"><h2 id="shared-heading">Shared tabs</h2><span id="shared-count" class="count">0</span></div>
+      <p id="empty-state">No tabs are shared.</p>
+      <ul id="shared-tabs" aria-label="Shared tabs"></ul>
+    </section>
+    <p id="notice" class="notice" role="status" aria-live="polite"></p>
+  </main>
+  <footer>Sharing ends when you stop it, leave the shared website, or disconnect.</footer>
+</body>
+</html>

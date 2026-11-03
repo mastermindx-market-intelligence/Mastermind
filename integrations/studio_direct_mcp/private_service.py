@@ -907,6 +907,13 @@ def _c2_lifecycle_mutex(account: str):
     subject = ("Fabric" if account in FABRIC_BACKEND_ACCOUNTS
                else "M1 Paper" if account == M1_PAPER_V20_ACCOUNT else "C2")
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
+    with _owned_lifecycle_mutex(lock_path, subject=subject):
+        yield
+
+
+@contextmanager
+def _owned_lifecycle_mutex(lock_path: Path, *, subject: str):
+    """Internal fixed-target lock. Never replace or unlink its persistent inode."""
     _assert_dest_safe(lock_path)
     current = lock_path.parent
     home = _user_root()
@@ -943,7 +950,9 @@ def _c2_lifecycle_mutex(account: str):
         except OSError as exc:
             raise SystemExit(f"{subject} lifecycle lock could not be acquired") from exc
         verify_inode()
-        yield
+        # Async bounded producers can requalify this same held inode after
+        # network awaits, immediately before their synchronous publication.
+        yield verify_inode
     finally:
         os.close(fd)
 
@@ -3773,6 +3782,12 @@ def build_parser() -> argparse.ArgumentParser:
     enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")
     enrollment.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
     enrollment.set_defaults(func=cmd_native_pool_pin_enrollment)
+
+    try:
+        from . import workbench_host_service
+    except ImportError:
+        import workbench_host_service
+    workbench_host_service.add_commands(sub)
 
     fabric = sub.add_parser("fabric-backend-release")
     fabric.add_argument("--account", required=True)

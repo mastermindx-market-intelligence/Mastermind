@@ -480,6 +480,124 @@ def test_default_relay_command_carries_authoritative_resource_expiry(tmp_path: P
         shutil.rmtree(relay_root, ignore_errors=True)
 
 
+def test_extension_profile_requires_typed_exclusive_owner_grant_without_profile_directory(tmp_path: Path):
+    from control_plane.browser_resource_contract import BrowserMode
+    from integrations.workbench_browser_mcp.resource_port import (
+        SharedHumanBrowserProfileGrant,
+    )
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    try:
+        port._profile_resolver = lambda _ref: PersistentBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            profile_dir=_private(tmp_path / "wrong-profile-path"),
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=True,
+        )
+        with pytest.raises(BrowserResourceRefused, match="PROFILE_GRANT_INVALID"):
+            port.prepare_resource(
+                caller,
+                project_ref="project:browser",
+                mode=BrowserMode.EXTENSION.value,
+                profile_ref="human-chrome-c2",
+            )
+
+        port._profile_resolver = lambda _ref: SharedHumanBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=True,
+        )
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode=BrowserMode.EXTENSION.value,
+            profile_ref="human-chrome-c2",
+        )
+        start = port.codec.decode_start(start_ref, now_ms=2000)
+        assert start.mode == BrowserMode.EXTENSION.value
+        assert start.profile_ref == "human-chrome-c2"
+        assert port._profile_path(start) is None
+
+        port._profile_resolver = lambda _ref: SharedHumanBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=False,
+        )
+        with pytest.raises(BrowserResourceRefused, match="PROFILE_GRANT_MISMATCH"):
+            port.prepare_resource(
+                caller,
+                project_ref="project:browser",
+                mode=BrowserMode.EXTENSION.value,
+                profile_ref="human-chrome-c2",
+            )
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_extension_resource_starts_and_reconciles_through_existing_artifact_owner(tmp_path: Path):
+    from control_plane.browser_resource_contract import BrowserMode
+    from integrations.workbench_browser_mcp.resource_port import SharedHumanBrowserProfileGrant
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    browser_ref = None
+    try:
+        port._profile_resolver = lambda _ref: SharedHumanBrowserProfileGrant(
+            profile_ref="human-chrome-c2",
+            owner_ref="owner:browser",
+            operation_ref="operation:browser",
+            generation="generation:browser",
+            host_id="b" * 64,
+            exclusive=True,
+        )
+        start_ref = port.prepare_resource(
+            caller,
+            project_ref="project:browser",
+            mode=BrowserMode.EXTENSION.value,
+            profile_ref="human-chrome-c2",
+        )
+        started = port.start_resource(caller, start_ref)
+        assert started["effect_state"] == "APPLIED"
+        browser_ref = started["browser_ref"]
+        browser = port.codec.decode_resource(browser_ref, now_ms=2000)
+        assert browser.mode == BrowserMode.EXTENSION.value
+        assert browser.profile_ref == "human-chrome-c2"
+
+        replay = port.start_resource(caller, start_ref)
+        assert replay["effect_state"] == "APPLIED"
+        assert replay["reconciled"] is True
+        assert replay["browser_ref"] == browser_ref
+
+        release = port.cleanup_resource(
+            browser_ref,
+            owner_state="released",
+            effect_state="APPLIED",
+        )
+        assert release["cleanup_action"] == "terminate_owned_process"
+        assert release["profile_deleted"] is False
+    finally:
+        if browser_ref is not None:
+            try:
+                port.cleanup_resource(
+                    browser_ref,
+                    owner_state="released",
+                    effect_state="APPLIED",
+                )
+            except Exception:
+                pass
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
 def test_prebarrier_pid_ready_marker_waits_for_complete_publication(tmp_path: Path, monkeypatch):
     """A created-but-empty PID file must not trigger the simulated failure.
 
@@ -506,3 +624,122 @@ open = _delayed_open
 
     monkeypatch.setattr(Path, "write_text", delayed_child_source)
     test_pre_barrier_inspection_failure_terminates_owned_wrapper_and_is_not_applied(tmp_path)
+
+
+
+def test_reconcile_cannot_finalize_while_startup_holds_the_store_writer(
+    tmp_path: Path, monkeypatch
+):
+    import concurrent.futures
+    import threading
+    import integrations.workbench_browser_mcp.resource_port as module
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    paused = threading.Event()
+    release = threading.Event()
+    original_finalize = module.finalize_action
+    finalizations = []
+    started = None
+
+    def paused_finalize(*args, **kwargs):
+        finalizations.append(kwargs["effect_state"])
+        paused.set()
+        assert release.wait(5), "startup finalization was not released"
+        return original_finalize(*args, **kwargs)
+
+    monkeypatch.setattr(module, "finalize_action", paused_finalize)
+    try:
+        start_ref = port.prepare_resource(
+            caller, project_ref="project:browser", mode="isolated"
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(port.start_resource, caller, start_ref)
+            try:
+                assert paused.wait(5), "startup did not reach finalization"
+                with pytest.raises(BrowserResourceRefused, match="BROWSER_RECONCILE_BUSY"):
+                    port.reconcile_resource(caller, start_ref)
+            finally:
+                release.set()
+                started = pending.result(timeout=10)
+
+        assert started["effect_state"] == "APPLIED"
+        assert finalizations == ["APPLIED"]
+        reconciled = port.reconcile_resource(caller, start_ref)
+        assert reconciled["effect_state"] == "APPLIED"
+        assert reconciled["browser_ref"] == started["browser_ref"]
+        assert finalizations == ["APPLIED"]
+        resource = port.codec.decode_resource(started["browser_ref"], now_ms=2000)
+        assert ProcessInspector().inspect(resource.relay_pid).start_identity == resource.relay_start_identity
+    finally:
+        release.set()
+        if started is not None and started.get("browser_ref"):
+            port.cleanup_resource(
+                started["browser_ref"], owner_state="released", effect_state="APPLIED"
+            )
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_reconcile_refuses_an_unavailable_store_writer(tmp_path: Path, monkeypatch):
+    import integrations.workbench_browser_mcp.resource_port as module
+    from integrations.workbench_action_mcp.action_artifacts import ActionArtifactUncertain
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    try:
+        start_ref = port.prepare_resource(
+            caller, project_ref="project:browser", mode="isolated"
+        )
+
+        def unavailable(_store):
+            raise ActionArtifactUncertain("writer unavailable")
+
+        monkeypatch.setattr(module, "acquire_store_writer", unavailable)
+        with pytest.raises(BrowserResourceRefused, match="BROWSER_RECONCILE_UNAVAILABLE"):
+            port.reconcile_resource(caller, start_ref)
+        assert list(relay_root.iterdir()) == []
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+@pytest.mark.parametrize("case", ["qualified", "legacy", "namespace", "verifier", "interpreter"])
+def test_root_owned_source_delegates_only_exact_link_runtime(tmp_path, monkeypatch, case):
+    from integrations.workbench_browser_mcp import resource_port as port
+    from ops.executive_os import company_mcp_edge as runtime_owner
+    from ops.executive_os import workbench_mcp_runtime as runtime
+    system = tmp_path / "system"
+    source = system / ("other" if case == "namespace" else "releases") / ("a" * 40)
+    source.mkdir(parents=True)
+    relay = _private(tmp_path / "relay")
+    output = _private(tmp_path / "output")
+    monkeypatch.setattr(runtime_owner, "SYSTEM", system)
+    monkeypatch.setattr(port.os, "geteuid", lambda: 501)
+    original = Path.lstat
+    def metadata(path, *args, **kwargs):
+        values = list(original(path, *args, **kwargs))
+        values[4] = 0 if path == source else 501
+        return os.stat_result(values)
+    monkeypatch.setattr(Path, "lstat", metadata)
+    calls = []
+    def qualified(sha, uid):
+        calls.append((sha, uid))
+        if case == "verifier":
+            raise runtime_owner.EdgeError("synthetic sealed-source refusal")
+        return {"python_executable": "/fixed/runtime/python"}
+    monkeypatch.setattr(runtime, "verify", qualified)
+    config = port.BrowserLinkHostConfig(source, "/changed/python" if case == "interpreter" else "/fixed/runtime/python",
+                                        relay, output)
+    if case == "legacy":
+        config = BrowserHostConfig(source, "/fixed/runtime/python", "/usr/bin/true", "/fixed/mcp",
+                                   "/fixed/chrome", relay, output, "/fixed/home", "/fixed/tmp")
+    if case == "qualified":
+        assert port.validate_host_config(config) is config
+        assert calls == [(source.name, 501)]
+        # A qualified source does not relax the private relay directory rule.
+        relay.chmod(0o777)
+        with pytest.raises(BrowserResourceRefused, match="RELAY_ROOT_UNSAFE"):
+            port.validate_host_config(config)
+    else:
+        with pytest.raises(BrowserResourceRefused, match="SOURCE_ROOT_UNSAFE"):
+            port.validate_host_config(config)
+        assert calls == ([] if case in {"legacy", "namespace"} else [(source.name, 501)])

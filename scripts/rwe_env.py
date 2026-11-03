@@ -669,7 +669,7 @@ def cmd_lock(args: argparse.Namespace) -> int:
         )
         return 2
     print(
-        "pip-compile --quiet --generate-hashes --extra dev "
+        "pip-compile --quiet --generate-hashes --extra dev --extra browser-mcp "
         f"--output-file requirements/{name} pyproject.toml"
     )
     print(f"# run from {root} with a pip-tools-equipped interpreter (network to PyPI required)")

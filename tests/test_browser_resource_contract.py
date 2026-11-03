@@ -151,3 +151,46 @@ def test_cleanup_never_kills_an_unowned_chrome_process():
         process_owned=False,
     )
     assert decision.action is BrowserCleanupAction.KEEP
+
+
+def test_extension_plan_uses_existing_human_chrome_without_profile_path_or_headless():
+    plan = build_browser_resource_plan(
+        **_base(
+            mode=BrowserMode.EXTENSION,
+            headed=True,
+            profile_ref="human-chrome-c2",
+        )
+    )
+    assert plan.mode is BrowserMode.EXTENSION
+    assert plan.requires_exclusive_profile is True
+    assert plan.profile_ref == "human-chrome-c2"
+    assert plan.profile_dir is None
+    assert "--extension" in plan.argv
+    assert "--headless" not in plan.argv
+    assert "--isolated" not in plan.argv
+    assert "--user-data-dir" not in plan.argv
+    assert "--executable-path" not in plan.argv
+    assert "--shared-browser-context" not in plan.argv
+    assert "--cdp-endpoint" not in plan.argv
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"mode": BrowserMode.EXTENSION, "headed": True},
+        {
+            "mode": BrowserMode.EXTENSION,
+            "headed": True,
+            "profile_ref": "human-chrome-c2",
+            "profile_dir": "/Users/chris/Chrome/Profile 2",
+        },
+        {
+            "mode": BrowserMode.EXTENSION,
+            "headed": False,
+            "profile_ref": "human-chrome-c2",
+        },
+    ],
+)
+def test_extension_plan_refuses_missing_identity_profile_paths_and_headless(kwargs):
+    with pytest.raises(BrowserResourceError):
+        build_browser_resource_plan(**_base(**kwargs))

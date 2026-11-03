@@ -180,15 +180,72 @@ def _load_config(path: str) -> TunnelConfig:
 
 def _bounded_json_file(path: Path, maximum: int) -> dict[str, Any]:
     try:
-        raw = path.read_bytes()
-        if len(raw) > maximum:
-            raise ValueError
-        value = json.loads(raw.decode("utf-8"))
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+                    or before.st_nlink != 1 or stat.S_IMODE(before.st_mode) & 0o022
+                    or before.st_size > maximum):
+                raise ValueError
+            chunks = bytearray()
+            while len(chunks) <= maximum:
+                chunk = os.read(fd, maximum + 1 - len(chunks))
+                if not chunk:
+                    break
+                chunks.extend(chunk)
+            raw = bytes(chunks)
+            after = os.fstat(fd)
+            named = path.lstat()
+            if (len(raw) > maximum or len(raw) != before.st_size
+                    or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                    != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                    or not stat.S_ISREG(named.st_mode)
+                    or (named.st_dev, named.st_ino) != (before.st_dev, before.st_ino)):
+                raise ValueError
+        finally:
+            os.close(fd)
+        def closed_object(pairs):
+            result = {}
+            for key, item in pairs:
+                if key in result:
+                    raise ValueError("duplicate key")
+                result[key] = item
+            return result
+        def refuse_constant(_value):
+            raise ValueError("non-finite value")
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=closed_object,
+                           parse_constant=refuse_constant)
     except (OSError, UnicodeError, ValueError, json.JSONDecodeError):
         raise FleetOperationError("UNRESOLVED_ACTION_EVIDENCE") from None
     if not isinstance(value, dict):
         raise FleetOperationError("UNRESOLVED_ACTION_EVIDENCE")
     return value
+
+
+def _qualified_claim_shape(claim, raw_size, root, action_id, kinds):
+    from .action_artifacts import (
+        ACTION_CLAIM_SCHEMA, ACTION_RESOURCE_CLAIM_SCHEMA, MAX_CLAIM_BYTES,
+        ActionArtifactError, adopt_artifact_store, classify_named_action, read_action_process,
+    )
+    if claim.get("schema") == ACTION_CLAIM_SCHEMA:
+        return raw_size <= MAX_CLAIM_BYTES
+    if claim.get("schema") != ACTION_RESOURCE_CLAIM_SCHEMA:
+        return False
+    fd = -1
+    try:
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        store = adopt_artifact_store(fd)
+        classified = classify_named_action(store, action_id)
+        if "process" in kinds and read_action_process(store, classified.claim.identity) is None:
+            return False
+        return (classified.claim.schema == ACTION_RESOURCE_CLAIM_SCHEMA
+                and classified.evidence_status == "qualified"
+                and classified.effect_state in {"APPLIED", "NOT_APPLIED"})
+    except (ActionArtifactError, OSError, ValueError, TypeError, UnicodeError, RecursionError):
+        return False
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def inspect_artifact_evidence(directory: str) -> ArtifactEvidence:
@@ -243,7 +300,8 @@ def inspect_artifact_evidence(directory: str) -> ArtifactEvidence:
             unresolved.append(action_id)
             continue
 
-        claim = _bounded_json_file(root / f"{action_id}.claim", 4096)
+        claim_path = root / f"{action_id}.claim"
+        claim = _bounded_json_file(claim_path, 24 * 1024)
         result = _bounded_json_file(root / f"{action_id}.result", 16 * 1024)
         claim_identity = claim.get("identity")
         result_identity = result.get("identity")
@@ -251,7 +309,7 @@ def inspect_artifact_evidence(directory: str) -> ArtifactEvidence:
         completed_at = result.get("completed_at_ms")
         purpose = claim_identity.get("purpose") if isinstance(claim_identity, dict) else None
         qualified = (
-            claim.get("schema") == "mastermind.workbench_action_claim.v1"
+            _qualified_claim_shape(claim, claim_path.stat().st_size, root, action_id, kinds)
             and claim.get("phase") == "claimed"
             and isinstance(claim_identity, dict)
             and claim_identity.get("action_id") == action_id

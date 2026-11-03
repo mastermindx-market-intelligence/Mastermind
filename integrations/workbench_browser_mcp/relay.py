@@ -121,7 +121,29 @@ def _unix_peer_pid(connection: socket.socket) -> int:
     return peer_pid
 
 
-class McpStdioSession:
+class BrowserRequestRefused(BrowserRelayError):
+    """A session proves refusal before any browser command was dispatched."""
+
+
+class BrowserSession:
+    """Explicit actuator interface; resource and action ownership stay upstream."""
+
+    max_parallel_calls = 1
+    read_only_tools = READ_ONLY_BROWSER_TOOLS
+
+    @property
+    def connection_status(self):
+        return None
+
+    @property
+    def native_endpoint(self):
+        return None
+
+    def call_with_identity(self, request_id, tool, arguments):
+        return self.call(tool, arguments)
+
+
+class McpStdioSession(BrowserSession):
     """Minimal bounded MCP client for one already-selected stdio child."""
 
     def __init__(
@@ -395,7 +417,7 @@ class BrowserRelayServer:
         *,
         resource_id: str,
         socket_path: Path,
-        session: McpStdioSession,
+        session: BrowserSession,
         owner_pid: int,
         parent_pid: int,
         expires_at_ms: int | None = None,
@@ -411,8 +433,10 @@ class BrowserRelayServer:
             raise BrowserRelayError("relay socket path is invalid") from error
         if len(encoded_socket) >= 104:
             raise BrowserRelayError("relay socket path is too long")
-        if not isinstance(session, McpStdioSession):
-            raise BrowserRelayError("relay MCP session is invalid")
+        if not isinstance(session, BrowserSession):
+            raise BrowserRelayError("relay browser session is invalid")
+        if type(session.max_parallel_calls) is not int or not 1 <= session.max_parallel_calls <= 16:
+            raise BrowserRelayError("relay concurrency is invalid")
         if expires_at_ms is not None and (
             type(expires_at_ms) is not int or not 0 <= expires_at_ms < 2**63
         ):
@@ -435,6 +459,10 @@ class BrowserRelayServer:
         self._server: socket.socket | None = None
         self._serve_error: BaseException | None = None
         self._socket_identity: tuple[int, int] | None = None
+        self._worker_slots = threading.BoundedSemaphore(session.max_parallel_calls)
+        self._workers_gate = threading.Lock()
+        self._workers: set[threading.Thread] = set()
+        self._connections: set[socket.socket] = set()
 
     def _validate_parent(self) -> None:
         parent = self._socket_path.parent
@@ -514,12 +542,16 @@ class BrowserRelayServer:
             if set(value) != {"schema", "kind", "request_id", "resource_id"}:
                 raise BrowserRelayError("relay status request is invalid")
             receipt = self._session.receipt
+            connection_status = self._session.connection_status
+            native_endpoint = self._session.native_endpoint
             return self._response(
                 request_id=request_id,
                 ok=True,
                 tool_schema_digest=receipt.tool_schema_digest,
                 allowed_tools=list(receipt.allowed_tools),
                 child_pid=receipt.child_pid,
+                **({"connection_status": connection_status} if connection_status is not None else {}),
+                **({"native_endpoint": native_endpoint} if native_endpoint is not None else {}),
             )
         if kind == "tool":
             if set(value) != {
@@ -535,12 +567,14 @@ class BrowserRelayServer:
             arguments = value.get("arguments")
             if type(tool) is not str or type(arguments) is not dict:
                 raise BrowserRelayError("relay tool request is invalid")
-            if self._lease_expired() and tool not in READ_ONLY_BROWSER_TOOLS:
+            if self._lease_expired() and tool not in self._session.read_only_tools:
                 return self._response(
                     request_id=request_id, ok=False, error="REQUEST_REFUSED"
                 )
             try:
-                result = self._session.call(tool, arguments)
+                result = self._session.call_with_identity(request_id, tool, arguments)
+            except BrowserRequestRefused:
+                return self._response(request_id=request_id, ok=False, error="REQUEST_REFUSED")
             except BrowserRelayError:
                 # Once the MCP child call begins, request bytes may already have
                 # crossed the browser-effect boundary. A missing/invalid reply
@@ -582,6 +616,47 @@ class BrowserRelayServer:
             raise BrowserRelayError("relay response is too large")
         connection.sendall(raw + b"\n")
 
+    def _serve_connection(self, connection: socket.socket) -> None:
+        with connection:
+            connection.settimeout(5)
+            request_id = "0" * 32
+            try:
+                if _unix_peer_pid(connection) != self._owner_pid:
+                    raise BrowserRelayError("relay peer process changed")
+                try:
+                    value = self._read_request(connection)
+                except (ConnectionError, TimeoutError):
+                    return
+                if type(value) is dict and type(value.get("request_id")) is str:
+                    request_id = value["request_id"]
+                if self._stop.is_set() or self._owner_requires_stop():
+                    raise BrowserRelayError("relay owner retired before dispatch")
+                if _unix_peer_pid(connection) != self._owner_pid:
+                    raise BrowserRelayError("relay peer process changed")
+                response = self._handle(value)
+            except BrowserRelayError:
+                response = self._response(
+                    request_id=request_id if _HEX32.fullmatch(request_id or "") is not None else "0" * 32,
+                    ok=False, error="REQUEST_REFUSED",
+                )
+            try:
+                self._write_response(connection, response)
+            except (ConnectionError, TimeoutError):
+                return  # delivery loss never causes effect replay
+
+    def _connection_worker(self, connection: socket.socket) -> None:
+        try:
+            self._serve_connection(connection)
+        except (OSError, ValueError, RuntimeError):
+            # An unexpected worker failure closes its channel. The original
+            # durable claim remains uncertain; other tabs can continue.
+            connection.close()
+        finally:
+            with self._workers_gate:
+                self._connections.discard(connection)
+                self._workers.discard(threading.current_thread())
+            self._worker_slots.release()
+
     def serve_forever(self) -> None:
         server: socket.socket | None = None
         try:
@@ -605,35 +680,29 @@ class BrowserRelayServer:
                     connection, _ = server.accept()
                 except socket.timeout:
                     continue
-                with connection:
-                    connection.settimeout(5)
-                    request_id = "0" * 32
-                    try:
-                        if _unix_peer_pid(connection) != self._owner_pid:
-                            raise BrowserRelayError("relay peer process changed")
-                        try:
-                            value = self._read_request(connection)
-                        except (ConnectionError, TimeoutError):
-                            # A disconnected caller has not reached dispatch.
-                            # Retire this connection, not the owner's relay.
-                            continue
-                        if type(value) is dict and type(value.get("request_id")) is str:
-                            request_id = value["request_id"]
-                        response = self._handle(value)
-                    except BrowserRelayError:
-                        response = self._response(
-                            request_id=request_id
-                            if _HEX32.fullmatch(request_id or "") is not None
-                            else "0" * 32,
-                            ok=False,
-                            error="REQUEST_REFUSED",
-                        )
-                    try:
-                        self._write_response(connection, response)
-                    except (ConnectionError, TimeoutError):
-                        # The caller may close before a refusal or reply lands.
-                        # Never replay a dispatched effect to recover delivery.
-                        continue
+                if self._session.max_parallel_calls == 1:
+                    self._serve_connection(connection)
+                    continue
+                if not self._worker_slots.acquire(blocking=False):
+                    # No request was accepted or dispatched. Do not invent a
+                    # correlated receipt for bytes that have not been read.
+                    connection.close()
+                    continue
+                worker = threading.Thread(target=self._connection_worker,
+                                          args=(connection,), daemon=True,
+                                          name="browser-relay-call")
+                with self._workers_gate:
+                    self._workers.add(worker)
+                    self._connections.add(connection)
+                try:
+                    worker.start()
+                except BaseException:
+                    with self._workers_gate:
+                        self._workers.discard(worker)
+                        self._connections.discard(connection)
+                    self._worker_slots.release()
+                    connection.close()
+                    raise
         except BaseException as error:
             self._serve_error = error
             self._ready.set()
@@ -645,9 +714,20 @@ class BrowserRelayServer:
                     server.close()
                 except OSError:
                     pass
+            self._stop.set()
             try:
                 self._session.close()
             finally:
+                with self._workers_gate:
+                    connections, workers = tuple(self._connections), tuple(self._workers)
+                for connection in connections:
+                    try:
+                        connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                deadline = time.monotonic() + 6
+                for worker in workers:
+                    worker.join(timeout=max(0, deadline - time.monotonic()))
                 identity = self._socket_identity
                 if identity is not None:
                     try:
@@ -731,45 +811,67 @@ def playwright_child_argv(
     output_dir = _absolute_cli_path(output_dir, "output_dir")
     if not mcp_cli_path.endswith("/node_modules/@playwright/mcp/cli.js"):
         raise BrowserRelayError("unexpected Playwright MCP entrypoint")
-    if mode not in {BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value}:
+    if mode not in {
+        BrowserMode.ISOLATED.value,
+        BrowserMode.PERSISTENT.value,
+        BrowserMode.EXTENSION.value,
+    }:
         raise BrowserRelayError("browser mode is invalid")
     argv = [
         node_executable,
         mcp_cli_path,
         "--browser",
         "chrome",
-        "--executable-path",
-        chrome_executable,
-        "--output-dir",
-        output_dir,
-        "--headless",
     ]
-    if mode == BrowserMode.ISOLATED.value:
+    if mode != BrowserMode.EXTENSION.value:
+        argv.extend(("--executable-path", chrome_executable))
+    argv.extend(("--output-dir", output_dir))
+    if mode == BrowserMode.EXTENSION.value:
         if profile_dir is not None:
-            raise BrowserRelayError("isolated relay cannot bind a profile directory")
-        argv.append("--isolated")
+            raise BrowserRelayError("extension relay cannot bind a profile directory")
+        argv.append("--extension")
     else:
-        if profile_dir is None:
-            raise BrowserRelayError("persistent relay requires a profile directory")
-        argv.extend(("--user-data-dir", _absolute_cli_path(profile_dir, "profile_dir")))
-    forbidden = {"--shared-browser-context", "--cdp-endpoint", "--extension"}
+        argv.append("--headless")
+        if mode == BrowserMode.ISOLATED.value:
+            if profile_dir is not None:
+                raise BrowserRelayError("isolated relay cannot bind a profile directory")
+            argv.append("--isolated")
+        else:
+            if profile_dir is None:
+                raise BrowserRelayError("persistent relay requires a profile directory")
+            argv.extend(("--user-data-dir", _absolute_cli_path(profile_dir, "profile_dir")))
+    forbidden = {"--shared-browser-context", "--cdp-endpoint"}
     if forbidden.intersection(argv):
-        raise BrowserRelayError("unsafe shared or attached browser requested")
+        raise BrowserRelayError("unsafe shared browser requested")
     return tuple(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mastermind one-resource browser relay")
+    parser.add_argument("--backend", choices=("playwright", "browser-link"), default="playwright")
+    parser.add_argument("--link-extension-id")
+    parser.add_argument("--link-instance-id")
+    parser.add_argument("--link-socket-path")
+    parser.add_argument("--link-chrome-pid", type=int)
+    parser.add_argument("--link-chrome-start")
     parser.add_argument("--resource-id", required=True)
     parser.add_argument("--socket-path", required=True)
-    parser.add_argument("--node-executable", required=True)
-    parser.add_argument("--mcp-cli-path", required=True)
-    parser.add_argument("--chrome-executable", required=True)
-    parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--mode", choices=[BrowserMode.ISOLATED.value, BrowserMode.PERSISTENT.value], required=True)
+    parser.add_argument("--node-executable")
+    parser.add_argument("--mcp-cli-path")
+    parser.add_argument("--chrome-executable")
+    parser.add_argument("--output-dir")
+    parser.add_argument(
+        "--mode",
+        choices=[
+            BrowserMode.ISOLATED.value,
+            BrowserMode.PERSISTENT.value,
+            BrowserMode.EXTENSION.value,
+        ],
+        required=True,
+    )
     parser.add_argument("--profile-dir")
-    parser.add_argument("--home-dir", required=True)
-    parser.add_argument("--tmp-dir", required=True)
+    parser.add_argument("--home-dir")
+    parser.add_argument("--tmp-dir")
     parser.add_argument("--barrier-fd", type=int, required=True)
     parser.add_argument("--expires-at-ms", type=int, required=True)
     args = parser.parse_args(argv)
@@ -777,16 +879,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     if _HEX32.fullmatch(args.resource_id) is None:
         raise BrowserRelayError("resource identity is invalid")
     socket_path = Path(_absolute_cli_path(args.socket_path, "socket_path"))
-    home_dir = _absolute_cli_path(args.home_dir, "home_dir")
-    tmp_dir = _absolute_cli_path(args.tmp_dir, "tmp_dir")
-    child_argv = playwright_child_argv(
-        node_executable=args.node_executable,
-        mcp_cli_path=args.mcp_cli_path,
-        chrome_executable=args.chrome_executable,
-        output_dir=args.output_dir,
-        mode=args.mode,
-        profile_dir=args.profile_dir,
-    )
+    native_values = (args.link_extension_id, args.link_instance_id, args.link_socket_path,
+                     args.link_chrome_pid, args.link_chrome_start)
+    legacy_values = (args.node_executable, args.mcp_cli_path, args.chrome_executable,
+                     args.output_dir, args.home_dir, args.tmp_dir, args.profile_dir)
+    if args.backend == "browser-link":
+        if any(value is None for value in native_values) or any(value is not None for value in legacy_values) or args.mode != BrowserMode.EXTENSION.value:
+            raise BrowserRelayError("Link relay arguments are invalid")
+        from integrations.mastermind_browser_link.native_channel import LinkEnrollment
+        from .link_session import BrowserLinkSession
+        session = BrowserLinkSession(
+            enrollment=LinkEnrollment(args.link_extension_id, args.link_instance_id,
+                                      Path(_absolute_cli_path(args.link_socket_path, "link_socket_path"))),
+            chrome_pid=args.link_chrome_pid, chrome_start_identity=args.link_chrome_start,
+            holder_ref=args.resource_id,
+        )
+    else:
+        if any(value is not None for value in native_values):
+            raise BrowserRelayError("legacy relay cannot accept Link arguments")
+        home_dir = _absolute_cli_path(args.home_dir, "home_dir")
+        tmp_dir = _absolute_cli_path(args.tmp_dir, "tmp_dir")
+        child_argv = playwright_child_argv(
+            node_executable=args.node_executable, mcp_cli_path=args.mcp_cli_path,
+            chrome_executable=args.chrome_executable, output_dir=args.output_dir,
+            mode=args.mode, profile_dir=args.profile_dir,
+        )
+        session = McpStdioSession(
+            argv=child_argv,
+            env={"HOME": home_dir, "TMPDIR": tmp_dir, "LANG": "C", "LC_ALL": "C",
+                 "NO_COLOR": "1", "PATH": "/usr/bin:/bin"},
+            allowed_tools=ALLOWED_BROWSER_TOOLS,
+            expected_tool_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+        )
     if args.barrier_fd < 3:
         raise BrowserRelayError("launch barrier descriptor is invalid")
     try:
@@ -796,19 +920,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if barrier != b"\x01":
         raise BrowserRelayError("launch barrier was not released")
 
-    session = McpStdioSession(
-        argv=child_argv,
-        env={
-            "HOME": home_dir,
-            "TMPDIR": tmp_dir,
-            "LANG": "C",
-            "LC_ALL": "C",
-            "NO_COLOR": "1",
-            "PATH": "/usr/bin:/bin",
-        },
-        allowed_tools=ALLOWED_BROWSER_TOOLS,
-        expected_tool_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
-    )
     owner_pid = os.getppid()
     relay = BrowserRelayServer(
         resource_id=args.resource_id,

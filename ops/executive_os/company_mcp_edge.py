@@ -90,22 +90,38 @@ def read_config():
     return raw
 
 
-def source_evidence():
-    if SOURCE.parent != SYSTEM / "releases" or re.fullmatch("[0-9a-f]{40}", SOURCE.name) is None:
+WORKBENCH_LOCK_RELATIVE = "requirements/workbench-browser-macos-arm64-py312.lock"
+WORKBENCH_RECEIPT = ".workbench-browser-runtime.json"
+WORKBENCH_SCHEMA = "mastermind.workbench_browser_runtime/v1"
+
+
+def _source_evidence_at(source_root, lock_relative):
+    """Shared verification only; the two product owners select fixed locks."""
+    source_root = Path(source_root)
+    if (lock_relative not in {LOCK_RELATIVE, WORKBENCH_LOCK_RELATIVE}
+            or source_root.parent != SYSTEM / "releases"
+            or re.fullmatch("[0-9a-f]{40}", source_root.name) is None):
         raise EdgeError("edge requires an exact installed release")
-    sealed(SOURCE, directory=True)
+    sealed(source_root, directory=True)
     from ops.executive_os import release_manifest
-    manifest = SOURCE / release_manifest.MANIFEST_NAME
+    manifest = source_root / release_manifest.MANIFEST_NAME
     sealed(manifest)
     identity = json.loads(manifest.read_bytes())
-    release_manifest.verify(SOURCE, SOURCE.name, identity["tree_sha"])
-    lock = SOURCE / LOCK_RELATIVE
-    return dict(release_sha=SOURCE.name, tree_sha=identity["tree_sha"],
+    release_manifest.verify(source_root, source_root.name, identity["tree_sha"])
+    lock = sealed(source_root / lock_relative)
+    return dict(release_sha=source_root.name, tree_sha=identity["tree_sha"],
                 source_manifest_sha256=digest(manifest), lock_sha256=digest(lock))
 
 
-def inventory(root):
+def source_evidence():
+    return _source_evidence_at(SOURCE, LOCK_RELATIVE)
+
+
+def inventory(root, *, kind="company"):
     """Closed immutable wheel tree; relative in-tree interpreter links only."""
+    receipt_name = {"company": RECEIPT, "workbench-browser": WORKBENCH_RECEIPT}.get(kind)
+    if receipt_name is None:
+        raise EdgeError("SDK runtime kind differs")
     root = sealed(root, directory=True)
     if stat.S_IMODE(root.stat().st_mode) != 0o555:
         raise EdgeError("SDK runtime root must be immutable")
@@ -113,7 +129,7 @@ def inventory(root):
     acl = _security()
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root).as_posix()
-        if relative in {RECEIPT, INCOMPLETE}:
+        if relative in {receipt_name, INCOMPLETE}:
             continue
         info = path.lstat()
         if (path.suffix in {".pth", ".pyc", ".pyo"}
@@ -248,6 +264,78 @@ def _archive_incomplete(root):
                       "release_sha": SOURCE.name, "archive": str(target)}, sort_keys=True))
 
 
+def _materialize_sdk(root, source, bindings, *, kind):
+    """Build the fixed immutable closure for an incumbent typed product owner.
+
+    This helper has no CLI, intake, release selection or service lifecycle.
+    Callers retain their admission, provision lock and publication authority.
+    """
+    if kind == "company":
+        expected = SYSTEM / "mcp-runtimes" / SOURCE.name
+        lock_relative, receipt_name, schema = LOCK_RELATIVE, RECEIPT, SCHEMA
+        identity_keys = {"control_uid", "worker_uid"}
+    elif kind == "workbench-browser":
+        identity_keys = {"service_uid"}
+        if (type(bindings) is not dict or set(bindings) != identity_keys
+                or type(bindings["service_uid"]) is not int or bindings["service_uid"] < 501):
+            raise EdgeError("Workbench runtime identity differs")
+        expected = SYSTEM / "workbench-mcp-runtimes" / str(bindings["service_uid"]) / SOURCE.name
+        lock_relative, receipt_name, schema = WORKBENCH_LOCK_RELATIVE, WORKBENCH_RECEIPT, WORKBENCH_SCHEMA
+    else:
+        raise EdgeError("SDK runtime kind differs")
+    if (Path(root) != expected or type(bindings) is not dict or set(bindings) != identity_keys
+            or any(type(v) is not int or v <= 0 for v in bindings.values())
+            or source.get("release_sha") != SOURCE.name):
+        raise EdgeError("SDK materialization binding differs")
+    sealed(root.parent, directory=True)
+    root.mkdir(mode=0o700)
+    marker_fd = os.open(root / INCOMPLETE,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(marker_fd, 0o600)
+        with os.fdopen(marker_fd, "wb", closefd=False) as marker:
+            marker.write(b"build in progress\n")
+            marker.flush()
+            os.fsync(marker.fileno())
+    finally:
+        os.close(marker_fd)
+    fsync_directory(root)
+    fsync_directory(root.parent)
+    run([BASE_PYTHON, "-I", "-S", "-B", "-m", "venv", "--copies", "--without-pip", root])
+    wheels = list((BASE_PYTHON.parents[1] / "lib/python3.12/ensurepip/_bundled").glob("pip-*.whl"))
+    if len(wheels) != 1:
+        raise EdgeError("attested bundled pip wheel differs")
+    python = root / "bin/python3.12"
+    pip = [python, "-I", "-B", "-c", PIP_BOOTSTRAP, wheels[0], "--isolated",
+           "--disable-pip-version-check", "--no-input", "--no-cache-dir"]
+    run([*pip, "install", "--no-compile", "--require-hashes", "--only-binary=:all:",
+         "--index-url", "https://pypi.org/simple", "-r", SOURCE / lock_relative])
+    run([*pip, "check"])
+    base_raw = json.loads(BASE_RECEIPT.read_bytes())
+    base = {k: base_raw[k] for k in ("runtime_root", "python_binary", "python_binary_sha256",
+        "python_framework_sha256", "python_version", "team_identifier")}
+    verify_base(base)
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            continue
+        path.chmod(0o555 if path.is_dir() or path.stat().st_mode & 0o111 else 0o444)
+        if path.is_file():
+            with path.open("rb") as frozen_file:
+                os.fsync(frozen_file.fileno())
+    for directory in sorted((p for p in root.rglob("*") if p.is_dir()), reverse=True):
+        fsync_directory(directory)
+    root.chmod(0o555)
+    fsync_directory(root)
+    entries = inventory(root) if kind == "company" else inventory(root, kind=kind)
+    raw = dict(schema=schema, source=source, base=base, **bindings,
+               inventory_sha256=hashlib.sha256(encoded(entries)).hexdigest(),
+               inventory_entries=len(entries), pip_check_passed=True)
+    publish(root / receipt_name, raw)
+    # Receipt durability precedes the only completion transition.
+    (root / INCOMPLETE).unlink()
+    fsync_directory(root)
+
+
 def provision(*, recover_incomplete=False):
     prior_umask = os.umask(0o077)
     try:
@@ -299,52 +387,9 @@ def _provision(*, recover_incomplete=False):
             verify(config)
             publish(CONFIG, config)
             return
-        root.mkdir(mode=0o700)
-        marker_fd = os.open(root / INCOMPLETE,
-                            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        try:
-            os.fchmod(marker_fd, 0o600)
-            with os.fdopen(marker_fd, "wb", closefd=False) as marker:
-                marker.write(b"build in progress\n")
-                marker.flush()
-                os.fsync(marker.fileno())
-        finally:
-            os.close(marker_fd)
-        fsync_directory(root)
-        fsync_directory(parent)
-        run([BASE_PYTHON, "-I", "-S", "-B", "-m", "venv", "--copies", "--without-pip", root])
-        wheels = list((BASE_PYTHON.parents[1] / "lib/python3.12/ensurepip/_bundled").glob("pip-*.whl"))
-        if len(wheels) != 1:
-            raise EdgeError("attested bundled pip wheel differs")
-        python = root / "bin/python3.12"
-        pip = [python, "-I", "-B", "-c", PIP_BOOTSTRAP, wheels[0], "--isolated",
-               "--disable-pip-version-check", "--no-input", "--no-cache-dir"]
-        run([*pip, "install", "--no-compile", "--require-hashes", "--only-binary=:all:",
-             "--index-url", "https://pypi.org/simple", "-r", SOURCE / LOCK_RELATIVE])
-        run([*pip, "check"])
-        base_raw = json.loads(BASE_RECEIPT.read_bytes())
-        base = {k: base_raw[k] for k in ("runtime_root", "python_binary", "python_binary_sha256",
-            "python_framework_sha256", "python_version", "team_identifier")}
-        for path in sorted(root.rglob("*")):
-            if path.is_symlink():
-                continue
-            path.chmod(0o555 if path.is_dir() or path.stat().st_mode & 0o111 else 0o444)
-            if path.is_file():
-                with path.open("rb") as frozen_file:
-                    os.fsync(frozen_file.fileno())
-        for directory in sorted((p for p in root.rglob("*") if p.is_dir()), reverse=True):
-            fsync_directory(directory)
-        root.chmod(0o555)
-        fsync_directory(root)
-        entries = inventory(root)
-        raw = dict(schema=SCHEMA, source=source, base=base,
-                   control_uid=control["control_uid"], worker_uid=control["worker_uid"],
-                   inventory_sha256=hashlib.sha256(encoded(entries)).hexdigest(),
-                   inventory_entries=len(entries), pip_check_passed=True)
-        publish(root / RECEIPT, raw)
-        # Marker removal is the only completion transition, after receipt durability.
-        (root / INCOMPLETE).unlink()
-        fsync_directory(root)
+        _materialize_sdk(root, source, {
+            "control_uid": control["control_uid"], "worker_uid": control["worker_uid"],
+        }, kind="company")
         config = _config_for(root, control)
         verify(config)
         publish(CONFIG, config)
