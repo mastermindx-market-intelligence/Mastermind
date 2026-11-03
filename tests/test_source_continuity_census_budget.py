@@ -71,10 +71,13 @@ class Clock:
         return self.now
 
 
-def run_cli(module, capsys, http, *, kind="checkpoint", runner=None):
+def run_cli(module, capsys, http, *, kind="checkpoint", runner=None, read_failure=None):
     exit_code = fx._run_cli(module, fx._cli_argv(kind), http=http, runner=runner)
     captured = capsys.readouterr()
-    assert captured.err == ""
+    if read_failure is None:
+        assert captured.err == ""
+    else:
+        assert json.loads(captured.err) == {"diagnostic": "READ_FAILED", **read_failure}
     assert captured.out.count("\n") == 1
     return exit_code, json.loads(captured.out)
 
@@ -183,7 +186,14 @@ def test_auth_failure_is_not_relabeled_budget_or_retried(capsys, monkeypatch):
     def denied(url, **kwargs):
         calls.append(url)
         raise module._AuthProbeError()
-    rc, payload = run_cli(module, capsys, denied)
+    rc, payload = run_cli(module, capsys, denied, read_failure={
+        "endpoint": "repos/mastermindx-market-intelligence/Mastermind/pulls/410",
+        "cause": "unclassified",
+        "attempts": 1,
+        "retryable": False,
+        "failed_reads": 1,
+        "recovered_reads": 0,
+    })
     assert rc == 2 and payload["code"] == "AUTH_UNAVAILABLE"
     assert len(calls) == 1
 

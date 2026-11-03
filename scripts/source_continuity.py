@@ -4,8 +4,9 @@
 This adapter observes one explicit local Git worktree plus authenticated GitHub
 GET-only facts, then delegates all classification to the pure verifier in
 ``control_plane.source_continuity``. It intentionally owns no persistence,
-lifecycle, retry/failover, watcher, receiver-transfer, release, merge, provider,
-or runtime effect.
+lifecycle, failover, watcher, receiver-transfer, release, merge, provider, or
+runtime effect. Its only retry repeats one idempotent GET in place after a
+transient transport failure, inside the invocation's shared read budget.
 """
 from __future__ import annotations
 
@@ -14,11 +15,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
+from http.client import HTTPException, IncompleteRead, InvalidURL
 import json
 import math
 import os
 from pathlib import Path, PurePosixPath
 import re
+import ssl
 import stat
 import subprocess
 import sys
@@ -28,8 +31,8 @@ import sys
 sys.dont_write_bytecode = True
 
 from threading import Lock
-from time import monotonic
-from typing import Callable, Mapping, Sequence
+from time import monotonic, sleep
+from typing import Callable, Mapping, Sequence, TextIO
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -87,6 +90,22 @@ _MAX_ROSTER_PAGES = _MAX_COLLISION_PRS // _PAGE_SIZE + 1
 _MAX_HTTP_CALLS = 4096
 _HTTP_READ_BUDGET_SECONDS = 900.0
 _MAX_HTTP_NORMALIZED_BYTES = 768 * 1024 * 1024
+# A transient transport failure (timeout, dropped connection, HTTP 500/502/503/504)
+# repeats the same idempotent GET in place. Every attempt is one call against the
+# shared budget. A retry that cannot be afforded (no call left, or the backoff plus
+# a minimum call window would reach the deadline) never sleeps and re-raises the
+# original failure. Rate limits (403, 429), every other 4xx and malformed bodies
+# never retry.
+_HTTP_READ_ATTEMPTS = 3
+_HTTP_RETRY_BACKOFF_SECONDS = (1.0, 2.0)
+_HTTP_RETRY_MIN_CALL_SECONDS = 2.0
+_TRANSIENT_HTTP_STATUSES = frozenset({500, 502, 503, 504})
+_READ_CAUSE_RE = re.compile(
+    r"^(?:timeout|connection|tls_verify|incomplete_response|protocol|missing_etag"
+    r"|not_modified_body|body_too_large|invalid_json|invalid_url|no_token"
+    r"|invalid_validator|invalid_representation|http_[1-5][0-9]{2})$"
+)
+_DIAGNOSTIC_ENDPOINT_RE = re.compile(r"^[A-Za-z0-9._~%/?&=:+,-]{1,1024}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _HOLD_LABELS = frozenset({"hold", "hold-for-sol", "hold_for_sol"})
@@ -170,6 +189,67 @@ def _is_resource_missing(error: BaseException) -> bool:
 
 class _ReadBudgetExceeded(Exception):
     pass
+
+
+def _labelled(error: Exception, cause: str, *, transient: bool = False) -> Exception:
+    """Attach a closed failure cause, and whether a repeat may succeed, to `error`.
+
+    Like the resource-missing marker these are attributes, not classes, so an
+    injected transport can label its own exception types.
+    """
+
+    error.source_continuity_read_cause = cause  # type: ignore[attr-defined]
+    error.source_continuity_transient = transient  # type: ignore[attr-defined]
+    return error
+
+
+def _is_transient(error: BaseException) -> bool:
+    return getattr(error, "source_continuity_transient", False) is True
+
+
+def _read_cause(error: BaseException) -> str:
+    cause = getattr(error, "source_continuity_read_cause", None)
+    if isinstance(cause, str) and _READ_CAUSE_RE.fullmatch(cause) is not None:
+        return cause
+    return "unclassified"
+
+
+def _http_status_cause(code: object) -> str:
+    if type(code) is int and 100 <= code <= 599:
+        return f"http_{code}"
+    return "protocol"
+
+
+def _transport_failure(error: BaseException) -> Exception:
+    """Classify a failure below HTTP status.
+
+    Timeouts, dropped connections and broken responses repeat. A rejected
+    certificate, a malformed URL and an unrecognized reason do not.
+    """
+
+    reason = error.reason if isinstance(error, URLError) else error
+    if isinstance(reason, TimeoutError):
+        return _labelled(_RemoteProbeError(), "timeout", transient=True)
+    if isinstance(reason, ssl.SSLCertVerificationError):
+        return _labelled(_RemoteProbeError(), "tls_verify")
+    if isinstance(reason, OSError):
+        return _labelled(_RemoteProbeError(), "connection", transient=True)
+    if isinstance(reason, (str, InvalidURL)):
+        return _labelled(_RemoteProbeError(), "invalid_url")
+    if isinstance(reason, IncompleteRead):
+        return _labelled(_RemoteProbeError(), "incomplete_response", transient=True)
+    if isinstance(reason, HTTPException):
+        return _labelled(_RemoteProbeError(), "protocol", transient=True)
+    return _labelled(_RemoteProbeError(), "connection")
+
+
+def _diagnostic_endpoint(url: object) -> str:
+    prefix = _API_ROOT + "/"
+    if isinstance(url, str) and url.startswith(prefix):
+        endpoint = url[len(prefix) :]
+        if _DIAGNOSTIC_ENDPOINT_RE.fullmatch(endpoint) is not None:
+            return endpoint
+    return "unrecognized"
 
 
 @dataclass(frozen=True)
@@ -305,6 +385,35 @@ def _conditional_semantics(
     return ("subject_pull", identity)
 
 
+def _check_fresh_representation(payload: object) -> None:
+    if (
+        not isinstance(payload, _HTTPRepresentation)
+        or payload.not_modified is not False
+        or not _is_valid_etag(payload.etag)
+    ):
+        raise _labelled(_RemoteProbeError(), "invalid_representation")
+
+
+def _replay_check(validator: str) -> Callable[[object], None]:
+    """Validate one conditional replay of a strict read sent with `validator`."""
+
+    def check(payload: object) -> None:
+        if (
+            not isinstance(payload, _HTTPRepresentation)
+            or not _is_valid_etag(payload.etag)
+            or (payload.not_modified is not True and payload.not_modified is not False)
+        ):
+            raise _labelled(_RemoteProbeError(), "invalid_representation")
+        if payload.not_modified is True and payload.payload is not None:
+            raise _labelled(_RemoteProbeError(), "not_modified_body")
+        if payload.not_modified is True and not _etags_match_validator(
+            validator, payload.etag
+        ):
+            raise _labelled(_RemoteProbeError(), "invalid_validator")
+
+    return check
+
+
 class _BoundedHTTPGet:
     def __init__(
         self,
@@ -323,6 +432,9 @@ class _BoundedHTTPGet:
         self._semantic_revalidations: list[str] = []
         self._missing_observations: list[str] = []
         self._base_head_update: tuple[str, str] | None = None
+        self._read_failure: dict[str, object] | None = None
+        self._failed_reads = 0
+        self._recovered_reads = 0
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -398,18 +510,119 @@ class _BoundedHTTPGet:
             if self._bytes > _MAX_HTTP_NORMALIZED_BYTES:
                 raise _ReadBudgetExceeded()
 
-    def __call__(self, url: str, *, token: str, timeout: float) -> object:
-        call_timeout = self._admit_call(timeout)
-
-        payload = self._transport(url, token=token, timeout=call_timeout)
-        if self.conditional_validation_available:
+    def _backoff(self, delay: float) -> None:
+        with self._lock:
+            now = self._checked_now_locked()
             if (
-                not isinstance(payload, _HTTPRepresentation)
-                or payload.not_modified is not False
-                or not _is_valid_etag(payload.etag)
+                self._calls >= _MAX_HTTP_CALLS
+                or now + delay + _HTTP_RETRY_MIN_CALL_SECONDS >= self._deadline
             ):
-                raise _RemoteProbeError()
-            representation = payload
+                raise _ReadBudgetExceeded()
+        sleep(delay)
+
+    def _record_read_failure(
+        self, url: str, error: BaseException, attempts: int
+    ) -> None:
+        failure = {
+            "endpoint": _diagnostic_endpoint(url),
+            "cause": _read_cause(error),
+            "attempts": attempts,
+            "retryable": _is_transient(error),
+        }
+        with self._lock:
+            self._failed_reads += 1
+            if self._read_failure is None:
+                self._read_failure = failure
+
+    def read_failure(self) -> dict[str, object] | None:
+        """The first read that failed for good, with run-wide failure counts."""
+
+        with self._lock:
+            if self._read_failure is None:
+                return None
+            return {
+                **self._read_failure,
+                "failed_reads": self._failed_reads,
+                "recovered_reads": self._recovered_reads,
+            }
+
+    def _read(
+        self,
+        url: str,
+        *,
+        token: str,
+        timeout: float,
+        if_none_match: str | None = None,
+        absence_lawful: bool = False,
+        check: Callable[[object], None] | None = None,
+    ) -> object:
+        """One logical GET, repeated in place while its failure is transient.
+
+        Each attempt is admitted as one call against the shared budget. `check`
+        validates the representation inside the same attempt, so a malformed
+        body is recorded as the read's failure. A lawful absence is an
+        observation, not a failure, and is neither recorded nor repeated.
+        """
+
+        failure: Exception | None = None
+        for attempt in range(1, _HTTP_READ_ATTEMPTS + 1):
+            if failure is None:
+                call_timeout = self._admit_call(timeout)
+            else:
+                try:
+                    self._backoff(_HTTP_RETRY_BACKOFF_SECONDS[attempt - 2])
+                    call_timeout = self._admit_call(timeout)
+                except _ReadBudgetExceeded:
+                    # An unaffordable retry keeps the refusal the failure earned.
+                    self._record_read_failure(url, failure, attempt - 1)
+                    raise failure from None
+            try:
+                if if_none_match is None:
+                    payload = self._transport(url, token=token, timeout=call_timeout)
+                else:
+                    payload = self._transport(
+                        url,
+                        token=token,
+                        timeout=call_timeout,
+                        if_none_match=if_none_match,
+                    )
+                if check is not None:
+                    check(payload)
+            except _ReadBudgetExceeded:
+                raise
+            except Exception as error:
+                if absence_lawful and _is_resource_missing(error):
+                    raise
+                if not _is_transient(error) or attempt == _HTTP_READ_ATTEMPTS:
+                    self._record_read_failure(url, error, attempt)
+                    raise
+                failure = error
+                continue
+            if failure is not None:
+                with self._lock:
+                    self._recovered_reads += 1
+            return payload
+        raise _ReadBudgetExceeded()  # no attempt was admitted
+
+    def __call__(self, url: str, *, token: str, timeout: float) -> object:
+        return self._strict_read(url, token=token, timeout=timeout)
+
+    def _strict_read(
+        self,
+        url: str,
+        *,
+        token: str,
+        timeout: float,
+        absence_lawful: bool = False,
+    ) -> object:
+        if self.conditional_validation_available:
+            representation = self._read(
+                url,
+                token=token,
+                timeout=timeout,
+                absence_lawful=absence_lawful,
+                check=_check_fresh_representation,
+            )
             self._account_payload(representation.payload)
             semantics = _conditional_semantics(
                 url,
@@ -427,23 +640,25 @@ class _BoundedHTTPGet:
                 )
             return representation.payload
 
+        payload = self._read(
+            url, token=token, timeout=timeout, absence_lawful=absence_lawful
+        )
         self._account_payload(payload)
         return payload
 
     def _collision_read(self, url: str, *, token: str, timeout: float) -> object:
         """Read one collision-census resource without registering a strict ETag fence."""
 
-        call_timeout = self._admit_call(timeout)
-        payload = self._transport(url, token=token, timeout=call_timeout)
         if self.conditional_validation_available:
-            if (
-                not isinstance(payload, _HTTPRepresentation)
-                or payload.not_modified is not False
-                or not _is_valid_etag(payload.etag)
-            ):
-                raise _RemoteProbeError()
+            payload = self._read(
+                url,
+                token=token,
+                timeout=timeout,
+                check=_check_fresh_representation,
+            )
             self._account_payload(payload.payload)
             return payload.payload
+        payload = self._read(url, token=token, timeout=timeout)
         self._account_payload(payload)
         return payload
 
@@ -459,7 +674,9 @@ class _BoundedHTTPGet:
         """
 
         try:
-            return self(url, token=token, timeout=timeout)
+            return self._strict_read(
+                url, token=token, timeout=timeout, absence_lawful=True
+            )
         except Exception as error:
             if not _is_resource_missing(error):
                 raise
@@ -474,22 +691,14 @@ class _BoundedHTTPGet:
             observations = tuple(self._conditional_observations)
             absences = tuple(self._missing_observations)
         for observation in observations:
-            call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
-            payload = self._transport(
+            payload = self._read(
                 observation.url,
                 token=token,
-                timeout=call_timeout,
+                timeout=_HTTP_TIMEOUT_SECONDS,
                 if_none_match=observation.etag,
+                check=_replay_check(observation.etag),
             )
-            if not isinstance(payload, _HTTPRepresentation) or not _is_valid_etag(
-                payload.etag
-            ):
-                raise _RemoteProbeError()
             if payload.not_modified is True:
-                if payload.payload is not None or not _etags_match_validator(
-                    observation.etag, payload.etag
-                ):
-                    raise _RemoteProbeError()
                 continue
             if payload.not_modified is False:
                 # Account every changed body before deciding. Only the open-PR
@@ -530,9 +739,13 @@ class _BoundedHTTPGet:
                 return False
             raise _RemoteProbeError()
         for url in absences:
-            call_timeout = self._admit_call(_HTTP_TIMEOUT_SECONDS)
             try:
-                payload = self._transport(url, token=token, timeout=call_timeout)
+                payload = self._read(
+                    url,
+                    token=token,
+                    timeout=_HTTP_TIMEOUT_SECONDS,
+                    absence_lawful=True,
+                )
             except Exception as error:
                 if _is_resource_missing(error):
                     continue
@@ -641,12 +854,41 @@ def _refusal(code: RefusalCode, exit_code: int) -> SourceContinuityRefusal:
     return SourceContinuityRefusal(code=code, exit_code=exit_code)
 
 
-def _emit(result: object) -> int:
+def _emit(result: object, reader: _BoundedHTTPGet | None = None) -> int:
     if isinstance(result, SourceContinuityRefusal):
         print(canonical_json(result.to_dict()))
+        # The receipt stays the one stdout line; which read failed goes to stderr,
+        # best effort, so a missing or closed stderr never changes the receipt.
+        failure = reader.read_failure() if reader is not None else None
+        stream = sys.stderr
+        if failure is not None and stream is not None:
+            try:
+                print(
+                    canonical_json({"diagnostic": "READ_FAILED", **failure}),
+                    file=stream,
+                )
+            except Exception:
+                _discard_unwritten_stderr(stream)
         return result.exit_code
     print(canonical_json(result.to_dict()))
     return 0
+
+
+def _discard_unwritten_stderr(stream: TextIO) -> None:
+    # A failed write stays buffered, and the flush at interpreter exit would fail
+    # again and turn the exit code into 120. Point the descriptor at /dev/null so
+    # that flush succeeds; never the descriptor that carries the receipt.
+    try:
+        descriptor = stream.fileno()
+        if descriptor == sys.stdout.fileno():
+            return
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, descriptor)
+        finally:
+            os.close(devnull)
+    except Exception:
+        pass
 
 
 def _is_sha(value: object) -> bool:
@@ -769,11 +1011,11 @@ def _stdlib_http_get(
     if_none_match: str | None = None,
 ) -> object:
     if not isinstance(url, str) or not url.startswith(_API_ROOT + "/"):
-        raise _RemoteProbeError()
+        raise _labelled(_RemoteProbeError(), "invalid_url")
     if not isinstance(token, str) or not token:
-        raise _AuthProbeError()
+        raise _labelled(_AuthProbeError(), "no_token")
     if if_none_match is not None and not _is_valid_etag(if_none_match):
-        raise _RemoteProbeError()
+        raise _labelled(_RemoteProbeError(), "invalid_validator")
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
@@ -791,30 +1033,38 @@ def _stdlib_http_get(
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed GitHub API root
             etag = _single_etag(response.headers)
             if not etag:
-                raise _RemoteProbeError()
+                raise _labelled(_RemoteProbeError(), "missing_etag")
             raw = response.read(_MAX_HTTP_BODY_BYTES + 1)
     except HTTPError as exc:
+        cause = _http_status_cause(exc.code)
         if exc.code == 304:
             etag = _single_etag(exc.headers)
             if not etag:
-                raise _RemoteProbeError()
-            raw = exc.read(_MAX_HTTP_BODY_BYTES + 1)
+                raise _labelled(_RemoteProbeError(), "missing_etag")
+            try:
+                raw = exc.read(_MAX_HTTP_BODY_BYTES + 1)
+            except (URLError, TimeoutError, OSError, HTTPException) as read_error:
+                raise _transport_failure(read_error) from None
             if raw:
-                raise _RemoteProbeError()
+                raise _labelled(_RemoteProbeError(), "not_modified_body")
             return _HTTPRepresentation(payload=None, etag=etag, not_modified=True)
         if exc.code in {401, 403}:
-            raise _AuthProbeError() from None
+            raise _labelled(_AuthProbeError(), cause) from None
         if exc.code == HTTPStatus.NOT_FOUND:
-            raise _RemoteResourceMissing() from None
-        raise _RemoteProbeError() from None
-    except (URLError, TimeoutError, OSError):
-        raise _RemoteProbeError() from None
+            raise _labelled(_RemoteResourceMissing(), cause) from None
+        raise _labelled(
+            _RemoteProbeError(),
+            cause,
+            transient=exc.code in _TRANSIENT_HTTP_STATUSES,
+        ) from None
+    except (URLError, TimeoutError, OSError, HTTPException) as exc:
+        raise _transport_failure(exc) from None
     if len(raw) > _MAX_HTTP_BODY_BYTES:
-        raise _RemoteProbeError()
+        raise _labelled(_RemoteProbeError(), "body_too_large")
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
-        raise _RemoteProbeError() from None
+        raise _labelled(_RemoteProbeError(), "invalid_json") from None
     return _HTTPRepresentation(payload=payload, etag=etag, not_modified=False)
 
 
@@ -2488,6 +2738,7 @@ def _run_writer_gate(
     if not isinstance(token, str) or not token:
         return _emit(_refusal(RefusalCode.AUTH_UNAVAILABLE, 2))
 
+    bounded_get = None
     try:
         bounded_get = _BoundedHTTPGet(http_get)
         first = _probe_writer_gate_facts(bounded_get, token, request)
@@ -2512,7 +2763,7 @@ def _run_writer_gate(
         result = _refusal(RefusalCode.REMOTE_PROBE_FAILED, 2)
     except Exception:
         result = _refusal(RefusalCode.PROBE_INTERNAL_ERROR, 2)
-    return _emit(result)
+    return _emit(result, bounded_get)
 
 
 def _build_parser() -> _SafeArgumentParser:
@@ -2591,6 +2842,7 @@ def main(
     if not isinstance(token, str) or not token:
         return _emit(_refusal(RefusalCode.AUTH_UNAVAILABLE, 2))
 
+    bounded_get = None
     try:
         bounded_get = _BoundedHTTPGet(
             http_get,
@@ -2696,7 +2948,7 @@ def main(
         result = _refusal(RefusalCode.REMOTE_PROBE_FAILED, 2)
     except Exception:
         result = _refusal(RefusalCode.PROBE_INTERNAL_ERROR, 2)
-    return _emit(result)
+    return _emit(result, bounded_get)
 
 
 if __name__ == "__main__":
