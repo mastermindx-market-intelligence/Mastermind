@@ -13,6 +13,7 @@ from ops.executive_os.os_public_edge import (
     MCP_ROUTES, POST_ROUTES, asset_routes,
     INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_LEGACY_GET_ROUTES,
     CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES, COMPOSED_GET_ROUTES,
+    COMPOSED_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
 )
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
@@ -101,7 +102,7 @@ def test_legacy_get_profile_is_the_exact_historical_eight():
     )
 
 
-# Spell out both predecessor contracts independently of the implementation table.
+# Spell out the historical pairs and current pair independently of the table.
 ADMITTED_ROUTE_PAIRS = (
     (LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
     (LEGACY_GET_ROUTES, INCUMBENT_POST_ROUTES),
@@ -109,7 +110,8 @@ ADMITTED_ROUTE_PAIRS = (
     (INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES),
     (CONTROL_ROOM_LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
     (CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES),
-    (COMPOSED_GET_ROUTES, POST_ROUTES),
+    (COMPOSED_GET_ROUTES, COMPOSED_POST_ROUTES),
+    (GET_ROUTES, COMPOSED_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
@@ -143,8 +145,10 @@ def test_complete_get_profiles_upgrade_only_os_path_lists(fixed, index_overlap, 
 INCOMPATIBLE_ROUTE_PAIRS = tuple(
     (fixed, posts)
     for fixed in (LEGACY_GET_ROUTES, INCUMBENT_GET_ROUTES,
-                  CONTROL_ROOM_LEGACY_GET_ROUTES, CONTROL_ROOM_GET_ROUTES, GET_ROUTES)
-    for posts in (LEGACY_POST_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_POST_ROUTES, POST_ROUTES)
+                  CONTROL_ROOM_LEGACY_GET_ROUTES, CONTROL_ROOM_GET_ROUTES,
+                  COMPOSED_GET_ROUTES, GET_ROUTES)
+    for posts in (LEGACY_POST_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_POST_ROUTES,
+                  COMPOSED_POST_ROUTES, POST_ROUTES)
     if (fixed, posts) not in ADMITTED_ROUTE_PAIRS
 )
 
@@ -152,11 +156,44 @@ INCOMPATIBLE_ROUTE_PAIRS = tuple(
 @pytest.mark.parametrize("fixed,posts", INCOMPATIBLE_ROUTE_PAIRS)
 @pytest.mark.parametrize("with_mcp", [False, True])
 def test_complete_but_incompatible_os_profiles_refuse(fixed, posts, with_mcp):
-    assert len(INCOMPATIBLE_ROUTE_PAIRS) == 13
+    assert len(INCOMPATIBLE_ROUTE_PAIRS) == 21
     live = mcp_fullconfig() if with_mcp else fullconfig()
     get_paths_of(live)[:] = sorted(set(fixed) | set(asset_routes(OLD)))
     post_paths_of(live)[:] = list(posts)
     with pytest.raises(ValueError, match="mixed or incomplete route profile"):
+        transition_values(live)
+
+
+@pytest.mark.parametrize("mask", range(1, 7))
+@pytest.mark.parametrize("with_mcp", [False, True])
+def test_partial_native_post_upgrade_is_not_an_admitted_historical_profile(mask, with_mcp):
+    live = mcp_fullconfig() if with_mcp else fullconfig()
+    post_paths_of(live)[:] = list(COMPOSED_POST_ROUTES) + [
+        path for bit, path in enumerate(DIRECT_NATIVE_POST_ROUTES) if mask & (1 << bit)
+    ]
+    with pytest.raises(ValueError, match="observed POST route differs"):
+        transition_values(live)
+
+
+@pytest.mark.parametrize("path", [
+    "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+    "/os/executive/direct-native/correction",
+])
+def test_native_post_routes_cannot_be_added_to_get_profile(path):
+    live = fullconfig()
+    get_paths_of(live).append(path)
+    with pytest.raises(ValueError, match="observed GET routes differ"):
+        transition_values(live)
+
+
+@pytest.mark.parametrize("path", [
+    "/os/executive/direct-native/*", "/os/executive/direct-native/result/",
+    "/os/executive/direct-native/arbitrary", "/os/executive/session/send",
+])
+def test_native_upgrade_does_not_admit_wildcards_aliases_or_other_operations(path):
+    live = fullconfig()
+    post_paths_of(live).append(path)
+    with pytest.raises(ValueError, match="observed POST route differs"):
         transition_values(live)
 
 

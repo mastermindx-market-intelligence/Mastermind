@@ -24,9 +24,16 @@ CONTROL_ROOM_ACTION_ROUTES = (
 )
 READER_POST_ROUTES = LEGACY_POST_ROUTES + SESSION_READ_POST_ROUTES
 CONTROL_ROOM_POST_ROUTES = LEGACY_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
+COMPOSED_POST_ROUTES = READER_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
+DIRECT_NATIVE_POST_ROUTES = (
+    "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+    "/os/executive/direct-native/correction",
+)
 # Session context/reply/references are reads. The effectful session/send route
 # is deliberately absent; this composition does not change its authorization.
-POST_ROUTES = READER_POST_ROUTES + CONTROL_ROOM_ACTION_ROUTES
+# Native result, consumption and governed correction retain their existing
+# authenticated backend owners and scope checks; this edge only forwards POST.
+POST_ROUTES = COMPOSED_POST_ROUTES + DIRECT_NATIVE_POST_ROUTES
 LEGACY_GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
     "/workspace/work/current", "/workspace/mission/current",
@@ -48,7 +55,7 @@ CONTROL_ROOM_GET_ROUTES = CONTROL_ROOM_LEGACY_GET_ROUTES + CONTROL_ROOM_READ_ROU
 COMPOSED_GET_ROUTES = READER_GET_ROUTES + CONTROL_ROOM_READ_ROUTES
 FABRIC_READ_ROUTES = ("/workspace/fabric/catalog/current", "/workspace/fabric/status/current")
 GET_ROUTES = COMPOSED_GET_ROUTES + FABRIC_READ_ROUTES
-# Preserve exactly the profiles admitted by the two predecessor contracts.
+# Preserve exactly the profiles admitted by the predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
 TRANSITION_ROUTE_PROFILES = (
@@ -58,7 +65,8 @@ TRANSITION_ROUTE_PROFILES = (
     (READER_GET_ROUTES, READER_POST_ROUTES),
     (CONTROL_ROOM_LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
     (CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES),
-    (COMPOSED_GET_ROUTES, POST_ROUTES),
+    (COMPOSED_GET_ROUTES, COMPOSED_POST_ROUTES),
+    (GET_ROUTES, COMPOSED_POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

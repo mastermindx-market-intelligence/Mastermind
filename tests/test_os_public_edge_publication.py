@@ -20,7 +20,10 @@ from ops.executive_os import executive_mcp_entry as entry
 from ops.executive_os import os_public_edge_publication as m
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest as seals
-from ops.executive_os.os_public_edge import HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import (
+    HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, POST_ROUTES,
+    COMPOSED_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES, asset_routes, render,
+)
 
 
 def git(repo, *args):
@@ -104,7 +107,7 @@ def inputs(tmp_path, monkeypatch, request):
     git(repo, "update-ref", "refs/remotes/origin/master", sha)
     settings = getattr(request, "param", (False, False))
     old_notices, new_notices = settings[:2]
-    retired_edge_profile = len(settings) == 3 and settings[2] is True
+    retired_edge_profile = settings[2] if len(settings) == 3 else None
     monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(
         app, "new", noir_notices=new_notices))
     bundle = tmp_path / "bundle"
@@ -118,11 +121,14 @@ def inputs(tmp_path, monkeypatch, request):
     seals.create(old, "a" * 40, "b" * 40)
     live = tmp_path / "live.json"
     config = fullconfig(manifest)
-    if retired_edge_profile:
+    if retired_edge_profile is True:
         # Current production edge initially has no Control Room routes.
         branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
         branches[0]["match"][0]["path"] = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(manifest)))
         branches[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
+    elif retired_edge_profile == "pre-native":
+        branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+        branches[1]["match"][0]["path"] = list(COMPOSED_POST_ROUTES)
     live.write_bytes(m.canonical(config))
     return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
                 new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,
@@ -220,6 +226,69 @@ def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(s
     assert route[1]["match"][0]["path"] == list(POST_ROUTES)
     assert relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][2] == {
         "handle": [{"handler": "static_response", "abort": True}]}
+
+
+@pytest.mark.parametrize("inputs", [(False, False, "pre-native")], indirect=True)
+def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
+    """Exercise rendered policy and both real publisher phases with inert HTTP."""
+    i, _, relay = staged
+    # These are the actual retained ten-path profile and the three POST paths
+    # dispatched by the native Executive transport, independent of the table.
+    historical = (
+        "/os/executive/context", "/os/executive/submit", "/os/executive/status",
+        "/os/executive/session/context", "/os/executive/session/reply",
+        "/os/executive/session/references", "/workspace/control-room/open",
+        "/workspace/control-room/bind", "/workspace/control-room/unbind",
+        "/workspace/control-room/refresh-builds",
+    )
+    native = (
+        "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+    )
+    assert COMPOSED_POST_ROUTES == historical
+    assert DIRECT_NATIVE_POST_ROUTES == native
+    assert POST_ROUTES == historical + native
+    branches = lambda config: config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    before = copy.deepcopy(relay.current)
+    original = branches(before)
+    assert original[1]["match"][0]["path"] == list(historical)
+    rendered = render(entry.build_os_asset_manifest(i["new_bundle"]), i["relay_port"])
+    post_matcher = rendered.split("    @post {", 1)[1].split("    handle @post {", 1)[0]
+    assert post_matcher.split("      path ", 1)[1].splitlines()[0].split() == list(historical + native)
+    assert "method POST" in post_matcher
+    assert all(path not in rendered.split("    handle @get {", 1)[0] for path in native)
+
+    for phase, expected_state in (("prepare", "PREPARED"), ("finalize", "FINAL")):
+        if phase == "finalize":
+            assert ready(staged)["state"] == "CUTOVER_READY"
+            assert relay.selected == "old"
+            relay.selected = "new"  # The explicit test-host switch, never the publisher.
+        assert publish(staged, phase)["state"] == expected_state
+        current = branches(relay.current)
+        assert current[1]["match"][0] == {"method": ["POST"], "path": list(historical + native)}
+        # Body bounds, proxy/header identity and terminal refusal remain exact.
+        assert current[1]["handle"] == original[1]["handle"]
+        assert current[1]["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert current[2:] == original[2:]
+        assert current[-1] == {"handle": [{"handler": "static_response", "abort": True}]}
+        assert relay.current["apps"]["tls"] == before["apps"]["tls"]
+        assert relay.current["apps"]["http"]["servers"]["srv0"]["routes"][1:] == before["apps"]["http"]["servers"]["srv0"]["routes"][1:]
+        # Closed Caddy method/path matchers forward each actual native POST to
+        # the existing proxy. Other methods and paths reach only terminal abort.
+        def matching(method, path):
+            return [branch for branch in current[:-1]
+                    if any(method in match["method"] and path in match["path"]
+                           for match in branch["match"])]
+        for path in native:
+            assert matching("POST", path) == [current[1]]
+            for method in ("GET", "PUT", "DELETE", "OPTIONS"):
+                assert matching(method, path) == []
+        for path in ("/os/executive/direct-native/arbitrary", native[0] + "/",
+                     "/os/executive/session/send", "/os/executive/direct-native/*"):
+            assert matching("POST", path) == []
+    assert relay.events.count(("POST", "config")) == 2
+    with pytest.raises(ValueError):
+        publish(staged, "finalize")
 
 
 def test_real_consumer_two_phase_order_and_single_selected_release(staged):

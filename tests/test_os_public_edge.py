@@ -29,7 +29,7 @@ def manifest(noir=False, notices=False):
     ]}
 
 
-def test_authenticated_control_room_routes_are_exact_and_method_scoped():
+def test_authenticated_native_and_control_room_routes_are_exact_and_method_scoped():
     from ops.executive_os.os_public_edge import (
         GET_ROUTES, INCUMBENT_GET_ROUTES, POST_ROUTES, INCUMBENT_POST_ROUTES,
     )
@@ -49,6 +49,9 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/control-room/bind",
         "/workspace/control-room/unbind",
         "/workspace/control-room/refresh-builds",
+        "/os/executive/direct-native/result",
+        "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
     }
     assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
     assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
