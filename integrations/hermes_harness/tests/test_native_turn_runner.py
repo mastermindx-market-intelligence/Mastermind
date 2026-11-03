@@ -55,15 +55,19 @@ class CgroupAndEnvironmentTests(unittest.TestCase):
     def test_exact_service_cgroup_matches(self):
         assert_role_service_cgroup(
             "mmsecretary",
-            raw="0::/user.slice/user-1000.slice/user@1000.service/app.slice/hermes-runtime-mmsecretary.service\n",
+            raw="0::/system.slice/hermes-runtime-mmsecretary.service\n",
         )
         assert_role_service_cgroup(
             "mmmeta",
-            raw="0::/user.slice/hermes-runtime-mmmeta.service/child.slice\n",
+            raw="0::/system.slice/hermes-runtime-mmmeta.service/child.slice\n",
         )
 
     def test_wrong_or_forged_cgroup_refuses(self):
         bad = [
+            "0::/user.slice/user-1000.slice/user@1000.service/app.slice/hermes-runtime-mmsecretary.service\n",
+            "0::/user.slice/hermes-runtime-mmsecretary.service/child.slice\n",
+            "0::/system.slice/unrelated.service/hermes-runtime-mmsecretary.service\n",
+            "1:name=systemd:/system.slice/hermes-runtime-mmsecretary.service\n",
             "0::/user.slice/hermes-runtime-mmmeta.service\n",
             "0::/user.slice/hermes-runtime-mmsecretary.service-fake\n",
             "0::/unrelated/sol-shell.scope\n",

@@ -15,7 +15,6 @@ import secrets
 import selectors
 import signal
 import subprocess
-import sys
 import time
 from collections.abc import Mapping
 
@@ -36,32 +35,27 @@ _ALLOWED_ROLES = frozenset({"mmsecretary", "mmmeta"})
 
 
 def assert_role_service_cgroup(role: str, *, raw: str | None = None) -> None:
-    """Require the current Linux cgroup under the exact selected role unit.
+    """Require the PID1-owned exact system.slice unit, never a user service.
 
-    Pure raw injection exists for deterministic tests only. run_native_canary
-    never accepts raw cgroup evidence: it always reads /proc/self/cgroup.
-    This is a confinement identity guard, not proof of BPF IPAddressDeny
-    enforcement or absence of an unrelated external process.
+    Ubuntu1's user manager matched the role's service basename but did not
+    enforce IPAddressDeny=any. Reuse the canonical root-owned cgroup guard
+    before any model canary can read private role credentials.
+    raw is only for hermetic test injection.
     """
     if role not in _ALLOWED_ROLES:
         raise RuntimeRefusal("NATIVE_CANARY_ROLE_INVALID")
-    if raw is None:
-        if not sys.platform.startswith("linux"):
-            raise RuntimeRefusal("NATIVE_CANARY_LINUX_REQUIRED")
-        try:
-            raw = Path("/proc/self/cgroup").read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
-            raise RuntimeRefusal("NATIVE_CANARY_CGROUP_UNAVAILABLE") from None
-    basename = f"hermes-runtime-{role}.service"
-    if (not isinstance(raw, str) or len(raw) > 16384
-            or not any(
-                (line.split(":", 2)[-1].split("/")[-1] == basename
-                 or f"/{basename}/" in line.split(":", 2)[-1])
-                for line in raw.splitlines()
-                if line.startswith("0::") or line.count(":") >= 2
-            )):
-        raise RuntimeRefusal("NATIVE_CANARY_CGROUP_UNQUALIFIED")
-
+    from integrations.hermes_runtime.system_service import assert_root_service_cgroup
+    try:
+        assert_root_service_cgroup(role, raw=raw)
+    except RuntimeRefusal as exc:
+        native_codes = {
+            "ROOT_UNIT_LINUX_REQUIRED": "NATIVE_CANARY_LINUX_REQUIRED",
+            "ROOT_UNIT_CGROUP_UNAVAILABLE": "NATIVE_CANARY_CGROUP_UNAVAILABLE",
+            "ROOT_UNIT_CGROUP_UNQUALIFIED": "NATIVE_CANARY_CGROUP_UNQUALIFIED",
+        }
+        if exc.code in native_codes:
+            raise RuntimeRefusal(native_codes[exc.code]) from None
+        raise
 
 def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) -> dict[str, str]:
     """Reject ambient/gateway/Slack credential exposure; use provided child scope."""
