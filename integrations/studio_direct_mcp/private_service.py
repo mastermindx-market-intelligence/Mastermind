@@ -696,6 +696,28 @@ NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537
                  'private-tunnel-gateway.mjs': '225b1a592f5486c688efc6f5fc37184877a7e3e8022c2e831858c8989c6cca00',
                  'tailnet-gateway.mjs': '89a3d1c972a31ab62f19205439d6f09bc24f4d51783ebc2e1bea788bcd9d817c'}}
 
+# This one exact C2 Business publisher successor is not generic restage.
+# Eligibility remains conditional on the completed original native pool-pin
+# transaction and a separately recorded native-owner publisher successor.
+C2_NATIVE_PUBLISHER_FILES_PREIMAGE = {
+    "fleet-routing.mjs": "dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533",
+    "fleet-status.mjs": "a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780",
+    "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+    "output-budget.mjs": "5fb464cdb531adf944561ddda760b77856530bcc08f7ba48ef774d6750f5a071",
+    "package-lock.json": "9a4e7398ddb45f44d6910fc05118bac425397f4b9869f33229da81f76ae262d0",
+    "package.json": "25ab096e21ac6e8c3761ee896e69d175ba628c1fe5751bcfab452c304a4bb634",
+    "paper-design.mjs": "e2162584ceab9941e7bcce51b73120c9a9aeb13c128cd5b217077c005f0f1c7e",
+    "private-tunnel-auth.mjs": "fe8c9e5ba14fd7750fc26bbfe45ed3f77d4b96fa8ff639c6b5efdf653740e1c0",
+    "private-tunnel-gateway.mjs": "fd4eb541590cafc3c92a0b0ac1f7080baa76193704a2219e58b02462ef4d5540",
+    "tailnet-gateway.mjs": "9dd75992ba0b5c658582779ebeb71a06f13ec0a3475aa83d62753e22832b906b",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
+C2_NATIVE_PUBLISHER_FILES_POSTIMAGE = {
+    **C2_NATIVE_PUBLISHER_FILES_PREIMAGE,
+    **FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256,
+}
+
 # Retained sealed Tailnet seats, each with only its original and exact native
 # pool-pin postimage. These are profile selectors, never an argv fallback.
 _NATIVE_POOL_PIN_TAILNET_CANONICAL = {
@@ -717,6 +739,24 @@ def _pin_owner_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def cmd_native_pool_pin_publisher(args):
+    """One additional explicitly sealed transition owned by the native pin module.
+
+    This does not call cmd_upgrade or alter the generic pin restage refusal.
+    """
+    pin = _pin_owner_module()
+    try:
+        value = pin.run_publisher(sys.modules[__name__], args)
+    except SystemExit as error:
+        if type(error.code) is str and error.code.startswith("NATIVE_POOL_PUBLISHER_"):
+            raise
+        raise SystemExit("NATIVE_POOL_PUBLISHER_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_POOL_PUBLISHER_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
 
 
 def cmd_native_pool_pin(args):
@@ -782,7 +822,7 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
     spec.loader.exec_module(generation)
     from contextlib import nullcontext
     lock = (generation.publication_lock(Path(first["store"]))
-            if args.operation in ("apply", "reconcile") else nullcontext())
+            if args.operation in ("apply", "reconcile", "publisher-apply", "publisher-reconcile") else nullcontext())
     with lock:
         checked = proof()
         if checked != first:
@@ -1188,7 +1228,9 @@ def _valid_manifest(data, account: str, label: str) -> bool:
             ))
             and not c2_paper_predecessor and not c4_paper_cohort
             and not (version == MANIFEST_VERSION and account in NATIVE_POOL_PIN_PREDECESSORS
-                     and files == NATIVE_POOL_PIN_PREDECESSORS[account])):
+                     and files == NATIVE_POOL_PIN_PREDECESSORS[account])
+            and not (version == MANIFEST_VERSION and account == "chatgpt2-business"
+                     and files == C2_NATIVE_PUBLISHER_FILES_POSTIMAGE)):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -3398,6 +3440,14 @@ def build_parser() -> argparse.ArgumentParser:
     pin.add_argument("--expected-plan-sha256")
     pin.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
     pin.set_defaults(func=cmd_native_pool_pin)
+
+    publisher_pin = sub.add_parser("native-pool-pin-publisher")
+    publisher_pin.add_argument("--account", required=True)
+    publisher_pin.add_argument("--source", required=True)
+    publisher_pin.add_argument("--expected-manifest-sha256", required=True)
+    publisher_pin.add_argument("--expected-plan-sha256")
+    publisher_pin.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    publisher_pin.set_defaults(func=cmd_native_pool_pin_publisher)
 
     fabric = sub.add_parser("fabric-backend-release")
     fabric.add_argument("--account", required=True)
