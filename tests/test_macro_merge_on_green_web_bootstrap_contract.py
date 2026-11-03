@@ -94,7 +94,7 @@ def test_account_entrypoint_routes_macros_and_other_repos_differently():
         "docs/DELIVERY_WORKFLOW.md",
         "merge-on-green",
         "binding CI",
-        "non-author release decision",
+        "independent non-author arming/release decision",
         "recorded holds",
         "main",
         "master",
@@ -152,3 +152,56 @@ def test_cross_repository_macro_gh_commands_are_explicitly_bound():
         assert defective != section, "negative mutation must change a command"
         with pytest.raises(AssertionError):
             _assert_explicit_macro_repo_binding(defective)
+
+
+
+def _assert_review_once_automatic_release_transition(delivery: str, account: str) -> None:
+    section = delivery.split(
+        "### Review once, release automatically — only after machine enforcement", 1
+    )[1].split("`merge-blocked` is a refusal/diagnostic", 1)[0]
+    for token in (
+        "one independent source review",
+        "not yet live authority",
+        "absent, stale, revoked, self-authored and unreadable reviews",
+        "CHANGES_REQUESTED",
+        "installed, independently qualified and read back",
+        "without an additional non-author release operator",
+        "admin bypass",
+    ):
+        assert token in section, f"automatic release safety contract lost: {token}"
+    interim = delivery.split(
+        "3. Verify **one genuinely independent formal GitHub APPROVED review**", 1
+    )[1].split("5. Reconcile the **existing controller**", 1)[0]
+    assert "**current interim non-author release fence**" in interim
+    assert "does not yet read native PR" not in interim  # review gate is described precisely
+    assert "does not yet read native PR" in section
+    assert "retain the current" in account
+    assert "independent non-author arming/release decision" in account
+    assert "review once and let existing automation perform" in account
+
+
+def test_review_once_auto_release_preserves_interim_and_machine_enforcement():
+    delivery = DELIVERY.read_text(encoding="utf-8")
+    account = (ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md").read_text(
+        encoding="utf-8"
+    )
+    _assert_review_once_automatic_release_transition(delivery, account)
+
+    import pytest
+
+    for removed in (
+        "**current interim non-author release fence**",
+        "installed, independently qualified and read back",
+        "absent, stale, revoked, self-authored and unreadable reviews",
+    ):
+        damaged = delivery.replace(removed, "UNVERIFIED", 1)
+        assert damaged != delivery
+        with pytest.raises(AssertionError):
+            _assert_review_once_automatic_release_transition(damaged, account)
+    damaged_account = account.replace(
+        "independent non-author arming/release decision",
+        "self-release approved", 1
+    )
+    assert damaged_account != account
+    with pytest.raises(AssertionError):
+        _assert_review_once_automatic_release_transition(delivery, damaged_account)
