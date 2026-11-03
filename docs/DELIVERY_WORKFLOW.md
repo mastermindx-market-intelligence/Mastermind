@@ -35,10 +35,14 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
+### Proportionate review, not universal review
+
+Use [REVIEW_RISK_POLICY.md](REVIEW_RISK_POLICY.md) and its source-verified advisory classifier when that policy has been accepted and enrolled for this repository. FAST routine changes require **zero additional independent technical reviews and zero additional non-author approvals from this policy**; STANDARD requires one independent assessment and non-author approval; CRITICAL requires stronger independent scrutiny. HOLD cannot claim a review exemption. The actual native GitHub ruleset, required CI, existing security/release holds, protected source law and authority constraints always prevail. Do not use a classifier result as a release token, self-approve/self-merge, or change a GitHub ruleset to bypass a hold. Until policy adoption and real-path qualification are verified, retain the incumbent review gate. Do not auto-trigger universal PR reviews merely because a review ingress is available.
+
 1. Run the smallest relevant local test set while iterating. Publish a truthful
    candidate once its scoped source is stable and the relevant local qualification passes.
-   For an ordinary non-author GitHub review, mark a qualified Draft PR **Ready for Review
-   before asking the reviewer**. Hosted CI may still be queued or running: full required
+   When the accepted risk tier or native rules require a non-author GitHub review, mark a qualified Draft PR **Ready for Review
+   before asking the reviewer**. FAST changes must not dispatch a review merely to satisfy an obsolete universal-review habit. Hosted CI may still be queued or running: full required
    CI is a merge/release gate, not a prerequisite for review readiness. Keep unfinished
    or locally failing work in Draft; do not imply a reviewer is working just because
    a request exists.
@@ -70,7 +74,7 @@ worktree and move only the task's deliberate edits there.
    Queued CI is not a failing build, and do not push empty/rebase-only commits to restart CI.
    Without a usable observer, continue useful foreground work and check once at the next real
    integration boundary. Never claim a background Web turn or automatic wake that does not exist.
-6. After required PR-head checks and review pass and queue entry is authorized, use the
+6. After required PR-head checks and all **actually required** reviews pass and queue entry is authorized, use the
    repository's native GitHub merge queue when enabled. The active queue's `merge_group`
    workflow qualifies the exact integrated candidate after queue entry and **before merge**;
    do not add a manual synthetic PR merge-ref check requirement or ancestry-only rebase as
@@ -111,7 +115,7 @@ a new watcher, or permission to retry an explicitly refused effect.
    and stable, transition it to **Ready for Review** even when hosted checks
    are still running; preserve any failed required CI as a merge blocker.
 2. Request the genuine non-author GitHub reviewer only on an eligible reviewable
-   candidate. A `review_requested` event observed while Draft is refused by
+   candidate **when its accepted review tier or native branch rule requires one**, or a separate authorized manual request exists. A `review_requested` event observed while Draft is refused by
    the existing review-intent admission and a later `ready_for_review` event
    does **not** replay it. If a reviewer is already requested, inspect and
    consume that **same formal request**; do not send a duplicate technical
@@ -130,8 +134,8 @@ a new watcher, or permission to retry an explicitly refused effect.
    polling or filing another handoff. This follows the protected
    `docs/sol_skills/ACTIVE_EXECUTION.md`, not a new lifecycle policy.
 5. Keep the branch-protected release gate: required exact-head CI, genuine
-   non-author approval, relevant source-law compatibility and native merge
-   queue. After merge, verify any owed installed instructions, provider skills
+   non-author approval **where required by the accepted risk tier or native rules**,
+   relevant source-law compatibility and native merge queue. After merge, verify any owed installed instructions, provider skills
    and real user-path behavior separately. `Ready` never means `merged`,
    `installed`, or `PROVEN_LIVE`.
 
