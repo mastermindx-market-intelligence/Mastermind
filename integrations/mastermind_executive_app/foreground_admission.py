@@ -12,11 +12,13 @@ from collections.abc import Mapping
 from control_plane.ceo_request import app_request_ref, automated_intent_id
 from integrations.mastermind_executive_app.admission import (
     AdmissionError, AdmissionOutcome, STATUS_ACCEPTED, STATUS_CONFLICT,
-    STATUS_EFFECT_UNKNOWN, STATUS_REFUSED, _finalize_receipt,
-    _validate_five_tool_shape, principal_authorizes_submit,
+    STATUS_EFFECT_UNKNOWN, STATUS_REFUSED, STATUS_TRANSPORT_UNAVAILABLE,
+    _finalize_receipt, _validate_five_tool_shape, principal_authorizes_submit,
 )
 from integrations.session_bridge.http_foreground import bind_request
-from integrations.session_bridge.installed import InstalledSessionBridgeClient
+from integrations.session_bridge.installed import (
+    InstalledSessionBridgeClient, TransportNotSent,
+)
 from integrations.session_bridge.schemas import BridgeError
 
 
@@ -42,6 +44,16 @@ async def compose_foreground_admission(request, principal, arguments, client, *,
         with bind_request(request, principal, clock=clock) as source:
             receipt = await source.run(lambda: client.summon(principal, validated))
             source.require_live()
+    except TransportNotSent:
+        # The trusted transport proved the original frame was never sent, so
+        # no Executive effect began. The incumbent ingress-unavailable admission
+        # retains the original request pointer; every other failure stays
+        # conservatively unknown.
+        return AdmissionOutcome(
+            status=STATUS_TRANSPORT_UNAVAILABLE, request_ref=request_ref,
+            code="ingress_unavailable",
+            message="Executive CEO ingress did not send the original request",
+        )
     except BridgeError as exc:
         # The existing owner distinguishes these pre-commit refusals. All other
         # failures conservatively retain the original pointer as unknown.
