@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -57,6 +58,41 @@ def exec_checked(argv: list[str], *, cwd: Path, env: dict[str, str] | None = Non
     return p.stdout + "\n" + p.stderr
 
 
+def generation_owner():
+    """Load the existing repository owner, never code from the supplied release."""
+    path = REPO / "ops/native_fabric/quota_continuity/rollout/native_generation.py"
+    spec = importlib.util.spec_from_file_location("native_generation_owner", path)
+    if spec is None or spec.loader is None:
+        raise ValueError("native generation owner unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def verified_generation_manifest(raw: bytes) -> dict[str, str]:
+    """Bind the complete supplied closure to the immutable expected generation."""
+    owner = generation_owner()
+    manifest = owner.unique_json(raw)
+    if not isinstance(manifest, dict):
+        raise ValueError("invalid generation manifest")
+    files = manifest.get("files")
+    stable_ext = manifest.get("stable_ext")
+    if (manifest.get("schema") != owner.SCHEMA
+            or not isinstance(files, dict) or len(files) != 95
+            or not isinstance(stable_ext, str)
+            or not Path(stable_ext).is_absolute()
+            or ".." in Path(stable_ext).parts
+            or str(Path(stable_ext)) != stable_ext):
+        raise ValueError("invalid expected 95-file generation manifest")
+    # The incumbent owner validates every relative name/hash and generates the
+    # fixed entrypoints/bindings. The self-declared digest is not proof.
+    expected = owner.descriptor(files, Path(stable_ext))
+    wanted = owner.digest(owner.canonical(expected))
+    if wanted != GENERATION or manifest != dict(expected, digest=wanted):
+        raise ValueError("generation closure identity or binding mismatch")
+    return expected["files"]
+
+
 def qualify(generation: Path) -> dict[str, object]:
     generation = generation.absolute()
     if generation.name != GENERATION or generation.parent.name != "native-code-releases":
@@ -67,12 +103,9 @@ def qualify(generation: Path) -> dict[str, object]:
     manifest_stat = manifest_path.lstat()
     if not stat.S_ISREG(manifest_stat.st_mode) or manifest_stat.st_mode & 0o222:
         raise ValueError("manifest not sealed")
-    manifest = json.loads(manifest_path.read_text())
-    files = manifest.get("files")
-    if (manifest.get("schema") != "native-code-generation.v1"
-        or manifest.get("digest") != GENERATION
-        or not isinstance(files, dict) or len(files) != 95):
-        raise ValueError("generation manifest differs from expected exact 95-file source")
+    # Refuse a changed manifest before reading/importing any supplied member.
+    raw_manifest = generation_owner().regular_bytes(manifest_path, limit=MAX_FILE_BYTES)
+    files = verified_generation_manifest(raw_manifest)
     for name, sha in files.items():
         if not isinstance(name, str) or not isinstance(sha, str) or ".." in Path(name).parts:
             raise ValueError("invalid native manifest member")
