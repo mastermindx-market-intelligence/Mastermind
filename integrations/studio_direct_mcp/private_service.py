@@ -299,6 +299,9 @@ C2_PAPER_BUSINESS_RUNTIME_IDENTITY = {**C2_PAPER_RUNTIME_IDENTITY, "port": 45028
 # configuration; it does not enroll a new workspace or change installed grants.
 C4_PAPER_ACCOUNT = "chatgpt4"
 C4_PAPER_ORIGINAL_MANIFEST_SHA256 = "849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071"
+C4_REPOSITORY_POST_MANIFEST_CANONICAL_SHA256 = "f7a737600b819deb0e9dbb746fa202d2777b0d6d4047f0c54d99b32f691ec79b"
+C4_REPOSITORY_POST_CONFIG_SHA256 = "fa00524fcade00b9fa6ffe33883600bec1856a41633f64b50c9f77e67527bfaa"
+# One immutable reviewed C4 repo successor generation; not a generic profile grant.
 C4_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
     "e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2",
     "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
@@ -769,6 +772,34 @@ def _pin_owner_module():
     return module
 
 
+def _c4_repo_owner_module():
+    # Same signed private-service source owner, not a separately installed Git
+    # publisher or one-off shell installer.
+    import importlib.util
+    candidate = Path(__file__).resolve().with_name("private_service_pin_c4.py")
+    if candidate.is_symlink() or not candidate.is_file():
+        raise SystemExit("NATIVE_POOL_C4_SOURCE_REFUSED")
+    spec = importlib.util.spec_from_file_location("_studio_pin_c4_repository", candidate)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def cmd_native_pool_c4_repositories(args):
+    owner = _c4_repo_owner_module()
+    try:
+        value = owner.run(sys.modules[__name__], args)
+    except SystemExit as error:
+        if (type(error.code) is str
+                and error.code in {"NATIVE_POOL_C4_" + code for code in owner.REFUSALS}):
+            raise
+        raise SystemExit("NATIVE_POOL_C4_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_POOL_C4_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
 def cmd_native_pool_pin(args):
     pin = _pin_owner_module()
     try:
@@ -861,6 +892,10 @@ def _pin_reject_generic_restage(account):
 
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
+        return
+    if (account == C4_PAPER_ACCOUNT
+            and os.path.lexists(roots["state"] / "native-pool-pin-c4-repositories")):
+        _c4_repo_owner_module().require_start(sys.modules[__name__], roots)
         return
     _pin_owner_module().require_start(sys.modules[__name__], account, roots)
 
@@ -1264,6 +1299,18 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         and all(data.get(key) == value for key, value in C4_PAPER_RUNTIME_IDENTITY.items())
         and _canonical_json_sha256(data) in C4_PAPER_MANIFEST_CANONICAL_SHA256
     )
+    c4_repository_postimage = (
+        version == MANIFEST_VERSION and account == C4_PAPER_ACCOUNT
+        and data.get("configHash") == C4_REPOSITORY_POST_CONFIG_SHA256
+        and all(data.get(key) == value for key, value in C4_PAPER_RUNTIME_IDENTITY.items())
+        and _canonical_json_sha256(data) == C4_REPOSITORY_POST_MANIFEST_CANONICAL_SHA256
+    )
+    # C4's original pinned profile has no repository adapter. A later
+    # generic known fileset containing that adapter is NOT a C4 grant:
+    # require the complete, immutable successor postimage first.
+    if (account == C4_PAPER_ACCOUNT and "workspace-access.mjs" in files
+            and not c4_repository_postimage):
+        return False
     if (fileset not in KNOWN_MANIFEST_FILESETS
             and not (version == MANIFEST_VERSION and (
                 fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
@@ -1271,6 +1318,7 @@ def _valid_manifest(data, account: str, label: str) -> bool:
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
             and not c2_paper_predecessor and not c4_paper_cohort
+            and not c4_repository_postimage
             and not (version == MANIFEST_VERSION and account in NATIVE_POOL_PIN_PREDECESSORS
                      and files == NATIVE_POOL_PIN_PREDECESSORS[account])):
         return False
@@ -3728,6 +3776,14 @@ def cmd_stop(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    c4 = sub.add_parser("native-pool-c4-repositories")
+    c4.add_argument("--account", choices=("chatgpt4",), required=True)
+    c4.add_argument("--expected-manifest-sha256", required=True)
+    c4.add_argument("--expected-plan-sha256")
+    c4.add_argument("--source", help="existing accepted Studio source; required for preview/apply")
+    c4.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    c4.set_defaults(func=cmd_native_pool_c4_repositories)
 
     pin = sub.add_parser("native-pool-pin")
     pin.add_argument("--account", required=True)

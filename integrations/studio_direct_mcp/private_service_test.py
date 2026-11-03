@@ -1793,8 +1793,30 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-c4-repositories", "seal-runtime", "start", "status", "stop"},
         )
+
+    def test_c4_native_successor_has_only_original_account_and_closed_operation(self):
+        parser = svc.build_parser()
+        base = ["native-pool-c4-repositories",
+                "--expected-manifest-sha256", "a" * 64,
+                "--operation", "preview"]
+        with self.assertRaises(SystemExit):
+            parser.parse_args(base)
+        with self.assertRaises(SystemExit):
+            parser.parse_args(base + ["--account", "chatgpt1"])
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["native-pool-c4-repositories",
+                               "--account", "chatgpt4",
+                               "--expected-manifest-sha256", "a" * 64,
+                               "--operation", "push"])
+        args = parser.parse_args(base + ["--account", "chatgpt4"])
+        self.assertEqual(args.account, "chatgpt4")
+        self.assertEqual(args.operation, "preview")
+        self.assertIs(args.func, svc.cmd_native_pool_c4_repositories)
+        with self.assertRaises(SystemExit):
+            parser.parse_args(base + ["--account", "chatgpt4",
+                                      "--repository", "macro"])
 
     def test_stage_requires_all_args(self):
         parser = svc.build_parser()

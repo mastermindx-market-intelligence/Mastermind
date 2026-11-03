@@ -144,3 +144,66 @@ bridge before any bootstrap/kickstart. Consume actual outcomes and qualify the
 new C2 tool path before releasing the native return carrier. The source protocol
 and temp-seat tests do not prove host quiescence, service health, provider
 readiness, native OAuth, a canary or product acceptance.
+
+## C4 native-pin repository successor (source candidate; not an installed grant)
+
+This successor exists under the **existing** private-service native-pin owner,
+and is restricted to the pre-enrolled `chatgpt4` seat. It does not alter the
+original seven-file `state/native-pool-pin` record, native pool generation,
+Paper/Fleet/tailnet modules, OAuth credentials, backend process, or any Git
+branch. It does not retry or take over the independently held C2 Business
+publisher #1979 source/edit operation.
+
+Before this operation, C4's actual original selected native pin has manifest
+SHA256 `168bb25afd7d710799fb86f8912389d49c86371c107ee9544d65fdc2b9d390e2`,
+config SHA256 `f02e385e234f7f88619058485b61f17834d3cfc33896ce3f5606bd64fcecce21`,
+and eleven exact sealed module files. The proposed successor updates only
+`gateway.mjs`, `git-publish.mjs`, adds `workspace-access.mjs`, and adds
+the closed `repositoryWorkspaces` configuration. C4 remains restricted to
+installed `mastermind`, `macro`, and `terminal` aliases and the same
+canonical origins and operation-bound workspaces; caller-supplied repository
+URL/path, refs, force pushes and new credentials remain absent.
+
+**Frozen v1 target generation:**
+
+- Gateway SHA256 `17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30`
+  from immutable **already reviewed Mastermind Git blob**
+  `f87ac012339e82fe46bce5ddc70d1d04183d1b6e` (read locally only with
+  Git lazy fetch disabled; never from another account's installed files).
+- Publisher SHA256 `f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c`
+  and workspace adapter SHA256
+  `e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5`.
+- Projected config SHA256 `fa00524fcade00b9fa6ffe33883600bec1856a41633f64b50c9f77e67527bfaa`,
+  projected manifest SHA256
+  `0fef1fcdaa6fff1f8eb605ad62cf931aaddc7fcf3a1eddbfaaeb749f8741205f`.
+  The protected manifest validator uses its separately frozen canonical
+  postimage digest. It does not refer to moving fleet-target hash constants.
+
+The `private_service.py native-pool-c4-repositories` owner offers
+`preview` (read-only), `apply` (new exact-plan transaction),
+`status` (read-only reconciliation), and `reconcile` (continuation of that
+**same** retained transaction only). There is no generic restage or retries.
+All outputs contain only receipt hashes, effect/phase and account identity.
+The immutable original pin is revalidated against the actually selected
+pool generation; C4's existing native lifecycle lock and publication
+selection fence cover modifying operations. Service-stop evidence is
+required; `preview` may inspect a running seat without any writes.
+Transaction files are 0600 under the existing state root, with a manifest-last
+change and result last. Partial/foreign states prevent startup, rather than
+overwriting or deleting the original pin.
+
+**Release remains gated:** exact-head hosted CI, independent authenticated
+nonauthor review, protected source merge, approved/verified installed
+private-service owner, read-only source/manifest preview with expected
+plan SHA, original C4 quiescence and stopped-service proof, exact CAS
+`apply` (or exact original transaction `reconcile` after uncertainty),
+and readback of all twelve modules/config/manifest/startup pin. The C4
+ChatGPT connected-app tool snapshot must then actually advertise
+`studio_workspace_repositories`, `studio_workspace_acquire`, closed
+`repository` selections and reviewed two-parent `merge` fields.
+Only afterward can a new **independent disposable** operation prove
+Macro and Terminal acquire/status/commit/nonforce-push/remote ref readback.
+Previously refused `intl-country-cockpit-20261018` remains on its original
+carrier; no automatic replay, account switch or alternative publisher is
+authorized. A source candidate or green fixture suite never counts as
+installed capability, release, or live website acceptance.
