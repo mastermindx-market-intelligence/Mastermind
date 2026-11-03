@@ -99,6 +99,79 @@ directory. Local uncommitted files cannot enter the release. The VPS deploy
 creates a rolling snapshot, restarts `mastermind.service`, checks
 `http://127.0.0.1:8001/health`, and rolls back on failure.
 
+## Macro release: `merge-on-green` is opt-in, not native auto-merge
+
+This is a **cross-repository exception** for
+`mastermindx-market-intelligence/macro` targeting `main`; it does not change
+Mastermind's protected `master` merge-queue procedure above or install a new
+merge service. Macro's incumbent controller is
+`macro/.github/workflows/merge-on-green.yml` +
+`macro/scripts/merge_on_green.py`. Its `merge-on-green` PR label is an
+**explicit release opt-in** consumed by that controller, not a general-purpose
+status, review approval, merge command, or license to override a hold.
+
+**Never use GitHub's native `gh pr merge --auto` or `enable_auto_merge` as the
+Macro fallback.** Macro's current source documents that without required status
+checks this may merge before CI concludes. Repository-wide
+`allow_auto_merge=true` does **not** mean that native auto-merge supplies
+Macro's source/check freshness contract.
+
+Before a session adds the label to any PR — particularly a PR it did not
+create — perform the following **on the exact current PR/head**, using live
+GitHub state, not a pasted handoff:
+
+1. Check the **repository and base** (`macro/main` only), PR state (OPEN,
+   not Draft), exact head SHA, source custody, latest main, merge compatibility,
+   all binding PR-head checks (`ci-gate`, scheduled `ci-pack-*`, fences and
+   other actual owner-specific checks), and any pending/red evidence. Macro's
+   `can_arm_merge_on_green` is the source-level clean-check predicate; an
+   absent or incomplete check is not green.
+2. Read **title, body and issue comments** for explicit `HOLD`,
+   `HOLD-FOR-SOL`, `STOP`, `do not merge` or release restrictions. Follow
+   `macro/agentos/decisions/DEC-SOL-HOLD-IS-A-MERGE-BARRIER.md` and
+   `DEC-MERGE-AUTOMATION-MUST-ENFORCE-RECORDED-HOLDS.md`.
+   A held PR must stay Draft, disarmed and without native auto-merge; its
+   particular holding authority must release it. Where the controller's
+   `HOLD-RELEASED` protocol applies, the qualifying release must be newer
+   than all binding hold comments. **A label or CI-green state never releases
+   a recorded hold.** Do not blanket-label, re-home or silently un-draft.
+3. Verify the applicable **independent non-author review/release decision**
+   and current source qualification. A Fabric technical `SOURCE_PASS`,
+   request for review, or green hosted CI is **not** a formal GitHub approval.
+   Macro's sweeper does not itself query a native `APPROVED` review; the
+   **arming actor** must enforce the organizational non-author release gate.
+   An author or shared-account session must not use the label to circumvent
+   the no-self-merge/no-self-approval rule.
+4. Only when release is **actually authorized**, the head checks are
+   concluded clean, and no hold/merge gate remains, the eligible release
+   operator may opt in by adding the **single existing label**:
+   `gh pr edit <number> --add-label merge-on-green`
+   (or the additive GitHub issue-label action). Record exact
+   repo/PR/head, reviewer identity/decision and check/run evidence on the
+   existing source-linked release record. Do not substitute
+   `main-red-repair` (a separately justified exception) or touch
+   `merge-refresh-in-flight` (controller-owned lease state).
+5. Reconcile the **existing controller** and PR after arming:
+   `gh run list --workflow merge-on-green.yml --limit 10`,
+   `gh run view <run-id> --log`, and
+   `gh pr view <number> --json state,isDraft,labels,headRefOid,mergeStateStatus,reviewDecision,autoMergeRequest`.
+   Read a **full sweep**, not only a successful *failure-marker pass*.
+   The controller can end SUCCESS without merging anything. A green head may
+   be **stale** after `main` changes CI definitions; branch refresh can be
+   deferred when its global CI workload cap is exhausted; conflicts, hold
+   guards, missing semantic proof and inherited reds are separate blockers.
+   Keep the original label/carrier and diagnose the actual verdict. Never
+   spam workflows, push empty commits, cancel another lane's CI, or raise the
+   workload cap merely to force progress.
+
+`merge-blocked` is a refusal/diagnostic to investigate, **not** approval to
+clear a hold. Record `ARMED`, `REFRESH_DEFERRED`, `CHECKS_PENDING`,
+`CONFLICT`, `HELD`, `MERGED`, and `PROVEN_LIVE` as distinct evidence
+claims, never as one "auto-merge enabled" status. Post-merge production
+verification is still required when owed. For other repositories, inspect
+their own current protected rules and release path; a Macro label is not a
+universal auto-merge switch.
+
 ## Review-readiness liveness (no implicit reviewer execution)
 
 This is sequencing guidance for the existing GitHub/Executive owners, **not** a
