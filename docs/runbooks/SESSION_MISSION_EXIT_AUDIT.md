@@ -35,6 +35,28 @@ owners and apply the platform's existing authorization and effect fences. The
 may proceed only if genuinely independent in target, authority and effect, as
 already determined by current protected law.
 
+## Consume pending work instead of duplicating it
+
+The existing `gaps[].next_proof` now uses the supplied observation state:
+
+| Observed gap | Guidance |
+| --- | --- |
+| Exact-head CI is QUEUED, PENDING, IN_PROGRESS, WAITING or REQUESTED, with its original run reference | Consume that run through its original observation path; no rerun or empty push. |
+| Exact-head CI has a terminal non-success result | Inspect the original failure before a permitted repair; no blind retry. |
+| CI identity/state is absent, stale or unrecognized | Reconcile with GitHub; missing evidence is not a failed build. |
+| Eligible independent review is REQUESTED, PENDING or IN_PROGRESS on the exact head | Consume the existing request; do not commission a duplicate. Request does not prove execution or approval. |
+| Current independent review requests changes | Repair the findings in one stable source revision before renewed review. |
+| Worker is QUEUED, STARTED or UNKNOWN | Reconcile the original worker; do not submit a replacement. |
+| Worker is TERMINAL | Inspect/validate its original result and effects; exit zero is not acceptance and does not justify a relaunch. |
+
+These values use the existing `source.ci_conclusion`, `source.review_verdict`
+and `worker.state` fields; no new schema, observer, clock or scheduler is added.
+The auditor cannot authenticate a caller-supplied snapshot or prove it is still
+current. Stale/missing references and unknown or self-review identity never
+become an eligible pending review. All proof predicates, held-action fences,
+false authorization flags and CLI exit meanings are unchanged. Output guidance
+uses fixed text and never echoes source references or private input.
+
 ## Integration sequence and boundaries
 
 1. Source tests + exact-head CI and independent review of this diagnostic.

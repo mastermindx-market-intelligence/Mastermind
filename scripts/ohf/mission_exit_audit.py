@@ -96,6 +96,75 @@ def _true_and_ref(obj: dict[str, Any], flag: str, receipt: str) -> bool:
     return obj.get(flag) is True and _ref(obj.get(receipt))
 
 
+def _next_proof(requirement: str, worker: dict[str, Any],
+                source: dict[str, Any], current_head: str) -> str:
+    """Describe the missing evidence without originating duplicate operations.
+
+    These are fixed advisory strings, not scheduler actions. Supplied snapshots
+    remain unverified until their existing owners confirm them; pending means
+    neither execution nor acceptance. No source/ref/content is echoed here.
+    """
+    if requirement == "current_head_ci":
+        state = source.get("ci_conclusion")
+        bound = source.get("ci_head") == current_head and _ref(source.get("ci_run_ref"))
+        if bound and isinstance(state, str):
+            if state in {"QUEUED", "PENDING", "IN_PROGRESS", "WAITING", "REQUESTED"}:
+                return (
+                    "consume the existing current-head CI run through its original observation path; "
+                    "do not rerun or push an empty change; advance independent permitted work"
+                )
+            if state in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE", "SKIPPED", "NEUTRAL"}:
+                return (
+                    "inspect the original CI result and identify a permitted repair; "
+                    "no blind retry or duplicate run"
+                )
+        return (
+            "reconcile current-head CI identity and state with GitHub before any new run; "
+            "missing evidence is not a failed build"
+        )
+    if requirement == "independent_source_review":
+        verdict = source.get("review_verdict")
+        bound = (
+            source.get("review_head") == current_head
+            and _ref(source.get("review_ref"))
+            and _ref(source.get("author_id"))
+            and _ref(source.get("reviewer_id"))
+            and source.get("author_id") != source.get("reviewer_id")
+        )
+        if bound and isinstance(verdict, str):
+            if verdict in {"REQUESTED", "PENDING", "IN_PROGRESS"}:
+                return (
+                    "consume the existing current-head review through its original reviewer; "
+                    "do not duplicate the request; a request is not execution or approval"
+                )
+            if verdict == "CHANGES_REQUESTED":
+                return (
+                    "repair the existing findings on the original source carrier, then obtain "
+                    "independent review of the stable changed head; do not repeat unchanged reviews"
+                )
+        return (
+            "reconcile the original review and current source with the independent reviewer; "
+            "obtain the missing head-bound verdict without duplicating an existing request"
+        )
+    if requirement == "accepted_worker_result":
+        if worker["state"] in {"QUEUED", "STARTED", "UNKNOWN"}:
+            return (
+                "reconcile the original worker through the existing Fabric/Runtime owner; "
+                "do not submit a replacement; queue or unknown state is not accepted execution"
+            )
+        if worker["state"] == "TERMINAL":
+            if worker.get("exit_code") == 0:
+                return (
+                    "consume and verify the original terminal result; exit zero is not acceptance; "
+                    "do not relaunch for missing result or acceptance evidence"
+                )
+            return (
+                "inspect the original terminal failure and reconcile its effects; "
+                "do not relaunch or fail over to obtain the same effect"
+            )
+    return ACTION[requirement]
+
+
 def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Return bounded proof gaps, not permission to perform any action.
 
@@ -173,7 +242,8 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
         ),
     }
     gaps = [
-        {"requirement": key, "owner": OWNER[key], "next_proof": ACTION[key]}
+        {"requirement": key, "owner": OWNER[key],
+         "next_proof": _next_proof(key, worker, source, current_head)}
         for key in REQUIREMENTS if key in req and not checks[key]
     ]
     held = []
