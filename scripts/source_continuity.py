@@ -1628,8 +1628,10 @@ def _read_open_pull_roster(
             pulls.append(row)
     if len(pulls) > _MAX_COLLISION_PRS:
         return pulls, False
-    # A full tail page vouches only for PRs at least as new as its oldest row.
-    # Every PR opened since the first observation is newer than newest_known.
+    # A full tail page vouches only for PRs created at least as recently as its
+    # oldest row. Every PR created since the first observation is numbered above
+    # newest_known. A reopened PR keeps its creation place, so the tail does
+    # not cover it.
     if (
         newest_known is not None
         and len(tail) == _PAGE_SIZE

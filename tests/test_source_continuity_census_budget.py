@@ -20,9 +20,11 @@ class EstateHTTP(fx._ProbeHTTP):
         file_counts=None,
         change=None,
         overlap=False,
+        opened_between=0,
     ):
         super().__init__()
         self.count = count
+        self.opened_between = opened_between
         self.files_per_pr = files_per_pr
         self.file_counts = {} if file_counts is None else dict(file_counts)
         self.change = change
@@ -42,6 +44,8 @@ class EstateHTTP(fx._ProbeHTTP):
                 {"number": 1000 + i} for i in range(self.count - 1)]
             if self.change == "membership" and self.passes > 1:
                 rows[-1] = {"number": 9000}
+            if self.passes > 1:
+                rows += [{"number": 9000 + i} for i in range(self.opened_between)]
             if self.change == "duplicate" and page == 2:
                 rows[100] = rows[99]
             if tail:

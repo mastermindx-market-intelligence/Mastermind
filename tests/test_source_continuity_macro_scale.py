@@ -345,6 +345,30 @@ def test_identityless_foreign_row_forces_full_second_census(
     assert len(_foreign_file_calls(http)) == 2 * (999 + 170)
 
 
+@pytest.mark.parametrize(("opened", "rc", "code"), [
+    (99, 1, "REMOTE_PROOF_CHANGED"),
+    (100, 2, "REMOTE_CENSUS_INCOMPLETE"),
+])
+@pytest.mark.parametrize("conditional", [True, False], ids=["identityless", "legacy"])
+def test_full_tail_of_new_prs_leaves_a_full_second_census_incomplete(
+    conditional, opened, rc, code, capsys, monkeypatch
+) -> None:
+    """The re-census paths pass the first observation's newest PR as the floor."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", budget.Clock())
+    if conditional:
+        http = ConditionalEstateHTTP(
+            module, 300, identityless={1000}, opened_between=opened
+        )
+    else:
+        http = budget.EstateHTTP(300, opened_between=opened)
+    rc_result, payload = budget.run_cli(module, capsys, http)
+
+    assert rc_result == rc, payload
+    assert payload["code"] == code
+    assert http.passes == 2
+
+
 def test_time_budget_accepts_last_finite_instant_and_refuses_deadline(
     capsys, monkeypatch
 ) -> None:

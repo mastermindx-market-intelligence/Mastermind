@@ -42,7 +42,7 @@ repos/{repo}/pulls?state=open&sort=created&direction=desc&per_page=100&page=1
 
 A row on that page that the oldest-first pages did not return is appended and evaluated like any other roster row. A tail that is not a list or holds more than a page, a non-object row, a number that is not a positive int, or a number repeated within the tail refuses `REMOTE_PROBE_FAILED`. The 1,500-PR cap is checked again after the merge.
 
-A full tail page covers only PRs at least as new as its oldest row. The second observation passes `newest_known`, the largest PR number in the first observation. If the tail page is full and every row on it is newer than `newest_known`, PRs opened between the observations may extend past it, so the census is `INCOMPLETE` and refuses `REMOTE_CENSUS_INCOMPLETE`.
+A full tail page covers only PRs created at least as recently as its oldest row. A reopened PR keeps its place in creation order, so the tail does not cover it. The second observation passes `newest_known`, the largest PR number in the first observation, from all three of its paths. If the tail page is full and every row on it is newer than `newest_known`, PRs opened between the observations may extend past it, so the census is `INCOMPLETE` and refuses `REMOTE_CENSUS_INCOMPLETE`.
 
 | Change before the tail page is read | Result |
 | --- | --- |
@@ -88,12 +88,14 @@ The tail page repairs an independent review finding against `e6def1df7`: a PR op
 - a full tail of only new PRs ends rc 0 instead of rc 2 `REMOTE_CENSUS_INCOMPLETE`; the 99-row guard case fails only because no tail is read;
 - six malformed tail pages (not a list, more than a page, a repeated row, a non-object row, a bool number, a zero number) end rc 0 instead of rc 2 `REMOTE_PROBE_FAILED`.
 
-Under the new source, all 710 `tests/test_source_continuity*.py` cases pass.
+Removing the floor from either re-census call site, identityless or legacy, fails that path's 100-PR case in `test_full_tail_of_new_prs_leaves_a_full_second_census_incomplete` in `tests/test_source_continuity_macro_scale.py`: rc 1 `REMOTE_PROOF_CHANGED` instead of rc 2 `REMOTE_CENSUS_INCOMPLETE`.
+
+Under the new source, all 714 `tests/test_source_continuity*.py` cases pass.
 
 The new tests pin:
 
 - the exact oldest-first query and the newest-first tail page, sent identically by both observations;
-- a PR opened since the first observation and skipped at the roster end, read once from the tail page; a full tail of only new PRs is incomplete, and a malformed tail fails closed;
+- a PR opened since the first observation and skipped at the roster end, read once from the tail page; a full tail of only new PRs is incomplete on all three second-observation paths, and a malformed tail fails closed;
 - a PR opened mid-read in either observation appended once and freshly proved, with no direct reads; a colliding one refuses `REMOTE_PROOF_CHANGED`;
 - a closure mid-read that skips a disjoint PR or a collider: exactly one direct read of the skipped PR, a receipt, and the collider still reported;
 - a skipped PR that moved, closed, names another PR, or reports an unknown state;
@@ -106,7 +108,7 @@ The new tests pin:
 1. `scripts/source_continuity.py`: the roster query and the tail page in `_read_open_pull_roster`, `newest_known` passed from both second-observation paths, the query check in `_open_pull_roster_semantics`, and the missing-PR branch in `_revalidate_collision_census` with its number-first check
 2. `tests/test_source_continuity_roster_order.py` (new)
 3. `tests/test_source_continuity_relevant_collision_semantics.py`: the open-but-missing case inverted from a refusal to a re-proof, a moved-collider case added, and the fake serves the tail page
-4. roster URL and tail-page fixtures in `tests/test_source_continuity.py`, `tests/test_source_continuity_r3_hardening.py`, `tests/test_source_continuity_saturated_foreign_pr.py`, `tests/test_source_continuity_read_retry.py`, `tests/test_source_continuity_census_budget.py` and `tests/test_source_continuity_macro_scale.py` (call totals up by two per run)
+4. roster URL and tail-page fixtures in `tests/test_source_continuity.py`, `tests/test_source_continuity_r3_hardening.py`, `tests/test_source_continuity_saturated_foreign_pr.py`, `tests/test_source_continuity_read_retry.py`, `tests/test_source_continuity_census_budget.py` and `tests/test_source_continuity_macro_scale.py` (call totals up by two per run); the estate fake takes `opened_between`, and the macro-scale file pins the floor on the identityless and legacy paths
 5. this plan
 
 ## Residual risk
@@ -114,6 +116,7 @@ The new tests pin:
 - Offset paging still skips a row when an earlier row closes mid-read. A PR skipped by both observations' rosters and older than the tail page is missed by the census, as before this change. That needs two specific events at the same page boundary inside a few-minute window. A PR opened between the observations and then skipped is read from the tail page; if 100 or more PRs open in between, the census refuses `REMOTE_CENSUS_INCOMPLETE` instead.
 - The subject PR skipped by the second roster still refuses `REMOTE_PROOF_CHANGED`. The identityless and legacy paths still refuse `REMOTE_PROOF_CHANGED` after a skip. Both are fail-closed.
 - A reopened PR older than the cursor still duplicates a row and refuses `REMOTE_PROBE_FAILED`.
+- A PR closed during the first observation, reopened afterwards at or past the cursor, and then skipped by a closure in the second roster read is never evaluated. It is not a first-pass record, so it gets no direct read, and it keeps its creation place, so the tail does not reach it. A colliding one would go undetected. On `0f7bcfc84`, newest-first, the same skip had the same result, so this is not a regression; an independent re-review of `a67ca88ec` found it. In the conditional path, the reopen must also come after the first observation's conditional replay. A `sort=updated&direction=desc` tail with a floor at the first observation's start time would cover reopened and new PRs together. On 2026-11-03 at 08:50Z, Macro's 100 most recently updated open PRs spanned 11.6 hours, and 34 were updated in the past hour, so such a floor would rarely refuse. It would add a dependency on the local clock against GitHub's `updated_at`.
 - GraphQL cursor pagination would be stable against both inserts and closures. It would change the transport, its budget accounting and the conditional-replay proofs, so it is out of scope.
 - A live run has not exercised this change yet. One real-path run at Macro scale is the remaining proof. The token is shared, so that is at most one run.
 

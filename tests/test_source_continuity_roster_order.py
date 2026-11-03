@@ -400,9 +400,9 @@ def test_new_pr_skipped_at_the_roster_end_is_read_from_the_tail_page(
 def test_a_tail_page_of_only_new_prs_leaves_the_second_census_incomplete(
     opened, rc, capsys, monkeypatch
 ) -> None:
-    # A full tail page vouches only for PRs at least as new as its oldest row.
-    # Once every row is newer than the first observation, a new PR skipped
-    # below it could be missed.
+    # A full tail page vouches only for PRs created at least as recently as its
+    # oldest row. Once every row is newer than the first observation, a new PR
+    # skipped below it could be missed.
     def open_many(http: ChurnHTTP, served: list[int]) -> None:
         for number in range(NEW_PR, NEW_PR + opened):
             open_pr(number)(http, served)
