@@ -77,3 +77,23 @@ def test_release_procedure_requires_review_holds_ci_and_real_sweeper_readback():
     assert section.index("Verify the applicable") < section.index(
         "Only when release is **actually authorized**"
     ), "release opt-in must come after non-author and hold checks"
+
+
+def test_account_entrypoint_routes_macros_and_other_repos_differently():
+    source = (ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md").read_text(
+        encoding="utf-8"
+    )
+    section = source.split(
+        "## Cross-repository PR auto-merge discipline", 1
+    )[1].split("## Execute economically", 1)[0]
+    for token in (
+        "docs/DELIVERY_WORKFLOW.md",
+        "merge-on-green",
+        "binding CI",
+        "non-author release decision",
+        "recorded holds",
+        "main",
+        "master",
+        "Project setting",
+    ):
+        assert token in section
