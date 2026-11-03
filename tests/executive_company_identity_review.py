@@ -33,7 +33,7 @@ REVIEWED_ANCHORS = {
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
         # Foreground-owner postimage; both pinned methods and ASTs are unchanged.
-        "source_sha256": "0a6f41b91ae2ceb8c597264d2856bac3d149ed37fb5c71dc8601b8bb210c5f8c",
+        "source_sha256": "4f38cb3b7da9d26e5714dee82c4dfd788bfbd12f5b805112c1750793c7d4c6e7",
         "ast_sha256": "f6179877c2695cabb9fe2b5cd33288e4a8c6d07c2676fa7794cc678d8c4fa4aa",
         "sites": (
             (("body", 3, "body", 27, "body", 3, "orelse", 0, "body", 2,
