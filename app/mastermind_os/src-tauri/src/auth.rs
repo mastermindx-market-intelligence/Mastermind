@@ -18,6 +18,9 @@ const CALLBACK: &str = "com.mastermind.os://oauth/callback";
 const ORIGIN: &str = "https://mcp.mastermind-x.com";
 const TRANSACTION_TTL: Duration = Duration::from_secs(300);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+// Source preparation <=120s followed by the existing <=300s foreground owner.
+// This is only a transport ceiling, never execution or retry authority.
+const EXECUTIVE_FOREGROUND_TIMEOUT: Duration = Duration::from_secs(430);
 const MAX_RESPONSE: usize = 2_000_000;
 const EXECUTIVE_SCOPE: &str = "mastermind.executive.read mastermind.executive.intent.submit";
 const EXECUTIVE_REQUEST_CAP: usize = 65_536;
@@ -90,6 +93,7 @@ struct Inner {
     client_id: Option<String>,
     executive_resource: Option<String>,
     executive_generation: u64,
+    executive_changed: tokio::sync::watch::Sender<()>,
     executive: Option<Token>,
     generation: u64,
     pending: Option<Pending>,
@@ -111,6 +115,7 @@ impl Inner {
             client_id,
             executive_resource: resource.and_then(executive_resource),
             executive_generation: 0,
+            executive_changed: tokio::sync::watch::channel(()).0,
             executive: None,
             generation: 0,
             pending: None,
@@ -155,6 +160,9 @@ impl Inner {
     }
     // Overflow permanently disables this optional capability; generations never wrap/reuse.
     fn advance_executive(&mut self) -> bool {
+        // Wake a pending foreground transport so its actual HTTP request is
+        // dropped on logout/renewal. The generation remains the authority.
+        self.executive_changed.send_replace(());
         match self.executive_generation.checked_add(1).filter(|n| *n <= MAX_SAFE_GENERATION) {
             Some(next) => { self.executive_generation = next; true }
             None => { self.executive = None; self.executive_resource = None; false }
@@ -1395,7 +1403,10 @@ where
     D: FnOnce(reqwest::RequestBuilder) -> F,
     F: std::future::Future<Output = std::result::Result<reqwest::Response, reqwest::Error>>,
 {
-    let (token, token_expires, generation) = {
+    let foreground_research = path == "/os/executive/submit"
+        && body.get("arguments").and_then(|v| v.get("execution_profile"))
+            .and_then(Value::as_str) == Some("research_only");
+    let (token, token_expires, generation, changed) = {
         let inner = state.lock()?;
         let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
         match path {
@@ -1422,6 +1433,7 @@ where
             token.value.clone(),
             token.expires,
             inner.executive_generation,
+            inner.executive_changed.subscribe(),
         )
     };
     let serialized = executive_body(&body)?;
@@ -1432,7 +1444,7 @@ where
     if url.origin().ascii_serialization() != ORIGIN {
         return Err("REQUEST_INVALID".into());
     }
-    let request = state
+    let mut request = state
         .http
         .post(url)
         .bearer_auth(token)
@@ -1440,32 +1452,58 @@ where
         .header("Cache-Control", "no-store")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(serialized);
-    let response = dispatch(request)
-        .await
-        .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
-    { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
-    let status = response.status();
-    let result = if status.is_success() {
-        read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else { EXECUTIVE_RESPONSE_CAP }).await
-    } else if direct && [401, 403, 409, 503].contains(&status.as_u16()) {
-        let value = read_json_body(response, DIRECT_NATIVE_RESPONSE_CAP).await?;
-        if value.get("schema").and_then(Value::as_str) == Some("mastermind.direct_native_result_response.v1")
-            && value.get("availability").and_then(Value::as_str) == Some("UNAVAILABLE") {
-            Ok(value)
-        } else { Err("EXECUTIVE_TRANSPORT_UNAVAILABLE".into()) }
-    } else {
-        Err(match status.as_u16() {
-            401 => "EXECUTIVE_AUTH_REQUIRED",
-            403 => "EXECUTIVE_ACCESS_REFUSED",
-            _ => "EXECUTIVE_TRANSPORT_UNAVAILABLE",
-        }
-        .into())
-    };
-    {
-        let mut inner = state.lock()?;
-        executive_guard(&mut inner, generation, token_expires)?;
+    if foreground_research {
+        request = request.timeout(EXECUTIVE_FOREGROUND_TIMEOUT);
     }
-    result
+    let exchange = async {
+        let response = dispatch(request)
+            .await
+            .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
+        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        let status = response.status();
+        let result = if status.is_success() {
+            read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else { EXECUTIVE_RESPONSE_CAP }).await
+        } else if direct && [401, 403, 409, 503].contains(&status.as_u16()) {
+            let value = read_json_body(response, DIRECT_NATIVE_RESPONSE_CAP).await?;
+            if value.get("schema").and_then(Value::as_str) == Some("mastermind.direct_native_result_response.v1")
+                && value.get("availability").and_then(Value::as_str) == Some("UNAVAILABLE") {
+                Ok(value)
+            } else { Err("EXECUTIVE_TRANSPORT_UNAVAILABLE".into()) }
+        } else {
+            Err(match status.as_u16() {
+                401 => "EXECUTIVE_AUTH_REQUIRED",
+                403 => "EXECUTIVE_ACCESS_REFUSED",
+                _ => "EXECUTIVE_TRANSPORT_UNAVAILABLE",
+            }.into())
+        };
+        { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
+        result
+    };
+    if foreground_research {
+        executive_foreground_exchange(state, generation, token_expires, changed, exchange).await
+    } else {
+        exchange.await
+    }
+}
+
+async fn executive_foreground_exchange<T, F>(
+    state: &NativeAuth, generation: u64, expires: Instant,
+    mut changed: tokio::sync::watch::Receiver<()>, exchange: F,
+) -> Result<T>
+where F: std::future::Future<Output = Result<T>> {
+    use std::{future::Future, task::Poll};
+    let mut exchange = std::pin::pin!(exchange);
+    let mut expiry = std::pin::pin!(tokio::time::sleep_until(expires.into()));
+    let mut notification = std::pin::pin!(changed.changed());
+    std::future::poll_fn(|cx| {
+        if notification.as_mut().poll(cx).is_ready() || expiry.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(Err("EXECUTIVE_AUTH_CHANGED".into()));
+        }
+        if let Err(error) = state.lock().and_then(|mut inner| executive_guard(&mut inner, generation, expires)) {
+            return Poll::Ready(Err(error));
+        }
+        exchange.as_mut().poll(cx)
+    }).await
 }
 #[tauri::command]
 pub fn executive_auth_status(state: tauri::State<'_, NativeAuth>) -> Result<ExecutiveAuthStatus> {
@@ -2239,6 +2277,62 @@ mod tests {
             },
         ));
         (result, calls.get())
+    }
+
+    #[test]
+    fn native_research_foreground_deadline_does_not_change_other_submits() {
+        for profile in ["research_only", "native_research_only", "bounded_code_change"] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, "/os/executive/submit",
+                serde_json::json!({"arguments":{"execution_profile":profile}}), |builder| {
+                    let request = builder.build().unwrap();
+                    assert_eq!(request.timeout().copied(),
+                        if profile == "research_only" { Some(EXECUTIVE_FOREGROUND_TIMEOUT) } else { None });
+                    std::future::ready(Ok(native_fixture_response()))
+                }));
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn native_research_foreground_drops_pending_transport_on_auth_change() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        struct PendingDrop(Arc<AtomicBool>);
+        impl Drop for PendingDrop {
+            fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
+        }
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        let dropped = Arc::new(AtomicBool::new(false));
+        let sentinel = PendingDrop(dropped.clone());
+        let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+            &state, "/os/executive/submit",
+            serde_json::json!({"arguments":{"execution_profile":"research_only"}}), |_| async {
+                let _pending = sentinel;
+                state.lock().unwrap().clear_executive();
+                std::future::pending::<std::result::Result<reqwest::Response, reqwest::Error>>().await
+            }));
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
+        assert!(dropped.load(Ordering::SeqCst), "pending HTTP owner survived auth invalidation");
+    }
+
+    #[test]
+    fn native_research_foreground_ends_at_original_token_expiry() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        let dispatched = std::cell::Cell::new(false);
+        let result = tauri::async_runtime::block_on(async {
+            // Start the short-lived token inside the running owner, rather
+            // than spending its lifetime initializing the async runtime.
+            state.lock().unwrap().executive.as_mut().unwrap().expires =
+                Instant::now() + Duration::from_millis(20);
+            executive_post_with_dispatch(&state, "/os/executive/submit",
+                serde_json::json!({"arguments":{"execution_profile":"research_only"}}), |_| {
+                    dispatched.set(true);
+                    std::future::pending::<std::result::Result<reqwest::Response, reqwest::Error>>()
+                }).await
+        });
+        assert!(dispatched.get(), "token expired before the foreground dispatch began");
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
     }
 
     #[test]

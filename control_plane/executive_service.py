@@ -194,7 +194,7 @@ class _ForegroundExecution:
     binding: bytes
 
     def __bool__(self):
-        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK"}
+        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK", "PAID_WORK"}
 
 
 class ServiceError(RuntimeProofError):
@@ -7828,7 +7828,8 @@ class ExecutiveControlService:
         elif not self.config.coo_attended_work_placements and not binding["operator_harness_armed"]:
             mode = "QUEUED_OPERATOR_HARNESS_OFF"
         else:
-            mode = "ATTENDED_WORK" if self.config.coo_attended_work_placements else "ORDINARY_OPERATOR"
+            mode = ("ATTENDED_WORK" if self.config.coo_attended_work_placements else
+                    "PAID_WORK" if self.config.coo_paid_work_placements else "ORDINARY_OPERATOR")
         return _ForegroundExecution(mode, _canonical_json(binding))
 
     def _require_foreground_execution(self, expectation):
@@ -7841,8 +7842,15 @@ class ExecutiveControlService:
                 raise StateConflict("foreground execution is unavailable")
             self._require_current_autonomy()
             self._require_coo_worker_composed()
+            self._require_paid_foreground_placements(binding)
         if self._require_attended_qualification() != qualification:
             raise StateConflict("foreground qualification changed")
+
+    def _require_paid_foreground_placements(self, binding):
+        if self.config.coo_paid_work_placements:
+            from control_plane.paid_fabric_admission import require_registered_paid_placements
+            require_registered_paid_placements(self._require_runtime(),
+                self._paid_worker_binding_source, self.config.coo_paid_work_placements, binding)
 
     def _require_attended_qualification(self):
         from control_plane.fabric_attended_routing import qualification_for
@@ -7971,6 +7979,7 @@ class ExecutiveControlService:
                     "REPAIR_CREATED", "HANDOFF_CREATED", "REQUEUED", "DISPATCHED"}
         for _ in range(128):
             operation.require_root(root_id)
+            self._require_paid_foreground_placements(root_binding)
             outcome = await self._run_coo_cycle(root_id)
             if outcome.root_job_id != root_id:
                 raise StateConflict("foreground cycle returned a foreign root")
@@ -7991,7 +8000,8 @@ class ExecutiveControlService:
                     }
                 if (material is not None and material.job.job_id != root_id
                         and material.job.orchestration_role == "plan"
-                        and not self.config.coo_attended_work_placements):
+                        and not self.config.coo_attended_work_placements
+                        and not self.config.coo_paid_work_placements):
                     # Ordinary Operator bound: the exact validated plan
                     # completion is this call's finite result. No plan
                     # admission, work creation or dispatch may follow here.

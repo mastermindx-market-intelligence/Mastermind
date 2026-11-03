@@ -590,6 +590,61 @@ describe("fixed structured-result browser transport", () => {
 describe("optional Executive authentication in the existing web owner", () => {
   const resource = "https://fixture-resource.mastermind-x.com/executive";
   const scopes = "mastermind.executive.read mastermind.executive.intent.submit";
+  it("keeps one research submission live beyond the read deadline for its finite owner", async () => {
+    const e = setup({ executiveResource: resource });
+    await e.login();
+    const held = deferred<Response>();
+    e.fetcher.mockReset();
+    e.fetcher.mockReturnValue(held.promise);
+    const pending = e.client.executive!.submit({ execution_profile: "research_only",
+      operation_key: "same-foreground-operation" }, new AbortController().signal);
+    const settled = vi.fn();
+    void pending.then(settled, settled);
+    await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS + 1);
+    expect(settled).not.toHaveBeenCalled();
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    expect(e.fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(false);
+    const accepted = { ok: true, status: "accepted", request_ref: "same" };
+    held.resolve(response(accepted));
+    await expect(pending).resolves.toEqual(accepted);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it.each(["native_research_only", "bounded_code_change"])(
+    "keeps the incumbent %s deadline and never retries", async (execution_profile) => {
+      const e = setup({ executiveResource: resource });
+      await e.login();
+      e.fetcher.mockReset();
+      e.fetcher.mockReturnValue(new Promise(() => {}));
+      const pending = e.client.executive!.submit({ execution_profile }, new AbortController().signal);
+      const refused = expect(pending).rejects.toThrow("EXECUTIVE_REQUEST_CANCELLED");
+      await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
+      await refused;
+      expect(e.fetcher).toHaveBeenCalledTimes(1);
+    });
+  it("ends a stalled research submission at its one total deadline", async () => {
+    const e = setup({ executiveResource: resource });
+    await e.login();
+    e.fetcher.mockReset();
+    e.fetcher.mockReturnValue(new Promise(() => {}));
+    const pending = e.client.executive!.submit({ execution_profile: "research_only" }, new AbortController().signal);
+    const refused = expect(pending).rejects.toThrow("EXECUTIVE_REQUEST_CANCELLED");
+    await vi.advanceTimersByTimeAsync(430_000);
+    await refused;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    expect(e.fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+  });
+  it("closes the actual research fetch when its auth generation changes", async () => {
+    const e = setup({ executiveResource: resource });
+    await e.login();
+    e.fetcher.mockReset();
+    e.fetcher.mockReturnValue(new Promise(() => {}));
+    const pending = e.client.executive!.submit({ execution_profile: "research_only" }, new AbortController().signal);
+    const refused = expect(pending).rejects.toThrow("EXECUTIVE_REQUEST_CANCELLED");
+    e.client.signOut();
+    await refused;
+    expect(e.fetcher.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
   it("uses a distinct third PKCE transaction with the same client and callback", async () => {
     const e = setup({ executiveResource: resource }), pending = e.client.signIn();
     await flush(); const first = new URL(e.popup.location);
