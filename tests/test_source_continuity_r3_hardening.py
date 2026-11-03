@@ -98,6 +98,8 @@ class CollisionHTTP:
         assert token == TOKEN and timeout > 0
         if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}, {"number": 999}]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}, {"number": 999}][::-1]
         if url.endswith("/pulls/999/files?per_page=100&page=1"):
             return [self.row]
         raise AssertionError(url)
@@ -127,6 +129,8 @@ class CollisionRowsHTTP:
         assert token == TOKEN and timeout > 0
         if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}, *({"number": number} for number in self.rows)]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}, *({"number": number} for number in self.rows)][::-1]
         for number, rows in self.rows.items():
             if url.endswith(f"/pulls/{number}/files?per_page=100&page=1"):
                 return rows
@@ -199,6 +203,8 @@ class PrefixHTTP:
             return self.files
         if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}][::-1]
         raise AssertionError(url)
 
 
@@ -267,6 +273,8 @@ class FenceHTTP:
             return {"commit": {"sha": BASE}}
         if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}][::-1]
         raise AssertionError(url)
 
 
@@ -309,6 +317,8 @@ class CollisionDriftFenceHTTP(FenceHTTP):
             return [{"filename": path, "status": "modified"} for path in OWNED]
         if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}, *({"number": number} for number in self.rows)]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}, *({"number": number} for number in self.rows)][::-1]
         for number, path in self.rows.items():
             if url.endswith(f"/pulls/{number}/files?per_page=100&page=1"):
                 return [{"filename": path, "status": "modified"}]

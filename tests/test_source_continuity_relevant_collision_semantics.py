@@ -75,6 +75,7 @@ class CollisionChurnHTTP:
         self.foreign_files = foreign_files
         self.direct_details = direct_details or {}
         self.roster_reads = 0
+        self.last_roster: list[dict[str, object]] = []
         self.plain_calls: list[str] = []
         self.conditional_calls: list[str] = []
 
@@ -89,11 +90,22 @@ class CollisionChurnHTTP:
             "?state=open&sort=created&direction=asc&per_page=100&page=1"
         )
 
+    @property
+    def _tail_url(self) -> str:
+        return self._open_roster_url.replace("direction=asc", "direction=desc")
+
+    def _tail(self) -> list[dict[str, object]]:
+        # Newest first, from whichever roster the observation just paged.
+        return sorted(self.last_roster, key=lambda row: row["number"], reverse=True)
+
     def _plain(self, url: str, *, token: str, timeout: float) -> object:
         self.plain_calls.append(url)
         if url == self._open_roster_url:
             self.roster_reads += 1
-            return self.first_roster if self.roster_reads == 1 else self.second_roster
+            self.last_roster = self.first_roster if self.roster_reads == 1 else self.second_roster
+            return self.last_roster
+        if url == self._tail_url:
+            return self._tail()
 
         prefix = f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls/"
         if url.startswith(prefix):
@@ -131,7 +143,9 @@ class CollisionChurnHTTP:
             )
 
         self.conditional_calls.append(url)
+        assert url != self._tail_url
         if url == self._open_roster_url:
+            self.last_roster = self.second_roster
             return self.module._HTTPRepresentation(
                 payload=self.second_roster,
                 etag='"' + "e" * 64 + '"',

@@ -33,9 +33,10 @@ class EstateHTTP(fx._ProbeHTTP):
     def __call__(self, url, *, token, timeout):
         parsed = urlparse(url)
         page = int(parse_qs(parsed.query).get("page", ["1"])[0])
+        tail = parse_qs(parsed.query).get("direction") == ["desc"]
         if parsed.path.endswith("/pulls"):
             self.calls.append((url, token, timeout))
-            if page == 1:
+            if page == 1 and not tail:
                 self.passes += 1
             rows = [{"number": fx.PR_NUMBER}] + [
                 {"number": 1000 + i} for i in range(self.count - 1)]
@@ -43,7 +44,10 @@ class EstateHTTP(fx._ProbeHTTP):
                 rows[-1] = {"number": 9000}
             if self.change == "duplicate" and page == 2:
                 rows[100] = rows[99]
-            result = rows[(page - 1) * 100:page * 100]
+            if tail:
+                result = rows[::-1][:100]
+            else:
+                result = rows[(page - 1) * 100:page * 100]
         elif parsed.path.endswith("/files") and (
                 f"/pulls/{fx.PR_NUMBER}/" not in parsed.path):
             self.calls.append((url, token, timeout))

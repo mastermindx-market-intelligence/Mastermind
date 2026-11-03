@@ -242,7 +242,7 @@ def test_macro_1000_open_pr_estate_with_live_fanout_completes(
     assert http.passes == 2
     roster_pages = [url for url, _, _ in http.calls if "/pulls?" in url]
     assert sum("page=11" in url for url in roster_pages) == 2
-    assert len(http.calls) == len(baseline.calls) + 2 * 170 == 2370
+    assert len(http.calls) == len(baseline.calls) + 2 * 170 == 2372
 
 
 def test_macro_1500_doubled_live_fanout_preserves_call_headroom(
@@ -266,8 +266,8 @@ def test_macro_1500_doubled_live_fanout_preserves_call_headroom(
     rc, payload = budget.run_cli(module, capsys, http)
 
     assert rc == 0, payload
-    assert len(http.calls) == len(baseline.calls) + 2 * 340 == 3720
-    assert module._MAX_HTTP_CALLS - len(http.calls) == 376
+    assert len(http.calls) == len(baseline.calls) + 2 * 340 == 3722
+    assert module._MAX_HTTP_CALLS - len(http.calls) == 374
 
 
 def _census_threads(http) -> set[str]:
@@ -301,7 +301,8 @@ def test_conditional_reuse_path_reads_each_foreign_pr_once(
     assert payload["collision_state"] == "DISJOINT"
     assert payload["authority_effect"] == "NONE"
     assert http.passes == 2
-    assert len(_roster_calls(http)) == 2 * (count // 100 + 1)
+    # Per pass: the full pages, the short last page and the newest-first tail.
+    assert len(_roster_calls(http)) == 2 * (count // 100 + 2)
     foreign_files = _foreign_file_calls(http)
     assert len(foreign_files) == len(set(foreign_files)) == count - 1 + 170
     strict = [
@@ -312,7 +313,7 @@ def test_conditional_reuse_path_reads_each_foreign_pr_once(
     assert sorted(http.conditional_calls) == sorted(strict)
     assert any(name.startswith("source-continuity-read") for name in threads)
     total = len(http.calls) + len(http.conditional_calls)
-    assert total == 2 * (count // 100 + 1) + count - 1 + 170 + 2 * len(strict)
+    assert total == 2 * (count // 100 + 2) + count - 1 + 170 + 2 * len(strict)
     assert total < module._MAX_HTTP_CALLS // 2
 
 

@@ -1583,6 +1583,8 @@ def _read_open_pull_roster(
     http_get: HTTPGet,
     token: str,
     repository: str,
+    *,
+    newest_known: int | None = None,
 ) -> tuple[list[object], bool]:
     # Offset pages, oldest first: a PR opened mid-read appends after the rows
     # already read instead of pushing one of them onto the next page.
@@ -1600,8 +1602,41 @@ def _read_open_pull_roster(
         if len(pulls) > _MAX_COLLISION_PRS:
             return pulls, False
         if len(payload) < _PAGE_SIZE:
-            return pulls, True
-    return pulls, False
+            break
+    else:
+        return pulls, False
+
+    # A row closed before the cursor makes the next page skip a row, and
+    # oldest-first puts the newest PRs where that skip can land. One
+    # newest-first page re-reads them; a row it adds was skipped above.
+    tail = _api(
+        http_get,
+        token,
+        f"repos/{repository}/pulls?state=open&sort=created&direction=desc"
+        f"&per_page={_PAGE_SIZE}&page=1",
+    )
+    if not isinstance(tail, list) or len(tail) > _PAGE_SIZE:
+        raise _RemoteProbeError()
+    seen_numbers = {row.get("number") for row in pulls if isinstance(row, dict)}
+    tail_numbers: set[int] = set()
+    for row in tail:
+        number = row.get("number") if isinstance(row, dict) else None
+        if type(number) is not int or number <= 0 or number in tail_numbers:
+            raise _RemoteProbeError()
+        tail_numbers.add(number)
+        if number not in seen_numbers:
+            pulls.append(row)
+    if len(pulls) > _MAX_COLLISION_PRS:
+        return pulls, False
+    # A full tail page vouches only for PRs at least as new as its oldest row.
+    # Every PR opened since the first observation is newer than newest_known.
+    if (
+        newest_known is not None
+        and len(tail) == _PAGE_SIZE
+        and min(tail_numbers) > newest_known
+    ):
+        return pulls, False
+    return pulls, True
 
 
 def _collision_census_details(
@@ -1610,9 +1645,13 @@ def _collision_census_details(
     repository: str,
     target_pr: int,
     owned_paths: tuple[str, ...],
+    *,
+    newest_known: int | None = None,
 ) -> _CollisionCensusDetails:
     reader = _collision_reader(http_get)
-    pulls, complete = _read_open_pull_roster(reader, token, repository)
+    pulls, complete = _read_open_pull_roster(
+        reader, token, repository, newest_known=newest_known
+    )
     if not complete:
         return _CollisionCensusDetails(
             CollisionState.INCOMPLETE, (), False, (), ()
@@ -1719,6 +1758,8 @@ def _collision_census(
     repository: str,
     target_pr: int,
     owned_paths: tuple[str, ...],
+    *,
+    newest_known: int | None = None,
 ) -> tuple[
     CollisionState,
     tuple[int, ...],
@@ -1731,6 +1772,7 @@ def _collision_census(
         repository,
         target_pr,
         owned_paths,
+        newest_known=newest_known,
     )
     return (
         details.state,
@@ -1759,7 +1801,14 @@ def _revalidate_collision_census(
     """
 
     reader = _collision_reader(http_get)
-    pulls, complete = _read_open_pull_roster(reader, token, repository)
+    pulls, complete = _read_open_pull_roster(
+        reader,
+        token,
+        repository,
+        newest_known=max(
+            [target_pr, *(record.pr_number for record in first_records)]
+        ),
+    )
     if not complete:
         return False, False
 
@@ -1805,6 +1854,8 @@ def _revalidate_collision_census(
             direct = _api(http_get=reader, token=token, endpoint=f"repos/{repository}/pulls/{number}")
             if not isinstance(direct, dict):
                 return False, True
+            if direct.get("number") != number:
+                raise _RemoteProbeError()
             state = direct.get("state")
             if state not in ("open", "closed"):
                 return False, True
@@ -2462,6 +2513,10 @@ def _remote_still_matches(
                 request.repository,
                 request.pr_number,
                 request.owned_paths,
+                newest_known=max(
+                    (number for number, _ in first_collision_snapshot),
+                    default=None,
+                ),
             )
             if (
                 not second_details.complete
@@ -2561,6 +2616,10 @@ def _remote_still_matches(
         request.repository,
         request.pr_number,
         request.owned_paths,
+        newest_known=max(
+            (number for number, _ in first_collision_snapshot),
+            default=None,
+        ),
     )
     if (
         not first_collisions_complete

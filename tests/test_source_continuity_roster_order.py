@@ -32,8 +32,10 @@ class ChurnHTTP(fx._ProbeHTTP):
     """A conditional transport over an open-PR estate that changes mid-roster.
 
     Rows are ordered by number, which stands in for creation order. A roster
-    request is served newest-first unless it asks for `direction=asc`, as
-    GitHub does. ``events[(pass, page)]`` runs after that roster page is served.
+    request with no `direction` is served newest-first, as GitHub does; one
+    with `direction=desc` is the tail page read after the oldest-first pages.
+    ``events[(pass, page)]`` runs after that roster page is served, and
+    ``events[(pass, "tail")]`` after that pass's tail page.
     """
 
     _source_continuity_conditional = True
@@ -47,6 +49,8 @@ class ChurnHTTP(fx._ProbeHTTP):
         self.events = dict(events or {})
         self.passes = 0
         self.served: dict[int, list[int]] = {}
+        self.tail_served: dict[int, list[int]] = {}
+        self.tail_mutator = None
         self.roster_urls: list[str] = []
         self.direct_reads: list[int] = []
         self.direct_mutators: dict[int, object] = {}
@@ -68,9 +72,20 @@ class ChurnHTTP(fx._ProbeHTTP):
         query = parse_qs(urlparse(url).query)
         assert query.get("sort", ["created"]) == ["created"]
         page = int(query["page"][0])
+        if query.get("direction") == ["desc"]:
+            assert page == 1
+            tail = sorted(self.open, reverse=True)[:100]
+            self.tail_served[self.passes] = tail
+            payload = [self._row(number) for number in tail]
+            if self.tail_mutator is not None:
+                payload = self.tail_mutator(payload)
+            event = self.events.get((self.passes, "tail"))
+            if event is not None:
+                event(self, tail)
+            return payload
         if page == 1:
             self.passes += 1
-        newest_first = query.get("direction", ["desc"]) != ["asc"]
+        newest_first = query.get("direction") != ["asc"]
         ordered = sorted(self.open, reverse=newest_first)
         served = ordered[(page - 1) * 100:page * 100]
         self.served.setdefault(self.passes, []).extend(served)
@@ -192,8 +207,9 @@ def test_roster_pages_oldest_first_with_an_exact_query(capsys, monkeypatch) -> N
     expected = [
         f"{ROSTER_URL}?state=open&sort=created&direction=asc&per_page=100&page={page}"
         for page in (1, 2, 3)
-    ]
+    ] + [f"{ROSTER_URL}?state=open&sort=created&direction=desc&per_page=100&page=1"]
     assert http.roster_urls == expected * 2
+    assert http.tail_served[2] == sorted(http.open, reverse=True)[:100]
     assert http.served[1][0] == fx.PR_NUMBER
     assert http.direct_reads == []
 
@@ -349,6 +365,84 @@ def test_reopened_older_pr_before_the_cursor_still_refuses(
 
     assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
     assert len(http.served[2]) != len(set(http.served[2]))
+
+
+@pytest.mark.parametrize(
+    ("collides", "rc", "code"),
+    [(False, 0, None), (True, 1, "REMOTE_PROOF_CHANGED")],
+)
+def test_new_pr_skipped_at_the_roster_end_is_read_from_the_tail_page(
+    collides, rc, code, capsys, monkeypatch
+) -> None:
+    # The first observation reads 200 rows. A PR opened after its roster sorts
+    # last, first on page 3, and a closure on page 2 pushes it back onto the
+    # page already read. It is in no first-pass record, so no direct read
+    # would find it.
+    http = _churn(
+        events={(2, 1): open_pr(NEW_PR, collides=collides), (2, 2): close_served(0)},
+    )
+    http.open = {fx.PR_NUMBER, *FOREIGN[:199]}
+
+    result_rc, payload = _run(http, capsys, monkeypatch)
+
+    assert NEW_PR not in http.served[2]
+    assert http.file_reads.count(NEW_PR) == 1
+    assert result_rc == rc, payload
+    if code is None:
+        assert payload["collision_state"] == "DISJOINT"
+    else:
+        assert payload["code"] == code
+    assert NEW_PR in http.tail_served[2]
+    assert http.direct_reads == []
+
+
+@pytest.mark.parametrize(("opened", "rc"), [(99, 0), (100, 2)])
+def test_a_tail_page_of_only_new_prs_leaves_the_second_census_incomplete(
+    opened, rc, capsys, monkeypatch
+) -> None:
+    # A full tail page vouches only for PRs at least as new as its oldest row.
+    # Once every row is newer than the first observation, a new PR skipped
+    # below it could be missed.
+    def open_many(http: ChurnHTTP, served: list[int]) -> None:
+        for number in range(NEW_PR, NEW_PR + opened):
+            open_pr(number)(http, served)
+
+    http = _churn(events={(2, 1): open_many})
+
+    result_rc, payload = _run(http, capsys, monkeypatch)
+
+    assert result_rc == rc, payload
+    if rc == 0:
+        assert payload["collision_state"] == "DISJOINT"
+        assert min(http.tail_served[2]) == FOREIGN[-1]
+    else:
+        assert payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+        assert min(http.tail_served[2]) == NEW_PR
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda rows: {"items": rows}, id="not-a-list"),
+        pytest.param(lambda rows: rows + rows[:1], id="over-a-page"),
+        pytest.param(lambda rows: rows[:-1] + rows[:1], id="repeated-row"),
+        pytest.param(lambda rows: rows[:-1] + ["row"], id="not-an-object"),
+        pytest.param(
+            lambda rows: [{**rows[0], "number": True}, *rows[1:]], id="bool-number"
+        ),
+        pytest.param(
+            lambda rows: [{**rows[0], "number": 0}, *rows[1:]], id="zero-number"
+        ),
+    ],
+)
+def test_malformed_tail_page_fails_closed(mutate, capsys, monkeypatch) -> None:
+    http = _churn()
+    http.tail_mutator = mutate
+
+    rc, payload = _run(http, capsys, monkeypatch)
+
+    assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
+    assert 1 in http.tail_served
 
 
 def _roster_row(number: int) -> dict[str, object]:

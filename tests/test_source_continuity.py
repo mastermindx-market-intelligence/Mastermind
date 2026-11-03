@@ -1041,6 +1041,8 @@ class _ProbeHTTP:
             return [{"filename": path, "status": "modified"} for path in FINAL_OWNED_PATHS]
         if endpoint == f"repos/{REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page=1":
             return [{"number": PR_NUMBER}]
+        if endpoint == f"repos/{REPOSITORY}/pulls?state=open&sort=created&direction=desc&per_page=100&page=1":
+            return [{"number": PR_NUMBER}]
         raise AssertionError(f"unexpected HTTP probe endpoint: {endpoint}")
 
 
@@ -1376,6 +1378,18 @@ class _CollisionFenceHTTP(_ProbeHTTP):
         assert url.startswith(API_ROOT + "/")
         endpoint = url.removeprefix(API_ROOT + "/")
         open_prefix = f"repos/{REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page="
+        tail = f"repos/{REPOSITORY}/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"
+        if endpoint == tail:
+            self.calls.append((url, token, timeout))
+            assert token == TOKEN
+            selected = (
+                self.initial_other_path
+                if self.census_reads == 1
+                else self.final_other_path
+            )
+            return ([{"number": self.OTHER_PR}] if selected is not None else []) + [
+                {"number": PR_NUMBER}
+            ]
         if endpoint.startswith(open_prefix):
             self.calls.append((url, token, timeout))
             assert token == TOKEN
