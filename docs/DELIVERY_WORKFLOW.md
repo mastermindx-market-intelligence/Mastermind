@@ -142,19 +142,22 @@ GitHub state, not a pasted handoff:
    **arming actor** must enforce the organizational non-author release gate.
    An author or shared-account session must not use the label to circumvent
    the no-self-merge/no-self-approval rule.
+   **Cross-repository command boundary:** every CLI command below must bind
+   `--repo mastermindx-market-intelligence/macro`; never rely on the current
+   shell checkout or a previously selected repository to identify the PR.
 4. Only when release is **actually authorized**, the head checks are
    concluded clean, and no hold/merge gate remains, the eligible release
    operator may opt in by adding the **single existing label**:
-   `gh pr edit <number> --add-label merge-on-green`
+   `gh pr edit <number> --repo mastermindx-market-intelligence/macro --add-label merge-on-green`
    (or the additive GitHub issue-label action). Record exact
    repo/PR/head, reviewer identity/decision and check/run evidence on the
    existing source-linked release record. Do not substitute
    `main-red-repair` (a separately justified exception) or touch
    `merge-refresh-in-flight` (controller-owned lease state).
 5. Reconcile the **existing controller** and PR after arming:
-   `gh run list --workflow merge-on-green.yml --limit 10`,
-   `gh run view <run-id> --log`, and
-   `gh pr view <number> --json state,isDraft,labels,headRefOid,mergeStateStatus,reviewDecision,autoMergeRequest`.
+   `gh run list --repo mastermindx-market-intelligence/macro --workflow merge-on-green.yml --limit 10`,
+   `gh run view <run-id> --repo mastermindx-market-intelligence/macro --log`, and
+   `gh pr view <number> --repo mastermindx-market-intelligence/macro --json state,isDraft,labels,headRefOid,mergeStateStatus,reviewDecision,autoMergeRequest`.
    Read a **full sweep**, not only a successful *failure-marker pass*.
    The controller can end SUCCESS without merging anything. A green head may
    be **stale** after `main` changes CI definitions; branch refresh can be
