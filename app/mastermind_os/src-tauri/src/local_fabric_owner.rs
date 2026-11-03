@@ -221,7 +221,7 @@ mod tests {
         assert_eq!(clean["rc"], 0);
         let wire = clean.to_string();
         for secret in ["VERY_PRIVATE", "accepted_by", "SECRET", "prompt", "tokens"] {
-            assert!(!wire.contains(secret), "{secret}");
+            assert!(!wire.contains(secret), "private field escaped the safe projection");
         }
         assert!(clean.get("accepted").is_none());
         assert!(clean.get("state").is_none());
