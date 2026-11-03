@@ -422,7 +422,7 @@ def build_personal_read_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     @server.call_tool(validate_input=False)
     async def call_tool(
         name: str, arguments: dict[str, Any] | None
-    ) -> list[mcp_types.TextContent]:
+    ) -> mcp_types.CallToolResult:
         try:
             request = server.request_context.request
         except LookupError as exc:
@@ -447,11 +447,14 @@ def build_personal_read_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
                     "backend_unavailable",
                     "installed Executive response is unavailable",
                 )
-        return [
-            mcp_types.TextContent(
+        failed = payload.get("ok") is not True
+        return mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(
                 type="text", text=canonical_json(payload).decode("utf-8")
-            )
-        ]
+            )],
+            structuredContent=payload if failed else None,
+            isError=failed,
+        )
 
     manager = StreamableHTTPSessionManager(
         server,
@@ -1152,6 +1155,9 @@ def _build_profile_mcp_app(
     def result(payload: dict[str, Any], *, challenge: str | None = None) -> mcp_types.CallToolResult:
         return mcp_types.CallToolResult(
             content=[mcp_types.TextContent(type="text", text=canonical_json(payload).decode("utf-8"))],
+            # Preserve the public typed failure and its original recovery identity.
+            # Success payloads stay text-only to avoid duplicating large results.
+            structuredContent=payload if payload.get("ok") is not True else None,
             isError=payload.get("ok") is not True,
             _meta={"mcp/www_authenticate": [challenge]} if challenge else None,
         )
