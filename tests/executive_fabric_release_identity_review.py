@@ -433,13 +433,13 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
 # PR2012 successor publication, finite retirement and the required MCP audit
-# leaves retain these same four exact identity/mode tokens. Preserve all
-# source changes; bind the actual full-file digest and complete-token sites.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '027aca59fdc8284a5376800d222ed0387ffc65ebe94b08ad2ecbe4773279c19b',
- 'sites': ((336, 24, 27, 'int', '501'),
-           (6628, 35, 37, 'int', '80'),
-           (6629, 50, 55, 'int', '0o755'),
-           (7353, 41, 46, 'int', '0o644'))}
+# leaves and bounded startup wait retain these same four identity/mode tokens.
+# Preserve all source changes; bind the full-file digest and complete-token sites.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '60593302448e9073154398664106624176b82f3d7446d1a08a6cbfe956db2f4c',
+ 'sites': ((342, 24, 27, 'int', '501'),
+           (6669, 35, 37, 'int', '80'),
+           (6670, 50, 55, 'int', '0o755'),
+           (7394, 41, 46, 'int', '0o644'))}
 
 # Chairman-authorized missing audit prerequisite: the incumbent MCP UID/GID
 # and fixed directory modes only. This exact source/token acknowledgement
