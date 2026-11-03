@@ -1,9 +1,10 @@
-# GitHub independent-review ingress — decision core and adapter interfaces
+# GitHub independent-review ingress — source adapters and release contract
 
-Status: **DRAFT source slice.** Ships the decision core and the adapter
-interfaces only. No transport, credential, webhook route, or reviewer identity
-is bound here. This document is the operator contract for what a human admin
-must do before any delivery can be admitted.
+Status: **Source implementation; installed acceptance pending.** Concrete HTTP,
+Unix-socket, GitHub App, Executive Runtime, publication and Slack adapters are
+present. The installed consumer, credential bindings, public route, qualified
+reviewer and live end-to-end acceptance remain unproven. This document records
+the source contract and the incumbent administrator's release dependencies.
 
 ## What this slice is
 
@@ -26,9 +27,10 @@ has an owner:
 - **No second GitHub App / installation governance layer.**
   `scripts/github_estate_governance.py` owns installation pinning and the
   least-privilege permission projection.
-- **No second live GitHub reader.** `scripts/source_continuity.py` is the
-  bounded reader; a host adapter that needs `/pulls/{n}` must extend it rather
-  than stand up a new client.
+- **No parallel review API client.** The source adapters use the existing
+  installation-scoped `integrations/github_review_api.py` and its bounded
+  authenticated transport. Source preflight and return bind that same API
+  implementation rather than inventing another credential or reader owner.
 - **No second review registry and no second independent-review authority.** The
   Fabric's `review_required` / `reviews_job_id` / `orchestration_role='review'`
   model in `control_plane/executive_runtime.py` remains the only one. The
@@ -371,8 +373,10 @@ default `False`.
    happens an unbound port is a typed refusal — and an unbound
    `ActorPermissionPort` refuses the open comment channel by name rather than
    admitting it on a payload claim.
-8. Decide the ingress route's exposure and rate limit. This slice ships no HTTP
-   route, so there is nothing to expose yet.
+8. Qualify and bind the existing ASGI webhook source on the incumbent host's
+   exact HTTPS route with its configured limits. Source routing exists;
+   public exposure and installed acceptance still require observed release
+   evidence.
 
 ## Verification performed
 
@@ -413,3 +417,59 @@ The concrete ReconcilingReviewPublication also requires a FinalPullRequestCheck 
 Native publication still refuses a draft. The only draft exception is an explicit `EXTERNAL_GITHUB_SUBMITTER` advisory whose verb is forced to `COMMENT`. That path seals the authenticated submitter id and login into `ExternalCommentAdvisory` and the final guard re-reads both after the reviews GET. A boolean, a missing seal, a `REQUEST_CHANGES` verb, or a submitter mismatch does not open the draft.
 
 The #1763 host adapter binds the App publisher user id and login, fills review authors from the authenticated GET, reserves publication on the incumbent EventStore, and passes this typed final check. That binding is source-only. No installed GitHub App, Executive handler, worker START, formal review, or Slack production proof follows from it.
+
+
+## Authenticated socket source preflight and per-repository policy — R15
+
+The incumbent Executive socket owner now accepts exactly one source path:
+legacy `source_guard`, or the concrete `GitHubReviewSourcePreflight` through
+`source_preflight`. The latter binds 1–32 explicitly enrolled singleton
+repository/settings/API triples. Repositories are unique case-insensitively
+because v1 decisions contain no installation field. Each authenticated API must
+match the binding's exact active installation and repository; no reader or
+credential fallback is attempted.
+
+Manual and human-lifecycle decisions require a fresh, sufficient collaborator
+permission before the fresh PR read. Standing-policy and reconciliation
+sources instead require their exact installation and enabled host-policy
+digest; bot provenance never becomes human authority. Every source requires
+an open, same-repository PR at the frozen head. Draft eligibility remains
+limited to explicit label/comment review.
+
+`PreparedReviewSourceCheck` carries the complete closed decision and an
+unrenewable observation interval of at most three seconds, starting before
+network reads. It is a host-local capability, never a field supplied by a
+socket caller. GitHub reads run once before admission and outside the Runtime
+writer transaction. Both existing commit fences verify the same full decision,
+local host arm/enrollment, exact automatic policy and original deadline.
+Expiry while waiting for the writer lock or revocation at either fence leaves
+no new Job/event. This bounds the age of observed GitHub facts; it cannot
+promise instantaneous remote revocation after the read.
+
+The host-local enrollment guard is mandatory and must be free of network,
+credential and database I/O. Replacing enrollment must revoke its existing
+generation fence before accepting more work. The prepared result is private
+to one request, never a shared last-request cache.
+
+The incumbent Executive process constructs the preflight from its own exact
+API/settings/enrollment bindings, then supplies both `source_preflight=preflight`
+and `automatic_policies=preflight.automatic_policies` to the same socket owner.
+The separate reconciliation execution-reference guard remains required.
+No prepared capability crosses the public webhook or socket boundary. This immutable bounded map keys each policy by exact
+`(installation_id, repository)`. It is mutually exclusive with the legacy
+singular `automatic_policy`; absent pairs and an explicitly empty map deny
+automatic admission with no fallback. Mutating the original supplied mapping
+does not revoke its installed copy; use the existing host arm/enrollment fence
+or replace the owner under the incumbent host's configuration custody.
+
+Slack parent reservation and capture retain the same source eligibility
+checks. Capture rechecks the prepared deadline after authenticated Slack
+readback, before the existing recorder. These are the existing pre-reserve and
+pre-record boundaries; R15 does not add a new after-lock check inside the Slack
+writers. Unknown send/record effects keep their original one-attempt owners.
+
+The 614-test review-system suite passes, including actual GitHub API adapter
+calls, real Runtime writer-lock fences and a local Unix-socket admission with
+one QUEUED Job and zero Attempts. This does not install the held Executive
+handler or prove live credentials, worker START, GitHub publication or Slack
+delivery.

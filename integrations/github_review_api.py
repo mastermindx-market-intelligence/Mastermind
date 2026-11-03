@@ -117,6 +117,16 @@ class GitHubReviewAPI:
         self._defer_code = "REVIEW_SOURCE_RATE_LIMITED"
 
     @property
+    def repository(self) -> str:
+        """Exact host-enrolled source repository; no credential is exposed."""
+        return self._repository
+
+    @property
+    def installation_id(self) -> int:
+        """Exact installation used for every authenticated source read."""
+        return self._installation_id
+
+    @property
     def publisher_login(self) -> str:
         """Validated immutable publication account for Executive return binding."""
         return self._publisher

@@ -150,9 +150,12 @@ ACK is not permission for a second parent. It does not enumerate Executive jobs,
 run a worker, retry a lost POST, hold a credential, or select a model. The
 `ExecutiveGitHubReviewSocketOwner` can apply those frames to the incumbent
 JobRegistry/EventStore **only when an authorized control host invokes it**.
-Its source_guard remains an explicitly injected trusted source-authorization
-dependency, not satisfied production proof. Only the trusted Executive host
-may supply the existing `eligible_quota_classes` worker route; the public
+Its source authorization is explicitly host-bound. R15 supplies the concrete
+`GitHubReviewSourcePreflight` factory and exact repository/install policy map;
+the host must still bind its authenticated GitHub readers and current local
+enrollment fences. Exactly one of `source_preflight` or the legacy `source_guard`
+is required. Source construction is not satisfied production proof. Only the
+trusted Executive host may supply the existing `eligible_quota_classes` worker route; the public
 webhook host rejects worker constraints entirely. An unbound/default route
 cannot be treated as actual worker-START eligibility.
 
@@ -202,8 +205,14 @@ Before rollout, the authorized incumbent control-service maintainer must bind
 this typed frame on the existing peer-authenticated Unix listener, without
 altering existing C1/CEO/Session Bridge semantics. Both the peer UID and
 separate disabled-by-default review arm must be checked before parsing or
-committing. The host source_guard must reverify current PR identity/head and
-actor authority **at the mutation boundary**. If disconnected after submit,
+committing. With `source_preflight`, authenticated PR/head and actor or standing-
+policy checks occur once before Runtime admission. The original observation is
+limited to three seconds, including network and lock waits; the host arm,
+current local enrollment, exact policy and that unrenewed deadline are rechecked
+at both Runtime commit fences. The local fence must perform no network,
+credential or database work. This bounds observation age, not instantaneous
+remote revocation. Legacy `source_guard` remains compatible and still requires
+a trusted bounded implementation. If disconnected after submit,
 the caller performs read-only exact command reconciliation and never blindly
 re-submits an uncertain effect. Qualify with the real existing Executive socket
 service test fixture, not a substitute server; only then compose and enroll the

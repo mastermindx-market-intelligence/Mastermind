@@ -118,3 +118,94 @@ The separate hardening-api01 Fabric call stopped during original-owner read-only
 After publishing 26369a2a7088f10572f8d04aa501011590e663f4, the final composed-path check found that read_current_permission caught the new typed source deferral under its broader API exception and returned None. This could turn a rate/token/auth failure into a normal permission-not-reverified refusal for a human-triggered review. The adapter now propagates typed deferral and other raised read failures to the existing HTTP unavailable/deferred responses, before PR read or admission. The existing 404/None handling and nonexception field-validation policy remain unchanged; no permission is fabricated and no static-association fallback is enabled by a transport exception.
 
 Actual GitHub API-through-ASGI regressions cover 429 with retained Retry-After, 401, and exhausted bounded 503 reads, with zero PR reads/admissions. Full verification now supersedes the earlier local count: **558 passed in 69.48s across 26 files**. Retained original-owner log /tmp/github-review-hardening-full-tests3.log, SHA-256 d8bdeb8936e11937dfd9ecefe09db41f50834691b5779f18ba1b146d62a8231b. The scoped parent architecture check found no new correctness/security issue in this exception-propagation delta; it remains nonformal QA. All installed, independent-review, current-head CI and live-canary gates above remain in force.
+
+## R14 multi-repository ingress completion — 2026-11-02 America/Vancouver
+
+Current Chairman continuation retains the same source operation and PR #1977. Protected procedure remains b2326bbe30e9988d26199f5e774a482b9c09068a, Skillpack 1.0.1. Published c9d4980 is clean; its 558-test result is retained and not rerun without an affected change.
+
+| ID | Dependencies | Task and bounded output | Acceptance and review | Editorial state |
+|---|---|---|---|---|
+| R14 | R5,R8,R10-R13 | Support multiple explicitly enrolled, exact repository/installation receiver bindings at the existing literal ASGI webhook mount. Reuse each receiver's signature, secret, source, admission and visibility owners. No new listener, automatic enrollment, provider router or lifecycle authority. | Two repositories sharing the route admit only through their exact enrolled receiver; malformed/duplicate/oversized hints, wrong signature/install/repository, disabled bindings, saturation, disconnect and unknown outcomes cannot select another receiver or call credentials/ports prematurely. Existing routes and single-receiver compatibility remain intact. | source design and implementation in progress |
+
+This slice is independent of the held executive_service.py handler effect and original review01. Neither is retried or replaced. No activation, merge, branch-protection change or reviewer START is inferred from the new source. Advisory review remains nonblocking under the existing A0/READ job and COMMENT publication contracts.
+
+Execution ownership: bounded implementation is eligible for paid Fabric only through the exposed enrolled adapter and current native admission. Native collaborators supply architectural judgments; root retains source integration and same-carrier effect reconciliation. WHY NOT FABLE: this is bounded deterministic ASGI routing and isolation work with checkable tests, not unresolved principal-level judgment.
+
+## R15 authenticated source preflight and commit freshness — 2026-11-02 America/Vancouver
+
+A bounded architecture assessment identified an additional real installed-composition gap: the Executive review socket accepts an injected source_guard but has no concrete authenticated GitHub guard factory. A naive network-backed callback would run four source passes on new admission, including two inside the Runtime writer transaction. This can stall unrelated Jobs and exceed receiver budgets.
+
+| ID | Dependencies | Task and bounded output | Acceptance and review | Editorial state |
+|---|---|---|---|---|
+| R15 | R10-R13 | Add an optional mutually exclusive authenticated source_preflight path to the existing socket owner. Produce one immutable exact-decision, exact-binding prepared check with a maximum three-second observation lifetime; perform GitHub reads before admission, retain only local current-binding/current-arm/policy/freshness checks at both Runtime commit fences. Preserve the legacy source_guard path and Slack parent guard branches. | Actual API and Runtime/socket tests prove one read pass, no HTTP under the writer transaction, expiry/revocation rollback, manual/lifecycle/standing-policy distinctions, exact installation binding, no cross-request reuse, and legacy compatibility. | source verified; installed qualification and independent acceptance pending |
+
+Allowed source: existing socket contract/owner, a concrete integrations/github_review_source_guard.py factory, read-only API binding properties, focused tests and existing release documentation. No executive_service.py edit, live handler invocation, listener/service activation, credential installation or review01 retry. Principal retention reason: PRINCIPAL_JUDGMENT for the source-authority/freshness transaction contract while the paid MiniMax worker owns the independent R14 patch proposal. The helper bounds observation age; it does not claim instantaneous remote revocation or authorize provider fallback.
+
+
+### R15 verified source checkpoint — 2026-11-03 UTC
+
+R15 is source-implemented and verified. The concrete authenticated preflight
+reads once outside Runtime's writer transaction, returns an immutable complete-
+decision check with an original maximum three-second lifetime, and preserves
+local arm/enrollment/policy/freshness checks at both admission commit fences.
+A copied exact `(installation_id, repository)` policy map enables heterogeneous
+repositories on one socket owner; empty/missing entries fail closed. The legacy
+callback and singular-policy paths remain compatible. The R14 prerequisite
+host composition now refuses zero/multiple repositories before constructing
+credential or API ports.
+
+**614 passed in 37.83s** in the original C2 workspace, all review test files
+plus delivery readiness. Retained log `/tmp/github-review-r15-full-tests.log`,
+SHA-256 `27313062368b904e81499dcb43b7d6f8891346af38e2e5e5ff14eb77e41ba3da`.
+Native parent architecture QA found no blocking source issue in the prepared
+check or exact-policy-map changes; it is not formal independent acceptance.
+The real Unix-socket test reaches one QUEUED Job and zero Attempts. No live
+handler, worker, GitHub publication or Slack delivery follows from these tests.
+
+R14 remains owned by original MiniMax Fabric run
+`github-review-coverage-20261102-c2-multirepo01`, controller `11857` on `m1`.
+The original controller is polling; no terminal result or worker START receipt
+has been accepted. No duplicate request, provider fallback, cancellation or
+held handler effect is performed. Documentation now states the automatic Dot
+initial-assignment/return gap explicitly rather than treating a Slack notice
+as a worker route.
+
+
+### R15 transport proof and hosted CI repair — 2026-11-03 UTC
+
+The signed HTTP → real Unix socket fixture now uses a separate authenticated
+Executive GitHub API and concrete source preflight with its exact policy map.
+Manual and standing-policy requests retain one admission and one original Slack
+thread; an automatic request with no matching Executive policy is refused
+before Executive source reads or any Job/Slack effect. These three integration
+cases passed in 5.21s after the accepted 614-test source run.
+
+Published c9d4980 CI run 41591183654, shard-1 job 125769818181, failed only
+`test_composition_proves_job_and_no_duplicate_with_real_app_jwt` with
+`len(sent) == 0` at 2026-11-03T07:11:37Z. Its runner used Python 3.12.15 on
+Ubuntu 24.04 and tested merge ff7986021d1818e1e005ced445d31041630a1e1c
+(c9d4980 plus protected b2326bb). Five other shards and CodeQL succeeded.
+The fixture opened and closed a separate asyncio loop for each request,
+so the now-separate Slack projection could be cancelled before starting.
+A deterministic Event-gated Slack response reproduced the same assertion
+failure against the old helper (1 failed in 7.49s).
+
+The repaired test keeps one event loop alive, proves admission/deduplication
+while Slack remains blocked, then releases the response and drains the actual
+projection before asserting exactly one notice. No production timeout,
+permission, CI check or assertion is weakened. Final affected group:
+**20 passed in 4.38s** across host composition, receiver capacity and signed
+socket integration. This is the targeted follow-up to the full 614-test source
+run, not a claim that current-head hosted CI has passed.
+
+Final parent QA tightened the negative socket case to require the observed
+`admit_or_join` frame and exact `REVIEW_REPOSITORY_POLICY_NOT_ENROLLED`
+refusal, then drain before asserting no effects. All fixture paths now drain
+before closing the listener. These assertions are included in the final
+20-test result above.
+
+Protected master was reread as e999c6e2161a77c7e4f35a9acf3ec3e3f6b9fc0c.
+Its sole change after compatible b2326bbe30e9988d26199f5e774a482b9c09068a
+is app/mastermind_os/src-tauri/src/auth.rs (#1991), with no governing-procedure,
+review integration or Runtime overlap. No held effect or review policy changes
+follow from that compatible protected-source update.

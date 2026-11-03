@@ -4,19 +4,27 @@ This is a hermetic simulated socket listener using the existing owner adapter;
 it DOES NOT claim that the installed ExecutiveControlService handler is bound.
 """
 import asyncio
+import dataclasses
 import datetime
 import json
 import time
 
 import httpx
+import pytest
 
 from control_plane.executive_runtime import Runtime, JobPayload
 from control_plane.github_review_intent import ReviewIntentDecision, sign_webhook_body
 from control_plane.github_review_intent_ingress import PublishState
-from control_plane.github_review_socket_owner import ExecutiveGitHubReviewSocketOwner
+from control_plane.github_review_socket_owner import (
+    ExecutiveGitHubReviewSocketOwner, GitHubReviewSocketRefused,
+)
+from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_host_composition import compose_github_review_host
 from integrations.github_review_return import GitHubReviewReturn, ReviewReturnSourceMode
 from integrations.github_review_socket_client import ExecutiveReviewSocketClient
+from integrations.github_review_source_guard import (
+    GitHubReviewSourceBinding, GitHubReviewSourcePreflight,
+)
 from integrations.github_review_slack_thread import (
     ExecutiveSlackReviewThreads, SlackReviewResultNotifier, review_parent_body,
 )
@@ -32,15 +40,49 @@ SECRET = "test-webhook-secret"
 DELIVERY_ID = "11111111-2222-3333-4444-555555555555"
 
 
-def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path):
+@pytest.mark.parametrize("mode", ["manual", "standing", "unbound_policy"])
+def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path, mode):
     async def exercise():
         source_checks = []
+        executive_reads = []
         runtime = Runtime.at(tmp_path / "runtime")
-        def source_guard(subject):
-            assert subject.repository == REPO
-            assert subject.pull_number == 42
-            assert subject.frozen_head_sha == SHA
-            source_checks.append(subject.command_id)
+        settings = dataclasses.replace(
+            _settings(), allow_lifecycle_review=mode != "manual",
+            allow_repository_policy_review=mode != "manual",
+        )
+
+        class ExecutiveTokens:
+            def token_for_installation(self, *, installation_id):
+                assert installation_id == settings.installation_id
+                return "synthetic-executive-source-token"
+
+        def executive_transport(request):
+            assert request.headers["authorization"] == "Bearer synthetic-executive-source-token"
+            executive_reads.append(request.url.path)
+            if request.url.path == f"/repos/{REPO}/collaborators/alice/permission":
+                return httpx.Response(200, json={
+                    "user": {"login": "alice"}, "permission": "write",
+                })
+            assert request.url.path == f"/repos/{REPO}/pulls/42"
+            return httpx.Response(200, json={
+                "number": 42, "state": "open", "draft": False,
+                "head": {"sha": SHA, "repo": {"full_name": REPO}},
+                "base": {"sha": "b" * 40, "repo": {"full_name": REPO}},
+                "title": "Source review", "body": "Untrusted PR content",
+            })
+
+        # This is the Executive process's independent source reader. The public
+        # webhook's API/token and socket payload cannot provide its authority.
+        executive_api = GitHubReviewAPI(
+            repository=REPO, installation_id=settings.installation_id,
+            token_source=ExecutiveTokens(), publisher_login="reviewer-bot[bot]",
+            publisher_user_id=9001,
+            client=httpx.Client(transport=httpx.MockTransport(executive_transport)),
+        )
+        preflight = GitHubReviewSourcePreflight(bindings=[GitHubReviewSourceBinding(
+            settings=settings, github=executive_api,
+            current_binding_guard=lambda: source_checks.append("current"),
+        )])
         notifications = []
         def trusted_parent_reader(subject, job_id, ts):
             # This fixture stands in for the installed host's authenticated
@@ -55,7 +97,8 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             )
         owner = ExecutiveGitHubReviewSocketOwner(
             runtime=runtime, admission_guard=lambda: None,
-            source_guard=source_guard,
+            source_preflight=preflight,
+            automatic_policies=({} if mode == "unbound_policy" else preflight.automatic_policies),
             repositories=frozenset({REPO}),
             relay_bot_user_id="U0BT71H4FQE",
             parent_message_reader=trusted_parent_reader,
@@ -65,14 +108,21 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             worker_constraints={"eligible_quota_classes": ["codex-native"]},
         )
         socket_path = str(tmp_path / "ceo-ingress.sock")
+        handled_actions = []
+        source_refusals = []
         async def handle(reader, writer):
             try:
                 raw = await asyncio.wait_for(reader.readline(), timeout=3.0)
                 assert len(raw) <= 8192
+                frame = json.loads(raw)
+                handled_actions.append(frame["action"])
                 result = await asyncio.to_thread(
-                    owner.handle_frame, json.loads(raw)
+                    owner.handle_frame, frame
                 )
                 payload = {"ok": True, "result": result}
+            except GitHubReviewSocketRefused as exc:
+                source_refusals.append(str(exc))
+                payload = {"ok": False, "error": {"code": "refused"}}
             except Exception:
                 payload = {"ok": False, "error": {"code": "refused"}}
             writer.write(json.dumps(payload).encode() + b"\n")
@@ -124,7 +174,7 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             )
         relay.post_parent = post_parent
         app = compose_github_review_host(
-            settings=_settings(), app_id=123,
+            settings=settings, app_id=123,
             private_key_source=credentials,
             webhook_secret_source=Hook(),
             socket_client=ExecutiveReviewSocketClient(
@@ -141,13 +191,14 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
         )
 
         body = json.dumps({
-            "action": "labeled", "installation": {"id": 4242},
+            "action": "labeled" if mode == "manual" else "opened",
+            "installation": {"id": 4242},
             "repository": {"full_name": REPO}, "number": 42,
             "pull_request": {
                 "number": 42,
                 "base": {"repo": {"full_name": REPO}},
             },
-            "sender": {"login": "alice"},
+            "sender": {"login": "alice" if mode == "manual" else "automation[bot]"},
             "label": {"name": "independent-review"},
         }).encode()
 
@@ -175,6 +226,18 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             return sent[0]["status"], json.loads(sent[1]["body"])
 
         try:
+            if mode == "unbound_policy":
+                status, _ = await deliver()
+                from test_github_review_receiver_capacity import drain
+                await asyncio.wait_for(drain(app), timeout=5)
+                assert status >= 400
+                assert "admit_or_join" in handled_actions
+                assert source_refusals == ["REVIEW_REPOSITORY_POLICY_NOT_ENROLLED"]
+                assert runtime.jobs.list_jobs() == []
+                # The public receiver's standing policy cannot grant the
+                # independently configured Executive owner's authority.
+                assert executive_reads == source_checks == notifications == []
+                return
             assert (await deliver())[0] == 202
             status, info = await deliver()
             assert status == 200 and info["status"] == "ALREADY_ADMITTED"
@@ -192,6 +255,10 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert job.requested_authorities == ["READ"]
             assert job.allowed_write_paths == []
             assert len(source_checks) >= 3  # before and during commit
+            assert executive_reads.count(f"/repos/{REPO}/pulls/42") >= 3
+            assert executive_reads.count(f"/repos/{REPO}/collaborators/alice/permission") == (
+                executive_reads.count(f"/repos/{REPO}/pulls/42") if mode == "manual" else 0            )
+            assert (admitted_decision.policy_authority is not None) == (mode == "standing")
             assert len(notifications) == 1
             assert notifications[0][0] == "C0CAUK8P8S3"
             assert REPO not in notifications[0][1]
@@ -257,7 +324,11 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert second.publication.state is PublishState.ALREADY_PUBLISHED
             assert len(history["posts"]) == len(replies) == 1
         finally:
-            server.close()
-            await server.wait_closed()
+            try:
+                from test_github_review_receiver_capacity import drain
+                await asyncio.wait_for(drain(app), timeout=5)
+            finally:
+                server.close()
+                await server.wait_closed()
 
     asyncio.run(exercise())

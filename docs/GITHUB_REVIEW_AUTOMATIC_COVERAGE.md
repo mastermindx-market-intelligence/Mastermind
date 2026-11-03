@@ -245,3 +245,52 @@ owners. It does not establish installed preview-stderr diagnostics or this
 consumer's actual caller qualification. Installation and live proof remain with
 the original #1829/#917/#1957 owners; this integration does not replay their held
 effects through another carrier.
+
+
+## R15 authenticated source and multi-repository policy qualification
+
+The concrete `GitHubReviewSourcePreflight` removes the former unspecified
+network-backed socket guard dependency. One fresh read pass precedes Runtime
+admission; both writer-transaction fences perform only local current-arm,
+enrollment/policy and observation-age checks. The maximum three-second window
+starts before the network reads and never renews, including while waiting for
+the writer lock. It prevents admission after stale or locally revoked evidence,
+without claiming instantaneous remote GitHub revocation.
+
+Each of up to 32 source bindings has one exact repository, active installation,
+authenticated API and mandatory local current-enrollment fence. A repository
+cannot select among multiple readers. The socket's immutable
+`automatic_policies` map uses exact `(installation_id, repository)` keys so
+heterogeneous repository policies stay separate. Missing/empty map entries
+refuse automatic work; the old singular-policy path remains compatible when
+no map is configured. Each public host composition now rejects empty or
+multiple repository settings before constructing credentials or API ports.
+
+Qualification on the original C2 source owner: **614 passed in 37.83s**,
+covering all `tests/test_github_review_*.py` and
+`tests/test_delivery_review_readiness.py`. Retained output:
+`/tmp/github-review-r15-full-tests.log`, SHA-256
+`27313062368b904e81499dcb43b7d6f8891346af38e2e5e5ff14eb77e41ba3da`.
+The suite covers actual adapter calls outside database locks, expiry and
+revocation rollback, manual/lifecycle/standing-policy distinctions, cross-
+request misuse, multiple repository policies and legacy callback compatibility.
+Parent architecture QA found no blocking source issue; it is not independent
+release acceptance. R14 shared-route ingress is still a separate in-flight
+Fabric patch proposal at this checkpoint, not claimed implemented here.
+
+### Automatic Dot assignment boundary
+
+The existing Slack visibility adapter announces an already-admitted Job; it
+does not assign a Dot. The existing dialogue engine transports an established
+dialogue, while its company binding requires an active Attempt, busy worker and
+qualified profile/session. An ordinary A0/READ GitHub root is not an eligible
+orchestration delegation root, and an explicitly unbound session has no alias
+fallback. A Slack reply alone is not an authenticated worker result.
+
+Automatic Dot execution therefore still requires an incumbent Runtime/Capacity
+initial-assignment and authenticated-return contract for the same Job,
+mutually exclusive with Fabric assignment. No mention, notification or ACK is
+promoted to START by this source. For the current rollout, use qualified Fabric
+for automatic work and an explicitly authorized Dot session for supplemental
+independent assessment. Neither an uncertain Fabric operation nor a missing
+formal approval is resolved by silently assigning the same work elsewhere.
