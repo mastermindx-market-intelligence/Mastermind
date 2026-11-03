@@ -62,6 +62,8 @@ export interface OrchestratorCommandBinding {
   /** Distinct direct terminal view; no role-envelope or product acceptance fallback. */
   readonly directNative?: {
     read(selection: DirectSelection, signal: AbortSignal): Promise<unknown>;
+    inspectCorrection?(selection:DirectSelection,signal:AbortSignal):Promise<unknown>;
+    makeCorrectionIntent?(selection:DirectTerminalSelection,fence:number):CommandIntent|null;
     makeConsumeIntent(selection: DirectTerminalSelection, digest: string): CommandIntent | null;
     isDirectSelection(selection: MissionSelection): boolean;
   };

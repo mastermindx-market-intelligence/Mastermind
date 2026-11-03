@@ -6839,6 +6839,22 @@ class ExecutiveControlService:
                     # dispatched=False and is not execution/result success.
 
             return result
+        if parsed.get('operation') in {'correction-inspect','correct'}:
+            from common import direct_native_correction_contract as correction
+            frame=wire.validate_private_frame(parsed)
+            write=frame['operation']=='correct'
+            body={key:value for key,value in frame.items() if key not in {'schema','operation','principal_scope'}}
+            with runtime.store.read() as connection:
+                rows=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? AND length(CAST(payload_json AS BLOB))<=65536 LIMIT 2",(body['job_id'],)).fetchall()
+                if len(rows)!=1:raise StateConflict('direct correction origin unavailable')
+                intent_id=json.loads(rows[0][0])['provenance']['intent_id']
+            access,_,_=await asyncio.to_thread(self._direct_native_access,principal_scope=frame['principal_scope'],
+                work_ref=body['work_ref'],intent_id=intent_id,app_binding=app_binding)
+            owner=(runtime.request_direct_native_correction if write else runtime.inspect_direct_native_correction)
+            from control_plane.workspace_owned_task import await_owned
+            # Retain an entered write through caller disconnect. Reconciliation
+            # is the exact authenticated inspection, never another dispatch.
+            return await await_owned(asyncio.create_task(asyncio.to_thread(owner,body,access=access)))
         expected={"schema","operation","work_ref","job_id","attempt_id","principal_scope"}
         consume=parsed.get("operation")=="consume"
         if consume: expected|={"result_digest","operation_key"}

@@ -51,7 +51,7 @@ SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
         'de1b4f7bf74030b6c71b956440801760452f17049d13fa423a9fac6aeec2562f',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        '5a676f5a4886820cf91e13d558e61623b3fdccbebde734c7941fbbc495ead668',
+        'df1e3158fb84d0558d5b14c15a17b74dffcc5c32bb70106a9651aec3197fd5bd',
     'app/mastermind_os/src/launch-config.ts':
         '00d1943314b17052a4d33626b5a6c9dcd4cddb09569aee146abc8cff4ca5ecf2',
 }
