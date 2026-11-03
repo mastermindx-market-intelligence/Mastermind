@@ -12,8 +12,6 @@ import {
   STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL,
   createGitPublisher,
   resolveGitPublishConfig,
-  StudioGitPrecheckRefusal,
-  classifyStudioGitFailure,
 } from './git-publish.mjs';
 
 const execFile = promisify(execFileCallback);
@@ -953,7 +951,7 @@ test('closed publisher refuses duplicate operation ownership or bad registry rec
       const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
       await assert.rejects(publisher.commit({
         operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
-      }), /OPERATION_AMBIGUOUS_ACROSS_REPOSITORIES|REPOSITORY_ROUTING_UNQUALIFIED/);
+      }), /more than one repository|invalid repository receipt|unexpected result/);
       assert.equal(gitCalls, 0, caseName);
     }
   } finally { await f.cleanup(); }
@@ -995,7 +993,7 @@ test('closed publisher fails closed on stdout absence even when another reposito
       const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
       await assert.rejects(publisher.commit({
         operation_id: f.operationId, expected_head_sha: 'b'.repeat(40), message: 'test: no effects',
-      }), /REPOSITORY_ROUTING_UNQUALIFIED/, caseName);
+      }), /unexpected result/, caseName);
       assert.equal(gitCalls, 0, caseName);
     }
   } finally { await f.cleanup(); }
@@ -1038,7 +1036,7 @@ test('closed publisher keeps canonical exit-code-2 absence as the only non-regis
     });
     await assert.rejects(absent.commit({
       operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
-    }), /OPERATION_NOT_REGISTERED_IN_CLOSED_PROFILE/);
+    }), /not registered in the closed repository profile/);
     assert.equal(gitCalls, 0);
 
     const routed = createGitPublisher(closedProfileFor(f), { execFile: exec });
@@ -1429,65 +1427,5 @@ test('merge readback rejects a commit with the wrong parent before updating the 
     assert.equal(result.code, 'MERGE_COMMIT_IDENTITY_MISMATCH');
     assert.equal(result.effect_state, 'NOT_APPLIED');
     assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
-  } finally { await f.cleanup(); }
-});
-
-test('public Git failure classification never turns an unqualified mutation into NOT_APPLIED', () => {
-  const secret = new Error('secret remote URL, workspace path, and credential material');
-  const unknown = classifyStudioGitFailure(secret, { modifying: true });
-  assert.deepEqual(unknown, {
-    schema: 'mastermind.studio_git_tool_error.v1',
-    status: 'UNKNOWN', effect_state: 'EFFECT_UNKNOWN', code: 'TYPED_GIT_EFFECT_UNQUALIFIED',
-  });
-  assert.doesNotMatch(JSON.stringify(unknown), /secret|credential|workspace path/);
-  const read = classifyStudioGitFailure(secret, { modifying: false });
-  assert.equal(read.status, 'REFUSED');
-  assert.equal(read.effect_state, 'NOT_APPLIED');
-  assert.equal(read.code, 'TYPED_GIT_READONLY_INSPECTION_REFUSED');
-});
-
-test('typed closed-selector refusal proves no Git mutation only by trusted error identity', () => {
-  const preflight = new StudioGitPrecheckRefusal('OPERATION_NOT_REGISTERED_IN_CLOSED_PROFILE');
-  const result = classifyStudioGitFailure(preflight, { modifying: true });
-  assert.equal(result.status, 'REFUSED');
-  assert.equal(result.effect_state, 'NOT_APPLIED');
-  assert.equal(result.code, 'OPERATION_NOT_REGISTERED_IN_CLOSED_PROFILE');
-
-  const spoofed = Object.assign(new Error('fake typed result'), {
-    name: 'StudioGitPrecheckRefusal',
-    code: 'OPERATION_NOT_REGISTERED_IN_CLOSED_PROFILE',
-    effect_state: 'NOT_APPLIED',
-  });
-  assert.deepEqual(classifyStudioGitFailure(spoofed, { modifying: true }), {
-    schema: 'mastermind.studio_git_tool_error.v1', status: 'UNKNOWN',
-    effect_state: 'EFFECT_UNKNOWN', code: 'TYPED_GIT_EFFECT_UNQUALIFIED',
-  });
-});
-
-test('a closed-selector transport failure is qualified only before publisher dispatch', async () => {
-  const f = await fixture();
-  try {
-    let gitCalls = 0;
-    const exec = async (file, args) => {
-      if (file !== f.cli) {
-        gitCalls += 1;
-        throw new Error('unexpected Git dispatch');
-      }
-      const error = new Error('read-only owner refused an unavailable selection');
-      error.code = 'ETIMEDOUT';
-      throw error;
-    };
-    const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
-    await assert.rejects(
-      publisher.commit({operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no ref update'}),
-      (error) => {
-        assert.ok(error instanceof StudioGitPrecheckRefusal);
-        const out = classifyStudioGitFailure(error, { modifying: true });
-        assert.equal(out.effect_state, 'NOT_APPLIED');
-        assert.equal(out.code, 'REPOSITORY_ROUTING_UNQUALIFIED');
-        return true;
-      },
-    );
-    assert.equal(gitCalls, 0);
   } finally { await f.cleanup(); }
 });

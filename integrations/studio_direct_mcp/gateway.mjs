@@ -100,7 +100,6 @@ import {
   STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL,
   STUDIO_GIT_PUBLISH_TOOLS,
   createGitPublisher,
-  classifyStudioGitFailure,
   resolveGitPublishConfig,
   toolResult as gitToolResult,
 } from './git-publish.mjs';
@@ -160,6 +159,20 @@ const CLASSIFICATION = Object.freeze({
   BAD_HOST: 'bad_host',
   BAD_ORIGIN: 'bad_origin',
 });
+
+// Never infer the absence of a Git effect from an exception: a failed commit
+// or push response may arrive *after* the source ref was updated. This layer
+// sees no authoritative stage receipt, so it reports unqualified mutations
+// as unknown while an exclusively read-only status retains NOT_APPLIED.
+// The exception object is deliberately not inspected or serialized.
+function classifyStudioGitFailure(_error, { modifying = false } = {}) {
+  return {
+    schema: 'mastermind.studio_git_tool_error.v1',
+    status: modifying ? 'UNKNOWN' : 'REFUSED',
+    effect_state: modifying ? 'EFFECT_UNKNOWN' : 'NOT_APPLIED',
+    code: modifying ? 'TYPED_GIT_EFFECT_UNQUALIFIED' : 'TYPED_GIT_READONLY_INSPECTION_REFUSED',
+  };
+}
 
 /** JSON-RPC error codes in the server-defined range (-32000..-32099). */
 const CODE = Object.freeze({
