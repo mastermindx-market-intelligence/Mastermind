@@ -27,6 +27,7 @@ import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection
 import { validActivitySelection } from "./planning/retained-activity";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
+import { canNavigateForAutomaticSignIn } from "./auth-navigation-guard";
 import { evidenceUrl, EVIDENCE_BODY_BYTES } from "./research/evidence-contract";
 export type { AuthState } from "./host";
 export interface WebPopup {
@@ -45,6 +46,8 @@ export interface WebAuthDeps {
     target: string,
     features: string,
   ) => WebPopup | null;
+  /** Test-injected top-level OAuth navigation; never a caller-supplied URL. */
+  navigate?: (url: string) => void;
   addEventListener?: typeof window.addEventListener;
   removeEventListener?: typeof window.removeEventListener;
   setTimeout?: typeof setTimeout;
@@ -63,6 +66,30 @@ const reason = (error: unknown) =>
   error instanceof Error && /^[A-Z_]{1,80}$/.test(error.message)
     ? error.message
     : "AUTH_REQUEST_FAILED";
+
+const REDIRECT_PENDING_KEY = "mastermind-os-auth0-redirect-pkce-v1";
+const REDIRECT_ATTEMPT_KEY = "mastermind-os-auth0-redirect-attempt-v1";
+const PRIOR_LOGIN_KEY = "mastermind-os-auth0-prior-login-v1:";
+type RedirectGrant = { readonly code: string; readonly verifier: string };
+let redirectGrant: RedirectGrant | null = null;
+
+function redirectPending(): {
+  state: string; verifier: string; clientId: string; started: number;
+} | null {
+  try {
+    const raw = sessionStorage.getItem(REDIRECT_PENDING_KEY);
+    if (!raw || raw.length > 1024) return null;
+    const v: unknown = JSON.parse(raw);
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    const p = v as Record<string, unknown>;
+    if (Object.keys(p).sort().join(",") !== "clientId,started,state,verifier" ||
+      !opaque(p.state, 128) || !opaque(p.verifier, 128) ||
+      typeof p.clientId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(p.clientId) ||
+      !Number.isSafeInteger(p.started) || Number(p.started) > Date.now() ||
+      Date.now() - Number(p.started) > TRANSACTION_TTL_MS) return null;
+    return p as {state: string; verifier: string; clientId: string; started: number};
+  } catch { return null; }
+}
 
 /** The callback scrubs its URL before any handoff; code/state never reach React. */
 export function handleWebAuthCallback(): boolean {
@@ -102,6 +129,22 @@ export function handleWebAuthCallback(): boolean {
         ? { failure: "AUTHORIZATION_DENIED" }
         : { code }),
   };
+  // A top-level round-trip must be handled before replacing the document
+  // body or forwarding to a potentially unrelated opener. React's #root
+  // survives; only the private OAuth owner receives the exchanged code.
+  const pending = redirectPending();
+  const registeredClient = readWebAuthConfig().webClientId;
+  if (origin === ORIGIN && window.parent === window && pending &&
+      pending.state === state && pending.clientId === registeredClient) {
+    try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* denied */ }
+    if (!failure && !error && opaque(code)) {
+      redirectGrant = { code, verifier: pending.verifier };
+    }
+    try { window.history.replaceState(null, "", "/os/"); } catch { return true; }
+    // Failed prompt=none returns to ordinary manual Sign-in, once only.
+    return false;
+  }
+  // The popup/iframe callback is deliberately not a mounted app.
   document.title = failure || error ? "Sign-in failed" : "Completing sign-in";
   const main = document.createElement("main");
   main.setAttribute("role", "status");
@@ -110,12 +153,10 @@ export function handleWebAuthCallback(): boolean {
       ? "Sign-in failed. Close this window and try again."
       : "Completing sign-in. This window will close automatically.";
   document.body.replaceChildren(main);
-  if (origin === ORIGIN && window.opener && !window.opener.closed) {
-    try {
-      window.opener.postMessage(payload, ORIGIN);
-    } catch {
-      /* opener is gone */
-    }
+  const recipient = window.opener && !window.opener.closed ? window.opener :
+    window.parent !== window ? window.parent : null;
+  if (origin === ORIGIN && recipient) {
+    try { recipient.postMessage(payload, ORIGIN); } catch { /* unavailable */ }
   }
   return true;
 }
@@ -136,6 +177,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     config.acquisitionScope === ACQUISITION_SCOPE &&
     config.contentAudience === CONTENT_AUDIENCE &&
     config.contentScope === CONTENT_SCOPE;
+  const logoutKey = `mastermind-os-auth-logout-v1:${config.webClientId ?? "unconfigured"}`;
+  // Storage errors must not invalidate an otherwise authorized manual login.
+  const loggedOutElsewhere = () => {
+    try { return localStorage.getItem(logoutKey) === "1"; }
+    catch { return false; }
+  };
   const cryptoApi = deps.crypto ?? crypto,
     fetchFn = deps.fetchFn ?? fetch.bind(globalThis),
     now = deps.now ?? Date.now;
@@ -143,11 +190,15 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     deps.openPopup ??
     ((url, target, features) =>
       window.open(url, target, features) as unknown as WebPopup | null);
+  const navigate = deps.navigate ?? ((url: string) => window.location.assign(url));
   const add = deps.addEventListener ?? window.addEventListener.bind(window),
     remove =
       deps.removeEventListener ?? window.removeEventListener.bind(window);
   const later = deps.setTimeout ?? setTimeout,
     clear = deps.clearTimeout ?? clearTimeout;
+  // Same-document logout is an auth-owner fact, not conditional on whether
+  // the browser can write the cross-tab storage marker.
+  let explicitlySignedOut = false;
   let generation = 0,
     flow: { generation: number; popup: WebPopup; cancel: () => void } | null =
       null,
@@ -168,6 +219,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   const valid = (resource: Resource) =>
+    !loggedOutElsewhere() &&
     Boolean(tokens[resource] && tokens[resource]!.expires > now());
   let executiveGeneration = 0;
   const executiveListeners = new Set<() => void>();
@@ -193,7 +245,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
             : valid("acquisition") || valid("content")
               ? "signed_in"
               : "signed_out",
-      reason: !configured ? "CLIENT_NOT_REGISTERED" : lastError,
+      reason: !configured ? "CLIENT_NOT_REGISTERED" :
+        lastError || (explicitlySignedOut ? "USER_SIGNED_OUT" : null),
       acquisition: valid("acquisition"),
       content: valid("content"),
     };
@@ -226,6 +279,38 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         /* already closed */
       }
     }
+  }
+  // Cross-tab sign-out revokes this token owner and all pending generation
+  // work. A remote logout is never an automatic login instruction.
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== logoutKey || event.newValue !== "1") return;
+    redirectGrant = null;
+    explicitlySignedOut = true;
+    cancel();
+    tokens.acquisition = null;
+    tokens.content = null;
+    lastError = null;
+    emit();
+  };
+  if (configured) add("storage", onStorage);
+  // BroadcastChannel is a same-origin, nonpersistent logout signal. Unlike
+  // localStorage events, it still delivers when quota rejects setItem.
+  // Only an explicit logout is broadcast; never send a token or a draft.
+  let logoutBroadcast: BroadcastChannel | null = null;
+  if (configured && typeof BroadcastChannel !== "undefined") {
+    try {
+      logoutBroadcast = new BroadcastChannel(logoutKey);
+      logoutBroadcast.onmessage = (event: MessageEvent) => {
+        if (event.data !== "USER_SIGNED_OUT") return;
+        redirectGrant = null;
+        explicitlySignedOut = true;
+        cancel();
+        tokens.acquisition = null;
+        tokens.content = null;
+        lastError = null;
+        emit();
+      };
+    } catch { /* storage marker remains another logout signal */ }
   }
   const check = (ticket: number) => {
     if (ticket !== generation) throw new Error("TRANSACTION_CANCELLED");
@@ -447,8 +532,168 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       current.cancel = () => {};
     }
   }
+  // Nonsecret explicit-logout flag prevents a reload from silently undoing sign-out.
+  const priorKey = PRIOR_LOGIN_KEY + (config.webClientId ?? "unconfigured");
+  function rememberSignedIn() {
+    try { localStorage.setItem(priorKey, "1"); } catch { /* no persistent hint */ }
+  }
+  async function redirectFallback(ticket: number): Promise<void> {
+    if (!configured || logoutBlocked() || valid("acquisition")) return;
+    try {
+      if (localStorage.getItem(priorKey) !== "1" ||
+          sessionStorage.getItem(REDIRECT_ATTEMPT_KEY) ||
+          !canNavigateForAutomaticSignIn()) return;
+      const verifier = random(), state = random();
+      const challenge = base64(new Uint8Array(await cryptoApi.subtle.digest(
+        "SHA-256", new TextEncoder().encode(verifier))));
+      check(ticket);
+      // Drafts may change while calculating the PKCE code challenge.
+      if (!canNavigateForAutomaticSignIn()) return;
+      const url = new URL(`${ISSUER}authorize`);
+      for (const [key, value] of Object.entries({
+        response_type: "code", client_id: config.webClientId!,
+        redirect_uri: CALLBACK_URL, audience: ACQUISITION_AUDIENCE,
+        scope: ACQUISITION_SCOPE, state, code_challenge: challenge,
+        code_challenge_method: "S256", prompt: "none", response_mode: "query",
+      })) url.searchParams.set(key, value);
+      sessionStorage.setItem(REDIRECT_PENDING_KEY, JSON.stringify({
+        clientId: config.webClientId!, state, verifier, started: now(),
+      }));
+      sessionStorage.setItem(REDIRECT_ATTEMPT_KEY, "1");
+      try { navigate(url.toString()); }
+      catch {
+        sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+        sessionStorage.removeItem(REDIRECT_ATTEMPT_KEY);
+      }
+    } catch { /* storage denied, no navigation or credential persistence */ }
+  }
+  const logoutBlocked = () => {
+    try { return localStorage.getItem(logoutKey) === "1"; } catch { return true; }
+  };
+  // Restore the Auth0 SSO session with hidden-frame PKCE. No access/refresh
+  // tokens are placed in localStorage, cookies, or sessionStorage.
+  let restoring: Promise<AuthState> | null = null;
+  async function restore(force = false): Promise<AuthState> {
+    if (!configured || explicitlySignedOut || logoutBlocked() || flow ||
+        (!force && valid("acquisition")) || restoring) {
+      return restoring ?? Promise.resolve(getState());
+    }
+    const ticket = generation;
+    const incoming = redirectGrant;
+    redirectGrant = null;
+    const installToken = (resource: "acquisition" | "content" | "executive", token: Token) => {
+      check(ticket);
+      tokens[resource] = token;
+      if (resource === "acquisition") rememberSignedIn();
+      if (resource === "executive") advanceExecutive();
+      later(() => {
+        if (ticket === generation && tokens[resource] === token) {
+          tokens[resource] = null;
+          if (resource === "executive") advanceExecutive();
+          emit();
+          void restore(true);
+        }
+      }, Math.max(0, token.expires - now()));
+      emit();
+    };
+    const restoreOne = async (resource: "acquisition" | "content" | "executive") => {
+      const verifier = random(), state = random();
+      const challenge = base64(new Uint8Array(await cryptoApi.subtle.digest(
+        "SHA-256", new TextEncoder().encode(verifier))));
+      check(ticket);
+      const url = new URL(`${ISSUER}authorize`);
+      const audience = resource === "acquisition" ? ACQUISITION_AUDIENCE :
+        resource === "content" ? CONTENT_AUDIENCE : executiveResource!;
+      for (const [key, value] of Object.entries({
+        response_type: "code", client_id: config.webClientId!,
+        redirect_uri: CALLBACK_URL, scope: resourceScope(resource), audience,
+        state, code_challenge: challenge, code_challenge_method: "S256",
+        prompt: "none", response_mode: "query",
+      })) url.searchParams.set(key, value);
+      const frame = document.createElement("iframe");
+      frame.hidden = true;
+      frame.setAttribute("aria-hidden", "true");
+      frame.title = "Session restoration";
+      const abort = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const code = await new Promise<string>((resolve, reject) => {
+          let settled = false;
+          const csp = (event: SecurityPolicyViolationEvent) => {
+            if ((event.effectiveDirective === "frame-src" ||
+                 event.effectiveDirective === "default-src") &&
+                (event.blockedURI === new URL(ISSUER).origin ||
+                 event.blockedURI.startsWith(ISSUER)))
+              finish("SILENT_AUTH_UNAVAILABLE");
+          };
+          const listener = (event: MessageEvent) => {
+            if (event.origin !== ORIGIN || event.source !== frame.contentWindow) return;
+            const data = event.data;
+            if (!data || typeof data !== "object" || data.type !== TYPE ||
+                data.state !== state) return;
+            if (ticket !== generation) return finish("TRANSACTION_CANCELLED");
+            if (Object.keys(data).some(k => !["type","state","code","failure"].includes(k)) ||
+                Boolean(data.code) === Boolean(data.failure) ||
+                (data.code !== undefined && !opaque(data.code))) return finish("CALLBACK_INVALID");
+            if (data.failure) return finish("SILENT_AUTH_UNAVAILABLE");
+            finish(undefined, data.code);
+          };
+          const finish = (error?: string, value?: string) => {
+            if (settled) return;
+            settled = true;
+            remove("message", listener);
+            remove("securitypolicyviolation", csp);
+            clear(timer);
+            error ? reject(new Error(error)) : resolve(value!);
+          };
+          add("message", listener);
+          add("securitypolicyviolation", csp);
+          timer = later(() => finish("SILENT_AUTH_UNAVAILABLE"), 10000);
+          frame.src = url.toString();
+          document.body.appendChild(frame);
+        });
+        check(ticket);
+        const token = await exchange(code, verifier, resource, ticket, abort.signal);
+        installToken(resource, token);
+      } finally {
+        abort.abort();
+        clear(timer);
+        frame.remove();
+      }
+    };
+    const running = (async () => {
+      try {
+        if (incoming) {
+          const token = await exchange(incoming.code, incoming.verifier,
+            "acquisition", ticket, new AbortController().signal);
+          installToken("acquisition", token);
+          try { sessionStorage.removeItem(REDIRECT_ATTEMPT_KEY); } catch { /* denied */ }
+        } else {
+          await restoreOne("acquisition");
+        }
+        if (ticket !== generation) return getState();
+        try { await restoreOne("content"); } catch { /* workspace remains usable */ }
+        if (executiveResource && ticket === generation) {
+          try { await restoreOne("executive"); } catch { /* optional privilege */ }
+        }
+      } catch {
+        if (!incoming && ticket === generation) await redirectFallback(ticket);
+        // The one-attempt guard also protects unattended post-expiry recovery.
+      }
+      return getState();
+    })();
+    restoring = running;
+    try { return await running; }
+    finally { if (restoring === running) restoring = null; }
+  }
+
   async function signIn() {
     if (!configured) return getState();
+    // A failed popup must not undo the user's explicit persistent logout.
+    try {
+      sessionStorage.removeItem(REDIRECT_ATTEMPT_KEY);
+      sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+    } catch { /* policy restricted */ }
     cancel();
     tokens.acquisition = null;
     tokens.content = null;
@@ -471,6 +716,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     try {
       await transaction("acquisition", current);
       check(current.generation);
+      const acquired = ((): Token | null => tokens.acquisition)();
+      if (acquired && acquired.expires > now()) {
+        // Only a new interactive grant can clear an explicit same-tab logout.
+        explicitlySignedOut = false;
+        try { localStorage.removeItem(logoutKey); } catch { /* denied */ }
+        rememberSignedIn();
+      }
       await transaction("content", current);
       check(current.generation);
       if (executiveResource) {
@@ -512,6 +764,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     try {
       await transaction("research", current);
       check(current.generation);
+      const acquiredResearch = ((): Token | null => tokens.research)();
+      if (acquiredResearch && acquiredResearch.expires > now()) {
+        // Research is a user-initiated separate grant, not automatic SSO.
+        explicitlySignedOut = false;
+        try { localStorage.removeItem(logoutKey); } catch { /* denied */ }
+      }
     } catch (error) {
       throw new Error(reason(error));
     } finally {
@@ -523,6 +781,15 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     }
   }
   async function signOut() {
+    // Apply the local privacy boundary before any storage operations. A quota
+    // refusal may reject setItem while read operations still succeed.
+    explicitlySignedOut = true;
+    try { logoutBroadcast?.postMessage("USER_SIGNED_OUT"); } catch { /* unavailable */ }
+    try { localStorage.setItem(logoutKey, "1"); } catch { /* unavailable */ }
+    try { localStorage.removeItem(priorKey); } catch { /* unavailable */ }
+    try { sessionStorage.removeItem(REDIRECT_PENDING_KEY); } catch { /* unavailable */ }
+    try { sessionStorage.removeItem(REDIRECT_ATTEMPT_KEY); } catch { /* unavailable */ }
+    redirectGrant = null;
     cancel();
     tokens.acquisition = null;
     tokens.content = null;
@@ -732,6 +999,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     },
     signIn,
     signOut,
+    restore,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
     readWork: ({ signal }) =>
