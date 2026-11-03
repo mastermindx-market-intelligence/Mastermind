@@ -769,6 +769,31 @@ def _pin_owner_module():
     return module
 
 
+def _pin_enrollment_owner_module():
+    import importlib.util
+    path = Path(__file__).resolve().with_name("private_service_pin_enrollment.py")
+    spec = importlib.util.spec_from_file_location("_studio_pin_enrollment_owner", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def cmd_native_pool_pin_enrollment(args):
+    owner = _pin_enrollment_owner_module()
+    try:
+        value = owner.run(sys.modules[__name__], args)
+    except SystemExit as error:
+        if type(error.code) is str and error.code in {
+            "NATIVE_PIN_ENROLLMENT_" + code for code in owner.REFUSAL_CODES
+        }:
+            raise
+        raise SystemExit("NATIVE_PIN_ENROLLMENT_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_PIN_ENROLLMENT_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
 def cmd_native_pool_pin(args):
     pin = _pin_owner_module()
     try:
@@ -861,6 +886,9 @@ def _pin_reject_generic_restage(account):
 
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
+        return
+    if account == "chatgpt4" and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
+        _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
     _pin_owner_module().require_start(sys.modules[__name__], account, roots)
 
@@ -3746,6 +3774,14 @@ def build_parser() -> argparse.ArgumentParser:
     pin.add_argument("--expected-plan-sha256")
     pin.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
     pin.set_defaults(func=cmd_native_pool_pin)
+
+    enrollment = sub.add_parser("native-pool-pin-enrollment")
+    enrollment.add_argument("--account", choices=("chatgpt4",), required=True)
+    enrollment.add_argument("--expected-manifest-sha256", required=True)
+    enrollment.add_argument("--expected-plan-sha256")
+    enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")
+    enrollment.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    enrollment.set_defaults(func=cmd_native_pool_pin_enrollment)
 
     try:
         from . import workbench_host_service
