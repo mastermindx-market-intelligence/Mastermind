@@ -84,6 +84,23 @@ proof obligation; it must not freeze unrelated permitted implementation or diagn
 
 Whenever an independent source/architecture review is required, use the shared [session review routing procedure](SESSION_INDEPENDENT_REVIEW_ROUTING.md). Discover actual Fabric capabilities in this session and preserve exact original root/effects before commissioning. One separately authorized Dot technical reviewer may be addressed through the existing Slack review channel when qualified; Slack delivery is not reviewer START, a refusal never authorizes cross-provider fallback, and a Dot source verdict is not formal non-author GitHub approval.
 
+## Cross-repository PR auto-merge discipline
+
+For any source release, first read the same-pinned
+[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). In particular, **Macro**
+`main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
+auto-merge is **not** a safe shortcut where binding checks are not protected.
+The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
+Check current PR/head, binding CI, actual non-author release decision, title/body/
+comments for recorded holds and the repository's source/lease gates **before**
+adding the label. Do not auto-arm every open PR or merge using the shared
+author account. A full successful sweeper run may still defer a PR because
+`main` changed CI definitions, active CI workload exceeds the controller
+refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
+success badge. Mastermind `master` retains its separate protected merge-queue
+path. An updated repository source pointer is not evidence that the live ChatGPT
+Project setting has been installed or freshly consumed.
+
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and
