@@ -2,6 +2,8 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -223,3 +225,42 @@ def test_sealed_module_refuses_unreviewed_source_digest(monkeypatch):
     monkeypatch.setattr(MODULE, "FLEET_V20_COHORT_SOURCE_SHA256", "0" * 64)
     with pytest.raises(SystemExit, match="source hash differs"):
         MODULE._frozen_paper_fleet_module()
+
+
+def test_verified_fleet_source_is_read_once_before_execution(monkeypatch):
+    original_reader = MODULE._fabric_release_bytes
+    calls = []
+
+    def secure_read_once(path, *, limit):
+        calls.append((path.name, limit))
+        return original_reader(path, limit=limit)
+
+    monkeypatch.setattr(MODULE, "_fabric_release_bytes", secure_read_once)
+    module = MODULE._frozen_paper_fleet_module()
+    assert len(module.COHORTS) == len(ALL_SEATS)
+    assert calls == [("paper_v20_fleet_cohorts.py", 64 * 1024)]
+
+
+def test_untrusted_bytes_refuse_before_any_module_execution(monkeypatch):
+    # A changed file can never enter Python's loader after the trusted hash
+    # check, because exactly those read bytes are the compiled source.
+    monkeypatch.setattr(MODULE, "_fabric_release_bytes", lambda *a, **k:
+                        b'raise RuntimeError("unreviewed source executed")')
+    with pytest.raises(SystemExit, match="source hash differs"):
+        MODULE._frozen_paper_fleet_module()
+
+
+def test_existing_lifecycle_lock_blocks_second_process(seat):
+    args, _, _, _, state, *_ = seat
+    lock_path = state / MODULE.C2_LIFECYCLE_LOCK_NAME
+    script = (
+        'import fcntl, os, sys; fd=os.open(sys.argv[1], os.O_RDWR); '
+        'fcntl.flock(fd, fcntl.LOCK_EX|fcntl.LOCK_NB)'
+    )
+    with MODULE._c2_lifecycle_mutex(args().account):
+        locked = subprocess.run([sys.executable, "-c", script, str(lock_path)],
+                                capture_output=True, text=True, timeout=5)
+        assert locked.returncode != 0
+    released = subprocess.run([sys.executable, "-c", script, str(lock_path)],
+                              capture_output=True, text=True, timeout=5)
+    assert released.returncode == 0, released.stderr[:200]

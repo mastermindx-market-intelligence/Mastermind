@@ -3165,17 +3165,17 @@ def _upgrade_paper_c2_personal_v20(args) -> int:
 
 def _frozen_paper_fleet_module():
     """Read the approved eight-cohort pure data file beside this installer."""
-    import importlib.util
+    from types import ModuleType
     path = Path(__file__).with_name("paper_v20_fleet_cohorts.py")
-    if path.is_symlink() or not path.is_file():
-        raise SystemExit("Paper fleet cohort source missing or unsafe")
-    if _stable_regular_file_hash(path, label="Paper fleet cohort source") != FLEET_V20_COHORT_SOURCE_SHA256:
+    # Reuse the original private-service no-follow, owner/mode and inode-stable
+    # bounded reader. Verify exactly the bytes that will execute: re-opening
+    # the file through a Python loader after a hash check creates a swap race.
+    source_bytes = _fabric_release_bytes(path, limit=64 * 1024)
+    if hashlib.sha256(source_bytes).hexdigest() != FLEET_V20_COHORT_SOURCE_SHA256:
         raise SystemExit("Paper fleet cohort source hash differs from the reviewed release")
-    spec = importlib.util.spec_from_file_location("_private_paper_fleet_v20_cohorts", path)
-    if spec is None or spec.loader is None:
-        raise SystemExit("Paper fleet cohort source cannot load")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = ModuleType("_private_paper_fleet_v20_cohorts")
+    module.__file__ = str(path)
+    exec(compile(source_bytes, str(path), "exec"), module.__dict__)
     expected = frozenset((
         "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
         "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
