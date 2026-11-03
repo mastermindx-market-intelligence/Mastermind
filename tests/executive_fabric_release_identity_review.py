@@ -432,14 +432,23 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
-# PR2012 successor publication and finite retirement retain these same four
-# exact identity/mode tokens. Preserve both source changes; bind the actual
-# combined full-file digest and relocated complete-token sites.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': 'b6ff496b3b4af339332a8d1adbc4b4ca635d4624979617633eddb9c01c3b1d59',
+# PR2012 successor publication, finite retirement and the required MCP audit
+# leaves retain these same four exact identity/mode tokens. Preserve all
+# source changes; bind the actual full-file digest and complete-token sites.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '027aca59fdc8284a5376800d222ed0387ffc65ebe94b08ad2ecbe4773279c19b',
  'sites': ((336, 24, 27, 'int', '501'),
-           (6610, 35, 37, 'int', '80'),
-           (6611, 50, 55, 'int', '0o755'),
-           (7288, 41, 46, 'int', '0o644'))}
+           (6628, 35, 37, 'int', '80'),
+           (6629, 50, 55, 'int', '0o755'),
+           (7353, 41, 46, 'int', '0o644'))}
+
+# Chairman-authorized missing audit prerequisite: the incumbent MCP UID/GID
+# and fixed directory modes only. This exact source/token acknowledgement
+# grants no service action, publication, policy authority or generic UID mask.
+REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {
+    'sha256': 'e40d488bd0c18f6cc422aeb15ce853cba330a8d5c9559cc7a7612b1ce119a3ed',
+    'sites': ((22, 12, 15, 'int', '458'), (23, 7, 12, 'int', '0o700'),
+              (125, 49, 54, 'int', '0o755'), (128, 60, 65, 'int', '0o755')),
+}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
