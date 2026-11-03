@@ -45,6 +45,21 @@ _PRINCIPAL_KEYS = frozenset({
 _MAX_TARGETS = 256
 
 
+class TransportNotSent(BridgeError):
+    """Private provenance: the trusted transport proved the frame was not sent.
+
+    Issued only inside :class:`InstalledSessionBridgeClient` after an actual
+    trusted transport response reports ``TRANSPORT_NOT_SENT``. It remains a
+    ``BridgeError`` with the incumbent public ``backend_unavailable`` code and
+    message, so existing Session Bridge callers keep their behavior; the
+    foreground admission owner consumes this type, which no wire payload,
+    store or caller-supplied JSON can forge.
+    """
+
+    def __init__(self, message: str = "installed Session Bridge owner is unavailable") -> None:
+        super().__init__("backend_unavailable", message)
+
+
 async def _maybe(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
@@ -89,6 +104,9 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
 
 
 def _validate_arguments(tool, arguments):
+    if tool == "session_summon":
+        from .schemas import validate_installed_summon_arguments
+        return validate_installed_summon_arguments(arguments)
     if tool == "session_reply_read":
         from .return_tools import NativeReplyReadTool
         try:
@@ -397,10 +415,9 @@ class InstalledSessionBridgeClient:
         response = await send(self._socket_path, frame)
         transport = getattr(response, "transport", None)
         if transport == TRANSPORT_NOT_SENT:
-            raise BridgeError(
-                "backend_unavailable",
-                "installed Session Bridge owner is unavailable",
-            )
+            # Typed provenance only the trusted transport can issue after it
+            # proved the frame was not sent; the public code is unchanged.
+            raise TransportNotSent("installed Session Bridge owner is unavailable")
         if transport == TRANSPORT_SENT_UNKNOWN:
             raise BridgeError(
                 "effect_unknown" if modifying else "backend_unavailable",

@@ -136,6 +136,15 @@ def current_request():
     value.require_live()
     return value
 
+def request_source_present(scope):
+    """Select an installed HTTP owner without treating its presence as authority.
+
+    Only ``owned_request`` mints the nominal value. A stale or malformed value
+    must enter ``bind_request`` and refuse; it must never fall back to an
+    unattended admission. No header or JSON field is read here.
+    """
+    return _SCOPE_KEY in scope
+
 def _current_request_or_none():
     # Absence retains the incumbent one-shot path. A copied but expired source
     # must refuse rather than silently obtaining a fresh legacy request.

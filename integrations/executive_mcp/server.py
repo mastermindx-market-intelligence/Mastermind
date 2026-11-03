@@ -76,6 +76,7 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/status",
     "/os/executive/direct-native/result",
     "/os/executive/direct-native/consume",
+    "/os/executive/direct-native/correction",
 )
 
 #: Three fixed POST routes served by the opt-in selected-session transport.
@@ -1075,6 +1076,7 @@ def _build_profile_mcp_app(
             commission_preparer=os_commission_preparer,
             direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
                 connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
+            foreground_submissions=os_session_bridge_client is not None,
         )
         if os_session_bridge_client is not None:
             # The opt-in selected-session leaf reuses this factory's audited
@@ -1756,7 +1758,8 @@ def build_web_ceo_v3_mcp_app(
         profile_validator=validate_web_ceo_v3_tool_arguments,
         reconcile_tool_name=RECONCILE_TOOL_NAME,
         profile_create_app=lambda configured: create_web_ceo_v3_app(
-            configured, mdm_reader=mdm_reader
+            configured, mdm_reader=mdm_reader,
+            foreground_session_client=(os_session_bridge_client if enable_os_executive_transport else None),
         ),
         workspace_app=workspace_app,
         content_app=content_app,
