@@ -84,7 +84,7 @@ COHORTS = {
         "config_sha256": "ace958d0fe23f0a1fe4f02de835ad152a42d0a0c2eaebb98df5e48cc84e9773a",
         "file_count": 13,
         "generation": "v12",
-        "manifest_sha256": "ede2189924ce7a0f98cbae6136cdf831be7a021e71bfaecce896ce7ff31524f4",
+        "manifest_sha256": "aba7a5755ae71a12b9359890cb5d8cda7bd179b176fcb77d6119edd802809983",
         "nonpaper_sha256": "bf613e14397fbb2c56b6f386d8ab9fb438101ecabcf3ed33c94b297114c2b98d",
         "plist_sha256": "525ed99524c4fa060a8d8ada0967b06509c42f970270f8b2619537516ebfdb34"
     }

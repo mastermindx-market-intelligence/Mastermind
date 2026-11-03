@@ -85,6 +85,33 @@ class TestPaperV20SealedFleet(unittest.TestCase):
                     int(pin[k], 16)
                 self.assertTrue(10 <= pin["file_count"] <= 13)
 
+    def test_publication_service_requalified_after_protected_runtime_release(self):
+        """Only the source-manifest identity changed in the current M2 census.
+
+        M2: 2026-11-03 04:56 UTC, prior protected Executive release b4a5a892;
+        13/13 installed modules match the new manifest, while old config, plist,
+        non-Paper hash, and the Paper v12 bridge remain unchanged.
+        """
+        publication = cohorts.COHORTS["mastermind-os-publication"]
+        self.assertEqual(
+            publication["manifest_sha256"],
+            "aba7a5755ae71a12b9359890cb5d8cda7bd179b176fcb77d6119edd802809983",
+        )
+        self.assertNotEqual(
+            publication["manifest_sha256"],
+            "ede2189924ce7a0f98cbae6136cdf831be7a021e71bfaecce896ce7ff31524f4",
+        )
+        self.assertEqual(
+            publication["config_sha256"],
+            "ace958d0fe23f0a1fe4f02de835ad152a42d0a0c2eaebb98df5e48cc84e9773a",
+        )
+        self.assertEqual(
+            publication["plist_sha256"],
+            "525ed99524c4fa060a8d8ada0967b06509c42f970270f8b2619537516ebfdb34",
+        )
+        self.assertEqual(publication["file_count"], 13)
+        self.assertEqual(publication["generation"], "v12")
+
     def test_success_preserves_nonpaper_and_plist_and_original_bytes(self):
         for generation in ("v10", "v12"):
             with self.subTest(generation=generation):
