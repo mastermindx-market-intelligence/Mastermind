@@ -657,6 +657,8 @@ export async function createNativeClient(
       | "read_mission_v3"
       | "read_admitted_plan"
       | "read_retained_activity"
+      | "read_fabric_catalog"
+      | "read_fabric_status"
       | "read_result"
       | "read_result_references"
       | "read_current_window",
@@ -734,6 +736,14 @@ export async function createNativeClient(
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
     readWork: ({ signal }) => read("read_work", signal),
+    readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
+    readAttendedFabric: ({ rootId, runId, signal }) => {
+      const selected = attendedSelection({ rootId, runId });
+      if (!selected) return Promise.reject(new Error("FABRIC_SELECTION_INVALID"));
+      return read("read_fabric_status", signal, { selection: {
+        root_id: selected.rootId, run_id: selected.runId,
+      } });
+    },
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));

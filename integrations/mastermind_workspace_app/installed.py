@@ -50,8 +50,12 @@ class CeoIngressWorkspaceClient:
         from common.workspace_control_room_read_contract import (
             FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
         )
+        from common import executive_workspace_fabric_contract as fabric_wire
         timeout = self.timeout_seconds
-        if isinstance(frame, dict) and frame.get("schema") == CCR_READ_FRAME_SCHEMA:
+        if isinstance(frame, dict) and frame.get("schema") == fabric_wire.FRAME_SCHEMA:
+            fabric_wire.validate_frame(frame)
+            ceiling = fabric_wire.ceiling(frame["operation"])
+        elif isinstance(frame, dict) and frame.get("schema") == CCR_READ_FRAME_SCHEMA:
             validate_ccr_read_frame(frame)
             ceiling = MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:

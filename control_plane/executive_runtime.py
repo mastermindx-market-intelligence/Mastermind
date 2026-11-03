@@ -40,8 +40,11 @@ from datetime import datetime, timezone
 from enum import Enum
 import inspect
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from control_plane.workspace_paid_fabric_runtime import BoundedPaidFabricSnapshot
 
 from control_plane.executive_readback_contract import (
     format_runtime_utc_timestamp, valid_lost_reason,
@@ -27108,6 +27111,40 @@ class BoundedRuntimeReadObservation:
             return dataclasses.replace(
                 result, observation_source_identity=self._identity
             )
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_paid_fabric_runs_bounded(
+        self, root_job_id: str, *, work_ref: str,
+        principal_binding_digest: str, mission_authority_ref: str,
+        authority_generation_digest: str,
+    ) -> "BoundedPaidFabricSnapshot":
+        """Host-only original native references for one admitted principal root.
+
+        Current browser/mission authorization belongs to the installed source
+        owner. This selection proves only immutable Runtime launch bindings;
+        its observation receipt is available after the context closes.
+        """
+        from control_plane.workspace_paid_fabric_runtime import (
+            PaidFabricRootNotBound, read_paid_fabric_runs_bounded,
+        )
+
+        self._select()
+        try:
+            result = read_paid_fabric_runs_bounded(
+                self._acquisition, self._vm_progress, root_job_id=root_job_id,
+                work_ref=work_ref, principal_binding_digest=principal_binding_digest,
+                mission_authority_ref=mission_authority_ref,
+                authority_generation_digest=authority_generation_digest,
+            )
+            return dataclasses.replace(result, observation_source_identity=self._identity)
+        except PaidFabricRootNotBound as exc:
+            # This is a proved source classification, not a failed read. The
+            # trusted caller must catch it inside the context and still require
+            # the finalized SAME receipt; every other refusal invalidates it.
+            exc.observation_source_identity = self._identity
+            raise
         except BaseException:
             self._failed = True
             raise

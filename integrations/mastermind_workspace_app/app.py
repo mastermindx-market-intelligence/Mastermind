@@ -52,6 +52,8 @@ _RESULT_ROUTE = "/workspace/result/current"
 _RESULT_REFERENCES_ROUTE = "/workspace/result-references/current"
 _PLAN_ROUTE = "/workspace/plan/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
+_FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
+_FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
 _ACTIVITY_QUERY_KEYS = frozenset({"work_ref", "root_job_id", "job_id", "attempt_id"})
 _CCR_STATE_ROUTE = "/workspace/control-room/state/current"
 _CCR_DISCOVER_ROUTE = "/workspace/control-room/discover/current"
@@ -715,6 +717,62 @@ async def control_room_current(
     return _envelope_response(envelope)
 
 
+async def fabric_current(request: Request, *, config: WorkspaceAppConfig, operation: str) -> Response:
+    """Fixed metadata GETs; current entitlement is checked on both boundaries."""
+    from common import executive_workspace_fabric_contract as fabric
+    principal = await _authenticate(request, config.authenticator, clock=config.now)
+    if isinstance(principal, JSONResponse):
+        return _with_no_store(principal)
+    refused = await _reject_any_body(request)
+    if refused is not None:
+        return refused
+    raw_query = request.scope.get("query_string") or b""
+    try:
+        if operation == fabric.CATALOG_OPERATION:
+            if raw_query:
+                raise ValueError("invalid_input")
+            selected = None
+        elif operation == fabric.STATUS_OPERATION:
+            selected = fabric.selection(dict(_decode_query(raw_query)))
+        else:
+            raise ValueError("invalid_input")
+    except (TypeError, ValueError):
+        return _refuse_json(400, "invalid_input")
+    try:
+        authorizer, client = config.authorize_principal, config.client
+        stamps = _control_room_permissions((authorizer,), principal)
+        frame = fabric.validate_frame({"schema": fabric.FRAME_SCHEMA, "operation": operation,
+            "selection": selected, "principal": contract.principal_frame(principal)})
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    try:
+        envelope = await client.request(frame)
+    except Exception:
+        return _refuse_json(503, "source_unavailable")
+    try:
+        if (config.authorize_principal is not authorizer or config.client is not client
+                or _control_room_permissions((authorizer,), principal) != stamps):
+            raise ValueError("access_denied")
+        current = config.now()
+        if type(current) is not int or not 0 <= current < principal.expires_at:
+            raise ValueError("access_denied")
+    except Exception:
+        return _refuse_json(403, "access_denied")
+    if type(envelope) is dict and envelope.get("ok") is False:
+        return _envelope_response(envelope)
+    try:
+        if type(envelope) is not dict or set(envelope) != {"ok", "result"} or envelope["ok"] is not True:
+            raise ValueError("source_unavailable")
+        result = (fabric.validate_catalog(envelope["result"]) if operation == fabric.CATALOG_OPERATION
+            else fabric.status_metadata(envelope["result"], **selected))
+        # Native extra fields are stripped before the public response, even if
+        # an otherwise valid private producer accidentally includes raw fields.
+        raw = contract.bounded_canonical(result, limit=fabric.ceiling(operation))
+    except (TypeError, ValueError, KeyError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200, media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
 def _control_room_permissions(authorizers, principal):
     """Current selected grants on the existing sealed membership owner."""
     stamps = []
@@ -1166,6 +1224,8 @@ class _RawPathFence:
         _RESULT_REFERENCES_ROUTE,
         _PLAN_ROUTE,
         _ACTIVITY_ROUTE,
+        _FABRIC_CATALOG_ROUTE,
+        _FABRIC_STATUS_ROUTE,
         _CCR_STATE_ROUTE,
         _CCR_DISCOVER_ROUTE,
     )
@@ -1237,6 +1297,14 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def activity_endpoint(request: Request) -> JSONResponse:
         return await activity_current(request, config=config)
 
+    async def fabric_catalog_endpoint(request: Request) -> Response:
+        from common.executive_workspace_fabric_contract import CATALOG_OPERATION
+        return await fabric_current(request, config=config, operation=CATALOG_OPERATION)
+
+    async def fabric_status_endpoint(request: Request) -> Response:
+        from common.executive_workspace_fabric_contract import STATUS_OPERATION
+        return await fabric_current(request, config=config, operation=STATUS_OPERATION)
+
     async def ccr_state_endpoint(request: Request) -> JSONResponse:
         return await control_room_current(request, config=config, operation="state")
 
@@ -1253,6 +1321,8 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
+        Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
+        Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),
         Route(_CCR_STATE_ROUTE, ccr_state_endpoint, methods=["GET"]),
         Route(_CCR_DISCOVER_ROUTE, ccr_discover_endpoint, methods=["GET"]),
     ]

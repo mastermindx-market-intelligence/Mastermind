@@ -45,7 +45,9 @@ CONTROL_ROOM_READ_ROUTES = (
     "/workspace/mission/v4/current",
 )
 CONTROL_ROOM_GET_ROUTES = CONTROL_ROOM_LEGACY_GET_ROUTES + CONTROL_ROOM_READ_ROUTES
-GET_ROUTES = READER_GET_ROUTES + CONTROL_ROOM_READ_ROUTES
+COMPOSED_GET_ROUTES = READER_GET_ROUTES + CONTROL_ROOM_READ_ROUTES
+FABRIC_READ_ROUTES = ("/workspace/fabric/catalog/current", "/workspace/fabric/status/current")
+GET_ROUTES = COMPOSED_GET_ROUTES + FABRIC_READ_ROUTES
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
 # partial upgrades, wildcards and extra paths cannot become transition inputs.
@@ -56,6 +58,7 @@ TRANSITION_ROUTE_PROFILES = (
     (READER_GET_ROUTES, READER_POST_ROUTES),
     (CONTROL_ROOM_LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
     (CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES),
+    (COMPOSED_GET_ROUTES, POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

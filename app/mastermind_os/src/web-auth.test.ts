@@ -1096,6 +1096,156 @@ describe("fixed acquisition Control Room action transport", () => {
   });
 });
 
+describe("authenticated per-user Fabric browser reads", () => {
+  const selection = { rootId: "ROOT:paid-fixture", runId: "ATT-1" };
+  const status = () => ({
+    schema: "mastermind.fabric_task_status.v1",
+    run_id: selection.runId, root_id: selection.rootId, parent_run_id: null,
+    state: "TERMINAL", rc: 0, signal: "ok",
+    result_available: true, result_bytes: 41, accepted: false,
+    accepted_by: "none", acceptance_state: "NOT_ACCEPTED",
+    acceptance_reason: "not_accepted",
+  });
+  const catalog = () => ({
+    schema: "mastermind.attended_fabric_catalog.v1", availability: "PARTIAL",
+    observed_at: "2026-11-03T00:00:00Z",
+    source: {
+      owner: "ATTENDED_FABRIC", observation_kind: "CONTROLLER_STATUS_SNAPSHOT",
+      revision: "b".repeat(64), scope: "EXACT_RUN_SET", atomic: false,
+      time_basis: "LOCAL_READ",
+    },
+    coverage: {
+      returned_count: 1, candidate_count: 2, omitted_count: 1,
+      scan_complete: true, status_complete: true,
+    },
+    items: [{ run_id: selection.runId, controller_modified_at: null,
+      status: status(), reason_code: null }],
+    reason_codes: ["ROWS_OMITTED"],
+  });
+  const request = (client: ReturnType<typeof setup>["client"], kind: "catalog" | "status",
+    signal = new AbortController().signal) => {
+    const host = bindMissionHost(client);
+    return kind === "catalog"
+      ? host.readAttendedFabricCatalog!({ signal })
+      : host.readAttendedFabric!({ ...selection, signal });
+  };
+
+  it("mounts both fixed reads and refuses a signed-out caller before HTTP", async () => {
+    const e = setup(), host = bindMissionHost(e.client);
+    expect(typeof host.readAttendedFabricCatalog).toBe("function");
+    expect(typeof host.readAttendedFabric).toBe("function");
+    await expect(request(e.client, "catalog")).rejects.toThrow("FABRIC_READ_UNAUTHORIZED");
+    await expect(request(e.client, "status")).rejects.toThrow("FABRIC_READ_UNAUTHORIZED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("uses the acquisition bearer on exact metadata-only GET routes", async () => {
+    const e = setup();
+    await e.login();
+    e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response(catalog()));
+    expect(await request(e.client, "catalog")).toEqual(catalog());
+    e.fetcher.mockResolvedValueOnce(response(status()));
+    expect(await request(e.client, "status")).toEqual(status());
+    expect(e.fetcher).toHaveBeenCalledTimes(2);
+    const [catalogUrl, catalogOptions] = e.fetcher.mock.calls[0];
+    expect(String(catalogUrl)).toBe(`${ORIGIN}/workspace/fabric/catalog/current`);
+    const [statusUrl, statusOptions] = e.fetcher.mock.calls[1];
+    expect(new URL(String(statusUrl)).origin).toBe(ORIGIN);
+    expect(new URL(String(statusUrl)).pathname).toBe("/workspace/fabric/status/current");
+    expect([...new URL(String(statusUrl)).searchParams]).toEqual([
+      ["root_id", selection.rootId], ["run_id", selection.runId],
+    ]);
+    for (const options of [catalogOptions, statusOptions]) {
+      expect(options).toMatchObject({
+        method: "GET", credentials: "omit", redirect: "error", cache: "no-store",
+        headers: { Accept: "application/json", Authorization: "Bearer private-token" },
+      });
+      expect(options).not.toHaveProperty("body");
+    }
+  });
+
+  it.each(["", "../foreign", "https://example.invalid/run", "run&root_id=foreign", "x".repeat(129)])(
+    "refuses invalid exact-run selectors %s before HTTP", async (invalid) => {
+      const e = setup();
+      await e.login();
+      e.fetcher.mockClear();
+      for (const selected of [
+        { rootId: invalid, runId: selection.runId },
+        { rootId: selection.rootId, runId: invalid },
+      ]) {
+        await expect(e.client.readAttendedFabric!({ ...selected,
+          signal: new AbortController().signal })).rejects.toThrow("FABRIC_SELECTION_INVALID");
+      }
+      expect(e.fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["catalog", "status"] as const)(
+    "rejects unauthorized or unavailable %s payloads", async (kind) => {
+      const e = setup();
+      await e.login();
+      for (const code of [401, 403, 503]) {
+        e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(kind === "catalog" ? catalog() : status()), {
+          status: code, headers: { "content-type": "application/json" },
+        }));
+        await expect(request(e.client, kind)).rejects.toThrow("READ_FAILED");
+      }
+    },
+  );
+
+  it.each(["catalog", "status"] as const)(
+    "withholds an in-flight %s after sign-out without repeating the read", async (kind) => {
+      const e = setup();
+      await e.login();
+      e.fetcher.mockClear();
+      const d = deferred<Response>();
+      e.fetcher.mockReturnValueOnce(d.promise);
+      const pending = request(e.client, kind);
+      await e.client.signOut();
+      d.resolve(response(kind === "catalog" ? catalog() : status()));
+      await expect(pending).rejects.toThrow("READ_CANCELLED");
+      expect(e.fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["catalog", "status"] as const)(
+    "cancels %s and withholds a late server response", async (kind) => {
+      const e = setup();
+      await e.login();
+      e.fetcher.mockClear();
+      const d = deferred<Response>(), controller = new AbortController();
+      e.fetcher.mockReturnValueOnce(d.promise);
+      const pending = request(e.client, kind, controller.signal);
+      controller.abort();
+      expect(e.fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+      d.resolve(response(kind === "catalog" ? catalog() : status()));
+      await expect(pending).rejects.toThrow("READ_CANCELLED");
+      expect(e.fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("keeps machine-wide catalogs outside the authenticated user's run set", async () => {
+    const e = setup();
+    await e.login();
+    const wide = catalog();
+    wide.source.scope = "MACHINE_OWNER";
+    e.fetcher.mockResolvedValueOnce(response(wide));
+    await expect(request(e.client, "catalog")).rejects.toThrow("FABRIC_CATALOG_SCOPE_REFUSED");
+  });
+
+  it.each([["catalog", 65_536], ["status", 16_384]] as const)(
+    "bounds the %s response before handing it to the host decoder", async (kind, cap) => {
+      const e = setup();
+      await e.login();
+      e.fetcher.mockResolvedValueOnce(response({
+        ...(kind === "catalog" ? catalog() : status()), padding: "x".repeat(cap),
+      }));
+      await expect(request(e.client, kind)).rejects.toThrow();
+    },
+  );
+});
+
 describe("fixed H2 direct-native authenticated routes",()=>{
   const resource="https://fixture-resource.mastermind-x.com/executive";
   const selection={work_ref:"WS:H2-FIXTURE",job_id:"JOB-123",attempt_id:null};

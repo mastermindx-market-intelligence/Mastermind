@@ -25,6 +25,7 @@ import { normalizeSelection, normalizeWorkspaceSelection, type MissionSelection 
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
 import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection, parseDirectNativeJson } from "./direct-native-result";
 import { validActivitySelection } from "./planning/retained-activity";
+import { attendedSelection } from "./fabric/attended-status";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
 import {
@@ -1148,6 +1149,16 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
         },
       ),
+    readAttendedFabricCatalog: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/fabric/catalog/current`, signal,
+        { cap: 65_536, typedUnavailableSchema: null }),
+    readAttendedFabric: ({ rootId, runId, signal }) => {
+      const selected = attendedSelection({ rootId, runId });
+      if (!selected) return Promise.reject(new Error("FABRIC_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/fabric/status/current?${new URLSearchParams({
+        root_id: selected.rootId, run_id: selected.runId,
+      })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
     readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
       if (!/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(work_ref) || !/^JOB-[0-9]{1,9}$/.test(root_job_id))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));

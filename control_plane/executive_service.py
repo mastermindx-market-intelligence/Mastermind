@@ -5430,6 +5430,7 @@ class ExecutiveControlService:
                 FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
             )
             from common import workspace_control_room_action_contract as action_wire
+            from common import executive_workspace_fabric_contract as fabric_read_wire
             if type(parsed) is dict and parsed.get("schema") == action_wire.FRAME_SCHEMA:
                 if not app_peer:
                     await self._send_ceo_ingress_error(
@@ -5498,12 +5499,21 @@ class ExecutiveControlService:
                 return
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
-                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA}:
+                    ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+                if parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
+                    ceiling = fabric_read_wire.MAX_STATUS_BYTES
+                    try:
+                        fabric_read_wire.validate_frame(parsed)
+                        ceiling = fabric_read_wire.ceiling(operation)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
                     try:
                         from common.product_acceptance_acquisition_contract import (
@@ -5555,6 +5565,27 @@ class ExecutiveControlService:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
                 if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
                     result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                elif parsed.get("schema") == fabric_read_wire.FRAME_SCHEMA:
+                    paid_source = self._paid_worker_binding_source
+                    facts_factory = app_binding.principal_facts_factory
+                    if (app_binding.principal_admission_armed is not True
+                            or facts_factory is None or factory is None or paid_source is None):
+                        result = workspace_error("access_denied", 403)
+                    else:
+                        try:
+                            from control_plane.coo_principal_host import CooHostProvider
+                            owner = facts_factory(self._require_runtime())
+                            if type(owner) is not CooHostProvider:
+                                raise ValueError("original installed COO source required")
+                            result = await owner.read_workspace_fabric(parsed, paid_source)
+                            if (self._ceo_ingress_app_binding is not app_binding
+                                    or app_binding.workspace_read_provider_factory is not factory
+                                    or app_binding.principal_facts_factory is not facts_factory
+                                    or app_binding.principal_admission_armed is not True
+                                    or self._paid_worker_binding_source is not paid_source):
+                                result = workspace_error("access_denied", 403)
+                        except Exception:
+                            result = workspace_error("source_unavailable", 503)
                 elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
                     # Only the *existing installed COO* source may carry a
                     # separately verified Workspace principal to one original

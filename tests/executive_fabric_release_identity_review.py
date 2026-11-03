@@ -311,8 +311,12 @@ REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
 # literal sites (including two precise docstring account-name examples). No
 # caller identity, permission or runtime admission is granted; any source/token
 # drift exposes these sites to the unchanged guard again.
-REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': 'd7fcc70d413c5445ee38c21dc1e19b584da12e2afb3eab02fcd39e9241f469ad',
- 'sites': ((120, 73, 76, 'int', '501'), (305, 78, 81, 'int', '450'), (400, 83, 86, 'int', '501'))},
+# 2026-11-03 native-status composition: the original three identity comparisons
+# are unchanged; the extra startup module names shift the last two sites by five
+# lines. Previous source SHA d7fcc70d413c5445ee38c21dc1e19b584da12e2afb3eab02fcd39e9241f469ad.
+# No new identity site is qualified; any source drift restores the ordinary guard.
+REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '936701c295116b786dc36d018357dfe0217c7cee37c4b11c2b14223c59c4a664',
+ 'sites': ((120, 73, 76, 'int', '501'), (310, 78, 81, 'int', '450'), (405, 83, 86, 'int', '501'))},
  'control_plane/paid_fabric_wire.py': {'sha256': '6c9c16eaa48fa7f5ac7cbd4eaa113b619a5bb1e3d65ef69ab55c6f0d839fc9c6',
  'sites': ((98, 35, 38, 'int', '501'),)},
  'control_plane/paid_model_execution_principal.py': {'sha256': 'a20a4115599d93cb8a9c5397a84a58624f9cd24bb5ee00e219add653f832e79c',
@@ -487,17 +491,20 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 }
 # Current-base composition keeps the original action-handler AST unchanged.
 # These eight sites retain the same exact HTTP status literals.
+# 2026-11-03 catalog composition adds fixed metadata GETs before that handler;
+# its AST is still identical and all eight sites move by 58 lines. Previous
+# source SHA de6f82cd7861cd79d90bc058c2753f5912a20e47c4ff992201962d8abdc78f31.
 REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
-    'sha256': 'de6f82cd7861cd79d90bc058c2753f5912a20e47c4ff992201962d8abdc78f31',
+    'sha256': '624b6a49ac97eea32adfa0691e85f5d0c7dcdb784b00f5192b1c227dbce8e5eb',
     'sites': (
-        (762, 71, 74, 'int', '400'),
-        (773, 71, 74, 'int', '403'),
-        (781, 71, 74, 'int', '400'),
-        (787, 79, 82, 'int', '400'),
-        (796, 71, 74, 'int', '400'),
-        (806, 71, 74, 'int', '403'),
-        (811, 76, 79, 'int', '503'),
-        (817, 71, 74, 'int', '403'),
+        (820, 71, 74, 'int', '400'),
+        (831, 71, 74, 'int', '403'),
+        (839, 71, 74, 'int', '400'),
+        (845, 79, 82, 'int', '400'),
+        (854, 71, 74, 'int', '400'),
+        (864, 71, 74, 'int', '403'),
+        (869, 76, 79, 'int', '503'),
+        (875, 71, 74, 'int', '403'),
     ),
 }
 

@@ -42,13 +42,38 @@ def source_owners(tmp_path_factory):
     spec = importlib.util.spec_from_file_location('successor_old_d044_fixture', path)
     old = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(old)
-    # Build the actual candidate; no model-generated count or placeholder files.
+    # Build current source first, then restore the exact historical B11 target.
+    # Later ordinary generations must not relabel that one finite transition.
     target = root / 'current'
     with mock.patch.object(sys, 'argv', ['builder', '--output', str(target)]), \
             contextlib.redirect_stdout(io.StringIO()):
         builder.main()
-    manifest = json.loads((target / 'native-manifest.json').read_bytes())
-    assert g.digest((target / 'native-manifest.json').read_bytes()) == installer.SUCCESSOR_MANIFEST
+    current_raw = (target / 'native-manifest.json').read_bytes()
+    assert current_raw == (ROLLOUT / 'native-manifest.json').read_bytes()
+    manifest = json.loads(current_raw)
+    import base64, zlib
+    fixture = ROLLOUT.parents[3] / 'tests/fixtures/native-catalog-predecessor102-0be933.json'
+    retained_raw = fixture.read_bytes()
+    assert g.digest(retained_raw) == '1df5d35c48678fea337238cf23aca6a68e3a16169192259873f7f48c36212fb9'
+    retained = json.loads(retained_raw)
+    assert retained['schema'] == 'mastermind.test_native_catalog_predecessor102/v1'
+    assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
+    historical_manifest = retained['manifest']
+    assert set(manifest) == set(historical_manifest)
+    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(retained['files']) == {
+        'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    for name, digest in manifest.items():
+        assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
+    for name, item in retained['files'].items():
+        raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+        assert len(raw) == item['bytes']
+        assert g.digest(raw) == item['sha256'] == historical_manifest[name]
+        (target / 'native-code-stage' / name).write_bytes(raw)
+    manifest = historical_manifest
+    historical_raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
+    assert g.digest(historical_raw) == retained['manifest_sha256'] == installer.SUCCESSOR_MANIFEST
+    for name, digest in manifest.items():
+        assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
     assert len(manifest) == installer.SUCCESSOR_MEMBER_COUNT
     assert 'ext/host_pull_launchd.plist.template' in manifest
     # The historical fixture alone receives the authentic old verifier.

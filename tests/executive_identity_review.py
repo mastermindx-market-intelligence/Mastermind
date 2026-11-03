@@ -402,7 +402,18 @@ def reviewed_literal_spans(path: str, source: str):
         node = candidates[0]
         if type(node).__name__ != expected["node_type"]:
             continue
-        if not all(line.isascii() for line in lines[node.lineno - 1:node.end_lineno]):
+        # Existing AST-only records remain ASCII-only. A record with an exact
+        # full-source pin may additionally bind a method containing UTF-8 prose;
+        # its literal lines must still be ASCII, so AST byte columns are also
+        # exact character columns. The source pin is checked even if the prose
+        # later becomes ASCII; no changed postimage can shed this requirement.
+        source_sha = expected.get("source_sha256")
+        if source_sha is not None and (
+                type(source_sha) is not str
+                or hashlib.sha256(source.encode()).hexdigest() != source_sha):
+            continue
+        if (source_sha is None
+                and not all(line.isascii() for line in lines[node.lineno - 1:node.end_lineno])):
             continue
         digest = hashlib.sha256(_reviewed_ast_dump(node).encode()).hexdigest()
         if digest != expected["ast_sha256"]:
@@ -417,6 +428,7 @@ def reviewed_literal_spans(path: str, source: str):
             if (not isinstance(literal, ast.Constant)
                     or type(literal.value).__name__ != value_type or literal.value != value
                     or literal.lineno != literal.end_lineno
+                    or not lines[literal.lineno - 1].isascii()
                     or ast.get_source_segment(source, literal) != spelling
                     or lines[literal.lineno - 1][literal.col_offset:literal.end_col_offset] != spelling):
                 qualified = []
