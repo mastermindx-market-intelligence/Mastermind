@@ -29,11 +29,18 @@ journey:
 * H3 -- COO-cycle test is the literal proof (handoff names the review).  The
   operator-path test proves gating, independence and ordering; the parent
   naming the review is fixture-attested.
-* H5 -- **declaration and grant-time fail-closed only.**  The touch-time half
-  (a Job that actually writes outside ``allowed_write_paths``) is
-  BUILT_NOT_PROVEN in-process: the only touch-time check is the worker-side
-  ``allowed_artifact_paths`` check in ``control_plane/codex_worker.py``, which
-  needs a real git workspace and Codex process.
+* H5 -- declaration-time refusal, grant-time refusal and a touch-time
+  rejection are all proven in-process.  Declaration/grant time: the Job is
+  refused with a typed error and leaves no effect.  Touch time: a worker (the
+  offline fake-Codex fixture of ``tests/test_executive_codex_worker.py``) that
+  writes outside the Job's ``allowed_write_paths`` is rejected by the worker-side
+  ``allowed_artifact_paths`` check (``control_plane/codex_worker.py:5205-5217``)
+  with a typed ``INVALID_RESULT``; the allowlist is fed from the Job grant by
+  ``Supervisor._launch_spec`` (``control_plane/executive_supervisor.py:2159-2163``)
+  and the runtime Job terminalizes FAILED.  **At touch time "no effect" means the
+  RESULT is rejected, not that nothing happened:** the offending bytes already
+  exist in the workspace, so the ledger's literal "and no effect" is NOT met by
+  that check (it is met only for the declaration/grant-time refusals).
 * H6 -- the rejected flag is derived from the rejecting review's sealed verdict
   and the repair child's provenance.  The FAILED branch proves a typed BLOCKED
   ``child_terminal_adverse`` plus a surfaced inbox ``job_failed`` escalation
@@ -54,12 +61,16 @@ duplicate root.
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from control_plane import codex_worker as cw
 from control_plane.ceo_intent import submit_intent
 from control_plane.executive_authority import AuthorityDenied
 from control_plane.executive_coo_cycle import CooCycle
@@ -71,7 +82,8 @@ from control_plane.executive_runtime import (
     Runtime,
     StateConflict,
 )
-from control_plane.executive_supervisor import SupervisorError
+from control_plane.executive_supervisor import ExecutiveSupervisor
+from tests.test_executive_codex_worker import _fake_binary, _schema, _workspace
 from tests.test_executive_os_phase1fc import (
     _complete_ohf_role,
     _cycle_through_completed_work,
@@ -111,12 +123,21 @@ JOURNEY_PROOF_NOTES = {
         "review (artifacts reference)."
     ),
     "H5": (
-        "Declaration and grant-time fail-closed only (escaping/absolute path "
-        "declarations; child widening its parent's allowed_write_paths). The "
-        "touch-time half is BUILT_NOT_PROVEN in-process: the only touch-time "
-        "check is worker-side allowed_artifact_paths in "
-        "control_plane/codex_worker.py and needs a real git workspace and "
-        "Codex process."
+        "Declaration-time refusal + touch-time rejection proven in-process. "
+        "Declaration/grant time: escaping/absolute path declarations "
+        "(StateConflict chained from AuthorityDenied) and a child widening its parent's "
+        "allowed_write_paths (StateConflict) are refused with no durable "
+        "effect. Touch time: Job allowed_write_paths -> real "
+        "Supervisor._launch_spec allowed_artifact_paths -> offline fake-Codex "
+        "write outside the allowlist -> typed INVALID_RESULT "
+        "(codex_worker.py:5205-5217) -> runtime Job FAILED. At touch time 'no "
+        "effect' means the RESULT is rejected (INVALID_RESULT), NOT that the "
+        "bytes are absent: the written file remains in the workspace, so the "
+        "ledger's literal 'and no effect' is not met by that check. Fixture "
+        "substitutions: the fake binary's prompt and its hard-coded result "
+        "identity (run-1/job-1/codex-01); the INVALID_RESULT -> FAILED mapping "
+        "is applied by this test via fail_attempt (the supervisor's own "
+        "mapping is unit-proven at tests/test_executive_supervisor.py:1190-1255)."
     ),
     "H6": (
         "Runtime-proven: rejected flag from the rejecting review's sealed "
@@ -139,7 +160,6 @@ _TERMINAL = {"COMPLETED", "CANCELLED", "FAILED", "LOST", "RATE_LIMITED"}
 _TERMINAL_EVENTS = {"JOB_COMPLETED", "JOB_CANCELLED", "JOB_FAILED"}
 _NOW = "2026-11-02T12:00:00+00:00"
 _FIXED_NOW = datetime(2026, 11, 2, 12, 0, 0, tzinfo=timezone.utc)
-_TYPED_REFUSALS = (AuthorityDenied, StateConflict, SupervisorError)
 _SAFE_PATH = "control_plane/parser.py"
 
 
@@ -337,21 +357,53 @@ def assert_h3_complete(observation: dict[str, Any]) -> None:
 def assert_h5_declaration_and_grant_time_fail_closed(
     observation: dict[str, Any],
 ) -> None:
-    """H5 (declaration and grant-time half): an out-of-bounds write path is refused, typed, no effect.
+    """H5 (declaration / grant time): an out-of-bounds write path is refused, typed, no effect.
 
-    The touch-time half of the ledger test is BUILT_NOT_PROVEN in-process; see
-    ``JOURNEY_PROOF_NOTES["H5"]``.
+    The refusal's type is pinned where it is raised (``pytest.raises`` on the
+    ``_h5_refusal`` call); here only the plain-data parts are checked.  Here "no
+    effect" is literal: the durable store is byte-for-byte unchanged.
     """
 
+    probe = observation["probe_precondition"]
     refusal = observation["refusal"]
-    assert refusal["allowed_write_paths"], "the probe needs a real allowed set"
-    assert refusal["requested_paths"], "the probe must request a write path"
-    assert not set(refusal["requested_paths"]) <= set(refusal["allowed_write_paths"])
-    # "refused with a typed error"
-    assert refusal["error_is_typed"] is True
+    assert probe["allowed"], "the probe needs a real allowed set"
+    assert probe["requested"], "the probe must request a write path"
+    assert not set(probe["requested"]) <= set(probe["allowed"])
+    # "refused with a typed error" -- the specific type is pinned at the call site
     assert refusal["error_contains"] in refusal["message"]
     # "and no effect"
     assert observation["effects_after"] == observation["effects_before"]
+
+
+def assert_h5_touch_time_rejected(observation: dict[str, Any]) -> None:
+    """H5 (touch time): a write outside ``allowed_write_paths`` is rejected, typed.
+
+    "No effect" is NOT met literally at touch time: the check rejects the RESULT
+    (``INVALID_RESULT``) after the bytes already exist in the workspace.  This
+    predicate therefore asserts the rejection and asserts, explicitly, that the
+    bytes remain.
+    """
+
+    job_allowed = observation["job_allowed_write_paths"]
+    assert job_allowed, "the Job needs a real write allowlist"
+    # the worker-side allowlist is fed from the Job grant by the real supervisor
+    assert observation["spec_allowed_artifact_paths"] == job_allowed
+    written = observation["workspace_paths_written"]
+    assert written and not set(written) <= set(job_allowed)
+    # "refused with a typed error"
+    adapter = observation["adapter_result"]
+    assert adapter["status"] == "INVALID_RESULT"
+    assert "unauthorized path(s)" in adapter["error"]
+    assert all(path in adapter["error"] for path in written)
+    # the runtime Job terminalizes with a typed state: FAILED, never COMPLETED
+    before, after = observation["job_before"], observation["job_after"]
+    assert before["status"] == "RUNNING"
+    assert after["status"] == "FAILED"
+    assert [row["status"] for row in after["attempts"]] == ["FAILED"]
+    assert after["event_types"][-1] == "JOB_FAILED"
+    assert "JOB_COMPLETED" not in after["event_types"]
+    # ... and the ledger's literal "and no effect" is NOT met at touch time
+    assert observation["bytes_remain_in_workspace"] is True
 
 
 def assert_h6_complete(observation: dict[str, Any]) -> None:
@@ -384,7 +436,7 @@ def assert_h6_complete(observation: dict[str, Any]) -> None:
     else:
         assert failed["status"] == "FAILED"
         assert escalation["job_id"] == failed["job_id"]
-        assert escalation["kind"] in {"job_failed", "escalated_exception"}
+        assert escalation["kind"] == "job_failed"
         assert escalation["target"] == "coo"
         assert escalation["in_attention"] is True
         # the parent's next cycle reads the failure as a typed, replay-stable
@@ -652,21 +704,37 @@ def test_journey_h3_generic_review_gates_the_parent_until_it_completes_independe
 
 # --------------------------------------------------------------------------
 # H5 — conflicting source writer / permission -> fail-closed
-#      (declaration and grant-time half only; touch-time is BUILT_NOT_PROVEN)
+#      (declaration, grant time and touch time)
 # --------------------------------------------------------------------------
 
 
-def _h5_refusal(runtime: Runtime, call, *, allowed, requested, error_contains):
+def _h5_refusal(
+    runtime: Runtime,
+    call,
+    *,
+    expected_error,
+    allowed,
+    requested,
+    error_contains,
+    expected_cause=None,
+):
+    """Run ``call`` and pin its refusal to ``expected_error`` (an isinstance check).
+
+    ``expected_cause`` additionally pins the chained ``__cause__`` where the
+    runtime wraps the originating refusal (``raise StateConflict(...) from exc``).
+    """
+
     before = _effect_snapshot(runtime)
-    with pytest.raises(_TYPED_REFUSALS) as excinfo:
+    with pytest.raises(expected_error) as excinfo:
         call()
+    assert isinstance(excinfo.value, expected_error)
+    if expected_cause is not None:
+        assert isinstance(excinfo.value.__cause__, expected_cause)
     after = _effect_snapshot(runtime)
     return {
+        # Declared by the probe before the call; NOT observed runtime state.
+        "probe_precondition": {"allowed": list(allowed), "requested": list(requested)},
         "refusal": {
-            "allowed_write_paths": list(allowed),
-            "requested_paths": list(requested),
-            "error_is_typed": isinstance(excinfo.value, _TYPED_REFUSALS),
-            "error_type": type(excinfo.value).__name__,
             "message": str(excinfo.value),
             "error_contains": error_contains,
         },
@@ -697,11 +765,11 @@ def test_journey_h5_child_write_outside_parent_paths_is_refused_typed_without_ef
             requested_authorities=["READ", "WRITE_BRANCH"],
             allowed_write_paths=[_SAFE_PATH, "control_plane/other.py"],
         ),
+        expected_error=StateConflict,
         allowed=writer.allowed_write_paths,
         requested=[_SAFE_PATH, "control_plane/other.py"],
         error_contains="allowed_write_paths",
     )
-    assert observation["refusal"]["error_type"] == "StateConflict"
     assert_h5_declaration_and_grant_time_fail_closed(observation)
 
 
@@ -712,7 +780,12 @@ def test_journey_h5_child_write_outside_parent_paths_is_refused_typed_without_ef
 def test_journey_h5_escaping_write_path_is_refused_typed_without_effect(
     tmp_path: Path, write_path: str
 ) -> None:
-    """JOURNEY H5 (declaration-time): a Job declaring a write path that escapes its workspace."""
+    """JOURNEY H5 (declaration-time): a Job declaring a write path that escapes its workspace.
+
+    ``control_plane/executive_authority.py:157`` raises ``AuthorityDenied``; the
+    runtime surfaces it as ``StateConflict`` chained ``from`` it, so both are
+    pinned.  The allowed/requested pair is a probe precondition.
+    """
 
     runtime = _runtime(tmp_path)
     runtime.jobs.create_job("Unrelated existing job")
@@ -724,11 +797,162 @@ def test_journey_h5_escaping_write_path_is_refused_typed_without_effect(
             requested_authorities=["READ", "WRITE_BRANCH"],
             allowed_write_paths=[_SAFE_PATH, write_path],
         ),
+        # the runtime wraps the authority refusal: StateConflict from AuthorityDenied
+        # (executive_runtime.py:16173 <- executive_authority.py:157)
+        expected_error=StateConflict,
+        expected_cause=AuthorityDenied,
         allowed=[_SAFE_PATH],
         requested=[_SAFE_PATH, write_path],
         error_contains="unsafe assigned write path",
     )
     assert_h5_declaration_and_grant_time_fail_closed(observation)
+
+
+def test_journey_h5_worker_write_outside_job_allowlist_is_rejected_invalid_result_at_touch_time(
+    tmp_path: Path,
+) -> None:
+    """JOURNEY H5 (touch time): Job grant -> supervisor spec -> offline fake-Codex write -> INVALID_RESULT -> Job FAILED.
+
+    Composes the pieces that are otherwise only unit-proven apart:
+    ``Supervisor._launch_spec`` copies the Job's ``allowed_write_paths`` into
+    ``allowed_artifact_paths`` (executive_supervisor.py:2159-2163); the worker-side
+    check (codex_worker.py:5205-5217) rejects a write outside it with
+    ``INVALID_RESULT`` (as in test_executive_codex_worker.py:1419-1433).
+    Fixture substitutions: the fake binary's prompt and its hard-coded result
+    identity.  The INVALID_RESULT -> FAILED mapping is applied here with
+    ``fail_attempt``; the supervisor's own mapping is unit-proven at
+    test_executive_supervisor.py:1190-1255.
+
+    "No effect" is NOT achieved at touch time: the RESULT is rejected but the
+    written file remains in the workspace; the observation asserts exactly that.
+    """
+
+    runtime = _runtime(tmp_path)
+    runtime.workers.register_worker(
+        "codex-01",
+        provider="codex",
+        account_label="journey-h5",
+        worker_type="codex-cli",
+        capabilities=["research", "code", "tests"],
+        quota_classes={
+            "codex-native": {
+                "capabilities": ["research", "code", "tests"],
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "cost_class": "standard",
+            }
+        },
+    )
+    workspace, head = _workspace(tmp_path / "workspaces")
+    job = runtime.jobs.create_job(
+        "Write only artifact.txt",
+        worktree=str(workspace.resolve()),
+        requested_authorities=["READ", "WRITE_BRANCH", "RUN_TESTS"],
+        allowed_write_paths=["artifact.txt"],
+        validation_commands=[["/usr/bin/true"]],
+        constraints={
+            "provider": "codex",
+            "model": "gpt-5.6-sol",
+            "effort": "xhigh",
+            "cost_class": "standard",
+            "base_sha": head,
+            "eligible_quota_classes": ["codex-native"],
+            "required_capabilities": ["research", "code", "tests"],
+        },
+        attempt_limit=1,
+    )
+    lease = runtime.attempts.claim_job(job.job_id, worker_id="codex-01")
+    assert lease is not None
+    attempt = lease.attempt
+    runtime.attempts.record_process(
+        attempt.attempt_id,
+        fence_generation=attempt.fence_generation,
+        lease_token=lease.lease_token,
+        provider_session_id="journey-h5-provider-session",
+    )
+    attempt = runtime.attempts.mark_running(
+        attempt.attempt_id,
+        fence_generation=attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    job_before = _job_view(runtime, job.job_id)
+
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir(mode=0o700)
+    (codex_home / "auth.json").write_text("{}", encoding="utf-8")
+    (codex_home / "auth.json").chmod(0o600)
+    binary, attestation = _fake_binary(tmp_path)
+    adapter = cw.CodexWorkerAdapter(
+        binary,
+        codex_home=codex_home,
+        binary_attestation=attestation,
+        allowed_versions=frozenset({"test-0"}),
+        required_team_identifier=None,
+    )
+    supervisor = ExecutiveSupervisor(
+        runtime,
+        adapter,
+        runs_root=tmp_path / "runs",
+        isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
+    )
+    run_dir = supervisor._run_dir(attempt.attempt_id)
+    run_dir.parent.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(mode=0o700)
+    (run_dir / "input").mkdir(mode=0o700)
+    schema_path = run_dir / "input" / "worker-result.schema.json"
+    schema_path.write_text(json.dumps(_schema()), encoding="utf-8")
+    schema_path.chmod(0o600)
+    persisted_job = runtime.jobs.get_job(job.job_id)
+    assert persisted_job is not None
+    spec = supervisor._launch_spec(persisted_job, lease, schema_path)
+    spec_allowed = list(spec.allowed_artifact_paths)
+    # Fixture substitutions (see docstring): prompt selects the fake's
+    # out-of-allowlist write; identity constants match the fake's fixed result.
+    spec = dataclasses.replace(
+        spec,
+        prompt="unauthorized-write",
+        run_id="run-1",
+        job_id="job-1",
+        worker_id="codex-01",
+    )
+
+    async def run_worker():
+        ref = await adapter.start(spec)
+        return await adapter.collect_result(ref)
+
+    receipt = asyncio.run(run_worker())
+    written = sorted(
+        entry.name
+        for entry in workspace.iterdir()
+        if entry.name not in {".git", ".codex", ".gitignore", "README.md"}
+    )
+    bytes_remain = all((workspace / name).is_file() for name in written)
+
+    # Apply the typed rejection to the runtime Job (what the supervisor does).
+    failed = runtime.attempts.fail_attempt(
+        attempt.attempt_id,
+        fence_generation=attempt.fence_generation,
+        lease_token=lease.lease_token,
+        payload={
+            "summary": "worker result rejected",
+            "errors": [str(receipt.result.error)],
+        },
+    )
+    assert failed.status is JobStatus.FAILED
+
+    observation = {
+        "job_allowed_write_paths": list(persisted_job.allowed_write_paths),
+        "spec_allowed_artifact_paths": spec_allowed,
+        "workspace_paths_written": written,
+        "adapter_result": {
+            "status": receipt.result.status.value,
+            "error": receipt.result.error or "",
+        },
+        "job_before": job_before,
+        "job_after": _job_view(runtime, job.job_id),
+        "bytes_remain_in_workspace": bytes_remain,
+    }
+    assert_h5_touch_time_rejected(observation)
 
 
 # --------------------------------------------------------------------------
@@ -825,17 +1049,24 @@ def test_journey_h6_failed_child_surfaces_escalation_item_and_parent_blocks_type
     replay = cycle.run_once(root.job_id)
     assert blocked.receipt["schema_version"] == "mastermind.coo_cycle_block/v1"
 
-    items = _runtime_inbox_items(tmp_path)
+    failed_items = [
+        item
+        for item in _runtime_inbox_items(tmp_path).values()
+        if item.get("kind") == "job_failed"
+    ]
+    assert len(failed_items) == 1
+    item = failed_items[0]
     resubmitted = submit_intent(runtime, _v2_intent(intent_id="CEO-JOURNEY-H6-FAILED"))
     assert resubmitted["job_id"] == root.job_id
 
     observation = {
         "failed_child": failed_view,
         "escalation_item": {
-            "job_id": work.attempt.job_id,
-            "kind": (items.get(work.attempt.job_id) or {}).get("kind"),
-            "target": (items.get(work.attempt.job_id) or {}).get("target"),
-            "in_attention": work.attempt.job_id in items,
+            # every field is read from the surfaced inbox item itself
+            "job_id": item["job_id"],
+            "kind": item["kind"],
+            "target": item["target"],
+            "in_attention": True,
         },
         "parent_block": {
             "action": blocked.action,
@@ -968,5 +1199,8 @@ def test_journey_completion_tests_match_the_capability_ledger() -> None:
     for journey, completion_test in JOURNEY_COMPLETION_TESTS.items():
         assert rows[journey] == completion_test, journey
     assert set(JOURNEY_PROOF_NOTES) == set(JOURNEY_COMPLETION_TESTS)
-    assert "BUILT_NOT_PROVEN" in JOURNEY_PROOF_NOTES["H5"]
+    h5_note = JOURNEY_PROOF_NOTES["H5"]
+    assert "BUILT_NOT_PROVEN" not in h5_note
+    assert "INVALID_RESULT" in h5_note and "bytes" in h5_note
+    assert "is not met" in h5_note
     assert canonical_digest(JOURNEY_COMPLETION_TESTS)  # stable, JSON-canonical
