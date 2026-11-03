@@ -100,6 +100,14 @@ class ReviewTier(str, Enum):
 
 
 @dataclasses.dataclass(frozen=True)
+class ReviewFileStat:
+    path: str
+    additions: int
+    deletions: int
+    previous_path: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class ReviewChangeFacts:
     repository: str
     pull_number: int
@@ -111,6 +119,10 @@ class ReviewChangeFacts:
     complete_source_verified: bool
     # Hints may only elevate risk and must come from a trusted policy owner.
     risk_hints: tuple[str, ...] = ()
+    # Optional exact per-file metrics; the trusted source collector verifies
+    # them against authenticated totals, so evidence-only files do not consume
+    # the code-change budget. Without these metrics use conservative totals.
+    file_metrics: tuple[ReviewFileStat, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -161,6 +173,34 @@ def _validate(facts: ReviewChangeFacts) -> None:
         raise RiskPolicyInputError("risk_hints must be exact known escalation-only values")
     if len(set(facts.risk_hints)) != len(facts.risk_hints):
         raise RiskPolicyInputError("duplicate risk hints")
+    if type(facts.file_metrics) is not tuple or len(facts.file_metrics) > _MAX_PATHS:
+        raise RiskPolicyInputError("file_metrics must be a bounded tuple")
+    metric_paths: set[str] = set()
+    metric_covered_paths: set[str] = set()
+    for entry in facts.file_metrics:
+        if type(entry) is not ReviewFileStat or entry.path not in facts.changed_paths:
+            raise RiskPolicyInputError("file metric identity not bound to changed paths")
+        if entry.path.lower() in metric_paths:
+            raise RiskPolicyInputError("duplicate file metric")
+        metric_paths.add(entry.path.lower())
+        metric_covered_paths.add(entry.path.lower())
+        if entry.previous_path is not None:
+            if (type(entry.previous_path) is not str
+                or entry.previous_path not in facts.changed_paths
+                or entry.previous_path.lower() in metric_covered_paths):
+                raise RiskPolicyInputError("previous path not bound to changed paths")
+            metric_covered_paths.add(entry.previous_path.lower())
+        for name in ("additions", "deletions"):
+            value = getattr(entry, name)
+            if type(value) is not int or not 0 <= value <= _MAX_METRIC:
+                raise RiskPolicyInputError("file metric must be bounded nonnegative integer")
+    if facts.file_metrics and metric_covered_paths != seen:
+        raise RiskPolicyInputError("file metrics omit source paths")
+    if facts.file_metrics and (
+        sum(f.additions for f in facts.file_metrics) != facts.additions
+        or sum(f.deletions for f in facts.file_metrics) != facts.deletions
+    ):
+        raise RiskPolicyInputError("file metrics do not match authenticated aggregate")
 
 
 def _result(tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
@@ -209,6 +249,7 @@ def _is_test_path(path: str) -> bool:
 _FAST_CODE_PREFIXES = (
     "app/src/", "app/mastermind_os/src/components/",
     "frontend/src/components/", "web/src/components/", "ui/",
+    "terminal/components/", "terminal/styles/", "terminal/assets/",
 )
 _FAST_CODE_SUFFIXES = (".css", ".scss", ".sass", ".less", ".svg")
 
@@ -216,6 +257,26 @@ _FAST_CODE_SUFFIXES = (".css", ".scss", ".sass", ".less", ".svg")
 def _is_explicit_fast_source(path: str) -> bool:
     lower = path.lower()
     return lower.startswith(_FAST_CODE_PREFIXES) or lower.endswith(_FAST_CODE_SUFFIXES)
+
+
+_SUPPORTING_PREFIXES = (
+    "research/evidence/", "mockups/evidence/", "ux-evidence/",
+    "terminal/docs/", "docs/verification/",
+)
+_SUPPORTING_SUFFIXES = (
+    ".md", ".rst", ".txt", ".png", ".jpg", ".jpeg", ".webp",
+    ".gif", ".svg", ".ico", ".woff", ".woff2",
+)
+_EVIDENCE_SUFFIXES = (".json", ".yml", ".yaml", ".log", ".csv", ".html")
+
+
+def _is_supporting_change(path: str) -> bool:
+    lower = path.lower()
+    return (
+        _is_test_path(lower)
+        or lower.endswith(_SUPPORTING_SUFFIXES)
+        or (lower.startswith(_SUPPORTING_PREFIXES) and lower.endswith(_EVIDENCE_SUFFIXES))
+    )
 
 
 def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
@@ -230,17 +291,26 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
     critical = [path for path in facts.changed_paths if _is_critical_path(path)]
     if critical or any(h in _CRITICAL_HINTS for h in facts.risk_hints):
         return _result(ReviewTier.CRITICAL, "TRUST_OR_AUTHORITY_BOUNDARY")
-    standard = [path for path in facts.changed_paths if _is_standard_path(path)]
+    standard = [path for path in facts.changed_paths
+                if not _is_supporting_change(path) and _is_standard_path(path)]
     if standard or any(h in _STANDARD_HINTS for h in facts.risk_hints):
         return _result(ReviewTier.STANDARD, "CONSEQUENTIAL_OR_COMPLEX_CHANGE")
-    total = facts.additions + facts.deletions
-    if total > _FAST_MAX_LINES or len(facts.changed_paths) > _FAST_MAX_FILES:
-        return _result(ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
-    if all(_is_test_path(p) for p in facts.changed_paths) and facts.deletions > _MAX_TEST_DELETIONS:
+    if facts.file_metrics:
+        test_deletions = sum(f.deletions for f in facts.file_metrics if _is_test_path(f.path))
+        material = tuple(f for f in facts.file_metrics if not _is_supporting_change(f.path))
+        total = sum(f.additions + f.deletions for f in material)
+        material_count = len(material)
+    else:
+        test_deletions = facts.deletions if all(_is_test_path(p) for p in facts.changed_paths) else 0
+        total = facts.additions + facts.deletions
+        material_count = len(facts.changed_paths)
+    if test_deletions > _MAX_TEST_DELETIONS:
         return _result(ReviewTier.STANDARD, "SUBSTANTIAL_TEST_REMOVAL")
-    if all(p.lower().endswith(_DOC_EXTENSIONS) or _is_test_path(p) for p in facts.changed_paths):
-        return _result(ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_ASSETS")
-    if all(_is_explicit_fast_source(p) or _is_test_path(p) or p.lower().endswith(_DOC_EXTENSIONS)
+    if all(_is_supporting_change(p) for p in facts.changed_paths):
+        return _result(ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_EVIDENCE")
+    if total > _FAST_MAX_LINES or material_count > _FAST_MAX_FILES:
+        return _result(ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
+    if all(_is_explicit_fast_source(p) or _is_supporting_change(p)
            for p in facts.changed_paths):
         return _result(ReviewTier.FAST, "BOUNDED_PRESENTATION_CHANGE")
     return _result(ReviewTier.STANDARD, "SOURCE_PATH_NOT_QUALIFIED_FOR_FAST")

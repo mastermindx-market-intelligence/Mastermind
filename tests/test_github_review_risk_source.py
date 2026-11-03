@@ -100,7 +100,7 @@ def test_complete_two_page_census():
     items = tuple(file(f"docs/page{i}.md", additions=1, deletions=0) for i in range(101))
     reader = Reader(first=snap(changed_files=101, additions=101, deletions=0),
                     pages={1: items[:100], 2: items[100:]})
-    assert assess(reader).tier is ReviewTier.STANDARD
+    assert assess(reader).tier is ReviewTier.FAST
     assert reader.file_reads == [1, 2]
 
 
@@ -159,3 +159,42 @@ def test_binary_image_without_patch_can_still_be_fast():
         pages={1: (file("docs/chart.png", additions=0, deletions=0, patch_available=False),)},
     )
     assert assess(reader).tier is ReviewTier.FAST
+
+
+
+def test_visual_code_plus_large_proof_artifacts_is_fast_not_standard():
+    """Source budget excludes verified screenshots/logs/tests, not code."""
+    files = (
+        file("terminal/components/ChartPanel.tsx", additions=20, deletions=5),
+        file("terminal/docs/verification/prophet-marker/run.log",
+             additions=1200, deletions=0, patch_available=False),
+        file("terminal/e2e/replay-temporal-authority.spec.ts",
+             additions=100, deletions=0),
+        file("terminal/docs/verification/prophet-marker/crop.webp",
+             additions=0, deletions=0, patch_available=False),
+    )
+    reader = Reader(
+        first=snap(changed_files=4, additions=1320, deletions=5),
+        pages={1: files},
+    )
+    assert assess(reader).tier is ReviewTier.FAST
+
+
+def test_proof_artifact_missing_patch_does_not_hide_authority_path():
+    reader = Reader(
+        first=snap(additions=1, deletions=0),
+        pages={1: (file("docs/DELIVERY_WORKFLOW.md",
+                         additions=1, deletions=0, patch_available=False),)},
+    )
+    with pytest.raises(RiskSourceUnavailable, match="PR_CODE_PATCH_MISSING"):
+        assess(reader)
+
+
+def test_sensitive_renamed_code_not_masked_by_evidence_scope():
+    reader = Reader(
+        first=snap(additions=1, deletions=0),
+        pages={1: (file("docs/verification/new.md", status="renamed",
+                         additions=1, deletions=0,
+                         previous_filename="backend/auth.py"),)},
+    )
+    assert assess(reader).tier is ReviewTier.CRITICAL

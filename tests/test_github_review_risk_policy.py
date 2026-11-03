@@ -5,6 +5,7 @@ import pytest
 
 from control_plane.github_review_risk_policy import (
     ReviewChangeFacts,
+    ReviewFileStat,
     ReviewTier,
     RiskPolicyInputError,
     assess_review_risk,
@@ -141,3 +142,45 @@ def test_function_is_pure_and_deterministic():
 def test_malformed_or_untrusted_inputs_never_produce_exemption(tamper):
     with pytest.raises(RiskPolicyInputError):
         assess_review_risk(replace(facts(), **tamper))
+
+
+
+def test_authenticated_file_metrics_cannot_omit_changed_source():
+    incomplete = replace(
+        facts(("docs/proof.md", "app/src/panel.tsx"), additions=10, deletions=0),
+        file_metrics=(ReviewFileStat(path="docs/proof.md", additions=10, deletions=0),),
+    )
+    with pytest.raises(RiskPolicyInputError, match="omit source paths"):
+        assess_review_risk(incomplete)
+
+
+def test_source_metric_aggregate_mismatch_refused():
+    tampered = replace(
+        facts(("docs/help.md",), additions=10, deletions=0),
+        file_metrics=(ReviewFileStat(path="docs/help.md", additions=1, deletions=0),),
+    )
+    with pytest.raises(RiskPolicyInputError, match="authenticated aggregate"):
+        assess_review_risk(tampered)
+
+
+def test_previous_rename_path_is_accounted_for_in_verified_metrics():
+    source = replace(
+        facts(("docs/verification/now.md", "backend/auth.py"), additions=1, deletions=0),
+        file_metrics=(ReviewFileStat(
+            path="docs/verification/now.md", previous_path="backend/auth.py",
+            additions=1, deletions=0,
+        ),),
+    )
+    assert assess_review_risk(source).tier is ReviewTier.CRITICAL
+
+
+def test_ui_change_not_penalized_for_large_verification_evidence():
+    source = replace(
+        facts(("terminal/components/ChartPanel.tsx", "terminal/docs/verification/replay.log"),
+              additions=900, deletions=3),
+        file_metrics=(
+            ReviewFileStat(path="terminal/components/ChartPanel.tsx", additions=20, deletions=3),
+            ReviewFileStat(path="terminal/docs/verification/replay.log", additions=880, deletions=0),
+        ),
+    )
+    assert assess_review_risk(source).tier is ReviewTier.FAST

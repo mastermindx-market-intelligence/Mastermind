@@ -12,6 +12,7 @@ from typing import Protocol
 
 from control_plane.github_review_risk_policy import (
     ReviewChangeFacts,
+    ReviewFileStat,
     ReviewRiskAssessment,
     RiskPolicyInputError,
     assess_review_risk,
@@ -23,6 +24,11 @@ ALLOWED_STATUSES = frozenset({
     "added", "modified", "removed", "renamed", "copied", "changed",
 })
 _BINARY_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".woff", ".woff2")
+_PATCHLESS_EVIDENCE_PREFIXES = (
+    "research/evidence/", "mockups/evidence/", "ux-evidence/",
+    "terminal/docs/", "docs/verification/",
+)
+_PATCHLESS_EVIDENCE_SUFFIXES = (".log", ".json", ".yml", ".yaml", ".md", ".txt", ".csv")
 
 
 class RiskSourceUnavailable(RuntimeError):
@@ -113,7 +119,11 @@ def _validate_file(value: object) -> SourceFile:
             raise RiskSourceUnavailable("PR_PREVIOUS_PATH_MISSING")
     elif value.previous_filename is not None:
         raise RiskSourceUnavailable("PR_PREVIOUS_PATH_MISMATCH")
-    if not value.patch_available and not value.filename.lower().endswith(_BINARY_SUFFIXES):
+    patchless_noncode = value.filename.lower().endswith(_BINARY_SUFFIXES) or (
+        value.filename.lower().startswith(_PATCHLESS_EVIDENCE_PREFIXES)
+        and value.filename.lower().endswith(_PATCHLESS_EVIDENCE_SUFFIXES)
+    )
+    if not value.patch_available and not patchless_noncode:
         raise RiskSourceUnavailable("PR_CODE_PATCH_MISSING")
     return value
 
@@ -165,6 +175,10 @@ def assess_current_pr_risk(
             head_sha=first.head_sha, changed_paths=tuple(paths),
             additions=first.additions, deletions=first.deletions,
             complete_source_verified=True, risk_hints=tuple(sorted(hints)),
+            file_metrics=tuple(ReviewFileStat(
+                path=f.filename, additions=f.additions, deletions=f.deletions,
+                previous_path=f.previous_filename
+            ) for f in files),
         ))
     except RiskPolicyInputError as exc:
         raise RiskSourceUnavailable("PR_SOURCE_INVALID_FOR_POLICY") from exc
