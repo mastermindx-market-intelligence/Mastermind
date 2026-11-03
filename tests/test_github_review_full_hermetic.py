@@ -11,6 +11,7 @@ from control_plane.github_review_host_config import ReviewHostSettings
 from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmission
 from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
+from integrations.github_review_risk_gate import GitHubReviewRiskGate
 from integrations.github_review_slack_visibility import SlackReviewVisibility
 from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
 from integrations.slack_agent_dialogue.engine import SlackMessage
@@ -46,12 +47,19 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path, 
             return httpx.Response(200, json={
                 "user": {"login": "alice"}, "permission": "write"
             })
+        if request.url.path.endswith("/pulls/42/files"):
+            return httpx.Response(200, json=[{
+                "filename": "app/src/components/Card.tsx",
+                "status": "modified", "additions": 3, "deletions": 1,
+                "patch": "@@ -1 +1 @@\n",
+            }])
         if request.url.path.endswith("/pulls/42"):
             return httpx.Response(200, json={
                 "number": 42, "state": "open", "draft": False,
                 "head": {"sha": SHA, "repo": {"full_name": REPO}},
                 "base": {"sha": "b" * 40, "repo": {"full_name": REPO}},
                 "title": "Review test", "body": "Never run code from PR text.",
+                "changed_files": 1, "additions": 3, "deletions": 1,
             })
         raise AssertionError(f"unexpected GitHub request: {request.url}")
 
@@ -89,6 +97,7 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path, 
     ingress = GitHubReviewReceiver(
         settings=settings, secret_source=HostCredentials(),
         pull_requests=github, actors=github, fabric=fabric, visibility=visibility,
+        automatic_review_gate=GitHubReviewRiskGate(github=github, repository=REPO),
     )
     body = json.dumps({
         "action": action, "installation": {"id": 4242},
@@ -132,11 +141,19 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path, 
     assert messages[0][0] == REVIEW_CHANNEL_ID
     assert "QUEUED" in messages[0][1]
     assert REPO not in messages[0][1]  # No private repo leak to public Slack.
-    assert github_requests == ([] if standing else [
+    expected_reads = ([] if standing else [
         ("GET", "/repos/example/repo/collaborators/alice/permission"),
-    ]) + [
-        ("GET", "/repos/example/repo/pulls/42"),
-    ]
+    ]) + [("GET", "/repos/example/repo/pulls/42")]
+    # Signed automatic lifecycle requests require complete source and a final
+    # exact-head re-read; the explicitly authorized manual lane remains original.
+    if action == "opened":
+        expected_reads += [
+            ("GET", "/repos/example/repo/pulls/42"),
+            ("GET", "/repos/example/repo/pulls/42/files"),
+            ("GET", "/repos/example/repo/pulls/42"),
+            ("GET", "/repos/example/repo/pulls/42"),
+        ]
+    assert github_requests == expected_reads
     status, result = deliver()
     assert (status, result["status"]) == (200, "ALREADY_ADMITTED")
     assert len(runtime.jobs.list_jobs()) == 1
