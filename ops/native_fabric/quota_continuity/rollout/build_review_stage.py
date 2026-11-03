@@ -66,7 +66,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'remote_sub_exec.py': '5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d',
     'pick.py': '4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b',
-    'remote_sub.sh': 'eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0',
+    'remote_sub.sh': 'c7b078c07f4403d6263462650990fceffeb99ca9dd3359b147e8fddb2eeaf678',
     'remote_sub_helpers.py': '0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556',
 }
 

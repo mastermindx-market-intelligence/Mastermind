@@ -21,7 +21,7 @@ donor and a successful exact-commit sparse worktree job. Source changes alone do
 | ID | Dependency | Objective and evidence | Editorial state |
 |---|---|---|---|
 | U4.1 | none | Verify registered host, fresh physical gates, installed tools and existing first-worker source. | accepted |
-| U4.2 | U4.1 | Admit Ubuntu4 to the two sparse Macro host-name guards, preserving provider, root/parent, donor, helper/policy, resource and lease gates; tests and independent source review. | ready |
+| U4.2 | U4.1 | Admit Ubuntu4 to the two sparse Macro host-name guards, preserving provider, root/parent, donor, helper/policy, resource and lease gates; tests and independent source review. | source tested; review pending |
 | U4.3 | U4.1 | Existing credential owner completes real Ubuntu4 provider enrollment and current-key canary through accepted owners. No secret transfer or fabricated receipts. | blocked |
 | U4.4 | U4.3 | One distinct MiniMax qualification through the existing native qualifier; verify lease, START, result, settlement and same-parent acceptance. | blocked |
 | U4.5 | U4.4 | Original registry owner removes only the accepted provider mode from the qualification hold with exact-preimage fencing; normal routing succeeds. | blocked |
@@ -71,3 +71,59 @@ No self-approval, protected merge, native release selection or host promotion is
 
 Live effects and continuation remain with the original owners. This file records source tasks
 and evidence, not live Jobs, retries, leases or provider credentials.
+
+## 2026-11-03 source checkpoint
+
+The candidate adds Ubuntu4 to exactly the sparse-host allowlists in
+`candidate/fabric_task.py` and `candidate/remote_sub.sh`. It updates the current
+controller composition digest, both generated source declarations and both current
+manifest assertions. Executor bytes, historical upgrade fixtures and all provider
+qualification policy remain unchanged.
+
+- Focused adapter regression: the original source reproduced the Ubuntu4 refusal;
+  the updated source passed all 8 tests, including prior-host compatibility,
+  unknown/Mac host refusal, unsupported mode, missing lineage, bad commit/cwd,
+  qualification separation and the unchanged CPU scope.
+- Full current-controller run: 30 cases executed; all 15 Ubuntu4 cases passed.
+  The initial aggregate had 28 passes and 2 Ubuntu0 timing failures while another
+  suite was running. The two unchanged Ubuntu0 cases then passed in isolation
+  under Python 3.12. No production or test deadlines were changed.
+- Final focused Python 3.12 run: 15 tests passed (8 adapter cases, 5 support-policy
+  and current-generation cases, and the 2 timing-case reruns).
+- Current stage closure: all 102 files matched the declared manifest. The generated
+  stage was moved to the operation-owned diagnostic directory outside source;
+  archived source intentionally does not contain `native-code-stage/`.
+- `bash -n candidate/remote_sub.sh` and `git diff --check` passed.
+- Wider M2 donor/security run remains **not green**: 69 passed, 64 failed. A direct
+  read-only fixture probe reproduced Apple Git 2.50.1's sparse-index-expansion
+  advisory on stderr, which the unchanged strict Git reader rejects. The same
+  boundary is documented in `PLAIN_PACKET_SAME_PATH_REPAIR_20261021.md`.
+  Its stderr guard, Git executable, sparse-index coverage and donor pins were not
+  changed. Hosted Linux checks and independent exact-head review remain required.
+
+Current native manifest SHA-256:
+`9463889cb7146504095ecf2dee774c28d8ddda5cb50515f2afcb0b7b15cf8563`.
+Current source inventory SHA-256:
+`9e3683e4b735a6971ed1e7df99885ac81f1558b37e1473fd79cf4cbd75998700`.
+
+Retained local diagnostics on the source owner:
+`/Users/chriswong/.local/share/mastermind-test-tmp/ubuntu4-fabric-integration-security.log`
+and `ubuntu4-focused-validation.log` in the same directory. The original full
+controller result is retained by Desktop Commander process 92809; it completed
+with exit 1 and the two documented Ubuntu0 timing failures.
+
+### Exact remaining operational gate
+
+Ubuntu4 is physically eligible, but all seven provider modes remain held for
+qualification. The existing credential owner must complete approved Ubuntu4-local
+provider enrollment through the original owner action recorded in #539; this
+session has no accepted current-key readiness proof. After enrollment, the native
+qualifier must perform one distinct MiniMax first-worker run under original root
+`ubuntu4-fabric-hardening-20261023`, retaining START, result, lease settlement and
+original-parent acceptance. Only then may the original registry owner promote
+that exact mode and prove an ordinary routed Ubuntu4 task. A repository task also
+needs the accepted source release and Ubuntu4's own qualified Macro donor.
+
+No live Ubuntu4 provider task was submitted, no provider hold was removed and no
+native generation was selected by this source change. Offline controller session
+fixtures are not a claimed real provider session.

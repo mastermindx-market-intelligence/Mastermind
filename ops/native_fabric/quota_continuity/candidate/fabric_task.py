@@ -915,7 +915,7 @@ def request(
         if not guard.get("allowed"):
             raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
         if new_macro_worktree is not None:
-            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
+            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}:
                 raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
             if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
                 raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")

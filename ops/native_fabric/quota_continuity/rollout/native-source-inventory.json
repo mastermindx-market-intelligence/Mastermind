@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 86604,
+      "bytes": 86615,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "97ce8aa312bb5687397031cecf67665b1bc2aad9e10cdcf9814248218f371006",
+      "sha256": "4d39336d9be215d220a682609babad8777a629dac2e1343ea9de2c258b4c2dca",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -570,9 +570,9 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 103957,
+      "bytes": 103973,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0",
+      "sha256": "c7b078c07f4403d6263462650990fceffeb99ca9dd3359b147e8fddb2eeaf678",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
