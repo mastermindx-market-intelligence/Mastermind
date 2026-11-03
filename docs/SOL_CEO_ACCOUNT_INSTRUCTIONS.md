@@ -98,28 +98,6 @@ Before writing, inspect current Project identity, editor permission, active conc
 
 After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
 
-## Cross-repository PR auto-merge discipline
-
-For any source release, first read the same-pinned
-[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). In particular, **Macro**
-`main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
-auto-merge is **not** a safe shortcut where binding checks are not protected.
-The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
-Check current PR/head, binding CI, genuine independent formal GitHub review,
-title/body/comments for recorded holds and repository source/lease gates
-**before** adding the label. **Until the incumbent controller or protected
-policy actually enforces those gates and is proven live**, retain the current
-independent non-author arming/release decision. **After** that machine guard
-is installed and verified, review once and let existing automation perform
-the protected release without a second human operator. Never auto-arm all
-open PRs, mistake a technical `SOURCE_PASS` for approval, or self-merge
-through a shared author account or REST/admin bypass. A full successful sweeper run may still defer a PR because
-`main` changed CI definitions, active CI workload exceeds the controller
-refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
-success badge. Mastermind `master` retains its separate protected merge-queue
-path. An updated repository source pointer is not evidence that the live ChatGPT
-Project setting has been installed or freshly consumed.
-
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and
@@ -156,6 +134,28 @@ invent an admission receipt to make a dormant path appear live.
 Pending CI blocks the gated release, not unrelated implementation or diagnosis. An
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.
+
+## Cross-repository PR auto-merge discipline
+
+For any source release, first read the same-pinned
+[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). In particular, **Macro**
+`main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
+auto-merge is **not** a safe shortcut where binding checks are not protected.
+The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
+Check current PR/head, binding CI, genuine independent formal GitHub review,
+title/body/comments for recorded holds and repository source/lease gates
+**before** adding the label. **Until the incumbent controller or protected
+policy actually enforces those gates and is proven live**, retain the current
+independent non-author arming/release decision. **After** that machine guard
+is installed and verified, review once and let existing automation perform
+the protected release without a second human operator. Never auto-arm all
+open PRs, mistake a technical `SOURCE_PASS` for approval, or self-merge
+through a shared author account or REST/admin bypass. A full successful sweeper run may still defer a PR because
+`main` changed CI definitions, active CI workload exceeds the controller
+refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
+success badge. Mastermind `master` retains its separate protected merge-queue
+path. An updated repository source pointer is not evidence that the live ChatGPT
+Project setting has been installed or freshly consumed.
 
 ## Preserve real controls and prove the result
 
