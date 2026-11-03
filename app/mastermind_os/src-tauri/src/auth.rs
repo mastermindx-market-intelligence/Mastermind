@@ -22,6 +22,8 @@ const MAX_RESPONSE: usize = 2_000_000;
 const EXECUTIVE_SCOPE: &str = "mastermind.executive.read mastermind.executive.intent.submit";
 const EXECUTIVE_REQUEST_CAP: usize = 65_536;
 const EXECUTIVE_RESPONSE_CAP: usize = 262_144;
+const DIRECT_NATIVE_REQUEST_CAP: usize = 4096;
+const DIRECT_NATIVE_RESPONSE_CAP: usize = 24_576;
 const MAX_SAFE_GENERATION: u64 = (1_u64 << 53) - 1;
 
 fn executive_resource(value: &str) -> Option<String> {
@@ -1323,6 +1325,36 @@ fn executive_body(body: &Value) -> Result<Vec<u8>> {
     }
     Ok(serialized)
 }
+fn direct_native_arguments(arguments: Value, consume: bool) -> Result<Value> {
+    let object = arguments.as_object().ok_or("DIRECT_SELECTION_INVALID")?;
+    let keys: &[&str] = if consume {
+        &["work_ref", "job_id", "attempt_id", "result_digest", "operation_key"]
+    } else { &["work_ref", "job_id", "attempt_id"] };
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    let id = |value: &Value| value.as_str().is_some_and(|value| {
+        !value.is_empty() && value.len() <= 128
+            && value.as_bytes()[0].is_ascii_alphanumeric()
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+    });
+    if !object["work_ref"].as_str().is_some_and(|value| !value.is_empty()
+        && value.trim() == value && value.chars().count() <= 512
+        && !value.chars().any(char::is_control))
+        || !id(&object["job_id"])
+        || !(id(&object["attempt_id"]) || (!consume && object["attempt_id"].is_null())) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    if consume && (!id(&object["operation_key"])
+        || !object["result_digest"].as_str().is_some_and(|value| value.len() == 64
+            && value.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    if executive_body(&arguments)?.len() > DIRECT_NATIVE_REQUEST_CAP {
+        return Err("REQUEST_BOUND".into());
+    }
+    Ok(arguments)
+}
 async fn executive_post(app: AppHandle, path: &'static str, body: Value) -> Result<Value> {
     let state = app.state::<NativeAuth>();
     executive_post_with_dispatch(&state, path, body, reqwest::RequestBuilder::send).await
@@ -1347,8 +1379,9 @@ where
             | "/os/executive/status"
             | "/os/executive/session/context"
             | "/os/executive/session/reply"
-            | "/os/executive/session/references" => {}
-            "/os/executive/submit" => {
+            | "/os/executive/session/references"
+            | "/os/executive/direct-native/result" => {}
+            "/os/executive/submit" | "/os/executive/direct-native/consume" => {
                 if !token.executive_send {
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
                 }
@@ -1362,6 +1395,8 @@ where
         )
     };
     let serialized = executive_body(&body)?;
+    let direct = matches!(path, "/os/executive/direct-native/result" | "/os/executive/direct-native/consume");
+    if direct && serialized.len() > DIRECT_NATIVE_REQUEST_CAP { return Err("REQUEST_BOUND".into()); }
     let url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID".to_owned())?;
     if url.origin().ascii_serialization() != ORIGIN {
         return Err("REQUEST_INVALID".into());
@@ -1380,7 +1415,13 @@ where
     { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
     let status = response.status();
     let result = if status.is_success() {
-        read_json_body(response, EXECUTIVE_RESPONSE_CAP).await
+        read_json_body(response, if direct { DIRECT_NATIVE_RESPONSE_CAP } else { EXECUTIVE_RESPONSE_CAP }).await
+    } else if direct && [401, 403, 409, 503].contains(&status.as_u16()) {
+        let value = read_json_body(response, DIRECT_NATIVE_RESPONSE_CAP).await?;
+        if value.get("schema").and_then(Value::as_str) == Some("mastermind.direct_native_result_response.v1")
+            && value.get("availability").and_then(Value::as_str) == Some("UNAVAILABLE") {
+            Ok(value)
+        } else { Err("EXECUTIVE_TRANSPORT_UNAVAILABLE".into()) }
     } else {
         Err(match status.as_u16() {
             401 => "EXECUTIVE_AUTH_REQUIRED",
@@ -1431,6 +1472,21 @@ pub async fn executive_status(app: AppHandle, intent_id: String) -> Result<Value
     if result.is_err() {
         emit(&app);
     }
+    result
+}
+
+#[tauri::command]
+pub async fn executive_direct_result(app: AppHandle, arguments: Value) -> Result<Value> {
+    let arguments = direct_native_arguments(arguments, false)?;
+    let result = executive_post(app.clone(), "/os/executive/direct-native/result", arguments).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_direct_consume(app: AppHandle, arguments: Value) -> Result<Value> {
+    let arguments = direct_native_arguments(arguments, true)?;
+    let result = executive_post(app.clone(), "/os/executive/direct-native/consume", arguments).await;
+    if result.is_err() { emit(&app); }
     result
 }
 
@@ -2018,6 +2074,71 @@ mod tests {
             .body(r#"{"fixture":"native-dispatch"}"#.to_owned())
             .unwrap()
             .into()
+    }
+
+    #[test]
+    fn native_direct_selection_is_closed_and_consumption_is_explicit() {
+        let read = serde_json::json!({"work_ref":"WS:H2", "job_id":"JOB-1", "attempt_id":null});
+        assert_eq!(direct_native_arguments(read.clone(), false).unwrap(), read);
+        assert!(direct_native_arguments(read.clone(), true).is_err());
+        let consume = serde_json::json!({"work_ref":"WS:H2", "job_id":"JOB-1", "attempt_id":"ATTEMPT-1",
+            "result_digest":"a".repeat(64), "operation_key":"ack-original"});
+        assert_eq!(direct_native_arguments(consume.clone(), true).unwrap(), consume);
+        assert!(direct_native_arguments(consume.clone(), false).is_err());
+        for (field, value) in [("job_id", serde_json::json!("../foreign")),
+            ("work_ref", serde_json::json!("WS:H2\n")), ("attempt_id", Value::Null),
+            ("result_digest", serde_json::json!("A".repeat(64))),
+            ("operation_key", serde_json::json!("bad/key"))] {
+            let mut changed = consume.clone(); changed[field] = value;
+            assert!(direct_native_arguments(changed, true).is_err());
+        }
+        let mut injected = read; injected["operation"] = "consume".into();
+        assert!(direct_native_arguments(injected, false).is_err());
+    }
+
+    #[test]
+    fn native_direct_transport_preserves_flat_body_and_requires_send_for_consumption() {
+        for (path, consume) in [("/os/executive/direct-native/result", false),
+            ("/os/executive/direct-native/consume", true)] {
+            for send in [false, true] {
+                let state = native_executive_state(if send { EXECUTIVE_SCOPE } else { "mastermind.executive.read" });
+                let mut body = serde_json::json!({"work_ref":"WS:H2", "job_id":"JOB-1", "attempt_id":"ATTEMPT-1"});
+                if consume { body["result_digest"] = "a".repeat(64).into(); body["operation_key"] = "ack-original".into(); }
+                let body = direct_native_arguments(body, consume).unwrap();
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state, path,
+                    body.clone(), |builder| {
+                        calls.set(calls.get() + 1);
+                        let request = builder.build().unwrap();
+                        assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                        assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                        assert_eq!(request.method(), reqwest::Method::POST);
+                        async { Ok(native_fixture_response()) }
+                    }));
+                if consume && !send {
+                    assert_eq!(calls.get(), 0);
+                    assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+                } else { assert_eq!(calls.get(), 1); assert!(result.is_ok()); }
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_typed_unavailable_is_bounded_and_schema_specific() {
+        let state = native_executive_state("mastermind.executive.read");
+        for (status, response, accepted) in [
+            (503, serde_json::json!({"schema":"mastermind.direct_native_result_response.v1", "availability":"UNAVAILABLE"}), true),
+            (503, serde_json::json!({"schema":"foreign", "availability":"UNAVAILABLE"}), false),
+            (503, serde_json::json!({"schema":"mastermind.direct_native_result_response.v1", "availability":"AVAILABLE"}), false),
+            (200, serde_json::json!({"oversized":"x".repeat(DIRECT_NATIVE_RESPONSE_CAP)}), false),
+        ] {
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                "/os/executive/direct-native/result", serde_json::json!({}), |_| async {
+                    Ok(tauri::http::Response::builder().status(status).header("Content-Type", "application/json")
+                        .body(response.to_string()).unwrap().into())
+                }));
+            assert_eq!(result.is_ok(), accepted);
+        }
     }
 
     fn native_post_spy(state: &NativeAuth, path: &'static str) -> (Result<Value>, usize) {

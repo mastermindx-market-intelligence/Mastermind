@@ -90,6 +90,8 @@ fn main() {
             auth::executive_context,
             auth::executive_submit,
             auth::executive_status,
+            auth::executive_direct_result,
+            auth::executive_direct_consume,
             auth::executive_session_context,
             auth::executive_session_reply,
             auth::executive_session_references
