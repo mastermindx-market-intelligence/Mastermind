@@ -923,8 +923,8 @@ else
 fi
 case "$POLL_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_POLL_SECS" >&2; RC=2; exit "$RC";; esac
 case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2; exit "$RC";; esac
-if [ "$MAX_SECS" -gt 7200 ]; then
-  echo "REMOTE_SUB_MAX_SECS must not exceed 7200" >&2
+if [ "$MAX_SECS" -gt 14400 ]; then
+  echo "REMOTE_SUB_MAX_SECS must not exceed 14400" >&2
   RC=2
   exit "$RC"
 fi
@@ -937,14 +937,14 @@ fi
 # A caller-supplied short deadline must not silently collapse a task that was
 # already classified as long bounded work. Complexity is an existing economic
 # classification, not a new lifecycle plane. C2 gets at least one hour; C3 gets
-# the full two-hour fabric fuse. The special go-codex profile remains short by
+# a four-hour finite fabric fuse. The special go-codex profile remains short by
 # design and is not lifted here.
 RUNTIME_FLOOR_SECS=0
 if [ "$MODE" != go-codex ]; then
   case "${POOL_TASK_COMPLEXITY:-}" in
     C0_MECHANICAL|C1_ROUTINE_BOUNDED) RUNTIME_FLOOR_SECS=0 ;;
-    C2_COMPLEX_BOUNDED) RUNTIME_FLOOR_SECS=3600 ;;
-    C3_FRONTIER_JUDGMENT) RUNTIME_FLOOR_SECS=7200 ;;
+    C2_COMPLEX_BOUNDED) RUNTIME_FLOOR_SECS=7200 ;;
+    C3_FRONTIER_JUDGMENT) RUNTIME_FLOOR_SECS=14400 ;;
     "")
       # Legacy callers predate complexity tagging. Treat a stale short override
       # as unsafe for real worker labor; short probes must opt into C0/C1.
@@ -964,7 +964,7 @@ if [ -n "${POOL_COMMISSION_REMAINING_SECONDS:-}" ]; then
   case "$POOL_COMMISSION_REMAINING_SECONDS" in
     ''|*[!0-9]*|0*) log "COMMISSION_TIME_INVALID"; RC=2; exit "$RC" ;;
   esac
-  if [ "${#POOL_COMMISSION_REMAINING_SECONDS}" -gt 4 ] || [ "$POOL_COMMISSION_REMAINING_SECONDS" -gt 7200 ]; then
+  if [ "${#POOL_COMMISSION_REMAINING_SECONDS}" -gt 5 ] || [ "$POOL_COMMISSION_REMAINING_SECONDS" -gt 14400 ]; then
     log "COMMISSION_TIME_INVALID"; RC=2; exit "$RC"
   fi
   if [ "$POOL_COMMISSION_REMAINING_SECONDS" -lt "$POLL_SECS" ]; then
@@ -1004,7 +1004,7 @@ fi
 # if the controller loses the terminal receipt.
 PROVIDER_LEASE_TTL=$((CHILD_TIMEOUT + 300))
 [ "$PROVIDER_LEASE_TTL" -lt 900 ] && PROVIDER_LEASE_TTL=900
-[ "$PROVIDER_LEASE_TTL" -gt 7500 ] && PROVIDER_LEASE_TTL=7500
+[ "$PROVIDER_LEASE_TTL" -gt 15000 ] && PROVIDER_LEASE_TTL=15000
 
 # A healthy SSH/tool host is not necessarily ready for this task's worktree.
 # Validate task-specific source roots before reserving scarce provider slots.
@@ -1563,7 +1563,7 @@ fi
 if [ "$MODE" = "glm-codex" ] || [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
   if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ] || commission_run capability-ready "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       'curl -fsS --max-time 3 http://127.0.0.1:4141/health | python3 -c '"'"'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("worker_capabilities")=="lease-v1" else 1)'"'"''       >/dev/null 2>&1; then
     CAP_TTL=$((CHILD_TIMEOUT + 300))
-    [ "$CAP_TTL" -gt 7500 ] && CAP_TTL=7500
+    [ "$CAP_TTL" -gt 15000 ] && CAP_TTL=15000
     [ "$CAP_TTL" -lt 60 ] && CAP_TTL=60
     if [ "$CANONICAL_PAID_ACTIVE" -eq 0 ]; then
     GLM_CAP_LOCAL="$(mktemp "${TMPDIR:-/tmp}/glm_remote_capability.XXXXXX")" || {

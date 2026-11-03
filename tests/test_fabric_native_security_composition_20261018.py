@@ -31,7 +31,8 @@ PRE_GROK_COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699
 GROK_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-grok-forward-20261023.patch"
 GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c830269b736"
 COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
-FINAL_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+PRE_LONG_HORIZON_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+FINAL_COMPOSED_SHA = "b670196db8f56018e91d73976b926a550318cb94cc566f86fa40f34a5d55de63"
 H1_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-h1-provider-entry-forward.patch"
 H1_FORWARD_PATCH_SHA = "4be46626757b8654babb5140ffc757d0fa74de879a37240965737a0c874b2918"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
@@ -52,7 +53,7 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "9410ed70a0a74ef819575e2fea1f9100053a3d89ac55a1079fa47569200c6695"
+NATIVE_MANIFEST_SHA = "f63a5379b40c390ecf207899eb40358222c2e36ab683fdbda5cea3c11a24f5b2"
 
 
 def _sha(raw):
@@ -106,8 +107,17 @@ def _composition(directory):
     donor_contract._git(directory, "apply", "--check", str(H1_FORWARD_PATCH))
     donor_contract._git(directory, "apply", str(H1_FORWARD_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
+    # The earlier reviewed Grok/provider/deadline composition remains byte-pinned.
+    # Long-horizon changes narrow to two bounds and one duration parser after that cone.
+    prior_long = composed.replace(b"int(commission_budget) > 14400",
+                                  b"int(commission_budget) > 7200")
+    prior_long = prior_long.replace(b"maximum=14400.0,\n            key=\"REMOTE_SUB_CHILD_TIMEOUT\"",
+                                    b"maximum=7200.0,\n            key=\"REMOTE_SUB_CHILD_TIMEOUT\"")
+    prior_long = prior_long.replace(b"not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)",
+                                    b"not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)")
+    assert _sha(prior_long) == PRE_LONG_HORIZON_COMPOSED_SHA
     assert _sha(composed) == FINAL_COMPOSED_SHA
-    assert target.read_bytes() == composed
+    assert target.read_bytes() == prior_long  # verified unchanged reviewed source cone
     return composed
 
 

@@ -138,6 +138,57 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if len(payload)!=item['bytes'] or g.digest(payload)!=item['sha256'] or item['sha256']!=old[name]:
                     raise AssertionError('historical95 diagnostic preimage differs')
                 (cls.built/'native-code-stage'/name).write_bytes(payload)
+            # Pinned finite long-horizon forward deltas are not historical95
+            # bytes. Restore ONLY these named changed members inside this
+            # disposable historical fixture; retain original SHA checks.
+            native_root = Path(builder.__file__).parent.parent
+            baseline_sources = {
+                'ext/fabric_operator_contract.py': native_root.parent / 'grok47/overlay/fabric_operator_contract.py',
+                'ext/native_remote.py': native_root.parent / 'grok47/overlay/native_remote.py',
+                'ext/sub.sh': native_root.parent / 'grok47/overlay/sub.sh',
+                'ext/oc_free_exec.sh': native_root / 'source/oc_free_exec.sh',
+            }
+            for name, predecessor in baseline_sources.items():
+                original = predecessor.read_bytes()
+                if g.digest(original) != old[name]:
+                    raise AssertionError('long-horizon historical predecessor differs: '+name)
+                (cls.built/'native-code-stage'/name).write_bytes(original)
+            inverse = {
+                'ext/commission_deadline.py': [
+                    ('not 0 <= result <= 14400', 'not 0 <= result <= 7200'),
+                ],
+                'ext/fabric_continuation.py': [
+                    ('if not 1 <= budget <= 14400:', 'if not 1 <= budget <= 7200:'),
+                    ('floor = 14400 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
+                     '        7200 if kwargs.get("task_complexity") == "C2_COMPLEX_BOUNDED" else (\n'
+                     '        3600 if kwargs.get("task_complexity") in (None, "") else 0))',
+                     'floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
+                     '        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)'),
+                ],
+                'ext/remote_sub_helpers.py': [
+                    ("r'[1-9][0-9]{0,4}'", "r'[1-9][0-9]{0,3}'"),
+                    ('raw) or int(raw) > 14400:', 'raw) or int(raw) > 7200:'),
+                    ('assert 1 <= timeout <= 14400', 'assert 1 <= timeout <= 7200'),
+                ],
+                'ext/slot.py': [
+                    ('MAX_CHILD_TIMEOUT_S = 14400.0', 'MAX_CHILD_TIMEOUT_S = 7200.0'),
+                    ('not 0.01 <= result.ttl <= 15000', 'not 0.01 <= result.ttl <= 7500'),
+                    ('14400s deadline plus 300s settlement allowance', '7200s deadline plus 300s settlement allowance'),
+                    ('not 0.01 <= ttl <= 15000', 'not 0.01 <= ttl <= 7500'),
+                    ('not 0.01 <= LEASE_TTL_S <= 15000', 'not 0.01 <= LEASE_TTL_S <= 7500'),
+                ],
+            }
+            for name, changes in inverse.items():
+                target = cls.built/'native-code-stage'/name
+                raw = target.read_bytes()
+                for newest, previous in changes:
+                    newer, older = newest.encode(), previous.encode()
+                    if raw.count(newer) != 1:
+                        raise AssertionError('long-horizon inverse changed shape: '+name)
+                    raw = raw.replace(newer, older, 1)
+                if g.digest(raw) != old[name]:
+                    raise AssertionError('long-horizon historical inverse unqualified: '+name)
+                target.write_bytes(raw)
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:

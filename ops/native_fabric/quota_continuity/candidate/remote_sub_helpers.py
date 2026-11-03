@@ -16,7 +16,7 @@ def deadline_init():
     deadline = read_deadline_ns()
     raw = os.environ.get('POOL_COMMISSION_REMAINING_SECONDS')
     if raw is not None:
-        if not re.fullmatch(r'[1-9][0-9]{0,3}', raw) or int(raw) > 7200:
+        if not re.fullmatch(r'[1-9][0-9]{0,4}', raw) or int(raw) > 14400:
             raise ValueError('commission_duration_invalid')
         if deadline is None:
             deadline = narrow_deadline_ns(None, int(raw))
@@ -170,7 +170,7 @@ def native_window():
     from lease_broker import default_broker
     lease,root,account,host,timeout,pool=sys.argv[2:]
     timeout=int(timeout)
-    assert 1 <= timeout <= 7200
+    assert 1 <= timeout <= 14400
     b=default_broker()
     assert b.heartbeat(lease)
     v=next(x for x in b.snapshot()['leases'] if x['id']==lease)

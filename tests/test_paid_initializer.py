@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='9410ed70a0a74ef819575e2fea1f9100053a3d89ac55a1079fa47569200c6695'
+    assert hashlib.sha256(current_raw).hexdigest()=='f63a5379b40c390ecf207899eb40358222c2e36ab683fdbda5cea3c11a24f5b2'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
@@ -595,9 +595,13 @@ def test_native_initializer_extends_only_exact_preimage_members():
     diagnostic_changed={'ext/fabric_task.py','ext/original_delivery_collector.py',
                         'ext/provider_outcome.py','ext/remote_sub.sh'}
     assert set(current)-set(before)==added
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed
-    assert sum(before[p]==current[p] for p in before)==78
-    for name in added|changed|diagnostic_changed:
+    long_horizon_changed={'ext/commission_deadline.py','ext/fabric_continuation.py',
+                          'ext/fabric_operator_contract.py','ext/native_remote.py',
+                          'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
+                          'ext/slot.py','ext/sub.sh'}
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed
+    assert sum(before[p]==current[p] for p in before)==70
+    for name in added|changed|diagnostic_changed|long_horizon_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation

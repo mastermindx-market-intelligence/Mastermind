@@ -64,10 +64,13 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 # Grok bases above as well as the
 # closed composed candidate bytes; neither source may silently replace the other.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
-    'remote_sub_exec.py': '5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d',
+    'remote_sub_exec.py': 'b670196db8f56018e91d73976b926a550318cb94cc566f86fa40f34a5d55de63',
     'pick.py': '4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b',
-    'remote_sub.sh': '7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92',
-    'remote_sub_helpers.py': '0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556',
+    'remote_sub.sh': 'a5acdd6f67fa2d466799dfa4758871051c24ddae697edd8a2dbab602889c6633',
+    'remote_sub_helpers.py': '3b084bb8ca1670bda2f77cd7223eb95dfdea4d6b294a1d5084bc85e0219b2931',
+    'sub.sh': 'f99d068f72859b627c30dc384f98be836ea7c353ef643855ddd34a5e7a6ee537',
+    'native_remote.py': '2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6',
+    'fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
 }
 
 EXTRA_PREIMAGES = {

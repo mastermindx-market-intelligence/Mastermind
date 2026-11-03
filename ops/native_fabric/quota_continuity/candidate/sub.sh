@@ -557,21 +557,21 @@ def main():
         raise LaneRuntimeConfigError("grok_local_host_policy_required")
     config = load_runtime_config(env)
     complexity = str(env.get("POOL_TASK_COMPLEXITY") or "").strip().upper()
-    default_worker_timeout = 7200.0 if complexity == "C3_FRONTIER_JUDGMENT" else 3600.0
+    default_worker_timeout = 14400.0 if complexity == "C3_FRONTIER_JUDGMENT" else (7200.0 if complexity == "C2_COMPLEX_BOUNDED" else 3600.0)
     worker_timeout = parse_bounded_seconds(
         env.get("POOL_CHILD_TIMEOUT_SECONDS"),
         default=default_worker_timeout,
         minimum=60.0,
-        maximum=7200.0,
+        maximum=14400.0,
         key="POOL_CHILD_TIMEOUT_SECONDS",
     )
     # Match the remote fabric's reviewed runtime-floor semantics: a stale caller
     # may tighten C0/C1 intentionally, but must not silently collapse already
     # classified long work below its custody-safe execution window.
     if complexity == "C2_COMPLEX_BOUNDED":
-        worker_timeout = max(worker_timeout, 3600.0)
-    elif complexity == "C3_FRONTIER_JUDGMENT":
         worker_timeout = max(worker_timeout, 7200.0)
+    elif complexity == "C3_FRONTIER_JUDGMENT":
+        worker_timeout = max(worker_timeout, 14400.0)
 
     default_turns = 140
     if complexity == "C2_COMPLEX_BOUNDED":

@@ -742,8 +742,8 @@ def _execute(argv: list[str], state: dict, *, _canonical_context=None) -> int:
     commission_budget = os.environ.get('REMOTE_SUB_COMMISSION_BUDGET_SECONDS')
     if commission_budget is not None:
         if (mode not in {'glm', 'glm-codex', 'minimax', 'minimax-codex', 'qwen'}
-                or not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)
-                or int(commission_budget) > 7200):
+                or not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)
+                or int(commission_budget) > 14400):
             return _fail('REMOTE_SUB_COMMISSION_BUDGET_INVALID', 78)
         state['commission_deadline_ns'] = narrow_deadline_ns(
             None, int(commission_budget), now_ns=state['entered_monotonic_ns'])
@@ -792,7 +792,7 @@ def _execute(argv: list[str], state: dict, *, _canonical_context=None) -> int:
             os.environ.get("REMOTE_SUB_CHILD_TIMEOUT"),
             default=7000.0,
             minimum=0.05,
-            maximum=7200.0,
+            maximum=14400.0,
             key="REMOTE_SUB_CHILD_TIMEOUT",
         )
     except LaneRuntimeConfigError as exc:
