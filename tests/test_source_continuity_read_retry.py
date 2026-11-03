@@ -4,7 +4,11 @@ from __future__ import annotations
 import email.message
 import io
 import json
+import os
+from pathlib import Path
 import ssl
+import subprocess
+import sys
 from http.client import BadStatusLine, IncompleteRead, InvalidURL, RemoteDisconnected
 from urllib.error import HTTPError, URLError
 
@@ -229,6 +233,50 @@ def test_unwritable_stderr_keeps_the_single_receipt(stream, capsys, monkeypatch)
     monkeypatch.undo()
     lines = capsys.readouterr().out.splitlines()
     assert exit_code == 2
+    assert len(lines) == 1
+    assert json.loads(lines[0])["code"] == "REMOTE_PROBE_FAILED"
+
+
+_CLOSED_PIPE_CHILD = """
+import sys
+sys.path.insert(0, {tests!r})
+import test_source_continuity as fx
+import test_source_continuity_census_budget as budget
+import test_source_continuity_read_retry as retry
+module = fx._cli_module()
+module.sleep = lambda _delay: None
+http = retry.Flaky(
+    budget.EstateHTTP(1),
+    retry.SUBJECT_URL,
+    [retry._error(module, "http_503", transient=True) for _ in range(3)],
+)
+raise SystemExit(fx._run_cli(module, fx._cli_argv(), http=http))
+"""
+
+
+def test_closed_stderr_pipe_keeps_the_refusal_exit_code():
+    # A real pipe with no reader: the failed diagnostic stays buffered, and
+    # without the repair the exit-time flush turns rc 2 into rc 120.
+    read_end, write_end = os.pipe()
+    os.close(read_end)
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-W",
+                "ignore",
+                "-c",
+                _CLOSED_PIPE_CHILD.format(tests=str(Path(__file__).resolve().parent)),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=write_end,
+            timeout=120,
+            check=False,
+        )
+    finally:
+        os.close(write_end)
+    lines = completed.stdout.decode().splitlines()
+    assert completed.returncode == 2
     assert len(lines) == 1
     assert json.loads(lines[0])["code"] == "REMOTE_PROBE_FAILED"
 

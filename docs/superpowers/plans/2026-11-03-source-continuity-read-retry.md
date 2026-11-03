@@ -61,14 +61,14 @@ stdout still carries exactly one receipt line. On a refusal with a recorded fail
 - The refusal codes keep their meaning, and a run with no retry refuses exactly as before. The one intentional change: `IncompleteRead` and other `HTTPException` failures, including a failed body read inside the 304 handler, are now classified, repeated, and refused `REMOTE_PROBE_FAILED` instead of `PROBE_INTERNAL_ERROR`.
 - `invalid_url` covers the pre-I/O URL guard, `http.client.InvalidURL`, and a `URLError` whose reason is a string (such as `unknown url type`). A `URLError` with any other unrecognized reason stays a non-transient `connection` failure.
 - `not_modified_body` covers a 304 with a body, whether the transport or the replay check sees it.
-- The stderr diagnostic is best-effort. With `sys.stderr` missing or unwritable it is dropped, and stdout still carries exactly one receipt line.
+- The stderr diagnostic is best-effort. With `sys.stderr` missing or unwritable it is dropped, stdout still carries exactly one receipt line, and the exit code is unchanged. After a failed write, stderr's descriptor is pointed at `/dev/null`. Otherwise the bytes left in its buffer fail again at interpreter exit, and CPython exits 120 instead of 2.
 - No failover, cache, cursor, persistence, auth widening or authority. Retry supersedes the predecessor's "no retry" only for idempotent GETs of the same URL, with the same token and validator.
 
 ## RED-first evidence
 
 Against the #1972 head source (`f9bf6c5ff`), 77 of the 78 new cases and the updated census-budget auth case fail. Most fail on the missing API (`_read_cause`, `_diagnostic_endpoint`, `sleep`). A behavioral check runs a copy of the tests that tolerates the missing `sleep` attribute and sends unlabelled errors. There, every single-failure recovery case (timeout, connection, 502, two failures, conditional replay, parallel census read, writer-gate read) ends rc=2 `REMOTE_PROBE_FAILED` on the old source. Only the lawful-absence case passes on both sources, as it should.
 
-Under the new source, all 672 `tests/test_source_continuity*.py` cases pass (662 before the review repairs below).
+Under the new source, all 673 `tests/test_source_continuity*.py` cases pass (662 before the review repairs below).
 
 The new tests pin:
 
@@ -82,6 +82,8 @@ The new tests pin:
 - endpoint and cause sanitizing, and that the token stays out of stderr.
 
 Review repairs (independent review, PASS_WITH_MINORS). A declined retry keeps its failure's refusal and diagnostic. Retries need a 2.0 s minimum call window, pinned at the boundary: 3.0 s left refuses without sleeping, 3.01 s left sleeps and recovers. `InvalidURL` and string-reason `URLError` read as `invalid_url`. The 304 handler's body read is classified. The replay check labels a 304 with a body `not_modified_body`. The stderr write cannot break the receipt. Against the pre-repair head (`8a8757ebf`), 11 of the new and updated tests fail. One of them shows that the old `print(..., file=sys.stderr)` with `sys.stderr` set to `None` writes the diagnostic to stdout, which would have produced a second stdout line. The reviewer also noted that census workers already running keep going after another worker's failure; that was accepted, because they share the call, byte and time budget.
+
+The delta review passed with one note: a real stderr pipe with no reader still changed the exit code. The caught `BrokenPipeError` left the line in stderr's buffer, the flush at interpreter exit failed again, and the process exited 120 instead of 2. A subprocess test with a closed pipe reproduces rc 120 against `216c3d7f2`. The repair points stderr's descriptor at `/dev/null` after a failed write, never the descriptor that carries the receipt.
 
 ## Live proof
 

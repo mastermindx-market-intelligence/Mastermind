@@ -32,7 +32,7 @@ sys.dont_write_bytecode = True
 
 from threading import Lock
 from time import monotonic, sleep
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Sequence, TextIO
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -868,10 +868,27 @@ def _emit(result: object, reader: _BoundedHTTPGet | None = None) -> int:
                     file=stream,
                 )
             except Exception:
-                pass
+                _discard_unwritten_stderr(stream)
         return result.exit_code
     print(canonical_json(result.to_dict()))
     return 0
+
+
+def _discard_unwritten_stderr(stream: TextIO) -> None:
+    # A failed write stays buffered, and the flush at interpreter exit would fail
+    # again and turn the exit code into 120. Point the descriptor at /dev/null so
+    # that flush succeeds; never the descriptor that carries the receipt.
+    try:
+        descriptor = stream.fileno()
+        if descriptor == sys.stdout.fileno():
+            return
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, descriptor)
+        finally:
+            os.close(devnull)
+    except Exception:
+        pass
 
 
 def _is_sha(value: object) -> bool:
