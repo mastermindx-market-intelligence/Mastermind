@@ -34,6 +34,33 @@ The browser reserves its principal-scoped persistent pointer before the HTTP
 effect. Reopen reads original intent status. It does not publish or submit again.
 Unknown publication/admission retains the original pointer for reconciliation.
 
+## Research submission and its foreground owner
+
+The installed Web-CEO v3 App composition uses the existing Session Bridge
+foreground owner for `research_only` submissions. The original bearer is still
+verified at both HTTP boundaries, source preparation still precedes admission,
+and the same operation key reaches the strict-v2 canonical sink once. The
+request owns at most 300 seconds of COO continuation; it does not enable a
+background scheduler or adopt a previously queued root. Duplicate requests
+return their original admission without driving again.
+
+An installation without attended or paid placements retains the ordinary plan-only
+contract: one validated planner completion, an open root, and no downstream
+work admission. Paid continuation requires the current root-read
+`PaidBindingSource`, the exact frozen placement union, and already registered
+Runtime Worker/quota identities. The continuation check performs no
+enrollment, capacity refresh or provider call. Each child still needs the
+existing claim, current capacity, paid lease and physical adapter checks.
+
+The App receives its immutable admission receipt and reads current status and
+results through the existing owners. A connection loss, expiry or uncertain
+return preserves the original request reference for reconciliation; it never
+authorizes another submission. Web and native research submits allow one
+430-second transport window for the existing source preparation (maximum 120
+seconds) and foreground execution. Read calls and `native_research_only` H2
+retain their existing deadlines and execution paths. Native auth-generation
+changes or token expiry drop the pending foreground HTTP request.
+
 ## Root-sealed Studio opt-in
 
 Use the existing private Studio lifecycle and an existing qualified account/port.
