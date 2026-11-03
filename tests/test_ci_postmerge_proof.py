@@ -411,3 +411,69 @@ def test_seven_job_proof_refuses_legacy_or_incomplete_job_shape(case):
     else:
         subject["jobs"]["total_count"] = 7.0
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
+
+
+@pytest.mark.parametrize("redirect_target", [
+    "https://foreign.invalid/collect",
+    "https://api.github.com/repos/other/repo/actions/runs/123",
+])
+def test_authenticated_api_redirect_never_follows_to_foreign_host(monkeypatch, redirect_target):
+    """Redirects must fail closed before Authorization can leave api.github.com."""
+    from email.message import Message
+    from io import BytesIO
+    import urllib.request
+    import urllib.response
+
+    seen = []
+    token = "test-sentinel-token-not-secret"
+    class FakeHTTPS(urllib.request.BaseHandler):
+        handler_order = 1
+        def https_open(self, req):
+            seen.append((req.host, req.get_header("Authorization")))
+            headers = Message()
+            if req.host == "api.github.com":
+                headers["Location"] = redirect_target
+                response = urllib.response.addinfourl(BytesIO(b""), headers, req.full_url, code=302)
+                response.msg = "Found"
+                return response
+            response = urllib.response.addinfourl(BytesIO(b'{"ok":true}'), headers, req.full_url, code=200)
+            response.msg = "OK"
+            return response
+
+    original = urllib.request.build_opener
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {})
+    def scoped_opener(*handlers):
+        return original(FakeHTTPS(), *handlers)
+    monkeypatch.setattr(urllib.request, "build_opener", scoped_opener)
+    monkeypatch.setattr(urllib.request, "_opener", scoped_opener())
+    with pytest.raises(ValueError, match="redirect"):
+        proof._github_read(f"{_PREFIX}/actions/runs/123", token)
+    assert seen == [("api.github.com", f"Bearer {token}")]
+
+
+
+def test_authenticated_same_origin_api_response_preserves_normal_json(monkeypatch):
+    from email.message import Message
+    from io import BytesIO
+    import urllib.request
+    import urllib.response
+    seen = []
+    class FakeHTTPS(urllib.request.BaseHandler):
+        handler_order = 1
+        def https_open(self, req):
+            seen.append((req.host, req.get_header("Authorization")))
+            response = urllib.response.addinfourl(
+                BytesIO(b'{"status":"ok"}'), Message(), req.full_url, code=200
+            )
+            response.msg = "OK"
+            return response
+
+    build = urllib.request.build_opener
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {})
+    monkeypatch.setattr(
+        urllib.request, "build_opener",
+        lambda *handlers: build(FakeHTTPS(), *handlers),
+    )
+    out = proof._github_read(f"{_PREFIX}/actions/runs/123", "test-token")
+    assert out == {"status": "ok"}
+    assert seen == [("api.github.com", "Bearer test-token")]

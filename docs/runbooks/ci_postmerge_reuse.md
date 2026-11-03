@@ -54,6 +54,12 @@ watcher, lifecycle or queue is introduced. The proof uses at most five bounded
 same-repository GitHub GET requests, each capped at 256,000 response bytes,
 with no retries and no persistent state. The current push and prior group
 are reread to reject actor, identity, attempt or generation movement.
+An authenticated GitHub API response may not redirect, including to the same
+host: Python's default urllib redirect handler forwards the original Bearer
+authorization to the new URL even when the host changes. The fixed read helper
+uses an explicit no-redirect opener; an HTTP 3xx is unqualified proof and the
+normal full pytest path executes. Two no-network redirect regressions and a
+normal same-origin JSON control protect this credential boundary.
 
 ## Verification and rollout
 

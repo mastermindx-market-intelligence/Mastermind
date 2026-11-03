@@ -240,6 +240,19 @@ def find_reusable_run(
     return identifier
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward an authenticated Actions read to a redirect target.
+
+    urllib's default redirect handler copies the Authorization header to the
+    replacement URL, including a different HTTPS host. GitHub proof is always
+    anchored to the fixed API/repository; any redirect means no qualifying
+    evidence and the caller executes the complete normal pytest path.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("GitHub API redirect refused")
+
+
 def _github_read(path: str, token: str) -> Any:
     if not path.startswith(f"/repos/{_REPOSITORY}/") or "//" in path:
         raise ValueError("unsupported GitHub endpoint")
@@ -252,7 +265,9 @@ def _github_read(path: str, token: str) -> Any:
             "User-Agent": "mastermind-ci-mergegroup-reuse",
         },
     )
-    with urllib.request.urlopen(request, timeout=8) as response:
+    # Do not use urlopen's default redirect-following opener: it forwards
+    # the Bearer header on cross-origin 302/307 responses.
+    with urllib.request.build_opener(_NoRedirect()).open(request, timeout=8) as response:
         data = response.read(_MAX_RESPONSE + 1)
     if len(data) > _MAX_RESPONSE:
         raise ValueError("GitHub evidence exceeded the bounded response")
