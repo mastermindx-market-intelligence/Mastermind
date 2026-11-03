@@ -245,7 +245,10 @@ class ReviewHostSettings:
         try:
             return ReviewIntentPolicy(
                 repositories=frozenset(self.repositories),
-                installation_ids=frozenset(self.installation_ids),
+                # This receiver's secret and GitHub API reader are bound to
+                # one installation. The broader configured allowlist must not
+                # attribute those reads to a different installation.
+                installation_ids=frozenset({self.installation_id}),
                 configured_reviewer=self.configured_reviewer,
                 authorized_actors=frozenset(self.authorized_actors),
                 intent_label=self.intent_label,

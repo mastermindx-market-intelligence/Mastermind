@@ -22,7 +22,7 @@ from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 from test_github_review_api import source
 from test_github_review_lifecycle import (
     REPO, HEAD, DELIVERY, SECRET, Actors, Pulls, Secrets, admit, facts, payload,
-    policy as actor_policy, settings,
+    policy as actor_policy, settings, http,
 )
 from test_github_review_runtime_adapter import decision as manual_decision
 
@@ -355,6 +355,21 @@ def test_receiver_exposes_backfill_only_to_bound_internal_owner(tmp_path):
         secret_source=Secrets(), pull_requests=pulls, actors=Actors(), fabric=fabric,
         reconciliation_guard=lambda ref: None if ref == "ROOT-1740:cycle-1" else False)
     assert receiver.reconcile_open_pull_requests(owner_execution_ref="ROOT-1740:cycle-1").complete
+
+
+def test_receiver_cannot_attribute_reads_to_another_allowlisted_installation(tmp_path):
+    runtime, fabric = adapter(tmp_path)
+    pulls, actors = Pulls(), Actors()
+    selected = settings(allow_repository_policy_review=True,
+                        installation_ids=frozenset({4242, 4243}))
+    receiver = GitHubReviewReceiver(settings=selected, secret_source=Secrets(),
+        pull_requests=pulls, actors=actors, fabric=fabric)
+    status, response = http(receiver, payload(sender="dependabot[bot]", installation=4243))
+    assert status == 200
+    assert response["reason"] == "INSTALLATION_NOT_ALLOWLISTED"
+    assert pulls.reads == actors.reads == 0
+    assert runtime.jobs.list_jobs() == []
+    assert selected.review_policy().installation_ids == frozenset({4242})
 
 
 def test_api_pagination_is_repository_scoped_and_never_follows_link_headers():

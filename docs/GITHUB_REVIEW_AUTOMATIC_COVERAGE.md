@@ -100,6 +100,8 @@ Unattended bot-sender coverage uses the existing host's `allow_repository_policy
 
 Installation and administrator enrollment remain separate observed facts. An installation ID, a webhook signature, or a caller-provided digest alone does not authorize paid review work. No additional policy database or grant registry is introduced.
 
+Each current host composition binds one repository and one active installation. Its derived policy narrows the configured installation allowlist to that active installation, matching the secret and authenticated API reader. A signed payload naming a different allowlisted installation is refused before authenticated reads. Operation across all intended repositories remains a separate enrollment and R9 proof requirement.
+
 ### Existing PRs and missed events
 
 `GitHubReviewReceiver.reconcile_open_pull_requests` is an internal callable for the existing authenticated operation owner. It has no HTTP route or timer. The default pass reads at most two pages of 25 PRs; all invocations are limited to 100 PRs. Listing uses a fixed repository-scoped GET and bounded numeric pagination, never arbitrary Link-header destinations. Each listed PR is re-read immediately before decision.
