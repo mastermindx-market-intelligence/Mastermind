@@ -37,7 +37,10 @@ class UnsafeRead(ValueError):
 
 
 def bounded_bytes(path: Path, max_bytes: int = 2_000_000) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    # Reject special files after opening without waiting for a FIFO writer.
+    # O_NONBLOCK has no effect on the regular files accepted below.
+    flags = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+             | getattr(os, "O_NONBLOCK", 0))
     try:
         fd = os.open(path, flags)
     except OSError as exc:

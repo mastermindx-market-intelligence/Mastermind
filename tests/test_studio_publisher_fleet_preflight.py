@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -98,6 +99,37 @@ class FleetPreflightTests(unittest.TestCase):
         result = audit_module.audit(self.root, self.account)
         self.assertEqual(result["status"], "REFUSED")
         self.assertNotIn(self.fixture_marker, json.dumps(result))
+
+
+    @unittest.skipUnless(
+        hasattr(os, "mkfifo") and hasattr(os, "O_NONBLOCK"),
+        "FIFO nonblocking semantics require POSIX",
+    )
+    def test_fifo_config_refuses_without_waiting_for_a_writer(self):
+        config_path = self.base / "config.json"
+        config_path.unlink()
+        os.mkfifo(config_path)
+        # Run the actual audit in a child so a blocking open is a bounded
+        # regression failure, never a hung test process or a fabricated read.
+        probe = """
+import importlib.util
+import json
+from pathlib import Path
+import sys
+spec = importlib.util.spec_from_file_location("fleet_preflight_fifo_probe", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+print(json.dumps(module.audit(Path(sys.argv[2]), sys.argv[3])))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(MODULE), str(self.root), self.account],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["status"], "REFUSED")
+        self.assertEqual(report["reason"], "FILE_UNSAFE")
+        self.assertNotIn(self.fixture_marker, result.stdout)
 
     def test_oversized_manifest_refuses_without_outputting_contents(self):
         (self.base / "manifest.json").write_bytes(b"x" * 2_000_001)
