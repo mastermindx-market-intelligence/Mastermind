@@ -24,16 +24,16 @@ class FleetPreflightTests(unittest.TestCase):
         self.account = "chatgpt3"
         self.base = self.root / self.account
         self.base.mkdir()
-        self.secret = "DO-NOT-SERIALIZE-SENSITIVE-VALUE"
+        self.fixture_marker = "HERMETIC-UNCLASSIFIED-DATA-MARKER"
         self.config = {
             "accountLabel": self.account,
-            "gitPublish": {"enabled": True, "credential": self.secret},
+            "gitPublish": {"enabled": True, "fixtureMarker": self.fixture_marker},
             "repositoryWorkspaces": {
                 "enabled": True,
                 "allowedRepositories": ["mastermind", "macro", "terminal"],
             },
         }
-        self.manifest = {"account": self.account, "secret": self.secret}
+        self.manifest = {"account": self.account, "fixtureMarker": self.fixture_marker}
         self.write_json("config.json", self.config)
         self.write_json("manifest.json", self.manifest)
         (self.base / "gateway.mjs").write_bytes(b"valid gateway fixture")
@@ -56,7 +56,7 @@ class FleetPreflightTests(unittest.TestCase):
         self.assertEqual(result["merge_schema_expected"], "YES")
         self.assertEqual(result["live_client_schema"], "NOT_OBSERVED")
         self.assertEqual(result["installation_proof"], "NOT_OBSERVED")
-        self.assertNotIn(self.secret, json.dumps(result))
+        self.assertNotIn(self.fixture_marker, json.dumps(result))
         self.assertNotIn(self.temp.name, json.dumps(result))
 
     def test_legacy_profile_has_no_foreign_repository_permission(self):
@@ -72,13 +72,13 @@ class FleetPreflightTests(unittest.TestCase):
         pin.mkdir()
         self.assertTrue(audit_module.audit(self.root, self.account)["native_pin_owner_required"])
 
-    def test_unapproved_alias_fails_closed_without_credential_leak(self):
+    def test_unapproved_alias_fails_closed_without_fixture_marker_leak(self):
         self.config["repositoryWorkspaces"]["allowedRepositories"].append("executive-dr-vault")
         self.write_json("config.json", self.config)
         result = audit_module.audit(self.root, self.account)
         self.assertEqual(result["status"], "REFUSED")
         self.assertEqual(result["reason"], "WORKSPACE_CONFIGURATION_INVALID")
-        self.assertNotIn(self.secret, json.dumps(result))
+        self.assertNotIn(self.fixture_marker, json.dumps(result))
 
     def test_duplicate_alias_fails_closed(self):
         self.config["repositoryWorkspaces"]["allowedRepositories"].append("macro")
@@ -93,11 +93,11 @@ class FleetPreflightTests(unittest.TestCase):
     def test_symlinked_config_refuses_without_reading_target(self):
         (self.base / "config.json").unlink()
         secret_target = self.root / "do-not-read"
-        secret_target.write_text(self.secret)
+        secret_target.write_text(self.fixture_marker)
         (self.base / "config.json").symlink_to(secret_target)
         result = audit_module.audit(self.root, self.account)
         self.assertEqual(result["status"], "REFUSED")
-        self.assertNotIn(self.secret, json.dumps(result))
+        self.assertNotIn(self.fixture_marker, json.dumps(result))
 
     def test_oversized_manifest_refuses_without_outputting_contents(self):
         (self.base / "manifest.json").write_bytes(b"x" * 2_000_001)
