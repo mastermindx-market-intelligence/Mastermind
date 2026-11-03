@@ -89,7 +89,7 @@ def test_account_entrypoint_routes_macros_and_other_repos_differently():
     )
     section = source.split(
         "## Cross-repository PR auto-merge discipline", 1
-    )[1].split("## Execute economically", 1)[0]
+    )[1].split("## Preserve real controls and prove the result", 1)[0]
     for token in (
         "docs/DELIVERY_WORKFLOW.md",
         "merge-on-green",
