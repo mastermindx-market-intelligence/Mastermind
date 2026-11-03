@@ -144,3 +144,39 @@ bridge before any bootstrap/kickstart. Consume actual outcomes and qualify the
 new C2 tool path before releasing the native return carrier. The source protocol
 and temp-seat tests do not prove host quiescence, service health, provider
 readiness, native OAuth, a canary or product acceptance.
+
+## C2 Business publisher successor after a completed native pin
+
+**Source-only until protected review and live owner admission.** This is a
+distinct native pin-owner transaction for the exact enrolled chatgpt2-business
+12-file seat, not a retry of the previously refused generic publisher upgrade.
+The existing NATIVE_POOL_PIN_PROFILE_REQUIRES_PIN_OWNER guard stays enforced.
+
+The private_service.py entrypoint `native-pool-pin-publisher` delegates to
+the existing native owner module private_service_pin.py. Only chatgpt2-business
+is eligible. Original installed manifest SHA256 is pinned to
+`9f2f1cdecdd99b1673181b0109d8e6b11896d95541ad42d5e087fb64c2646d3b`,
+with all 12 original module hashes and both approved target hashes fixed.
+
+- `--operation preview` is read-only, even while loaded. It returns a plan SHA
+  bound to exact source modules, original pin receipt, installed afterimages
+  and source/hash profiles; preview is not installation authorization.
+- `--operation apply` needs the exact expected plan SHA, the original native
+  `APPLIED` pin transaction and selected bridge, existing lifecycle/native
+  publication locks, and positive stopped-service evidence.
+- Only git-publish.mjs, workspace-access.mjs and manifest.json are permitted
+  to change. The manifest commits last and a separate immutable receipt
+  follows. All seven original pin evidence files remain untouched.
+- `--operation status` observes the original successor transaction. A partial
+  effect or missing receipt never authorizes another apply or a new carrier.
+  `--operation reconcile` is forward-only on that same sealed transaction,
+  after fresh exact-state and stopped-service proof. Foreign state is refused.
+- Normal service startup requires both completed native pin and successor
+  receipts, exact final module hashes and selected native bridge; incomplete
+  successors fail closed. Without a successor, existing startup remains intact.
+
+Qualification: from integrations/studio_direct_mcp run
+`python -m unittest discover -s . -p 'private_service*test.py'`.
+This tests isolated fake seats only. Protected CI, genuine independent review,
+original-owner rollout, installed gateway health and live client adoption
+remain separate required evidence; the original denied upgrade is not retried.

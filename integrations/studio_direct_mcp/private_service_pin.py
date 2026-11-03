@@ -5,13 +5,14 @@ The existing seat lifecycle and native publication locks serialize cooperative
 owners; private directories do not claim atomic CAS against an adversarial UID.
 """
 
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 import copy
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import stat
 
 SCHEMA = "mastermind.studio_native_pool_pin.v1"
@@ -443,6 +444,9 @@ def run(svc, args):
 
 def require_start(svc, account, roots):
     """Only an OWNED future-pin transition adds a startup fence."""
+    if os.path.lexists(roots["state"] / "native-pool-pin-publisher"):
+        publisher_require_start(svc, account, roots)
+        return
     path = roots["state"] / "native-pool-pin"
     if not os.path.lexists(path):
         return
@@ -486,3 +490,381 @@ def require_start(svc, account, roots):
             != p["pool_bridge"]
         ):
             fail("FUTURE_PIN_NOT_READY")
+
+
+# A single exact native-pin-owner successor; NOT generic Studio restaging.
+# Its original pin plan/result remain sealed and immutable. A sibling durable
+# intent captures the two reviewed publisher files and manifest-last change.
+PUBLISHER_SCHEMA = "mastermind.studio_native_pin_publisher.v1"
+PUBLISHER_ACCOUNT = "chatgpt2-business"
+PUBLISHER_BEFORE_MANIFEST = "9f2f1cdecdd99b1673181b0109d8e6b11896d95541ad42d5e087fb64c2646d3b"
+PUBLISHER_FILES = ("git-publish.mjs", "workspace-access.mjs")
+PUBLISHER_TX_FILES = frozenset({
+    "plan.json", "intent.json", "result.json", "manifest.before.json",
+    "manifest.after.json", *(name + "." + side + ".mjs"
+        for name in ("git-publish", "workspace-access")
+        for side in ("before", "after")),
+})
+
+
+def publisher_fail(code):
+    raise SystemExit("NATIVE_POOL_PUBLISHER_" + code)
+
+
+def publisher_plan_sha(svc, plan):
+    return digest(svc._fabric_release_json(plan))
+
+
+def publisher_record(svc, args, plan, phase, *, result=False):
+    return {
+        "schema": PUBLISHER_SCHEMA,
+        "account": PUBLISHER_ACCOUNT,
+        "planSha256": publisher_plan_sha(svc, plan),
+        "originalPinPlanSha256": plan["original_pin_plan"],
+        "effect": "APPLIED" if result else "NOT_APPLIED" if phase == "OLD"
+                  else "PARTIAL" if phase == "PARTIAL" else "EFFECT_UNKNOWN",
+        "phase": phase,
+        "manifestBefore": plan["manifest_before"],
+        "manifestAfter": plan["manifest_after"],
+        "resultCommitted": result,
+        "serviceStarted": False,
+        "configChanged": False,
+        "poolChanged": False,
+    }
+
+
+@contextmanager
+def publisher_original_pin(svc, roots, *, write):
+    """Authenticate the prior completed, selected native owner, not just hashes."""
+    path = roots["state"] / "native-pool-pin"
+    try:
+        directory(svc, path)
+        p = decode(svc._fabric_release_bytes(path / "plan.json"))
+        if p.get("schema") != SCHEMA or p.get("account") != PUBLISHER_ACCOUNT:
+            publisher_fail("ORIGINAL_PIN_UNQUALIFIED")
+        a = SimpleNamespace(
+            account=PUBLISHER_ACCOUNT,
+            expected_manifest_sha256=p["manifest_before"],
+            successor_bundle=p["successor_bundle"],
+            successor_plan_sha256=p["successor_digest"],
+            expected_plan_sha256=plan_sha(svc, p),
+            operation="publisher-apply" if write else "status",
+        )
+        with svc._pin_native_context(a) as binding:
+            oldplan, raw = read_transaction(svc, path, a, binding)
+            result = decode(svc._fabric_release_bytes(path / "result.json"))
+            if (result != {"schema": SCHEMA,
+                           "planSha256": plan_sha(svc, oldplan),
+                           "effect": "APPLIED"}
+                    or binding.get("phase") != "SELECTED"
+                    or svc._stable_regular_file_hash(
+                        Path(oldplan["pool_target"]), label="original native pool"
+                    ) != oldplan["pool_bridge"]):
+                publisher_fail("ORIGINAL_PIN_UNQUALIFIED")
+            if (digest(svc._fabric_release_bytes(roots["config"]))
+                    != oldplan["config_after"]):
+                publisher_fail("CONFIG_CHANGED")
+            yield oldplan, raw, digest(svc._fabric_release_bytes(path / "result.json"))
+    except (KeyError, ValueError, TypeError, OSError, RecursionError):
+        publisher_fail("ORIGINAL_PIN_UNQUALIFIED")
+
+
+def publisher_seal(svc, roots, original_raw, expected):
+    """Inspect every non-publisher byte, including native pool and private runtime."""
+    original = decode(original_raw["manifest.after.json"])
+    if (digest(svc._fabric_release_bytes(roots["config"])) != original["configHash"]
+            or digest(svc._fabric_release_bytes(roots["plist"])) != original["plistHash"]
+            or svc._stable_regular_file_hash(
+                Path(original["node"]), label="publisher node"
+            ) != original["nodeHash"]
+            or svc._stable_regular_file_hash(
+                Path(original["backend"]), label="publisher backend"
+            ) != original["backendHash"]
+            or svc._dependency_tree_hash(roots["node_modules"])
+               != original["dependencyTreeHash"]):
+        publisher_fail("STATIC_SEAL_REFUSED")
+    if (not svc._native_pin_manifest_valid(
+            expected, PUBLISHER_ACCOUNT,
+            "com.mastermind.studio-direct-private." + PUBLISHER_ACCOUNT)
+            or set(expected["files"]) != set(original["files"])):
+        publisher_fail("MANIFEST_PROFILE_REFUSED")
+    for name, wanted in original["files"].items():
+        if name not in PUBLISHER_FILES and (
+            digest(svc._fabric_release_bytes(roots["base"] / name)) != wanted
+        ):
+            publisher_fail("UNRELATED_FILE_CHANGED")
+
+
+def publisher_candidate(svc, args, roots, oldplan, original_raw, prior_result):
+    if (args.account != PUBLISHER_ACCOUNT
+            or args.expected_manifest_sha256 != PUBLISHER_BEFORE_MANIFEST
+            or not isinstance(args.source, str)
+            or not Path(args.source).is_absolute()
+            or Path(args.source).is_symlink()
+            or not Path(args.source).is_dir()):
+        publisher_fail("PROFILE_REFUSED")
+    source = Path(args.source)
+    original_bytes = original_raw["manifest.after.json"]
+    if (digest(original_bytes) != PUBLISHER_BEFORE_MANIFEST
+            or svc._fabric_release_bytes(roots["manifest"]) != original_bytes):
+        publisher_fail("ORIGINAL_MANIFEST_CHANGED")
+    prior = decode(original_bytes)
+    if prior["files"] != svc.C2_NATIVE_PUBLISHER_FILES_PREIMAGE:
+        publisher_fail("ORIGINAL_PROFILE_CHANGED")
+    publisher_seal(svc, roots, original_raw, prior)
+    new = copy.deepcopy(prior)
+    raw = {"manifest.before.json": original_bytes}
+    modes = {}
+    for name in PUBLISHER_FILES:
+        installed_path, source_path = roots["base"] / name, source / name
+        before = svc._fabric_release_bytes(installed_path)
+        after = svc._fabric_release_bytes(source_path)
+        if (digest(before) != svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256[name]
+                or digest(after) != svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name]
+                or svc._stable_regular_file_hash(source_path, label="reviewed publisher source")
+                   != digest(after)):
+            publisher_fail("MODULE_SOURCE_REFUSED")
+        stem = name.removesuffix(".mjs")
+        raw[stem + ".before.mjs"], raw[stem + ".after.mjs"] = before, after
+        modes[name] = stat.S_IMODE(installed_path.lstat().st_mode)
+        new["files"][name] = digest(after)
+    if new["files"] != svc.C2_NATIVE_PUBLISHER_FILES_POSTIMAGE:
+        publisher_fail("TARGET_PROFILE_REFUSED")
+    publisher_seal(svc, roots, original_raw, prior)
+    new_bytes = svc._fabric_release_json(new)
+    raw["manifest.after.json"] = new_bytes
+    plan = {
+        "schema": PUBLISHER_SCHEMA,
+        "account": PUBLISHER_ACCOUNT,
+        "uid": os.getuid(),
+        "source": str(source),
+        "original_pin_plan": plan_sha(svc, oldplan),
+        "original_pin_result": prior_result,
+        "manifest_before": digest(original_bytes),
+        "manifest_after": digest(new_bytes),
+        "module_before": {
+            n: svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256[n]
+            for n in PUBLISHER_FILES
+        },
+        "module_after": {
+            n: svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[n]
+            for n in PUBLISHER_FILES
+        },
+        "module_mode": modes,
+        "manifest_mode": stat.S_IMODE(roots["manifest"].lstat().st_mode),
+    }
+    return plan, raw
+
+
+def publisher_transaction(svc, args, roots, oldplan, original_raw, prior_result):
+    path = roots["state"] / "native-pool-pin-publisher"
+    directory(svc, path)
+    if {p.name for p in path.iterdir()} - PUBLISHER_TX_FILES:
+        publisher_fail("FOREIGN_TRANSACTION")
+    plan = decode(svc._fabric_release_bytes(path / "plan.json"))
+    if (set(plan) != {"schema", "account", "uid", "source",
+                      "original_pin_plan", "original_pin_result",
+                      "manifest_before", "manifest_after", "module_before",
+                      "module_after", "module_mode", "manifest_mode"}
+            or plan["schema"] != PUBLISHER_SCHEMA
+            or plan["account"] != PUBLISHER_ACCOUNT
+            or plan["uid"] != os.getuid()
+            or plan["original_pin_plan"] != plan_sha(svc, oldplan)
+            or plan["original_pin_result"] != prior_result
+            or plan["manifest_before"] != PUBLISHER_BEFORE_MANIFEST
+            or plan["module_before"] != svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256
+            or plan["module_after"] != svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256
+            or not isinstance(plan["source"], str)
+            or not Path(plan["source"]).is_absolute()
+            or plan["source"] != str(Path(args.source))
+            or plan["manifest_mode"] not in (0o400, 0o600, 0o644)):
+        publisher_fail("PLAN_REFUSED")
+    wanted = publisher_plan_sha(svc, plan)
+    if wanted != args.expected_plan_sha256:
+        publisher_fail("PLAN_CAS_REFUSED")
+    raw = {}
+    for name in PUBLISHER_TX_FILES - {"plan.json", "intent.json", "result.json"}:
+        raw[name] = svc._fabric_release_bytes(path / name)
+    if (digest(raw["manifest.before.json"]) != plan["manifest_before"]
+            or digest(raw["manifest.after.json"]) != plan["manifest_after"]
+            or raw["manifest.before.json"] != original_raw["manifest.after.json"]):
+        publisher_fail("MANIFEST_BYTES_REFUSED")
+    before = decode(raw["manifest.before.json"])
+    after = decode(raw["manifest.after.json"])
+    expected = copy.deepcopy(before)
+    expected["files"].update(plan["module_after"])
+    if (after != expected
+            or expected["files"] != svc.C2_NATIVE_PUBLISHER_FILES_POSTIMAGE):
+        publisher_fail("PROFILE_BYTES_REFUSED")
+    for name in PUBLISHER_FILES:
+        stem = name.removesuffix(".mjs")
+        if (digest(raw[stem + ".before.mjs"]) != plan["module_before"][name]
+                or digest(raw[stem + ".after.mjs"]) != plan["module_after"][name]
+                or type(plan["module_mode"].get(name)) is not int
+                or plan["module_mode"][name] not in (0o400, 0o600, 0o644)):
+            publisher_fail("MODULE_BYTES_REFUSED")
+    if decode(svc._fabric_release_bytes(path / "intent.json")) != {
+        "schema": PUBLISHER_SCHEMA, "planSha256": wanted,
+    }:
+        publisher_fail("INTENT_REFUSED")
+    return path, plan, raw
+
+
+def publisher_phase(svc, roots, original_raw, plan, raw):
+    before, after = (
+        decode(raw["manifest.before.json"]),
+        decode(raw["manifest.after.json"]),
+    )
+    publisher_seal(svc, roots, original_raw, after)
+    if stat.S_IMODE(roots["manifest"].lstat().st_mode) != plan["manifest_mode"]:
+        publisher_fail("FOREIGN_MODE")
+    stages = []
+    for name in PUBLISHER_FILES:
+        stem = name.removesuffix(".mjs")
+        path = roots["base"] / name
+        if stat.S_IMODE(path.lstat().st_mode) != plan["module_mode"][name]:
+            publisher_fail("FOREIGN_MODE")
+        contents = svc._fabric_release_bytes(path)
+        if contents == raw[stem + ".before.mjs"]:
+            stages.append(False)
+        elif contents == raw[stem + ".after.mjs"]:
+            stages.append(True)
+        else:
+            publisher_fail("FOREIGN_MODULE")
+    manifest = svc._fabric_release_bytes(roots["manifest"])
+    if manifest == raw["manifest.after.json"] and all(stages):
+        return "COMPLETE"
+    if manifest == raw["manifest.before.json"]:
+        return "OLD" if not any(stages) else "PARTIAL"
+    publisher_fail("FOREIGN_MANIFEST")
+
+
+def publisher_result(svc, path, plan):
+    receipt = path / "result.json"
+    if not os.path.lexists(receipt):
+        return False
+    observed = decode(svc._fabric_release_bytes(receipt))
+    if observed != {
+        "schema": PUBLISHER_SCHEMA,
+        "planSha256": publisher_plan_sha(svc, plan),
+        "effect": "APPLIED",
+    }:
+        publisher_fail("RESULT_REFUSED")
+    return True
+
+
+def run_publisher(svc, args):
+    if args.account != PUBLISHER_ACCOUNT:
+        publisher_fail("ACCOUNT_REFUSED")
+    if (args.expected_manifest_sha256 != PUBLISHER_BEFORE_MANIFEST
+            or (args.operation != "preview" and
+                not svc._sha256_hex(args.expected_plan_sha256))):
+        publisher_fail("INPUT_REFUSED")
+    roots = svc._build_runtime_roots(PUBLISHER_ACCOUNT)
+    path = roots["state"] / "native-pool-pin-publisher"
+    modifying = args.operation in ("apply", "reconcile")
+    lock = svc._c2_lifecycle_mutex(PUBLISHER_ACCOUNT) if modifying else nullcontext()
+    with lock, publisher_original_pin(svc, roots, write=modifying) as original:
+        oldplan, original_raw, prior_result = original
+        if args.operation == "preview":
+            if os.path.lexists(path):
+                publisher_fail("TRANSACTION_EXISTS")
+            plan, _ = publisher_candidate(
+                svc, args, roots, oldplan, original_raw, prior_result
+            )
+            return publisher_record(svc, args, plan, "OLD") | {
+                "effect": "NOT_APPLIED", "preflight": True
+            }
+        if args.operation == "apply" and os.path.lexists(path):
+            publisher_fail("RECONCILIATION_REQUIRED")
+        if args.operation == "apply":
+            from_native = publisher_candidate(
+                svc, args, roots, oldplan, original_raw, prior_result
+            )
+            plan, raw = from_native
+            if publisher_plan_sha(svc, plan) != args.expected_plan_sha256:
+                publisher_fail("PLAN_CAS_REFUSED")
+            stopped(svc, PUBLISHER_ACCOUNT, roots)
+            directory(svc, roots["state"])
+            path.mkdir(mode=svc.DIR_MODE)
+            svc._fsync_dir(path.parent)
+            try:
+                svc._fabric_release_new(path / "plan.json", svc._fabric_release_json(plan))
+                for name, contents in raw.items():
+                    svc._fabric_release_new(path / name, contents)
+                svc._fabric_release_new(path / "intent.json", svc._fabric_release_json({
+                    "schema": PUBLISHER_SCHEMA, "planSha256": args.expected_plan_sha256,
+                }))
+            except BaseException:
+                publisher_fail("INTENT_EFFECT_UNKNOWN")
+        tx, plan, raw = publisher_transaction(
+            svc, args, roots, oldplan, original_raw, prior_result
+        )
+        phase = publisher_phase(svc, roots, original_raw, plan, raw)
+        complete = publisher_result(svc, tx, plan)
+        if complete and phase != "COMPLETE":
+            publisher_fail("RESULT_STATE_REFUSED")
+        if args.operation == "status":
+            return publisher_record(
+                svc, args, plan, phase, result=complete
+            )
+        stopped(svc, PUBLISHER_ACCOUNT, roots)
+        if complete:
+            # A completed transaction cannot be replayed or rewritten.
+            publisher_fail("ALREADY_COMMITTED")
+        try:
+            if phase == "OLD" or phase == "PARTIAL":
+                for name in PUBLISHER_FILES:
+                    stem = name.removesuffix(".mjs")
+                    path_name = roots["base"] / name
+                    if svc._fabric_release_bytes(path_name) != raw[stem + ".after.mjs"]:
+                        svc._atomic_write_bytes(
+                            path_name, raw[stem + ".after.mjs"],
+                            mode=plan["module_mode"][name],
+                        )
+                phase = publisher_phase(svc, roots, original_raw, plan, raw)
+                if phase != "PARTIAL":
+                    publisher_fail("PARTIAL_STATE_REFUSED")
+                stopped(svc, PUBLISHER_ACCOUNT, roots)
+                svc._atomic_write_bytes(
+                    roots["manifest"], raw["manifest.after.json"],
+                    mode=plan["manifest_mode"],
+                )
+            if publisher_phase(svc, roots, original_raw, plan, raw) != "COMPLETE":
+                publisher_fail("FINAL_STATE_REFUSED")
+            stopped(svc, PUBLISHER_ACCOUNT, roots)
+            svc._fabric_release_new(tx / "result.json", svc._fabric_release_json({
+                "schema": PUBLISHER_SCHEMA,
+                "planSha256": publisher_plan_sha(svc, plan),
+                "effect": "APPLIED",
+            }))
+            if publisher_phase(svc, roots, original_raw, plan, raw) != "COMPLETE":
+                publisher_fail("FINAL_STATE_REFUSED")
+        except BaseException:
+            # Nothing is rolled back or retried; the original retained transaction
+            # is the only lawful reconciliation carrier.
+            publisher_fail("EFFECT_UNKNOWN")
+        return publisher_record(svc, args, plan, "COMPLETE", result=True)
+
+
+def publisher_require_start(svc, account, roots):
+    """A completed chained publisher receipt is required before startup."""
+    if account != PUBLISHER_ACCOUNT:
+        publisher_fail("ACCOUNT_REFUSED")
+    path = roots["state"] / "native-pool-pin-publisher"
+    plan = decode(svc._fabric_release_bytes(path / "plan.json"))
+    a = SimpleNamespace(
+        account=account,
+        expected_manifest_sha256=PUBLISHER_BEFORE_MANIFEST,
+        expected_plan_sha256=publisher_plan_sha(svc, plan),
+        source=plan.get("source"),
+        operation="status",
+    )
+    with publisher_original_pin(svc, roots, write=False) as original:
+        oldplan, raw_old, oldresult = original
+        tx, checked, raw = publisher_transaction(
+            svc, a, roots, oldplan, raw_old, oldresult
+        )
+        if (publisher_phase(svc, roots, raw_old, checked, raw) != "COMPLETE"
+                or not publisher_result(svc, tx, checked)):
+            publisher_fail("START_INCOMPLETE")
