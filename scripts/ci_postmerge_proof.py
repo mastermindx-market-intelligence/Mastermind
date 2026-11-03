@@ -194,6 +194,7 @@ def find_reusable_run(
         if name == "pytest shard 0":
             required |= {
                 "Verify Paper direct pinned MCP SDK",
+                "Verify Paper Studio prepare guard",
                 "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
                 "Compile source",
                 "Validate shell scripts",

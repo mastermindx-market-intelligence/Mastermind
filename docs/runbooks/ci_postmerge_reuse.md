@@ -122,3 +122,17 @@ exact pinned proof condition, while retaining all original checks that both
 H1 steps execute first on shard two with unchanged isolation and positive
 validators. No initializer implementation or Linux fixture was modified.
 This is the sole eighth changed path beyond the original seven-path repair.
+
+## Released Paper prepare guard composition (2026-11-03)
+
+The six-shard adaptation also retains protected source's exact
+`Verify Paper Studio prepare guard` step on shard zero. It runs
+`node --test paper-design.test.mjs` in `integrations/studio_direct_mcp`
+before reuse proof, regardless of whether full pytest can be omitted.
+The workflow validator rejects omission, duplication, reuse-based suppression,
+wrong command/directory, continued failure, or moving this gate after the proof.
+The prior-run proof requires exactly one completed/successful copy of this step;
+a successful job with its Paper guard missing, skipped, failed, pending or
+duplicated cannot qualify. Existing redirect refusal, six-shard/H1 safeguards,
+five-read budget and full-pytest fallback remain unchanged. These are source/test
+contracts, not measured protected-push savings or installed acceptance.

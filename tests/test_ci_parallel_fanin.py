@@ -104,8 +104,16 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: false",
         ),
         (
-            "working-directory: integrations/studio_direct_mcp",
-            "working-directory: integrations/wrong_mcp",
+            # Target the *required Fabric gate*, not whichever earlier
+            # independent Studio/ Paper qualification step shares its cwd.
+            # Otherwise a new legitimate preflight silently redirects this
+            # regression to the wrong tool and produces a false failure.
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n"
+            "        if: matrix.index == 0\n"
+            "        working-directory: integrations/studio_direct_mcp",
+            "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n"
+            "        if: matrix.index == 0\n"
+            "        working-directory: integrations/wrong_mcp",
         ),
         (
             "gateway-shared-backend.test.mjs ",
@@ -369,5 +377,37 @@ def test_reuse_preserves_finite_existing_full_pytest_step_timeout(timeout) -> No
     runner = next(step for step in workflow["jobs"]["pytest_shards"]["steps"]
                   if step.get("name") == "Run repository test shard")
     runner["timeout-minutes"] = timeout
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("mutation", ["missing", "reuse-gated", "wrong-directory", "wrong-command", "continue-on-error", "after-pytest", "duplicate"])
+def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    # Add the exact already-released step for the RED pre-integration fixture.
+    guard = next((step for step in steps if step.get("name") == "Verify Paper Studio prepare guard"), None)
+    if guard is None:
+        guard = {"name": "Verify Paper Studio prepare guard", "if": "matrix.index == 0",
+                 "working-directory": "integrations/studio_direct_mcp",
+                 "run": "node --test paper-design.test.mjs"}
+        steps.insert(next(i for i, step in enumerate(steps) if step.get("id") == "previous_ci"), guard)
+    fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+    if mutation == "missing":
+        steps.remove(guard)
+    elif mutation == "reuse-gated":
+        guard["if"] = "${{ matrix.index == 0 && steps.previous_ci.outputs.reuse != 'true' }}"
+    elif mutation == "wrong-directory":
+        guard["working-directory"] = "."
+    elif mutation == "wrong-command":
+        guard["run"] = "echo skipped"
+    elif mutation == "continue-on-error":
+        guard["continue-on-error"] = True
+    elif mutation == "after-pytest":
+        steps.remove(guard)
+        steps.append(guard)
+    else:
+        steps.append(dict(guard))
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))

@@ -136,6 +136,21 @@ def validate_parallel_workflow(text: str) -> None:
         ]
         if len(matches) != 1 or matches[0].get("if") != "matrix.index == 0":
             raise ci_pytest.PolicyError("non-pytest CI gates must run in shard zero")
+    # Preserve the released non-pytest Paper gate in both ordinary and reuse
+    # executions. A green job alone does not prove its command actually ran.
+    paper = [step for step in shard_steps
+             if step.get("name") == "Verify Paper Studio prepare guard"]
+    expected_paper = {
+        "name": "Verify Paper Studio prepare guard",
+        "if": "matrix.index == 0",
+        "working-directory": "integrations/studio_direct_mcp",
+        "run": "node --test paper-design.test.mjs",
+    }
+    if (len(paper) != 1 or paper[0] != expected_paper
+            or shard_steps.index(paper[0]) >= shard_steps.index(proof)):
+        raise ci_pytest.PolicyError(
+            "released Paper prepare guard must run unchanged before reuse proof"
+        )
     # Reuse may omit only the full pytest step, never the released fast
     # preflight or either real Linux initializer qualification.
     for name, condition in {

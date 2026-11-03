@@ -72,6 +72,7 @@ def _steps(index: int) -> list[dict]:
     if index == 0:
         names[:0] = [
             "Verify Paper direct pinned MCP SDK",
+            "Verify Paper Studio prepare guard",
             "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
             "Compile source", "Validate shell scripts",
         ]
@@ -477,3 +478,19 @@ def test_authenticated_same_origin_api_response_preserves_normal_json(monkeypatc
     out = proof._github_read(f"{_PREFIX}/actions/runs/123", "test-token")
     assert out == {"status": "ok"}
     assert seen == [("api.github.com", "Bearer test-token")]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "skipped", "failure", "duplicate", "pending"])
+def test_released_paper_guard_must_have_run_before_reusing_pytest(mutation):
+    subject = _subject()
+    steps = subject["jobs"]["jobs"][0]["steps"]
+    guard = next(step for step in steps if step["name"] == "Verify Paper Studio prepare guard")
+    if mutation == "missing":
+        steps.remove(guard)
+    elif mutation == "duplicate":
+        steps.append(deepcopy(guard))
+    elif mutation == "pending":
+        guard.update(status="in_progress", conclusion=None)
+    else:
+        guard["conclusion"] = mutation
+    assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
