@@ -21,13 +21,13 @@ def _contains_macro_release_instruction(text: str) -> bool:
     return all(
         snippet in _approved_project_block(text)
         for snippet in (
-            "Macro release:",
+            "9A. Macro:",
             "docs/DELIVERY_WORKFLOW.md",
             "`merge-on-green`",
-            "clean CI",
+            "requires CI",
             "non-author review",
             "no HOLD",
-            "No blanket-arming or native auto-merge",
+            "no native --auto",
         )
     )
 
@@ -39,6 +39,14 @@ def test_actual_web_project_block_exposes_release_pointer_within_budget():
     assert block.startswith("MASTERMIND SOL BOOTSTRAP")
     assert len(block) <= 8000
     assert len(block.encode("utf-8")) <= 8000
+    for anchor in (
+        "6A. Named reviewer login",
+        "33. MORE_WORK_EXISTS means the mission is incomplete",
+        "39. Persist results/rulings/continuations",
+        "40. Grok Secretary",
+        "Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin.",
+    ):
+        assert anchor in block, f"incumbent #1987 instruction lost: {anchor}"
     assert DELIVERY.is_file()
 
 
@@ -46,7 +54,7 @@ def test_outside_fence_release_note_does_not_count_as_installed_instruction():
     kernel = KERNEL.read_text(encoding="utf-8")
     assert _contains_macro_release_instruction(kernel)
     moved = kernel.replace(
-        "9A. Macro release: pinned docs/DELIVERY_WORKFLOW.md; `merge-on-green` is opt-in after clean CI, non-author review and no HOLD. No blanket-arming or native auto-merge.",
+        "9A. Macro: docs/DELIVERY_WORKFLOW.md. `merge-on-green` requires CI, non-author review, no HOLD; no native --auto.",
         "",
     )
     assert moved != kernel, "the exact projected rule must exist in the source"
