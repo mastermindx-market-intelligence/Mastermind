@@ -31,7 +31,7 @@ AUTHORITY + EFFECTS
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
 9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
-9A. Macro: docs/DELIVERY_WORKFLOW.md. `merge-on-green` requires CI, non-author review, no HOLD; no native --auto.
+9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm.
 
 ADAPTIVE MODE + CAPABILITIES
 10. Follow ACTIVE_EXECUTION 1B for human-attended mode fit/stickiness; no invented Pro receipt. Automated cognition keeps router/budget gates. Switch only for a critical-path reason.
