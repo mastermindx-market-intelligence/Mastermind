@@ -1,0 +1,67 @@
+"""Contract tests for source-pinned Web Project owner-takeover rollout.
+
+Source publication, live Project installation and real agent behavior are separate.
+"""
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+KERNEL = ROOT / "docs/sol_skills/BOOTSTRAP_KERNEL.md"
+ACCOUNT = ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"
+
+
+def _project_block() -> str:
+    source = KERNEL.read_text(encoding="utf-8")
+    return source.split("## Approved Project instruction text", 1)[1].split(
+        "```text\n", 1
+    )[1].split("\n```", 1)[0]
+
+
+def test_project_block_fits_both_real_limits_and_has_exact_unique_rules():
+    block = _project_block()
+    assert len(block) <= 8000
+    assert len(block.encode("utf-8")) <= 8000
+    for number in ("5.", "6A.", "13.", "39.", "40."):
+        assert sum(line.startswith(number + " ") for line in block.splitlines()) == 1
+
+
+def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
+    block = _project_block()
+    for phrase in (
+        "Archived",
+        "Current assigned receiver owns recovery",
+        "Archived chats/PR authors aren't live owners",
+        "Handoffs name an executable successor action",
+        "Independent non-author review",
+        "never native Sol labor",
+        "First explicit safety/permission denial",
+        "EFFECT_UNKNOWN",
+        "no self-approve/merge",
+    ):
+        assert phrase in block
+
+
+def test_formal_review_eligibility_and_handoff_remain_inside_fence():
+    block = _project_block()
+    for phrase in (
+        "6A. Named reviewer login is preferred",
+        "independent of PR authors/committers/coauthors",
+        "No impersonation, self-review, duplicate or denial evasion",
+        "HANDOFF_SOURCE_LINK_V1",
+        "Delivery != PICKUP_ACK/START",
+        "<@U0BTCHX8HMF>",
+        "Never DM.",
+    ):
+        assert phrase in block
+
+
+def test_project_installation_needs_editor_readback_and_behavioral_canary():
+    instructions = ACCOUNT.read_text(encoding="utf-8")
+    for phrase in (
+        "each **distinct** authorized Mastermind Project",
+        "preserving newer valid Project-specific rules",
+        "8,000-character and UTF-8 byte budgets",
+        "fresh-chat action scenarios per intended member account",
+        "UNKNOWN/BLOCKED gap",
+        "not proof of ChatGPT settings installation",
+    ):
+        assert phrase in instructions

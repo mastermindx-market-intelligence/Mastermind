@@ -84,6 +84,14 @@ proof obligation; it must not freeze unrelated permitted implementation or diagn
 
 Whenever an independent source/architecture review is required, use the shared [session review routing procedure](SESSION_INDEPENDENT_REVIEW_ROUTING.md). Discover actual Fabric capabilities in this session and preserve exact original root/effects before commissioning. One separately authorized Dot technical reviewer may be addressed through the existing Slack review channel when qualified; Slack delivery is not reviewer START, a refusal never authorizes cross-provider fallback, and a Dot source verdict is not formal non-author GitHub approval.
 
+## Shared ChatGPT Web Project instruction rollout
+
+The authoritative source is the **fenced Project instruction block** in `docs/sol_skills/BOOTSTRAP_KERNEL.md` on accepted protected `master`. A branch/PR and a chat memory are not an installed Project setting. The Project owner/editor updates each **distinct** authorized Mastermind Project once, rather than once per member; personal account custom instructions cannot replace Project instructions.
+
+Before writing, inspect current Project identity, editor permission, active concurrent UI writer, and saved instruction text. Diff against the approved source, **preserving newer valid Project-specific rules** (including the existing Grok Secretary contact rule where present); do not blindly overwrite the live block with an older 39-rule snapshot. Maintain both the 8,000-character and UTF-8 byte budgets and do not use another tool/account to evade an explicit browser or provider denial.
+
+After an authorized save, verify the actual Project ID and saved text/marker, then run **fresh-chat action scenarios per intended member account**: archived old author -> assume permitted leadership; live exclusive writer/EFFECT_UNKNOWN -> fence; explicit tool denial -> no same-effect retry; unconsumed Slack handoff -> do not claim START. A paraphrase and a concrete correct next action are valid evidence; requiring verbatim disclosure of hidden instructions is not. Record each seat as VERIFIED or an exact UNKNOWN/BLOCKED gap, citing existing rollout evidence, without credentials. `HANDOFF_SOURCE_LINK_V1` is a source/transport marker, not proof of ChatGPT settings installation or agent execution.
+
 ## Execute economically
 
 Prefer existing admitted Fabric workers for separable work when framing, review and
