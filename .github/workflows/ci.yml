@@ -40,6 +40,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
       # A clean hosted runner lacks the local sibling checkout; pin exactly

@@ -411,3 +411,41 @@ def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
         steps.append(dict(guard))
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+def test_primary_checkout_never_persists_expanded_proof_credentials():
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    primary = workflow["jobs"]["pytest_shards"]["steps"][0]
+    assert primary["uses"] == "actions/checkout@v4"
+    assert primary["with"].get("persist-credentials") is False
+    assert primary["with"].get("fetch-depth") == 0
+    fan.validate_parallel_workflow(_WORKFLOW.read_text())
+
+
+@pytest.mark.parametrize("mutation", ["missing", "true", "string-false", "numeric-zero", "fetch-depth", "conditional", "duplicate", "malformed-inputs"])
+def test_primary_checkout_credential_boundary_is_load_bearing(mutation):
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    primary = steps[0]
+    primary["with"]["persist-credentials"] = False
+    fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+    if mutation == "missing":
+        primary["with"].pop("persist-credentials")
+    elif mutation == "true":
+        primary["with"]["persist-credentials"] = True
+    elif mutation == "string-false":
+        primary["with"]["persist-credentials"] = "false"
+    elif mutation == "numeric-zero":
+        primary["with"]["persist-credentials"] = 0
+    elif mutation == "fetch-depth":
+        primary["with"]["fetch-depth"] = 1
+    elif mutation == "conditional":
+        primary["if"] = "${{ false }}"
+    elif mutation == "malformed-inputs":
+        primary["with"] = []
+    else:
+        steps.append(dict(primary))
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))

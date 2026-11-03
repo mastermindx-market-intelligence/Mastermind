@@ -98,6 +98,26 @@ def validate_parallel_workflow(text: str) -> None:
         if canonical_id in seen_step_ids:
             raise ci_pytest.PolicyError("parallel CI step IDs must be globally unique")
         seen_step_ids.add(canonical_id)
+    # Job permissions apply to every step; prevent checkout from retaining the
+    # expanded Actions-read token in repository Git configuration for later code.
+    primary_checkouts = [
+        step for step in shard_steps
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+        and (not isinstance(step.get("with"), dict)
+             or not step["with"].get("repository"))
+    ]
+    if len(primary_checkouts) != 1:
+        raise ci_pytest.PolicyError("one primary repository checkout is required")
+    primary = primary_checkouts[0]
+    checkout_inputs = primary.get("with")
+    if (not isinstance(checkout_inputs, dict)
+            or checkout_inputs.get("persist-credentials") is not False
+            or type(checkout_inputs.get("fetch-depth")) is not int
+            or checkout_inputs.get("fetch-depth") != 0
+            or primary.get("if") is not None):
+        raise ci_pytest.PolicyError(
+            "primary checkout must preserve full history without persisted credentials"
+        )
     # The single prior-CI probe is read-only and executes before the shard.
     # The final shard step can be conditional ONLY on the verified output of
     # this pinned producer. No skipping whole jobs or trusted non-pytest gates.

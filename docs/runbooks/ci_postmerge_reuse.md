@@ -48,8 +48,14 @@ step ID, command, GH token surface, ordering and runner condition. A simple
 
 A single read-only addition of `actions: read` is scoped to the existing
 `pytest_shards` job only; root CI and the protected final `test` remain
-`contents: read`. The token is passed to the short proof step only,
-not to pytest. No new PAT, key, credential store, scheduler, agent,
+`contents: read`. The primary checkout explicitly sets
+`persist-credentials: false` while retaining `fetch-depth: 0`; the secondary
+Macro checkout already disables persistence. This prevents the checkout action
+from leaving its authentication token in local Git configuration for subsequent
+install/repository/test steps. The proof step receives its explicit `GH_TOKEN`
+environment binding; pytest is not explicitly given that binding. These job
+permissions and step environment choices are not a process sandbox or proof that
+arbitrary trusted job code cannot access any runner credential. No new PAT, key, credential store, scheduler, agent,
 watcher, lifecycle or queue is introduced. The proof uses at most five bounded
 same-repository GitHub GET requests, each capped at 256,000 response bytes,
 with no retries and no persistent state. The current push and prior group
