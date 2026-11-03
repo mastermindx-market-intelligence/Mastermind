@@ -189,3 +189,17 @@ No approval, green CI, mergeability, installation or whole-fleet readiness is
 inferred from those observations. The next release action remains with the
 existing non-author review and protected native publication owners, followed
 by real worker qualification and original-incident reconciliation.
+
+## CI repair and protected-source composition (2026-11-03 continuation)
+
+The original PR-head CI failed in three shards because four tests retained an old CURRENT manifest pin and the historical B11 fixture lacked the exact predecessor executor. The minimal reproducer recorded three assertion failures and one fixture setup error before repair.
+
+The current source composes protected master `9f65957e29eba92245d78609f032aaea523b7cb4` with the existing sparse-commit fix. Regeneration produces 102 members, manifest `dbf5371bd7e346d8abd4c52d65731b52a0eb388cc45c41ce28fe143f295700b8`, and inventory `2b02de89d0fac9a72930e7aa1fbd302f710d3b2c36661245620e48b984e0c934`. Only `ext/remote_sub_exec.py` differs from that protected native manifest; all four upstream diagnostic member changes survive relative to the prior PR head.
+
+The original catalog and diagnostic fixtures, original transition manifest, and historical transformation-chain pins remain unchanged. A supplemental byte-qualified fixture restores only the old executor during disposable historical reconstruction. Current-stage verification still precedes restoration, and all historical members are verified afterward.
+
+Focused regressions: **182 passed, 6 Linux-only skips**, plus **88 passed** for the affected upstream diagnostic paths. The current-manifest failures and all 32 historical successor tests now pass. These local results do not stand in for Linux CI, independent integration review, protected merge, or installation. Exact hashes and receipts are in `ci-repair-validation.json`.
+
+The bounded integration-review request `fabric-ubuntu-ci-fixture-review-20261103-c4` was refused with `MANUAL_ROUTE_UNAVAILABLE`; same-ID status is `NOT_FOUND`, with execution absence unproven and retry disallowed. The operation is preserved without rerouting or replay. The earlier accepted executor review retains only its original scope.
+
+Ubuntu1 diagnosis now identifies its four CI runners’ startup refusal: disk use is 88.86%, above the installed guard’s 85% threshold. The guard also requires 100 GiB free. No CPU or memory refusal was observed. No disk threshold was lowered and no data was deleted. A bounded storage ownership read found the root-owned isolated runner directories unreadable as `longr`; the home census is partial.

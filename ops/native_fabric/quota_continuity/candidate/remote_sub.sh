@@ -2026,8 +2026,18 @@ else
   [ "$RECEIPT_SAVED" -eq 1 ] && CLEAN_RECEIPT=" $REMOTE_LANES_Q/ext/lanes/${ID}.process.jsonl"
   CLEAN_USAGE=''
   [ "$USAGE_SAVED" -eq 1 ] && CLEAN_USAGE=" $REMOTE_LANES_Q/ext/lanes/${ID}.usage.json"
+  CLEAN_PACKET=" $REMOTE_LANES_Q/tmp/${ID}.txt"
+  CLEAN_RC=" $REMOTE_LANES_Q/ext/$REMOTE_RC"
+  # Prospective only: retain this failed operation's original proof beside its
+  # already-private capture. No old evidence reconstruction or capture export.
+  if [ "$PROVIDER_SAVED" -eq 1 ] && [ "$RC" -ne 0 ] &&
+      commission_run diagnostic-retention "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+        "python3 $REMOTE_LANES_Q/support-releases/$SUPPORT_DIGEST/ext/provider_outcome.py retained-diagnostic-ready $REMOTE_LANES_Q '$ID' '$ORCH_ID'" >/dev/null 2>&1; then
+    CLEAN_PACKET=''; CLEAN_RC=''; CLEAN_RECEIPT=''
+    log "DIAGNOSTIC_PROOFS_RETAINED same_operation=1 acceptance=0"
+  fi
   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "rm -f $REMOTE_LANES_Q/tmp/${ID}.txt $REMOTE_LANES_Q/ext/$REMOTE_RC $REMOTE_LANES_Q/ext/$REMOTE_STDOUT$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- $REMOTE_LANES_Q/tmp/${ID}.support-src"; then
+      "rm -f$CLEAN_PACKET$CLEAN_RC $REMOTE_LANES_Q/ext/$REMOTE_STDOUT$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- $REMOTE_LANES_Q/tmp/${ID}.support-src"; then
     log "REMOTE_CLEANED transport=1 receipt_saved=$RECEIPT_SAVED usage_saved=$USAGE_SAVED"
   else
     log "REMOTE_CLEANUP_FAILED; completed work remains reconciled"

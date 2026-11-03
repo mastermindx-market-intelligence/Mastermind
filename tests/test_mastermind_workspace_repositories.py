@@ -388,3 +388,102 @@ def test_reinstall_refuses_untrusted_previous_wrapper_before_overwrite(tmp_path,
     assert result.returncode != 0, result.stdout
     assert launcher.read_bytes() == before
     assert launcher.is_symlink() is (fault == "symlink")
+
+
+def test_exact_registration_status_skips_fleet_worktree_enumeration(fleet, monkeypatch):
+    """Publisher's status identifies one locked worktree without scanning peers.
+
+    The release path must continue to use its original complete enumeration.
+    """
+    from control_plane import executive_workspace as workspace
+
+    repos, _, root, env = fleet
+    code, created = acquire(fleet, "macro", "status-fast-fixture")
+    assert code == 0, created
+    destination = Path(created["receipt"]["workspace_path"])
+    source = repos["macro"][0]
+    scoped_root = root / "macro"
+
+    def fleet_scan_forbidden(*args, **kwargs):
+        raise AssertionError("status must not enumerate other worktrees")
+
+    monkeypatch.setattr(workspace, "_worktree_records", fleet_scan_forbidden)
+    status = workspace.inspect_linked_worktree(
+        source, scoped_root, destination,
+        expected_operation_id="status-fast-fixture",
+        status_direct_registration=True,
+    )
+    assert status.head_sha == repos["macro"][1]
+    assert status.branch == "sol/web-status-fast-fixture"
+    assert status.dirty is False
+    assert status.removed is False
+    with pytest.raises(AssertionError, match="must not enumerate"):
+        workspace.inspect_linked_worktree(
+            source, scoped_root, destination,
+            expected_operation_id="status-fast-fixture",
+        )
+
+
+def test_exact_registration_status_refuses_wrong_lock_or_git_backref(fleet):
+    """A synthetic or displaced .git file is never an authorized registration."""
+    from control_plane import executive_workspace as workspace
+
+    repos, _, root, _ = fleet
+    code, created = acquire(fleet, "macro", "status-spoof-guard")
+    assert code == 0, created
+    destination = Path(created["receipt"]["workspace_path"])
+    source = repos["macro"][0]
+    scoped_root = root / "macro"
+    admin = Path((destination / ".git").read_text().split("gitdir: ", 1)[1].strip())
+    lock = admin / "locked"
+    backref = admin / "gitdir"
+
+    def must_fail():
+        with pytest.raises(workspace.WorkspaceError):
+            workspace.inspect_linked_worktree(
+                source, scoped_root, destination,
+                expected_operation_id="status-spoof-guard",
+                status_direct_registration=True,
+            )
+
+    original_lock = lock.read_text()
+    try:
+        lock.write_text(original_lock.replace(
+            "operation=status-spoof-guard", "operation=another-operation"
+        ))
+        must_fail()
+    finally:
+        lock.write_text(original_lock)
+
+    original_backref = backref.read_text()
+    try:
+        backref.write_text(str(destination / "not-the-gitfile") + "\n")
+        must_fail()
+    finally:
+        backref.write_text(original_backref)
+
+    # The real registration remains usable; no source or fixture was deleted.
+    accepted = workspace.inspect_linked_worktree(
+        source, scoped_root, destination,
+        expected_operation_id="status-spoof-guard",
+        status_direct_registration=True,
+    )
+    assert accepted.head_sha == repos["macro"][1]
+
+
+def test_registered_cli_status_preserves_existing_receipt_contract(fleet):
+    _, _, _, env = fleet
+    code, created = acquire(fleet, "macro", "status-cli-contract")
+    assert code == 0, created
+    code, observed = invoke(
+        env, "status", "--repository", "macro",
+        "--operation-id", "status-cli-contract", "--lane", "web",
+    )
+    assert code == 0, observed
+    assert observed["schema_version"] == "mastermind.workspace_cli/v2"
+    assert observed["effect"] == "NOT_APPLIED"
+    assert observed["repository"] == "macro"
+    receipt = observed["receipt"]
+    assert receipt["branch"] == "sol/web-status-cli-contract"
+    assert receipt["workspace_path"] == created["receipt"]["workspace_path"]
+    assert receipt["dirty"] is False and receipt["removed"] is False

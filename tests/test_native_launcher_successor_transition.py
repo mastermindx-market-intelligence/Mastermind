@@ -60,11 +60,31 @@ def source_owners(tmp_path_factory):
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
     assert set(manifest) == set(historical_manifest)
-    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(retained['files']) == {
-        'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    # S7 changed three additional members of the CURRENT closure. Restore
+    # their exact protected predecessor bytes in this historical B11 fixture;
+    # the immutable original fixture and paired-upgrade target stay unchanged.
+    diagnostic_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-diagnostic-predecessors-e5f49cf4.json').read_bytes()
+    assert g.digest(diagnostic_raw) == 'fcc3ab7de9a8f517ca59d94cf745c1d894fc14478f399e7d18f198f0679233df'
+    diagnostic = json.loads(diagnostic_raw)
+    assert diagnostic['schema'] == 'mastermind.test_native_diagnostic_predecessors/v1'
+    assert diagnostic['source_commit'] == 'e5f49cf4dbe8d06382c1d6f32368e9e9fb51c63d'
+    # Sparse pin qualification changes one more CURRENT member. The retained
+    # executor below is the exact protected predecessor, never a relabelled
+    # historical manifest or a weakened current-stage verification.
+    sparse_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-sparse-executor-predecessor-e39a617b.json').read_bytes()
+    assert g.digest(sparse_raw) == '5dde14ea06bd038dc173bb680a186fd0d6c99f5cd7afdebc3136b539227f4ec8'
+    sparse = json.loads(sparse_raw)
+    assert sparse['schema'] == 'mastermind.test_native_sparse_executor_predecessor/v1'
+    assert sparse['source_commit'] == 'e39a617b6771cb6b07323a533b4cf9db7e78900a'
+    assert set(sparse['files']) == {'ext/remote_sub_exec.py'}
+    assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
+                                      'ext/provider_outcome.py', 'ext/remote_sub.sh'}
+    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
+        set(retained['files']) | set(diagnostic['files']) | set(sparse['files']))
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
-    for name, item in retained['files'].items():
+    for name, item in {**retained['files'], **diagnostic['files'], **sparse['files']}.items():
         raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
         assert len(raw) == item['bytes']
         assert g.digest(raw) == item['sha256'] == historical_manifest[name]
