@@ -62,6 +62,7 @@ export interface RawClient {
   subscribe(listener: (state: AuthState) => void): () => void;
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
+  restore?(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;

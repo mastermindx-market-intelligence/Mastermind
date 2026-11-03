@@ -277,15 +277,18 @@ class CoreTests(unittest.TestCase):
                 mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
                 self.assertNotEqual(b.digest(mutated), b.SUPPORTED_CATALOG_SHA256)
                 client = ReviewedCatalogFake(mutated)
-                with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-                    self.call(
-                        client=client,
-                        expected_snapshot=b.digest(client.info),
-                        arguments={"fileId": "file-fixture"},
-                        _server_pin=b.SUPPORTED_SERVER,
-                        _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
-                    )
-                self.assertNotIn("create_artboard", client.calls)
+                schema = b.schema_receipt(client, mutated)
+                self.assertFalse(schema["full_catalog_known"])
+                self.assertIn("create_artboard", schema["compatible_write_tools"])
+                observed = self.call(
+                    client=client,
+                    expected_snapshot=b.digest(client.info),
+                    arguments={"fileId": "file-fixture"},
+                    _server_pin=b.SUPPORTED_SERVER,
+                    _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
+                )
+                self.assertEqual(observed["state"], "APPLIED_RESPONSE_OBSERVED")
+                self.assertEqual([name for name, _ in client.dispatched].count("create_artboard"), 1)
 
     def test_new_font_catalog_exact_delta_and_blocked_tools_preserved(self):
         fixture_dir = ROOT / "tests" / "fixtures" / "paper_desktop"
@@ -355,16 +358,21 @@ class CoreTests(unittest.TestCase):
                          previous["get_basic_info"]["inputSchema"])
         self.assertIn("divider", current["get_basic_info"]["description"])
 
-    def test_prior_v11_catalog_is_not_admitted_by_v12_write_pin(self):
+    def test_older_full_catalog_can_still_use_independently_compatible_tools(self):
         fixture = ROOT / "tests/fixtures/paper_desktop/48b258_full_catalog.json"
         client = ReviewedCatalogFake(json.loads(fixture.read_text(encoding="utf-8")))
-        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-            b.execute(
-                "edit", tool="create_artboard", arguments={"fileId": "file-fixture"},
-                expected_snapshot=b.digest(client.info), operation_id="old-catalog-proof",
-                allow_write=True, client=client, lock_root=self.root,
-            )
-        self.assertEqual(client.dispatched, [])
+        # A historical global digest was not approved for wholesale writes,
+        # but the exact unchanged create_artboard input contract remains valid.
+        receipt = b.schema_receipt(client, client.catalog())
+        self.assertFalse(receipt["full_catalog_known"])
+        self.assertIn("create_artboard", receipt["compatible_write_tools"])
+        observed = b.execute(
+            "edit", tool="create_artboard", arguments={"fileId": "file-fixture"},
+            expected_snapshot=b.digest(client.info), operation_id="old-catalog-safe-tool",
+            allow_write=True, client=client, lock_root=self.root,
+        )
+        self.assertEqual(observed["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertEqual([name for name, _ in client.dispatched].count("create_artboard"), 1)
 
     def test_divider_pages_preserve_exact_file_snapshot_and_explicit_page_target(self):
         client = ReviewedCatalogFake()

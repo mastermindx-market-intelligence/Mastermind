@@ -8,6 +8,7 @@ import {
   type LaunchCompletion,
   type LaunchForm,
 } from "./LaunchOrchestrator";
+import { canNavigateForAutomaticSignIn } from "../../auth-navigation-guard";
 
 const makeProps = (overrides = {}) => ({
   projects: [
@@ -39,6 +40,18 @@ afterEach(() => {
 });
 
 describe("LaunchOrchestrator", () => {
+  it("prevents automatic Auth0 navigation during an unsent or in-flight launch", () => {
+    const view = render(<LaunchOrchestrator {...makeProps()} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Keep this private launch goal." } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    view.rerender(<LaunchOrchestrator {...makeProps({ submitting: true })} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    view.unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
   describe("rendering", () => {
     it("renders project and profile selects with all choices", () => {
       render(<LaunchOrchestrator {...makeProps()} />);

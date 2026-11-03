@@ -207,8 +207,16 @@ FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
     "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
 }
-FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+# The merge-capable publisher's previously sealed target is a valid *incoming
+# predecessor* for the narrow rejection-diagnostics update. Do not accept
+# arbitrary live publisher bytes, widen the account allowlist, or change
+# inherited config/credential/manifest requirements.
+FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
+    "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+}
+FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+    "git-publish.mjs": "00524608d1f517264cd133b173289a0ea20b217d40ce2ecd9022fb1063286a25",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
 
@@ -2021,16 +2029,20 @@ def _upgrade_fleet_v10_publisher_only(
             or "commissionPublication" in old_config
             or "modernFabricProtocol" in old_config):
         raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
-    # Preserve the historical legacy/index-sync transitions. The merge update
-    # admits only its exact observed module pair under the existing closed
-    # profile. The sealed manifest, not the caller, chooses the transition.
+    # Preserve historical legacy/index-sync transition constraints. The
+    # current target admits only two *exact sealed* closed-profile predecessor
+    # pairs: original index-sync and installed merge-capable publisher. The
+    # sealed manifest, not the caller, chooses the transition.
     original_publisher = old_config.get("gitPublish")
     expected_closed = _typed_git_config(user_root, closed_repositories=True)
     patch_hashes = FLEET_V10_PUBLISHER_PATCH_SHA256
     preserve_config_bytes = False
-    if (original_publisher == expected_closed and all(
-            prior["files"].get(name) == digest
-            for name, digest in FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256.items())):
+    if (original_publisher == expected_closed and any(
+            all(prior["files"].get(name) == digest for name, digest in exact_pair.items())
+            for exact_pair in (
+                FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256,
+                FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256,
+            ))):
         patch_hashes = FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256
         preserve_config_bytes = True
     elif original_publisher == _typed_git_config(user_root):
