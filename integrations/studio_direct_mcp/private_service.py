@@ -72,6 +72,14 @@ PAPER_BRIDGE_SHA256 = "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b41
 PAPER_COMMAND_TIMEOUT_MS = 70_000
 PAPER_APP_REL = Path("Applications/Paper.app")
 
+# The accepted immutable v20 target generation. The global selection above
+# intentionally stays v12; this pin only names the staged generation that the
+# one reviewed C2 Personal v12 cohort may select through the dedicated
+# transaction below. runtime_stage.py remains the owner that stages and never
+# rewrites the v20 directory.
+PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
+PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
+
 # Optional read-only fleet-status consumer. It delegates to the installed
 # Studio Direct control owner instead of letting a model compose shell probes.
 FLEET_STATUS_LAUNCHER_REL = Path(".local/bin/studio-direct")
@@ -284,6 +292,26 @@ C4_PAPER_RUNTIME_IDENTITY = {
     "dependencyTreeHash": "639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211",
 }
 PAPER_RUNTIME_UPGRADE_ACCOUNTS = C2_PAPER_UPGRADE_ACCOUNTS | frozenset((C4_PAPER_ACCOUNT,))
+
+# Fresh read-only observed C2 Personal M2 cohort, 2026-11-02. This seat already
+# received the reviewed closed-publisher generation and selects exact v12, so
+# the historical v10 -> v12 admission above can never fire for it again. Its
+# one-seat v12 -> v20 selection reuses the identical single-use manifest-CAS
+# transaction with this pinned predecessor. The installed 12-file cohort is the
+# sealed publisher patch plus the unchanged fleet modules; no byte identity is
+# invented here. The node/backend/dependency identity is inherited from the
+# seat's sealed C2 predecessor because the publisher patch changed only module
+# bytes; a live manifest that disagrees refuses closed and requires fresh
+# observation of the exact differing identity fields.
+C2_PAPER_V12_MANIFEST_SHA256 = (
+    "c5cdba867972f547aaefa7dbfc5840467d2961c7f4d346e8de1f1ba575686ef6")
+C2_PAPER_V12_NON_PAPER_CONFIG_SHA256 = (
+    "201288e64eadeb25e16306e737831fb828ce638a54b0e41c16945bd1c737eb08")
+C2_PAPER_V12_FILES_SHA256 = {
+    **{name: digest for name, digest in C2_PAPER_FILES_SHA256.items()
+       if name not in C2_PERSONAL_TARGET_PATCH_SHA256},
+    **C2_PERSONAL_TARGET_PATCH_SHA256,
+}
 
 
 KNOWN_MANIFEST_FILESETS = frozenset(
@@ -954,8 +982,10 @@ def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> 
     }
 
 
-def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -> dict:
-    runtime = user_root / PAPER_RUNTIME_REL
+def _verify_paper_runtime(
+    user_root: Path, *, expected_sha: str | None = None, rel: Path | None = None,
+) -> dict:
+    runtime = user_root / (PAPER_RUNTIME_REL if rel is None else rel)
     expected_sha = PAPER_BRIDGE_SHA256 if expected_sha is None else expected_sha
     source = runtime / "source"
     bridge = source / "bridge.py"
@@ -989,7 +1019,7 @@ def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -
     if (
         not isinstance(receipt, dict)
         or receipt.get("schema") != PAPER_RUNTIME_SCHEMA
-        or receipt.get("generation") != PAPER_RUNTIME_REL.name
+        or receipt.get("generation") != runtime.name
         or receipt.get("bridge_sha256") != expected_sha
         or receipt.get("source_sha256") != expected_sources
         or receipt.get("network_install_performed") is not False
@@ -999,13 +1029,17 @@ def _verify_paper_runtime(user_root: Path, *, expected_sha: str | None = None) -
     return receipt
 
 
-def _paper_design_config(user_root: Path) -> dict:
-    runtime = user_root / PAPER_RUNTIME_REL
+def _paper_design_config(
+    user_root: Path, *,
+    rel: Path | None = None, bridge_sha256: str | None = None,
+) -> dict:
+    runtime = user_root / (PAPER_RUNTIME_REL if rel is None else rel)
+    bridge_sha256 = PAPER_BRIDGE_SHA256 if bridge_sha256 is None else bridge_sha256
     return {
         "enabled": True,
         "pythonPath": str(runtime / "venv" / "bin" / "python"),
         "bridgePath": str(runtime / "source" / "bridge.py"),
-        "bridgeSha256": PAPER_BRIDGE_SHA256,
+        "bridgeSha256": bridge_sha256,
         "appPath": str(user_root / PAPER_APP_REL),
         "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
     }
@@ -2738,16 +2772,21 @@ def cmd_upgrade(args) -> int:
 
 @_c2_lifecycle_serialized(readonly_preflight=True)
 def cmd_paper_runtime_upgrade(args) -> int:
-    """Select reviewed Paper v12 on an exact qualified fleet without restaging it.
+    """Select a reviewed Paper runtime on an exact qualified fleet without restaging it.
 
     This dedicated transaction grants no new account, file cohort or capability.
     It cannot stop/start a service, copy gateway source or select an arbitrary bridge.
     The original manifest CAS is intentionally single-use; a replay must fresh-read.
+    The exact sealed C2 Personal v12 cohort selects the accepted immutable v20
+    generation through the same transaction; every other admission remains the
+    historical v10 -> v12 selection.
     """
     account = args.account
     _validate_account_label(account)
     expected = args.expected_manifest_sha256
     preview = args.preflight_only
+    if account == C2_PAPER_ACCOUNT and expected == C2_PAPER_V12_MANIFEST_SHA256:
+        return _upgrade_paper_c2_personal_v20(args)
     if account == C2_PAPER_ACCOUNT:
         original_manifest = C2_PAPER_ORIGINAL_MANIFEST_SHA256
         non_paper_pin = C2_PAPER_NON_PAPER_CONFIG_SHA256
@@ -2820,8 +2859,6 @@ def cmd_paper_runtime_upgrade(args) -> int:
         raise SystemExit("paper runtime compatibility: prospective manifest invalid")
     manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
     target_manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
-    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
-        raise SystemExit("paper runtime compatibility: installed manifest changed during planning")
     receipt = {
         "account": account, "fromGeneration": "v10", "toGeneration": "v12",
         "originalManifestSha256": expected, "targetManifestSha256": target_manifest_sha,
@@ -2829,6 +2866,125 @@ def cmd_paper_runtime_upgrade(args) -> int:
         "preservedGatewayFiles": len(prior["files"]), "runtimeSealPreserved": True,
         "sourcePointerPreserved": True, "serviceStarted": False,
     }
+    return _apply_paper_selection(
+        account=account, label=label, roots=roots, expected=expected, prior=prior,
+        old_config_bytes=old_config_bytes, old_manifest_bytes=old_manifest_bytes,
+        config_bytes=config_bytes, target_manifest_sha=target_manifest_sha,
+        receipt=receipt, preview=preview,
+        runtime_verifier=lambda: _verify_paper_runtime(user_root),
+    )
+
+
+def _upgrade_paper_c2_personal_v20(args) -> int:
+    """Select the accepted immutable v20 runtime on the sealed v12 C2 Personal seat.
+
+    One exact observed cohort, one direction, and the same single-use
+    manifest-CAS transaction as the historical selection. Admission re-derives
+    the installed 12-file cohort from the reviewed closed-publisher patch plus
+    unchanged fleet modules, requires the freshly observed predecessor CAS and
+    non-Paper profile, and verifies both the retained v12 runtime and the
+    staged v20 generation through the existing owners. No runtime path, bridge
+    or file byte is caller-selectable, and nothing is restaged or restarted.
+    """
+    account = args.account
+    expected = args.expected_manifest_sha256
+    preview = args.preflight_only
+    if type(preview) is not bool:
+        raise SystemExit("paper runtime compatibility preflight flag invalid")
+    if not _sha256_hex(expected):
+        raise SystemExit("paper runtime compatibility requires an exact manifest CAS")
+    if PAPER_RUNTIME_REL.name != "v12":
+        raise SystemExit("paper runtime compatibility: v20 selection requires the reviewed v12 predecessor pin")
+
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    config_path, manifest_path = roots["config"], roots["manifest"]
+    for path in (config_path, manifest_path, roots["plist"]):
+        _assert_dest_safe(path)
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("paper runtime compatibility: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("files") != C2_PAPER_V12_FILES_SHA256
+            or any(prior.get(key) != value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())):
+        raise SystemExit("paper runtime compatibility: original sealed identity does not match")
+    for name in prior["files"]:
+        _assert_dest_safe(roots["base"] / name)
+    old_config_bytes, old_manifest_bytes = config_path.read_bytes(), manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("paper runtime compatibility: verified snapshot changed during preflight")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SystemExit("paper runtime compatibility: original config invalid") from exc
+    if type(old_config) is not dict:
+        raise SystemExit("paper runtime compatibility: original config invalid")
+    non_paper = {key: value for key, value in old_config.items() if key != "paperDesign"}
+    non_paper_sha = hashlib.sha256(json.dumps(
+        non_paper, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if non_paper_sha != C2_PAPER_V12_NON_PAPER_CONFIG_SHA256:
+        raise SystemExit("paper runtime compatibility: original non-Paper profile changed")
+
+    user_root = _user_root()
+    target_paper = _paper_design_config(
+        user_root, rel=PAPER_RUNTIME_V20_REL, bridge_sha256=PAPER_V20_BRIDGE_SHA256)
+    expected_old_paper = {
+        **target_paper,
+        "pythonPath": str(user_root / PAPER_RUNTIME_REL / "venv/bin/python"),
+        "bridgePath": str(user_root / PAPER_RUNTIME_REL / "source/bridge.py"),
+        "bridgeSha256": PAPER_BRIDGE_SHA256,
+    }
+    if old_config.get("paperDesign") != expected_old_paper:
+        raise SystemExit("paper runtime compatibility: original Paper selection is not exact v12")
+    _verify_paper_runtime(user_root)
+    _verify_paper_runtime(
+        user_root, rel=PAPER_RUNTIME_V20_REL, expected_sha=PAPER_V20_BRIDGE_SHA256)
+    new_config = {**old_config, "paperDesign": target_paper}
+    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
+    future = {**prior, "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("paper runtime compatibility: prospective manifest invalid")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    target_manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    receipt = {
+        "account": account, "fromGeneration": "v12", "toGeneration": "v20",
+        "originalManifestSha256": expected, "targetManifestSha256": target_manifest_sha,
+        "bridgeSha256": PAPER_V20_BRIDGE_SHA256, "nonPaperConfigSha256": non_paper_sha,
+        "preservedGatewayFiles": len(prior["files"]), "runtimeSealPreserved": True,
+        "sourcePointerPreserved": True, "serviceStarted": False,
+    }
+    return _apply_paper_selection(
+        account=account, label=label, roots=roots, expected=expected, prior=prior,
+        old_config_bytes=old_config_bytes, old_manifest_bytes=old_manifest_bytes,
+        config_bytes=config_bytes, target_manifest_sha=target_manifest_sha,
+        receipt=receipt, preview=preview,
+        runtime_verifier=lambda: (
+            _verify_paper_runtime(user_root),
+            _verify_paper_runtime(
+                user_root, rel=PAPER_RUNTIME_V20_REL,
+                expected_sha=PAPER_V20_BRIDGE_SHA256)),
+    )
+
+
+def _apply_paper_selection(
+    *, account: str, label: str, roots: dict, expected: str, prior: dict,
+    old_config_bytes: bytes, old_manifest_bytes: bytes, config_bytes: bytes,
+    target_manifest_sha: str, receipt: dict, preview: bool, runtime_verifier,
+) -> int:
+    """Shared single-use Paper selection transaction behind both admissions.
+
+    Extracted unchanged from the reviewed v10 -> v12 selection so the v20 path
+    inherits its exact planning recheck, loaded-service refusal, commit order,
+    rollback and EFFECT_UNKNOWN semantics. The manifest commits last so fresh
+    integrity checks reject partial file updates; a post-commit failure stays
+    EFFECT_UNKNOWN on this operation and is never replayed or self-repaired.
+    """
+    config_path, manifest_path = roots["config"], roots["manifest"]
+    future = {**prior, "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("paper runtime compatibility: installed manifest changed during planning")
     if preview:
         print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
         return 0
@@ -2837,7 +2993,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     # Reconfirm the complete sealed installation and target before the first write.
     if _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior:
         raise SystemExit("paper runtime compatibility: original installation changed")
-    _verify_paper_runtime(user_root)
+    runtime_verifier()
     if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
             or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]):
         raise SystemExit("paper runtime compatibility: original snapshot CAS mismatch")
@@ -2859,7 +3015,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
         if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future
                 or _stable_regular_file_hash(manifest_path, label="installed manifest") != target_manifest_sha):
             raise RuntimeError("committed installation does not match the planned result")
-        _verify_paper_runtime(user_root)
+        runtime_verifier()
         if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
             raise RuntimeError("service became loaded during commit verification")
     except BaseException as exc:
