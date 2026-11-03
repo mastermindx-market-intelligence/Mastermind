@@ -44,7 +44,8 @@ The existing `gaps[].next_proof` now uses the supplied observation state:
 | Exact-head CI is QUEUED, PENDING, IN_PROGRESS, WAITING or REQUESTED, with its original run reference | Consume that run through its original observation path; no rerun or empty push. |
 | Exact-head CI has a terminal non-success result | Inspect the original failure before a permitted repair; no blind retry. |
 | CI identity/state is absent, stale or unrecognized | Reconcile with GitHub; missing evidence is not a failed build. |
-| Eligible independent review is REQUESTED, PENDING or IN_PROGRESS on the exact head | Consume the existing request; do not commission a duplicate. Request does not prove execution or approval. |
+| Eligible independent review is REQUESTED or PENDING on the exact head | Reconcile its actual original carrier and verify no START/unknown effect, then any eligible independent non-author may complete it; never bind acceptance to a historical reviewer session or duplicate started work. |
+| An independent review is genuinely IN_PROGRESS on the exact head | Consume that active review on its original carrier; do not reroute or duplicate it. Execution is not approval. |
 | Current independent review requests changes | Repair the findings in one stable source revision before renewed review. |
 | Worker is QUEUED, STARTED or UNKNOWN | Reconcile the original worker; do not submit a replacement. |
 | Worker is TERMINAL | Inspect/validate its original result and effects; exit zero is not acceptance and does not justify a relaunch. |

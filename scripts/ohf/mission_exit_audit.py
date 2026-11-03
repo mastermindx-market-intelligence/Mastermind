@@ -134,10 +134,18 @@ def _next_proof(requirement: str, worker: dict[str, Any],
             and source.get("author_id") != source.get("reviewer_id")
         )
         if bound and isinstance(verdict, str):
-            if verdict in {"REQUESTED", "PENDING", "IN_PROGRESS"}:
+            if verdict in {"REQUESTED", "PENDING"}:
                 return (
-                    "consume the existing current-head review through its original reviewer; "
-                    "do not duplicate the request; a request is not execution or approval"
+                    "consume the existing current-head review request, confirm no active review "
+                    "on its original carrier, then any eligible independent non-author may "
+                    "return a real head-bound verdict; do not duplicate a started review "
+                    "or change review identities; a request is not execution or approval"
+                )
+            if verdict == "IN_PROGRESS":
+                return (
+                    "consume the active current-head review on its original carrier; "
+                    "do not duplicate or reroute a started review; "
+                    "review execution is not approval"
                 )
             if verdict == "CHANGES_REQUESTED":
                 return (

@@ -299,9 +299,14 @@ def test_pending_review_does_not_commission_duplicate_or_claim_approval(state):
     data = snapshot()
     data["source"].update(review_verdict=state, review_ref="github:original-review")
     guidance = _gap_guidance(data, "independent_source_review")
-    assert "existing current-head review" in guidance
+    if state == "IN_PROGRESS":
+        assert "active current-head review" in guidance
+        assert "original carrier" in guidance
+        assert "execution is not approval" in guidance
+    else:
+        assert "existing current-head review request" in guidance
+        assert "request is not execution or approval" in guidance
     assert "do not duplicate" in guidance
-    assert "request is not execution or approval" in guidance
     assert "independent_source_review" not in audit(data)["checks_passed"]
 
 
@@ -387,3 +392,25 @@ def test_cli_reports_original_pending_work_without_creating_authority(tmp_path):
     assert "do not submit a replacement" in guidance["accepted_worker_result"]
     assert report["retry_authorized"] is False
     assert report["dispatch_authorized"] is False
+
+
+@pytest.mark.parametrize("state", ["REQUESTED", "PENDING"])
+def test_unconsumed_independent_request_does_not_bind_original_session(state):
+    data = snapshot()
+    data["source"].update(review_verdict=state, review_ref="github:original-review")
+    guidance = _gap_guidance(data, "independent_source_review")
+    assert "any eligible independent non-author" in guidance
+    assert "confirm no active review" in guidance
+    assert "original reviewer" not in guidance
+    assert "do not duplicate" in guidance
+    assert "request is not execution or approval" in guidance
+
+
+def test_started_review_retains_original_carrier_with_no_parallel_worker():
+    data = snapshot()
+    data["source"].update(review_verdict="IN_PROGRESS", review_ref="github:original-review")
+    guidance = _gap_guidance(data, "independent_source_review")
+    assert "active current-head review" in guidance
+    assert "original carrier" in guidance
+    assert "do not duplicate" in guidance
+    assert "any eligible independent non-author" not in guidance
