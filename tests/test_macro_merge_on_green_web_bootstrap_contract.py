@@ -78,7 +78,7 @@ def test_release_procedure_requires_review_holds_ci_and_real_sweeper_readback():
         "PROVEN_LIVE",
     ):
         assert token in section, f"Macro release gate lost: {token}"
-    assert section.index("Verify the applicable") < section.index(
+    assert section.index("Verify **one genuinely independent formal GitHub APPROVED review**") < section.index(
         "Only when release is **actually authorized**"
     ), "release opt-in must come after non-author and hold checks"
 
@@ -174,7 +174,7 @@ def _assert_review_once_automatic_release_transition(delivery: str, account: str
     )[1].split("5. Reconcile the **existing controller**", 1)[0]
     assert "**current interim non-author release fence**" in interim
     assert "does not yet read native PR" not in interim  # review gate is described precisely
-    assert "does not yet read native PR" in section
+    assert "Macro\'s existing sweeper does not check formal" in section
     assert "retain the current" in account
     assert "independent non-author arming/release decision" in account
     assert "review once and let existing automation perform" in account
