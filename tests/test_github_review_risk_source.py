@@ -97,7 +97,7 @@ def test_file_deletion_escalates_even_docs():
 
 
 def test_complete_two_page_census():
-    items = tuple(file(f"docs/page{i}.md", additions=1, deletions=0) for i in range(101))
+    items = tuple(file(f"docs/user/page{i}.md", additions=1, deletions=0) for i in range(101))
     reader = Reader(first=snap(changed_files=101, additions=101, deletions=0),
                     pages={1: items[:100], 2: items[100:]})
     assert assess(reader).tier is ReviewTier.FAST

@@ -24,6 +24,13 @@ _MAX_TEST_DELETIONS = 50
 _CRITICAL_PREFIXES = (
     ".github/",
     "docs/sol_skills/",
+    "docs/sol_",
+    "docs/session_",
+    "docs/executive_",
+    "docs/agent_",
+    "docs/github_",
+    "docs/review_",
+    "docs/authority_",
     "ops/executive_os/",
     "control_plane/github_review_",
     "integrations/github_review_",
@@ -150,6 +157,9 @@ class ReviewChangeFacts:
 @dataclasses.dataclass(frozen=True)
 class ReviewRiskAssessment:
     schema: str
+    repository: str
+    pull_number: int
+    head_sha: str
     tier: ReviewTier
     minimum_independent_assessments: int
     minimum_formal_non_author_approvals: int
@@ -225,7 +235,7 @@ def _validate(facts: ReviewChangeFacts) -> None:
         raise RiskPolicyInputError("file metrics do not match authenticated aggregate")
 
 
-def _result(tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
+def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
     review_counts = {
         ReviewTier.FAST: (0, 0),
         ReviewTier.STANDARD: (1, 1),
@@ -235,6 +245,9 @@ def _result(tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
     assessments, approvals = review_counts[tier]
     return ReviewRiskAssessment(
         schema=SCHEMA,
+        repository=facts.repository,
+        pull_number=facts.pull_number,
+        head_sha=facts.head_sha,
         tier=tier,
         minimum_independent_assessments=assessments,
         minimum_formal_non_author_approvals=approvals,
@@ -297,24 +310,39 @@ def _is_explicit_fast_source(path: str) -> bool:
 
 _SUPPORTING_PREFIXES = (
     "research/evidence/", "mockups/evidence/", "ux-evidence/",
-    "terminal/docs/", "docs/verification/",
+    "terminal/docs/pr-crops/", "terminal/docs/verification/",
+    "docs/verification/", "docs/screenshots/",
 )
-_SUPPORTING_SUFFIXES = (
-    ".md", ".rst", ".txt", ".png", ".jpg", ".jpeg", ".webp",
-    ".gif", ".svg", ".ico", ".woff", ".woff2",
+_INERT_DOC_EXACT = frozenset({
+    "readme.md", "docs/readme.md", "docs/guide.md", "docs/user-guide.md",
+})
+_INERT_DOC_PREFIXES = (
+    "docs/user/", "docs/guides/", "docs/faq/", "docs/tutorials/",
 )
+_VISUAL_SUFFIXES = (
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico",
+    ".woff", ".woff2",
+)
+_INERT_TEXT_SUFFIXES = (".md", ".rst", ".txt")
 _EVIDENCE_SUFFIXES = (".json", ".yml", ".yaml", ".log", ".csv", ".html")
 
 
 def _is_supporting_change(path: str) -> bool:
+    """Only known passive evidence, user guides and visual assets are exempt.
+
+    Unknown operational Markdown is NOT silently a no-review document.
+    Executable test sources are never supporting just because of a filename.
+    """
     lower = path.lower()
-    # Executable tests and CI enforcement are never inert by path alone.
     if _is_test_path(lower) or lower.startswith(("terminal/e2e/", "e2e/")):
         return False
-    return (
-        lower.endswith(_SUPPORTING_SUFFIXES)
-        or (lower.startswith(_SUPPORTING_PREFIXES) and lower.endswith(_EVIDENCE_SUFFIXES))
-    )
+    if lower in _INERT_DOC_EXACT:
+        return True
+    if any(lower.startswith(prefix) for prefix in _INERT_DOC_PREFIXES):
+        return lower.endswith(_INERT_TEXT_SUFFIXES + _VISUAL_SUFFIXES)
+    if any(lower.startswith(prefix) for prefix in _SUPPORTING_PREFIXES):
+        return lower.endswith(_INERT_TEXT_SUFFIXES + _VISUAL_SUFFIXES + _EVIDENCE_SUFFIXES)
+    return lower.endswith(_VISUAL_SUFFIXES)
 
 
 def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
@@ -325,14 +353,14 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
     """
     _validate(facts)
     if not facts.complete_source_verified or not facts.changed_paths:
-        return _result(ReviewTier.HOLD, "CURRENT_COMPLETE_DIFF_NOT_PROVEN")
+        return _result(facts, ReviewTier.HOLD, "CURRENT_COMPLETE_DIFF_NOT_PROVEN")
     critical = [path for path in facts.changed_paths if _is_critical_path(path)]
     if critical or any(h in _CRITICAL_HINTS for h in facts.risk_hints):
-        return _result(ReviewTier.CRITICAL, "TRUST_OR_AUTHORITY_BOUNDARY")
+        return _result(facts, ReviewTier.CRITICAL, "TRUST_OR_AUTHORITY_BOUNDARY")
     standard = [path for path in facts.changed_paths
                 if not _is_supporting_change(path) and _is_standard_path(path)]
     if standard or any(h in _STANDARD_HINTS for h in facts.risk_hints):
-        return _result(ReviewTier.STANDARD, "CONSEQUENTIAL_OR_COMPLEX_CHANGE")
+        return _result(facts, ReviewTier.STANDARD, "CONSEQUENTIAL_OR_COMPLEX_CHANGE")
     if facts.file_metrics:
         test_deletions = sum(f.deletions for f in facts.file_metrics if _is_test_path(f.path))
         material = tuple(f for f in facts.file_metrics if not _is_supporting_change(f.path))
@@ -343,12 +371,12 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
         total = facts.additions + facts.deletions
         material_count = len(facts.changed_paths)
     if test_deletions > _MAX_TEST_DELETIONS:
-        return _result(ReviewTier.STANDARD, "SUBSTANTIAL_TEST_REMOVAL")
+        return _result(facts, ReviewTier.STANDARD, "SUBSTANTIAL_TEST_REMOVAL")
     if all(_is_supporting_change(p) for p in facts.changed_paths):
-        return _result(ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_EVIDENCE")
+        return _result(facts, ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_EVIDENCE")
     if total > _FAST_MAX_LINES or material_count > _FAST_MAX_FILES:
-        return _result(ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
+        return _result(facts, ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
     if all(_is_explicit_fast_source(p) or _is_supporting_change(p)
            for p in facts.changed_paths):
-        return _result(ReviewTier.FAST, "BOUNDED_PRESENTATION_CHANGE")
-    return _result(ReviewTier.STANDARD, "SOURCE_PATH_NOT_QUALIFIED_FOR_FAST")
+        return _result(facts, ReviewTier.FAST, "BOUNDED_PRESENTATION_CHANGE")
+    return _result(facts, ReviewTier.STANDARD, "SOURCE_PATH_NOT_QUALIFIED_FOR_FAST")

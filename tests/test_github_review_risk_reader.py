@@ -7,6 +7,7 @@ import pytest
 
 from control_plane.github_review_risk_dispatch import (
     ReviewDispatch, ReviewOrigin, decide_risk_dispatch,
+    advise_current_pr_review,
 )
 from control_plane.github_review_risk_policy import ReviewTier
 from control_plane.github_review_risk_source import (
@@ -72,24 +73,31 @@ def assess(fixture):
     return assess_current_pr_risk(fixture.reader, repository=REPO, pull_number=PR)
 
 
+def auto_decide(fixture, assessment):
+    return decide_risk_dispatch(
+        origin=ReviewOrigin.AUTOMATIC_POLICY, assessment=assessment,
+        expected_repository=REPO, expected_pull_number=PR,
+        expected_head_sha=SHA,
+        current_source=fixture.reader.read_pr_risk_source(
+            repository=REPO, pull_number=PR,
+        ),
+    )
+
+
 def test_full_existing_api_bridge_skips_plain_docs_before_dispatch():
     fixture = ApiFixture()
     risk = assess(fixture)
-    result = decide_risk_dispatch(
-        origin=ReviewOrigin.AUTOMATIC_POLICY, assessment=risk,
-    )
+    result = auto_decide(fixture, risk)
     assert risk.tier is ReviewTier.FAST
     assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
-    assert len(fixture.calls) == 3
+    assert len(fixture.calls) == 4
 
 
 def test_auth_change_is_critical_even_when_pr_claims_fast():
     fixture = ApiFixture(files=[file("backend/auth/session.py")])
     risk = assess(fixture)
     assert risk.tier is ReviewTier.CRITICAL
-    assert decide_risk_dispatch(
-        origin=ReviewOrigin.AUTOMATIC_POLICY, assessment=risk,
-    ).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+    assert auto_decide(fixture, risk).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
 
 
 def test_manual_intent_is_unaffected_even_when_source_is_fast():
@@ -190,3 +198,63 @@ def test_file_page_cannot_expand_scope(page, per_page):
 def test_non_app_fake_reader_refused():
     with pytest.raises(GitHubReviewRiskReadUnavailable):
         GitHubReviewRiskReader(api=object(), repository=REPO)
+
+
+def test_full_signed_current_head_preflight_uses_four_authenticated_gets():
+    fixture = ApiFixture()
+    advice = advise_current_pr_review(
+        fixture.reader, origin=ReviewOrigin.AUTOMATIC_POLICY,
+        repository=REPO, pull_number=PR, signed_head_sha=SHA,
+    )
+    assert advice.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
+    assert advice.head_sha == SHA
+    assert len(fixture.calls) == 4
+
+
+def test_changed_head_after_completed_census_fails_closed():
+    fixture = ApiFixture()
+    assessment = assess(fixture)
+    fixture.snapshot["head"]["sha"] = "c" * 40
+    assert auto_decide(fixture, assessment).action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE
+
+
+def test_signed_event_head_mismatch_after_complete_github_census_holds():
+    fixture = ApiFixture()
+    advice = advise_current_pr_review(
+        fixture.reader, origin=ReviewOrigin.AUTOMATIC_POLICY,
+        repository=REPO, pull_number=PR, signed_head_sha="c" * 40,
+    )
+    assert advice.action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE
+
+
+@pytest.mark.parametrize("path,tier", [
+    ("docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md", ReviewTier.CRITICAL),
+    ("docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md", ReviewTier.CRITICAL),
+    ("docs/EXECUTIVE_WEB_SOL_CONTEXT_ROTATION_LAW.md", ReviewTier.CRITICAL),
+    ("tests/conftest.py", ReviewTier.CRITICAL),
+    ("skills/mastermind-fabric-delegate/SKILL.md", ReviewTier.CRITICAL),
+    ("app/src/lib/session_client.ts", ReviewTier.STANDARD),
+    ("app/src/components/Button.tsx", ReviewTier.FAST),
+    ("docs/user-guide.md", ReviewTier.FAST),
+])
+def test_real_reviewer_falsifiers_through_signed_reader_and_dispatch(path, tier):
+    fixture = ApiFixture(
+        snapshot=pull(additions=1, deletions=1),
+        files=[file(path, additions=1, deletions=1)],
+    )
+    assessment = assess(fixture)
+    assert assessment.tier is tier
+    advice = auto_decide(fixture, assessment)
+    expected = (ReviewDispatch.SKIP_NO_REVIEW_NEEDED if tier is ReviewTier.FAST
+                else ReviewDispatch.AUTO_REVIEW_ELIGIBLE)
+    assert advice.action is expected
+
+
+def test_explicit_manual_review_skips_risk_preflight_and_keeps_original_route():
+    fixture = ApiFixture()
+    advice = advise_current_pr_review(
+        fixture.reader, origin=ReviewOrigin.MANUAL_AUTHORIZED,
+        repository=REPO, pull_number=PR, signed_head_sha=SHA,
+    )
+    assert advice.action is ReviewDispatch.USE_EXISTING_MANUAL_INGRESS
+    assert fixture.calls == []
