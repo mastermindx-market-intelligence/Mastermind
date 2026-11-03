@@ -8,9 +8,11 @@ Keep the existing Workspace, Content, Executive, Studio, Git and Runtime owners.
 
 An OS launch key is the SHA-256-derived "mmos-launch-<40hex>" of the authenticated
 principal namespace and the exact form. Backend normalization adds defaults, so
-publication validates the form under the canonical five-tool law but preserves
-its original semantic fields for the key. The inner submit uses normalized
-arguments and the same key.
+publication validates the form through the authenticated-app request extension
+and preserves its original semantic fields for the key. Legacy omission uses
+the frozen five-tool law unchanged; an explicit requested frontier_model_alias
+is included in the key, argument digest and immutable commission. The inner
+submit uses normalized arguments and the same key.
 
 The App forwards the original bearer and original arguments to one installed
 loopback Studio port, fixed route /os-internal/commission/prepare. Studio
@@ -53,7 +55,9 @@ Its exact fields are:
   principal_scope comes from verified OS context for the intended client and
   subject. template contains exact workstream, department, priority,
   execution_profile and any actually emitted optional allowed_write_paths,
-  validation, attempt_limit. Objective and operation key are not template fields.
+  validation, attempt_limit, frontier_model_alias. An explicit alias must match
+  exactly; it is never stripped before comparing the sealed template.
+  Objective and operation key are not template fields.
 - audit_directory:
   /Library/Application Support/MastermindExecutive/audit/os-commission-publication.
   Provision its existing durable auth sink access for the actual Studio identity.
@@ -112,6 +116,27 @@ POST set or the exact six-path read-expanded set, and stages the latter without
 loading Caddy. It bounds request bodies, removes spoofable forwarding
 headers and fixes the upstream authority. Validate and qualify routing before the
 existing Caddy owner loads the candidate.
+
+The same fixed template also carries the public MCP entrypoint on
+mcp.mastermind-x.com (Chairman decision on #1656): exactly GET
+/.well-known/oauth-protected-resource/mcp (RFC 9728 metadata) and POST /mcp
+(Streamable HTTP, body capped by Caddy at 64000 bytes, below the gateway's own
+65536-byte ceiling), both ahead of the terminal abort. Caddy performs no
+authentication: the gateway still returns the 401 challenge and validates every
+token. /mcp is proxied with a loopback Host because the gateway's DNS-rebinding
+fence admits only loopback hosts. Staging this route does not make the endpoint
+usable, and installing it is not neutral: without the gateway's opt-in
+public_mcp_resource key the verifier accepts a token for any configured resource
+(OS and tunnel audiences included). Installation therefore waits for (1) the
+installed gateway to run with public_mcp_resource set to exactly
+https://mcp.mastermind-x.com/mcp, which restricts /mcp to that audience and
+advertises this host with a per-host resource_metadata challenge, (2) the sealed
+M2 installed-config change that adds the key (the preflight refuses a bad value),
+and (3) the Auth0 API audience to exist (see docs/EXECUTIVE_MCP.md section 8). The
+mode is exclusive per gateway process, so the OpenAI tunnel entrypoint stays
+reachable only through a second gateway instance with its own sealed config. A
+Caddy-only install yields a 401 whose challenge points at the tunnel resource, or
+an OAuth discovery failure, while still admitting those other audiences.
 
 The intended DNS A record is mcp.mastermind-x.com → 146.190.142.17.
 Do not claim DNS/certificate/routing readiness from rendered configuration.

@@ -1,0 +1,292 @@
+"""Regression tests for the mmtask import/export/rebind repair and null-binding initialization (2026-10-24). Run: python3 test_mmtask.py [path-to-mmtask]"""
+import json, os, shutil, subprocess, sys, tempfile, unittest
+
+MMTASK = os.environ.get("MMTASK_UNDER_TEST", os.path.expanduser("~/gwcap/bin/mmtask"))
+REAL_MIRROR = os.path.expanduser("~/gwcap/agentos-mirror/macro")
+_MIRROR = None
+
+
+def mirror():
+    global _MIRROR
+    if _MIRROR is None:
+        _MIRROR = tempfile.mkdtemp(prefix="mmtask-test-mirror-")
+        shutil.copytree(os.path.join(REAL_MIRROR, "agentos"), os.path.join(_MIRROR, "agentos"))
+        shutil.copytree(os.path.join(REAL_MIRROR, "scripts"), os.path.join(_MIRROR, "scripts"), ignore=shutil.ignore_patterns("__pycache__"))
+    return _MIRROR
+
+
+class Base(unittest.TestCase):
+    def setUp(self):
+        self.d = tempfile.mkdtemp(prefix="mmtask-test-charter-")
+        open(os.path.join(self.d, "NORTH_STAR.md"), "w").write("# NS — test\n- workstream: WS:PAPER-INTERNATIONAL-WAVES\n")
+        open(os.path.join(self.d, "PROGRESS.log"), "w").write("# progress\n")
+        open(os.path.join(self.d, "DECISIONS.md"), "w").write("# decisions\n")
+        open(os.path.join(self.d, "STATE.md"), "w").write("current task: P1.T1\n")
+        self.env = {**os.environ, "MM_SESSION": "test-a", "MM_AGENTOS_MIRROR": mirror()}
+        self.env.pop("CODEX_THREAD_ID", None)
+
+    def tearDown(self):
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def mm(self, *args, ok=True, session=None):
+        env = dict(self.env)
+        if session: env["MM_SESSION"] = session
+        r = subprocess.run([sys.executable, MMTASK, "--dir", self.d, *args], capture_output=True, text=True, env=env)
+        if ok: self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r
+
+    def db(self):
+        return json.load(open(os.path.join(self.d, "TASKS.json")))
+
+
+class H(Base):
+    def seed(self):
+        self.mm("import", "--no-fetch", "--mirror", mirror())
+        self.mm("wave-propose", "local-a", "Local A work")
+        self.mm("add", "accepted task", "--wave", "local-a", "--id", "T002")
+        self.mm("start", "T002"); self.mm("done", "T002", "--evidence", "commit abc123 tests PASS")
+        self.mm("accept", "T002", "--evidence", "independent review PASS")
+        self.mm("add", "active task", "--wave", "local-a", "--id", "T004"); self.mm("start", "T004")
+        self.mm("add", "old recovery", "--wave", "local-a", "--id", "T003")
+        self.mm("add", "new recovery", "--wave", "local-a", "--id", "P9.T1")
+        self.mm("supersede", "T003", "--by", "P9.T1", "--reason", "same recovery")
+
+    def snapshot(self):
+        return {t["id"]: (t["status"], t.get("evidence"), list(t.get("history") or [])) for t in self.db()["tasks"]}
+
+    # ---------------- import ----------------
+    def test_import_missing_record_never_erases(self):
+        self.seed(); before = self.snapshot(); waves0 = [w["id"] for w in self.db()["waves"]]
+        self.mm("rebind", "--from", "WS:PAPER-INTERNATIONAL-WAVES", "--to", "WS:MARKET-OS", "--reason", "t")
+        # now simulate a record disappearing: point at an empty mirror copy without WS-MARKET-OS
+        m2 = tempfile.mkdtemp(); shutil.copytree(os.path.join(mirror(), "agentos"), os.path.join(m2, "agentos")); shutil.copytree(os.path.join(mirror(), "scripts"), os.path.join(m2, "scripts"))
+        os.remove(os.path.join(m2, "agentos/workstreams/WS-MARKET-OS.md"))
+        obj = self.db()["agentos"].get("objective")
+        self.mm("import", "--no-fetch", "--mirror", m2)
+        after = self.snapshot(); db = self.db()
+        for k, (st, ev, h) in before.items():
+            self.assertEqual(after[k][0], st); self.assertEqual(after[k][1], ev); self.assertEqual(after[k][2][:len(h)], h)
+        self.assertTrue(set(waves0) <= {w["id"] for w in db["waves"]})
+        self.assertEqual(db["agentos"].get("objective"), obj)  # last known canonical fields kept
+        self.assertTrue(db["agentos"]["primary_record_missing"])
+        shutil.rmtree(m2, ignore_errors=True)
+
+    def test_import_tasks_merge_local_wins_and_no_superseded_recreate(self):
+        self.seed()
+        foreign = {"tasks": [{"id": "T002", "status": "todo", "title": "accepted task", "history": [{"at": "2026-10-24T10:00:00Z", "by": "old", "event": "add"}]},
+                             {"id": "T003", "status": "todo", "title": "old recovery"},
+                             {"id": "T009", "status": "todo", "title": "foreign new", "wave": "nope"}]}
+        f = os.path.join(self.d, "foreign.json"); json.dump(foreign, open(f, "w"))
+        r = self.mm("import", "--no-fetch", "--mirror", mirror(), "--tasks", f)  # same session -> not live-foreign
+        db = {t["id"]: t for t in self.db()["tasks"]}
+        self.assertEqual(db["T002"]["status"], "accepted"); self.assertIn("independent review PASS", db["T002"]["evidence"])
+        self.assertEqual(db["T003"]["status"], "superseded")
+        self.assertEqual(db["T009"]["status"], "ready")
+        self.assertTrue(any(h.get("by") == "old" for h in db["T002"]["history"]))
+        self.assertEqual(sum(1 for t in self.db()["tasks"] if t["id"] == "T003"), 1)
+
+    def test_import_refuses_new_rows_while_foreign_writer_live(self):
+        self.seed()
+        f = os.path.join(self.d, "foreign.json"); json.dump({"tasks": [{"id": "T010", "status": "todo", "title": "x"}]}, open(f, "w"))
+        r = self.mm("import", "--no-fetch", "--mirror", mirror(), "--tasks", f, session="other-session")
+        self.assertIn("refused_live", r.stdout); self.assertNotIn("T010", {t["id"] for t in self.db()["tasks"]})
+        self.assertIn("live writer test-a", r.stdout)
+        self.mm("import", "--no-fetch", "--mirror", mirror(), "--tasks", f, "--allow-live", session="other-session")
+        self.assertIn("T010", {t["id"] for t in self.db()["tasks"]})
+
+    def test_import_keeps_local_wave_numbers(self):
+        self.seed(); p0 = {w["id"]: w["p"] for w in self.db()["waves"]}
+        self.mm("import", "--no-fetch", "--mirror", mirror())
+        p1 = {w["id"]: w["p"] for w in self.db()["waves"]}
+        for k, v in p0.items(): self.assertEqual(p1[k], v)
+        self.assertEqual(len(set(p1.values())), len(p1))
+
+    # ---------------- export ----------------
+    def test_failed_validation_does_not_advance_last_export(self):
+        self.seed()
+        self.mm("rebind", "--from", "WS:PAPER-INTERNATIONAL-WAVES", "--to", "WS:MARKET-OS", "--reason", "t")
+        # bind to a pending record -> dangling ref -> rc=1
+        open(os.path.join(self.d, "NORTH_STAR.md"), "a")
+        db = self.db(); self.assertIsNone(db["agentos"].get("last_export"))
+        m2 = tempfile.mkdtemp(); shutil.copytree(os.path.join(mirror(), "agentos"), os.path.join(m2, "agentos")); shutil.copytree(os.path.join(mirror(), "scripts"), os.path.join(m2, "scripts"))
+        os.remove(os.path.join(m2, "agentos/workstreams/WS-MARKET-OS.md"))
+        self.mm("import", "--no-fetch", "--mirror", m2)
+        r = self.mm("export")
+        self.assertIn("rc=1", r.stdout); self.assertIn("NOT advanced", r.stdout)
+        db = self.db(); self.assertIsNone(db["agentos"].get("last_export")); self.assertFalse(db["agentos"]["last_export_attempt"]["ok"])
+        shutil.rmtree(m2, ignore_errors=True)
+
+    def test_successful_and_repeated_export_preserve_verified_evidence(self):
+        self.seed()
+        r1 = self.mm("export", "--session", "test-session")
+        self.assertIn("rc=0", r1.stdout + r1.stderr, r1.stdout)
+        db1 = self.db(); le1 = db1["agentos"]["last_export"]; self.assertTrue(le1)
+        ex = json.load(open(os.path.join(self.d, "export", sorted(os.listdir(os.path.join(self.d, "export")))[0], "EXPORT.json")))
+        self.assertIn("T002", ex["verified_ids"]); self.assertFalse(ex["published"])
+        import time; time.sleep(1.2)
+        r2 = self.mm("export", "--session", "test-session")  # nothing changed since -> accepted evidence must still be carried
+        ex2 = json.load(open(os.path.join(self.d, "export", sorted(x for x in os.listdir(os.path.join(self.d, "export")) if x != "EXPORTS.jsonl")[0], "EXPORT.json")))
+        self.assertIn("T002", ex2["verified_ids"]); self.assertGreater(self.db()["agentos"]["last_export"], le1)
+        t = {x["id"]: x for x in self.db()["tasks"]}["T002"]
+        self.assertEqual(t["status"], "accepted"); self.assertIn("commit abc123", t["evidence"])
+        self.assertIn("PREPARED ONLY", ex2["note"])
+
+    def test_dry_run_writes_nothing(self):
+        self.seed(); b = open(os.path.join(self.d, "TASKS.json")).read()
+        r = self.mm("export", "--dry-run")
+        self.assertIn("DRY RUN", r.stdout); self.assertEqual(open(os.path.join(self.d, "TASKS.json")).read(), b)
+        self.assertFalse(os.path.exists(os.path.join(self.d, "export", "EXPORTS.jsonl")))
+
+    def test_export_state_recompute_unsets_after_only_failures(self):
+        self.seed()
+        self.mm("rebind", "--from", "WS:PAPER-INTERNATIONAL-WAVES", "--to", "WS:MARKET-OS", "--reason", "t")
+        os.makedirs(os.path.join(self.d, "export", "2026-01-01"))
+        json.dump({"at": "2026-01-01T00:00:00Z", "validate": {"ran": True, "rc": 1}}, open(os.path.join(self.d, "export", "2026-01-01", "EXPORT.json"), "w"))
+        # simulate the old bug: a bogus last_export via a foreign tool would be repaired by recompute
+        r = self.mm("export-state", "--recompute", "--reason", "test")
+        self.assertIn("already consistent", r.stdout)  # never set, never advanced
+        self.assertIsNone(self.db()["agentos"].get("last_export"))
+
+    # ---------------- rebind ----------------
+    def test_rebind_preserves_everything_and_logs(self):
+        self.seed(); before = self.snapshot()
+        r = self.mm("rebind", "--from", "WS:PAPER-INTERNATIONAL-WAVES", "--to", "WS:MARKET-OS", "--reason", "canonical record exists")
+        db = self.db(); after = self.snapshot()
+        self.assertEqual(db["workstream"], "WS:MARKET-OS")
+        for k, (st, ev, h) in before.items():
+            self.assertEqual(after[k][0], st); self.assertEqual(after[k][1], ev); self.assertEqual(after[k][2][:len(h)], h)
+            self.assertEqual(after[k][2][-1]["event"], "rebind")
+        self.assertTrue(all(t["workstream"] == "WS:MARKET-OS" for t in db["tasks"]))
+        self.assertTrue(any(w["source"] == "agentos" and w["workstream"] == "WS:MARKET-OS" for w in db["waves"]))
+        self.assertIn("rebind WS:PAPER-INTERNATIONAL-WAVES -> WS:MARKET-OS", open(os.path.join(self.d, "PROGRESS.log")).read())
+        self.assertIn("MMTASK-REBIND", open(os.path.join(self.d, "DECISIONS.md")).read())
+        self.assertEqual(db["binding_history"][-1]["from"], "WS:PAPER-INTERNATIONAL-WAVES")
+
+    def test_rebind_refuses_missing_target_and_wrong_from(self):
+        self.seed(); b = open(os.path.join(self.d, "TASKS.json")).read()
+        r = self.mm("rebind", "--from", "WS:PAPER-INTERNATIONAL-WAVES", "--to", "WS:NO-SUCH-THING", "--reason", "x", ok=False)
+        self.assertNotEqual(r.returncode, 0); self.assertIn("does not exist", r.stderr)
+        r = self.mm("rebind", "--from", "WS:OTHER", "--to", "WS:MARKET-OS", "--reason", "x", ok=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(open(os.path.join(self.d, "TASKS.json")).read(), b)
+
+    def test_positional_slug_form(self):
+        root = tempfile.mkdtemp(); os.makedirs(os.path.join(root, "proj")); 
+        import yaml
+        env = {**self.env, "HOME": root, "PYTHONPATH": os.path.dirname(os.path.dirname(yaml.__file__))}
+        os.makedirs(os.path.join(root, "gwcap/project-charters")); shutil.move(os.path.join(root, "proj"), os.path.join(root, "gwcap/project-charters/proj"))
+        open(os.path.join(root, "gwcap/project-charters/proj/NORTH_STAR.md"), "w").write("- workstream: WS:PAPER-INTERNATIONAL-WAVES\n")
+        r = subprocess.run([sys.executable, MMTASK, "rebind", "proj", "--from", "WS:PAPER-INTERNATIONAL-WAVES", "--to", "WS:MARKET-OS", "--reason", "x", "--mirror", mirror()], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        shutil.rmtree(root, ignore_errors=True)
+
+
+
+FIXTURE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "shared-shell-TASKS.null-bound.json")
+
+
+class NullBind(Base):
+    """Disposable copy of the real shared-shell buffer shape: explicit top-level workstream:null, legacy v1 rows T001-T006
+    (no workstream key, v1 statuses done/todo, milestones), P1.T1 + its local wave using the bare spelling MARKET-OS.
+    The fixture's evidence is the real buffer's own; nothing is invented to make export pass."""
+    def setUp(self):
+        super().setUp()
+        open(os.path.join(self.d, "NORTH_STAR.md"), "w").write("# Shared Shell north star (no workstream line)\n")
+        fx = json.load(open(FIXTURE))
+        fx["tasks"][-1].setdefault("aliases", ["P1-SSDIAG"])  # exercise P-alias preservation on the bare-bound task
+        shutil.copy(FIXTURE, os.path.join(self.d, "TASKS.fixture.json"))
+        json.dump(fx, open(os.path.join(self.d, "TASKS.json"), "w"), indent=2)
+        self.orig = fx
+        self.legacy = ["T001", "T002", "T003", "T004", "T005", "T006"]
+
+    def init(self, *extra, ok=True):
+        return self.mm("rebind", "--from", "null", "--to", "WS:MARKET-OS", "--reason", "test null init", "--mirror", mirror(), *extra, ok=ok)
+
+    def raw(self):
+        return open(os.path.join(self.d, "TASKS.json")).read()
+
+    def test_fixture_shape_and_pre_state(self):
+        db = self.db()
+        self.assertIn("workstream", db); self.assertIsNone(db["workstream"])
+        self.assertTrue(all("workstream" not in t for t in db["tasks"] if t["id"] in self.legacy))
+        self.assertEqual({t["id"]: t.get("workstream") for t in db["tasks"] if t["id"] == "P1.T1"}, {"P1.T1": "MARKET-OS"})
+        r = self.mm("export", ok=False)  # export correctly refuses an unbound buffer
+        self.assertNotEqual(r.returncode, 0); self.assertIn("no workstream binding", r.stderr)
+        r = self.mm("rebind", "--from", "WS:MARKET-OS", "--to", "WS:MARKET-OS", "--reason", "x", ok=False)  # old path cannot express null
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_explicit_null_is_not_silently_inferred_by_load(self):
+        open(os.path.join(self.d, "NORTH_STAR.md"), "w").write("- workstream: WS:PAPER-INTERNATIONAL-WAVES\n")
+        self.mm("list", "--all")
+        self.assertIsNone(self.db()["workstream"])
+
+    def test_explicit_null_initializes_losslessly(self):
+        b = {t["id"]: json.loads(json.dumps(t)) for t in self.orig["tasks"]}
+        r = self.init()
+        db = self.db(); a = {t["id"]: t for t in db["tasks"]}
+        self.assertEqual(db["workstream"], "WS:MARKET-OS")
+        self.assertEqual(list(a), list(b))  # same ids, same order
+        for tid in self.legacy:  # legacy rows byte-for-byte equal (ids, v1 status, milestone, history, evidence, notes)
+            self.assertEqual(a[tid], b[tid], tid)
+        p = a["P1.T1"]; o = b["P1.T1"]
+        self.assertEqual(p["workstream"], "WS:MARKET-OS")
+        for k in ("id", "status", "evidence", "acceptance", "notes", "depends_on", "superseded_by", "reason", "wave", "aliases", "title", "created", "created_by"):
+            self.assertEqual(p.get(k), o.get(k), k)
+        self.assertEqual(p["history"][:len(o["history"])], o["history"]); self.assertEqual(p["history"][-1]["event"], "bind-init")
+        self.assertIn("P1-SSDIAG", p["aliases"])
+        w = next(w for w in db["waves"] if w["id"] == "shared-shell-source-diagnostics")
+        self.assertEqual((w["p"], w["workstream"], w["qualified_from"], w["source"]), ("P1", "WS:MARKET-OS", "MARKET-OS", "local-proposed"))
+        self.assertTrue(any(x["source"] == "agentos" and x["workstream"] == "WS:MARKET-OS" for x in db["waves"]))
+        bh = db["binding_history"][-1]
+        self.assertEqual((bh["from"], bh["to"], bh["kind"], bh["qualified_tasks"], bh["qualified_waves"], bh["legacy_untouched"]),
+                         (None, "WS:MARKET-OS", "null-init", ["P1.T1"], ["P1"], self.legacy))
+        self.assertIn("bind-init null -> WS:MARKET-OS", open(os.path.join(self.d, "PROGRESS.log")).read())
+        self.assertIn("MMTASK-BIND-INIT", open(os.path.join(self.d, "DECISIONS.md")).read())
+        self.assertEqual(self.mm("show", "P1-SSDIAG").returncode, 0)  # alias still resolves
+
+    def test_repeat_init_is_noop_and_conflicts_refuse_without_write(self):
+        self.init(); raw = self.raw()
+        r = self.init(); self.assertIn("already bound to WS:MARKET-OS; nothing changed", r.stdout); self.assertEqual(self.raw(), raw)
+        r = self.mm("rebind", "--from", "null", "--to", "WS:MARKET-TIME-MACHINE", "--reason", "x", "--mirror", mirror(), ok=False)
+        self.assertNotEqual(r.returncode, 0); self.assertIn("already bound to WS:MARKET-OS", r.stderr); self.assertEqual(self.raw(), raw)
+
+    def test_refuses_missing_target_and_unrelated_association(self):
+        raw = self.raw()
+        r = self.mm("rebind", "--from", "null", "--to", "WS:NO-SUCH-THING", "--reason", "x", "--mirror", mirror(), ok=False)
+        self.assertIn("does not exist", r.stderr); self.assertEqual(self.raw(), raw)
+        r = self.mm("rebind", "--from", "null", "--to", "WS:MARKET-TIME-MACHINE", "--reason", "x", "--mirror", mirror(), ok=False)
+        self.assertIn("unrelated workstream associations", r.stderr); self.assertIn("P1.T1='MARKET-OS'", r.stderr); self.assertEqual(self.raw(), raw)
+        r = self.mm("rebind", "--from", "nul", "--to", "WS:MARKET-OS", "--reason", "x", ok=False)
+        self.assertIn("bad workstream key", r.stderr); self.assertEqual(self.raw(), raw)
+
+    def test_export_import_round_trip_is_lossless(self):
+        self.init()
+        before = self.db(); tasks0 = json.dumps(before["tasks"], sort_keys=True); waves0 = {w["id"]: w["p"] for w in before["waves"]}
+        r = self.mm("export", "--session", "test-session")
+        out = r.stdout + r.stderr
+        ex_dir = os.path.join(self.d, "export", sorted(x for x in os.listdir(os.path.join(self.d, "export")) if x != "EXPORTS.jsonl")[0])
+        ex = json.load(open(os.path.join(ex_dir, "EXPORT.json")))
+        self.assertEqual(ex["workstream"], "WS:MARKET-OS"); self.assertFalse(ex["published"]); self.assertFalse(ex["pending_record"])
+        self.assertTrue(ex["validated"], out)
+        hand = open(ex["handoff"]).read()
+        self.assertIn("workstream: WS:MARKET-OS", hand); self.assertIn("P1.T1", hand)
+        self.assertIn("shared-shell-source-diagnostics", open(ex["wave_patch"]).read())
+        # verified only carries evidence that already exists in the buffer (reviewed/accepted rows)
+        self.assertEqual(ex["verified_ids"], sorted(t["id"] for t in before["tasks"] if t["status"] in ("accepted", "reviewed") and t.get("evidence")))
+        self.assertEqual(json.dumps(self.db()["tasks"], sort_keys=True), tasks0)  # export never touches task rows
+        snap = os.path.join(self.d, "roundtrip.json"); shutil.copy(os.path.join(self.d, "TASKS.json"), snap)
+        self.mm("import", "--no-fetch", "--mirror", mirror())
+        self.mm("import", "--no-fetch", "--mirror", mirror(), "--tasks", snap)
+        db = self.db()
+        self.assertEqual(json.dumps(db["tasks"], sort_keys=True), tasks0)
+        self.assertEqual({w["id"]: w["p"] for w in db["waves"]}, waves0)
+        self.assertEqual(db["workstream"], "WS:MARKET-OS")
+        self.init()  # re-init after round trip is still a no-op
+        self.assertEqual(json.dumps(self.db()["tasks"], sort_keys=True), tasks0)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        MMTASK = sys.argv.pop(1)
+    import warnings; warnings.simplefilter("ignore", ResourceWarning)
+    unittest.main(verbosity=2, warnings="ignore")

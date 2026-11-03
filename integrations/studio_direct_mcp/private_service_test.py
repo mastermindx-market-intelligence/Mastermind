@@ -2279,6 +2279,85 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
                 svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256[name],
                 svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name])
 
+    def test_rejection_diagnostics_generation_preserves_exact_old_install_identity(self):
+        # The predecessor is the historically sealed merge-capable publisher,
+        # not a wildcard for arbitrary files or a rewrite of index-sync law.
+        self.assertEqual(svc.FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256, {
+            "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
+            "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+        })
+        self.assertEqual(
+            svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
+            "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c",
+        )
+        self.assertNotEqual(
+            svc.FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256["git-publish.mjs"],
+            svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
+        )
+
+    def test_post_merge_publisher_preflight_and_apply_keep_sealed_host_config(self):
+        # An installed merge-capable pair can receive the narrow publisher
+        # diagnosis patch through the incumbent exact-CAS stopped service path.
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots), roots["plist"].read_bytes())
+            previous_pair = {
+                name: svc._sha256_file(roots["base"] / name)
+                for name in ("git-publish.mjs", "workspace-access.mjs")
+            }
+            not_original = {name: "0" * 64 for name in previous_pair}
+            with mock.patch.object(svc, "FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256", not_original), \
+                 mock.patch.object(svc, "FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256", previous_pair):
+                args.publisher_preflight_only = True
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+                self.assertEqual(before, (roots["manifest"].read_bytes(),
+                                          roots["config"].read_bytes(),
+                                          self._all_files(roots), roots["plist"].read_bytes()))
+                args.publisher_preflight_only = False
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+                self.assertEqual(before[1], roots["config"].read_bytes())
+                self.assertEqual(before[3], roots["plist"].read_bytes())
+                after_files = self._all_files(roots)
+                self.assertEqual(
+                    {name for name in before[2] if before[2][name] != after_files[name]},
+                    {"git-publish.mjs", "workspace-access.mjs"},
+                )
+                svc._verify_staged_install("chatgpt1", _label_for("chatgpt1"), roots,
+                                           require_runtime_seal=True)
+
+    def test_post_merge_predecessor_refuses_mixed_or_foreign_source(self):
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            expected_pair = {
+                name: svc._sha256_file(roots["base"] / name)
+                for name in ("git-publish.mjs", "workspace-access.mjs")
+            }
+            rejected = {name: "0" * 64 for name in expected_pair}
+            # Manifest is re-sealed around one foreign module, and the exact
+            # predecessor pair must nevertheless refuse without any writes.
+            (roots["base"] / "git-publish.mjs").write_bytes(b"foreign-publisher\\n")
+            manifest = json.loads(roots["manifest"].read_text())
+            manifest["files"]["git-publish.mjs"] = svc._sha256_file(
+                roots["base"] / "git-publish.mjs")
+            roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True))
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots))
+            with mock.patch.object(svc, "FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256", rejected), \
+                 mock.patch.object(svc, "FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256", expected_pair), \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "unrecognized prior publisher identity"):
+                    svc.cmd_upgrade(args)
+                write.assert_not_called()
+            self.assertEqual(before, (roots["manifest"].read_bytes(),
+                                      roots["config"].read_bytes(),
+                                      self._all_files(roots)))
+
     def test_merge_transition_preflight_and_stopped_apply_preserve_exact_config(self):
         for account in ("chatgpt1", "chatgpt3"):
             with self.subTest(account=account), self._installed_merge_predecessor_fixture(account) as (args, roots, _cfg):

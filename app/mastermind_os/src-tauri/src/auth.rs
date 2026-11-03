@@ -7,7 +7,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     sync::Mutex,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
@@ -50,6 +50,9 @@ impl Resource {
             Self::Executive => option_env!("MM_EXECUTIVE_RESOURCE").unwrap_or(""),
         }
     }
+    fn persistent(self) -> bool {
+        self != Self::Executive && crate::native_refresh::enabled()
+    }
     fn scope(self) -> &'static str {
         match self {
             Self::Acquisition => "mastermind.workspace.read",
@@ -69,6 +72,8 @@ pub struct AuthStatus {
 struct Token {
     value: String,
     expires: Instant,
+    // A sleeping Mac need not advance Instant. Check actual wall expiry too.
+    wall_expires: SystemTime,
     // Derived from the exact validated Executive grant; stays in the native owner.
     executive_send: bool,
 }
@@ -90,6 +95,7 @@ struct Inner {
     acquisition: Option<Token>,
     content: Option<Token>,
     reason: Option<&'static str>,
+    restoring: bool,
 }
 impl Inner {
     fn new(client: Option<&str>) -> Self {
@@ -110,6 +116,7 @@ impl Inner {
             acquisition: None,
             content: None,
             reason: None,
+            restoring: false,
         }
     }
     fn token(&self, resource: Resource) -> Option<&Token> {
@@ -118,7 +125,7 @@ impl Inner {
             Resource::Content => self.content.as_ref(),
             Resource::Executive => self.executive.as_ref().filter(|_| self.executive_resource.is_some()),
         }
-        .filter(|t| t.expires > Instant::now())
+        .filter(|t| t.expires > Instant::now() && t.wall_expires > SystemTime::now())
     }
     fn status(&self) -> AuthStatus {
         let acquisition = self.token(Resource::Acquisition).is_some();
@@ -126,7 +133,7 @@ impl Inner {
         AuthStatus {
             status: if self.client_id.is_none() {
                 "unconfigured"
-            } else if self.pending.is_some() || self.exchanging {
+            } else if self.pending.is_some() || self.exchanging || self.restoring {
                 "signing_in"
             } else if self.reason.is_some() {
                 "error"
@@ -174,6 +181,7 @@ impl Inner {
         self.clear_executive();
         self.pending = None;
         self.exchanging = false;
+        self.restoring = false;
         self.acquisition = None;
         self.content = None;
         self.reason = None;
@@ -266,6 +274,10 @@ impl Inner {
 pub struct NativeAuth {
     inner: Mutex<Inner>,
     http: reqwest::Client,
+    // Keychain writes and logout use the same lock. A late rotating response
+    // cannot recreate a credential after a generation-changing logout.
+    keychain_lock: Mutex<()>,
+    refresh_locks: [tokio::sync::Mutex<()>; 2],
 }
 impl NativeAuth {
     pub fn new() -> Result<Self> {
@@ -278,6 +290,8 @@ impl NativeAuth {
         Ok(Self {
             inner: Mutex::new(Inner::new(option_env!("MM_NATIVE_CLIENT_ID"))),
             http,
+            keychain_lock: Mutex::new(()),
+            refresh_locks: [tokio::sync::Mutex::new(()), tokio::sync::Mutex::new(())],
         })
     }
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>> {
@@ -296,12 +310,17 @@ fn authorization_url(client: &str, resource: Resource, state: &str, verifier: &s
 }
 fn authorization_url_for_audience(client: &str, resource: Resource, audience: &str, state: &str, verifier: &str) -> String {
     let mut url = Url::parse(&format!("{ISSUER}authorize")).expect("fixed issuer");
+    let scope = if resource.persistent() {
+        format!("{} offline_access", resource.scope())
+    } else {
+        resource.scope().to_owned()
+    };
     url.query_pairs_mut().extend_pairs([
         ("response_type", "code"),
         ("client_id", client),
         ("redirect_uri", CALLBACK),
         ("audience", audience),
-        ("scope", resource.scope()),
+        ("scope", scope.as_str()),
         ("state", state),
         ("code_challenge_method", "S256"),
         (
@@ -400,24 +419,47 @@ pub fn auth_status(state: tauri::State<'_, NativeAuth>) -> Result<AuthStatus> {
 #[tauri::command]
 pub fn sign_out(app: AppHandle) -> Result<AuthStatus> {
     let state = app.state::<NativeAuth>();
+    let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
     let mut inner = state.lock()?;
     inner.invalidate();
+    let client = inner.client_id.clone();
+    let mut failure = None;
+    if crate::native_refresh::enabled() {
+        if let Some(client) = client {
+            for resource in [Resource::Acquisition, Resource::Content] {
+                if let Err(error) = crate::native_refresh::delete(&client, resource.audience()) {
+                    failure = Some(error);
+                }
+            }
+        }
+    }
+    if failure.is_some() { inner.reason = Some("KEYCHAIN_DELETE_FAILED"); }
     let status = inner.status();
     drop(inner);
+    drop(_keychain);
     emit(&app);
+    if failure.is_some() { return Err("KEYCHAIN_DELETE_FAILED".into()); }
     Ok(status)
 }
 #[tauri::command]
 pub fn sign_in(app: AppHandle) -> Result<AuthStatus> {
     let state = app.state::<NativeAuth>();
+    let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
     let mut inner = state.lock()?;
     if inner.client_id.is_none() {
         return Ok(inner.status());
     }
     inner.invalidate();
+    if crate::native_refresh::enabled() {
+        let client = inner.client_id.as_deref().ok_or("NATIVE_CLIENT_ID_MISSING")?;
+        for resource in [Resource::Acquisition, Resource::Content] {
+            crate::native_refresh::delete(client, resource.audience())?;
+        }
+    }
     let url = inner.transaction(Resource::Acquisition)?;
     let generation = inner.generation;
     drop(inner);
+    drop(_keychain);
     emit(&app);
     open_transaction(&app, url, generation)?;
     let result = state.lock()?.status();
@@ -488,7 +530,15 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
         .is_some_and(|s| s.eq_ignore_ascii_case("Bearer"))
         || (resource != Resource::Executive && object
             .get("scope")
-            .is_some_and(|s| s.as_str() != Some(resource.scope())))
+            .is_some_and(|s| {
+                let Some(actual) = s.as_str() else { return true; };
+                let mut scopes: Vec<_> = actual.split_whitespace().collect();
+                scopes.sort_unstable();
+                let mut expected = vec![resource.scope()];
+                if resource.persistent() { expected.push("offline_access"); }
+                expected.sort_unstable();
+                scopes != expected && scopes != [resource.scope()]
+            }))
     {
         return Err("TOKEN_RESPONSE_INVALID".into());
     }
@@ -500,6 +550,7 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
     Ok(Token {
         value: token.into(),
         expires: Instant::now() + Duration::from_secs(seconds),
+        wall_expires: SystemTime::now() + Duration::from_secs(seconds),
         executive_send,
     })
 }
@@ -526,12 +577,25 @@ pub async fn callback(app: AppHandle, raw: String) {
         .send()
         .await;
     let token = match response {
-        Ok(r) => bounded_json(r, 32768)
-            .await
-            .and_then(|v| parse_token(v, pending.resource)),
+        Ok(r) => bounded_json(r, 32768).await.and_then(|v| {
+            let access = parse_token(v.clone(), pending.resource)?;
+            if pending.resource.persistent() {
+                let refresh = v.get("refresh_token").and_then(Value::as_str)
+                    .filter(|s| crate::native_refresh::valid_refresh(s))
+                    .ok_or("REFRESH_TOKEN_NOT_ISSUED")?;
+                let _keychain = state.keychain_lock.lock()
+                    .map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+                let inner = state.lock()?;
+                if inner.generation != pending.generation || !inner.exchanging {
+                    return Err("AUTHENTICATION_CHANGED".into());
+                }
+                crate::native_refresh::save(&client, pending.resource.audience(), refresh)?;
+            }
+            Ok(access)
+        }),
         Err(_) => Err("TOKEN_EXCHANGE_FAILED".into()),
     };
-    let expires = token.as_ref().ok().map(|token| token.expires);
+    let expiry = token.as_ref().ok().map(|token| (token.expires, token.wall_expires));
     let mut inner = match state.lock() {
         Ok(i) => i,
         Err(_) => return,
@@ -539,23 +603,207 @@ pub async fn callback(app: AppHandle, raw: String) {
     let next = inner.finish_exchange(pending.generation, pending.resource, token);
     drop(inner);
     emit(&app);
-    if let Some(expires) = expires {
-        let expiry_app = app.clone();
-        let generation = pending.generation;
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep_until(tokio::time::Instant::from_std(expires)).await;
-            let current = expiry_app
-                .state::<NativeAuth>()
-                .lock()
-                .is_ok_and(|inner| inner.generation == generation);
-            if current {
-                emit(&expiry_app);
-            }
-        });
+    if let Some((expires, wall_expires)) = expiry {
+        schedule_expiration(app.clone(), pending.resource, expires, wall_expires, pending.generation);
     }
     if let Some(url) = next {
         let _ = open_transaction(&app, url, pending.generation);
     }
+}
+
+// Auth0 can report a revoked/expired/rotated grant on any of these exact
+// statuses; never keep a permanent ambiguous Keychain marker for a definitive
+// invalid_grant. Other errors or malformed responses remain ambiguous.
+fn terminal_invalid_grant(status: u16, body: &Value) -> bool {
+    matches!(status, 400 | 401 | 403) &&
+    body.get("error").and_then(Value::as_str) == Some("invalid_grant")
+}
+
+/// Resume an existing, per-resource rotating Auth0 grant. No credential is
+/// exposed through a Tauri command. The per-resource Tokio lock prevents
+/// concurrent replay, including timer expiry racing with a workspace read.
+async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
+    if !resource.persistent() { return Err("AUTHENTICATION_REQUIRED".into()); }
+    let state = app.state::<NativeAuth>();
+    let slot = match resource {
+        Resource::Acquisition => 0,
+        Resource::Content => 1,
+        Resource::Executive => return Err("AUTHENTICATION_REQUIRED".into()),
+    };
+    let _singleflight = state.refresh_locks[slot].lock().await;
+    let (client, generation) = {
+        let inner = state.lock()?;
+        if inner.token(resource).is_some_and(|t|
+            t.expires > Instant::now() + Duration::from_secs(45) &&
+            t.wall_expires > SystemTime::now() + Duration::from_secs(45)) { return Ok(()); }
+        (inner.client_id.clone().ok_or("NATIVE_CLIENT_ID_MISSING")?, inner.generation)
+    };
+    let old = {
+        let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+        crate::native_refresh::load(&client, resource.audience())?
+            .ok_or("AUTHENTICATION_REQUIRED")?
+    };
+    {
+        let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+        let inner = state.lock()?;
+        if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+        crate::native_refresh::begin_rotation(&client, resource.audience(), &old)?;
+    }
+    // Once begin_rotation succeeds, the outcome must be assumed ambiguous if the
+    // response fails. The Keychain marker prohibits replay on the next restart.
+    let response = state.http.post(format!("{ISSUER}oauth/token"))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", client.as_str()),
+            ("refresh_token", old.as_str()),
+        ])
+        .send().await;
+    let response = match response {
+        Ok(response) => response,
+        Err(error) if error.is_connect() => {
+            // reqwest classified the failure as a pre-transmission connection
+            // error: Auth0 never received this grant. Permit an online retry,
+            // but only after deleting our *exact* Keychain pending item.
+            let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+            let inner = state.lock()?;
+            if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+            crate::native_refresh::rollback_untransmitted(&client, resource.audience(), &old)?;
+            return Err("NETWORK_UNAVAILABLE".into());
+        }
+        Err(_) => return Err("REFRESH_OUTCOME_UNCONFIRMED".into()),
+    };
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let invalid_grant = if matches!(status, 400 | 401 | 403) {
+            read_json_body(response, 32768).await.ok().is_some_and(|body|
+                terminal_invalid_grant(status, &body))
+        } else { false };
+        if invalid_grant {
+            let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+            let mut inner = state.lock()?;
+            if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+            // This response is terminal only for the exact grant this process
+            // sent. The generation fence above is process-local: another
+            // instance's explicit sign-out or fresh sign-in may have replaced
+            // the stored credential and marker after begin_rotation. Qualified
+            // cleanup mutates only items it can still prove hold the old
+            // grant, so a newer login and its rotation marker survive a stale
+            // response; a superseded account is not treated as signed out.
+            let cleanup = crate::native_refresh::delete_stale(&client, resource.audience(), &old)?;
+            match cleanup {
+                crate::native_refresh::StaleGrantCleanup::Superseded => {
+                    drop(inner); drop(_keychain); emit(app);
+                    return Err("AUTHENTICATION_CHANGED".into());
+                }
+                crate::native_refresh::StaleGrantCleanup::RemovedStaleGrant
+                | crate::native_refresh::StaleGrantCleanup::AlreadyAbsent => {
+                    match resource {
+                        Resource::Acquisition => inner.acquisition = None,
+                        Resource::Content => inner.content = None,
+                        Resource::Executive => (),
+                    }
+                }
+            }
+            drop(inner); drop(_keychain); emit(app);
+            return Err("AUTHENTICATION_REQUIRED".into());
+        }
+        return Err("REFRESH_OUTCOME_UNCONFIRMED".into());
+    }
+    let decoded = read_json_body(response, 32768).await
+        .map_err(|_| "REFRESH_OUTCOME_UNCONFIRMED")?;
+    let access = parse_token(decoded.clone(), resource)
+        .map_err(|_| "REFRESH_OUTCOME_UNCONFIRMED")?;
+    let next = decoded.get("refresh_token").and_then(Value::as_str)
+        .filter(|s| crate::native_refresh::valid_refresh(s))
+        .ok_or("REFRESH_OUTCOME_UNCONFIRMED")?;
+    let expires = access.expires;
+    let wall_expires = access.wall_expires;
+    {
+        let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+        let mut inner = state.lock()?;
+        if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+        crate::native_refresh::finish_rotation(&client, resource.audience(), &old, next)?;
+        match resource {
+            Resource::Acquisition => inner.acquisition = Some(access),
+            Resource::Content => inner.content = Some(access),
+            Resource::Executive => return Err("AUTHENTICATION_REQUIRED".into()),
+        }
+        inner.reason = None;
+    }
+    emit(app);
+    schedule_expiration(app.clone(), resource, expires, wall_expires, generation);
+    Ok(())
+}
+
+/// Resource read paths may transparently restore a previously authorized
+/// native grant, but cannot bootstrap a new user identity or widen scopes.
+async fn ensure_native_token(app: &AppHandle, resource: Resource) -> Result<(String, u64)> {
+    let state = app.state::<NativeAuth>();
+    let needs_refresh = {
+        let inner = state.lock()?;
+        inner.token(resource).is_none()
+    };
+    if needs_refresh && resource.persistent() {
+        refresh_one(app, resource).await?;
+    }
+    let inner = state.lock()?;
+    let token = inner.token(resource).ok_or("AUTHENTICATION_REQUIRED")?;
+    Ok((token.value.clone(), inner.generation))
+}
+
+// Refresh while the credential is inside refresh_one's 45-second threshold.
+// Scheduling 60 seconds before expiry silently made refresh_one return early
+// without ever creating the next timer, so idle sessions still expired.
+fn native_refresh_deadline(expires: Instant, now: Instant) -> Instant {
+    let early = expires.checked_sub(Duration::from_secs(35)).unwrap_or(expires);
+    let floor = now + Duration::from_secs(10);
+    if early < floor { floor } else { early }
+}
+fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wall_expires: SystemTime, generation: u64) {
+    tauri::async_runtime::spawn(async move {
+        let target = if resource.persistent() {
+            native_refresh_deadline(expires, Instant::now())
+        } else { expires };
+        let wall_target = if resource.persistent() {
+            wall_expires.checked_sub(Duration::from_secs(35)).unwrap_or(wall_expires)
+        } else { wall_expires };
+        // Wake/sleep-safe periodic deadline observation. Monotonic-only Tokio
+        // timers can remain behind the real Auth0 expiry after laptop sleep.
+        loop {
+            let now = Instant::now();
+            if now >= target || SystemTime::now() >= wall_target { break; }
+            tokio::time::sleep((target - now).min(Duration::from_secs(30))).await;
+        }
+        let unchanged = app.state::<NativeAuth>().lock().is_ok_and(|inner|
+            inner.generation == generation);
+        if !unchanged { return; }
+        if resource.persistent() {
+            // A network/rotation failure does not replay an ambiguous token;
+            // a later explicit sign-in remains available.
+            let _ = refresh_one(&app, resource).await;
+        }
+        emit(&app);
+    });
+}
+
+/// Startup reads the platform Keychain on the native owner only. The frontend
+/// sees a signing_in state, not any refresh/access credentials.
+pub fn start_restore(app: AppHandle) {
+    if !crate::native_refresh::enabled() { return; }
+    if let Ok(mut inner) = app.state::<NativeAuth>().lock() {
+        if inner.client_id.is_none() { return; }
+        inner.restoring = true;
+    } else { return; }
+    emit(&app);
+    tauri::async_runtime::spawn(async move {
+        for resource in [Resource::Acquisition, Resource::Content] {
+            let _ = refresh_one(&app, resource).await;
+        }
+        if let Ok(mut inner) = app.state::<NativeAuth>().lock() {
+            inner.restoring = false;
+        }
+        emit(&app);
+    });
 }
 
 #[derive(Deserialize)]
@@ -657,17 +905,7 @@ async fn read(
             .append_pair("root_job_id", &selection.root_job_id);
     }
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (
-            inner
-                .token(resource)
-                .ok_or("AUTHENTICATION_REQUIRED")?
-                .value
-                .clone(),
-            inner.generation,
-        )
-    };
+    let (token, generation) = ensure_native_token(&app, resource).await?;
     let response = state
         .http
         .get(url)
@@ -703,17 +941,7 @@ pub async fn read_programs(app: AppHandle) -> Result<Value> {
 pub async fn read_work(app: AppHandle) -> Result<Value> {
     let url = Url::parse(&format!("{ORIGIN}{WORK_PATH}")).map_err(|_| "REQUEST_INVALID")?;
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (
-            inner
-                .token(Resource::Acquisition)
-                .ok_or("AUTHENTICATION_REQUIRED")?
-                .value
-                .clone(),
-            inner.generation,
-        )
-    };
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
     let response = state
         .http
         .get(url)
@@ -764,11 +992,7 @@ pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> 
         .append_pair("work_ref", &selection.work_ref)
         .append_pair("root_job_id", &selection.root_job_id);
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (inner.token(Resource::Acquisition)
-            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
-    };
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
     let response = state.http.get(url).bearer_auth(token)
         .header("Accept", "application/json")
         .header("Cache-Control", "no-store")
@@ -790,6 +1014,65 @@ pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> 
     // Exact fields, source observation, availability, and selectors are decoded in
     // the existing frontend Plan consumer; no private response fields are projected.
     Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FabricStatusSelection {
+    root_id: String,
+    run_id: String,
+}
+impl FabricStatusSelection {
+    fn validate(&self) -> Result<()> {
+        let root = self.root_id.strip_prefix("JOB-").ok_or("SELECTION_INVALID")?;
+        if root.is_empty() || root.len() > 9 || !root.bytes().all(|b| b.is_ascii_digit())
+            || !self.run_id.strip_prefix("ATT-").is_some_and(|v| lowercase_hex(v, 32)) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+fn fabric_read_target(selection: Option<&FabricStatusSelection>) -> Result<(Url, &'static str, usize)> {
+    let (path, schema, cap) = if selection.is_some() {
+        ("/workspace/fabric/status/current", "mastermind.fabric_task_status.v1", 16_384)
+    } else {
+        ("/workspace/fabric/catalog/current", "mastermind.attended_fabric_catalog.v1", 65_536)
+    };
+    let mut url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID")?;
+    if let Some(selected) = selection {
+        selected.validate()?;
+        url.query_pairs_mut().append_pair("root_id", &selected.root_id)
+            .append_pair("run_id", &selected.run_id);
+    }
+    Ok((url, schema, cap))
+}
+async fn read_fabric(app: AppHandle, selection: Option<FabricStatusSelection>) -> Result<Value> {
+    let (url, schema, cap) = fabric_read_target(selection.as_ref())?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    // Unavailable/error bodies cannot become successful run observations.
+    let result = bounded_json(response, cap).await;
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(schema) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The same strict frontend decoders retain only approved metadata and
+    // enforce exact-run browser scope; no machine-local credential is used.
+    Ok(value)
+}
+#[tauri::command]
+pub async fn read_fabric_catalog(app: AppHandle) -> Result<Value> {
+    read_fabric(app, None).await
+}
+#[tauri::command]
+pub async fn read_fabric_status(app: AppHandle, selection: FabricStatusSelection) -> Result<Value> {
+    read_fabric(app, Some(selection)).await
 }
 
 #[derive(Deserialize)]
@@ -830,11 +1113,7 @@ pub async fn read_retained_activity(app: AppHandle, selection: RetainedActivityS
         .append_pair("job_id", &selection.job_id)
         .append_pair("attempt_id", &selection.attempt_id);
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (inner.token(Resource::Acquisition)
-            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
-    };
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
     let response = state.http.get(url).bearer_auth(token)
         .header("Accept", "application/json")
         .header("Cache-Control", "no-store")
@@ -888,11 +1167,7 @@ pub async fn read_result_references(
         .append_pair("work_ref", &selection.work_ref)
         .append_pair("root_job_id", &selection.root_job_id);
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (inner.token(Resource::Acquisition)
-            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
-    };
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
     let response = state.http.get(url).bearer_auth(token)
         .header("Accept", "application/json")
         .header("Cache-Control", "no-store")
@@ -924,17 +1199,7 @@ pub async fn read_mission_v3(app: AppHandle, selection: MissionSelection) -> Res
         .append_pair("work_ref", &selection.work_ref)
         .append_pair("root_job_id", &selection.root_job_id);
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (
-            inner
-                .token(Resource::Acquisition)
-                .ok_or("AUTHENTICATION_REQUIRED")?
-                .value
-                .clone(),
-            inner.generation,
-        )
-    };
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
     let response = state
         .http
         .get(url)
@@ -969,17 +1234,7 @@ pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<V
         .append_pair("attempt_id", &selection.attempt_id)
         .append_pair("result_envelope_digest", &selection.result_envelope_digest);
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (
-            inner
-                .token(Resource::Acquisition)
-                .ok_or("AUTHENTICATION_REQUIRED")?
-                .value
-                .clone(),
-            inner.generation,
-        )
-    };
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
     let response = state
         .http
         .get(url)
@@ -1020,17 +1275,7 @@ fn allowed_window_schema(schema: &str) -> bool {
 async fn read_current_window_document(app: AppHandle) -> Result<Value> {
     let url = Url::parse(&format!("{ORIGIN}/workspace/window/current")).map_err(|_| "REQUEST_INVALID")?;
     let state = app.state::<NativeAuth>();
-    let (token, generation) = {
-        let inner = state.lock()?;
-        (
-            inner
-                .token(Resource::Content)
-                .ok_or("AUTHENTICATION_REQUIRED")?
-                .value
-                .clone(),
-            inner.generation,
-        )
-    };
+    let (token, generation) = ensure_native_token(&app, Resource::Content).await?;
     let response = state
         .http
         .get(url)
@@ -1276,9 +1521,22 @@ mod tests {
         Token {
             value: value.into(),
             expires: Instant::now() + Duration::from_secs(60),
+            wall_expires: SystemTime::now() + Duration::from_secs(60),
             executive_send: false,
         }
     }
+    #[test]
+    fn native_token_wall_expiry_fences_sleep_without_waiting_for_instant() {
+        let mut inner = inner();
+        let mut access = token("synthetic-but-private");
+        assert!(access.expires > Instant::now());
+        access.wall_expires = SystemTime::now() - Duration::from_secs(1);
+        inner.acquisition = Some(access);
+        assert!(inner.token(Resource::Acquisition).is_none());
+        assert!(!inner.status().acquisition);
+        assert_eq!(inner.status().status, "signed_out");
+    }
+
     #[test]
     fn actual_transaction_completion_keeps_resources_separate() {
         let mut i = inner();
@@ -1375,7 +1633,9 @@ mod tests {
                 Url::parse(&authorization_url("client", resource, "state", "verifier")).unwrap();
             let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
             assert_eq!(pairs["audience"], resource.audience());
-            assert_eq!(pairs["scope"], resource.scope());
+            assert_eq!(pairs["scope"], if resource.persistent() {
+                format!("{} offline_access", resource.scope())
+            } else { resource.scope().to_owned() });
             assert_eq!(pairs["code_challenge_method"], "S256");
             assert_eq!(pairs["redirect_uri"], CALLBACK);
             assert_eq!(
@@ -1423,6 +1683,7 @@ mod tests {
         i.acquisition = Some(Token {
             value: "secret".into(),
             expires: Instant::now() + Duration::from_secs(60),
+            wall_expires: SystemTime::now() + Duration::from_secs(60),
             executive_send: false,
         });
         let generation = i.generation;
@@ -1543,7 +1804,9 @@ mod tests {
             assert!(verifiers.insert(pending.verifier.clone()));
             assert_eq!(pairs["client_id"], "public-client");
             assert_eq!(pairs["redirect_uri"], CALLBACK);
-            assert_eq!(pairs["scope"], resource.scope());
+            assert_eq!(pairs["scope"], if resource.persistent() {
+                format!("{} offline_access", resource.scope())
+            } else { resource.scope().to_owned() });
             assert_eq!(pairs["code_challenge_method"], "S256");
             assert_eq!(pairs["code_challenge"], URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes())));
             assert_eq!(pairs["audience"], if resource == Resource::Executive {
@@ -1809,6 +2072,56 @@ mod tests {
 }
 
 #[cfg(test)]
+mod fabric_read_selection_tests {
+    use super::*;
+
+    #[test]
+    fn catalog_and_status_have_fixed_origin_routes_and_byte_limits() {
+        let (catalog, schema, cap) = fabric_read_target(None).unwrap();
+        assert_eq!(catalog.as_str(), "https://mcp.mastermind-x.com/workspace/fabric/catalog/current");
+        assert_eq!(schema, "mastermind.attended_fabric_catalog.v1");
+        assert_eq!(cap, 65_536);
+        assert!(catalog.query().is_none());
+        let selected = FabricStatusSelection { root_id: "JOB-42".into(),
+            run_id: format!("ATT-{}", "a".repeat(32)) };
+        let (status, schema, cap) = fabric_read_target(Some(&selected)).unwrap();
+        assert_eq!(status.origin().ascii_serialization(), "https://mcp.mastermind-x.com");
+        assert_eq!(status.path(), "/workspace/fabric/status/current");
+        assert_eq!(schema, "mastermind.fabric_task_status.v1");
+        assert_eq!(cap, 16_384);
+        assert_eq!(status.query_pairs().into_owned().collect::<Vec<_>>(), vec![
+            ("root_id".to_string(), selected.root_id), ("run_id".to_string(), selected.run_id),
+        ]);
+    }
+
+    #[test]
+    fn paid_selector_rejects_foreign_namespaces_paths_and_aliases() {
+        for root in ["ROOT:manual", "../JOB-1", "JOB-", "JOB--1", "JOB-1234567890",
+                     "https://example.invalid/root", "JOB-1&run_id=foreign"] {
+            assert!(fabric_read_target(Some(&FabricStatusSelection { root_id: root.into(),
+                run_id: format!("ATT-{}", "a".repeat(32)) })).is_err());
+        }
+        for run in ["ATT-1", "../foreign", "att-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "ATT-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "run&root_id=foreign"] {
+            assert!(fabric_read_target(Some(&FabricStatusSelection { root_id: "JOB-1".into(),
+                run_id: run.into() })).is_err());
+        }
+    }
+
+    #[test]
+    fn selector_accepts_only_the_two_typed_fields() {
+        let valid = serde_json::json!({"root_id":"JOB-1", "run_id":format!("ATT-{}", "a".repeat(32))});
+        assert!(serde_json::from_value::<FabricStatusSelection>(valid.clone()).unwrap().validate().is_ok());
+        let mut extra = valid.clone();
+        extra["owner_path"] = serde_json::json!("/private/foreign");
+        assert!(serde_json::from_value::<FabricStatusSelection>(extra).is_err());
+        let mut mistyped = valid;
+        mistyped["run_id"] = serde_json::json!(3);
+        assert!(serde_json::from_value::<FabricStatusSelection>(mistyped).is_err());
+    }
+}
+
+#[cfg(test)]
 mod retained_activity_selection_tests {
     use super::*;
 
@@ -1847,5 +2160,87 @@ mod retained_activity_selection_tests {
         assert_eq!(RETAINED_ACTIVITY_PATH, "/workspace/operator/activity/current");
         assert_eq!(RETAINED_ACTIVITY_SCHEMA, "mastermind.workspace_retained_activity.v1");
         assert_eq!(RETAINED_ACTIVITY_CAP, PLAN_RESPONSE_CAP);
+    }
+    #[test]
+    fn native_idle_refresh_timer_enters_renewal_window() {
+        let now = Instant::now();
+        let expires = now + Duration::from_secs(3600);
+        let at = native_refresh_deadline(expires, now);
+        assert_eq!(expires.duration_since(at), Duration::from_secs(35));
+        assert!(expires.duration_since(at) < Duration::from_secs(45));
+        assert_eq!(native_refresh_deadline(now + Duration::from_secs(3), now),
+            now + Duration::from_secs(10));
+    }
+
+    #[test]
+    fn auth0_revocation_terminal_status_is_exactly_scoped() {
+        let invalid = serde_json::json!({"error": "invalid_grant"});
+        for status in [400, 401, 403] {
+            assert!(terminal_invalid_grant(status, &invalid));
+        }
+        for status in [200, 404, 408, 409, 429, 500, 502, 503] {
+            assert!(!terminal_invalid_grant(status, &invalid));
+        }
+        for error in ["temporarily_unavailable", "invalid_client", "login_required"] {
+            assert!(!terminal_invalid_grant(403, &serde_json::json!({"error": error})));
+        }
+        assert!(!terminal_invalid_grant(403, &serde_json::json!({})));
+        assert!(!terminal_invalid_grant(403, &serde_json::json!({"error": null})));
+        assert!(!terminal_invalid_grant(403, &serde_json::json!(["invalid_grant"])));
+        // Malformed or ambiguous bodies on the statuses refresh_one actually
+        // observes stay non-terminal: the grant and its marker remain held
+        // for the ambiguous-replay fence instead of any cleanup path.
+        for status in [400, 401] {
+            assert!(!terminal_invalid_grant(status, &serde_json::json!({})));
+            assert!(!terminal_invalid_grant(status, &serde_json::json!({"error": null})));
+            assert!(!terminal_invalid_grant(status, &serde_json::json!(["invalid_grant"])));
+            assert!(!terminal_invalid_grant(status,
+                &serde_json::json!({"error": "temporarily_unavailable"})));
+        }
+    }
+
+    #[test]
+    fn native_offline_scope_is_workspace_only_and_build_gated() {
+        let url = authorization_url("public-client", Resource::Acquisition, "state", "verifier");
+        let parsed = Url::parse(&url).unwrap();
+        let scope = parsed.query_pairs().find(|(key, _)| key == "scope").unwrap().1.to_string();
+        assert_eq!(scope.contains("offline_access"), crate::native_refresh::enabled());
+        let executive = authorization_url_for_audience(
+            "public-client", Resource::Executive,
+            "https://mcp.mastermind-x.com/os/executive", "state", "verifier",
+        );
+        let exec_scope = Url::parse(&executive).unwrap().query_pairs()
+            .find(|(key, _)| key == "scope").unwrap().1.to_string();
+        assert_eq!(exec_scope, EXECUTIVE_SCOPE);
+        assert!(!exec_scope.contains("offline_access"));
+    }
+
+    #[test]
+    fn restoring_is_cancelled_by_generation_changing_logout() {
+        let mut inner = Inner::new(Some("native-client"));
+        inner.restoring = true;
+        assert_eq!(inner.status().status, "signing_in");
+        inner.invalidate();
+        assert!(!inner.restoring);
+        assert_eq!(inner.status().status, "signed_out");
+    }
+
+    #[test]
+    fn unapproved_offline_scope_never_becomes_an_api_permission() {
+        let scopes = if crate::native_refresh::enabled() {
+            "offline_access mastermind.workspace.read"
+        } else { "mastermind.workspace.read" };
+        assert!(parse_token(serde_json::json!({
+            "access_token":"a-valid-synthetic-access-token","expires_in":3600,
+            "token_type":"Bearer","scope":scopes
+        }), Resource::Acquisition).is_ok());
+        assert!(parse_token(serde_json::json!({
+            "access_token":"a-valid-synthetic-access-token","expires_in":3600,
+            "token_type":"Bearer","scope":"mastermind.workspace.read mastermind.executive.intent.submit"
+        }), Resource::Acquisition).is_err());
+        assert!(parse_token(serde_json::json!({
+            "access_token":"a-valid-synthetic-access-token","expires_in":3600,
+            "token_type":"Bearer","scope":"mastermind.executive.read offline_access"
+        }), Resource::Executive).is_err());
     }
 }

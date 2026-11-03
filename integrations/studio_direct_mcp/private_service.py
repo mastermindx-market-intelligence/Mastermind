@@ -70,6 +70,20 @@ PAPER_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v12")
 PAPER_RUNTIME_SCHEMA = "mastermind.paper_runtime.v1"
 PAPER_BRIDGE_SHA256 = "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb"
 PAPER_COMMAND_TIMEOUT_MS = 70_000
+# Exact existing M1 Chris Admin legacy Paper gateway: no new account or tunnel.
+# These pins are single-use predecessor CAs; any changed installed state requires
+# a new independent review rather than choosing a nearby runtime generation.
+M1_PAPER_V20_ACCOUNT = "chrisadmin"
+M1_PAPER_V5_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v5")
+M1_PAPER_V20_RUNTIME_REL = Path(".local/share/mastermind-paper/runtime/v20")
+M1_PAPER_V5_BRIDGE_SHA256 = "d3301a1466d46ae081ded963f438c019fabf39c9bccfc8c669f16562a52bf7f6"
+M1_PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
+M1_PAPER_V20_MERGE = "e3ee36e297140539e05a0524f3446e086f40c5d1"
+M1_PAPER_V5_MANIFEST_SHA256 = "a97c67c52e334d624f9c3266177ed5a430323fa5310fbd52611942504b4e3457"
+M1_PAPER_V5_CONFIG_SHA256 = "99686765df4296917a6762e379dc34daec7d6750315377d5a043eaa04edc441f"
+M1_PAPER_V5_NONPAPER_SHA256 = "11a66a9b085108e4a645d7b24513b8a392492c17ad1abd09e060bfa978dceb02"
+M1_PAPER_V5_PLIST_SHA256 = "72ab2c78f5a06efe254a47293f36a5770fa95f90311cefd390ea37317d04f677"
+
 PAPER_APP_REL = Path("Applications/Paper.app")
 
 # The accepted immutable v20 target generation. The global selection above
@@ -215,8 +229,16 @@ FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
     "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
 }
-FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+# The merge-capable publisher's previously sealed target is a valid *incoming
+# predecessor* for the narrow rejection-diagnostics update. Do not accept
+# arbitrary live publisher bytes, widen the account allowlist, or change
+# inherited config/credential/manifest requirements.
+FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256 = {
     "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
+    "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+}
+FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256 = {
+    "git-publish.mjs": "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c",
     "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
 }
 
@@ -851,9 +873,11 @@ def _c2_lifecycle_mutex(account: str):
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS | {"chatgpt2-business"} | NATIVE_POOL_PIN_ACCOUNTS):
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS
+                       | {"chatgpt2-business", M1_PAPER_V20_ACCOUNT} | NATIVE_POOL_PIN_ACCOUNTS):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
-    subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
+    subject = ("Fabric" if account in FABRIC_BACKEND_ACCOUNTS
+               else "M1 Paper" if account == M1_PAPER_V20_ACCOUNT else "C2")
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
     _assert_dest_safe(lock_path)
     current = lock_path.parent
@@ -983,10 +1007,36 @@ def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> 
 
 
 def _verify_paper_runtime(
-    user_root: Path, *, expected_sha: str | None = None, rel: Path | None = None,
+    user_root: Path, *, expected_sha: str | None = None,
+    runtime_rel: Path | None = None, rel: Path | None = None,
 ) -> dict:
-    runtime = user_root / (PAPER_RUNTIME_REL if rel is None else rel)
-    expected_sha = PAPER_BRIDGE_SHA256 if expected_sha is None else expected_sha
+    # One owner, two reviewed callers: M1 uses runtime_rel; C2 uses rel.
+    if runtime_rel is not None and rel is not None and runtime_rel != rel:
+        raise SystemExit("Paper runtime conflicting generation selectors")
+    runtime_rel = runtime_rel or rel or PAPER_RUNTIME_REL
+    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL,
+                           M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL):
+        raise SystemExit("paper runtime generation is not an admitted target")
+    if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
+        fixed_sha = M1_PAPER_V5_BRIDGE_SHA256
+    elif runtime_rel in (M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL):
+        # These constants are the same approved bridge in source, but individual
+        # hermetic tests deliberately mock their owner's expected bridge bytes.
+        allowed_sha = (M1_PAPER_V20_BRIDGE_SHA256, PAPER_V20_BRIDGE_SHA256)
+        if expected_sha is None:
+            expected_sha = M1_PAPER_V20_BRIDGE_SHA256
+        if expected_sha not in allowed_sha:
+            raise SystemExit("Paper exact runtime bridge SHA mismatch")
+        fixed_sha = expected_sha
+    else:
+        fixed_sha = None
+    if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
+        if expected_sha not in (None, fixed_sha):
+            raise SystemExit("Paper exact runtime bridge SHA mismatch")
+        expected_sha = fixed_sha
+    elif fixed_sha is None:
+        expected_sha = PAPER_BRIDGE_SHA256 if expected_sha is None else expected_sha
+    runtime = user_root / runtime_rel
     source = runtime / "source"
     bridge = source / "bridge.py"
     receipt_path = runtime / "RUNTIME.json"
@@ -1019,7 +1069,7 @@ def _verify_paper_runtime(
     if (
         not isinstance(receipt, dict)
         or receipt.get("schema") != PAPER_RUNTIME_SCHEMA
-        or receipt.get("generation") != runtime.name
+        or receipt.get("generation") != runtime_rel.name
         or receipt.get("bridge_sha256") != expected_sha
         or receipt.get("source_sha256") != expected_sources
         or receipt.get("network_install_performed") is not False
@@ -2013,16 +2063,20 @@ def _upgrade_fleet_v10_publisher_only(
             or "commissionPublication" in old_config
             or "modernFabricProtocol" in old_config):
         raise SystemExit("fleet publisher compatibility: original scoped capabilities changed")
-    # Preserve the historical legacy/index-sync transitions. The merge update
-    # admits only its exact observed module pair under the existing closed
-    # profile. The sealed manifest, not the caller, chooses the transition.
+    # Preserve historical legacy/index-sync transition constraints. The
+    # current target admits only two *exact sealed* closed-profile predecessor
+    # pairs: original index-sync and installed merge-capable publisher. The
+    # sealed manifest, not the caller, chooses the transition.
     original_publisher = old_config.get("gitPublish")
     expected_closed = _typed_git_config(user_root, closed_repositories=True)
     patch_hashes = FLEET_V10_PUBLISHER_PATCH_SHA256
     preserve_config_bytes = False
-    if (original_publisher == expected_closed and all(
-            prior["files"].get(name) == digest
-            for name, digest in FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256.items())):
+    if (original_publisher == expected_closed and any(
+            all(prior["files"].get(name) == digest for name, digest in exact_pair.items())
+            for exact_pair in (
+                FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256,
+                FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256,
+            ))):
         patch_hashes = FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256
         preserve_config_bytes = True
     elif original_publisher == _typed_git_config(user_root):
@@ -2770,6 +2824,133 @@ def cmd_upgrade(args) -> int:
     )
 
 
+def _m1_paper_v20_upgrade(args) -> int:
+    """Exact M1 chrisadmin v5->v20 Paper-only CAS. Never restage or start a service."""
+    account = args.account
+    if account != M1_PAPER_V20_ACCOUNT or getattr(args, "m1_v20", False) is not True:
+        raise SystemExit("M1 Paper v20 requires its exact enrolled account and selector")
+    if args.expected_manifest_sha256 != M1_PAPER_V5_MANIFEST_SHA256:
+        raise SystemExit("M1 Paper v20 predecessor manifest CAS mismatch")
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    for path in (roots["config"], roots["manifest"], roots["plist"]):
+        _assert_dest_safe(path)
+    if _stable_regular_file_hash(roots["manifest"], label="M1 manifest") != M1_PAPER_V5_MANIFEST_SHA256:
+        raise SystemExit("M1 Paper v20 actual predecessor manifest changed")
+    if _stable_regular_file_hash(roots["config"], label="M1 config") != M1_PAPER_V5_CONFIG_SHA256:
+        raise SystemExit("M1 Paper v20 actual predecessor config changed")
+    if _stable_regular_file_hash(roots["plist"], label="M1 plist") != M1_PAPER_V5_PLIST_SHA256:
+        raise SystemExit("M1 Paper v20 original service identity changed")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    user_root = _user_root()
+    _verify_paper_runtime(
+        user_root, runtime_rel=M1_PAPER_V20_RUNTIME_REL,
+        expected_sha=M1_PAPER_V20_BRIDGE_SHA256,
+    )
+    _verify_paper_runtime(
+        user_root, runtime_rel=M1_PAPER_V5_RUNTIME_REL,
+        expected_sha=M1_PAPER_V5_BRIDGE_SHA256,
+    )
+    old_config_bytes = roots["config"].read_bytes()
+    old_manifest_bytes = roots["manifest"].read_bytes()
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, ValueError) as exc:
+        raise SystemExit("M1 Paper v20 original config invalid") from exc
+    if type(old_config) is not dict:
+        raise SystemExit("M1 Paper v20 original config invalid")
+    old_paper = {
+        "enabled": True,
+        "pythonPath": str(user_root / M1_PAPER_V5_RUNTIME_REL / "venv/bin/python"),
+        "bridgePath": str(user_root / M1_PAPER_V5_RUNTIME_REL / "source/bridge.py"),
+        "bridgeSha256": M1_PAPER_V5_BRIDGE_SHA256,
+        "appPath": str(user_root / PAPER_APP_REL),
+        "commandTimeoutMs": PAPER_COMMAND_TIMEOUT_MS,
+    }
+    if old_config.get("paperDesign") != old_paper:
+        raise SystemExit("M1 Paper v20 original Paper selection differs")
+    nonpaper = {key: value for key, value in old_config.items() if key != "paperDesign"}
+    nonpaper_sha = hashlib.sha256(json.dumps(
+        nonpaper, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    if nonpaper_sha != M1_PAPER_V5_NONPAPER_SHA256:
+        raise SystemExit("M1 Paper v20 unrelated gateway configuration changed")
+    target_paper = {
+        **old_paper,
+        "pythonPath": str(user_root / M1_PAPER_V20_RUNTIME_REL / "venv/bin/python"),
+        "bridgePath": str(user_root / M1_PAPER_V20_RUNTIME_REL / "source/bridge.py"),
+        "bridgeSha256": M1_PAPER_V20_BRIDGE_SHA256,
+    }
+    future_config = {**old_config, "paperDesign": target_paper}
+    config_bytes = json.dumps(future_config, indent=2, sort_keys=True).encode("utf-8")
+    future = {**prior, "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("M1 Paper v20 target manifest invalid")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    target_manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
+    receipt = {
+        "account": account,
+        "fromGeneration": "v5", "toGeneration": "v20",
+        "protectedSourceRevision": M1_PAPER_V20_MERGE,
+        "originalManifestSha256": M1_PAPER_V5_MANIFEST_SHA256,
+        "targetManifestSha256": target_manifest_sha,
+        "bridgeSha256": M1_PAPER_V20_BRIDGE_SHA256,
+        "nonPaperConfigSha256": nonpaper_sha,
+        "preservedGatewayFiles": len(prior["files"]),
+        "runtimeSealPreserved": True, "sourcePointerPreserved": True,
+        "serviceStarted": False,
+    }
+    if args.preflight_only:
+        print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
+        return 0
+
+    # The owner must bootout and drain the ORIGINAL service before one apply.
+    # Keep the existing install lifecycle lock, no second lock or runtime plane.
+    with _c2_lifecycle_mutex(account):
+        if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+            raise SystemExit("M1 Paper v20 refusing selector while original service is loaded")
+        if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+                or _stable_regular_file_hash(roots["manifest"], label="M1 manifest")
+                != M1_PAPER_V5_MANIFEST_SHA256
+                or _stable_regular_file_hash(roots["config"], label="M1 config")
+                != M1_PAPER_V5_CONFIG_SHA256):
+            raise SystemExit("M1 Paper v20 predecessor changed before selection")
+        _verify_paper_runtime(user_root, runtime_rel=M1_PAPER_V20_RUNTIME_REL)
+        committed = False
+        try:
+            _atomic_write_bytes(roots["config"], config_bytes)
+            if (_stable_regular_file_hash(roots["manifest"], label="M1 manifest")
+                    != M1_PAPER_V5_MANIFEST_SHA256
+                    or _stable_regular_file_hash(roots["config"], label="M1 config")
+                    != future["configHash"]
+                    or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
+                raise RuntimeError("M1 Paper v20 concurrent change before manifest commit")
+            _atomic_write_bytes(roots["manifest"], manifest_bytes)
+            committed = True
+            if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future
+                    or _stable_regular_file_hash(roots["manifest"], label="M1 manifest")
+                    != target_manifest_sha):
+                raise RuntimeError("M1 Paper v20 post-commit manifest verification failed")
+            _verify_paper_runtime(user_root, runtime_rel=M1_PAPER_V20_RUNTIME_REL)
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
+                raise RuntimeError("M1 Paper v20 service reappeared during commit")
+        except BaseException as exc:
+            if committed:
+                raise SystemExit("M1 Paper v20 EFFECT_UNKNOWN after manifest commit; reconcile same original owner") from exc
+            # Do not overwrite any concurrent writer on the sole original carrier.
+            restored = ((roots["config"].read_bytes() in (old_config_bytes, config_bytes))
+                        and roots["manifest"].read_bytes() == old_manifest_bytes
+                        and _lifecycle_inspect(account, label, roots, require_positive=True) is None)
+            if not restored:
+                raise SystemExit("M1 Paper v20 EFFECT_UNKNOWN before commit; reconcile original owner") from exc
+            if roots["config"].read_bytes() != old_config_bytes:
+                _atomic_write_bytes(roots["config"], old_config_bytes)
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+            raise
+    print(json.dumps({**receipt, "effect": "INSTALLED_NOT_STARTED"}, sort_keys=True))
+    return 0
+
+
 @_c2_lifecycle_serialized(readonly_preflight=True)
 def cmd_paper_runtime_upgrade(args) -> int:
     """Select a reviewed Paper runtime on an exact qualified fleet without restaging it.
@@ -2783,6 +2964,8 @@ def cmd_paper_runtime_upgrade(args) -> int:
     """
     account = args.account
     _validate_account_label(account)
+    if getattr(args, "m1_v20", False) is True:
+        return _m1_paper_v20_upgrade(args)
     expected = args.expected_manifest_sha256
     preview = args.preflight_only
     if account == C2_PAPER_ACCOUNT and expected == C2_PAPER_V12_MANIFEST_SHA256:
@@ -3572,6 +3755,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="CAS pin for the exact reviewed sealed Paper predecessor")
     paper.add_argument("--preflight-only", action="store_true",
                        help="read-only Paper selection plan; no service or installation changes")
+    paper.add_argument("--m1-v20", action="store_true",
+                       help="exact reviewed M1 chrisadmin v5-to-v20 Paper-only selector")
     paper.set_defaults(func=cmd_paper_runtime_upgrade)
 
     for name in ("stage", "upgrade"):

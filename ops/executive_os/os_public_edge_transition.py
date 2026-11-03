@@ -2,9 +2,11 @@
 
 Prepares the exact replacement of the installed public OS edge asset routes in
 two phases: a prepare config admitting both the retired and candidate asset
-paths, and a final config admitting only the candidate paths. Configs are
-transformed in memory only; staging writes plan/candidate JSON under an
-existing sealed parent. No network, SSH, subprocess, daemon, environment
+paths plus the new fixed authenticated Control Room GET/POST routes, and a final
+config admitting only candidate assets plus those same closed new routes. Both
+the incumbent and expanded observed method-specific profiles are admitted;
+mixed or extra routes fail closed. Configs are transformed only in memory;
+staging writes plan/candidate JSON under an existing sealed parent. No network, SSH, subprocess, daemon, environment
 override, ``caddy load``/reload or production write exists here.
 """
 from __future__ import annotations
@@ -19,7 +21,8 @@ import re
 import stat
 
 from ops.executive_os.os_public_edge import (
-    GET_ROUTES, HOST, POST_ROUTES, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, asset_routes,
+    GET_ROUTES, HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTE,
+    MCP_ROUTES, POST_ROUTES, TRANSITION_ROUTE_PROFILES, asset_routes,
 )
 
 PLAN_SCHEMA = "mastermind.os_public_edge_transition.plan.v1"
@@ -112,6 +115,32 @@ def _branch_handlers(handlers: object) -> list:
     raise ValueError("OS edge transition wrapper depth refused")
 
 
+_STRIPPED_REQUEST_HEADERS = ("Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                             "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP")
+
+
+def _expected_proxy(relay_port: int, upstream_host: str) -> dict:
+    return {
+        "handler": "reverse_proxy",
+        "upstreams": [{"dial": f"127.0.0.1:{relay_port}"}],
+        "headers": {"request": {
+            "delete": list(_STRIPPED_REQUEST_HEADERS),
+            "set": {"Host": [upstream_host], "X-Forwarded-For": ["127.0.0.1"],
+                    "X-Forwarded-Proto": ["https"]},
+        }},
+    }
+
+
+def _proxy_matches(observed: object, relay_port: int, upstream_host: str) -> bool:
+    if type(observed) is not dict:
+        return False
+    candidate = dict(observed)
+    # The adapter emits no transport; an explicit plain-HTTP one is the same behavior.
+    if candidate.get("transport") == {"protocol": "http"}:
+        del candidate["transport"]
+    return candidate == _expected_proxy(relay_port, upstream_host)
+
+
 def _locate(fullconfig: object, current_routes: tuple[str, ...],
             relay_port: int) -> tuple:
     _relay(relay_port)
@@ -151,23 +180,19 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
             break
         inner = nested
         path += (0, "handle", 0, "routes")
-    if len(inner) != 3:
+    # Two accepted shapes: the original GET/POST/abort and, with the public MCP
+    # entrypoint (#1656), GET/POST/MCP-metadata-GET/MCP-POST/abort in that order.
+    if len(inner) not in (3, 5):
         raise ValueError("OS edge transition inner route set refused")
-    # Only complete historical/current profiles. The list forms retain the
-    # exact /os/ overlap with index.html; no other duplicate or subset qualifies.
-    expected = (
-        sorted(set(GET_ROUTES) | set(current_routes)),
-        sorted(list(GET_ROUTES) + list(current_routes)),
-        sorted(set(LEGACY_GET_ROUTES) | set(current_routes)),
-        sorted(list(LEGACY_GET_ROUTES) + list(current_routes)),
-    )
-    get_path = None
-    post_path = None
+    # Match a complete admitted pair, not independent subsets or a cross-product.
+    # Comparing list and set forms permits only the known index.html /os/ overlap.
+    get_path = post_path = None
+    get_matches = post_matches = set()
     methods = set()
     for position, item in enumerate(inner):
         if type(item) is not dict:
             raise ValueError("OS edge transition inner route refused")
-        if position == 2:
+        if position == len(inner) - 1:
             if item != {"handle": [{"handler": "static_response", "abort": True}]}:
                 raise ValueError("OS edge transition terminal route refused")
             if item["handle"][0]["abort"] is not True:
@@ -182,41 +207,63 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
             raise ValueError("OS edge transition inner matcher refused")
         method, paths = match[0]["method"], match[0]["path"]
         if (type(method) is not list or len(method) != 1 or method[0] not in ("GET", "POST")
-                or method[0] in methods or type(paths) is not list
-                or any(type(value) is not str for value in paths)):
+                or type(paths) is not list or any(type(value) is not str for value in paths)):
             raise ValueError("OS edge transition inner matcher refused")
-        methods.add(method[0])
         handlers = _branch_handlers(item["handle"])
-        if method == ["GET"]:
-            if sorted(paths) not in expected or len(handlers) != 1:
-                raise ValueError("OS edge transition observed GET routes differ")
-            get_path = path + (position, "match", 0, "path")
+        if position >= 2:
+            # Fixed, immutable MCP branches: only the two OS path lists change.
+            if position == 2:
+                same = method == ["GET"] and paths == [MCP_METADATA_ROUTE] and len(handlers) == 1
+            else:
+                same = (method == ["POST"] and paths == list(MCP_ROUTES) and len(handlers) == 2
+                        and handlers[0] == {"handler": "request_body", "max_size": MCP_MAX_BODY}
+                        and type(handlers[0].get("max_size")) is int)
+            if not same:
+                raise ValueError("OS edge transition observed MCP route differs")
         else:
-            # Accept exactly the old sealed three-path edge OR the new
-            # read-expanded edge. The public effectful /session/send route is
-            # deliberately absent from both. No arbitrary intermediate lists.
-            if (len(paths) != len(set(paths))
-                    or sorted(paths) not in (sorted(LEGACY_POST_ROUTES), sorted(POST_ROUTES))
-                    or len(handlers) != 2
-                    or handlers[0] != {"handler": "request_body", "max_size": 64000}
-                    or type(handlers[0].get("max_size")) is not int):
-                raise ValueError("OS edge transition observed POST route differs")
-            post_path = path + (position, "match", 0, "path")
-        proxy = handlers[-1]
-        if (proxy.get("handler") != "reverse_proxy"
-                or proxy.get("upstreams") != [{"dial": f"127.0.0.1:{relay_port}"}]):
+            if method[0] in methods:
+                raise ValueError("OS edge transition inner matcher refused")
+            methods.add(method[0])
+            if method == ["GET"]:
+                get_matches = {
+                    index for index, (fixed_get, _) in enumerate(TRANSITION_ROUTE_PROFILES)
+                    if sorted(paths) in (
+                        sorted(set(fixed_get) | set(current_routes)),
+                        sorted(list(fixed_get) + list(current_routes)),
+                    )
+                }
+                if not get_matches or len(handlers) != 1:
+                    raise ValueError("OS edge transition observed GET routes differ")
+                get_path = path + (position, "match", 0, "path")
+            else:
+                post_matches = {
+                    index for index, (_, fixed_post) in enumerate(TRANSITION_ROUTE_PROFILES)
+                    if sorted(paths) == sorted(fixed_post)
+                }
+                if (len(paths) != len(set(paths)) or not post_matches
+                        or len(handlers) != 2
+                        or handlers[0] != {"handler": "request_body", "max_size": 64000}
+                        or type(handlers[0].get("max_size")) is not int):
+                    raise ValueError("OS edge transition observed POST route differs")
+                post_path = path + (position, "match", 0, "path")
+        # Every branch's proxy must be the whole rendered handler, not merely the
+        # right upstream: a changed Host, header list, rewrite or transport would
+        # alter what the gateway sees. Only /mcp presents the gateway's loopback Host.
+        upstream_host = "127.0.0.1" if position == 3 and len(inner) == 5 else HOST
+        if not _proxy_matches(handlers[-1], relay_port, upstream_host):
             raise ValueError("OS edge transition relay upstream refused")
-    if methods != {"GET", "POST"} or get_path is None or post_path is None:
-        raise ValueError("OS edge transition branch set refused")
+    if (methods != {"GET", "POST"} or get_path is None or post_path is None
+            or not get_matches.intersection(post_matches)):
+        raise ValueError("OS edge transition mixed or incomplete route profile")
     return get_path, post_path
 
 
 def _transition(*, fullconfig: object, current_manifest: object,
                 candidate_manifest: object, relay_port: int) -> dict:
     current_routes, candidate_routes, shared = _asset_pair(current_manifest, candidate_manifest)
-    get_position, post_position = _locate(fullconfig, current_routes, relay_port)
+    position, post_position = _locate(fullconfig, current_routes, relay_port)
     return {
-        "position": get_position,
+        "position": position,
         "post_position": post_position,
         "retired": list(current_routes),
         "candidate": list(candidate_routes),
@@ -228,13 +275,13 @@ def _transition(*, fullconfig: object, current_manifest: object,
 
 
 def _rebuild(fullconfig: object, position: tuple, paths: list[str],
-             post_position: tuple) -> dict:
+             *, post_position: tuple, post_paths: tuple[str, ...]) -> dict:
     rebuilt = copy.deepcopy(fullconfig)
-    for location, fixed_paths in ((position, paths), (post_position, POST_ROUTES)):
+    for field_path, values in ((position, paths), (post_position, post_paths)):
         target = rebuilt
-        for key in location[:-1]:
+        for key in field_path[:-1]:
             target = target[key]
-        target[location[-1]] = list(fixed_paths)
+        target[field_path[-1]] = list(values)
     return rebuilt
 
 
@@ -254,8 +301,10 @@ def plan(*, old_source: str, new_source: str, fullconfig: object, current_manife
             "observed_fullconfig_sha256": _sha256(fullconfig),
             "current_manifest_sha256": _sha256(current_manifest),
             "candidate_manifest_sha256": _sha256(candidate_manifest),
-            "prepare_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["prepare"], data["post_position"])),
-            "final_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["final"], data["post_position"])),
+            "prepare_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["prepare"],
+                                                    post_position=data["post_position"], post_paths=POST_ROUTES)),
+            "final_fullconfig_sha256": _sha256(_rebuild(fullconfig, data["position"], data["final"],
+                                                  post_position=data["post_position"], post_paths=POST_ROUTES)),
         },
         "get_routes": {
             "fixed": list(GET_ROUTES),
@@ -275,14 +324,16 @@ def prepare_config(*, fullconfig: object, current_manifest: object,
                    candidate_manifest: object, relay_port: int) -> dict:
     data = _transition(fullconfig=fullconfig, current_manifest=current_manifest,
                        candidate_manifest=candidate_manifest, relay_port=relay_port)
-    return _rebuild(fullconfig, data["position"], data["prepare"], data["post_position"])
+    return _rebuild(fullconfig, data["position"], data["prepare"],
+                                                    post_position=data["post_position"], post_paths=POST_ROUTES)
 
 
 def final_config(*, fullconfig: object, current_manifest: object,
                  candidate_manifest: object, relay_port: int) -> dict:
     data = _transition(fullconfig=fullconfig, current_manifest=current_manifest,
                        candidate_manifest=candidate_manifest, relay_port=relay_port)
-    return _rebuild(fullconfig, data["position"], data["final"], data["post_position"])
+    return _rebuild(fullconfig, data["position"], data["final"],
+                                                  post_position=data["post_position"], post_paths=POST_ROUTES)
 
 
 def preparation_complete(*, observed: object, prepared: object) -> dict:

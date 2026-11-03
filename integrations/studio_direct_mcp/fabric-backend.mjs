@@ -15,6 +15,8 @@ const VERSION = '0.3.0';
 const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$';
 const ID_RE = new RegExp(ID_PATTERN);
 const MAX_RESPONSE_BYTES = 65536;
+const MAX_RETAINED_BYTES = 8_388_608; // incumbent adapter's fixed result ceiling
+const MAX_PAGE_BYTES = 4096; // base64 plus duplicate MCP envelope fits the 16-KiB gateway budget
 const MAX_PACKET_BYTES = 32768;
 const MAX_CONTROLLERS = 512;
 // Internal exact-ID history, not provider/task admission: at most 2 MiB of
@@ -33,6 +35,30 @@ with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
   print(json.dumps({'capture_error':'RESULT_RESPONSE_TOO_LARGE'}));sys.exit(0)
  print(json.dumps({'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()},separators=(',',':')))
 `;
+// Capture the *incumbent adapter's* bounded response into an ephemeral local file,
+// hash and UTF-8 validate every byte, and return only one small page. No direct
+// artifact-file access, alternate result store, or caller-supplied program/path.
+const PAGE_CAPTURE_PROGRAM = `import base64,codecs,hashlib,json,subprocess,sys,tempfile
+offset=int(sys.argv[1]); length=int(sys.argv[2])
+with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+ p=subprocess.run(sys.argv[3:],stdout=out,stderr=err)
+ if p.returncode:
+  print(json.dumps({'exit_code':p.returncode},separators=(',',':')));sys.exit(0)
+ out.seek(0); full=hashlib.sha256(); decode=codecs.getincrementaldecoder('utf-8')('strict'); count=0
+ try:
+  while True:
+   part=out.read(65536)
+   if not part: break
+   count+=len(part)
+   if count>8388608:
+    print(json.dumps({'capture_error':'RESULT_RESPONSE_TOO_LARGE'}));sys.exit(0)
+   full.update(part);decode.decode(part)
+  decode.decode(b'',final=True)
+ except UnicodeDecodeError:
+  print(json.dumps({'capture_error':'RESULT_NOT_UTF8'}));sys.exit(0)
+ out.seek(offset); page=out.read(length)
+ print(json.dumps({'exit_code':0,'response_bytes':count,'response_sha256':full.hexdigest(),'offset':offset,'page_bytes':len(page),'page_sha256':hashlib.sha256(page).hexdigest(),'page_base64':base64.b64encode(page).decode('ascii')},separators=(',',':')))
+`;
 const CLASSES = ['mechanical', 'fix_build', 'review', 'census', 'audit'];
 // Fixed evidence-basis codes prevent acceptance metadata from becoming a
 // prompt or workflow-control channel. These labels do not prove the checks.
@@ -45,6 +71,8 @@ const DEFAULT_ADAPTER = resolve(homedir(), '.claude/projects/-Users-chriswong-Do
 const idSchema = { type: 'string', pattern: ID_PATTERN, minLength: 1, maxLength: 128 };
 const identity = { run_id: idSchema, root_id: idSchema };
 const maxBytes = { type: 'integer', minimum: 1024, maximum: MAX_RESPONSE_BYTES, default: 8192 };
+const pageBytes = { type:'integer', minimum:1, maximum:MAX_PAGE_BYTES, default:MAX_PAGE_BYTES };
+const pageOffset = { type:'integer', minimum:0, maximum:MAX_RETAINED_BYTES, default:0 };
 function tool(name, description, properties, required, readOnly) {
   return Object.freeze({ name, description, inputSchema: { type:'object', properties, required, additionalProperties:false },
     annotations: { title:name.replaceAll('_',' '), readOnlyHint:readOnly, destructiveHint:false,
@@ -63,7 +91,10 @@ export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
   tool('fabric_result', 'Retrieve the actual successor result only when available and the ledger root matches. Returns accept_run_id for exact reviewed-leaf acceptance. Returns a digest of the complete adapter response, not an artifact attestation. Does not accept the result.', {...identity,max_bytes:maxBytes}, ['run_id','root_id'], true),
-  tool('fabric_accept', 'Effectful acceptance of one fully reviewed worker result. Requires independently checked evidence and the exact response digest. This changes the existing ledger; never retry an uncertain acceptance.', {
+  tool('fabric_result_page', 'Read one bounded page of the observed successor result; returns accept_run_id for exact-leaf acceptance after strict root and size checks. Each page carries the SHA256 of the complete UTF-8 result. Pages must cover all bytes in order before oversized acceptance; no new worker, result store or acceptance.', {
+    ...identity, offset:pageOffset, max_bytes:pageBytes, expected_response_sha256:{type:'string',pattern:'^[0-9a-f]{64}$'},
+  }, ['run_id','root_id'], true),
+  tool('fabric_accept', 'Effectful acceptance of one fully reviewed worker result. Requires independently checked evidence and the exact response digest. Oversized results require complete contiguous page delivery for this exact leaf in the current backend generation and a fresh full digest check. This changes the existing ledger; never retry an uncertain acceptance.', {
     ...identity, by:{type:'string',enum:['deterministic','reviewer']}, expected_response_sha256:{type:'string',pattern:'^[0-9a-f]{64}$'},
     verification_summary:{type:'string',enum:ACCEPT_VERIFICATION_CODES,
       description:'One fixed evidence-basis code after actual verification. No prose or workflow instructions. Backend does not attest external checks.'}, max_bytes:maxBytes,
@@ -182,12 +213,21 @@ function checkRoot(s, args, strict=false) {
   if (s.root_id && s.root_id!==args.root_id) fail('ROOT_MISMATCH');
   if (strict && s.root_id!==args.root_id) fail('ROOT_UNVERIFIED');
 }
-function resultReady(s,args) {
+function resultIdentityReady(s,args) {
+  if(s.continuation?.controller_return==='UNCONFIRMED') fail('CONTROLLER_RETURN_UNCONFIRMED',{effective_run_id:s.run_id});
   checkRoot(s,args,true);
   if(s.state==='EFFECT_UNKNOWN') fail('EFFECT_UNKNOWN');
   if(!s.result_available) fail('RESULT_UNAVAILABLE');
   if(!Number.isSafeInteger(s.result_bytes) || s.result_bytes<0) fail('RESULT_SIZE_UNVERIFIED');
+}
+function resultReady(s,args) {
+  resultIdentityReady(s,args);
   if(s.result_bytes>(args.max_bytes??8192)) fail('RESULT_TOO_LARGE',{result_bytes:s.result_bytes,max_bytes:args.max_bytes??8192});
+}
+function pageReady(s,args,offset) {
+  resultIdentityReady(s,args);
+  if(s.result_bytes>MAX_RETAINED_BYTES) fail('RESULT_EXCEEDS_ADAPTER_LIMIT',{result_bytes:s.result_bytes,max_bytes:MAX_RETAINED_BYTES});
+  if(offset>=s.result_bytes) fail('RESULT_OFFSET_OUT_OF_RANGE',{offset,result_bytes:s.result_bytes});
 }
 
 /**
@@ -257,6 +297,9 @@ export function createFabricFacade(engine, options={}) {
   const controllers=new Map();
   const attempted=new Set(); // exact generation-local replay fence, never delete
   const reservations=new Map(); // preflight + dispatched/UNKNOWN slots, <=512
+  // Bounded generation-local read coverage, keyed by the observed effective leaf.
+  // Stores no result bytes and grants no worker, retry, or acceptance authority.
+  const deliveredPrefixes=new Map();
   let retentionCursor=0;
   function loseControllerBinding(pid) {
     const prior=controllers.get(pid);
@@ -340,8 +383,9 @@ export function createFabricFacade(engine, options={}) {
     reservations.set(key,binding);
     return binding;
   }
-  function command(argv, packet, capture=false) {
-    const prefix=capture?[cfg.python,'-c',CAPTURE_PROGRAM,cfg.python,cfg.adapterPath]:[cfg.python,cfg.adapterPath];
+  function command(argv, packet, capture=false, page=null) {
+    const prefix=page?[cfg.python,'-c',PAGE_CAPTURE_PROGRAM,String(page.offset),String(page.max_bytes),cfg.python,cfg.adapterPath]:
+      capture?[cfg.python,'-c',CAPTURE_PROGRAM,cfg.python,cfg.adapterPath]:[cfg.python,cfg.adapterPath];
     let c=[...prefix,...argv].map(shellQuote).join(' ');
     if(packet!==undefined) {
       let marker; do{marker='MMX_FABRIC_PACKET_'+randomBytes(12).toString('hex');}while(packet.split('\n').includes(marker));
@@ -349,8 +393,8 @@ export function createFabricFacade(engine, options={}) {
     } else c+='\n';
     return `printf '%s\\n' 'MMX_FABRIC_BEGIN'\n${c}mmx_fabric_rc=$?\nprintf '\\nMMX_FABRIC_EXIT=%s\\n' "$mmx_fabric_rc"`;
   }
-  async function runShort(argv, timeoutMs=10000, capture=false) {
-    const raw=await engine.callTool({name:'start_process',arguments:{command:command(argv,undefined,capture),timeout_ms:timeoutMs}});
+  async function runShort(argv, timeoutMs=10000, capture=false, page=null) {
+    const raw=await engine.callTool({name:'start_process',arguments:{command:command(argv,undefined,capture,page),timeout_ms:timeoutMs}});
     let text=engineText(raw), parsed=completedOutput(text); const pid=processPid(text);
     // Every start_process is a new process, including short observations.
     // A reused native PID cannot retain an older root's output authority.
@@ -388,7 +432,6 @@ export function createFabricFacade(engine, options={}) {
     checkRoot(s,args);observeTerminal(s,args);return s;
   }
   async function retained(args,s) {
-    if(s.continuation?.controller_return==='UNCONFIRMED') fail('CONTROLLER_RETURN_UNCONFIRMED',{effective_run_id:s.run_id});
     resultReady(s,args);
     const r=await runShort(['result',s.run_id,'--max-bytes',String(args.max_bytes??8192)],10000,true);
     if(r.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:r.exit_code});
@@ -398,6 +441,50 @@ export function createFabricFacade(engine, options={}) {
     if(decoded.decodeError) fail('RESULT_NOT_UTF8');
     if(decoded.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:decoded.exit_code});
     return {adapter_response:decoded.stdout,response_sha256:decoded.stdout_sha256,response_bytes:decoded.stdout_bytes};
+  }
+  async function retainedPage(args,s,offset,length) {
+    pageReady(s,args,offset);
+    const r=await runShort(['result',s.run_id,'--max-bytes',String(MAX_RETAINED_BYTES)],10000,false,{offset,max_bytes:length});
+    if(r.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:r.exit_code});
+    let captured;try{captured=JSON.parse(r.stdout);}catch{fail('RESULT_TRANSFER_INVALID');}
+    if(!captured || typeof captured!=='object' || Array.isArray(captured)) fail('RESULT_TRANSFER_INVALID');
+    if(Object.hasOwn(captured,'capture_error')) {
+      if(Object.keys(captured).length===1 && ['RESULT_RESPONSE_TOO_LARGE','RESULT_NOT_UTF8'].includes(captured.capture_error)) fail(captured.capture_error);
+      fail('RESULT_TRANSFER_INVALID');
+    }
+    if(!Number.isSafeInteger(captured.exit_code) || captured.exit_code < -255 || captured.exit_code > 255) fail('RESULT_TRANSFER_INVALID');
+    if(captured.exit_code!==0) {
+      if(Object.keys(captured).length!==1) fail('RESULT_TRANSFER_INVALID');
+      fail('RESULT_UNAVAILABLE',{adapter_exit_code:captured.exit_code});
+    }
+    if(Object.keys(captured).length!==7 || !Number.isSafeInteger(captured.response_bytes) || captured.response_bytes!==s.result_bytes ||
+       captured.offset!==offset || !Number.isSafeInteger(captured.page_bytes) ||
+       captured.page_bytes!==Math.min(length,s.result_bytes-offset) ||
+       typeof captured.response_sha256!=='string' || !/^[0-9a-f]{64}$/.test(captured.response_sha256) ||
+       typeof captured.page_sha256!=='string' || !/^[0-9a-f]{64}$/.test(captured.page_sha256) ||
+       typeof captured.page_base64!=='string' || captured.page_base64.length > Math.ceil(length/3)*4 ||
+       !/^[A-Za-z0-9+/]*={0,2}$/.test(captured.page_base64))
+      fail('RESULT_TRANSFER_INVALID');
+    const bytes=Buffer.from(captured.page_base64,'base64');
+    if(bytes.length!==captured.page_bytes || hash(bytes)!==captured.page_sha256 ||
+       bytes.toString('base64')!==captured.page_base64) fail('RESULT_TRANSFER_INVALID');
+    if(args.expected_response_sha256 && captured.response_sha256!==args.expected_response_sha256)
+      fail('RESULT_CHANGED',{current_response_sha256:captured.response_sha256});
+    return {response_bytes:captured.response_bytes,response_sha256:captured.response_sha256,
+      offset,page_bytes:captured.page_bytes,page_sha256:captured.page_sha256,
+      page_base64:captured.page_base64,next_offset:offset+captured.page_bytes};
+  }
+  function recordPage(args,s,page) {
+    let witness=deliveredPrefixes.get(s.run_id);
+    if(!witness || witness.root_id!==args.root_id ||
+       witness.response_bytes!==page.response_bytes || witness.response_sha256!==page.response_sha256) {
+      if(!witness && deliveredPrefixes.size>=MAX_CONTROLLERS) fail('DELIVERY_TRACKING_CAPACITY');
+      witness={root_id:args.root_id,response_bytes:page.response_bytes,
+        response_sha256:page.response_sha256,contiguous_bytes:0};
+      deliveredPrefixes.set(s.run_id,witness);
+    }
+    if(page.offset===witness.contiguous_bytes) witness.contiguous_bytes+=page.page_bytes;
+    return witness.contiguous_bytes;
   }
   return { async call(name,args={}) {
     let effectStarted=false;
@@ -505,7 +592,25 @@ export function createFabricFacade(engine, options={}) {
       }
       if(name==='fabric_accept' && s.accepted===true) fail('ALREADY_ACCEPTED');
       if(name==='fabric_accept' && s.run_id!==args.run_id) fail('ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED',{effective_run_id:s.run_id});
-      const data=await retained(args,s);
+      if(name==='fabric_result_page') {
+        const page=await retainedPage(args,s,args.offset??0,args.max_bytes??MAX_PAGE_BYTES);
+        const contiguous_bytes=recordPage(args,s,page);
+        return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,accept_run_id:s.run_id,root_id:args.root_id,...page,
+          delivered_prefix_bytes:contiguous_bytes,full_result_delivered:contiguous_bytes===page.response_bytes,
+          accepted:s.accepted===true,digest_scope:'exact complete adapter CLI response; not artifact attestation'});
+      }
+      let data;
+      if(name==='fabric_accept' && s.result_bytes>MAX_RESPONSE_BYTES) {
+        pageReady(s,args,0);
+        const witness=deliveredPrefixes.get(s.run_id);
+        if(!witness || witness.root_id!==args.root_id || witness.response_bytes!==s.result_bytes ||
+           witness.contiguous_bytes!==s.result_bytes) fail('RESULT_NOT_FULLY_DELIVERED');
+        const check=await retainedPage(args,s,0,1);
+        if(witness.response_sha256!==check.response_sha256 ||
+           args.expected_response_sha256!==check.response_sha256)
+          fail('RESULT_CHANGED',{current_response_sha256:check.response_sha256});
+        data={response_sha256:check.response_sha256};
+      } else data=await retained(args,s);
       if(name==='fabric_result') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,accept_run_id:s.run_id,root_id:args.root_id,...data,accepted:s.accepted===true,
         digest_scope:'exact complete adapter CLI response; not a cryptographic artifact attestation'});
       if(data.response_sha256!==args.expected_response_sha256) fail('RESULT_CHANGED',{current_response_sha256:data.response_sha256});
