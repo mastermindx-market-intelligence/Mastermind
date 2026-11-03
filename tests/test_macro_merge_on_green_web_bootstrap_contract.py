@@ -173,7 +173,8 @@ def _assert_review_once_automatic_release_transition(delivery: str, account: str
         "3. Verify **one genuinely independent formal GitHub APPROVED review**", 1
     )[1].split("5. Reconcile the **existing controller**", 1)[0]
     assert "**current interim non-author release fence**" in interim
-    assert "does not yet read native PR" not in interim  # review gate is described precisely
+    assert "Macro's sweeper does not yet read native PR" in interim
+    assert "eligible independent release/arming actor must verify" in interim
     assert "Macro\'s existing sweeper does not check formal" in section
     assert "retain the current" in account
     assert "independent non-author arming/release decision" in account
@@ -191,6 +192,8 @@ def test_review_once_auto_release_preserves_interim_and_machine_enforcement():
 
     for removed in (
         "**current interim non-author release fence**",
+        "Macro's sweeper does not yet read native PR",
+        "eligible independent release/arming actor must verify",
         "installed, independently qualified and read back",
         "absent, stale, revoked, self-authored and unreadable reviews",
     ):
