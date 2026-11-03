@@ -64,4 +64,27 @@ describe("native existing direct result and explicit consumption", () => {
     expect(invoke).toHaveBeenCalledWith("executive_direct_result", { arguments: selection });
     expect(invoke.mock.calls.map(([command]) => command)).not.toContain("executive_direct_consume");
   });
+  it("maps correction inspect and exact fenced request without inventing terminal consumption", async () => {
+    const f = await fixture(), signal = new AbortController().signal;
+    const inspect = { operation: "inspect", ...selection };
+    const request = { operation: "request", ...selection, fence_generation: 2, operation_key: "cancel-original" };
+    await f.transport.directNative.correction(inspect, signal);
+    f.invoke.mockResolvedValueOnce({ error: { code: "effect_unknown" } });
+    await expect(f.transport.directNative.correction(request, signal)).resolves.toEqual({ error: { code: "effect_unknown" } });
+    expect(f.invoke.mock.calls.slice(1)).toEqual([
+      ["executive_direct_correction", { arguments: inspect }],
+      ["executive_direct_correction", { arguments: request }],
+    ]);
+    expect(f.invoke.mock.calls.map(([command]) => command)).not.toContain("executive_direct_consume");
+  });
+  it("refuses correction mutation fields in inspect and invalid fences before native dispatch", async () => {
+    const f = await fixture(), signal = new AbortController().signal;
+    const request = { operation: "request", ...selection, fence_generation: 1, operation_key: "cancel-original" };
+    for (const value of [{ operation: "inspect", ...selection, fence_generation: 1 },
+      { ...request, fence_generation: 0 }, { ...request, fence_generation: 1.5 },
+      { ...request, attempt_id: null }, { ...request, operation_key: "bad/key" },
+      { ...request, operation: "consume" }, { ...request, principal_scope: "foreign" }])
+      await expect(f.transport.directNative.correction(value, signal)).rejects.toThrow("DIRECT_SELECTION_INVALID");
+    expect(f.invoke.mock.calls).toEqual([["executive_auth_status"]]);
+  });
 });

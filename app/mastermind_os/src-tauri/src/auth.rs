@@ -1355,6 +1355,30 @@ fn direct_native_arguments(arguments: Value, consume: bool) -> Result<Value> {
     }
     Ok(arguments)
 }
+fn direct_native_correction_arguments(arguments: Value) -> Result<Value> {
+    let object = arguments.as_object().ok_or("DIRECT_SELECTION_INVALID")?;
+    let request = match object.get("operation").and_then(Value::as_str) {
+        Some("inspect") => false, Some("request") => true,
+        _ => return Err("DIRECT_SELECTION_INVALID".into()),
+    };
+    let keys: &[&str] = if request {
+        &["operation", "work_ref", "job_id", "attempt_id", "fence_generation", "operation_key"]
+    } else { &["operation", "work_ref", "job_id", "attempt_id"] };
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    direct_native_arguments(serde_json::json!({"work_ref":object["work_ref"],
+        "job_id":object["job_id"], "attempt_id":object["attempt_id"]}), false)?;
+    if request && (object["attempt_id"].is_null()
+        || !object["fence_generation"].as_u64().is_some_and(|value| value > 0 && value <= MAX_SAFE_GENERATION)
+        || !object["operation_key"].as_str().is_some_and(|value| !value.is_empty() && value.len() <= 128
+            && value.as_bytes()[0].is_ascii_alphanumeric()
+            && value.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte)))) {
+        return Err("DIRECT_SELECTION_INVALID".into());
+    }
+    if executive_body(&arguments)?.len() > DIRECT_NATIVE_REQUEST_CAP { return Err("REQUEST_BOUND".into()); }
+    Ok(arguments)
+}
 async fn executive_post(app: AppHandle, path: &'static str, body: Value) -> Result<Value> {
     let state = app.state::<NativeAuth>();
     executive_post_with_dispatch(&state, path, body, reqwest::RequestBuilder::send).await
@@ -1381,6 +1405,12 @@ where
             | "/os/executive/session/reply"
             | "/os/executive/session/references"
             | "/os/executive/direct-native/result" => {}
+            "/os/executive/direct-native/correction" => {
+                direct_native_correction_arguments(body.clone())?;
+                if body.get("operation").and_then(Value::as_str) == Some("request") && !token.executive_send {
+                    return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
+                }
+            }
             "/os/executive/submit" | "/os/executive/direct-native/consume" => {
                 if !token.executive_send {
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
@@ -1395,7 +1425,8 @@ where
         )
     };
     let serialized = executive_body(&body)?;
-    let direct = matches!(path, "/os/executive/direct-native/result" | "/os/executive/direct-native/consume");
+    let direct = matches!(path, "/os/executive/direct-native/result" | "/os/executive/direct-native/consume"
+        | "/os/executive/direct-native/correction");
     if direct && serialized.len() > DIRECT_NATIVE_REQUEST_CAP { return Err("REQUEST_BOUND".into()); }
     let url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID".to_owned())?;
     if url.origin().ascii_serialization() != ORIGIN {
@@ -1486,6 +1517,13 @@ pub async fn executive_direct_result(app: AppHandle, arguments: Value) -> Result
 pub async fn executive_direct_consume(app: AppHandle, arguments: Value) -> Result<Value> {
     let arguments = direct_native_arguments(arguments, true)?;
     let result = executive_post(app.clone(), "/os/executive/direct-native/consume", arguments).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_direct_correction(app: AppHandle, arguments: Value) -> Result<Value> {
+    let arguments = direct_native_correction_arguments(arguments)?;
+    let result = executive_post(app.clone(), "/os/executive/direct-native/correction", arguments).await;
     if result.is_err() { emit(&app); }
     result
 }
@@ -2138,6 +2176,54 @@ mod tests {
                         .body(response.to_string()).unwrap().into())
                 }));
             assert_eq!(result.is_ok(), accepted);
+        }
+    }
+
+    #[test]
+    fn native_direct_correction_inspect_cannot_smuggle_a_request() {
+        let inspect = serde_json::json!({"operation":"inspect", "work_ref":"WS:H2",
+            "job_id":"JOB-1", "attempt_id":null});
+        assert!(direct_native_correction_arguments(inspect.clone()).is_ok());
+        for (field, value) in [("fence_generation", serde_json::json!(1)),
+            ("operation_key", serde_json::json!("cancel-original")), ("request", serde_json::json!(true))] {
+            let mut changed = inspect.clone(); changed[field] = value;
+            assert!(direct_native_correction_arguments(changed).is_err());
+        }
+        let request = serde_json::json!({"operation":"request", "work_ref":"WS:H2", "job_id":"JOB-1",
+            "attempt_id":"ATTEMPT-1", "fence_generation":1, "operation_key":"cancel-original"});
+        assert!(direct_native_correction_arguments(request.clone()).is_ok());
+        for (field, value) in [("fence_generation", serde_json::json!(0)),
+            ("fence_generation", serde_json::json!(1.5)), ("attempt_id", Value::Null),
+            ("operation", serde_json::json!("consume")), ("operation_key", serde_json::json!("../foreign"))] {
+            let mut changed = request.clone(); changed[field] = value;
+            assert!(direct_native_correction_arguments(changed).is_err());
+        }
+    }
+
+    #[test]
+    fn native_direct_correction_actual_scope_gate_preserves_unknown_without_retry() {
+        for operation in ["inspect", "request"] {
+            for send in [false, true] {
+                let state = native_executive_state(if send { EXECUTIVE_SCOPE } else { "mastermind.executive.read" });
+                let mut body = serde_json::json!({"operation":operation,"work_ref":"WS:H2",
+                    "job_id":"JOB-1","attempt_id":"ATTEMPT-1"});
+                if operation == "request" { body["fence_generation"] = 1.into(); body["operation_key"] = "cancel-original".into(); }
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(&state,
+                    "/os/executive/direct-native/correction", body.clone(), |builder| {
+                        calls.set(calls.get() + 1);
+                        let request = builder.build().unwrap();
+                        assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), body);
+                        async { Ok(tauri::http::Response::builder().status(202).header("Content-Type", "application/json")
+                            .body(r#"{"error":{"code":"effect_unknown"}}"#.to_owned()).unwrap().into()) }
+                    }));
+                if operation == "request" && !send {
+                    assert_eq!(calls.get(), 0); assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+                } else {
+                    assert_eq!(calls.get(), 1);
+                    assert_eq!(result.unwrap(), serde_json::json!({"error":{"code":"effect_unknown"}}));
+                }
+            }
         }
     }
 
