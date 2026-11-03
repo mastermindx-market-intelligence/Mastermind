@@ -18,6 +18,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -502,22 +503,40 @@ def _parser() -> argparse.ArgumentParser:
 
 
 
-def _git_text(source: Path, *args: str) -> tuple[int, str, str]:
+# Census is a read-only diagnostic, never an unbounded fleet-wide Git scan.
+# The host's real 100+ workspace inventory can contain high-cost untracked scans.
+CENSUS_TOTAL_SECONDS = 60.0
+CENSUS_PER_COMMAND_SECONDS = 5.0
+CENSUS_LIST_SECONDS = 10.0
+
+
+def _git_text(
+    source: Path, *args: str, timeout_seconds: float = 60.0
+) -> tuple[int, str, str]:
     env = dict(os.environ)
     env["GIT_OPTIONAL_LOCKS"] = "0"
-    completed = subprocess.run(
-        ["git", "-C", str(source), *args],
-        env=env,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(source), *args],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        # Timeout never becomes a clean checkout or a successful prune.
+        return 124, "", "WORKSPACE_GIT_TIMEOUT"
+    except (OSError, ValueError):
+        return 125, "", "WORKSPACE_GIT_UNAVAILABLE"
     return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
 
 
-def _porcelain_records(source: Path) -> list[dict[str, str]]:
-    code, output, error = _git_text(source, "worktree", "list", "--porcelain")
+def _porcelain_records(source: Path, *, timeout_seconds: float = CENSUS_LIST_SECONDS) -> list[dict[str, str]]:
+    code, output, error = _git_text(source, "worktree", "list", "--porcelain", timeout_seconds=timeout_seconds)
     if code != 0:
         raise WorkspaceError(f"worktree census failed: {error or output}")
     records: list[dict[str, str]] = []
@@ -533,9 +552,21 @@ def _porcelain_records(source: Path) -> list[dict[str, str]]:
     return records
 
 
-def _census(source: Path, root: Path) -> dict[str, object]:
+def _census(source: Path, root: Path, *, clock=None) -> dict[str, object]:
     source = source.resolve()
     root = root.resolve()
+    observe = clock if clock is not None else time.monotonic
+    deadline = observe() + CENSUS_TOTAL_SECONDS
+
+    def bounded_git(path: Path, *args: str) -> tuple[int, str, str]:
+        remaining = deadline - observe()
+        if remaining <= 0:
+            return 124, "", "WORKSPACE_CENSUS_BUDGET_EXHAUSTED"
+        return _git_text(
+            path, *args,
+            timeout_seconds=min(CENSUS_PER_COMMAND_SECONDS, remaining),
+        )
+
     entries: list[dict[str, object]] = []
     for record in _porcelain_records(source):
         path = Path(record["worktree"]).resolve()
@@ -557,7 +588,7 @@ def _census(source: Path, root: Path) -> dict[str, object]:
         elif not exists:
             state = "MISSING_LOCKED" if locked_reason else "MISSING_PRUNABLE"
         else:
-            code, status, _ = _git_text(path, "status", "--porcelain=v1", "--untracked-files=all")
+            code, status, _ = bounded_git(path, "status", "--porcelain=v1", "--untracked-files=all")
             dirty = None if code != 0 else bool(status)
             if dirty is True:
                 state = "DIRTY_PRESERVE"
@@ -567,17 +598,23 @@ def _census(source: Path, root: Path) -> dict[str, object]:
             elif managed and locked_reason:
                 state = "MANAGED_ACTIVE"
             else:
-                ancestor_code, _, _ = _git_text(
+                ancestor_code, _, _ = bounded_git(
                     source, "merge-base", "--is-ancestor", head, "refs/remotes/origin/master"
                 )
+                remote_code = 1
                 remote_head = ""
-                if branch:
-                    remote_code, remote_value, _ = _git_text(
+                if ancestor_code != 0 and branch:
+                    remote_code, remote_value, _ = bounded_git(
                         source, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}"
                     )
                     if remote_code == 0:
                         remote_head = remote_value
-                if ancestor_code == 0:
+                if ancestor_code not in {0, 1} or remote_code not in {0, 1}:
+                    # An unreadable ancestor or ref is not proof of clean
+                    # recoverability. Preserve rather than suggest pruning.
+                    dirty = None
+                    state = "UNAVAILABLE_PRESERVE"
+                elif ancestor_code == 0:
                     state = "CLEAN_RECOVERABLE"
                     recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
                 elif remote_head == head and head:

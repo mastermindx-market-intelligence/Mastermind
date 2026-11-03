@@ -108,6 +108,74 @@ def test_cli_census_reports_source_and_managed_workspace(tmp_path: Path):
     assert states[str((root / "web" / "cli-op-003").resolve())] == "MANAGED_ACTIVE"
 
 
+def test_git_census_timeout_returns_sanitized_unknown_not_dirty_or_clean(
+    storage_cli, tmp_path, monkeypatch,
+):
+    cli, _, _, _ = storage_cli
+    def slow_status(argv, **kwargs):
+        assert kwargs["timeout"] <= 60
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"], output=b"secret")
+    monkeypatch.setattr(cli.subprocess, "run", slow_status)
+    code, output, error = cli._git_text(tmp_path, "status", "--porcelain=v1")
+    assert code == 124 and output == ""
+    assert error == "WORKSPACE_GIT_TIMEOUT"
+    assert "secret" not in error
+
+
+def test_census_global_deadline_preserves_unobserved_worktrees(storage_cli, tmp_path, monkeypatch):
+    cli, root, _, _ = storage_cli
+    source = tmp_path / "source"
+    one, two = root / "web" / "one", root / "web" / "two"
+    for path in (source, one, two):
+        path.mkdir(parents=True)
+    records = [
+        {"worktree": str(source), "HEAD": "a"*40},
+        {"worktree": str(one), "HEAD": "b"*40, "locked": "mastermind-linked-worktree:v1"},
+        {"worktree": str(two), "HEAD": "c"*40, "locked": "mastermind-linked-worktree:v1"},
+    ]
+    monkeypatch.setattr(cli, "_porcelain_records", lambda *_args, **_kw: records)
+    called = []
+    def git_status(path, *args, **kwargs):
+        called.append((path, args, kwargs))
+        assert kwargs["timeout_seconds"] > 0
+        return 0, " M important.txt", ""
+    monkeypatch.setattr(cli, "_git_text", git_status)
+    ticks = iter((0.0, 0.0, 61.0))
+    result = cli._census(source, root, clock=lambda: next(ticks))
+    indexed = {entry["path"]: entry for entry in result["worktrees"]}
+    assert indexed[str(one)]["state"] == "DIRTY_PRESERVE"
+    assert indexed[str(one)]["dirty"] is True
+    assert indexed[str(two)]["state"] == "UNAVAILABLE_PRESERVE"
+    assert indexed[str(two)]["dirty"] is None
+    assert len(called) == 1, "exhausted census budget must not spawn another git status"
+
+
+def test_census_unknown_ancestry_does_not_claim_clean_recoverability(
+    storage_cli, tmp_path, monkeypatch,
+):
+    cli, root, _, _ = storage_cli
+    source, child = tmp_path / "source", root / "web" / "one"
+    for path in (source, child):
+        path.mkdir(parents=True)
+    monkeypatch.setattr(cli, "_porcelain_records", lambda *_args, **_kw: [
+        {"worktree": str(source), "HEAD": "a"*40},
+        {"worktree": str(child), "HEAD": "b"*40, "branch": "refs/heads/isolated"},
+    ])
+    def checked_git(_path, *args, **kwargs):
+        assert 0 < kwargs["timeout_seconds"] <= cli.CENSUS_PER_COMMAND_SECONDS
+        if args[0] == "status":
+            return 0, "", ""
+        if args[0] == "merge-base":
+            return 124, "", "WORKSPACE_GIT_TIMEOUT"
+        return 1, "", ""
+    monkeypatch.setattr(cli, "_git_text", checked_git)
+    result = cli._census(source, root, clock=lambda: 0.0)
+    entry = result["worktrees"][1]
+    assert entry["dirty"] is None
+    assert entry["state"] == "UNAVAILABLE_PRESERVE"
+    assert entry["recoverability"] == "UNKNOWN"
+
+
 @pytest.mark.parametrize("enrolled", [False, True])
 @pytest.mark.parametrize("path_component", [
     "plain",
