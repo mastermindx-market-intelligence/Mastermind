@@ -171,6 +171,12 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
     if type(cycles) is not int or cycles < 0:
         raise InvalidSnapshot("support cycles must be a nonnegative integer")
 
+    # A started worker is relevant only when bound to a specific waiting lane.
+    # Canonical blocker/owner evidence is validated above; the caller still
+    # authenticates that readback from the actual existing owner.
+    waiting_lanes = {
+        row["id"]: row for row in items if row["state"] == "WAITING_EXTERNAL"
+    }
     # Started/running durable execution needs an exact original owner readback
     # and a real return/wake path. A request ID, delivery or watcher alone is
     # not proof of execution, and cannot legalize a checkpoint summary.
@@ -188,7 +194,26 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
                 or wait_executor.get("owner_observed") is not True
             ):
                 raise InvalidSnapshot("started executor lacks original owner/return proof")
-            durable_wait = True
+            lane_id = wait_executor.get("lane_id")
+            if lane_id is not None and not _public_effect_ref(lane_id):
+                raise InvalidSnapshot("wait executor lane ID is invalid")
+            waiting_lane = waiting_lanes.get(lane_id)
+            if waiting_lane is not None:
+                # Usually the blocker ref identifies the awaited run itself.
+                # If it is a separate receipt, the lane must carry a bound
+                # executor ref and its own source-attributed binding evidence.
+                related_ref = waiting_lane.get("executor_ref")
+                if related_ref is None:
+                    related_ref = waiting_lane["blocker_ref"]
+                elif (
+                    not _public_effect_ref(related_ref)
+                    or not _public_effect_ref(waiting_lane.get("executor_binding_ref"))
+                    or waiting_lane.get("executor_binding_observed") is not True
+                ):
+                    raise InvalidSnapshot("waiting lane executor binding is unverified")
+                durable_wait = wait_executor["ref"] == related_ref
+            # A missing, finished, foreign or unrelated waiting lane is not a
+            # durable executor for this mission, regardless of worker START.
         elif wait_executor.get("ref") is not None and not _public_effect_ref(wait_executor.get("ref")):
             raise InvalidSnapshot("invalid wait executor reference")
 
