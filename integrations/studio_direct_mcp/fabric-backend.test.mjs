@@ -510,6 +510,68 @@ test('strict manual request cannot dispatch if native pin flag is unavailable',a
  assert.equal(e.calls.length,1);assert.match(e.calls[0].arguments.command,/'request' '--help'/);
 });
 
+
+test('native C2 manual preview refusal explains the policy hold without a worker or replay',async()=>{
+  const native='NONE reason=bounded_complexity_requires_escalation\n';
+  const previewFailed=finished(JSON.stringify({exit_code:75,stdout_base64:Buffer.from(native).toString('base64'),
+    stdout_bytes:Buffer.byteLength(native),stdout_sha256:digest(native)}));
+  const e=engine([manualHelp,capturedJSON(absent),previewFailed]);
+  const req={...manualPinned,pool:'glm',model:'auto'};
+  const out=unwrap(await facade(e).call('fabric_request',req));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'bounded_complexity_requires_escalation');
+  assert.equal(out.required_field,'escalation_reason');
+  assert.equal(out.retry_allowed,false);
+  assert.equal(out.execution_absence_proven,false);
+  assert.equal(e.calls.length,3);
+  assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+  assert.equal(e.calls.filter(x=>x.arguments?.command?.includes("'request' '--id'")).length,0);
+});
+
+test('native manual preview reports a bounded no-host reason without inventing escalation instructions',async()=>{
+  const native='NONE reason=no_eligible_host\n';
+  const refused=finished(JSON.stringify({exit_code:75,stdout_base64:Buffer.from(native).toString('base64'),
+    stdout_bytes:Buffer.byteLength(native),stdout_sha256:digest(native)}));
+  const e=engine([manualHelp,capturedJSON(absent),refused]);
+  const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'no_eligible_host');
+  assert.equal(Object.hasOwn(out,'required_field'),false);
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3);
+});
+
+test('untrusted or ambiguous native preview stdout remains unavailable with no raw reason echo',async()=>{
+  for(const native of ['NONE reason=bad;do_something\n','NONE reason=bounded_complexity_requires_escalation\nANOTHER LINE',
+    '{"state":"PREVIEW_ONLY"}','NONE reason=bad-with-dash\n']) {
+    const refused=finished(JSON.stringify({exit_code:75,stdout_base64:Buffer.from(native).toString('base64'),
+      stdout_bytes:Buffer.byteLength(native),stdout_sha256:digest(native)}));
+    const e=engine([manualHelp,capturedJSON(absent),refused]);
+    const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+    assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+    assert.equal(Object.hasOwn(out,'native_reason'),false);
+    assert.equal(out.retry_allowed,false);
+    assert.equal(e.calls.length,3);
+  }
+});
+
+test('legitimate C2 GLM escalation remains a strict original-route request with no substitution',async()=>{
+  const justification='Independent security review of Browser Link native host bridge';
+  const req={...manualPinned,pool:'glm',model:'glm-5.3',escalation_reason:justification};
+  const preview={...manualPreview,pool:'glm',model:'glm-5.3',mode:'glm',host:'ubuntu0'};
+  const e=engine([manualHelp,capturedJSON(absent),capturedJSON(preview),pending()]);
+  const out=unwrap(await continuingFacade(e).call('fabric_request',req));
+  assert.equal(out.delivery,'CONTROLLER_CREATED');
+  assert.equal(out.worker_start_proven,false);
+  assert.equal(out.requested_pool,'glm');
+  assert.equal(out.requested_model,'glm-5.3');
+  assert.equal(e.calls.length,4);
+  assert.match(e.calls[2].arguments.command,/'--escalation-reason'/);
+  assert.match(e.calls[3].arguments.command,/'--strict-manual-pin'/);
+  assert.match(e.calls[3].arguments.command,/'--escalation-reason'/);
+  assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+
 test('native preview failure or mismatch refuses before controller creation',async()=>{
  for(const value of [
    'not-json',JSON.stringify({...manualPreview,model:'grok-4.6'}),
