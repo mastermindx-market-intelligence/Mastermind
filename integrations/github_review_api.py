@@ -18,6 +18,7 @@ from control_plane.github_review_intent_ingress import (
     ExternalGitHubSourceFacts,
     PublishedReviewFacts,
     PublicationEffectUnknown,
+    OpenPullRequestPage,
 )
 
 _API = "https://api.github.com"
@@ -189,6 +190,26 @@ class GitHubReviewAPI:
             base_repository=_repo_name(base_repo.get("full_name")),
             base_sha=base_sha, title=title[:16000], body=(body or "")[:16000],
         )
+
+    def list_open_pull_request_numbers(
+        self, *, repository: str, page: int, per_page: int,
+    ) -> OpenPullRequestPage:
+        """Fixed scoped GET, bounded numeric pagination; never follow Link URLs."""
+        route = self._check(repository)
+        if (type(page) is not int or not 1 <= page <= 10000
+                or type(per_page) is not int or not 1 <= per_page <= 100):
+            raise GitHubReviewAPIUnavailable("GITHUB_PULL_PAGE_INVALID")
+        rows = self._request(
+            "GET", f"{route}/pulls?state=open&sort=created&direction=asc&per_page={per_page}&page={page}",
+        )
+        if type(rows) is not list or len(rows) > per_page:
+            raise GitHubReviewAPIUnavailable("GITHUB_PULL_PAGE_INVALID")
+        numbers = tuple(_number(_obj(row).get("number")) for row in rows)
+        if len(set(numbers)) != len(numbers):
+            raise GitHubReviewAPIUnavailable("GITHUB_PULL_PAGE_INVALID")
+        # A full final page intentionally costs one more bounded GET to prove
+        # exhaustion; response Link headers never select an authenticated URL.
+        return OpenPullRequestPage(numbers=numbers, has_more=len(numbers) == per_page)
 
     def read_external_source(
         self, *, repository: str, pull_number: int

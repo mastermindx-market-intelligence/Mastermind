@@ -11,7 +11,7 @@ import time
 import httpx
 
 from control_plane.executive_runtime import Runtime, JobPayload
-from control_plane.github_review_intent import sign_webhook_body
+from control_plane.github_review_intent import ReviewIntentDecision, sign_webhook_body
 from control_plane.github_review_intent_ingress import PublishState
 from control_plane.github_review_socket_owner import ExecutiveGitHubReviewSocketOwner
 from integrations.github_review_host_composition import compose_github_review_host
@@ -180,6 +180,9 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert status == 200 and info["status"] == "ALREADY_ADMITTED"
             assert len(runtime.jobs.list_jobs()) == 1
             job = runtime.jobs.list_jobs()[0]
+            admitted_decision = ReviewIntentDecision.from_admitted_dict(
+                runtime.store.get_event_by_command_id(decision().command_id).payload["provenance"]["decision"]
+            )
             assert job.status.value == "QUEUED"
             assert job.attempt_count == 0
             assert job.requested_authorities == ["READ"]
@@ -191,7 +194,7 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             # The public socket process must durably return the Slack thread
             # to the existing Executive ledger, not just post a parent.
             assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
-                decision=decision(), job_id=job.job_id,
+                decision=admitted_decision, job_id=job.job_id,
             ) == "1792699000.000001"
             before = len(requests)
             status, response = await deliver(
@@ -234,7 +237,7 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
                 ),
             )
             first = await asyncio.to_thread(
-                return_owner.deliver, decision=decision(), job_id=job.job_id,
+                return_owner.deliver, decision=admitted_decision, job_id=job.job_id,
             )
             assert first.publication.state is PublishState.PUBLISHED
             assert first.publication.review_id == "789"
@@ -245,7 +248,7 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert replies[0][0:2] == ("C0CAUK8P8S3", "1792699000.000001")
             assert "789" in replies[0][2] and REPO not in replies[0][2]
             second = await asyncio.to_thread(
-                return_owner.deliver, decision=decision(), job_id=job.job_id,
+                return_owner.deliver, decision=admitted_decision, job_id=job.job_id,
             )
             assert second.publication.state is PublishState.ALREADY_PUBLISHED
             assert len(history["posts"]) == len(replies) == 1

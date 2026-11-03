@@ -109,6 +109,7 @@ class ReviewHostSettings:
     enabled: bool = False
     publication_enabled: bool = False
     allow_lifecycle_review: bool = False
+    allow_repository_policy_review: bool = False
 
     # --- exact ingress surface ---------------------------------------------
     expected_host: str = "127.0.0.1"
@@ -138,7 +139,7 @@ class ReviewHostSettings:
     job_review_required: bool = False
 
     def __post_init__(self) -> None:
-        for name in ("enabled", "publication_enabled", "require_https", "job_review_required", "allow_lifecycle_review"):
+        for name in ("enabled", "publication_enabled", "require_https", "job_review_required", "allow_lifecycle_review", "allow_repository_policy_review"):
             value = getattr(self, name)
             if not isinstance(value, bool):
                 raise ReviewHostConfigError(f"{name} must be a boolean")
@@ -258,6 +259,7 @@ class ReviewHostSettings:
                 allow_static_actor_authority=False,
                 allow_explicit_rerun=False,
                 allow_lifecycle_review=self.allow_lifecycle_review,
+                allow_repository_policy_review=self.allow_repository_policy_review,
             )
         except ReviewIntentError as exc:
             raise ReviewHostConfigError(f"host settings do not project a policy: {exc}") from exc
@@ -270,6 +272,7 @@ class ReviewHostSettings:
             "enabled": self.enabled,
             "publication_enabled": self.publication_enabled,
             "allow_lifecycle_review": self.allow_lifecycle_review,
+            "allow_repository_policy_review": self.allow_repository_policy_review,
             "expected_host": self.expected_host,
             "delivery_path": self.delivery_path,
             "require_https": self.require_https,

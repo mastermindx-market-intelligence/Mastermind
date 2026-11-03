@@ -2,7 +2,7 @@
 
 Task tree: [2026-11-02 GitHub review coverage](plans/2026-11-02-github-review-coverage.md).
 Integration and release evidence: [Mastermind #1740](https://github.com/mastermindx-market-intelligence/Mastermind/issues/1740).
-Source baseline: `7e87f225a4ed03e3b89169f7b7c9052c6a6eac9c`.
+Original source baseline: `7e87f225a4ed03e3b89169f7b7c9052c6a6eac9c`; resumed procedure pin: `ea4f893103a1c0354f28843241848cae91336bd7`. R8 extends the same PR #1977 and source operation.
 This is source behavior and a rollout specification. It is not an installed-service or production review receipt.
 
 ## Existing owners and intended outcome
@@ -11,19 +11,21 @@ Reuse the incumbent GitHub decision/ingress, Executive Runtime admission and res
 
 The intended rollout covers Mastermind, macro, and mastermind-terminal. Enrollment of each repository is a separate observed configuration fact. Every open PR should ultimately have a visible disposition; every eligible current head should receive one independent review. Required CI, formal GitHub approval, merge ownership, and production verification remain separately observable.
 
-The current source extension provides automatic eligibility for selected lifecycle deliveries. It does not complete unattended bot-sender or existing-PR coverage, formal automated approval, service installation, or live delivery proof.
+The source now provides lifecycle admission, an explicit standing repository-policy mode for bot-sender events, and bounded authenticated reconciliation of already-open PRs. The installed consumer, repository enrollment, qualified worker capacity, formal approval, and live delivery proof remain release dependencies.
 
 ## Implemented lifecycle decision behavior
 
-`ReviewHostSettings.allow_lifecycle_review` and `ReviewIntentPolicy.allow_lifecycle_review` default to `False` and require actual booleans. The host projects the flag into the existing decision policy and includes it in its secret-free configuration receipt. Existing receiver and publication gates remain in effect.
+`ReviewHostSettings.allow_lifecycle_review` and `ReviewIntentPolicy.allow_lifecycle_review` default to `False` and require actual booleans. The separate `allow_repository_policy_review` flag also defaults to `False`. The host projects both into the existing decision policy and includes them in its secret-free configuration receipt. Existing receiver and publication gates remain in effect.
 
 | Delivery or condition | Behavior |
 | --- | --- |
 | `pull_request/opened`, `synchronize`, `reopened`, `ready_for_review`; lifecycle flag off | `AUTOMATIC_REVIEW_DISABLED` before authenticated GitHub reads or ledger inspection |
 | Same actions; flag on; allowed human sender with freshly verified sufficient permission; open, same-repository, nondraft PR | Existing admission path, using authoritative current PR facts |
-| Lifecycle event with no current permission | `ACTOR_PERMISSION_NOT_REVERIFIED`; static actor fallback cannot authorize this channel |
+| Lifecycle event in human-actor mode with no current permission | `ACTOR_PERMISSION_NOT_REVERIFIED`; static actor fallback cannot authorize this channel |
 | Revoked or insufficient permission | `ACTOR_PERMISSION_INSUFFICIENT` |
-| Unlisted human or observed GitHub bot sender | `ACTOR_NOT_AUTHORIZED`; bot identity is retained, never converted to a human |
+| Unlisted human or observed GitHub bot sender in human-actor mode | `ACTOR_NOT_AUTHORIZED`; bot identity is retained, never converted to a human |
+| Lifecycle event with both automatic flags enabled and an enrolled repository/install | Standing host policy authorizes the review; the actual signed sender remains provenance; authenticated current PR facts are still required |
+| Authenticated existing-owner reconciliation with both flags enabled | List bounded open PR pages, re-read each PR, and use the same canonical admission identity without fabricating a webhook or human actor |
 | Draft lifecycle event | `PULL_REQUEST_DRAFT`; existing authorized label/comment advisory remains available |
 | Closed PR, fork, wrong signed PR identity, invalid signature, wrong repository or installation | Existing refusal; no review admission |
 | Lifecycle and manual events for the same repository/PR/head | Same deterministic command identity; existing Runtime deduplicates |
@@ -31,7 +33,17 @@ The current source extension provides automatic eligibility for selected lifecyc
 
 The HTTP receiver retains `status: REFUSED` and adds the closed decision `reason` when available. A refusal is not a retry instruction or permission to select another identity.
 
-A bot-authored PR can receive an authorized human-triggered review. A bot-sender lifecycle event does not acquire human collaborator authority. The implementation intentionally keeps observation and authorization distinct.
+A bot-authored PR can receive an authorized human-triggered review or an automatic review under enrolled repository policy. A bot sender never acquires human collaborator authority. Manual label/comment/review-request channels retain their existing human and current-permission requirements.
+
+### Canonical admission and transport
+
+New `JOB_CREATED.provenance` records preserve the complete validated original decision and the SHA-256 of the normalized job objective. Exact replay still checks the original payload. A distinct authorized trigger for the same repository/PR/head joins that immutable admission and returns its original decision and job ID. Three concurrent origins are arbitrated by the existing unique command index; no additional queue or table is introduced.
+
+The strict v1 decision remains available for manual/human-authorized deliveries. The v2 decision carries the actual automatic origin, installation ID, and digest of the applied host policy. Authenticated reconciliation additionally carries the existing owner's real execution reference, with no sender or delivery ID. The receiving socket owner must independently bind the same policy and, for reconciliation, an execution-reference guard. Payload text and a digest-shaped string alone confer no authority.
+
+Legacy jobs lacking the full recorded decision return `ADMITTED_DECISION_UNAVAILABLE` with their existing job identity. They are not redispatched or attributed to a later trigger, and they do not prevent a scan from processing other PRs. Slack and publication joins reject substitution of a later decision for a recorded original.
+
+Job objectives contain exact source references and bounded untrusted excerpts. Their JSON-escaped text is capped at 3,000 bytes so long descriptions and non-ASCII content fit the existing 8,192-byte frame and 4,000-byte objective fences. All original text is validated before excerpting. The worker must retrieve the complete diff and affected files at the frozen head/base and the complete PR context; excerpts cannot establish coverage. Missing full source requires `BLOCKED_BY_CURRENT_SOURCE`.
 
 ## Independence and publication
 
@@ -80,21 +92,23 @@ The Dot must independently inspect the candidate and reach its own conclusion. A
 
 Use the original thread for subsequent findings and coordination. An unacknowledged mention, Slack reaction, display name, or membership proves neither reviewer execution nor GitHub approval. A pending, uncertain, or refused Fabric review must be reconciled on its original operation; do not reroute it through a Dot.
 
-## Capabilities still required for all-PR coverage
+## Repository-policy and backlog source contracts
 
 ### Standing repository-policy authority
 
-Unattended bot-sender coverage needs a separately reviewed standing grant in the existing authority system. Bind exact repository ID/name, App installation and current access, protected policy revision and approving authority, permitted review action, target branches/events, draft/fork policy, resource limits, enablement, and revocation. The policy authorizes admission; the webhook sender remains provenance. Preserve existing manual-request authority checks.
+Unattended bot-sender coverage uses the existing host's `allow_repository_policy_review` setting together with lifecycle enablement, exact repository/install allowlisting, and the current installation-scoped GitHub reader. The digest identifies the applied nonsecret policy; it is not a separate grant record. The configured Executive admission/source guards remain authoritative and run before admission and at commit. Receiver and socket policy must match. Turning off the relevant host gate prevents new admissions.
 
-The source extension does not introduce this grant. An installation ID or valid webhook signature alone does not authorize paid review work.
+Installation and administrator enrollment remain separate observed facts. An installation ID, a webhook signature, or a caller-provided digest alone does not authorize paid review work. No additional policy database or grant registry is introduced.
 
 ### Existing PRs and missed events
 
-Extend the existing authorized reconciliation owner to enumerate open PRs using authenticated current facts and compare their heads with existing admission records. Reuse repository/PR/head identity. Do not manufacture signed webhook deliveries, add another scheduler, or create a second ledger.
+`GitHubReviewReceiver.reconcile_open_pull_requests` is an internal callable for the existing authenticated operation owner. It has no HTTP route or timer. The default pass reads at most two pages of 25 PRs; all invocations are limited to 100 PRs. Listing uses a fixed repository-scoped GET and bounded numeric pagination, never arbitrary Link-header destinations. Each listed PR is re-read immediately before decision.
 
-The reconciled input needs an explicit reviewed contract and policy provenance. A policy change must not silently duplicate the ordinary review for a head; use the existing authorized rerun contract when another review is required.
+The receipt records outcomes, pages observed, completeness and the next page hint. A capacity bound or read failure is explicitly incomplete. A potentially uncertain admission stops the pass with its exact command identity for original-owner reconciliation. A known legacy admission is recorded as existing/incomplete and the pass continues. GitHub pagination is not a stable snapshot; the existing owner retains continuity and starts a later pass at page one to catch list movement. There is no claim of an installed recurring PR scan.
 
-### Forks and formal automated approval
+Policy revisions do not change the ordinary repository/PR/head identity. A new head creates a new review; another review of the same head requires the existing separately authorized rerun contract. Forks and automatic drafts retain explicit refusal/defer behavior.
+
+## Remaining fork and formal-approval scope
 
 Forks remain refused under the present source policy. Future coverage requires a reviewed, bounded source-read path that does not expose privileged credentials to fork code. Report forks as observed but uncovered until that policy is installed and proven.
 
@@ -108,14 +122,31 @@ The existing service/App administrator must then:
 
 1. Verify the lawful source release and installed consumer, preserving the incumbent listener and Runtime.
 2. Verify the intended GitHub App/installation, repository access, exact subscriptions, HTTPS webhook route, and approved signing/private-key custody.
-3. Enroll receiver/publication/lifecycle policy deliberately, beginning with one repository; do not infer enrollment from source defaults.
+3. Enroll receiver/publication/lifecycle policy and the appropriate human or standing-policy mode deliberately, beginning with one repository; bind the internal reconciliation owner separately.
 4. Verify model admission, independent execution provenance, and eligible Dot/GitHub identities.
 5. Prove a real delivery causes one canonical Job, actual independent Fabric START and retained result, exact-head findings publication, and the matching original Slack-thread reply.
 6. Prove a genuine independent formal GitHub review when required.
 7. Prove duplicate delivery, changed head, revoked permission/grant, absent reviewer, capacity limits, malformed signature, and uncertain publication behavior.
-8. After the separately reviewed standing-policy and reconciliation capabilities exist, prove both bot-sender and already-open PR coverage before claiming all-PR automation.
+8. Validate the R8 policy and reconciliation source on the installed consumer, then prove both bot-sender and already-open PR coverage before claiming all-PR automation.
 9. Enroll the remaining repositories only after readback of the preceding gates.
 
 Preserve required CI, approval counts, code owners, stale-review handling, and merge ownership. Rollback disables new automatic admissions through the existing policy gate while reconciling in-flight operations normally.
 
 Completion requires real GitHub -> existing Executive/Fabric -> GitHub -> Slack evidence. Unit tests, a queued Job, a provider name, and merged source are not substitutes for that proof.
+
+## Current route qualification observation — 2026-11-03 UTC
+
+The original Fabric gateway was correlated by generation to the installed `fabric-c3-570f6f34` owner on m2studio. Its installed backend hash matched its manifest, and the native generation's state/lanes aliases resolve to the original owner. An exact artifact census for the older `github-review-coverage-20261102-c2-review01` found no retained request, refusal, launch, process or result record. Historical execution absence remains unproven; the missing evidence is the original frontend/controller receipt. No replacement review was launched.
+
+A distinct read-only GLM preflight for the new R8 qualification scope (`github-review-coverage-20261102-c2-r8-qualify01`) returned native exit 75 with no eligible remote mode. One diagnostic repeat retained the same 250-byte stderr digest, `ff7b0899fc04cd41a0889f7865aace03f77e084b63d89c2964594cc5dd6b3bd5`; it submitted no provider work. Registry/telemetry read at 02:17:26Z showed:
+
+| Native GLM host | Observed admission obstacle |
+| --- | --- |
+| m1 | One active lane meets the effective ceiling of one; GLM is also qualification-only |
+| ubuntu0 | 66.5 GB free, below the 75 GB floor including staging reserve |
+| ubuntu1 | 69.2 GB free, below the 75 GB floor |
+| ubuntu2 | Lane occupancy unknown under a reconciliation hold, despite 279 GB free |
+| ubuntu3 | 3.8 GB free, below the 75 GB floor |
+| ubuntu4 | GLM and other supported modes are qualification-only despite sufficient disk space |
+
+These are dated eligibility observations, not a permanent capacity assessment or a platform safety-denial receipt. No actual served model/harness or independent reviewer START was established. Restore capacity through the existing host owners and requalify a route; do not lower thresholds, clear holds, or substitute Codex/Work merely to make a request succeed.

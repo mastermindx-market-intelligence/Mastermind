@@ -36,6 +36,7 @@ def compose_github_review_host(
     webhook_secret_source: DeliverySecretSource,
     runtime: Runtime | None = None,
     admission_guard: Callable[[], None] | None = None,
+    reconciliation_guard: Callable[[str], None] | None = None,
     socket_client: ExecutiveReviewSocketClient | None = None,
     relay_client: SlackWebApiDialogueClient,
     publisher_login: str,
@@ -105,4 +106,5 @@ def compose_github_review_host(
         actors=github,
         fabric=admission,
         visibility=visibility,
+        reconciliation_guard=reconciliation_guard,
     )

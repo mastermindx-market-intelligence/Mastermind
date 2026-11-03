@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from control_plane.github_review_intent import ReviewIntentRefusal, ReviewIntentSignatureError
@@ -23,6 +23,8 @@ from control_plane.github_review_intent_ingress import (
     ReviewIngressUnavailable,
     VisibilityPort,
     admit_review_intent,
+    reconcile_open_pull_requests,
+    ReviewReconciliationOutcome,
 )
 from control_plane.github_review_host_config import (
     DeliverySecretSource,
@@ -48,6 +50,7 @@ class GitHubReviewReceiver:
         actors: ActorPermissionPort,
         fabric: FabricJobAdmissionPort,
         visibility: VisibilityPort | None = None,
+        reconciliation_guard: Callable[[str], None] | None = None,
     ) -> None:
         if not isinstance(settings, ReviewHostSettings):
             raise TypeError("expected enrolled review host settings")
@@ -57,6 +60,29 @@ class GitHubReviewReceiver:
         self._actors = actors
         self._fabric = fabric
         self._visibility = visibility
+        if reconciliation_guard is not None and not callable(reconciliation_guard):
+            raise TypeError("reconciliation requires an incumbent owner guard")
+        self._reconciliation_guard = reconciliation_guard
+
+    def reconcile_open_pull_requests(
+        self, *, owner_execution_ref: str, start_page: int = 1,
+        max_pages: int = 2, per_page: int = 25,
+    ) -> ReviewReconciliationOutcome:
+        """Internal existing-owner call only; this is not an HTTP route or timer."""
+        if not self._settings.enabled:
+            raise ReviewIngressUnavailable("REVIEW_RECONCILIATION_DISABLED")
+        if self._reconciliation_guard is None:
+            raise ReviewIngressUnavailable("REVIEW_RECONCILIATION_OWNER_UNARMED")
+        if len(self._settings.repositories) != 1:
+            raise ReviewIngressUnavailable("REVIEW_RECONCILIATION_REPOSITORY_UNBOUND")
+        return reconcile_open_pull_requests(
+            policy=self._settings.review_policy(),
+            repository=next(iter(self._settings.repositories)),
+            installation_id=self._settings.installation_id,
+            owner_execution_ref=owner_execution_ref, authorize=self._reconciliation_guard,
+            pull_requests=self._pulls, fabric=self._fabric, visibility=self._visibility,
+            start_page=start_page, max_pages=max_pages, per_page=per_page,
+        )
 
     @staticmethod
     async def _reply(
@@ -224,6 +250,8 @@ class GitHubReviewReceiver:
         if state == "ADMITTED":
             await self._reply(send, 202, "ADMITTED", job_id=outcome.job_id)
         elif state == "ALREADY_ADMITTED":
-            await self._reply(send, 200, "ALREADY_ADMITTED")
+            await self._reply(send, 200, "ALREADY_ADMITTED", job_id=outcome.job_id,
+                reason=(outcome.decision.refusal if outcome.decision.refusal is
+                        ReviewIntentRefusal.ADMITTED_DECISION_UNAVAILABLE else None))
         else:
             await self._reply(send, 200, "REFUSED", reason=outcome.decision.refusal)

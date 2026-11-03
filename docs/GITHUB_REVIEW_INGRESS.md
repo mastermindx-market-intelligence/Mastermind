@@ -96,15 +96,18 @@ caller route selected.
 
 ## Explicit and automatic intent channels
 
-All channels require an **allowlisted human login**. Authority beyond the allowlist comes
-from exactly one of two places, and from nothing else.
+Manual channels and the default human-authorized lifecycle mode require an
+**allowlisted human login**. Their authority beyond the allowlist comes from
+the channel-specific enforcement or the externally reverified permission below.
 
 | Channel | Delivery | GitHub's own enforcement | Fresh read required? |
 | --- | --- | --- | --- |
 | Configured reviewer requested | `pull_request` / `review_requested` | Refused unless the actor holds triage/write at delivery time | No, unless `require_current_permission_for_all_channels` |
 | Intent label | `pull_request` / `labeled` | Same | Same |
 | Slash command comment | `issue_comment` / `created` | **None** — writable by anyone | **Yes** |
-| Opt-in automatic lifecycle review | `pull_request` / `opened`, `synchronize`, `reopened`, `ready_for_review` | No collaborator authority follows from these actions | **Always**, even if static actor fallback is enabled |
+| Opt-in human-authorized lifecycle review | `pull_request` / `opened`, `synchronize`, `reopened`, `ready_for_review` | No collaborator authority follows from these actions | **Always**, even if static actor fallback is enabled |
+| Standing repository-policy lifecycle review | Same four lifecycle actions; both automatic flags enabled | Host-enrolled repository/install policy; signed sender is provenance | Fresh installation-scoped PR facts; no claim of human collaborator permission |
+| Existing-owner open-PR reconciliation | Internal authenticated callable, no webhook | Host-enrolled policy plus the existing owner's execution-reference guard | Bounded scoped list and a fresh read of each PR |
 
 `issue_comment` is the open channel: GitHub's reported `author_association`
 travels in the payload and is a **claim**, not authority. With no externally
@@ -118,19 +121,36 @@ The pure policy has explicit, default-off switches:
 `allow_static_actor_authority` permits the existing explicit-channel fallback
 when no read is bound, while `require_current_permission_for_all_channels`
 extends the strict posture to the two channels GitHub polices itself. The host
-requires fresh permission on every channel. Lifecycle review never accepts the
-static fallback, regardless of policy flags.
+requires fresh permission for every human-authorized channel. Human-authorized
+lifecycle review never accepts the static fallback.
 
 Automatic lifecycle review also requires `allow_lifecycle_review=True`; its
 default is `False` in both the host settings and decision policy. Disabled
 lifecycle deliveries are refused before authenticated reads or ledger inspection.
 Automatic drafts defer; existing authorized label/comment draft advisory remains.
-GitHub bot senders are observed without acquiring human authority. All channels
-share the same repository/PR/head admission identity. The receiver reports the
-closed refusal `reason` alongside its existing `REFUSED` status.
+The separate `allow_repository_policy_review` setting is also default-off. It
+permits bot-sender lifecycle events under the enrolled repository policy while
+preserving the real sender. A strict v2 decision binds the actual origin,
+installation and host policy digest. The Executive socket independently checks
+its own configured policy; reconciliation additionally requires its own bound
+owner guard and carries no fabricated sender or webhook delivery.
+
+All channels share the same repository/PR/head admission identity. New creation
+events preserve the complete original decision and normalized objective digest.
+An exact replay retains payload checks; a distinct trigger joins the first
+winner and returns its original job/decision through the socket. Legacy records
+that lack a full decision remain existing with `ADMITTED_DECISION_UNAVAILABLE`;
+they are not redispatched and do not stop unrelated PRs in a bounded scan.
+
+The receiver reports closed refusal reasons. Its reconciliation callable is
+internal, with at most 100 PRs per invocation, fixed scoped numeric pagination,
+fresh PR reads, and an explicit partial-result receipt. It introduces no timer.
+Job objectives validate full original text, then carry bounded excerpts and
+exact source references inside the existing socket limits. Full-source
+retrieval remains required before a reviewer may claim coverage.
 
 See [automatic coverage and rollout](GITHUB_REVIEW_AUTOMATIC_COVERAGE.md) for
-model assessment, Slack Dot review, the remaining bot/backlog authority gaps,
+model assessment, Slack Dot review, repository-policy and backlog contracts,
 and the separate host/App and formal-approval gates.
 
 The command matches the **first non-empty comment line exactly**. A comment that
