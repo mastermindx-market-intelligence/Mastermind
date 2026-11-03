@@ -62,7 +62,7 @@ CONTEXT + RECOVERY
 
 FINALIZATION + DURABILITY
 32. Classify: PROVEN_OUTCOME | EXACT_HUMAN_GATE | EFFECT_UNKNOWN | ALL_SCOPED_LANES_BLOCKED | DURABLE_EXECUTION_RUNNING | CHECKPOINTED_CONTINUATION | MORE_WORK_EXISTS. MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states.
-33. MORE_WORK_EXISTS: continue while useful healthy work remains. CHECKPOINTED_CONTINUATION needs a real boundary; DURABLE_EXECUTION_RUNNING needs proven START/RUNNING and lawful return.
+33. MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains.
 34. CHECKPOINTED_CONTINUATION requires a justified continuity/surface boundary, durable state, and exact next action; task/phase/checkpoint completion alone never qualifies.
 35. Green CI is not acceptance. Require production-path results/browser proof when owed; no claimed tests/writes/publication/deployment without receipts.
 36. Provenance supports, not replaces, synthesis/workflow. Separate research, forecasts, and trade authority; model summaries/sentiment never originate or size trades without accepted validation.
