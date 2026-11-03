@@ -71,7 +71,7 @@ def test_release_procedure_requires_review_holds_ci_and_real_sweeper_readback():
         "APPROVED",
         "Fabric",
         "Only when release is **actually authorized**",
-        "gh pr edit <number> --add-label merge-on-green",
+        "gh pr edit <number> --repo mastermindx-market-intelligence/macro --add-label merge-on-green",
         "failure-marker pass",
         "global CI workload cap",
         "native `gh pr merge --auto`",
@@ -101,3 +101,54 @@ def test_account_entrypoint_routes_macros_and_other_repos_differently():
         "Project setting",
     ):
         assert token in section
+
+
+
+def _macro_release_commands(section: str) -> list[str]:
+    """Only operative PR/sweeper commands, not the explicitly forbidden --auto."""
+    import re
+
+    return re.findall(
+        r"`(gh (?:pr (?:edit|view)|run (?:list|view)) [^`]+)`",
+        section,
+    )
+
+
+def _assert_explicit_macro_repo_binding(section: str) -> None:
+    commands = _macro_release_commands(section)
+    assert len(commands) == 4, "every listed operative command must be checked"
+    for command in commands:
+        words = command.split()
+        assert words.count("--repo") == 1, (
+            f"no implicit repository or duplicate repository selection: {command}"
+        )
+        assert words[words.index("--repo") + 1] == (
+            "mastermindx-market-intelligence/macro"
+        ), f"command would target wrong GitHub repository: {command}"
+
+
+def test_cross_repository_macro_gh_commands_are_explicitly_bound():
+    section = DELIVERY.read_text(encoding="utf-8").split(
+        "## Macro release: `merge-on-green` is opt-in, not native auto-merge", 1
+    )[1].split("## Review-readiness liveness", 1)[0]
+    _assert_explicit_macro_repo_binding(section)
+
+    import pytest
+
+    for defective in (
+        section.replace(
+            "gh pr edit <number> --repo mastermindx-market-intelligence/macro",
+            "gh pr edit <number>",
+        ),
+        section.replace(
+            "gh run view <run-id> --repo mastermindx-market-intelligence/macro",
+            "gh run view <run-id> --repo mastermindx-market-intelligence/Mastermind",
+        ),
+        section.replace(
+            "gh pr view <number> --repo mastermindx-market-intelligence/macro",
+            "gh pr view <number> --repo mastermindx-market-intelligence/Mastermind",
+        ),
+    ):
+        assert defective != section, "negative mutation must change a command"
+        with pytest.raises(AssertionError):
+            _assert_explicit_macro_repo_binding(defective)
