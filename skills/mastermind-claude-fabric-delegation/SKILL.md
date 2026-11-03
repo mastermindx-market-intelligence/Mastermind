@@ -11,6 +11,16 @@ This is an invocation guide, **not** a new tool, root, entitlement, account, que
 
 Before requesting a distinct PR/source review, load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the verified protected Mastermind source. It describes the existing Fabric-versus-separately-qualified Dot decision and exact PR/author/worker/formal-GitHub identity fences. Never reassign a denied, active or uncertain same-scope review through another provider, carrier or Slack Dot; a technical verdict does not submit a formal non-author GitHub approval. This source pointer is not proof of live Claude skill installation or a fresh authenticated session.
 
+## Review refusal is an action-local gate, not a mission stop
+
+After a reviewer is unavailable or Fabric returns `REQUEST_REFUSED_BEFORE_LAUNCH` / `retry_allowed=false`, record the exact original run, root, parent, carrier, PR/head, failure stage, observed reason, and effect/worker-START evidence. A no-replay flag binds **that attempt**; it does not establish a provider-wide outage, a permanent prohibition on every future review, or successful review. Nor does it grant permission to issue a new request.
+
+Classify **actual** safety/permission/qualification denial separately from technical schema/transport/capacity failure and unknown effects. Respect an explicit denial of the same intended effect even when pre-dispatch `EFFECT_NONE` is proven; do not rename/reparent/re-home it or change accounts/providers/tools to get it through. `EFFECT_UNKNOWN` stays on its original carrier until canonical readback reconciles it. A technical pre-launch refusal still requires an actual root/admission/lease diagnosis by the existing owner; fixing host capacity alone never proves original-root eligibility or authorizes a replacement.
+
+If a named human reviewer is occupied, inspect the existing exact-head GitHub review request and the current source guide's actual non-author eligibility and any exact-seat restriction. A pending request is not proof of START or exclusive lifetime custody. Do not duplicate, impersonate, silently transfer or self-approve; a different authorized reviewer may act only through the existing GitHub/review owner after identity, permission, review/effect and current-head gates are satisfied. A terminal technical attempt may be followed by a genuinely distinct authorized operation only when the canonical admission owner permits it, not because its run ID was changed.
+
+**Continue the parent mission** through disjoint authorized source/tests/CI diagnostics or an actual permission/placement repair. Name the concrete owner action and missing receipt for the held review. Stop the entire session only when the active execution law proves no safe useful lane remains; a failed reviewer request or unavailable seat alone does not prove that.
+
 ## First 30 seconds: choose the existing entrypoint
 
 1. From the **current assigned session's trusted binding**, identify the original `root`, your **actual immediate parent** (the current Claude coordinator's admitted run/session binding) and a new unique `run_id` for *one* child. Preserve the original root on every descendant. A filesystem path, model label, project name or prior conversation is **not** an identity. If root/parent cannot be verified, return `FABRIC_IDENTITY_UNVERIFIED` without dispatch.
