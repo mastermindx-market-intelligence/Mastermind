@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='9463889cb7146504095ecf2dee774c28d8ddda5cb50515f2afcb0b7b15cf8563'
+    assert hashlib.sha256(current_raw).hexdigest()=='e9ae16306674c49574cdb481e40c83c8b1973300d1b8c793a9bbabbf7801ab77'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
@@ -949,7 +949,9 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed',
         'tests/test_paid_provider_entry_linux.py']
     assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}'
-    assert full[0][1].get('if') is None
+    # Only full pytest may reuse the exact prior proof; both H1 gates above
+    # still execute on shard two before the proof/pytest steps.
+    assert full[0][1].get('if') == "${{ steps.previous_ci.outputs.reuse != 'true' }}"
 
 
 def test_annotation_boundary_itself_never_renders_unapproved_fields():

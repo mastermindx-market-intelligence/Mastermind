@@ -153,3 +153,22 @@ preimage-member case, native AUTO source contract and terminal-poll inventory
 closure case. Diagnostic log:
 `/Users/chriswong/.local/share/mastermind-test-tmp/ubuntu4-review-repair-validation.log`.
 A separate immutable-head follow-up review is still required before release.
+
+
+## Current protected-base integration qualification (2026-11-03)
+
+This source composition combines PR head e45ffe8718bfc319e973d9e7fb7821b19ab1b87d with protected 52309cca7ff283fe1c0e23023c3d74d30768491a, using actual common ancestor d47cdb5652096e038a8bfb24e431ebe48ccf7ff2. The historical receipts above retain their original scope.
+
+The production merge retains both Ubuntu4 sparse-host eligibility and protected #2009 request-level required-mode filtering. The canonical build_review_stage.py is unchanged. Its complete 102-member output was generated outside the source workspace; every staged byte, size, manifest member and inventory member was verified.
+
+- Combined fabric_task.py: 86702 bytes; SHA256 c159d2b716b9674ca1bc97357a1eac073c42080d9d4f8ffdbe0e7c5464545236.
+- Generated native manifest SHA256: e9ae16306674c49574cdb481e40c83c8b1973300d1b8c793a9bbabbf7801ab77.
+- Generated source inventory SHA256: a6461d3c0d30cb36ce6c97acc7b41995f2259af4c2f88f762570d6ec4ac0ea01.
+
+The existing affected qualification groups produced 164 testcase records: 132 passed and 32 failed, with zero errors/skips. The JUnit suite counter reports 192 executions; the 132/32 result counts above are taken directly from its 164 testcase records. All 97 cases outside the existing sparse-donor security suite passed, including 13 CPU/sparse admission cases, 8 Ubuntu4 request cases, 30 current controller cases, all 32 successor-transition cases and the current pin/closure consumers.
+
+The sparse-donor security suite produced 35 passing and 32 failing cases. A separate run of that same 67-case suite against unchanged protected 52309cca7ff283fe1c0e23023c3d74d30768491a reproduced exactly the same case identities, statuses and failure messages. A read-only traceback observer captured Git return code 0 plus its 440-byte sparseIndexExpanded diagnostic on stderr (SHA256 dcaa675fe4faaf0983c40cb570a0a08d2816cb63386fceef6ae99faa63f030ad). The unchanged strict reader refuses that diagnostic before those fixtures reach their intended cases. This is baseline host behavior, not a green security-suite result. No reader guard, Git configuration, fixture, deadline or expected refusal was relaxed.
+
+The controller remains c7b078c07f4403d6263462650990fceffeb99ca9dd3359b147e8fddb2eeaf678. Its existing historical fixture inverse remains eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0. The historical fixture and its two-member difference assertion are unchanged; the earlier unrelated-controller-byte negative remains prior evidence, not a newly rerun case.
+
+The original managed operation workspace remains at 5bab743fc8f99e2e2af42619a6975a5778f4ef62 with tracked files clean; existing untracked/ignored content was retained. All generated qualification data is outside that source workspace. This is source qualification only: no native generation was selected or installed, no host/provider was activated and no denied worker operation was replayed. The integration is published as draft pending fresh hosted qualification. Independent review of the eventual current head and ordinary protected merge gates remain required.

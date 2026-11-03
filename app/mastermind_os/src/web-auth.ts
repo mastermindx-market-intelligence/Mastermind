@@ -1006,7 +1006,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     });
   }
   async function executivePost(
-    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume",
+    route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "session/references" | "direct-native/result" | "direct-native/consume" | "direct-native/correction",
     arguments_: unknown,
     signal: AbortSignal,
   ) {
@@ -1014,7 +1014,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
     // READ-only may observe but must never originate a SEND or Event ACK effect.
-    if ((route === "submit" || route === "session/send" || route === "direct-native/consume") &&
+    if ((route === "submit" || route === "session/send" || route === "direct-native/consume" || (route === "direct-native/correction" && (arguments_ as Record<string,unknown>)?.operation === "request")) &&
       token.executiveSend !== true)
       throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
@@ -1024,7 +1024,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const abort = () => controller.abort();
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
-    const timer = later(abort, READ_TIMEOUT_MS);
+    // This one effect may first prepare its source (at most 120s), then owns
+    // the existing finite 300s foreground call. Reads and direct-native H2
+    // keep their incumbent deadline. No timeout can authorize a retry.
+    const foregroundResearch = route === "submit" && arguments_ !== null &&
+      typeof arguments_ === "object" && !Array.isArray(arguments_) &&
+      Reflect.get(arguments_, "execution_profile") === "research_only";
+    const timer = later(abort, foregroundResearch ? 430_000 : READ_TIMEOUT_MS);
     executiveRequests.add(controller);
     const current = () => !controller.signal.aborted && ticket === executiveGeneration &&
       tokens.executive === token && valid("executive");
@@ -1078,6 +1084,7 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       submit: (arguments_, signal) => executivePost("submit", arguments_, signal),
       status: (arguments_, signal) => executivePost("status", { intent_id: arguments_.intent_id }, signal),
       directNative: {
+        correction: (request,signal)=>executivePost('direct-native/correction',request,signal),
         read: (selection, signal) => {
           const normalized=normalizeDirectSelection(selection);
           if(!normalized)return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
