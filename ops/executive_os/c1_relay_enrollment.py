@@ -731,6 +731,44 @@ def _install_release_root() -> Path:
         raise C1EnrollmentError("C1_ENROLLMENT_HOST_REFUSED") from None
 
 
+def _optional_control_socket_entries(
+    control: Mapping[str, object], *, control_gid: int
+) -> tuple[tuple[str, dict[str, object] | None], ...]:
+    """Derive the two installer-optional Control launchd socket bindings.
+
+    The installer composes the Control daemon's launchd sockets from the
+    reviewed core plus at most two canonical optional bindings produced by the
+    same closed factories it uses. This re-derives both entries from the one
+    already-parsed Control document: the Company worker identity stays the
+    canonical existing service principal contract recorded in that document,
+    never a caller-selected peer, and the workspace entry is bound to the
+    actual existing Control group. An absent or disabled optional derives
+    ``None`` and must then be absent from the installed daemon. Every factory
+    refusal propagates, which the caller maps to a host refusal.
+    """
+
+    # Lazy by design: the phase1c owner pulls in the control_plane service
+    # owners, and loading it at module import would widen this helper's import
+    # surface for every C1 caller.
+    from scripts.executive_os_phase1c import (
+        company_consultation_launchd_entry,
+        workspace_control_room_launchd_entry,
+    )
+
+    return (
+        (
+            "CompanyConsultation",
+            company_consultation_launchd_entry(control),
+        ),
+        (
+            "WorkspaceControlRoom",
+            workspace_control_room_launchd_entry(
+                control, control_gid=control_gid
+            ),
+        ),
+    )
+
+
 def _relay_substrate() -> str:
     """Validate every release-agnostic C1 host precondition.
 
@@ -807,8 +845,44 @@ def _relay_substrate() -> str:
             raise ValueError
         control_plist = plistlib.loads(CONTROL_PLIST.read_bytes())
         sockets = control_plist["Sockets"]
-        if set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"}:
+        # The installer composes the Control daemon's launchd sockets from the
+        # reviewed core plus at most the two canonical optional bindings it
+        # derives from this same already-parsed Control document. Re-derive
+        # both entries here; any other name, any spurious or missing optional,
+        # and any drift between an installed stanza and its factory output
+        # refuses. The comparison is type-exact, so a permissive ``1`` can
+        # never stand in for ``True``.
+        optional_entries = _optional_control_socket_entries(
+            control, control_gid=control_gid
+        )
+        expected_names = {
+            "Operator",
+            "CeoIngress",
+            "DialogueObservation",
+            *(name for name, entry in optional_entries if entry is not None),
+        }
+        if set(sockets) != {"Operator", "CeoIngress", "DialogueObservation"} and set(
+            sockets
+        ) != expected_names:
             raise ValueError
+        for name, entry in optional_entries:
+            if entry is None:
+                if name in sockets:
+                    raise ValueError
+                continue
+            observed = sockets.get(name)
+            if type(observed) is not dict or set(observed) != set(entry):
+                raise ValueError
+            # An optional binding is canonical only for the actual existing
+            # Control identity, never for a document-selected stand-in.
+            if entry["SockPathOwner"] != control_uid:
+                raise ValueError
+            for key, value in entry.items():
+                if (
+                    type(observed[key]) is not type(value)
+                    or observed[key] != value
+                ):
+                    raise ValueError
         if (
             sockets["Operator"].get("SockPathOwner") != control_uid
             or sockets["Operator"].get("SockPathGroup") != ops_gid

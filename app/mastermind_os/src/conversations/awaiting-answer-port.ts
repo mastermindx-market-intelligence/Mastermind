@@ -18,7 +18,7 @@ export interface AwaitingAnswerDependencies<TAnswer> {
   readonly onAdmission?: (pointer: OperationPointer) => void;
   /** Accepts this detached answer into the current local view only. This is
    * never a canonical ACK or a parent_consumed transition. */
-  readonly onAnswer: (pointer: OperationPointer, answer: TAnswer) => boolean;
+  readonly onAnswer: (pointer: OperationPointer, answer: TAnswer) => boolean | Promise<boolean>;
 }
 
 function snapshot(pointer: OperationPointer): OperationPointer {
@@ -87,7 +87,10 @@ export function createAwaitingAnswerPort<TAnswer>(deps: AwaitingAnswerDependenci
           !exactReceipt(pointer, observed.receipt) || observed.receipt.disposition !== "accepted" ||
           observed.answer === null || observed.answer === undefined) return unknown(pointer);
       try {
-        if (deps.onAnswer(pointer, observed.answer) !== true) return unknown(pointer);
+        // An owner may acknowledge only after its actual view commits; a
+        // scheduled state update is not a rendered/retained answer. Keep the
+        // original hint through this await and recheck owner afterwards.
+        if (await deps.onAnswer(pointer, observed.answer) !== true) return unknown(pointer);
       } catch { return unknown(pointer); }
       // A local callback may itself cause selection/auth invalidation.
       if (!owns(captured, pointer, signal)) return unknown(pointer);

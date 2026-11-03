@@ -1951,6 +1951,64 @@ def _worktree_record(
     return None
 
 
+
+def _registered_linked_worktree_status_record(
+    source: Path, destination: Path, *, env: dict[str, str]
+) -> dict[str, str] | None:
+    """Verify ONE locked linked-worktree registration without enumerating the fleet.
+
+    Status reads run on hosts with thousands of other worktrees; repository-wide
+    `git worktree list --porcelain` may exceed the publisher's bounded precheck.
+    Git's own .git -> common/worktrees/<id> -> gitdir reciprocal registration and
+    the exact managed lock are sufficient for this *read-only* status lookup.
+    The regular release, removal and acquisition paths keep the existing fleet
+    enumeration and safety rules. No worktree registry is created here.
+    """
+    try:
+        dot_git = destination / ".git"
+        if dot_git.is_symlink() or not dot_git.is_file():
+            return None
+        if dot_git.stat().st_size > 4096:
+            return None
+        pointer = dot_git.read_text(encoding="utf-8")
+        if not pointer.startswith("gitdir: ") or pointer.count("\n") > 1:
+            return None
+        value = pointer[len("gitdir: "):].strip()
+        if not value or any(c in value for c in "\r\n\x00"):
+            return None
+        raw_admin = Path(value)
+        if not raw_admin.is_absolute():
+            raw_admin = destination / raw_admin
+        if raw_admin.is_symlink():
+            return None
+
+        common = _common_git_dir(source, env=env)
+        common_worktrees = common / "worktrees"
+        if common_worktrees.is_symlink():
+            return None
+        owner_dir = common_worktrees.resolve(strict=True)
+        admin = raw_admin.resolve(strict=True)
+        if admin.parent != owner_dir or not admin.is_dir():
+            return None
+
+        backref, lock = admin / "gitdir", admin / "locked"
+        if (backref.is_symlink() or lock.is_symlink()
+                or not backref.is_file() or not lock.is_file()
+                or backref.stat().st_size > 4096 or lock.stat().st_size > 2048):
+            return None
+        back = backref.read_text(encoding="utf-8").strip()
+        if (not Path(back).is_absolute() or any(c in back for c in "\r\n\x00")
+                or Path(back).resolve(strict=True) != dot_git.resolve(strict=True)):
+            return None
+        reason = lock.read_text(encoding="utf-8").strip()
+        if ("\n" in reason or "\r" in reason
+                or not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX + " ")):
+            return None
+        return {"worktree": str(destination.resolve()), "locked": reason}
+    except (OSError, UnicodeError, RuntimeError, ValueError):
+        return None
+
+
 def _run_status(
     argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]
 ) -> tuple[int, str, str]:
@@ -1993,8 +2051,13 @@ def _require_linked_identity(
     *,
     env: dict[str, str],
     expected_lock_reason: str | None = None,
+    status_direct_registration: bool = False,
 ) -> tuple[dict[str, str], str, str, Path]:
-    record = _worktree_record(source, destination, env=env)
+    record = (
+        _registered_linked_worktree_status_record(source, destination, env=env)
+        if status_direct_registration
+        else _worktree_record(source, destination, env=env)
+    )
     if record is None:
         raise WorkspaceError("workspace is not registered to the source repository")
     reason = record.get("locked", "")
@@ -2202,6 +2265,7 @@ def inspect_linked_worktree(
     workspace_path: str | Path,
     *,
     expected_operation_id: str | None = None,
+    status_direct_registration: bool = False,
 ) -> LinkedWorkspaceReleaseReceipt:
     """Classify whether a managed linked worktree can be removed without data loss."""
 
@@ -2215,7 +2279,10 @@ def inspect_linked_worktree(
     if destination == root:
         raise WorkspaceError("managed workspace may not be the workspace root itself")
     env = _git_env(root / ".control-home")
-    record, head, branch, _ = _require_linked_identity(source, destination, env=env)
+    record, head, branch, _ = _require_linked_identity(
+        source, destination, env=env,
+        status_direct_registration=status_direct_registration,
+    )
     lock_reason = record.get("locked", "")
     if expected_operation_id is not None:
         observed_operation = _lock_value(lock_reason, "operation")

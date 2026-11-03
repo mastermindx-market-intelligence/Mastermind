@@ -563,3 +563,522 @@ def test_reset_cost_basis_entry_point_is_removed() -> None:
 
     assert not hasattr(paper_account, "reset_cost_basis_to_market")
     assert "reset_cost_basis_to_market" not in inspect.getsource(paper_account)
+
+
+# ===========================================================================
+# W3-E14 — book paths fail closed; load/save never create a book directory.
+# Everything below exercises the PRODUCTION behaviour: the conftest book-dir
+# bootstrap shim is OFF for tests marked ``strict_book_dirs``.
+# ===========================================================================
+
+import ast
+import errno
+import os
+import shutil
+import tempfile
+import uuid
+from typing import Callable
+
+_BOOKS = "books"
+
+
+@pytest.fixture(params=[None, "autonomous"], ids=["flagship", "autonomous"])
+def strict_book(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[str | None, Path]:
+    """The ``book`` fixture's isolation, plus an EXISTING book dir, for the strict
+    (shim-free) E14 fail-closed tests."""
+    from portfolio import paper_account, registry
+
+    base = tmp_path / _BOOKS / (request.param or "flagship")
+    base.mkdir(parents=True, exist_ok=True)
+    if request.param is None:
+        monkeypatch.setattr(paper_account, "_DATA", base)
+        monkeypatch.setattr(paper_account, "_ACCOUNT_PATH", base / "account.json")
+        monkeypatch.setattr(paper_account, "_FILLS_PATH", base / "fills.jsonl")
+        monkeypatch.setattr(paper_account, "_NAV_PATH", base / "nav_history.jsonl")
+        return None, base
+    original_data_dir = registry.data_dir
+
+    def _data_dir(portfolio_id: str | None = None) -> Path:
+        if portfolio_id == request.param:
+            return base
+        return original_data_dir(portfolio_id)
+
+    monkeypatch.setattr(registry, "data_dir", _data_dir)
+    return request.param, base
+
+
+def _tree(root: Path) -> dict[str, object]:
+    """Snapshot every path under root: file bytes, ("link", target) for a symlink, "dir"."""
+    out: dict[str, object] = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dp = Path(dirpath)
+        for name in dirnames + filenames:
+            p = dp / name
+            rel = p.relative_to(root).as_posix()
+            if os.path.islink(p):
+                out[rel] = ("link", os.readlink(p))
+            elif p.is_dir():
+                out[rel] = "dir"
+            else:
+                out[rel] = p.read_bytes()
+    return out
+
+
+def _deny_stat_for(monkeypatch: pytest.MonkeyPatch, target: Path, exc: OSError) -> None:
+    """Patch os.stat AND os.lstat so either raises ``exc`` for exactly one path and calls
+    through for every other path."""
+    target_str = os.fsdecode(os.fspath(target))
+    real_stat = os.stat
+    real_lstat = os.lstat
+
+    def _deny_stat(path: object, *args: object, **kwargs: object) -> object:
+        if os.fsdecode(os.fspath(path)) == target_str:
+            raise exc
+        return real_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    def _deny_lstat(path: object, *args: object, **kwargs: object) -> object:
+        if os.fsdecode(os.fspath(path)) == target_str:
+            raise exc
+        return real_lstat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(os, "stat", _deny_stat)
+    monkeypatch.setattr(os, "lstat", _deny_lstat)
+
+
+def _fresh_tripwire(*_args: object, **_kwargs: object) -> object:
+    raise AssertionError("fresh-book fallback reached")
+
+
+def _write_tripwire(*_args: object, **_kwargs: object) -> object:
+    raise AssertionError("write reached")
+
+
+def _arm(monkeypatch: pytest.MonkeyPatch, module: object,
+         names: tuple[str, ...]) -> None:
+    for name in names:
+        monkeypatch.setattr(module, name, _fresh_tripwire if name == "_fresh_account"
+                            else _write_tripwire)
+
+
+def _assert_path_invalid(
+    excinfo: pytest.ExceptionInfo,
+    problem: str,
+) -> None:
+    record = excinfo.value.record
+    assert record is not None
+    assert record["problems"] == [problem]
+    assert record["status"] == "path_invalid"
+    assert record["quarantine_file"] is None
+    assert record["source_sha256"] is None
+    assert record["recoverable"] is True
+
+
+_STAT_FAILURE_CASES: dict[str, OSError] = {
+    "eacces": PermissionError(errno.EACCES, "Permission denied"),
+    "enotdir": NotADirectoryError(errno.ENOTDIR, "Not a directory"),
+    "eloop": OSError(errno.ELOOP, "Too many levels of symbolic links"),
+}
+
+
+# ---------------------------------------------------------------------------
+# A1. book dir renamed (unmount simulation) — nothing is created or written
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_renamed_book_dir_fails_closed_everywhere_and_creates_nothing(
+    strict_book: tuple[str | None, Path],
+    run_events_recorder: list[dict],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from portfolio import paper_account
+
+    portfolio_id, base = strict_book
+    _write_book(base, json.dumps(_live_book(), indent=2).encode("utf-8"))
+    (base / ".paper_transaction.lock").write_bytes(b"")
+    base.rename(base.with_name(base.name + ".unmounted"))
+    books_root = tmp_path / _BOOKS
+    snapshot = _tree(books_root)
+    fresh = paper_account._fresh_account()
+    _arm(monkeypatch, paper_account, ("_fresh_account", "_atomic_write_bytes", "_append_jsonl"))
+
+    loaders: list[Callable[[], object]] = [
+        lambda: paper_account._load_account_file(portfolio_id),
+        lambda: paper_account._load_account(portfolio_id),
+        lambda: paper_account._save_account(fresh, portfolio_id),
+        lambda: paper_account._save_pending([], portfolio_id),
+    ]
+    for call in loaders:
+        with pytest.raises(paper_account.AccountStateInvalid) as excinfo:
+            call()
+        _assert_path_invalid(excinfo, "data_dir_missing")
+    with pytest.raises(paper_account.AccountStateInvalid) as lock_excinfo:
+        with paper_account._paper_transaction_lock(portfolio_id):
+            pass
+    _assert_path_invalid(lock_excinfo, "data_dir_missing")
+
+    status = paper_account.account_file_status(portfolio_id)
+    assert status == {"status": "INVALID", "problems": ["data_dir_missing"],
+                      "sha256": None, "size": None,
+                      "path": str(base / "account.json")}
+
+    assert not base.exists()
+    assert _tree(books_root) == snapshot
+    assert run_events_recorder, "the path-invalid raise must emit its HARD_STOP event"
+    for event in run_events_recorder:
+        assert event["kind"] == "account_state_invalid"
+        assert event["severity"] == "HARD_STOP"
+        assert event["extra"]["quarantine_status"] == "path_invalid"
+
+
+# ---------------------------------------------------------------------------
+# A2. dangling symlink — invalid, never a new book, and nothing is written
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_dangling_symlink_fails_closed_and_writes_nothing(
+    strict_book: tuple[str | None, Path],
+    run_events_recorder: list[dict],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from portfolio import paper_account
+
+    portfolio_id, base = strict_book
+    account_path = base / "account.json"
+    try:
+        os.symlink("missing-target.json", account_path)
+    except OSError as exc:  # pragma: no cover — filesystems without symlink support
+        pytest.skip(f"symlinks unavailable: {exc!r}")
+    (base / ".paper_transaction.lock").write_bytes(b"")
+    snapshot = _tree(base)
+    fresh = paper_account._fresh_account()
+    _arm(monkeypatch, paper_account, ("_fresh_account", "_atomic_write_bytes", "_append_jsonl"))
+
+    with pytest.raises(paper_account.AccountStateInvalid) as first:
+        paper_account._load_account_file(portfolio_id)
+    _assert_path_invalid(first, "dangling_symlink")
+    hard = [e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]
+    assert len(hard) == 1
+    assert hard[0]["step"] == "load_account"
+    assert hard[0]["extra"]["quarantine_status"] == "path_invalid"
+
+    with pytest.raises(paper_account.AccountStateInvalid) as excinfo:
+        paper_account._load_account(portfolio_id)
+    _assert_path_invalid(excinfo, "dangling_symlink")
+    with pytest.raises(paper_account.AccountStateInvalid) as save_excinfo:
+        paper_account._save_account(fresh, portfolio_id)
+    _assert_path_invalid(save_excinfo, "dangling_symlink")
+
+    status = paper_account.account_file_status(portfolio_id)
+    assert status["status"] == "INVALID"
+    assert status["problems"] == ["dangling_symlink"]
+
+    assert os.readlink(account_path) == "missing-target.json"
+    assert not (base / "missing-target.json").exists()
+    assert not (base / "account_quarantine.jsonl").exists()
+    assert not list(base.glob("account.quarantine.*.json"))
+    assert _tree(base) == snapshot
+
+
+# ---------------------------------------------------------------------------
+# A3. absent file in an existing dir is still a legitimate new book
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_absent_file_in_existing_dir_is_a_new_book(
+    strict_book: tuple[str | None, Path],
+    run_events_recorder: list[dict],
+) -> None:
+    from portfolio import paper_account
+
+    portfolio_id, base = strict_book
+    snapshot = _tree(base)
+
+    state = paper_account._load_account_file(portfolio_id)
+    assert state == paper_account._fresh_account()
+    status = paper_account.account_file_status(portfolio_id)
+    assert status == {"status": "MISSING", "path": str(base / "account.json"),
+                      "sha256": None, "size": None, "problems": []}
+    assert run_events_recorder == []
+    assert _tree(base) == snapshot
+
+    paper_account._save_account(paper_account._fresh_account(), portfolio_id)
+    assert (base / "account.json").is_file()
+
+
+# ---------------------------------------------------------------------------
+# A4. a stat failure on the file is INVALID (quarantine path), parametrized
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+@pytest.mark.parametrize("case_id", sorted(_STAT_FAILURE_CASES))
+def test_stat_failure_on_account_file_fails_closed(
+    strict_book: tuple[str | None, Path],
+    run_events_recorder: list[dict],
+    monkeypatch: pytest.MonkeyPatch,
+    case_id: str,
+) -> None:
+    from portfolio import paper_account
+
+    portfolio_id, base = strict_book
+    account_path = base / "account.json"
+    original = _write_book(base, json.dumps(_live_book(), indent=2).encode("utf-8"))
+    exc = _STAT_FAILURE_CASES[case_id]
+    expected = f"unreadable:{type(exc).__name__}"
+    _deny_stat_for(monkeypatch, account_path, exc)
+    fresh = paper_account._fresh_account()
+    monkeypatch.setattr(paper_account, "_fresh_account", _fresh_tripwire)
+
+    with pytest.raises(paper_account.AccountStateInvalid) as first:
+        paper_account._load_account_file(portfolio_id)
+    assert first.value.record["status"] == "quarantine_failed"
+    assert first.value.record["problems"] == [expected]
+    rows = _quarantine_rows(base)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "quarantine_failed"
+    hard = [e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]
+    assert len(hard) == 1
+
+    status = paper_account.account_file_status(portfolio_id)
+    assert status["status"] == "INVALID"
+    assert status["problems"] == [expected]
+    assert len(_quarantine_rows(base)) == 1
+    assert len([e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]) == 1
+
+    with pytest.raises(paper_account.AccountStateInvalid):
+        paper_account._save_account(fresh, portfolio_id)
+
+    with open(account_path, "rb") as fh:  # os.stat is patched; read without it
+        assert fh.read() == original
+
+
+# ---------------------------------------------------------------------------
+# A5. a REAL ELOOP (no monkeypatch) — a self-referential symlink is invalid
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_real_eloop_self_symlink_fails_closed(
+    strict_book: tuple[str | None, Path],
+    run_events_recorder: list[dict],
+) -> None:
+    from portfolio import paper_account
+
+    portfolio_id, base = strict_book
+    account_path = base / "account.json"
+    _write_book(base, json.dumps(_live_book(), indent=2).encode("utf-8"))
+    account_path.unlink()
+    os.symlink("account.json", account_path)
+    fresh = paper_account._fresh_account()
+
+    with pytest.raises(paper_account.AccountStateInvalid) as excinfo:
+        paper_account._load_account_file(portfolio_id)
+    assert excinfo.value.record["problems"] == ["unreadable:OSError"]
+
+    status = paper_account.account_file_status(portfolio_id)
+    assert status["status"] == "INVALID"
+    assert status["problems"] == ["unreadable:OSError"]
+
+    with pytest.raises(paper_account.AccountStateInvalid):
+        paper_account._save_account(fresh, portfolio_id)
+    assert os.readlink(account_path) == "account.json"
+    assert run_events_recorder, "the unreadable ELOOP must be audited"
+
+
+# ---------------------------------------------------------------------------
+# A6. read race: the file vanishes between the stat and the read
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_read_race_vanish_returns_a_new_book_without_auditing(
+    strict_book: tuple[str | None, Path],
+    run_events_recorder: list[dict],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from portfolio import paper_account
+
+    portfolio_id, base = strict_book
+    account_path = base / "account.json"
+    _write_book(base, json.dumps(_live_book(), indent=2).encode("utf-8"))
+    real_read_bytes = Path.read_bytes
+
+    def vanishing_read(self: Path) -> bytes:
+        if self == account_path:
+            account_path.unlink()
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(self))
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", vanishing_read)
+    state = paper_account._load_account_file(portfolio_id)
+    assert state == paper_account._fresh_account()
+    assert _quarantine_rows(base) == []
+    assert run_events_recorder == []
+
+
+@pytest.mark.strict_book_dirs
+def test_read_race_phantom_fails_closed(
+    strict_book: tuple[str | None, Path],
+    run_events_recorder: list[dict],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from portfolio import paper_account
+
+    portfolio_id, base = strict_book
+    account_path = base / "account.json"
+    _write_book(base, json.dumps(_live_book(), indent=2).encode("utf-8"))
+    real_read_bytes = Path.read_bytes
+
+    def phantom_read(self: Path) -> bytes:
+        if self == account_path:
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(self))
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", phantom_read)
+    with pytest.raises(paper_account.AccountStateInvalid) as excinfo:
+        paper_account._load_account_file(portfolio_id)
+    assert excinfo.value.record["problems"] == ["unreadable:FileNotFoundError"]
+    assert excinfo.value.record["status"] == "quarantine_failed"
+    assert len(_quarantine_rows(base)) == 1
+    assert len([e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# A7. the low-level writers never create directories
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_low_level_writers_never_create_directories(
+    strict_book: tuple[str | None, Path],
+) -> None:
+    from portfolio import paper_account
+
+    _portfolio_id, base = strict_book
+    base.rename(base.with_name(base.name + ".away"))
+
+    with pytest.raises(OSError):
+        paper_account._atomic_write_bytes(base / "x.json", b"{}")
+    with pytest.raises(OSError):
+        paper_account._append_jsonl(base / "fills.jsonl", {"a": 1})
+    with pytest.raises(OSError):
+        paper_account._ensure_book_subdir(base / "settlement_receipts")
+    assert not base.exists()
+
+    base.mkdir()
+    paper_account._ensure_book_subdir(base / "settlement_receipts")
+    assert (base / "settlement_receipts").is_dir()
+    assert sorted(p.name for p in base.iterdir()) == ["settlement_receipts"]
+
+
+# ---------------------------------------------------------------------------
+# A8. _check_book_dir classifies without ever creating
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_check_book_dir_classifies_without_creating(tmp_path: Path) -> None:
+    from portfolio import paper_account
+
+    missing = tmp_path / "nope"
+    problem, exc = paper_account._check_book_dir(missing)
+    assert problem == "data_dir_missing"
+    assert isinstance(exc, FileNotFoundError)
+    assert not missing.exists()
+
+    regular = tmp_path / "regular.txt"
+    regular.write_bytes(b"x")
+    assert paper_account._check_book_dir(regular) == ("data_dir_not_directory", None)
+    assert regular.read_bytes() == b"x"
+
+    existing = tmp_path / "dir"
+    existing.mkdir()
+    assert paper_account._check_book_dir(existing) == (None, None)
+
+
+# ---------------------------------------------------------------------------
+# S1. the explicit bootstrap is unreachable from production code
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_bootstrap_book_dir_is_unreachable_from_production_code() -> None:
+    root = Path(__file__).resolve().parent.parent
+    offenders: list[str] = []
+    for folder in ("app", "bot", "brain", "portfolio", "loop", "control_plane", "scripts"):
+        base_dir = root / folder
+        if not base_dir.exists():
+            continue
+        for path in sorted(base_dir.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and node.id == "bootstrap_book_dir":
+                    offenders.append(f"{path.relative_to(root)}:{node.lineno} Name")
+                elif isinstance(node, ast.Attribute) and node.attr == "bootstrap_book_dir":
+                    offenders.append(f"{path.relative_to(root)}:{node.lineno} Attribute")
+                elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                      and node.value == "bootstrap_book_dir"):
+                    offenders.append(f"{path.relative_to(root)}:{node.lineno} Constant")
+    assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# S2. no mkdir anywhere outside the explicit bootstrap helpers
+# ---------------------------------------------------------------------------
+
+@pytest.mark.strict_book_dirs
+def test_no_mkdir_outside_the_explicit_bootstrap_helpers() -> None:
+    root = Path(__file__).resolve().parent.parent
+    allowed = {
+        "portfolio/paper_account.py": {"bootstrap_book_dir", "_ensure_book_subdir"},
+        "portfolio/self_directed.py": {"bootstrap_book_dir"},
+    }
+    violations: list[str] = []
+    for rel, allowed_fns in allowed.items():
+        path = root / rel
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        stack: list[str] = []
+
+        class _Visitor(ast.NodeVisitor):
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                stack.append(node.name)
+                self.generic_visit(node)
+                stack.pop()
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Call(self, node: ast.Call) -> None:
+                func = node.func
+                if isinstance(func, ast.Attribute) and func.attr in {"mkdir", "makedirs"}:
+                    if not stack or stack[-1] not in allowed_fns:
+                        violations.append(f"{rel}:{node.lineno} inside {stack or '<module>'}")
+                self.generic_visit(node)
+
+        _Visitor().visit(tree)
+    assert violations == []
+
+
+# ---------------------------------------------------------------------------
+# S3. the conftest shim never applies OUTSIDE the session basetemp (NOT strict)
+# ---------------------------------------------------------------------------
+
+def test_shim_leaves_dirs_outside_basetemp_missing(tmp_path: Path) -> None:
+    from portfolio import paper_account
+
+    outside = Path(tempfile.gettempdir()) / f"e14-shim-{uuid.uuid4().hex}" / "book"
+    try:
+        assert paper_account._check_book_dir(outside)[0] == "data_dir_missing"
+        assert not outside.exists()
+    finally:
+        shutil.rmtree(outside.parent, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# S4. the conftest shim bootstraps missing book dirs under basetemp (NOT strict)
+# ---------------------------------------------------------------------------
+
+def test_shim_bootstraps_missing_book_dirs_under_basetemp(tmp_path: Path) -> None:
+    from portfolio import paper_account
+
+    target = tmp_path / "auto"
+    assert paper_account._check_book_dir(target) == (None, None)
+    assert target.is_dir()

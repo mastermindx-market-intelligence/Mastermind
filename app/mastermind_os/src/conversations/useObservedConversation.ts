@@ -31,7 +31,14 @@ export function useObservedConversation(authGeneration: number, selection: Missi
   };
   return {
     projection, clear,
-    draft: contentAllowed === false ? "" : readDraft(drafts, context),
+    // When permission expires, projection evidence stays WITHHELD, but a
+    // previously authored unsent local note remains copyable/read-only.
+    // Explicit logout and a new grant clear it via invalidateAuth().
+    draft: readDraft(drafts, context),
+    // The root App may still have user-authored text on an off-view pane,
+    // even when its qualified Content permission is temporarily unavailable.
+    hasUnsentDraft: () => readDraft(latestDrafts.current, current.current).length > 0,
+    discardDraft: () => publishDrafts(writeDraft(latestDrafts.current, current.current, "")),
     draftRevision: readDraftRevision(drafts, context),
     draftInsertion: contentAllowed === false ? null : readDraftInsertion(drafts, context),
     changeDraft: (text: string) => { if (canEdit()) publishDrafts(writeDraft(latestDrafts.current, context, text)); },
@@ -39,10 +46,12 @@ export function useObservedConversation(authGeneration: number, selection: Missi
       publishDrafts(appendDraftSource(latestDrafts.current, context, expectedRevision, source)),
     undoSource: (identity: string, expectedRevision: number) => canEdit() &&
       publishDrafts(undoDraftSource(latestDrafts.current, context, expectedRevision, identity)),
-    invalidateAuth: () => {
-      const next = current.current.authGeneration + 1;
+    invalidateAuth: (preserveUnsentOnPassiveExpiry = false) => {
+      const old = current.current.authGeneration, next = old + 1;
       clear(); current.current = { ...current.current, authGeneration: next };
-      publishDrafts(alignDrafts(latestDrafts.current, next));
+      const previous = latestDrafts.current;
+      publishDrafts(preserveUnsentOnPassiveExpiry && previous.authGeneration === old
+        ? { ...previous, authGeneration: next } : alignDrafts(previous, next));
     },
     begin: () => { clear(); return captureObservedConversation(current.current); },
     accept: (pending: ReturnType<typeof captureObservedConversation>, mission: Missionv3Document | null, window: WindowDocument | null) => {
