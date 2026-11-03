@@ -40,6 +40,21 @@ and merge decisions follow the currently authorized role and operation, not a
 historical session name. Independent review and source/release protections still apply.
 These role descriptions do not themselves grant authority.
 
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+Agent OS workstream waves and latest dated handoff as the pinned plan, and the
+versioned GitHub master plan as the task tree only. If no task tree exists, create
+and read back one with stable task/subtask IDs, dependencies and acceptance evidence
+**before major delegation or implementation**. The next action stays on the workstream
+and handoff.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
+
 ### Assigned Codex/Claude Meta-CEO: paid Fabric delegation first
 
 **Only a currently assigned principal or AI CEO** applies this profile. The
@@ -187,6 +202,10 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 - **Slack delivery is not target consumption**, and neither delivery nor a historical native task ID
   proves ACK, START, execution, or reusable capacity. Preserve those states separately until the
   accepted RuntimeBinding/Wake path proves them.
+
+### Independent-review discoverability for every assigned session
+
+Before requesting or claiming independent PR/source review, load [the common session review routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md). Check this exact session's authenticated Subagent Fabric tools and original review state; for a distinctly authorized manual review, one verified ChatGPT Dot may receive a source-linked Slack commission. Do not duplicate a running/uncertain/denied review, mislabel Slack pickup as START, or equate a Dot technical verdict with formal non-author GitHub approval. The existing GitHub review ingress and Runtime remain authoritative; a source link does not prove a fresh-session installation.
 
 ## Agent OS — the organizational knowledge plane
 

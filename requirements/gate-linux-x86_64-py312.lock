@@ -2,14 +2,12 @@
 # Platform: Linux / x86_64
 # Interpreter: CPython 3.12.14; isolated official pip-tools7.6.1
 # Source: pyproject.toml (extras "dev", "browser-mcp")
-# pyproject.toml sha256: e57252a450cc3883a02acf06e8c6eff1517189f4c6e4c5d273a865578ec75fa6
-# Browser extra qualified 2026-10-22: only added direct constraints are
-# mcp1.28.1, PyJWT[crypto]2.14.0, Pillow12.3.0, already exact in this lock.
-# Existing base/dev requirements and all locked versions/extras/hashes are unchanged.
-# This is a closure-equivalence qualification, not a new platform compile.
-# Regenerated from the existing lock: only PyJWT 2.13.0 to 2.14.0;
-# all 72 other package versions, extras and hash sets are unchanged.
-# Regenerate: pip-compile --generate-hashes --reuse-hashes --upgrade-package PyJWT==2.14.0 --quiet --extra dev --extra browser-mcp --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
+# pyproject.toml sha256: d0f85572a285de0cbaffbab75cc215248cebd1ce54b2e398c97f7a0bb6ea80f3
+# Integration qualification: protected dev pytest>=8,<9.2 and the Browser MCP
+# direct constraints mcp1.28.1, PyJWT[crypto]2.14.0, Pillow12.3.0.
+# Both parents have byte-identical generated package pins/extras/hashes below.
+# This is an exact closure comparison, not a fresh cross-platform pip-compile.
+# Regenerate: pip-compile --generate-hashes --reuse-hashes --quiet --extra dev --extra browser-mcp --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
 # Official default PyPI index used with isolated PIP_CONFIG_FILE=/dev/null.
 # pip-tools7.6.1 retains the spurious --no-index command comment below;
 # no --no-index flag was supplied to the actual generator.

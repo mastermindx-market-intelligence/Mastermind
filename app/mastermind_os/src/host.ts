@@ -1,4 +1,5 @@
 import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
+import { decodeBrowserScopedFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
 import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
@@ -27,8 +28,10 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import { decodeResultReferencesEnvelope, type ResultReferencesDocument } from "./result-references";
 import { decodeWorkDocument, type WorkDocument } from "./work";
 import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
+import { decodeControlRoomDiscovery, type ControlRoomDiscovery } from "./control-room-navigation";
 import {
   completeOrchestratorCommandBinding,
   type OrchestratorCommandBinding,
@@ -43,6 +46,12 @@ export interface AuthState {
   content: boolean;
 }
 import type { ResearchEvidenceTransport } from "./research/evidence-contract";
+import {
+  decodeControlRoomRead, type ControlRoomRead,
+  decodeControlRoomActionPayload, decodeControlRoomActionResult,
+  ControlRoomActionTransportError,
+  type ControlRoomOperation, type ControlRoomActionResult,
+} from "./control-room";
 
 export interface RawClient {
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
@@ -61,11 +70,23 @@ export interface RawClient {
   subscribe(listener: (state: AuthState) => void): () => void;
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
+  restore?(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
+  /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
+  readAttendedFabricCatalog?(request: { signal: AbortSignal }): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Fixed authenticated one-cache Control Room state; no operator writes. */
+  readControlRoomState?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Independent read with a separately sealed Discovery grant; never an action grant. */
+  readControlRoomDiscovery?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Each original mutation has one fixed, optional host method and one owner. */
+  openControlRoomSurface?(request: { payload: Readonly<Record<string, unknown>>; signal: AbortSignal }): Promise<unknown>;
+  bindControlRoomSurface?(request: { payload: Readonly<Record<string, unknown>>; signal: AbortSignal }): Promise<unknown>;
+  unbindControlRoomSurface?(request: { payload: Readonly<Record<string, unknown>>; signal: AbortSignal }): Promise<unknown>;
+  refreshControlRoomBuilds?(request: { signal: AbortSignal }): Promise<unknown>;
   readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
     work_ref: string;
@@ -83,6 +104,11 @@ export interface RawClient {
     jobId: string;
     attemptId: string;
     resultEnvelopeDigest: string;
+    signal: AbortSignal;
+  }): Promise<unknown>;
+  readResultReferences?(request: {
+    workRef: string;
+    rootJobId: string;
     signal: AbortSignal;
   }): Promise<unknown>;
   readCurrentWindow(request: { signal: AbortSignal }): Promise<unknown>;
@@ -112,11 +138,22 @@ export interface MissionHost {
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
+  readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
   readPrograms?: ProgramRead;
+  readControlRoomState?: (request: { signal: AbortSignal }) => Promise<ControlRoomRead>;
+  readControlRoomDiscovery?: (request: { signal: AbortSignal }) => Promise<ControlRoomDiscovery>;
+  openControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
+  bindControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
+  unbindControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
+  refreshControlRoomBuilds?: (request: { signal: AbortSignal }) => Promise<ControlRoomActionResult>;
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
+  /** Typed retained-result reference index read; same two-field selection grammar. */
+  readResultReferences?: (
+    request: { workRef: string; rootJobId: string; signal: AbortSignal },
+  ) => Promise<ResultReferencesDocument>;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
   }) => Promise<WindowDocument>;
@@ -160,6 +197,73 @@ export function bindMissionHost(
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
+  // Capture the actual fixed owner method once. Any replacement before invocation
+  // refuses pre-dispatch; a lost result AFTER invoking it is EFFECT_UNKNOWN.
+  // Caller cancellation or auth changes after the call cannot erase the owner's return.
+  function bindAction(
+    operation: ControlRoomOperation,
+    method: "openControlRoomSurface" | "bindControlRoomSurface"
+      | "unbindControlRoomSurface" | "refreshControlRoomBuilds",
+  ) {
+    const raw = client[method];
+    if (typeof raw !== "function") return null;
+    const withPayload = operation !== "refresh-builds";
+    return async (request: { payload?: Record<string, unknown>; signal: AbortSignal }): Promise<ControlRoomActionResult> => {
+      const admitted = (() => {
+        try {
+          // Capture authority before request decoding or any state callback can
+          // reenter authentication. The final epoch check follows every callback.
+          const started = epoch;
+          const getState = client.getState;
+          const getGeneration = client.invalidationGeneration;
+          const source = getGeneration?.call(client);
+          const signal = request.signal;
+          if (!signal || signal.aborted) throw new Error("PRE_DISPATCH_CANCELLED");
+          const payload = decodeControlRoomActionPayload(
+            withPayload ? request.payload : {}, operation,
+          );
+          const state = getState.call(client);
+          const authorized = state.status === "signed_in" && state.acquisition;
+          const currentSource = getGeneration?.call(client);
+          if (!authorized || source !== currentSource
+              || client.getState !== getState
+              || client.invalidationGeneration !== getGeneration
+              || client[method] !== raw || signal.aborted || started !== epoch)
+            throw new Error("ACTION_NOT_ADMITTED");
+          return { payload, signal };
+        } catch {
+          throw new ControlRoomActionTransportError(operation, "NOT_DISPATCHED");
+        }
+      })();
+      let result: unknown;
+      try {
+        result = withPayload
+          ? await (raw as NonNullable<RawClient["openControlRoomSurface"]>)
+            .call(client, admitted)
+          : await (raw as NonNullable<RawClient["refreshControlRoomBuilds"]>)
+            .call(client, { signal: admitted.signal });
+      } catch (error) {
+        // Only this exact delegated owner may establish that its own fetch did
+        // not start. No other operation or error phase supplies that evidence.
+        let disposition: "NOT_DISPATCHED" | "EFFECT_UNKNOWN" = "EFFECT_UNKNOWN";
+        try {
+          if (error instanceof ControlRoomActionTransportError
+              && error.operation === operation
+              && (error.disposition === "NOT_DISPATCHED"
+                || error.disposition === "EFFECT_UNKNOWN"))
+            disposition = error.disposition;
+        } catch { /* An uninspectable dependency error remains uncertain. */ }
+        throw new ControlRoomActionTransportError(operation, disposition);
+      }
+      try {
+        const httpStatus = result && typeof result === "object" && !Array.isArray(result)
+          ? (result as { status?: number }).status : NaN;
+        return decodeControlRoomActionResult(result, operation, httpStatus as number);
+      } catch {
+        throw new ControlRoomActionTransportError(operation, "EFFECT_UNKNOWN");
+      }
+    };
+  }
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
     invalidationGeneration: () => epoch,
@@ -212,13 +316,21 @@ export function bindMissionHost(
         const selected = attendedSelection(request);
         if (!selected) throw new Error("FABRIC_SELECTION_INVALID");
         const started = epoch;
-        check(request.signal, started);
-        const state = client.getState();
-        if (state.status !== "signed_in" || !state.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
-        const raw = await client.readAttendedFabric!({ ...selected, signal: request.signal });
-        check(request.signal, started);
-        const current = client.getState();
-        if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        const source = client.invalidationGeneration!();
+        const read = client.readAttendedFabric!;
+        const verify = () => {
+          check(request.signal, started);
+          if (!Number.isSafeInteger(source) ||
+              source !== client.invalidationGeneration?.() ||
+              typeof read !== "function" || read !== client.readAttendedFabric)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("FABRIC_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await read.call(client, { ...selected, signal: request.signal });
+        verify();
         return decodeAttendedStatus(raw, selected);
       },
     } : {}),
@@ -271,6 +383,27 @@ export function bindMissionHost(
         } finally { guard.dispose(); }
       },
     } : {}),
+    ...(client.readAttendedFabricCatalog && client.invalidationGeneration ? {
+      async readAttendedFabricCatalog({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        const source = client.invalidationGeneration!();
+        const read = client.readAttendedFabricCatalog!;
+        const verify = () => {
+          check(signal, started);
+          if (!Number.isSafeInteger(source) ||
+              source !== client.invalidationGeneration?.() ||
+              typeof read !== "function" || read !== client.readAttendedFabricCatalog)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("FABRIC_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await read.call(client, { signal });
+        verify();
+        return decodeBrowserScopedFabricCatalog(raw);
+      },
+    } : {}),
     async readPrograms({ signal }) {
       const started = epoch;
       check(signal, started);
@@ -278,6 +411,41 @@ export function bindMissionHost(
       check(signal, started);
       return decodeProgramsEnvelope(raw);
     },
+    ...(client.readControlRoomState ? {
+      async readControlRoomState({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        check(signal, started);
+        const raw = await client.readControlRoomState!({ signal });
+        check(signal, started);
+        return decodeControlRoomRead(raw);
+      },
+    } : {}),
+    ...(client.readControlRoomDiscovery ? {
+      async readControlRoomDiscovery({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        check(signal, started);
+        const state = client.getState();
+        if (state.status !== "signed_in" || !state.acquisition)
+          throw new Error("DISCOVERY_READ_UNAUTHORIZED");
+        const raw = await client.readControlRoomDiscovery!({ signal });
+        check(signal, started);
+        const decoded = decodeControlRoomDiscovery(raw);
+        check(signal, started);
+        return decoded;
+      },
+    } : {}),
+    ...(client.openControlRoomSurface ? {
+      openControlRoomSurface: bindAction("open", "openControlRoomSurface")!,
+    } : {}),
+    ...(client.bindControlRoomSurface ? {
+      bindControlRoomSurface: bindAction("bind", "bindControlRoomSurface")!,
+    } : {}),
+    ...(client.unbindControlRoomSurface ? {
+      unbindControlRoomSurface: bindAction("unbind", "unbindControlRoomSurface")!,
+    } : {}),
+    ...(client.refreshControlRoomBuilds ? {
+      refreshControlRoomBuilds: bindAction("refresh-builds", "refreshControlRoomBuilds")!,
+    } : {}),
     async readProgramsObservation({ signal }) {
       const started = epoch;
       check(signal, started);
@@ -326,6 +494,29 @@ export function bindMissionHost(
       const result = decodeMissionv3(raw, selection);
       if (!result) throw new Error("MISSION_V3_RESPONSE_INVALID");
       return result;
+    },
+    async readResultReferences({ workRef, rootJobId, signal }) {
+      const selection = normalizeWorkspaceSelection({ workRef, rootJobId });
+      if (!selection) throw new Error("SELECTION_INVALID");
+      const started = epoch;
+      check(signal, started);
+      if (!client.readResultReferences)
+        throw new Error("RESULT_REFERENCES_UNAVAILABLE");
+      const raw = await client.readResultReferences({
+        workRef: selection.workRef,
+        rootJobId: selection.rootJobId,
+        signal,
+      });
+      check(signal, started);
+      // The fixed HTTP body (never a private socket frame) is fully decoded
+      // by the closed result-references decoder. The typed allowed 503
+      // unavailable document is a valid decoded outcome, not an error.
+      const decoded = decodeResultReferencesEnvelope(raw, {
+        workRef: selection.workRef,
+        rootJobId: selection.rootJobId,
+      });
+      if (!decoded) throw new Error("RESULT_REFERENCES_RESPONSE_INVALID");
+      return decoded;
     },
     async readResult({
       workRef,
@@ -466,7 +657,10 @@ export async function createNativeClient(
       | "read_mission_v3"
       | "read_admitted_plan"
       | "read_retained_activity"
+      | "read_fabric_catalog"
+      | "read_fabric_status"
       | "read_result"
+      | "read_result_references"
       | "read_current_window",
     signal: AbortSignal,
     args?: Record<string, unknown>,
@@ -510,6 +704,7 @@ export async function createNativeClient(
   }
   return {
     executive: executive.transport,
+    executiveSession: executive.sessionTransport,
     getState: () => ({ ...current }),
     invalidationGeneration: () => epoch,
     subscribe(listener) {
@@ -541,6 +736,14 @@ export async function createNativeClient(
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
     readWork: ({ signal }) => read("read_work", signal),
+    readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
+    readAttendedFabric: ({ rootId, runId, signal }) => {
+      const selected = attendedSelection({ rootId, runId });
+      if (!selected) return Promise.reject(new Error("FABRIC_SELECTION_INVALID"));
+      return read("read_fabric_status", signal, { selection: {
+        root_id: selected.rootId, run_id: selected.runId,
+      } });
+    },
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));
@@ -590,6 +793,13 @@ export async function createNativeClient(
           attempt_id: attemptId,
           result_envelope_digest: resultEnvelopeDigest,
         },
+      });
+    },
+    readResultReferences: ({ workRef, rootJobId, signal }) => {
+      if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
+        return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_result_references", signal, {
+        selection: { work_ref: workRef, root_job_id: rootJobId },
       });
     },
     readCurrentWindow: ({ signal }) => read("read_current_window", signal),

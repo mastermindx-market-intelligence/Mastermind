@@ -91,7 +91,9 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_wire import (
+    CONTINUATION_OPERATION_PREFIX,
     OperatorHarnessWireError,
+    RetainedPlainInputEvidence,
     event_cursor as wire_event_cursor,
     launch_comparison as wire_launch_comparison,
     operation_id as wire_operation_id,
@@ -99,6 +101,7 @@ from control_plane.operator_harness_wire import (
     process_identity_observation as wire_process_identity_observation,
     process_generation_ref as wire_process_generation_ref,
     requested_execution_profile as wire_requested_execution_profile,
+    retained_plain_input_evidence as wire_retained_plain_input_evidence,
     session_epoch_ref as wire_session_epoch_ref,
     provider_session_handoff as wire_provider_session_handoff,
     to_wire as operator_to_wire,
@@ -975,6 +978,14 @@ class _BrokerOperatorRun:
     materialization_receipt: OperatorMaterializationReceipt | None = None
     resource: OperatorAttemptResource | None = None
     prompts: dict[str, str] = dataclasses.field(default_factory=dict)
+    # Transient begin-turn marks for the retained plain-input digest
+    # observation: the exact immutable TurnRef accepted at ohf-begin-turn under
+    # the continuation prefix, bound to the generation that accepted it.  This
+    # is process-local observation selection only, never ACK authority, and it
+    # dies with the run instead of any durable store.
+    retained_plain_turns: dict[TurnRef, ProcessGenerationRef] = dataclasses.field(
+        default_factory=dict
+    )
     terminal_error: str | None = None
     busy: bool = False
 
@@ -2452,6 +2463,15 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator begin-turn returned an untyped observation"
                 )
+            if (operation.command_id.startswith(CONTINUATION_OPERATION_PREFIX)
+                    and observation.acknowledged is True
+                    and type(observation.provider_native_turn_id) is str
+                    and bool(observation.provider_native_turn_id)):
+                # Marked only after this ohf-begin-turn succeeded, for the
+                # existing operation id, under the immutable TurnRef and the
+                # current generation.  The prefix selects the bounded digest
+                # observation at collect; it never grants ACK authority.
+                state.retained_plain_turns[turn] = state.generation
             return {"observation": operator_to_wire(observation)}
         finally:
             await self._operator_release_busy(state)
@@ -2824,14 +2844,56 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator collection returned untyped or oversized evidence"
                 )
-            return {
+            response = {
                 "events": operator_to_wire(events),
                 "cursor": operator_to_wire(next_cursor),
                 "candidate": operator_to_wire(candidate),
                 "raw_role_result": operator_to_wire(raw),
             }
+            if state.retained_plain_turns.get(turn) == state.generation:
+                # The accepted collector runs only for a turn marked at
+                # begin-turn; ordinary turns never incur an additional raw
+                # read.  Absence stays an explicit unavailable value.
+                response["retained_plain_input_evidence"] = (
+                    await self._retained_plain_input_evidence(state, turn)
+                )
+            return response
         finally:
             await self._operator_release_busy(state)
+
+    async def _retained_plain_input_evidence(
+        self, state: _BrokerOperatorRun, turn: TurnRef
+    ) -> dict[str, Any] | None:
+        """Reuse only the accepted extractor for one marked turn.
+
+        The only accepted producer is the adapter's own
+        ``collect_retained_plain_text_evidence``; a no-supported-method adapter,
+        an unsupported build or input, or any extraction refusal is the
+        explicit unavailable ``None``.  The optional emitted value must pass
+        the closed digest-only wire codec, so the
+        transport can never carry a prompt, an expected text, a caller build
+        attestation, an acceptance boolean, or ACK authority.
+        """
+
+        collector = getattr(
+            state.adapter, "collect_retained_plain_text_evidence", None
+        )
+        if not callable(collector):
+            return None
+        try:
+            evidence = await self._operator_call(
+                "retained plain input evidence", collector, turn
+            )
+        except WorkerBrokerError:
+            return None
+        if not isinstance(evidence, RetainedPlainInputEvidence):
+            return None
+        try:
+            encoded = operator_to_wire(evidence)
+            wire_retained_plain_input_evidence(encoded)
+        except OperatorHarnessWireError:
+            return None
+        return encoded
 
     async def _ohf_interrupt(self, payload: dict[str, Any]) -> dict[str, Any]:
         if set(payload) != {"operation_id", "turn"}:
@@ -4095,7 +4157,7 @@ class WorkerBrokerClient:
     ) -> dict[str, Any]:
         # Bridge-only read: this does not add the operation to the ordinary
         # Worker Broker server or grant a generic request-supplied data source.
-        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation"}:
+        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation", "native-fabric-status"}:
             raise BrokerProtocolError("client operation is not allowed")
         request_id = f"req-{uuid.uuid4().hex}"
         document = {

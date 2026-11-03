@@ -25,6 +25,7 @@ async function mount() {
     const client = isTauri()
       ? await createNativeClient(invoke, listen)
       : createWebAuth();
+    if (!isTauri()) void client.restore?.().catch(() => {});
     const composition = composeMissionHost(client);
     window.MastermindMissionHost = composition.host;
     void composition.ready.catch(() => {});

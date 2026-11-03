@@ -28,6 +28,8 @@ primary-source research are appropriate when the problem needs them, not mandato
 stages for every fix. Implement, verify, save the material delta and start the next
 safe ready phase in the same healthy turn. A checkpoint is a save, not a stop.
 
+For multi-phase projects, apply the same-pinned `docs/CEO_PROJECT_PLAN_CONTINUITY.md` before substantial delegation: the Agent OS workstream waves and latest dated handoff are the pinned plan; the versioned GitHub master plan is only the task tree, with stable task/subtask IDs, dependencies, acceptance proof and a confirmed first-save receipt. Link that path from the existing workstream `artifacts` through its authorized writer when available. Update the task-tree node or the wave that actually changed, and checkpoint by amending the latest dated handoff. A save never grants execution authority or ends a healthy turn. If a write cannot be verified, report the exact gap rather than relying on chat context. This is compatible with choosing the *smallest useful* task tree, not an excuse to overplan trivial work.
+
 ## A role is not a persistent conversation
 
 Chairman intent assigns responsibility. The active assigned principal owns delivery;
@@ -77,6 +79,10 @@ This does not transfer a live lease, bypass an exact-session protocol, or clear
 EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their existing
 owners. When the original session is itself the target of a proof, retain that precise
 proof obligation; it must not freeze unrelated permitted implementation or diagnosis.
+
+## Cross-session independent review
+
+Whenever an independent source/architecture review is required, use the shared [session review routing procedure](SESSION_INDEPENDENT_REVIEW_ROUTING.md). Discover actual Fabric capabilities in this session and preserve exact original root/effects before commissioning. One separately authorized Dot technical reviewer may be addressed through the existing Slack review channel when qualified; Slack delivery is not reviewer START, a refusal never authorizes cross-provider fallback, and a Dot source verdict is not formal non-author GitHub approval.
 
 ## Execute economically
 

@@ -114,22 +114,24 @@ def _bounded_regular(path: Path, limit: int) -> bytes:
     return data
 
 
-def _paths(run_id: str) -> tuple[Path, Path]:
+def _paths(run_id: str, *, owner_ext: Path | None = None) -> tuple[Path, Path]:
     rid = validate_run_id(run_id)
+    here = HERE if owner_ext is None else owner_ext
     return (
-        HERE / "state" / "remote_sub" / f"{rid}.log",
-        HERE / "lanes" / f"{rid}.remote.stdout",
+        here / "state" / "remote_sub" / f"{rid}.log",
+        here / "lanes" / f"{rid}.remote.stdout",
     )
 
 
 
 
-def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None) -> bytes:
+def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None,
+                     *, owner_ext: Path | None = None) -> bytes:
     """Read one coherent result observation under the current run's protocol."""
     from remote_sub_helpers import read_macro_result
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, owner_ext=owner_ext)
     log = _bounded_regular(log_path, MAX_LOG_BYTES) if original_log is None else original_log
-    verified = read_macro_result(HERE, log_path, rid, limit, log)
+    verified = read_macro_result(HERE if owner_ext is None else owner_ext, log_path, rid, limit, log)
     if verified is not None:
         return verified
     # Intact legacy logs keep their bounded result reads.  An orphan or a
@@ -147,7 +149,8 @@ def _acceptance_unknown(reason: str) -> dict[str, Any]:
             "acceptance_reason": reason, "root_id": None, "parent_run_id": None}
 
 
-def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
+def _active_lineage_projection(rid: str, original_log: bytes,
+                               *, owner_ext: Path | None = None) -> dict[str, Any]:
     """Read existing artifact PRE_LAUNCH correlation, never worker/auth proof.
 
     The original controller validates the artifact packet and acquire response
@@ -158,7 +161,7 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
     unknown = {"controller_lineage": {"state": "UNVERIFIED"}}
     try:
         import artifact_delivery as delivery
-        log_path, _ = _paths(rid)
+        log_path, _ = _paths(rid, owner_ext=owner_ext)
         initial = log_path.lstat()
         def identity(info):
             return (info.st_dev, info.st_ino, info.st_uid, info.st_mode,
@@ -255,7 +258,9 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         return unknown
 
 
-def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes) -> dict[str, Any]:
+def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes,
+                           *, owner_ext: Path | None = None) -> dict[str, Any]:
+    ledger = {} if owner_ext is None else {"ledger_path": str(owner_ext.parent / "orch/fabric/ledger.jsonl")}
     # Retain all legacy execution fields. This additive observation neither
     # accepts a result nor creates a native RuntimeBinding or retry right.
     if (status["state"] != "TERMINAL" or status["rc"] != 0
@@ -266,17 +271,17 @@ def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes
         if (status["state"] == "TERMINAL" and type(status["rc"]) is int
                 and status["rc"] != 0 and status["signal"] != "effect_unknown"):
             try:
-                log_path, _ = _paths(rid)
+                log_path, _ = _paths(rid, owner_ext=owner_ext)
                 if _bounded_regular(log_path, MAX_LOG_BYTES) != original_log:
                     return projection
                 identity = pool_ledger.read_execution_identity(
-                    rid, expected_rc=status["rc"], expected_signal=status["signal"])
+                    rid, expected_rc=status["rc"], expected_signal=status["signal"], **ledger)
                 if _bounded_regular(log_path, MAX_LOG_BYTES) == original_log:
                     projection.update(identity)
             except (AttributeError, OSError, FabricTaskError):
                 pass
         return projection
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, owner_ext=owner_ext)
     # Transport retains group-writable result modes (e.g. 0664). Preserve that
     # existing format; require local ownership, no world write, and stable reads.
     # Ledger acceptance does not attest result bytes or authenticate the parent.
@@ -299,7 +304,7 @@ def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes
             return _acceptance_unknown("RESULT_NOT_VERIFIABLE")
         if log[0] != original_log:
             return _acceptance_unknown("ARTIFACT_CHANGED")
-        projection = pool_ledger.read_acceptance(rid, expected_rc=status["rc"], expected_signal=status["signal"])
+        projection = pool_ledger.read_acceptance(rid, expected_rc=status["rc"], expected_signal=status["signal"], **ledger)
         if (artifact(result_path, MAX_RESULT_BYTES) != result
                 or artifact(log_path, MAX_LOG_BYTES) != log):
             return _acceptance_unknown("ARTIFACT_CHANGED")
@@ -365,9 +370,16 @@ def _controller_observation(text: str, rid: str) -> dict[str, Any] | None:
     }
 
 
-def inspect_run(run_id: str) -> dict[str, Any]:
+def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:
+    # The original paid owner binds immutable code to its fixed existing data
+    # namespace. This read-only parameter grants no caller authority, starts
+    # no process, and never changes module globals shared by concurrent reads.
+    here = HERE if owner_ext is None else Path(owner_ext)
+    if not here.is_absolute() or ".." in here.parts:
+        raise ValueError("invalid Fabric owner namespace")
+    owner = {} if owner_ext is None else {"owner_ext": here}
     rid = validate_run_id(run_id)
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, **owner)
     missing_log = False
     metadata_error = None
     try:
@@ -377,7 +389,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     except OSError as exc:
         metadata_error = exc
     if missing_log:
-        retained = HERE / "state" / "remote_sub" / f"{rid}.request.json"
+        retained = here / "state" / "remote_sub" / f"{rid}.request.json"
         if retained.exists() or retained.is_symlink():
             try:
                 row = json.loads(_bounded_regular(retained, 32768))
@@ -437,7 +449,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
             "result_bytes": None,
         }
 
-    prelease = HERE / "state" / "remote_sub" / f"{rid}.prelease-quota.json"
+    prelease = here / "state" / "remote_sub" / f"{rid}.prelease-quota.json"
     if prelease.exists() or prelease.is_symlink():
         import quota_circuit
         # Preserve the incumbent sticky uncertainty rule before any new
@@ -459,7 +471,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         try:
             request = json.loads(_bounded_regular(prelease.with_name(rid + ".request.json"), 32768))
             root, parent = request.get("root_id"), request.get("parent_run_id")
-            quota_circuit.validate_prelease_refusal(HERE, rid, root, parent,
+            quota_circuit.validate_prelease_refusal(here, rid, root, parent,
                                                    packet_limit=MAX_RESULT_BYTES)
             return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                 **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
@@ -548,13 +560,13 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     if state == "SETTLING" and rid in completion_reconcile.KNOWN_RUNS:
         verified = completion_reconcile.status_from_receipt(rid)
         if verified is not None:
-            verified.update(_acceptance_projection(rid, verified, original_log))
+            verified.update(_acceptance_projection(rid, verified, original_log, **owner))
             return verified
 
     result_available = False
     result_bytes = None
     try:
-        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log)
+        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log, **owner)
         result_available = True
         result_bytes = len(snapshot)
     except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
@@ -573,11 +585,11 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         observation = _controller_observation(text, rid)
         if observation is not None:
             status["controller_observation"] = observation
-    status.update(_acceptance_projection(rid, status, original_log))
+    status.update(_acceptance_projection(rid, status, original_log, **owner))
     if state == "ACTIVE_OR_WAITING":
-        status.update(_active_lineage_projection(rid, original_log))
+        status.update(_active_lineage_projection(rid, original_log, **owner))
     for suffix in (".session-retained.json", ".session-created.json"):
-        path = HERE / "state" / "remote_sub" / (rid + suffix)
+        path = here / "state" / "remote_sub" / (rid + suffix)
         if suffix == ".session-created.json" and rc == 0:
             continue
         try:
@@ -662,6 +674,78 @@ def validate_request_max_turns(value: object) -> int:
     return value
 
 
+def _manual_token(value: str | None) -> str | None:
+    """A literal preference is not an admission or quota grant."""
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
+    token = value.strip()
+    if not token or token.casefold() == "auto":
+        return None
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", token) is None:
+        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
+    return token
+
+
+def _enforce_manual_route(route: dict[str, str], pool: str | None, model: str | None) -> None:
+    """Match the reselected *actual* worker route before native launch effects."""
+    named_pool = _manual_token(pool)
+    if named_pool is None:
+        raise FabricTaskError("MANUAL_POOL_REQUIRED")
+    canonical = pick.canonical_pool(named_pool)
+    canonical = pick.ROUTING_TOKEN_POOLS.get(canonical, canonical)
+    if route.get("POOL") != canonical:
+        raise FabricTaskError("MANUAL_POOL_ROUTE_MISMATCH")
+    if route.get("MODE") not in pick._HOST_POOL_MODES.get(canonical, ()):
+        raise FabricTaskError("MANUAL_POOL_MODE_MISMATCH")
+    named_model = _manual_token(model)
+    if named_model is not None and route.get("MODEL", "").casefold() != named_model.casefold():
+        raise FabricTaskError("MANUAL_MODEL_ROUTE_MISMATCH")
+
+
+def preview_route(
+    run_id: str,
+    task_class: str,
+    *,
+    pool: str | None = None,
+    model: str | None = None,
+    prefer: str | None = None,
+    subject_pool: str | None = None,
+    task_complexity: str = "",
+    escalation_reason: str = "",
+) -> dict[str, object]:
+    """Read-only incumbent picker and economic preflight; no lease, packet or worker."""
+    rid = validate_run_id(run_id)
+    selected_pool = _manual_token(pool)
+    selected_model = _manual_token(model)
+    if selected_model is not None and selected_pool is None:
+        raise FabricTaskError("MANUAL_MODEL_REQUIRES_POOL")
+    route = _parse_route(pick.format_pick(
+        task_class, host="auto", pool=selected_pool,
+        prefer=_manual_token(prefer),
+        **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+        task_complexity=task_complexity, escalation_reason=escalation_reason,
+        requested_model=selected_model, route_key=rid,
+    ))
+    if selected_pool is not None:
+        _enforce_manual_route(route, selected_pool, selected_model)
+    policy = pick.launch_policy(
+        route["MODE"], task_class, route["MODEL"],
+        escalation_reason=escalation_reason, task_complexity=task_complexity,
+    )
+    if not policy.get("allowed"):
+        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(policy.get("reason")))
+    return {
+        "state": "PREVIEW_ONLY", "reserved": False, "run_id": rid,
+        "pool": route["POOL"], "model": route["MODEL"],
+        "host": route["HOST"], "mode": route["MODE"],
+        "reason": route.get("REASON") or "",
+        "selection_rechecked_at_request": True,
+        "strict_pin_enforced_at_request": selected_pool is not None,
+    }
+
+
 def request(
     run_id: str,
     task_class: str,
@@ -687,8 +771,14 @@ def request(
     request_capacity_preflight: bool = False,
     request_deadline_ns: int | None = None,
     not_before: str | None = None,
+    strict_manual_pin: bool = False,
 ) -> int:
     rid = validate_run_id(run_id)
+    # Match preview: AUTO is never a literal provider/model pin. Validate
+    # before retaining a packet or consulting any provider/runtime owner.
+    pool = _manual_token(pool)
+    requested_model = _manual_token(requested_model)
+    prefer = _manual_token(prefer)
     if bool(packet) == bool(stdin_bytes is not None):
         raise ValueError("provide exactly one of packet or stdin")
     if max_turns is not None:
@@ -813,6 +903,8 @@ def request(
             route = _parse_route(
                 _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
                 if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
+        if strict_manual_pin:
+            _enforce_manual_route(route, pool, requested_model)
         check_deadline()
         if max_turns is not None and route["MODE"] not in {"glm", "minimax"}:
             raise FabricTaskError("REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED")
@@ -1218,6 +1310,17 @@ def main(argv: list[str] | None = None) -> int:
     p_packet_reconcile.add_argument("--root", required=True)
     p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
 
+
+    p_preview = sub.add_parser("preview", help="read-only incumbent model and provider selection")
+    p_preview.add_argument("--id", required=True)
+    p_preview.add_argument("--class", dest="task_class", required=True)
+    p_preview.add_argument("--pool", default="auto")
+    p_preview.add_argument("--model", dest="requested_model", default="auto")
+    p_preview.add_argument("--prefer")
+    p_preview.add_argument("--subject-pool")
+    p_preview.add_argument("--task-complexity", default="")
+    p_preview.add_argument("--escalation-reason", default="")
+
     p_request = sub.add_parser("request")
     p_request.add_argument("--id", required=True)
     p_request.add_argument("--class", dest="task_class", required=True)
@@ -1232,6 +1335,7 @@ def main(argv: list[str] | None = None) -> int:
     packet_group.add_argument("--packet")
     packet_group.add_argument("--stdin", action="store_true")
     p_request.add_argument("--pool")
+    p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
     p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac, MiniMax on M1 or Ubuntu4); no provider enrollment")
     p_request.add_argument("--prefer")
     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
@@ -1482,7 +1586,19 @@ def main(argv: list[str] | None = None) -> int:
             except (prestart_reconcile.PrestartReconcileError, OSError, ValueError) as exc:
                 print(str(exc), file=sys.stderr)
                 return 78
+
+        if args.cmd == "preview":
+            _json(preview_route(
+                args.id, args.task_class, pool=args.pool,
+                model=args.requested_model, prefer=args.prefer,
+                subject_pool=args.subject_pool,
+                task_complexity=args.task_complexity,
+                escalation_reason=args.escalation_reason,
+            ))
+            return 0
         if args.cmd == "request":
+            if args.strict_manual_pin and args.quota_fallback:
+                raise FabricTaskError("MANUAL_PIN_QUOTA_FALLBACK_REFUSED")
             stdin_bytes = sys.stdin.buffer.read() if args.stdin else None
             request_fn = request
             if args.quota_fallback:
@@ -1507,6 +1623,7 @@ def main(argv: list[str] | None = None) -> int:
                 qualification_host=args.qualification_host,
                 new_macro_worktree=args.new_macro_worktree,
                 cpu_scope_percent=args.cpu_scope_percent,
+                strict_manual_pin=args.strict_manual_pin,
                 **({"not_before": args.not_before} if args.not_before is not None else {}),
                 **({"max_turns": args.max_turns} if args.max_turns is not None else {}),
             )

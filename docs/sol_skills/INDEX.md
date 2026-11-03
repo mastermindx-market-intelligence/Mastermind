@@ -123,6 +123,18 @@ applies, and no prior modifying effect is unresolved. Otherwise preserve the exa
 `EFFECT_UNKNOWN` never permits cross-carrier replay.
 
 
+### `docs/CEO_PROJECT_PLAN_CONTINUITY.md`
+Mandatory repository-source companion whenever a CEO or delegated orchestrator starts or
+recovers a **multi-phase project**, including ChatGPT Web Pro, Astra/Codex, Fable/Claude,
+Grok and future eligible principals. Agent OS workstream waves and the latest dated
+handoff are the pinned plan; the versioned GitHub master plan is the task tree;
+Executive OS `control_plane` holds live Jobs and Attempts. Verify first-save and
+milestone readbacks, keep task-tree edits on that file, and recover from a fresh chat
+without the predecessor transcript. This is a model-neutral plan/continuation
+**procedure**, not a second task database, Executive admission, provider install or
+permission grant. Load from the same protected commit as this INDEX. Tiny one-phase
+tasks need no new plan.
+
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
 principal-duty selection, delegation economics, worker packets, capacity-aware routing, or
@@ -134,6 +146,16 @@ admission, retry, transfer, effect, or production authority.
 ### `REVIEW_RETURN.md`
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed
 completion. Reviews against original outcome, not merely implementation quality.
+
+### `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md`
+For a *new independent PR/source review*, load this shared session-side guide from the **same
+verified protected Mastermind commit** before choosing an avenue. It explains when the
+current session may use actually admitted Fabric versus a separately authorized Slack
+Dot assessment, preserving existing author/reviewer identity, original effects, and
+the non-author formal GitHub review gate. The guide is **not** an additional runtime,
+reviewer registry, permission, credential, watcher or retry authority. Source enrollment
+here does not install a ChatGPT Project instruction, Fabric plugin or native skill;
+prove each live surface separately.
 
 ### `COMMISSION_WAVE.md`
 Use when Chairman intent authorizes Sol to send bounded work to Fable/another operator or,
