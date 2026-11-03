@@ -264,3 +264,15 @@ def test_existing_lifecycle_lock_blocks_second_process(seat):
     released = subprocess.run([sys.executable, "-c", script, str(lock_path)],
                               capture_output=True, text=True, timeout=5)
     assert released.returncode == 0, released.stderr[:200]
+
+
+def test_fleet_flag_on_other_admitted_account_refuses_without_lock_inode(seat):
+    args, config, manifest, plist, state, *_ = seat
+    before = (config.read_bytes(), manifest.read_bytes(), plist.read_bytes())
+    for unrelated in ("fabric-read", "chatgpt2-personal", "unreviewed-paper-seat"):
+        invalid = args()
+        invalid.account = unrelated
+        with pytest.raises(SystemExit, match="not in reviewed cohort"):
+            MODULE.cmd_paper_runtime_upgrade(invalid)
+        assert before == (config.read_bytes(), manifest.read_bytes(), plist.read_bytes())
+        assert not (state / MODULE.C2_LIFECYCLE_LOCK_NAME).exists()

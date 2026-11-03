@@ -96,6 +96,12 @@ PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7ee
 PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
 PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
 FLEET_V20_COHORT_SOURCE_SHA256 = "19bdff327813249eba800f1004b87283f3717eebbd8efff1072ece4a14f58d3c"
+# One closed admission set shared by the dispatcher and real lifecycle-lock gate.
+FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
+    "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
+    "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
+    "chatgpt4", "mastermind-os-publication",
+))
 
 # Optional read-only fleet-status consumer. It delegates to the installed
 # Studio Direct control owner instead of letting a model compose shell probes.
@@ -928,8 +934,12 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if ((args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS
-                    and getattr(args, "fleet_v20", False) is not True)
+            fleet_selection = getattr(args, "fleet_v20", False) is True
+            if fleet_selection and args.account not in FLEET_V20_ENROLLED_ACCOUNTS:
+                # Let the source owner issue the normal typed refusal before
+                # any unrelated account lifecycle lock inode can be created.
+                return function(args)
+            if ((args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS and not fleet_selection)
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
@@ -3176,12 +3186,7 @@ def _frozen_paper_fleet_module():
     module = ModuleType("_private_paper_fleet_v20_cohorts")
     module.__file__ = str(path)
     exec(compile(source_bytes, str(path), "exec"), module.__dict__)
-    expected = frozenset((
-        "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
-        "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
-        "chatgpt4", "mastermind-os-publication",
-    ))
-    if (frozenset(module.COHORTS) != expected
+    if (frozenset(module.COHORTS) != FLEET_V20_ENROLLED_ACCOUNTS
             or module.TARGET_BRIDGE_SHA256 != PAPER_V20_BRIDGE_SHA256
             or module.PREDECESSORS != {
                 "v10": PAPER_V10_BRIDGE_SHA256,
