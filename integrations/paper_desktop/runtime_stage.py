@@ -73,6 +73,23 @@ REVIEWED_GENERATIONS = {
     "v16": {
         "bridge.py": "0828e0623029d136440277919a4392f637bb98c73e826ab7d06d917e3221b029",
     },
+    "v17": {
+        "bridge.py": "2da2dadada8bba9e78bc31fceba02b67f96d00a5214cf6d78c821d3d30fd0474",
+    },
+    # Security-qualified v18: preserve all immutable earlier generation pins.
+    # The v17 candidate must not be selected after its reviewed contract bugs.
+    "v18": {
+        "bridge.py": "48ad9043494447ebafb1b8f7c987ddbb8845a8d5cb5a136443a8e6841a18b6c5",
+    },
+    # Post-edit verifier must also qualify its snapshot getter; no retry.
+    "v19": {
+        "bridge.py": "2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae",
+    },
+    # v20 closes the implicit second-read TOCTOU review finding.
+    # v19 receipts remain immutable historical proof and are not selected.
+    "v20": {
+        "bridge.py": "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
+    },
 }
 
 

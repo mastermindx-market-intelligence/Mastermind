@@ -120,9 +120,11 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
     'Push exactly the current HEAD of one existing clean Mastermind attended Web workspace to its ' +
     'same host-resolved sol/web-* origin branch without force, tags, branch selection or credential input. ' +
     'Requires the caller to fence the action with the exact expected local HEAD. If the remote already ' +
-    'equals that HEAD, no push is issued. A failure after push starts is EFFECT_UNKNOWN unless remote ' +
-    'readback proves the exact HEAD is applied. EFFECT_UNKNOWN remains unresolved and carries no retry authority; ' +
-    'studio_git_publish_status exposes read-only reconciliation state for any later decision.',
+    'equals that HEAD, no push is issued. Readback of the exact pinned ref proves successful publication. ' +
+    'A Git porcelain one-ref rejection with the remote ref unchanged returns NOT_APPLIED for that ref, ' +
+    'but never grants retry or alternative-carrier permission; diagnose its unknown cause read-only on ' +
+    'the original carrier. All other unresolved push failures remain EFFECT_UNKNOWN and fenced. ' +
+    'studio_git_publish_status provides read-only reconciliation.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -352,6 +354,19 @@ function commitActionRef(operationId, branch, oldHead, tree, message, protectedB
     .update(operationId).update('\0').update(branch).update('\0').update(oldHead);
   if (protectedBase !== null) hash.update('\0').update(protectedBase);
   return hash.update('\0').update(tree).update('\0').update(message).digest('hex');
+}
+
+// A rejected *one-ref* push and a lost push response are different effects.
+// Inspect only Git's machine-readable porcelain status for this exact pinned
+// destination, never untrusted remote prose or a generic exit code.
+function explicitlyRejectedExactRef(error, ref) {
+  if (error?.code !== 1 || error?.killed === true || error?.signal) return false;
+  const output = [error?.stdout, error?.stderr]
+    .filter((value) => typeof value === 'string').join('\n');
+  return output.split(/\r?\n/).some((line) => {
+    const match = line.match(/^!\t([^\t\r\n]+)\t\[remote rejected\](?:\s*\([^\r\n]*\))?\s*$/);
+    return match !== null && match[1].endsWith(`:${ref}`);
+  });
 }
 
 function publicStatus(state) {
@@ -1109,6 +1124,26 @@ export function createGitPublisher(config, dependencies = {}) {
             action_ref: ref,
             push_attempted: true,
             ...publicStatus(afterFailure),
+          };
+        }
+        // Do not turn an explicit porcelain ref rejection into EFFECT_UNKNOWN
+        // when the same pinned destination is authoritatively unchanged.
+        // This classifies the requested ref only; it does not classify the
+        // host's reason or authorize an automatic retry or carrier switch.
+        if (explicitlyRejectedExactRef(error, before.ref) &&
+            afterFailure.remoteHead === before.remoteHead) {
+          return {
+            schema: 'mastermind.studio_git_push_result.v1',
+            status: 'REFUSED',
+            effect_state: 'NOT_APPLIED',
+            code: 'REMOTE_REF_REJECTED_UNCHANGED',
+            action_ref: ref,
+            push_attempted: true,
+            retry_allowed: false,
+            diagnostic_scope: 'SAME_CARRIER_READ_ONLY',
+            rejection_reason: 'UNDETERMINED',
+            ...publicStatus(afterFailure),
+            ready_to_push: false, // A rejected write is not automatically re-admitted.
           };
         }
       } catch {
