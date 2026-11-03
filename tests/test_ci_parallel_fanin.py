@@ -26,7 +26,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
         "push": {"branches": ["master"]},
         "workflow_dispatch": None,
     }
-    assert set(data["jobs"]) == {"pytest_shards", "test"}
+    assert set(data["jobs"]) == {"pr_scope", "pr_fast", "pytest_shards", "test"}
     shards = data["jobs"]["pytest_shards"]
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards["strategy"]["fail-fast"] is False
@@ -37,7 +37,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
     assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
     assert data["jobs"]["test"]["name"] == "test"
-    assert data["jobs"]["test"]["needs"] == ["pytest_shards"]
+    assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
 
 
 @pytest.mark.parametrize(
@@ -75,10 +75,10 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
             "index: [0, 1, 2, 3, 4, 5]",
             "index: [0, 1, 2, 3, 4, 5]\n        python: [3.12]",
         ),
-        ("needs: [pytest_shards]", "needs: []"),
+        ("needs: [pr_scope, pr_fast, pytest_shards]", "needs: []"),
         ("if: ${{ always() }}", "if: false"),
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
-        ('if [ "$SHARDS_STATUS" != success ]; then', "if [ \"$SHARDS_STATUS\" = failure ]; then"),
+        ('if [ "$PR_SCOPE_STATUS" != success ]; then', "if [ \"$PR_SCOPE_STATUS\" = failure ]; then"),
         ("exit 1", "exit 0"),
         ("exit 1", "# exit 1"),
         (
@@ -89,7 +89,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
             "      - name: Run repository test gate\n        env:",
             "      - name: Run repository test gate\n        if: ${{ github.event_name == 'pull_request' }}\n        env:",
         ),
-        ("exit 1\n          fi", "echo \"not stopping\"\n          fi\n          exit 1"),
+        ("exit 1\n            fi", "echo \"not stopping\"\n            fi\n            exit 1"),
         (
             "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}",
             "python -m scripts.ci_parallel_shard --jobs 6 --index 0",
