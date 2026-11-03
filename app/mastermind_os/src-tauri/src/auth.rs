@@ -210,6 +210,14 @@ impl Inner {
         });
         Ok(url)
     }
+    fn initial_sign_in_transaction(&mut self) -> Result<String> {
+        // Request a fresh login UI on explicit Sign in so an unrelated browser
+        // SSO session can be changed. This hint is not identity
+        // proof; the normal trusted issuer and resource checks still apply.
+        // Only this initial handoff requests it. Chained grants keep SSO.
+        let url = self.transaction(Resource::Acquisition)?;
+        Ok(format!("{url}&prompt=login"))
+    }
     fn consume(&mut self, callback: &str) -> Result<(Pending, String, String)> {
         // Malformed or unrelated callbacks cannot cancel another transaction.
         let (state, code, error) = parse_callback(callback)?;
@@ -456,7 +464,7 @@ pub fn sign_in(app: AppHandle) -> Result<AuthStatus> {
             crate::native_refresh::delete(client, resource.audience())?;
         }
     }
-    let url = inner.transaction(Resource::Acquisition)?;
+    let url = inner.initial_sign_in_transaction()?;
     let generation = inner.generation;
     drop(inner);
     drop(_keychain);
@@ -1625,6 +1633,66 @@ mod tests {
             .expect("Inner::new source must remain present");
         assert!(constructor.contains("crate::native_client::validate_native_client_id"));
         assert!(!constructor.contains("is_ascii_alphanumeric"));
+    }
+    #[test]
+    fn explicit_sign_in_requests_login_without_an_identity_hint() {
+        let mut i = inner();
+        let raw = i.initial_sign_in_transaction().unwrap();
+        let url = Url::parse(&raw).unwrap();
+        let pairs: Vec<_> = url.query_pairs().collect();
+        let value = |key: &str| pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_ref());
+        assert_eq!(value("prompt"), Some("login"));
+        assert_eq!(pairs.iter().filter(|(k, _)| k == "prompt").count(), 1);
+        assert_eq!(value("login_hint"), None);
+        assert_eq!(url.origin().ascii_serialization(), ISSUER.trim_end_matches('/'));
+        assert_eq!(url.path(), "/authorize");
+        assert_eq!(value("client_id"), Some("public-client"));
+        assert_eq!(value("redirect_uri"), Some(CALLBACK));
+        assert_eq!(value("response_type"), Some("code"));
+        assert_eq!(value("audience"), Some(Resource::Acquisition.audience()));
+        let expected_scope = if Resource::Acquisition.persistent() {
+            format!("{} offline_access", Resource::Acquisition.scope())
+        } else { Resource::Acquisition.scope().to_owned() };
+        assert_eq!(value("scope"), Some(expected_scope.as_str()));
+        let pending = i.pending.as_ref().unwrap();
+        assert_eq!(value("state"), Some(pending.state.as_str()));
+        assert_eq!(value("code_challenge_method"), Some("S256"));
+        let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(pending.verifier.as_bytes()));
+        assert_eq!(value("code_challenge"), Some(challenge.as_str()));
+    }
+    #[test]
+    fn explicit_sign_in_chained_grants_preserve_same_session_sso() {
+        let mut i = Inner::with_executive_resource(Some("public-client"),
+            Some("https://mcp.mastermind-x.com/os/executive"));
+        i.initial_sign_in_transaction().unwrap();
+        for (completed, next) in [(Resource::Acquisition, Resource::Content),
+            (Resource::Content, Resource::Executive)] {
+            let state = i.pending.as_ref().unwrap().state.clone();
+            let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
+            assert_eq!(pending.resource, completed);
+            let raw = i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).unwrap();
+            let url = Url::parse(&raw).unwrap();
+            let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
+            assert!(!pairs.contains_key("prompt"));
+            assert!(!pairs.contains_key("login_hint"));
+            assert_eq!(pairs["audience"], if next == Resource::Executive {
+                i.executive_resource.as_deref().unwrap()
+            } else { next.audience() });
+            assert_eq!(pairs["redirect_uri"], CALLBACK);
+            assert_eq!(pairs["code_challenge_method"], "S256");
+            assert_eq!(i.pending.as_ref().unwrap().resource, next);
+        }
+        let state = i.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
+        assert!(i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).is_none());
+        assert!(i.token(Resource::Executive).is_some());
+    }
+    #[test]
+    fn explicit_sign_in_without_a_client_stays_unconfigured() {
+        let mut i = Inner::new(None);
+        assert_eq!(i.initial_sign_in_transaction().unwrap_err(), "NATIVE_CLIENT_ID_MISSING");
+        assert!(i.pending.is_none());
+        assert_eq!(i.status().status, "unconfigured");
     }
     #[test]
     fn separate_authorizations_have_exact_custom_scope_and_s256() {
