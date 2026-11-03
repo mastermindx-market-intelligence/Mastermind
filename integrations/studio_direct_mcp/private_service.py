@@ -845,9 +845,11 @@ def _c2_lifecycle_mutex(account: str):
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS | {"chatgpt2-business"} | NATIVE_POOL_PIN_ACCOUNTS):
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS
+                       | {"chatgpt2-business", M1_PAPER_V20_ACCOUNT} | NATIVE_POOL_PIN_ACCOUNTS):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
-    subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
+    subject = ("Fabric" if account in FABRIC_BACKEND_ACCOUNTS
+               else "M1 Paper" if account == M1_PAPER_V20_ACCOUNT else "C2")
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
     _assert_dest_safe(lock_path)
     current = lock_path.parent

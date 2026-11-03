@@ -14,6 +14,7 @@ SOURCE = Path(__file__).with_name("private_service.py")
 SPEC = importlib.util.spec_from_file_location("paper_m1_under_test", SOURCE)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+ORIGINAL_LIFECYCLE_MUTEX = MODULE._c2_lifecycle_mutex
 
 
 def digest(payload):
@@ -26,6 +27,8 @@ def enrolled(tmp_path, monkeypatch):
     home = tmp_path / "home"
     base = home / ".local/share/studio-direct-mcp/private/chrisadmin"
     base.mkdir(parents=True, mode=0o700)
+    state = base / "state"
+    state.mkdir(mode=0o700)
     (home / ".local/share/mastermind-paper/runtime/v5").mkdir(parents=True)
     (home / ".local/share/mastermind-paper/runtime/v20").mkdir(parents=True)
     label = "com.mastermind.studio-direct-private.chrisadmin"
@@ -51,7 +54,7 @@ def enrolled(tmp_path, monkeypatch):
     manifest_path.write_bytes(json.dumps(initial, indent=2).encode())
     for f in (config_path, plist_path, manifest_path):
         f.chmod(0o600)
-    roots = {"base": base, "config": config_path, "manifest": manifest_path, "plist": plist_path}
+    roots = {"base": base, "state": state, "config": config_path, "manifest": manifest_path, "plist": plist_path}
     monkeypatch.setattr(MODULE, "M1_PAPER_V5_MANIFEST_SHA256", digest(manifest_path.read_bytes()))
     monkeypatch.setattr(MODULE, "M1_PAPER_V5_CONFIG_SHA256", digest(config_path.read_bytes()))
     monkeypatch.setattr(MODULE, "M1_PAPER_V5_PLIST_SHA256", digest(plist_path.read_bytes()))
@@ -159,3 +162,21 @@ def test_post_manifest_commit_failure_does_not_blindly_replay(enrolled,monkeypat
     manifest=json.loads(m.read_bytes())
     assert updated["paperDesign"]["bridgeSha256"]==MODULE.M1_PAPER_V20_BRIDGE_SHA256
     assert manifest["configHash"]==digest(c.read_bytes())
+
+
+def test_original_chrisadmin_mutex_admits_actual_apply_not_a_mock(enrolled, monkeypatch, capsys):
+    """Regression: dry run previously passed, but live M1 apply was refused by account gate."""
+    args, config_path, manifest_path, plist_path, _ = enrolled
+    monkeypatch.setattr(MODULE, "_c2_lifecycle_mutex", ORIGINAL_LIFECYCLE_MUTEX)
+    assert MODULE.cmd_paper_runtime_upgrade(args()) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["effect"] == "INSTALLED_NOT_STARTED"
+    assert json.loads(config_path.read_bytes())["paperDesign"]["bridgeSha256"] == MODULE.M1_PAPER_V20_BRIDGE_SHA256
+    assert json.loads(manifest_path.read_bytes())["configHash"] == digest(config_path.read_bytes())
+    lock = config_path.parent / "state" / MODULE.C2_LIFECYCLE_LOCK_NAME
+    assert lock.is_file() and (lock.stat().st_mode & 0o777) == 0o600
+    assert lock.stat().st_size == 0
+    assert plist_path.read_bytes() == b"synthetic plist identity"
+    with pytest.raises(SystemExit, match="cannot select another account"):
+        with ORIGINAL_LIFECYCLE_MUTEX("not-an-enrolled-account"):
+            pass
