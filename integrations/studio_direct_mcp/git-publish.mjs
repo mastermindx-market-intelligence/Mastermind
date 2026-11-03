@@ -27,6 +27,34 @@ const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_PUSH_TIMEOUT_MS = 60_000;
 const RESOLVED_CONFIGS = new WeakSet();
 
+// Only a closed repository selector may create this pre-dispatch refusal.
+// The gateway must not infer NOT_APPLIED from arbitrary exception messages:
+ // operations with lost responses may already have modified a Git ref.
+export class StudioGitPrecheckRefusal extends Error {
+  constructor(code) {
+    super(code);
+    this.name = 'StudioGitPrecheckRefusal';
+    this.code = code;
+  }
+}
+
+// Public Git results contain only fixed codes, never exception messages,
+// repository paths, origin URLs, credentials, argv, or remote stderr.
+export function classifyStudioGitFailure(error, { modifying = false } = {}) {
+  if (error instanceof StudioGitPrecheckRefusal) {
+    return {
+      schema: 'mastermind.studio_git_tool_error.v1',
+      status: 'REFUSED', effect_state: 'NOT_APPLIED', code: error.code,
+    };
+  }
+  return {
+    schema: 'mastermind.studio_git_tool_error.v1',
+    status: modifying ? 'UNKNOWN' : 'REFUSED',
+    effect_state: modifying ? 'EFFECT_UNKNOWN' : 'NOT_APPLIED',
+    code: modifying ? 'TYPED_GIT_EFFECT_UNQUALIFIED' : 'TYPED_GIT_READONLY_INSPECTION_REFUSED',
+  };
+}
+
 export const STUDIO_GIT_PUBLISH_STATUS_TOOL = Object.freeze({
   name: 'studio_git_publish_status',
   title: 'Studio Git Publish Status',
@@ -122,7 +150,7 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
     'Requires the caller to fence the action with the exact expected local HEAD. If the remote already ' +
     'equals that HEAD, no push is issued. Readback of the exact pinned ref proves successful publication. ' +
     'A Git porcelain one-ref rejection with the remote ref unchanged returns NOT_APPLIED for that ref, ' +
-    'but never grants retry or alternative-carrier permission; diagnose its unknown cause read-only on ' +
+    'but does not confer retry or alternative-carrier permission; diagnose its unknown cause read-only on ' +
     'the original carrier. All other unresolved push failures remain EFFECT_UNKNOWN and fenced. ' +
     'studio_git_publish_status provides read-only reconciliation.',
   inputSchema: {
@@ -432,14 +460,22 @@ function createClosedRepositoryPublisher(cfg, dependencies) {
       if (result.error !== undefined || !result.receipt || typeof result.receipt !== 'object') {
         throw new Error('closed workspace registry returned an unexpected result');
       }
-      if (selected !== null) throw new Error('operation ID is registered in more than one repository');
+      if (selected !== null) throw new StudioGitPrecheckRefusal('OPERATION_AMBIGUOUS_ACROSS_REPOSITORIES');
       selected = publishers.get(profile.repository);
     }
-    if (!selected) throw new Error('operation is not registered in the closed repository profile');
+    if (!selected) throw new StudioGitPrecheckRefusal('OPERATION_NOT_REGISTERED_IN_CLOSED_PROFILE');
     return selected;
   }
   const dispatch = (method) => async (args) => {
-    const publisher = await select(args?.operation_id);
+    let publisher;
+    try {
+      publisher = await select(args?.operation_id);
+    } catch (error) {
+      // Every selector operation is a canonical read-only mmx-workspace status.
+      // No publisher method (and therefore no Git mutation) has been entered.
+      if (error instanceof StudioGitPrecheckRefusal) throw error;
+      throw new StudioGitPrecheckRefusal('REPOSITORY_ROUTING_UNQUALIFIED');
+    }
     return publisher[method](args);
   };
   return Object.freeze({

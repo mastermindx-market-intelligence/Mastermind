@@ -100,6 +100,7 @@ import {
   STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL,
   STUDIO_GIT_PUBLISH_TOOLS,
   createGitPublisher,
+  classifyStudioGitFailure,
   resolveGitPublishConfig,
   toolResult as gitToolResult,
 } from './git-publish.mjs';
@@ -1208,17 +1209,19 @@ class GatewaySession {
           effect: typeof data?.effect_state === 'string' ? data.effect_state : undefined,
         });
         return gitToolResult(data, isError);
-      } catch {
-        log('info', 'tool_call', {
+      } catch (error) {
+        // A thrown mutation is not proof of a preflight refusal. The original
+        // owner might have updated its ref before a lost return. Only a typed
+        // closed-selector refusal proves that publisher dispatch never began.
+        const modifying = name !== STUDIO_GIT_PUBLISH_STATUS_TOOL.name;
+        const data = classifyStudioGitFailure(error, { modifying });
+        if (data.effect_state === 'EFFECT_UNKNOWN') this.taint('typed git mutation return unqualified');
+        log('warn', 'tool_call', {
           sid: this.tag, tool: name, durationMs: Date.now() - started,
           classification: CLASSIFICATION.TOOL_ERROR,
+          effect: data.effect_state,
         });
-        return gitToolResult({
-          schema: 'mastermind.studio_git_tool_error.v1',
-          status: 'REFUSED',
-          effect_state: 'NOT_APPLIED',
-          code: 'TYPED_GIT_PRECHECK_REFUSED',
-        }, true);
+        return gitToolResult(data, true);
       }
     }
 
