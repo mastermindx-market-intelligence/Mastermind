@@ -4157,7 +4157,7 @@ class WorkerBrokerClient:
     ) -> dict[str, Any]:
         # Bridge-only read: this does not add the operation to the ordinary
         # Worker Broker server or grant a generic request-supplied data source.
-        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation"}:
+        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation", "native-fabric-status"}:
             raise BrokerProtocolError("client operation is not allowed")
         request_id = f"req-{uuid.uuid4().hex}"
         document = {

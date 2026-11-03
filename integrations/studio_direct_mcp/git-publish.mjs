@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const execFileDefault = promisify(execFileCallback);
@@ -499,8 +499,33 @@ export function createGitPublisher(config, dependencies = {}) {
   async function seedPrivateIndex(workspacePath, indexPath) {
     const {stdout} = await git(workspacePath, ['rev-parse', '--git-path', 'index']);
     const realIndexPath = path.resolve(workspacePath, oneLine(stdout, 'real index path'));
-    const originalIndex = await readFile(realIndexPath);
+    // Bind bytes and metadata to one inode even if Git replaces the pathname.
+    // The existing real-index byte comparisons still fence concurrent writers.
+    const source = await open(realIndexPath, 'r');
+    let originalIndex;
+    let originalMtimeNs;
+    try {
+      originalMtimeNs = (await source.stat({bigint: true})).mtimeNs;
+      originalIndex = await source.readFile();
+    } finally {
+      await source.close();
+    }
+
+    // A newer copy can hide a same-size edit in a racily clean cached entry.
+    // Floor integer nanoseconds before conversion so floating-point rounding
+    // cannot advance the private index into the following second.
+    const nsPerSecond = 1_000_000_000n;
+    let seconds = originalMtimeNs / nsPerSecond;
+    if (originalMtimeNs < 0n && originalMtimeNs % nsPerSecond !== 0n) seconds -= 1n;
+    const timestamp = Number(seconds);
+    if (!Number.isSafeInteger(timestamp)) {
+      throw new Error('real index timestamp is outside the supported range');
+    }
     await writeFile(indexPath, originalIndex);
+    await utimes(indexPath, timestamp, timestamp);
+    if ((await stat(indexPath, {bigint: true})).mtimeNs > originalMtimeNs) {
+      throw new Error('private index timestamp advanced during preparation');
+    }
     return {realIndexPath, originalIndex};
   }
 

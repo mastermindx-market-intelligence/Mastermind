@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='0be933110a192f3855359eb72bfdfddb38e6dd581ed1d495d0caf7ea8a7a6aec'
+    assert hashlib.sha256(current_raw).hexdigest()=='55cc9fcdd3e03696311532b0ab7dcd2c54eaad0ac039280d3c844de87dbc4054'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
@@ -587,11 +587,11 @@ def test_native_initializer_extends_only_exact_preimage_members():
     changed={'ext/fabric_task.py','ext/glm_host_account_source.py',
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
-        'ext/paid_model_owner.py','ext/pick.py','ext/remote_sub.sh',
+        'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
         'ext/remote_sub_exec.py','ext/support_bundle.py','ext/paid_yaml_runtime.py','pool'}
     assert set(current)-set(before)==added
     assert {p for p in before if before[p]!=current[p]}==changed
-    assert sum(before[p]==current[p] for p in before)==81
+    assert sum(before[p]==current[p] for p in before)==80
     for name in added|changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()

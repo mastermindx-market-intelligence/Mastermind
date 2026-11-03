@@ -28,7 +28,10 @@ def digest(raw: bytes) -> str:
 
 @pytest.fixture(scope="module")
 def material(tmp_path_factory):
-    original = (ROOT / MANIFEST["target_path"]).read_bytes()
+    # This is a historical prospective patch, not an embargo on unrelated
+    # active-reader improvements. Keep its exact reviewed input reproducible
+    # in source archives without depending on Git history or live host files.
+    original = (PROPOSAL / "fabric_task.py.base").read_bytes()
     patch = (PROPOSAL / "native-refusal-diagnostics.patch").read_bytes()
     assert digest(original) == MANIFEST["preimage_sha256"]
     assert digest(patch) == MANIFEST["patch_sha256"]
@@ -209,9 +212,16 @@ def test_symlinked_refusal_cannot_supply_diagnostics(ns):
     assert "request_refusal_code" not in out
 
 
-def test_no_active_candidate_or_installed_manifest_change(material):
-    assert digest((ROOT / MANIFEST["target_path"]).read_bytes()) == MANIFEST["preimage_sha256"]
+def test_proposal_remains_inert_and_preserves_its_original_admission_ast(material):
+    assert digest((PROPOSAL / "fabric_task.py.base").read_bytes()) == MANIFEST["preimage_sha256"]
     assert MANIFEST["active_candidate_unchanged"] is True
+    # The later browser catalog adds read-only owner-namespace binding to the
+    # active adapter. It does not activate this proposal's diagnostic behavior.
+    active = ast.parse((ROOT / MANIFEST["target_path"]).read_text())
+    assert not any(isinstance(node, ast.FunctionDef) and node.name == "_safe_request_refusal_code"
+                   for node in ast.walk(active))
+    assert not any(isinstance(node, ast.Constant) and node.value == "request_refusal_code"
+                   for node in ast.walk(active))
     old, new = map(ast.parse, material[:2])
     ignored = {"inspect_run", "_parse_route", "_safe_request_refusal_code"}
     def clean(module):

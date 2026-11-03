@@ -1029,6 +1029,54 @@ Retain one request ID and use the existing same-ID status/reconciliation path
 after transport loss. The predecessor digest is a concurrency fence, not a
 source of renewal authority.
 
+For an expired **passing company device-auth** receipt on the current Codex
+pin whose credential and binary have undergone the same filesystem device-number
+change, the root provisioner accepts the separate explicit option
+`--requalify-passed-device-renumbering-sha256 SHA256`. This is a new bounded
+qualification under the current authorized acceptance assignment, not reuse of
+historical readiness. The supplied digest must match the exact current canonical
+receipt bytes; it is a compare-and-replace fence, not an authority grant or a
+hardcoded incident identity.
+
+The historical receipt must pass its complete original semantics against its
+own recorded credential and current-pin binary. Both historical objects must
+share one positive device number, and both actual current objects must share a
+different positive device number. Every other field must be unchanged, including
+inode, owner/group, mode, size, timestamps and link count, plus the binary's fixed
+path/version/SHA/team. Unchanged identities, one-sided or split device changes,
+other metadata drift, a different binary, nonpassing/reserved receipts and
+unexpired predecessor deadlines refuse. This comparison does not establish a
+historical VolumeUUID or explain why the device number changed. Ordinary renewal,
+refresh, terminal recovery and the historical incident flags remain unchanged.
+
+This option is available through the **root provisioner only**, with the fixed
+company worker, canonical paths and no slot override. It is mutually exclusive
+with every other requalification/recovery option. Supply a newly authorized UTC
+device revalidation deadline more than 30 and no more than 60 minutes ahead:
+
+```bash
+sudo /bin/bash \
+  "/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/provision-worker-auth.sh" \
+  --verify-ready \
+  --expected-credential-kind device-auth \
+  --workspace-binding-class company-workspace-admin-attested \
+  --credential-expires-at "$APPROVED_REVALIDATION_UTC" \
+  --requalify-passed-device-renumbering-sha256 "$CURRENT_PASS_RECEIPT_SHA256"
+```
+
+The existing root transaction lock covers the fresh identity probe, immutable
+superseded-receipt archive, exact receipt CAS and sticky reservation. Current
+credential and binary metadata are rechecked around the archive and replacement.
+Only then does the same owner spend exactly one canary and require the unchanged
+post-canary identity/finalization checks before recording READY. The provisioner
+requests no logout, credential replacement, copying or repair; credential
+contents never enter its evidence, and no receipt is deleted to manufacture an attempt.
+The reservation binds the actual new device numbers. A crash or lost response
+after reservation leaves the same original operation nonpassing until observed;
+do not issue another canary or invalidate its receipt. A completed replacement
+also makes the old supplied digest ineligible for replay. Preserve the original
+root operation record and inspect the existing lock/receipt before any next step.
+
 For the separately reviewed company-device metadata-drift qualification, the
 same `executive.worker_auth.verify_ready` action accepts
 `--requalify-company-device-drift-sha256 SHA256`. The sole admitted predecessor

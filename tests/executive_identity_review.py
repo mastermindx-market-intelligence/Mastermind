@@ -279,6 +279,35 @@ def reviewed_literal_spans(path: str, source: str):
                     or lines[line-1][start:end] != spelling):
                 return ()
             spans.append((line, start, end, kind))
+        # Explicit exact-file UTF-8 byte sites only. Legacy ASCII sites above
+        # retain their existing behavior. A byte slice alone cannot bless a
+        # substring/string: require the complete, typed Python Constant too.
+        utf8_sites = file_review.get('utf8_sites', ())
+        if utf8_sites:
+            try:
+                literals = [node for node in ast.walk(ast.parse(source))
+                            if isinstance(node, ast.Constant)]
+                for line, start, end, kind, spelling in utf8_sites:
+                    if (any(type(value) is not int for value in (line, start, end))
+                            or kind != 'int' or type(spelling) is not str
+                            or not 1 <= line <= len(lines) or not 0 <= start < end):
+                        return ()
+                    raw_line = lines[line - 1].encode('utf-8')
+                    prefix = raw_line[:start].decode('utf-8')
+                    value = raw_line[start:end].decode('utf-8')
+                    suffix = raw_line[end:].decode('utf-8')
+                    if value != spelling or end > len(raw_line):
+                        return ()
+                    matches = [node for node in literals
+                        if (node.lineno, node.end_lineno, node.col_offset,
+                            node.end_col_offset) == (line, line, start, end)
+                        and type(node.value) is int and node.value == int(spelling, 0)
+                        and ast.get_source_segment(source, node) == spelling]
+                    if len(matches) != 1:
+                        return ()
+                    spans.append((line, len(prefix), len(prefix) + len(value), kind))
+            except (SyntaxError, ValueError, TypeError, UnicodeError):
+                return ()
         return tuple(sorted(spans))
     modes = REVIEWED_PRIVATE_MODE_SOURCES.get(path)
     if modes is not None:
@@ -373,7 +402,18 @@ def reviewed_literal_spans(path: str, source: str):
         node = candidates[0]
         if type(node).__name__ != expected["node_type"]:
             continue
-        if not all(line.isascii() for line in lines[node.lineno - 1:node.end_lineno]):
+        # Existing AST-only records remain ASCII-only. A record with an exact
+        # full-source pin may additionally bind a method containing UTF-8 prose;
+        # its literal lines must still be ASCII, so AST byte columns are also
+        # exact character columns. The source pin is checked even if the prose
+        # later becomes ASCII; no changed postimage can shed this requirement.
+        source_sha = expected.get("source_sha256")
+        if source_sha is not None and (
+                type(source_sha) is not str
+                or hashlib.sha256(source.encode()).hexdigest() != source_sha):
+            continue
+        if (source_sha is None
+                and not all(line.isascii() for line in lines[node.lineno - 1:node.end_lineno])):
             continue
         digest = hashlib.sha256(_reviewed_ast_dump(node).encode()).hexdigest()
         if digest != expected["ast_sha256"]:
@@ -388,6 +428,7 @@ def reviewed_literal_spans(path: str, source: str):
             if (not isinstance(literal, ast.Constant)
                     or type(literal.value).__name__ != value_type or literal.value != value
                     or literal.lineno != literal.end_lineno
+                    or not lines[literal.lineno - 1].isascii()
                     or ast.get_source_segment(source, literal) != spelling
                     or lines[literal.lineno - 1][literal.col_offset:literal.end_col_offset] != spelling):
                 qualified = []

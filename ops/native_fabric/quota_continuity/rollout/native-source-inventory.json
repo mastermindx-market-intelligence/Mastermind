@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 85543,
+      "bytes": 86604,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
+      "sha256": "97ce8aa312bb5687397031cecf67665b1bc2aad9e10cdcf9814248218f371006",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -528,10 +528,10 @@
       "source": "source/placement_view.py"
     },
     "ext/pool_ledger.py": {
-      "bytes": 85541,
+      "bytes": 85784,
       "installed_preimage_sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "source": "source/pool_ledger.py"
+      "sha256": "34be52eca114c32f44538254b3675ce2d0a79dc420ebda2f42702c6be56ad6cc",
+      "source": "candidate/pool_ledger.py"
     },
     "ext/pool_status.py": {
       "bytes": 51566,
