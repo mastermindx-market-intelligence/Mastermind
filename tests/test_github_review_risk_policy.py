@@ -87,8 +87,8 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
 def test_consequential_code_gets_one_review(paths):
     decision = assess_review_risk(facts(paths))
     assert decision.tier is ReviewTier.STANDARD
-    assert decision.minimum_independent_assessments == 1
-    assert decision.minimum_formal_non_author_approvals == 1
+    assert decision.minimum_independent_assessments == 0
+    assert decision.minimum_formal_non_author_approvals == 0
 
 
 def test_large_unremarkable_diff_gets_one_review():

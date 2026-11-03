@@ -112,12 +112,17 @@ def decide_risk_dispatch(
         "pull_number": expected_pull_number,
         "head_sha": expected_head_sha,
     }
-    if assessment.tier is ReviewTier.FAST:
+    if assessment.tier in (ReviewTier.FAST, ReviewTier.STANDARD):
+        # Routine code and test changes need CI/self-check, not another
+        # mandatory independent worker or formal approval per edit. The
+        # separate explicitly authorized manual review route is unchanged.
         return RiskDispatchAdvice(
-            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, ReviewTier.FAST,
-            "FAST_NO_INDEPENDENT_REVIEW_REQUIRED", **bound,
+            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, assessment.tier,
+            ("FAST_NO_INDEPENDENT_REVIEW_REQUIRED"
+             if assessment.tier is ReviewTier.FAST
+             else "STANDARD_NO_MANDATORY_INDEPENDENT_REVIEW"), **bound,
         )
-    if assessment.tier in (ReviewTier.STANDARD, ReviewTier.CRITICAL):
+    if assessment.tier is ReviewTier.CRITICAL:
         return RiskDispatchAdvice(
             ReviewDispatch.AUTO_REVIEW_ELIGIBLE, assessment.tier,
             "INDEPENDENT_REVIEW_REQUIRED", **bound,

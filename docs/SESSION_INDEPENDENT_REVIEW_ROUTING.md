@@ -6,6 +6,10 @@
 
 An attended ChatGPT Web, Codex, Claude, Grok or eligible other seat can request **one real, independent source/architecture review**, obtain trustworthy return evidence, and distinguish a technical review from a formal non-author GitHub review. Use Executive OS / Fabric for Jobs, Attempts, admission, provenance and sealed results; GitHub for PR source, CI and submitted review identity; Agent OS for continuity; Slack for message transport. Do **not** build a parallel review registry, queue, authorization, webhook, identity, retry or watcher plane. The automated GitHub-triggered review entrypoint remains the existing `control_plane/github_review_intent.py` / `github_review_intent_ingress.py`, with installation and real-path proof separate from merged source.
 
+## First gate: is an independent review actually required?
+
+A reviewer is **not the default next worker** after every code edit, build, commit or PR. Use the accepted, source-verified review-risk policy and current native branch restrictions *before* creating any reviewer assignment. FAST and ordinary STANDARD do not add a mandatory independent review or formal non-author approval from this policy; self-check and relevant CI still apply. CRITICAL retains mandatory independent scrutiny, and HOLD cannot qualify for exemption. A separately authorized manual review remains permitted even for FAST/STANDARD. Never create a Fabric review, Slack Dot child, GitHub reviewer request, status wait or approval ceremony merely because an automatic-review tool exists. This is a session-level routing rule, not an authorization to bypass an existing GitHub branch restriction, current security hold, or actual denied effect.
+
 ## Before dispatch: immutable review identity
 
 1. Fresh-read repo, PR number, **full 40-character head SHA**, protected base/merge ref, all changed paths, original user/machine outcome, builder/commit authors, existing formal reviews/CI and current PR draft state. Bound scope and negative tests; check whether the source owner, existing `independent-review` GitHub ingress or a same-PR/head/scope Fabric reviewer has already been requested or started.

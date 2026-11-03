@@ -249,8 +249,8 @@ def test_real_reviewer_falsifiers_through_signed_reader_and_dispatch(path, tier)
     assessment = assess(fixture)
     assert assessment.tier is tier
     advice = auto_decide(fixture, assessment)
-    expected = (ReviewDispatch.SKIP_NO_REVIEW_NEEDED if tier is ReviewTier.FAST
-                else ReviewDispatch.AUTO_REVIEW_ELIGIBLE)
+    expected = (ReviewDispatch.AUTO_REVIEW_ELIGIBLE if tier is ReviewTier.CRITICAL
+                else ReviewDispatch.SKIP_NO_REVIEW_NEEDED)
     assert advice.action is expected
 
 

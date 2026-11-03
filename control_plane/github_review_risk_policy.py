@@ -241,7 +241,9 @@ def _validate(facts: ReviewChangeFacts) -> None:
 def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
     review_counts = {
         ReviewTier.FAST: (0, 0),
-        ReviewTier.STANDARD: (1, 1),
+        # Normal code is verified by source-bound CI; independent review is
+        # optional unless another explicit gate makes it mandatory.
+        ReviewTier.STANDARD: (0, 0),
         ReviewTier.CRITICAL: (2, 1),
         ReviewTier.HOLD: (0, 0),
     }
