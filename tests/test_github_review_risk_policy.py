@@ -31,8 +31,7 @@ def facts(paths=("app/src/component.tsx",), *, additions=12, deletions=4,
 @pytest.mark.parametrize("paths", [
     ("docs/user-guide.md",),
     ("README.md", "docs/screenshots/welcome.png"),
-    ("app/src/component.tsx",),
-    ("tests/test_model.py",),
+    ("app/src/components/component.tsx",),
 ])
 def test_bounded_routine_changes_need_no_independent_review(paths):
     decision = assess_review_risk(facts(paths))
@@ -57,6 +56,13 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
     ("trading/strategy.py",),
     ("scripts/deploy_from_git.sh",),
     ("AGENTS.md",),
+    ("tests/conftest.py",),
+    ("tests/test_ci_pytest_policy.py",),
+    ("control_plane/executive_coo_policy.py",),
+    ("config/unrun_test_waivers.yml",),
+    ("skills/mastermind-fabric-delegate/SKILL.md",),
+    ("plugins/mastermind-sol/skills/review-pull-request/SKILL.md",),
+    ("pytest.ini",),
 ])
 def test_small_sensitive_changes_never_use_fast_lane(paths):
     decision = assess_review_risk(facts(paths, additions=1, deletions=0))
@@ -67,9 +73,11 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
 
 
 @pytest.mark.parametrize("paths", [
-    ("control_plane/executive_coo_policy.py",),
     ("brain/macro_models.py",),
     ("server/handler.py",),
+    ("app/src/business_logic.ts",),
+    ("tests/test_model.py",),
+    ("tests/test_component.py",),
     ("package-lock.json",),
     ("backend/schema/price.ts",),
 ])
@@ -92,8 +100,8 @@ def test_test_only_large_deletion_gets_one_review():
     assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=51)).tier is ReviewTier.STANDARD
 
 
-def test_smaller_test_cleanup_stays_fast():
-    assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=49)).tier is ReviewTier.FAST
+def test_smaller_test_cleanup_requires_standard_review():
+    assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=49)).tier is ReviewTier.STANDARD
 
 
 @pytest.mark.parametrize("hint,expected", [
@@ -184,3 +192,45 @@ def test_ui_change_not_penalized_for_large_verification_evidence():
         ),
     )
     assert assess_review_risk(source).tier is ReviewTier.FAST
+
+
+@pytest.mark.parametrize("protected_path", [
+    "tests/conftest.py",
+    "tests/test_ci_pytest_policy.py",
+    "skills/mastermind-fabric-delegate/SKILL.md",
+    "plugins/mastermind-sol/skills/review-pull-request/SKILL.md",
+    "config/unrun_test_waivers.yml",
+    "app/src/components/ci_policy.tsx",
+])
+def test_verified_one_line_policy_and_test_gate_changes_never_fast(protected_path):
+    source = replace(
+        facts((protected_path,), additions=1, deletions=1),
+        file_metrics=(ReviewFileStat(
+            path=protected_path, additions=1, deletions=1
+        ),),
+    )
+    verdict = assess_review_risk(source)
+    assert verdict.tier is ReviewTier.CRITICAL
+    assert not verdict.fast_lane_candidate
+
+
+def test_inert_evidence_only_stays_fast_with_full_verified_metrics():
+    source = replace(
+        facts(("docs/screenshots/chart.webp", "docs/user-guide.md"),
+              additions=9, deletions=1),
+        file_metrics=(
+            ReviewFileStat(path="docs/screenshots/chart.webp", additions=0, deletions=0),
+            ReviewFileStat(path="docs/user-guide.md", additions=9, deletions=1),
+        ),
+    )
+    assert assess_review_risk(source).tier is ReviewTier.FAST
+
+
+def test_test_only_one_line_addition_is_standard_until_semantics_qualified():
+    source = replace(
+        facts(("tests/test_behavior.py",), additions=1, deletions=0),
+        file_metrics=(ReviewFileStat(
+            path="tests/test_behavior.py", additions=1, deletions=0
+        ),),
+    )
+    assert assess_review_risk(source).tier is ReviewTier.STANDARD

@@ -30,6 +30,19 @@ _CRITICAL_PREFIXES = (
     "scripts/deploy_",
     "scripts/release_",
     "security/",
+    "skills/",
+    "plugins/",
+    ".claude/",
+    ".codex/",
+    ".cursor/",
+    "ci/",
+    "tests/test_ci_",
+    "tests/test_security_",
+    "tests/test_auth_",
+    "tests/test_review_",
+    "tests/test_policy_",
+    "config/unrun_test_waivers.yml",
+    "config/ci_",
     "trading/",
     "payments/",
     "billing/",
@@ -41,6 +54,13 @@ _CRITICAL_PREFIXES = (
 _CRITICAL_EXACT = frozenset({
     "AGENTS.md",
     "CLAUDE.md",
+    "pytest.ini",
+    "tox.ini",
+    "noxfile.py",
+    "setup.cfg",
+    "tests/conftest.py",
+    "tests/pytest_plugins.py",
+    "pyproject.toml",
     "CODEOWNERS",
     "SECURITY.md",
     "config/authority_map.yml",
@@ -56,6 +76,7 @@ _CRITICAL_EXACT = frozenset({
 _CRITICAL_SEGMENTS = frozenset({
     "auth", "authentication", "authorization", "oauth", "security", "secrets",
     "secret", "credential", "credentials", "permission", "permissions",
+    "ci", "policy", "pytest",
     "privilege", "privileges", "token", "tokens", "crypto", "encryption",
     "order_execution", "trade_execution", "trade_sizing", "payments",
     "payment", "billing", "trading", "order", "orders", "broker",
@@ -64,6 +85,7 @@ _CRITICAL_SEGMENTS = frozenset({
 _STANDARD_PREFIXES = (
     "control_plane/", "integrations/", "brain/", "finance/", "engine/risk_",
     "backend/", "server/", "services/", "api/", "lib/",
+    "scripts/", "ops/", "config/",
 )
 _STANDARD_EXACT = frozenset({
     "pyproject.toml", "requirements.txt", "package.json",
@@ -224,6 +246,8 @@ def _is_critical_path(path: str) -> bool:
     lower = path.lower()
     if lower in {p.lower() for p in _CRITICAL_EXACT}:
         return True
+    if lower.endswith("/conftest.py") or lower.endswith("/pytest_plugins.py"):
+        return True
     if any(lower.startswith(prefix) for prefix in _CRITICAL_PREFIXES):
         return True
     # A directory or filename component that names a privileged boundary.
@@ -233,6 +257,8 @@ def _is_critical_path(path: str) -> bool:
 
 def _is_standard_path(path: str) -> bool:
     lower = path.lower()
+    if _is_test_path(lower):
+        return True
     if lower in _STANDARD_EXACT or lower.endswith((".sql", ".lock")):
         return True
     if any(lower.startswith(prefix) for prefix in _STANDARD_PREFIXES):
@@ -243,20 +269,30 @@ def _is_standard_path(path: str) -> bool:
 
 def _is_test_path(path: str) -> bool:
     lower = path.lower()
-    return lower.startswith(_TEST_PREFIXES) or "/__tests__/" in lower or lower.endswith((".test.ts", ".test.tsx", ".spec.js", ".spec.ts"))
+    parts = lower.split("/")
+    return (
+        any(part in ("tests", "test", "__tests__", "e2e") for part in parts[:-1])
+        or lower.endswith((".test.ts", ".test.tsx", ".test.js", ".test.jsx",
+                           ".spec.js", ".spec.ts", ".spec.tsx"))
+    )
 
 
 _FAST_CODE_PREFIXES = (
-    "app/src/", "app/mastermind_os/src/components/",
+    "app/src/components/", "app/mastermind_os/src/components/",
     "frontend/src/components/", "web/src/components/", "ui/",
     "terminal/components/", "terminal/styles/", "terminal/assets/",
 )
 _FAST_CODE_SUFFIXES = (".css", ".scss", ".sass", ".less", ".svg")
+_FAST_COMPONENT_SUFFIXES = (".tsx", ".jsx")
 
 
 def _is_explicit_fast_source(path: str) -> bool:
     lower = path.lower()
-    return lower.startswith(_FAST_CODE_PREFIXES) or lower.endswith(_FAST_CODE_SUFFIXES)
+    return (
+        lower.endswith(_FAST_CODE_SUFFIXES)
+        or (lower.startswith(_FAST_CODE_PREFIXES)
+            and lower.endswith(_FAST_COMPONENT_SUFFIXES))
+    )
 
 
 _SUPPORTING_PREFIXES = (
@@ -272,9 +308,11 @@ _EVIDENCE_SUFFIXES = (".json", ".yml", ".yaml", ".log", ".csv", ".html")
 
 def _is_supporting_change(path: str) -> bool:
     lower = path.lower()
+    # Executable tests and CI enforcement are never inert by path alone.
+    if _is_test_path(lower) or lower.startswith(("terminal/e2e/", "e2e/")):
+        return False
     return (
-        _is_test_path(lower)
-        or lower.endswith(_SUPPORTING_SUFFIXES)
+        lower.endswith(_SUPPORTING_SUFFIXES)
         or (lower.startswith(_SUPPORTING_PREFIXES) and lower.endswith(_EVIDENCE_SUFFIXES))
     )
 

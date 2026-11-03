@@ -162,7 +162,7 @@ def test_binary_image_without_patch_can_still_be_fast():
 
 
 
-def test_visual_code_plus_large_proof_artifacts_is_fast_not_standard():
+def test_visual_code_with_executable_test_change_is_standard_even_with_large_proof():
     """Source budget excludes verified screenshots/logs/tests, not code."""
     files = (
         file("terminal/components/ChartPanel.tsx", additions=20, deletions=5),
@@ -177,7 +177,9 @@ def test_visual_code_plus_large_proof_artifacts_is_fast_not_standard():
         first=snap(changed_files=4, additions=1320, deletions=5),
         pages={1: files},
     )
-    assert assess(reader).tier is ReviewTier.FAST
+    # An executable e2e test is not passive evidence. The final review gate
+    # remains unless a trusted semantic qualifier proves it presentation-only.
+    assert assess(reader).tier is ReviewTier.STANDARD
 
 
 def test_proof_artifact_missing_patch_does_not_hide_authority_path():
