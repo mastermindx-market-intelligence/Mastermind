@@ -313,6 +313,9 @@ C4_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
     "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
     # Exact native-pool pin postimage; all other C4 profile fields stay sealed.
     "e10730454cd343b8774929b9c6d39f5dfbf1c9b7e83bfdc82636b8e54d0437a0",
+    # Exact v20 Paper-only successor of that native-pin postimage, with the
+    # original 11 module seals, plist, port and non-Paper config unchanged.
+    "f46f1aeec2c5b0baa98f7c655723bbdfbb0a4765f87a98aacb29381750382b1e",
 ))
 C4_PAPER_NON_PAPER_CONFIG_SHA256 = "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894"
 C4_PAPER_RUNTIME_IDENTITY = {
