@@ -43,15 +43,19 @@ Action: stop tool execution in that conversation; never keep issuing `Continue`;
 
 The truth rule remains **Thinking failed != context exhausted**. A single failure may justify `ROTATION_SUSPECTED`; it never proves a private provider context limit.
 
-## Tool-output, command, and context budgets
+## Tool-output and command budgets
 
 These are conservative Mastermind engineering budgets, not undocumented provider limits — **pressure indicators and checkpoint prompts, never hard productivity ceilings**. A healthy long turn that stays on the same bounded phase may continue beyond a soft budget after compressing/retrieving more selectively and making its durable frontier current; the budgets prevent transcript bloat and stale recovery state, not short Pro or Extra High runs.
 
-- Per response: soft target **8 KiB or 150 lines**; hard ceiling **16 KiB**; search ceiling **100 matches**; larger results return a bounded excerpt, total byte/line count, truncation flag, digest, and cursor.
-- Per active turn: cumulative raw-output target **32 KiB**; use ACTIVE_EXECUTION's recovery-gap rule for coherent milestone saves; no tool-call counter triggers a checkpoint, authority recap or stop. Do not load multiple complete source files, PR bodies, logs, metrics, schemas, or process tables when exact ranges or selected fields answer the question — raw tool history is not a continuation manifest. Return source identity, exact query, selected findings, bounded excerpt, byte/line count, truncation flag, and cursor or artifact reference instead of full process listings, metrics pages, logs, repository trees, large PR bodies, long source files, irrelevant connector schemas, or repeated evidence.
-- Commands and processes: normal command timeout **15 seconds**; hard default ceiling **30 seconds**; long work returns PID and typed status instead of blocking the reasoning turn. No unbounded recursive search across home, temp, system support roots, or multiple repositories; no unfiltered process, log, or metrics dump; prefer exact roots, `git grep`, `find -maxdepth`, field-selected `jq`, byte/line caps, and cursors.
+### Per response
 
-Never reconstruct or replay private reasoning or the full prior tool transcript after interruption, compaction, or rotation.
+soft target **8 KiB or 150 lines**; hard ceiling **16 KiB**; search ceiling **100 matches**; larger results return a bounded excerpt, total byte/line count, truncation flag, digest, and cursor.
+### Per active turn
+
+cumulative raw-output target **32 KiB**; use ACTIVE_EXECUTION's recovery-gap rule for coherent milestone saves; no tool-call counter triggers a checkpoint, authority recap or stop.
+### Commands and processes
+
+normal command timeout **15 seconds**; hard default ceiling **30 seconds**; long work returns PID and typed status instead of blocking the reasoning turn. No unbounded recursive search across home, temp, system support roots, or multiple repositories; no unfiltered process, log, or metrics dump; prefer exact roots, `git grep`, `find -maxdepth`, field-selected `jq`, byte/line caps, and cursors.
 
 ## Timeout and process continuation
 
@@ -60,6 +64,12 @@ When a command times out: (1) freeze the exact PID, command, carrier, and reques
 ## Connector taint
 
 A tainted connector generation is unusable for additional work: refuse further calls in that generation, return one compact typed error, and preserve the original PID/action/effect plus the **original carrier and connector generation**. Reconcile from a fresh connector generation while remaining bound to that original carrier; a fresh generation is not carrier failover. Connector taint never authorizes replay or carrier failover and never includes prior raw payloads in the error.
+
+## Conversation-context discipline
+
+Do not load multiple complete source files, PR bodies, logs, metrics, schemas, or process tables when exact ranges or selected fields answer the question — raw tool history is not a continuation manifest. Return source identity, exact query, selected findings, bounded excerpt, byte/line count, truncation flag, and cursor or artifact reference instead of full process listings, metrics pages, logs, repository trees, large PR bodies, long source files, irrelevant connector schemas, or repeated evidence.
+
+Never reconstruct or replay private reasoning or the full prior tool transcript after interruption, compaction, or rotation.
 
 ## Compact continuation capsule
 
@@ -87,10 +97,18 @@ If persistence fails, do not loop on checkpoint writes. Emit one copyable `NOT_C
 
 Classify the observed boundary before choosing recovery; these are diagnostic classes only and create no Executive lifecycle states.
 
-- `STREAM_ATTACHMENT_UNCERTAIN` — the UI/client stream is detached, red-exclamation, resume-stream unavailable, or visibly says stopped without proof that the underlying request/process ended. Reacquire/read observable state first; do not duplicate Continue or effects merely because the client detached.
-- `TURN_EXECUTION_ENDED` — the reasoning/tool turn ended, but the conversation and exact workspace/process may still be valid. Reconcile PID/action/effect identity and, when the chat remains healthy, continue on the next turn in the same conversation.
-- `SESSION_UNSTABLE` — the conversation is materially heavy/unstable, or terminal generation failure repeats. Persist the frontier, seal the predecessor, and use a fresh same-mode chat through the existing rotation owner; do not turn mode switching into an ersatz compaction mechanism.
-- `WORKSPACE_OR_EFFECT_UNCERTAIN` — filesystem, process, request, branch, or modifying effect may have survived independently of the chat. Preserve the exact original identity; `EFFECT_UNKNOWN` blocks replay, mode movement, receiver change, and rotation until same-carrier reconciliation.
+### `STREAM_ATTACHMENT_UNCERTAIN`
+
+the UI/client stream is detached, red-exclamation, resume-stream unavailable, or visibly says stopped without proof that the underlying request/process ended. Reacquire/read observable state first; do not duplicate Continue or effects merely because the client detached.
+### `TURN_EXECUTION_ENDED`
+
+the reasoning/tool turn ended, but the conversation and exact workspace/process may still be valid. Reconcile PID/action/effect identity and, when the chat remains healthy, continue on the next turn in the same conversation.
+### `SESSION_UNSTABLE`
+
+the conversation is materially heavy/unstable, or terminal generation failure repeats. Persist the frontier, seal the predecessor, and use a fresh same-mode chat through the existing rotation owner; do not turn mode switching into an ersatz compaction mechanism.
+### `WORKSPACE_OR_EFFECT_UNCERTAIN`
+
+filesystem, process, request, branch, or modifying effect may have survived independently of the chat. Preserve the exact original identity; `EFFECT_UNKNOWN` blocks replay, mode movement, receiver change, and rotation until same-carrier reconciliation.
 
 ## Mode-specific continuation defaults
 
@@ -103,11 +121,21 @@ These are empirical operating defaults, not platform duration guarantees; elapse
 
 ## Failure triage
 
-- **Failure inside one tool call:** a tool/host boundary; reconcile exact PID, action, carrier, and effect.
-- **First terminal generation failure after a completed tool call:** if context pressure is low and effects are reconciled, classify `ROTATION_SUSPECTED` and make at most one bounded recovery; a relevant mode change may be part of that recovery. If the conversation is already heavy/unstable enough that continuing is unsafe, classify `ROTATION_REQUIRED` from surface unsafety instead. In neither case does `Thinking failed` itself prove context exhaustion.
-- **Second consecutive terminal generation failure:** classify `ROTATION_REQUIRED` under `REPEATED_TERMINAL_GENERATION_FAILURE`; stop using the chat.
-- **Fresh conversation fails before its first tool call:** platform, browser, account, model, device, network, and extension state are the leading boundary. Check current provider status, hard-refresh/restart, use a clean/private browser profile, and compare a different browser/model/device/network without moving any unresolved effect to another carrier.
-- **Failure persists across clean environments:** collect a sanitized support packet — timestamp, model/mode, conversation identity, request ID when shown, browser/version, clean-environment comparisons, HAR, console errors — excluding credentials, private tool payloads, and company-confidential evidence not required by support.
+### Failure inside one tool call
+
+a tool/host boundary; reconcile exact PID, action, carrier, and effect.
+### First terminal generation failure after a completed tool call
+
+if context pressure is low and effects are reconciled, classify `ROTATION_SUSPECTED` and make at most one bounded recovery; a relevant mode change may be part of that recovery. If the conversation is already heavy/unstable enough that continuing is unsafe, classify `ROTATION_REQUIRED` from surface unsafety instead. In neither case does `Thinking failed` itself prove context exhaustion.
+### Second consecutive terminal generation failure
+
+classify `ROTATION_REQUIRED` under `REPEATED_TERMINAL_GENERATION_FAILURE`; stop using the chat.
+### Fresh conversation fails before its first tool call
+
+platform, browser, account, model, device, network, and extension state are the leading boundary. Check current provider status, hard-refresh/restart, use a clean/private browser profile, and compare a different browser/model/device/network without moving any unresolved effect to another carrier.
+### Failure persists across clean environments
+
+collect a sanitized support packet — timestamp, model/mode, conversation identity, request ID when shown, browser/version, clean-environment comparisons, HAR, console errors — excluding credentials, private tool payloads, and company-confidential evidence not required by support.
 
 ## Closeout and rotation sequence
 

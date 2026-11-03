@@ -184,3 +184,129 @@ def test_profile_error_and_unknown_effect_recovery_bundle() -> None:
         "`MORE_WORK_EXISTS` when safe independent work remains",
     ):
         assert gate in active, f"disposition mapping dropped: {gate}"
+
+
+# Immutable public navigation baseline, not a second policy source.
+import hashlib
+import json
+import pytest
+
+PUBLIC_HEADING_MANIFEST = ROOT / "tests/fixtures/delivery_compaction_public_headings_22c08067.json"
+PUBLIC_HEADING_SHA256 = "c6686d9d5c10737356bfdf6a1d2da6d5e717cd911c489bffbd580edc9f4e7015"
+_PUBLIC_BASELINE = json.loads(PUBLIC_HEADING_MANIFEST.read_text())
+
+
+def _public_headings(text: str) -> list[str]:
+    result: list[str] = []
+    fence = None
+    for line in text.splitlines():
+        mark = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if mark:
+            char = mark.group(1)[0]
+            if fence is None:
+                fence = char
+            elif char == fence:
+                fence = None
+            continue
+        if fence is None and re.match(r"^#{1,6} ", line):
+            result.append(line)
+    return result
+
+
+def _require_public_headings(text: str, expected: list[str]) -> None:
+    actual = _public_headings(text)
+    cursor = 0
+    for heading in expected:
+        assert actual.count(heading) == expected.count(heading), heading
+        assert heading in actual[cursor:], f"missing or reordered: {heading}"
+        cursor = actual.index(heading, cursor) + 1
+
+
+def test_public_heading_manifest_retains_immutable_source_identity() -> None:
+    assert hashlib.sha256(PUBLIC_HEADING_MANIFEST.read_bytes()).hexdigest() == PUBLIC_HEADING_SHA256
+    assert _PUBLIC_BASELINE["baseline_sha"] == "22c08067ed0f480d1d5324a815fa248661c4ab46"
+    assert set(_PUBLIC_BASELINE["files"]) == set(_ALL_TARGETS)
+
+
+@pytest.mark.parametrize("rel", _ALL_TARGETS)
+def test_all_original_public_headings_remain_ordered(rel: str) -> None:
+    _require_public_headings(_read(rel), _PUBLIC_BASELINE["files"][rel]["headings"])
+
+
+@pytest.mark.parametrize("rel,removed", [
+    (rel, heading)
+    for rel, item in _PUBLIC_BASELINE["files"].items()
+    for heading in item["headings"]
+])
+def test_public_heading_guard_rejects_every_missing_anchor(rel: str, removed: str) -> None:
+    # A pinned baseline skeleton makes each mutant independent of other defects.
+    expected = _PUBLIC_BASELINE["files"][rel]["headings"]
+    text = "\n\n".join(expected)
+    _require_public_headings(text, expected)
+    mutant = text.replace(removed + "\n", "", 1) if removed != expected[-1] else text[:text.rfind(removed)]
+    with pytest.raises(AssertionError):
+        _require_public_headings(mutant, expected)
+
+
+# Each repaired leaf must lead to relevant content, not an empty heading alias.
+_LEAF_CONTENT = {
+    "docs/sol_skills/ACTIVE_EXECUTION.md": {
+        "### A \u2014 local human gate, another lane open": ("HUMAN_AUTH", "unblocked lane"),
+        "### B \u2014 GitHub reads observed, write unprobed": ("UNPROBED", "non-mutating permission/preflight"),
+        "### B2 \u2014 exact write refusal is proven": ("dummy mutation", "platform-wide write claim"),
+        "### C \u2014 protected master moves on unrelated paths": ("bounded compatibility check", "Do not restart"),
+        "### D \u2014 artifact substitution": ("NO_DELTA_LOOP", "capability step"),
+        "### E \u2014 turn-independent execution claim": ("canonical durable executor", "continue it"),
+    },
+    "docs/sol_skills/SESSION_RELIABILITY.md": {
+        "### Per response": ("8 KiB", "16 KiB", "100 matches"),
+        "### Per active turn": ("32 KiB", "no tool-call counter"),
+        "### Commands and processes": ("15 seconds", "30 seconds", "PID"),
+        "## Conversation-context discipline": ("raw tool history", "Never reconstruct"),
+        "### `STREAM_ATTACHMENT_UNCERTAIN`": ("UI/client stream", "Reacquire/read observable state"),
+        "### `TURN_EXECUTION_ENDED`": ("same conversation", "Reconcile PID/action/effect"),
+        "### `SESSION_UNSTABLE`": ("Persist the frontier", "fresh same-mode chat"),
+        "### `WORKSPACE_OR_EFFECT_UNCERTAIN`": ("same-carrier reconciliation", "EFFECT_UNKNOWN"),
+        "### Failure inside one tool call": ("tool/host boundary", "carrier"),
+        "### First terminal generation failure after a completed tool call": ("at most one bounded recovery", "ROTATION_SUSPECTED"),
+        "### Second consecutive terminal generation failure": ("ROTATION_REQUIRED", "REPEATED_TERMINAL_GENERATION_FAILURE"),
+        "### Fresh conversation fails before its first tool call": ("unresolved effect", "clean/private browser profile"),
+        "### Failure persists across clean environments": ("sanitized support packet", "excluding credentials"),
+    },
+}
+
+
+def _leaf_body(text: str, heading: str) -> str:
+    lines = text.splitlines()
+    assert lines.count(heading) == 1, heading
+    start = lines.index(heading) + 1
+    end = next((i for i in range(start, len(lines)) if re.match(r"^#{1,6} ", lines[i])), len(lines))
+    return " ".join(lines[start:end])
+
+
+def _require_leaf_content(text: str, heading: str, terms: tuple[str, ...]) -> None:
+    body = " ".join(_leaf_body(text, heading).split())
+    for term in terms:
+        assert term in body, f"{heading}: missing local content {term}"
+
+
+@pytest.mark.parametrize("rel,heading,terms", [
+    (rel, heading, terms) for rel, sections in _LEAF_CONTENT.items() for heading, terms in sections.items()
+])
+def test_repaired_anchor_has_its_own_meaningful_body(rel: str, heading: str, terms: tuple[str, ...]) -> None:
+    text = _read(rel)
+    _require_leaf_content(text, heading, terms)
+    body = _leaf_body(text, heading)
+    assert body.strip()
+    # A heading alone, or a body moved under a different heading, is not recovery.
+    with pytest.raises(AssertionError):
+        _require_leaf_content(heading + "\n\nUnrelated navigation text.\n", heading, terms)
+    with pytest.raises(AssertionError):
+        _require_leaf_content(heading + "\n\n### Unrelated section\n" + body, heading, terms)
+
+
+def test_tool_heavy_and_multi_phase_profiles_include_reliability() -> None:
+    assert "more than three tool calls" in _read("docs/sol_skills/INDEX.md")
+    ordinary = tuple(SKILLPACK_FILES)[:4]
+    assert _bundle_bytes(ordinary) < sum(_PIN_BYTES[p] for p in ordinary)
+    assert _bundle_bytes(_ALL_TARGETS) < sum(_PIN_BYTES[p] for p in _ALL_TARGETS)
