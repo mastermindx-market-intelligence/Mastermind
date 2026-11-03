@@ -89,6 +89,9 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
 
 
 def _validate_arguments(tool, arguments):
+    if tool == "session_summon":
+        from .schemas import validate_installed_summon_arguments
+        return validate_installed_summon_arguments(arguments)
     if tool == "session_reply_read":
         from .return_tools import NativeReplyReadTool
         try:
