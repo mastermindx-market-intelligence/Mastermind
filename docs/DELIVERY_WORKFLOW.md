@@ -135,19 +135,25 @@ GitHub state, not a pasted handoff:
    `HOLD-RELEASED` protocol applies, the qualifying release must be newer
    than all binding hold comments. **A label or CI-green state never releases
    a recorded hold.** Do not blanket-label, re-home or silently un-draft.
-3. Verify the applicable **independent non-author review/release decision**
-   and current source qualification. A Fabric technical `SOURCE_PASS`,
-   request for review, or green hosted CI is **not** a formal GitHub approval.
-   Macro's sweeper does not itself query a native `APPROVED` review; the
-   **arming actor** must enforce the organizational non-author release gate.
-   An author or shared-account session must not use the label to circumvent
-   the no-self-merge/no-self-approval rule.
+3. Verify **one genuinely independent formal GitHub APPROVED review** on the
+   exact current PR head and current source qualification. A Fabric technical
+   `SOURCE_PASS`, reviewer request, or green hosted CI is **not** approval.
+   A newer `CHANGES_REQUESTED`, dismissal, materially changed head or
+   indeterminate reviewer identity invalidates the release evidence. Check
+   actual review author against PR/commit authors; changing account inside
+   the same reasoning session does not establish independent scrutiny.
+   **Current interim gate:** Macro's sweeper does not yet read native PR
+   reviews, so the eligible independent release/arming actor must verify
+   this evidence before applying the opt-in label. Do not claim that
+   `merge-on-green` alone enforces review, or use a shared author account
+   to circumvent the no-self-approval/no-self-merge rule.
    **Cross-repository command boundary:** every CLI command below must bind
    `--repo mastermindx-market-intelligence/macro`; never rely on the current
    shell checkout or a previously selected repository to identify the PR.
 4. Only when release is **actually authorized**, the head checks are
    concluded clean, and no hold/merge gate remains, the eligible release
-   operator may opt in by adding the **single existing label**:
+   operator may opt in by adding the **single existing label** under the
+   **current interim non-author release fence**:
    `gh pr edit <number> --repo mastermindx-market-intelligence/macro --add-label merge-on-green`
    (or the additive GitHub issue-label action). Record exact
    repo/PR/head, reviewer identity/decision and check/run evidence on the
@@ -166,6 +172,28 @@ GitHub state, not a pasted handoff:
    Keep the original label/carrier and diagnose the actual verdict. Never
    spam workflows, push empty commits, cancel another lane's CI, or raise the
    workload cap merely to force progress.
+
+### Review once, release automatically — only after machine enforcement
+
+The Chairman's target is **one independent source review, then an automatic
+protected release**, not a second standing human release ceremony. The target is
+**not yet live authority**: Macro's existing sweeper does not check formal
+GitHub review state, and Mastermind's active native queue ruleset must not be
+assumed to require review merely because a merge queue is configured.
+
+Before dropping the interim non-author arming/release fence, the *incumbent*
+controller or protected repository policy must enforce an exact-head formal
+approval from a reviewer genuinely independent of source authors, review
+revocation/CHANGES_REQUESTED, binding CI and current integrated proof, explicit
+HOLD/STOP release order, branch conflicts and unavailable API data. Prove
+negative tests for absent, stale, revoked, self-authored and unreadable reviews,
+plus hold, red CI, stale-base and race conditions. Only after the existing
+machine gate is **installed, independently qualified and read back** may the
+existing release automation admit a reviewed, CI-green, unheld candidate
+without an additional non-author release operator. The author must still not
+self-merge through REST or an admin bypass, and the `merge-on-green` label
+remains an opt-in, never proof of approval. A source change or successful
+controller run does not establish production adoption.
 
 `merge-blocked` is a refusal/diagnostic to investigate, **not** approval to
 clear a hold. Record `ARMED`, `REFRESH_DEFERRED`, `CHECKS_PENDING`,
