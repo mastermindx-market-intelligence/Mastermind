@@ -2,7 +2,7 @@
 
 Task tree: [2026-11-02 GitHub review coverage](plans/2026-11-02-github-review-coverage.md).
 Integration and release evidence: [Mastermind #1740](https://github.com/mastermindx-market-intelligence/Mastermind/issues/1740).
-Original source baseline: `7e87f225a4ed03e3b89169f7b7c9052c6a6eac9c`; resumed procedure pin: `ea4f893103a1c0354f28843241848cae91336bd7`. R8 extends the same PR #1977 and source operation.
+Original source baseline: `7e87f225a4ed03e3b89169f7b7c9052c6a6eac9c`; current resumed procedure pin: `b2326bbe30e9988d26199f5e774a482b9c09068a`. R8 and R10–R13 extend the same PR #1977 and source operation.
 This is source behavior and a rollout specification. It is not an installed-service or production review receipt.
 
 ## Existing owners and intended outcome
@@ -106,7 +106,9 @@ Each current host composition binds one repository and one active installation. 
 
 `GitHubReviewReceiver.reconcile_open_pull_requests` is an internal callable for the existing authenticated operation owner. It has no HTTP route or timer. The default pass reads at most two pages of 25 PRs; all invocations are limited to 100 PRs. Listing uses a fixed repository-scoped GET and bounded numeric pagination, never arbitrary Link-header destinations. Each listed PR is re-read immediately before decision.
 
-The receipt records outcomes, pages observed, completeness and the next page hint. A capacity bound or read failure is explicitly incomplete. A potentially uncertain admission stops the pass with its exact command identity for original-owner reconciliation. A known legacy admission is recorded as existing/incomplete and the pass continues. GitHub pagination is not a stable snapshot; the existing owner retains continuity and starts a later pass at page one to catch list movement. There is no claim of an installed recurring PR scan.
+The v2 receipt records outcomes, pages observed, isolated read failures, starting scope, elapsed time, enumeration completeness and page/PR continuation hints. A failed individual PR read is retained while unrelated PRs continue. `complete` describes enumeration; `all_sources_observed` additionally requires no missing source and a complete pass beginning at page one without a within-page resume. Neither field claims worker execution or accepted review coverage.
+
+A cooperative 30-second budget (maximum 60 seconds) stops new operations between bounded ports. A successful owner guard cannot consume the budget and then start another read/admission. Budget exhaustion or a source-wide rate/auth/server deferral preserves the current or incoming same-page PR hint, avoiding repeated work on the prefix. The hint is applied to a fresh page; if it is absent, that entire page is examined. A potentially uncertain admission stops with its exact command identity and no automatic continuation hint. A known legacy admission remains existing/incomplete and does not block unrelated PRs. GitHub pagination is not a stable snapshot; the existing owner retains continuity and starts later sweeps at page one. There is no installed recurring scan or new cursor store.
 
 Policy revisions do not change the ordinary repository/PR/head identity. A new head creates a new review; another review of the same head requires the existing separately authorized rerun contract. Forks and automatic drafts retain explicit refusal/defer behavior.
 
@@ -152,3 +154,94 @@ A distinct read-only GLM preflight for the new R8 qualification scope (`github-r
 | ubuntu4 | GLM and other supported modes are qualification-only despite sufficient disk space |
 
 These are dated eligibility observations, not a permanent capacity assessment or a platform safety-denial receipt. No actual served model/harness or independent reviewer START was established. Restore capacity through the existing host owners and requalify a route; do not lower thresholds, clear holds, or substitute Codex/Work merely to make a request succeed.
+
+## Reliability and throughput hardening — R10–R13
+
+The existing source owners now implement the following behavior. These are
+source contracts and hermetic qualification targets, not production receipts.
+
+| Condition | Bounded behavior and recovery |
+| --- | --- |
+| Fresh publication review GET or final PR/source read fails | No publication reservation or POST; a later authorized invocation can perform fresh preflight |
+| Database wait ages publication preflight | Three-second monotonic freshness guard inside the acquired transaction refuses before creating the claim |
+| Claim committed but process/ACK becomes uncertain | Original claim remains sticky; elapsed time does not authorize another POST |
+| Original POST landed, ACK lost, head later changed | Exactly one matching historical review can confirm the old effect from its stored body digest and original publisher; no new POST and no coverage of the new head |
+| Old v1 unconfirmed reservation lacks publisher provenance | Preserve uncertainty; do not invent the original publisher from current configuration |
+| Concurrent publication callers | Existing unique command transaction selects one POST owner; others reconcile |
+| Transient GitHub GET failure | At most two same-token, same-origin attempts share a three-second operation budget; short backoff only |
+| Rate limit, server Retry-After, permission or token-source failure | Global scan deferral; advisory delay retained, shared pacing rechecked before every network attempt; no credential/provider substitution |
+| Oversized, compressed or slow-drip response | Stream cap and per-chunk deadline checks; one-MiB GitHub JSON and 64-KiB token responses; close early |
+| Slow webhook admission | Four active operations maximum; busy before credentials/ports; timeout retains capacity until actual worker exit; budget checked before starting admission |
+| Slow Slack projection | Two separate best-effort slots; known GitHub admission ACK proceeds; explicit scheduled/deferred visibility receipt; no hidden durable notification queue |
+| Unknown Slack POST or result reply | Existing one-attempt owner remains authoritative; no blind resend or claim of successful Dot pickup |
+
+The production publication hot path uses exact indexed claim/confirmation reads,
+so its cost does not grow by loading the entire publication namespace. Historical
+recovery also avoids unnecessary current-head/result work once the original
+effect has already been confirmed. The runtime still performs fresh source and
+permission reads wherever they are required; no cache turns stale facts into
+permission to publish.
+
+Network and scan deadlines are cooperative. They stop new work and check each
+raw transport chunk; they do not assert that cancellation can undo a synchronous
+socket effect. Automatic provider continuation is not added by these changes.
+
+### Existing task-level and provider gates
+
+Read the actual current [native selection owner](../ops/native_fabric/quota_continuity/candidate/pick.py)
+and [Fabric contract](../integrations/studio_direct_mcp/FABRIC.md), not a provider
+name or an old routing-table excerpt. Semantic review uses `task_class=review`.
+
+| Complexity | Review use and current qualification |
+| --- | --- |
+| C0 mechanical | Inventory and deterministic evidence preparation; cannot substitute for semantic review |
+| C1 routine bounded | Small conventional changes with a qualified semantic reviewer and retained coverage |
+| C2 complex bounded | Cross-file behavior, concurrency, privilege and retry changes, including this integration |
+| C3 frontier judgment | Difficult unresolved architecture with the actual frontier escalation witness |
+
+Full GLM at C0/C1/C2 requires the native economic escalation witness; C3 requires
+the frontier witness. Grok leaf labor has its corresponding witness gate unless
+a current applicable quota-priority exception exists. MiniMax review requires
+known subject-provider provenance and cannot review GLM-family work under the
+current directional restriction. GLM Flash and full GLM share a provider family,
+so they are not independent merely because the requested model strings differ.
+The actual native mode controls optional turn-limit support; a ceiling is not
+new retry permission.
+
+Strict pool/model pins disable cross-provider/model quota continuation. Ordinary
+unpinned routing may use the existing bounded continuation only after proven
+pre-task capacity rejection, unchanged task digest, cleanup and released lease,
+within the original deadline and at most three sequential attempts. Authentication,
+permission, spend, policy refusals, partial execution and unknown effects do not
+qualify. Broad AUTO is not a request-scoped four-model allowlist; this integration
+does not add a second candidate selector. Any future constrained candidate set
+belongs in the existing Router/Capacity contract and applies prospectively.
+
+Slack Dot review remains one explicit authorized assignment through the existing
+dialogue owner, with actual recipient, thread, pickup, START and findings receipts.
+Delivery/timeout alone does not choose a replacement or establish GitHub approval.
+Automated Dot dispatch and recovery of an old Slack reservation without retained
+original rendering/publisher evidence are not claimed by this source patch.
+
+### New route preflight observation
+
+The separate `github-review-coverage-20261102-c2-hardening-api01` task reached the
+original installed manual-route preview and stopped before native task-request
+dispatch. Its preview observation at 2026-11-02 21:58:13 America/Vancouver exited
+75 with zero stdout. The original owner is gateway generation
+`59a4851b-97a7-433f-b0b1-e992d35d0050`, profile `fabric-c3-570f6f34`; selected backend
+SHA-256 is `98bddb9adaa5e98ae5e3a73e8e051141aceeeb47476551c2247f0fc85481b2b3`.
+The retained preview-output digest is
+`560fce9374277e92c2597d289c94026842ecda6c8700081f2d7977093dc56069`.
+
+The wrapper discarded preview stderr, so the exact native eligibility reason is
+unknown. The outer `INVALID_ARGUMENT` label does not prove malformed task input.
+This read-only preflight evidence is not reviewer START, permission to repeat the
+request, or resolution of the older `review01`. No provider work was credited.
+
+[Merged #1959](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1959)
+adds prospective native request-refusal diagnostics under the existing capacity
+owners. It does not establish installed preview-stderr diagnostics or this
+consumer's actual caller qualification. Installation and live proof remain with
+the original #1829/#917/#1957 owners; this integration does not replay their held
+effects through another carrier.

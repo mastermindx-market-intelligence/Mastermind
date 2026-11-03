@@ -115,7 +115,11 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path, 
             "path": settings.delivery_path, "query_string": b"",
             "headers": headers_override or headers,
         }
-        asyncio.run(ingress(scope, receive, send))
+        async def complete_delivery():
+            await ingress(scope, receive, send)
+            from test_github_review_receiver_capacity import drain
+            await asyncio.wait_for(drain(ingress), timeout=5)
+        asyncio.run(complete_delivery())
         return response[0]["status"], json.loads(response[1]["body"])
 
     status, result = deliver()

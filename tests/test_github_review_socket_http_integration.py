@@ -178,6 +178,10 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert (await deliver())[0] == 202
             status, info = await deliver()
             assert status == 200 and info["status"] == "ALREADY_ADMITTED"
+            # Admission ACK no longer waits for the separate Slack projection.
+            # Keep the real socket server alive until its exact receipt settles.
+            from test_github_review_receiver_capacity import drain
+            await asyncio.wait_for(drain(app), timeout=5)
             assert len(runtime.jobs.list_jobs()) == 1
             job = runtime.jobs.list_jobs()[0]
             admitted_decision = ReviewIntentDecision.from_admitted_dict(

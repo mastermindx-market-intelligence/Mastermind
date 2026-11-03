@@ -343,6 +343,118 @@ def test_disabled_or_unarmed_backfill_earns_no_reads(tmp_path):
     assert pulls.calls == [] and runtime.jobs.list_jobs() == []
 
 
+def test_one_unavailable_pr_source_does_not_starve_other_prs(tmp_path):
+    runtime, fabric = adapter(tmp_path)
+
+    class PartlyUnavailable(Pages):
+        def read_pull_request(self, **kwargs):
+            if kwargs["pull_number"] == 42:
+                self.calls.append(("read", REPO, 42))
+                raise OSError("private upstream error")
+            return super().read_pull_request(**kwargs)
+
+    pulls = PartlyUnavailable({1: ingress.OpenPullRequestPage((42, 43), False)})
+    result = scan(pulls, fabric)
+    assert result.complete and not result.all_sources_observed
+    assert result.interruption is None and result.next_page is None
+    assert [o.decision.pull_number for o in result.outcomes] == [43]
+    assert result.read_failures == (ingress.ReviewReconciliationReadFailure(page=1, pull_number=42),)
+    wire = result.to_dict()
+    assert wire["schema"] == "mastermind.github_review_reconciliation.v2"
+    assert wire["retry_read_pages"] == [1] and not wire["all_sources_observed"]
+    assert "private upstream" not in json.dumps(wire)
+    assert len(runtime.jobs.list_jobs()) == 1
+
+
+@pytest.mark.parametrize("point", ["list", "source", "visibility"])
+def test_scan_budget_stops_before_next_effect_and_retains_known_admission(tmp_path, point):
+    runtime, fabric = adapter(tmp_path)
+    now = [0.0]
+
+    class Slow(Pages):
+        def list_open_pull_request_numbers(self, **kwargs):
+            result = super().list_open_pull_request_numbers(**kwargs)
+            if point == "list":
+                now[0] += 2
+            return result
+
+        def read_pull_request(self, **kwargs):
+            result = super().read_pull_request(**kwargs)
+            if point == "source":
+                now[0] += 2
+            return result
+
+    class Visibility:
+        def notify_review_admitted(self, **kwargs):
+            if point == "visibility":
+                now[0] += 2
+
+    pulls = Slow({1: ingress.OpenPullRequestPage((42, 43), False)})
+    result = scan(pulls, fabric, clock=lambda: now[0], time_budget_seconds=1,
+                  visibility=Visibility())
+    assert not result.complete and not result.all_sources_observed
+    assert result.interruption == "REVIEW_RECONCILIATION_BUDGET_EXHAUSTED"
+    assert result.next_page == 1 and result.elapsed_seconds == 2
+    expected_jobs = 1 if point == "visibility" else 0
+    assert len(runtime.jobs.list_jobs()) == len(result.outcomes) == expected_jobs
+    assert [c[-1] for c in pulls.calls if c[0] == "read"] == ([] if point == "list" else [42])
+    assert result.interrupted_pull_number == (43 if point == "visibility" else 42)
+
+
+@pytest.mark.parametrize("budget", [0, -1, 61, True, "30", float("inf"), float("nan")])
+def test_scan_rejects_invalid_time_budget_before_source_reads(tmp_path, budget):
+    runtime, fabric = adapter(tmp_path)
+    pulls = Pages({})
+    with pytest.raises(ingress.ReviewIngressError, match="time budget"):
+        scan(pulls, fabric, time_budget_seconds=budget)
+    assert pulls.calls == [] and runtime.jobs.list_jobs() == []
+
+
+def test_owner_revocation_is_global_even_when_a_source_read_fails(tmp_path):
+    runtime, fabric = adapter(tmp_path)
+    allowed = [True]
+
+    class Revoked(Pages):
+        def read_pull_request(self, **kwargs):
+            self.calls.append(("read", REPO, kwargs["pull_number"]))
+            allowed[0] = False
+            raise OSError("source unavailable")
+
+    pulls = Revoked({1: ingress.OpenPullRequestPage((42, 43), False)})
+    result = scan(pulls, fabric, authorize=lambda _: None if allowed[0] else False)
+    assert result.interruption == "REVIEW_RECONCILIATION_OWNER_UNARMED"
+    assert result.interrupted_pull_number == 43
+    assert len(result.read_failures) == 1
+    assert [c[-1] for c in pulls.calls if c[0] == "read"] == [42]
+    assert runtime.jobs.list_jobs() == []
+
+
+def test_unknown_admission_stops_until_original_command_is_positively_reconciled(tmp_path):
+    runtime, fabric = adapter(tmp_path)
+
+    class LostReceipt:
+        admitted_command_ids = fabric.admitted_command_ids
+        admit_review_intent = fabric.admit_review_intent
+
+        def admit_or_join_review_intent(self, **kwargs):
+            fabric.admit_or_join_review_intent(**kwargs)
+            raise OSError("lost admission receipt after commit")
+
+    pulls = Pages({1: ingress.OpenPullRequestPage((42, 43), False)})
+    first = scan(pulls, LostReceipt())
+    assert first.interruption == "REVIEW_RECONCILIATION_ADMISSION_UNRECONCILED"
+    assert first.interrupted_command_id == reconciled().command_id
+    assert len(runtime.jobs.list_jobs()) == 1
+    assert [c[-1] for c in pulls.calls if c[0] == "read"] == [42]
+    recovered = fabric.read_existing_review(decision=reconciled())
+    assert recovered is not None and not recovered.created
+    second = scan(pulls, fabric)
+    assert second.complete and second.all_sources_observed
+    assert second.outcomes[0].job_id == recovered.job_id
+    assert second.outcomes[0].state is ingress.AdmissionState.ALREADY_ADMITTED
+    assert len(runtime.jobs.list_jobs()) == 2
+
+
 def test_receiver_exposes_backfill_only_to_bound_internal_owner(tmp_path):
     runtime, fabric = adapter(tmp_path)
     pulls = Pages({1: ingress.OpenPullRequestPage((42,), False)})
@@ -451,3 +563,125 @@ def test_later_trigger_cannot_reattribute_the_slack_parent(tmp_path):
         threads.reserve_parent_send(decision=reconciled(), job_id=receipt.job_id)
     assert threads.reserve_parent_send(decision=receipt.decision, job_id=receipt.job_id)
     assert not threads.reserve_parent_send(decision=receipt.decision, job_id=receipt.job_id)
+
+
+def test_same_page_budget_continuation_prevents_prefix_starvation(tmp_path):
+    runtime, fabric = adapter(tmp_path)
+    now = [0.0]
+
+    class Slow(Pages):
+        def read_pull_request(self, **kwargs):
+            now[0] += 0.6
+            return super().read_pull_request(**kwargs)
+
+    pulls = Slow({1: ingress.OpenPullRequestPage((42, 43), False)})
+    first = scan(pulls, fabric, clock=lambda: now[0], time_budget_seconds=1.0)
+    assert first.next_page == 1 and first.resume_pull_number == 43
+    assert first.interruption == "REVIEW_RECONCILIATION_BUDGET_EXHAUSTED"
+    assert len(runtime.jobs.list_jobs()) == 1
+    second = scan(pulls, fabric, clock=lambda: now[0], time_budget_seconds=1.0,
+                  start_page=first.next_page, resume_pull_number=first.resume_pull_number)
+    assert second.complete and not second.all_sources_observed
+    assert second.to_dict()["start_pull_number"] == 43
+    assert len(runtime.jobs.list_jobs()) == 2
+    assert [c[-1] for c in pulls.calls if c[0] == "read"] == [42, 43, 43]
+
+
+def test_absent_continuation_hint_falls_back_to_whole_fresh_page(tmp_path):
+    runtime, fabric = adapter(tmp_path)
+    pulls = Pages({1: ingress.OpenPullRequestPage((42, 44), False)})
+    assert scan(pulls, fabric, resume_pull_number=43).complete
+    assert [c[-1] for c in pulls.calls if c[0] == "read"] == [42, 44]
+    assert len(runtime.jobs.list_jobs()) == 2
+
+
+@pytest.mark.parametrize("expire_on", [2, 3, 4])
+def test_successful_owner_check_cannot_spend_budget_then_start_another_operation(tmp_path, expire_on):
+    runtime, fabric = adapter(tmp_path)
+    now, checks = [0.0], [0]
+    pulls = Pages({1: ingress.OpenPullRequestPage((42,), False)})
+
+    def authorize(_):
+        checks[0] += 1
+        if checks[0] == expire_on:
+            now[0] = 2.0
+
+    result = scan(pulls, fabric, authorize=authorize, clock=lambda: now[0], time_budget_seconds=1.0)
+    assert result.interruption == "REVIEW_RECONCILIATION_BUDGET_EXHAUSTED"
+    assert runtime.jobs.list_jobs() == []
+    if expire_on == 2:
+        assert pulls.calls == []
+    elif expire_on == 3:
+        assert len(pulls.calls) == 1  # list only
+    else:
+        assert len(pulls.calls) == 2  # final owner guard blocks admission
+
+
+@pytest.mark.parametrize("where", ["list", "read"])
+def test_source_wide_rate_limit_stops_scan_instead_of_hammering_other_prs(tmp_path, where):
+    runtime, fabric = adapter(tmp_path)
+
+    class Limited(Pages):
+        def list_open_pull_request_numbers(self, **kwargs):
+            if where == "list":
+                raise ingress.ReviewSourceReadDeferred("REVIEW_SOURCE_RATE_LIMITED", retry_after_seconds=120)
+            return super().list_open_pull_request_numbers(**kwargs)
+
+        def read_pull_request(self, **kwargs):
+            super().read_pull_request(**kwargs)
+            raise ingress.ReviewSourceReadDeferred("REVIEW_SOURCE_RATE_LIMITED", retry_after_seconds=120)
+
+    pulls = Limited({1: ingress.OpenPullRequestPage((42, 43), False)})
+    result = scan(pulls, fabric)
+    assert result.interruption == "REVIEW_SOURCE_RATE_LIMITED"
+    assert result.to_dict()["retry_after_seconds"] == 120
+    assert not result.complete and not result.read_failures
+    assert not any(c[0] == "read" and c[-1] == 43 for c in pulls.calls)
+    assert runtime.jobs.list_jobs() == []
+
+
+def test_typed_read_deferral_preserves_current_and_incoming_continuation(tmp_path):
+    runtime, fabric = adapter(tmp_path)
+
+    class Limited(Pages):
+        def read_pull_request(self, **kwargs):
+            if kwargs["pull_number"] == 43:
+                raise ingress.ReviewSourceReadDeferred("REVIEW_SOURCE_RATE_LIMITED", retry_after_seconds=120)
+            return super().read_pull_request(**kwargs)
+
+    first = scan(Limited({1: ingress.OpenPullRequestPage((42, 43), False)}), fabric)
+    assert first.resume_pull_number == 43 and len(first.outcomes) == 1
+    again = scan(Pages({1: ingress.ReviewSourceReadDeferred("REVIEW_SOURCE_RATE_LIMITED",
+                                                          retry_after_seconds=110)}), fabric,
+                 start_page=first.next_page, resume_pull_number=first.resume_pull_number)
+    assert again.resume_pull_number == 43
+    healthy = Pages({1: ingress.OpenPullRequestPage((42, 43), False)})
+    result = scan(healthy, fabric, start_page=again.next_page, resume_pull_number=again.resume_pull_number)
+    assert result.complete and len(result.outcomes) == 1
+    assert [c[-1] for c in healthy.calls if c[0] == "read"] == [43]
+    assert len(runtime.jobs.list_jobs()) == 2
+
+
+def test_broken_installation_token_stops_whole_scan_after_one_failure(tmp_path):
+    from test_github_review_http_recovery import adapter as api_adapter
+    runtime, fabric = adapter(tmp_path)
+
+    class Token:
+        calls = 0
+        def token_for_installation(self, **kwargs):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("private token source unavailable")
+            return "private-test-token"
+
+    token, requests = Token(), []
+
+    def wire(req):
+        requests.append(req)
+        return httpx.Response(200, json=[{"number": 42}, {"number": 43}])
+
+    result = scan(api_adapter(wire, tokens=token), fabric)
+    assert result.interruption == "REVIEW_SOURCE_AUTH_UNAVAILABLE"
+    assert token.calls == 2 and len(requests) == 1
+    assert result.resume_pull_number == 42
+    assert runtime.jobs.list_jobs() == []

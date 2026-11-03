@@ -145,6 +145,15 @@ they are not redispatched and do not stop unrelated PRs in a bounded scan.
 The receiver reports closed refusal reasons. Its reconciliation callable is
 internal, with at most 100 PRs per invocation, fixed scoped numeric pagination,
 fresh PR reads, and an explicit partial-result receipt. It introduces no timer.
+The v2 reconciliation receipt separates enumeration from source coverage and
+records isolated read failures, elapsed time, the starting scope and continuation
+hint. A pass has a cooperative default 30-second budget (maximum 60 seconds).
+A failed individual source read does not starve unrelated PRs. Installation-wide
+credential, permission, rate-limit and server deferrals stop the pass. Budget or
+read-only deferral can retain a same-page PR hint; an uncertain admission stops
+at its exact original command with no continuation permission. A resumed pass
+never claims that it observed every repository source. Later page-one sweeps
+remain necessary because GitHub pagination is not a stable snapshot.
 Job objectives validate full original text, then carry bounded excerpts and
 exact source references inside the existing socket limits. Full-source
 retrieval remains required before a reviewer may claim coverage.
@@ -207,17 +216,65 @@ is a coincidence. A moved head is refused with `HEAD_MOVED`; a read that answers
 about a different pull request is refused with `PULL_NUMBER_MISMATCH`.
 
 **An uncertain POST is reconciled, never retried blind.** The concrete
-`ReconcilingReviewPublication` adapter must first atomically reserve an immutable
-publication command/payload using the *existing* Executive EventStore's
-`events.command_id` UNIQUE transaction. Only the first durable claimant can POST;
-all competing and repeated invocations must reconcile against the existing
-claim and authenticated exact GitHub review readback. A normal-success receipt
-is confirmed in that same incumbent ledger, and even a failed pre-POST or
-post-POST read keeps the claim sticky as `PublicationEffectUnknown` (not a
-safely retryable failure). An unmatched/failed read is reported as
+`ReconcilingReviewPublication` adapter first observes the exact existing claim,
+reads authenticated reviews, and performs the typed final PR/source check. A
+fresh preflight failure creates no publication reservation. Only after those
+reads succeed does the adapter atomically reserve the immutable command/payload
+in the *existing* Executive EventStore's `events.command_id` UNIQUE transaction.
+Host authorization and the three-second preflight deadline are checked inside
+the acquired transaction, including time spent waiting for the database lock.
+Only the first durable claimant can POST. An existing claim, lost reservation
+reply, or expiry after committed reservation remains sticky even if no POST is
+known to have occurred. Competing callers use positive authenticated readback;
+they never acquire another POST right. A successful effect is confirmed in the
+same ledger. Unmatched, ambiguous or unavailable readback remains
 `PUBLICATION_EFFECT_UNKNOWN`, never a second GitHub POST. A read-only
 `published_command_ids()` preflight is **not** an atomic gate. Test fakes must
 not be substituted for that production ledger.
+
+New v2 reservations retain the original publisher's numeric ID and login along
+with repository, PR, frozen head, Job, event and exact body digest. Reserved-only
+recovery occurs before current-head/result eligibility: an exact historical
+review may become visible after the head moves. It requires exactly one matching
+authenticated review and only confirms the original effect; it does not review
+the new head. The production hot path uses indexed exact-command reads, not a
+scan of every publication. Valid confirmed v1 history is retained, including
+through the original publication API. An unconfirmed v1 reservation without
+original publisher provenance stays unknown; current configuration cannot fill
+missing historical facts.
+
+### Bounded transport and admission pressure
+
+The GitHub adapter streams JSON with a one-MiB response cap; token issuance uses
+the same streaming guard with a 64-KiB cap. Both request identity encoding, refuse
+unexpected compression and close responses on every exit. A GET may make one
+short same-token, same-destination recovery attempt after a transport failure or
+500/502/503/504, within one three-second cooperative operation budget. It does
+not retry schema, permission, redirect or missing-source refusals. Review POSTs
+and installation-token POSTs remain one attempt.
+
+GitHub rate limits and server `Retry-After` responses establish adapter-local
+pacing and a typed source-wide deferral. Shared pacing is checked before every
+attempt, including after another request establishes a limit during backoff.
+The existing owner receives the delay; workers do not sleep through long limits.
+This is transport pacing, not a new task queue or retry authority. HTTPX timeouts
+bound individual I/O waits; the monotonic deadline is checked on each raw chunk,
+so these are cooperative bounds, not synchronous-call cancellation guarantees.
+
+The HTTP receiver admits at most four active synchronous operations. A busy
+receiver returns `ADMISSION_BUSY` before credentials or ports are called. Secret
+reads run outside the event loop. A timed-out operation retains its slot until
+the real worker exits, and a preflight budget check prevents starting a late
+admission. An admission already attempted at timeout remains
+`ADMISSION_EFFECT_UNKNOWN` and reconciles under the original command.
+
+Slack visibility has two separate best-effort slots. A slow Slack call does not
+delay a known admission HTTP acknowledgment or occupy admission capacity. The
+response distinguishes `SCHEDULED_BEST_EFFORT` from `DEFERRED_CAPACITY`; neither
+claims Slack delivery. Deferred visibility has not reserved or attempted a send
+and may be projected later by the original owner. This adapter adds no durable
+notification queue or background wake guarantee. An existing unknown Slack send
+remains governed by its original reservation and cannot be automatically reposted.
 
 **No unfenced auto-approval.** `PASS` maps to a GitHub `COMMENT`, never
 `APPROVE`. This slice mints no approval verb and no merge path at all, and
@@ -334,13 +391,13 @@ default `False`.
 
 ### What these tests do *not* prove
 
-Every port above is exercised through a fake. There is still no concrete
-webhook HTTP listener, authenticated GitHub client, Executive/Fabric job
-adapter, result bridge, Slack producer, host secret/route binding, or live
-review readback. **The integration has not been called live or end to end, and
-a green fixture run is not live acceptance.** Qualifying the host, the App
-installation, the webhook secret, and the Slack permission remains the separate
-human-admin ceremony above.
+The source now includes concrete HTTP, Unix-socket, GitHub App, Executive Runtime,
+publication and Slack adapters. Hermetic composed tests exercise real local
+Runtime stores and transports with synthetic external services. They do not
+prove a selected installed service, enrolled GitHub App, public HTTPS route,
+qualified real worker, production review or Slack-thread delivery. A green
+fixture run is not live acceptance. Those deployment and canary facts remain
+separately required under the existing owners.
 
 ## Known gaps, unrelated to this change
 
