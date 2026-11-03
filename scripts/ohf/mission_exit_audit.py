@@ -5,6 +5,13 @@ owners. The caller remains responsible for authenticating observations, freshnes
 writer custody, and actual acceptance. This is NOT an Executive lifecycle, retry,
 dispatch, credential, or finalization authority.
 
+An optional ``lanes`` section additionally classifies the *claimed session exit*
+against observed lane state: it separates lawful continuation after a lane-local
+``WAITING_EXTERNAL`` from a mere status/checkpoint/CI-summary exit, and the lawful
+all-lanes stop (or safety/effect-unknown fence) from a premature stop. These are
+read-only classifications of supplied observations -- still no lifecycle, retry,
+dispatch, credential, or finalization authority, and never served-model proof.
+
 Run: python -m scripts.ohf.mission_exit_audit /path/to/snapshot.json
 """
 from __future__ import annotations
@@ -52,6 +59,28 @@ ACTION = {
 VALID_SCOPES = {"analysis", "implementation", "review", "none"}
 VALID_RUN_STATES = {"NONE", "QUEUED", "STARTED", "TERMINAL", "UNKNOWN"}
 VALID_EFFECTS = {"NONE", "SAFETY_DENIED", "PERMISSION_DENIED", "EFFECT_UNKNOWN"}
+# Optional evidence-only lane classifier, NOT a new Executive lifecycle,
+# admission, source authority, checkpoint registry, or retry controller.
+VALID_LANE_STATES = {
+    "DONE", "WAITING_EXTERNAL", "SAFE_WORK_REMAINING", "BLOCKED_PROVEN", "FENCED",
+}
+VALID_EXIT_CLAIMS = {
+    "CONTINUE", "CHECKPOINT_SUMMARY_STOP", "CHECKPOINTED_CONTINUATION",
+    "WAIT_EXTERNAL_EXECUTOR", "ALL_LANES_BLOCKED_STOP",
+}
+VALID_CONTINUITY_REASONS = {
+    "CONTEXT_PRESSURE", "SESSION_UNSTABLE", "SURFACE_TRANSITION",
+    "NEXT_PHASE_EXCEEDS_LANDING_RESERVE",
+}
+# An old START receipt does not prove the executor remains live. These are
+# read-only observations from the incumbent Job/Attempt or original carrier;
+# only a currently observed STARTED/RUNNING state can support a worker-wait.
+VALID_EXECUTOR_STATES = {
+    "NONE", "QUEUED", "STARTED", "RUNNING",
+    "TERMINAL", "FAILED", "CANCELED", "UNKNOWN",
+}
+ACTIVE_EXECUTOR_STATES = {"STARTED", "RUNNING"}
+
 
 
 class InvalidSnapshot(ValueError):
@@ -95,6 +124,205 @@ def _public_effect_ref(value: Any) -> bool:
 def _true_and_ref(obj: dict[str, Any], flag: str, receipt: str) -> bool:
     return obj.get(flag) is True and _ref(obj.get(receipt))
 
+
+def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, Any]:
+    """Evidence-bound diagnostic of a proposed session exit, never permission.
+
+    WAITING_EXTERNAL blocks its own lane but not independent safe work. An
+    actual verified checkpoint is distinct from a durable worker wait or a
+    checkpoint/status summary. All-scoped-lanes-blocked requires source-linked
+    evidence for every remaining lane. The canonical owners must still verify
+    all supplied observations before acting.
+    """
+    lanes = _object(snapshot.get("lanes"), "lanes")
+    items = lanes.get("items")
+    if not isinstance(items, list) or not items or not all(isinstance(x, dict) for x in items):
+        raise InvalidSnapshot("lanes.items must be a nonempty list of lane objects")
+    states: list[str] = []
+    seen_ids: set[str] = set()
+    for item in items:
+        lane_id = item.get("id")
+        if not _public_effect_ref(lane_id) or lane_id in seen_ids:
+            raise InvalidSnapshot("lane ids must be unique opaque source references")
+        seen_ids.add(lane_id)
+        state = item.get("state")
+        if not isinstance(state, str) or state not in VALID_LANE_STATES:
+            raise InvalidSnapshot("unknown lane state")
+        if state in ("WAITING_EXTERNAL", "BLOCKED_PROVEN"):
+            if (
+                not _public_effect_ref(item.get("blocker_ref"))
+                or not _public_effect_ref(item.get("blocker_owner_ref"))
+                or item.get("blocker_observed") is not True
+            ):
+                raise InvalidSnapshot("blocked lane lacks attributed current evidence")
+            if state == "BLOCKED_PROVEN" and item.get("negative_capability_verified") is not True:
+                raise InvalidSnapshot("proven blocker lacks negative-capability evidence")
+        elif state == "FENCED":
+            if (
+                effect.get("class") == "NONE"
+                or item.get("effect_action_id") != effect.get("action_id")
+                or item.get("effect_carrier") != effect.get("carrier")
+            ):
+                raise InvalidSnapshot("fenced lane is not bound to original held effect")
+        elif state == "DONE":
+            if not _public_effect_ref(item.get("completion_ref")):
+                raise InvalidSnapshot("done lane lacks source acceptance reference")
+        else:
+            if not _public_effect_ref(item.get("next_action_ref")):
+                raise InvalidSnapshot("ready lane lacks concrete next-action reference")
+        states.append(state)
+
+    exit_claim = lanes.get("exit_claim")
+    if not isinstance(exit_claim, str) or exit_claim not in VALID_EXIT_CLAIMS:
+        raise InvalidSnapshot("unknown exit claim")
+    cycles = lanes.get("support_cycles_without_delta", 0)
+    if type(cycles) is not int or cycles < 0:
+        raise InvalidSnapshot("support cycles must be a nonnegative integer")
+
+    # A started worker is relevant only when bound to a specific waiting lane.
+    # Canonical blocker/owner evidence is validated above; the caller still
+    # authenticates that readback from the actual existing owner.
+    waiting_lanes = {
+        row["id"]: row for row in items if row["state"] == "WAITING_EXTERNAL"
+    }
+    # Started/running durable execution needs an exact original owner readback
+    # and a real return/wake path. A request ID, delivery or watcher alone is
+    # not proof of execution, and cannot legalize a checkpoint summary.
+    wait_executor = lanes.get("wait_executor")
+    durable_wait = False
+    if wait_executor is not None:
+        wait_executor = _object(wait_executor, "wait_executor")
+        started = wait_executor.get("started", False)
+        if type(started) is not bool:
+            raise InvalidSnapshot("wait executor started must be boolean")
+        if started:
+            if (
+                not _public_effect_ref(wait_executor.get("ref"))
+                or not _public_effect_ref(wait_executor.get("return_path_ref"))
+                or wait_executor.get("owner_observed") is not True
+            ):
+                raise InvalidSnapshot("started executor lacks original owner/return proof")
+            lane_id = wait_executor.get("lane_id")
+            if lane_id is not None and not _public_effect_ref(lane_id):
+                raise InvalidSnapshot("wait executor lane ID is invalid")
+            current_state = wait_executor.get("state")
+            if current_state is not None and (
+                type(current_state) is not str
+                or current_state not in VALID_EXECUTOR_STATES
+            ):
+                raise InvalidSnapshot("unknown current executor state")
+            live_state = current_state in ACTIVE_EXECUTOR_STATES
+            if live_state and (
+                not _public_effect_ref(wait_executor.get("state_ref"))
+                or wait_executor.get("state_observed") is not True
+            ):
+                raise InvalidSnapshot("active executor state lacks current owner readback")
+            waiting_lane = waiting_lanes.get(lane_id)
+            if waiting_lane is not None:
+                # Usually the blocker ref identifies the awaited run itself.
+                # If it is a separate receipt, the lane must carry a bound
+                # executor ref and its own source-attributed binding evidence.
+                related_ref = waiting_lane.get("executor_ref")
+                if related_ref is None:
+                    related_ref = waiting_lane["blocker_ref"]
+                elif (
+                    not _public_effect_ref(related_ref)
+                    or not _public_effect_ref(waiting_lane.get("executor_binding_ref"))
+                    or waiting_lane.get("executor_binding_observed") is not True
+                ):
+                    raise InvalidSnapshot("waiting lane executor binding is unverified")
+                durable_wait = live_state and wait_executor["ref"] == related_ref
+            # A missing, terminal, queued, failed, foreign or unrelated run
+            # is not an active executor for this mission, even if a historical
+            # START and a valid return path are present.
+        elif wait_executor.get("ref") is not None and not _public_effect_ref(wait_executor.get("ref")):
+            raise InvalidSnapshot("invalid wait executor reference")
+
+    # CHECKPOINTED_CONTINUATION requires genuinely observed risk, committed
+    # cumulative source and coherent resume. It does NOT require a running
+    # executor and can be valid with remaining safe work if context pressure
+    # genuinely prevents a safe in-session next phase.
+    checkpoint = lanes.get("checkpoint")
+    checkpoint_proven = False
+    if checkpoint is not None:
+        checkpoint = _object(checkpoint, "checkpoint")
+        revision = checkpoint.get("revision")
+        reason = checkpoint.get("continuity_reason")
+        checkpoint_proven = (
+            checkpoint.get("persisted") is True
+            and _public_effect_ref(checkpoint.get("receipt_ref"))
+            and isinstance(revision, str)
+            and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision) is not None
+            and isinstance(reason, str)
+            and reason in VALID_CONTINUITY_REASONS
+            and checkpoint.get("observed_continuity_risk") is True
+            and _public_effect_ref(checkpoint.get("next_action_ref"))
+            and _public_effect_ref(checkpoint.get("resume_surface_ref"))
+            and checkpoint.get("effects_accounted") is True
+            and checkpoint.get("custody_preserved") is True
+            and checkpoint.get("mission_complete") is False
+        )
+
+    # A list of blocked entries cannot prove the absence of omitted ready
+    # actions. Require an independently source-attributed, complete scoped
+    # inventory before this read-only diagnostic accepts a mission-wide stop.
+    # The caller still must authenticate this source against its canonical owner.
+    scope_coverage = False
+    scope = lanes.get("scope_evidence")
+    if scope is not None:
+        scope = _object(scope, "scope_evidence")
+        revision = scope.get("source_revision")
+        canonical_ids = scope.get("canonical_lane_ids")
+        if (
+            not _public_effect_ref(scope.get("source_ref"))
+            or not _public_effect_ref(scope.get("owner_readback_ref"))
+            or not isinstance(revision, str)
+            or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision) is None
+            or scope.get("source_observed") is not True
+            or scope.get("all_dependencies_checked") is not True
+            or not isinstance(canonical_ids, list)
+            or not canonical_ids
+            or len(canonical_ids) > 128
+            or any(not _public_effect_ref(i) for i in canonical_ids)
+            or len(set(canonical_ids)) != len(canonical_ids)
+        ):
+            raise InvalidSnapshot("scope coverage lacks current canonical owner evidence")
+        if set(canonical_ids) != seen_ids:
+            raise InvalidSnapshot("enumerated lanes omit a canonical scoped action")
+        scope_coverage = True
+    waiting = "WAITING_EXTERNAL" in states
+    safe_work = "SAFE_WORK_REMAINING" in states
+    all_blocked = (
+        scope_coverage
+        and not safe_work
+        and all(s in ("BLOCKED_PROVEN", "FENCED", "WAITING_EXTERNAL", "DONE") for s in states)
+        and any(s != "DONE" for s in states)
+    )
+    external_waits_only = scope_coverage and waiting and all(s in ("WAITING_EXTERNAL", "DONE") for s in states)
+    # No-delta is actionable when useful independent work remains; a proven
+    # all-lanes block is a genuine terminal boundary, not an artificial loop.
+    no_delta_loop = cycles >= 2 and not all_blocked
+    lawful_stop = (
+        (exit_claim == "ALL_LANES_BLOCKED_STOP" and all_blocked)
+        or (exit_claim == "WAIT_EXTERNAL_EXECUTOR" and durable_wait and not safe_work
+            and scope_coverage)
+        or (exit_claim == "CHECKPOINTED_CONTINUATION" and checkpoint_proven)
+    )
+    return {
+        "lane_local_wait_blocks_only_its_lane": waiting and safe_work,
+        "remaining_safe_work": safe_work,
+        "scope_evidence_structurally_bound": scope_coverage,
+        "all_lanes_proven_blocked": all_blocked,
+        "all_external_waits_proven_blocked": external_waits_only,
+        "no_delta_loop_forces_tactic_change": no_delta_loop,
+        "checkpoint_continuation_verified": checkpoint_proven,
+        "wait_executor_verified": durable_wait,
+        "status_summary_is_not_continuation": exit_claim == "CHECKPOINT_SUMMARY_STOP",
+        "wait_requires_started_durable_executor": (
+            exit_claim == "WAIT_EXTERNAL_EXECUTOR" and not durable_wait
+        ),
+        "premature_exit_detected": exit_claim != "CONTINUE" and not lawful_stop,
+    }
 
 def _next_proof(requirement: str, worker: dict[str, Any],
                 source: dict[str, Any], current_head: str) -> str:
@@ -272,7 +500,7 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
     # The caller must verify these observations against each canonical owner;
     # all green checks only mean the supplied packet is ready for adjudication.
     ready = not gaps and not held
-    return {
+    report = {
         "schema": OUTPUT_SCHEMA,
         "disposition": "READY_FOR_CANONICAL_ADJUDICATION" if ready else "INCOMPLETE",
         "checks_passed": [key for key in REQUIREMENTS if key in req and checks[key]],
@@ -292,6 +520,11 @@ def audit(snapshot: dict[str, Any]) -> dict[str, Any]:
         "production_activation_authorized": False,
         "fresh_owner_readback_required": True,
     }
+    # Exit-claim classification is additive: snapshots without a ``lanes`` section
+    # keep the exact incumbent output contract (no lane flags ever appear).
+    if root.get("lanes") is not None:
+        report.update(_audit_lanes(root, effect))
+    return report
 
 
 def _read_snapshot(path: Path) -> str:
