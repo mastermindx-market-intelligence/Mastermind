@@ -3,7 +3,7 @@
 Recorded 2026-11-02 (America/Vancouver). Owning repository: Mastermind.
 Task tree: `docs/plans/2026-11-02-github-review-coverage.md`.
 Original integration and recovery evidence: [#1740](https://github.com/mastermindx-market-intelligence/Mastermind/issues/1740).
-Protected procedure: `7e87f225a4ed03e3b89169f7b7c9052c6a6eac9c`, Skillpack 1.0.1 / bootstrap 1.
+Protected procedure at creation: `7e87f225a4ed03e3b89169f7b7c9052c6a6eac9c`. Resumed procedure: `ea4f893103a1c0354f28843241848cae91336bd7`, Skillpack 1.0.1 / bootstrap 1; governing procedure unchanged across the intervening protected-source movement.
 This document's revision is its containing Git commit. It is a source task tree, not a Job, queue, reviewer registry, or Agent OS wave.
 
 ## Outcome and completion evidence
@@ -22,10 +22,10 @@ Source baseline: #1748 and #1763 merged; #1924 adds session review routing. Thei
 | R2 | R1 | Extend the incumbent decision/host configuration for default-off repository lifecycle review coverage; preserve manual intent and one PR/head command identity. | Real receiver tests for opened, synchronize, reopened and ready_for_review; duplicate/manual coalescing; fresh authority; drafts, forks, closed PRs and wrong repository refused or explicitly deferred. | implemented; independent review pending |
 | R3 | R1 | Assess admitted review model routes and economics; preserve existing Model Router/Capacity rather than create a model picker. | Official capability sources, actual catalog evidence where available, independence requirements and measurable qualification protocol. No unsupported model ranking. | assessment accepted; benchmark not run |
 | R4 | R1 | Specify existing Slack Dot assignment/return and formal-review boundary. | One recipient and original thread, explicit pickup/START/result, authenticated non-author review and exact head; no Slack-only approval or guessed wake. | design accepted; live Dot execution unproven |
-| R5 | R2,R3,R4 | Integrate source, meaningful negative tests, source-bound release checklist and independent security review. | Relevant tests pass; genuine independent reviewer returns readable findings; exact GitHub PR head/CI recorded; no self-approval or self-merge. | source/tests prepared; review reconciliation blocked |
+| R5 | R2,R3,R4 | Integrate source, meaningful negative tests, source-bound release checklist and independent security review. | Relevant tests pass; genuine independent reviewer returns readable findings; exact GitHub PR head/CI recorded; no self-approval or self-merge. | published #1977; one hosted regression under repair; original review reconciliation pending |
 | R6 | R5 | Qualify the original host consumer, approved App identity, secret custody and exact webhook route through existing owners. | Previously held effect reconciled by its owner; authorized installation; default-off configuration deliberately enrolled; no duplicate runtime. | blocked |
 | R7 | R6 | Prove actual GitHub delivery -> canonical review Job -> Fabric START/result -> exact-head formal GitHub review -> Slack. | Positive real path plus replay, stale-head and uncertain-publication controls. Reviewer findings do not imply formal APPROVED. | blocked |
-| R8 | R1,R5 | Add separately reviewed standing repository-policy authority and existing-owner reconciliation for bot-sender and already-open PR coverage. | Exact repository/installation/policy binding, revocation, authenticated source, same admission identity, no fabricated webhook or new queue. Current sender policy remains intact. | proposed; not implemented |
+| R8 | R1,R5 | Add separately reviewed standing repository-policy authority and existing-owner reconciliation for bot-sender and already-open PR coverage. | Exact repository/installation/policy binding, revocation, authenticated source, same admission identity, no fabricated webhook or new queue. Current sender policy remains intact. | architecture recovered; implementation next |
 | R9 | R6,R7,R8 | Demonstrate full enrolled-repository coverage and eligible independent formal approval. | Bot and existing-PR positive paths; explicit fork/draft/capacity dispositions; exact-head independent Dot/GitHub review with actual identity and execution evidence. | blocked |
 
 ## Initial model and publication decision
@@ -53,3 +53,14 @@ The automatic lifecycle source and tests are prepared in the original managed wo
 - GitHub PR/CI and publication readbacks belong in the #1740 source-linked checkpoint after publication. Source tests do not resolve R6, R8 or R9, and do not establish all-PR production automation.
 
 No changes are made to the held `control_plane/executive_service.py` effect, credentials, App installation, service activation, required CI/approval rules, merge controls or model-pool enrollment.
+
+
+## Resumed work — 2026-11-02 America/Vancouver
+
+Current Chairman instruction: resume this program and advance more of the remaining implementation. Original managed source operation and PR #1977 are retained at initial resume head `aaf7c0b4b44980fd220363d5a4409d14f31dc9b1`; typed owner readback proved a clean workspace and matching remote head.
+
+R5 hosted run `41555905991`, shard-4 job `125654602986`, failed only `tests/test_delivery_review_readiness.py::test_ready_transition_is_not_a_duplicate_review_intent_channel`. It still asserted that `ready_for_review` was an unsupported channel. The intended lifecycle extension requires a stronger behavioral contract: disabled by default, enabled only with fresh permission, and the same existing manual/automatic command identity. Repair that obsolete expectation while preserving draft and formal-review sequencing. CodeQL and the other five pytest shards passed. The previous bounded observer terminated `OBSERVER_UNAVAILABLE`; direct exact-head GitHub readback supplied the actual result, and no duplicate observer is active.
+
+R8 remains a genuine missing implementation dependency. Architecture work is restricted to the incumbent host policy, typed authority/origin, current source guard, existing admission/provenance and existing reconciliation owner; do not invent a grant store, scheduler, bot-to-human identity conversion or fake signed webhook. Schema and provenance propagation must precede any claim of universal coverage.
+
+Original Fabric review status remains NOT_FOUND without execution-absence proof. Current recovery is a read-only investigation of the original request/controller evidence; status wrapper flags alone are not a platform-denial receipt. No replacement request is authorized by this checkpoint, and no prior held effect is cleared.
