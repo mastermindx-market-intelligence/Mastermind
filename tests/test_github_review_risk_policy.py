@@ -51,6 +51,9 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
     ("integrations/github_review_api.py",),
     ("app/security/token.py",),
     ("backend/oauth/refresh.py",),
+    ("backend/auth.py",),
+    ("db/migrations/2026_nov.sql",),
+    ("trading/strategy.py",),
     ("scripts/deploy_from_git.sh",),
     ("AGENTS.md",),
 ])
@@ -65,7 +68,7 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
 @pytest.mark.parametrize("paths", [
     ("control_plane/executive_coo_policy.py",),
     ("brain/macro_models.py",),
-    ("db/migrations/2026_nov.sql",),
+    ("server/handler.py",),
     ("package-lock.json",),
     ("backend/schema/price.ts",),
 ])

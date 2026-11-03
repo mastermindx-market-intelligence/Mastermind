@@ -30,6 +30,13 @@ _CRITICAL_PREFIXES = (
     "scripts/deploy_",
     "scripts/release_",
     "security/",
+    "trading/",
+    "payments/",
+    "billing/",
+    "migrations/",
+    "db/migrations/",
+    "database/migrations/",
+    "finance/execution/",
 )
 _CRITICAL_EXACT = frozenset({
     "AGENTS.md",
@@ -51,11 +58,12 @@ _CRITICAL_SEGMENTS = frozenset({
     "secret", "credential", "credentials", "permission", "permissions",
     "privilege", "privileges", "token", "tokens", "crypto", "encryption",
     "order_execution", "trade_execution", "trade_sizing", "payments",
-    "payment", "billing",
+    "payment", "billing", "trading", "order", "orders", "broker",
+    "execution", "deployment", "workflow", "policy_authority",
 })
 _STANDARD_PREFIXES = (
-    "control_plane/", "integrations/", "migrations/", "db/migrations/",
-    "database/migrations/", "brain/", "trading/", "finance/", "engine/risk_",
+    "control_plane/", "integrations/", "brain/", "finance/", "engine/risk_",
+    "backend/", "server/", "services/", "api/", "lib/",
 )
 _STANDARD_EXACT = frozenset({
     "pyproject.toml", "requirements.txt", "package.json",
@@ -73,7 +81,7 @@ _CRITICAL_HINTS = frozenset({
 })
 _STANDARD_HINTS = frozenset({
     "user_behavior", "data_contract", "cross_service", "schema",
-    "complex_refactor",
+    "complex_refactor", "destructive_change",
 })
 _ALL_HINTS = _CRITICAL_HINTS | _STANDARD_HINTS
 _DOC_EXTENSIONS = (".md", ".rst", ".txt", ".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -179,8 +187,8 @@ def _is_critical_path(path: str) -> bool:
     if any(lower.startswith(prefix) for prefix in _CRITICAL_PREFIXES):
         return True
     # A directory or filename component that names a privileged boundary.
-    parts = lower.replace(".", "_").replace("-", "_").split("/")
-    return any(part in _CRITICAL_SEGMENTS for part in parts)
+    parts = set(part for part in re.split(r"[/_.-]+", lower) if part)
+    return bool(parts & _CRITICAL_SEGMENTS)
 
 
 def _is_standard_path(path: str) -> bool:
@@ -189,13 +197,25 @@ def _is_standard_path(path: str) -> bool:
         return True
     if any(lower.startswith(prefix) for prefix in _STANDARD_PREFIXES):
         return True
-    parts = lower.replace(".", "_").replace("-", "_").split("/")
-    return any(part in _STANDARD_SEGMENTS for part in parts)
+    parts = set(part for part in re.split(r"[/_.-]+", lower) if part)
+    return bool(parts & _STANDARD_SEGMENTS)
 
 
 def _is_test_path(path: str) -> bool:
     lower = path.lower()
     return lower.startswith(_TEST_PREFIXES) or "/__tests__/" in lower or lower.endswith((".test.ts", ".test.tsx", ".spec.js", ".spec.ts"))
+
+
+_FAST_CODE_PREFIXES = (
+    "app/src/", "app/mastermind_os/src/components/",
+    "frontend/src/components/", "web/src/components/", "ui/",
+)
+_FAST_CODE_SUFFIXES = (".css", ".scss", ".sass", ".less", ".svg")
+
+
+def _is_explicit_fast_source(path: str) -> bool:
+    lower = path.lower()
+    return lower.startswith(_FAST_CODE_PREFIXES) or lower.endswith(_FAST_CODE_SUFFIXES)
 
 
 def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
@@ -218,6 +238,9 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
         return _result(ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
     if all(_is_test_path(p) for p in facts.changed_paths) and facts.deletions > _MAX_TEST_DELETIONS:
         return _result(ReviewTier.STANDARD, "SUBSTANTIAL_TEST_REMOVAL")
-    if all(p.lower().endswith(_DOC_EXTENSIONS) for p in facts.changed_paths):
-        return _result(ReviewTier.FAST, "ROUTINE_DOCUMENTATION_OR_ASSETS")
-    return _result(ReviewTier.FAST, "BOUNDED_ROUTINE_CHANGE")
+    if all(p.lower().endswith(_DOC_EXTENSIONS) or _is_test_path(p) for p in facts.changed_paths):
+        return _result(ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_ASSETS")
+    if all(_is_explicit_fast_source(p) or _is_test_path(p) or p.lower().endswith(_DOC_EXTENSIONS)
+           for p in facts.changed_paths):
+        return _result(ReviewTier.FAST, "BOUNDED_PRESENTATION_CHANGE")
+    return _result(ReviewTier.STANDARD, "SOURCE_PATH_NOT_QUALIFIED_FOR_FAST")

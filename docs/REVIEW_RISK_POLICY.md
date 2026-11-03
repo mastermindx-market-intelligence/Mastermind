@@ -17,6 +17,12 @@ Independent review is **not** a default prerequisite for every minor edit, every
 
 The counts above are **additional policy demands**, not permission to reduce a higher native GitHub ruleset, CODEOWNERS, release hold or separately accepted security review. A technical Fabric `PASS` or GitHub `COMMENT` does not become `APPROVED`. If a native rule requires an approval even on FAST, that native rule governs until its legitimate owner amends it. Never silently admin-bypass. The merge actor must remain authorized and independent from the source author under applicable protected law.
 
+## Exact-head source verification and pre-admission disposition
+
+The additional pure `control_plane/github_review_risk_source.py` requires an **existing authenticated installation-scoped GitHub reader** to supply one current PR identity, every bounded changed-file page, and a second identical current PR read. It refuses incomplete pagination, inconsistent totals, changed heads/base, forks, drafts, missing code patches, and missing original paths for renames. Deleted files escalate the risk tier; renamed files are assessed at both their old and new paths. These inputs are **not** permission or a GitHub credential source by themselves.
+
+The pure `control_plane/github_review_risk_dispatch.py` is the integration seam: verified automatic origin + FAST => `SKIP_NO_REVIEW_NEEDED` **before Executive creates a review Job**; verified automatic STANDARD/CRITICAL => normal existing review ingress; incomplete source => HOLD. An authenticated explicit manual review intent retains the original permission-gated path even if the source would ordinarily be FAST. This preflight is not connected to #1977's live host yet. Its binding must reuse the existing `GitHubReviewAPI` installation, source reader, signed receiver, Runtime ledger, and original exact command identity, not add a second review scheduler.
+
 ## Risk classification evidence and adversarial rules
 
 The owner supplies complete changed filenames, additions/deletions and a verified exact current GitHub PR head. Diff coverage must include renames/deletions, not only visible excerpts. Agent PR descriptions, labels, comments, Markdown risk declarations, branch names and model claims **cannot lower** the tier. Allowed trusted source-owner hints can only escalate. Invalid paths, case aliases, stale heads, partial pagination or unverified files produce HOLD, not FAST. Small one-line edits to auth, release controls or protected rules remain CRITICAL.
