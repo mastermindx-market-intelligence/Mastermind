@@ -271,7 +271,12 @@ async def _drive_inner(
         if not replayed:
             replayed = True
             return {"type": "http.request", "body": replay_body, "more_body": False}
-        return {"type": "http.disconnect"}
+        # Exhausting the replayed body is not a real caller disconnect. Inner
+        # middleware may observe receive concurrently; a synthetic disconnect
+        # cancels the legitimate handler before it can finish. The existing
+        # bounded drive owns cancellation of this wait and its inner task.
+        await asyncio.Future()
+        raise AssertionError("unreachable replay receive")
 
     async def collect(event: Mapping[str, Any]) -> None:
         nonlocal start, body, total, complete
@@ -360,6 +365,7 @@ class OsExecutiveTransportApp:
         "/os/executive/status",
         "/os/executive/direct-native/result",
         "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
     )
 
     def __init__(
@@ -497,7 +503,7 @@ class OsExecutiveTransportApp:
 
         if (path == "/os/executive/context" and body_obj) or (
             path not in {"/os/executive/context", "/os/executive/direct-native/result",
-                         "/os/executive/direct-native/consume"} and set(body_obj) != {"arguments"}
+                         "/os/executive/direct-native/consume", "/os/executive/direct-native/correction"} and set(body_obj) != {"arguments"}
         ):
             await JSONResponse({"ok": False, "error": {"code": "invalid_input", "message": "fixed request body required"}},
                                status_code=HTTPStatus.BAD_REQUEST, headers=_OS_HTTP_HEADERS)(scope, receive, send)
@@ -559,6 +565,9 @@ class OsExecutiveTransportApp:
         body_obj: dict[str, Any],
         principal: VerifiedPrincipal,
     ) -> Response:
+        if path == '/os/executive/direct-native/correction':
+            from integrations.mastermind_executive_app.direct_native import dispatch_direct_correction
+            return await dispatch_direct_correction(self,scope,body_obj,principal)
         if path in {"/os/executive/direct-native/result", "/os/executive/direct-native/consume"}:
             from integrations.mastermind_executive_app.direct_native import dispatch_direct_native
             return await dispatch_direct_native(self, scope, body_obj, principal,

@@ -1269,6 +1269,9 @@ describe("fixed H2 direct-native authenticated routes",()=>{
       ...selection, attempt_id: "ATT-456", result_digest: "d".repeat(64),
       operation_key: "mmos-readonly-ack-denied",
     }, signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    await expect(e.client.executive!.directNative!.correction!({
+      ...selection,attempt_id:'ATT-456',fence_generation:7,operation_key:'original-correction',operation:'request',
+    },signal)).rejects.toThrow('EXECUTIVE_SEND_SCOPE_REQUIRED');
     expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
       ORIGIN + "/os/executive/direct-native/result",
     ]);

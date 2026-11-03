@@ -76,6 +76,7 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/status",
     "/os/executive/direct-native/result",
     "/os/executive/direct-native/consume",
+    "/os/executive/direct-native/correction",
 )
 
 #: Three fixed POST routes served by the opt-in selected-session transport.

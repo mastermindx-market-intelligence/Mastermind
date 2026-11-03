@@ -17531,138 +17531,148 @@ class JobRegistry:
             or type(expected_fence_generation) is not int or expected_fence_generation < 1
         ):
             raise StateConflict("exact cancellation requires Attempt and fence generation")
-        timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
-            job_row = connection.execute(
-                "SELECT * FROM jobs WHERE job_id=?", (job_id,)
-            ).fetchone()
-            if job_row is None:
-                raise StateConflict(f"job {job_id!r} does not exist")
-            if exact:
-                # Match under the same transaction that requests cancellation;
-                # a pre-read followed by ordinary cancel_job could cancel a
-                # successor Attempt instead of the originating operation.
-                _finite_existing_effect(self.store, connection, job_id)
-                original = connection.execute(
-                    "SELECT * FROM attempts WHERE attempt_id=? AND job_id=?",
-                    (expected_attempt_id, job_id),
-                ).fetchone()
-                if (job_row["current_attempt_id"] != expected_attempt_id
-                        or original is None
-                        or original["fence_generation"] != expected_fence_generation):
-                    raise StateConflict("exact cancellation Attempt or fence changed")
-                if AttemptStatus(original["status"]) in _TERMINAL_ATTEMPT_STATUSES:
-                    return _job_from_row(job_row)  # Terminal wins; no new event/effect.
-            status = JobStatus(job_row["status"])
-            if status == JobStatus.CANCEL_REQUESTED:
-                return _job_from_row(job_row)
+            return self._cancel_job_in_transaction(connection, job_id,
+                expected_attempt_id=expected_attempt_id,
+                expected_fence_generation=expected_fence_generation)
+
+    def _cancel_job_in_transaction(self, connection, job_id, *,
+                                   expected_attempt_id=None, expected_fence_generation=None):
+        # The existing Runtime correction owner reuses this exact transaction.
+        # This private helper performs no access admission on its own.
+        if not connection.in_transaction:
+            raise StateConflict("cancellation requires the existing transaction")
+        exact = expected_attempt_id is not None or expected_fence_generation is not None
+        timestamp = self.store.now_ms()
+        job_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+        ).fetchone()
+        if job_row is None:
+            raise StateConflict(f"job {job_id!r} does not exist")
+        if exact:
+            # Match under the same transaction that requests cancellation;
+            # a pre-read followed by ordinary cancel_job could cancel a
+            # successor Attempt instead of the originating operation.
             _finite_existing_effect(self.store, connection, job_id)
-            if status == JobStatus.QUEUED:
-                connection.execute(
-                    "UPDATE jobs SET status='CANCELLED',updated_at_ms=?,version=version+1 WHERE job_id=?",
-                    (timestamp, job_id),
-                )
-                event_type = "JOB_CANCELLED"
-                attempt_id = None
-            elif status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}:
-                attempt_id = str(job_row["current_attempt_id"])
-                attempt_row = connection.execute(
-                    "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
-                ).fetchone()
-                if attempt_row is None or attempt_row["lease_token"] is None:
-                    raise StateConflict(f"job {job_id} has no cancellable attempt")
-                AttemptRegistry(self.store)._leased_row(
-                    connection,
-                    attempt_id=attempt_id,
-                    fence_generation=int(attempt_row["fence_generation"]),
-                    lease_token=str(attempt_row["lease_token"]),
-                    timestamp=timestamp,
-                    statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
-                )
-                connection.execute(
-                    """
-                    UPDATE attempts SET status='CANCEL_REQUESTED',updated_at_ms=?,version=version+1
-                    WHERE attempt_id=? AND status IN ('CLAIMED','RUNNING','CHECKPOINTED')
-                    """,
-                    (timestamp, attempt_id),
-                )
-                connection.execute(
-                    """
-                    UPDATE jobs SET status='CANCEL_REQUESTED',cancel_requested_at_ms=?,
-                                    updated_at_ms=?,version=version+1
-                    WHERE job_id=?
-                    """,
-                    (timestamp, timestamp, job_id),
-                )
-                event_type = "JOB_CANCEL_REQUESTED"
-            elif status in {
-                JobStatus.RATE_LIMITED,
-                JobStatus.FAILED,
-                JobStatus.LOST,
-            }:
-                attempt_id = str(job_row["current_attempt_id"])
-                attempt_row = connection.execute(
-                    "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
-                ).fetchone()
-                if (
-                    attempt_row is None
-                    or AttemptStatus(attempt_row["status"])
-                    not in _TERMINAL_ATTEMPT_STATUSES
-                ):
-                    raise PersistenceError(
-                        f"terminal job {job_id} has no matching terminal attempt"
-                    )
-                quota_row = connection.execute(
-                    """
-                    SELECT held_attempt_id FROM worker_quota_classes
-                    WHERE worker_id=? AND quota_class=?
-                    """,
-                    (attempt_row["worker_id"], attempt_row["quota_class"]),
-                ).fetchone()
-                if quota_row is None or quota_row["held_attempt_id"] not in {
-                    None,
-                    attempt_id,
-                }:
-                    raise PersistenceError(
-                        f"terminal job {job_id} has an inconsistent quota-class hold"
-                    )
-                connection.execute(
-                    """
-                    UPDATE worker_quota_classes
-                    SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
-                    WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
-                    """,
-                    (
-                        timestamp,
-                        attempt_row["worker_id"],
-                        attempt_row["quota_class"],
-                        attempt_id,
-                    ),
-                )
-                connection.execute(
-                    """
-                    UPDATE jobs SET status='CANCELLED',cancel_requested_at_ms=?,
-                                    updated_at_ms=?,version=version+1
-                    WHERE job_id=?
-                    """,
-                    (timestamp, timestamp, job_id),
-                )
-                event_type = "JOB_CANCELLED"
-            else:
-                raise StateConflict(f"job {job_id} cannot cancel from {status.value}")
-            self.store.append_event(
-                connection,
-                aggregate_type="job",
-                aggregate_id=job_id,
-                event_type=event_type,
-                job_id=job_id,
-                attempt_id=attempt_id,
-                payload={"previous_status": status.value},
-                timestamp_ms=timestamp,
+            original = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=? AND job_id=?",
+                (expected_attempt_id, job_id),
+            ).fetchone()
+            if (job_row["current_attempt_id"] != expected_attempt_id
+                    or original is None
+                    or original["fence_generation"] != expected_fence_generation):
+                raise StateConflict("exact cancellation Attempt or fence changed")
+            if AttemptStatus(original["status"]) in _TERMINAL_ATTEMPT_STATUSES:
+                return _job_from_row(job_row)  # Terminal wins; no new event/effect.
+        status = JobStatus(job_row["status"])
+        if status == JobStatus.CANCEL_REQUESTED:
+            return _job_from_row(job_row)
+        _finite_existing_effect(self.store, connection, job_id)
+        if status == JobStatus.QUEUED:
+            connection.execute(
+                "UPDATE jobs SET status='CANCELLED',updated_at_ms=?,version=version+1 WHERE job_id=?",
+                (timestamp, job_id),
             )
-        job = self.get_job(job_id)
-        assert job is not None
-        return job
+            event_type = "JOB_CANCELLED"
+            attempt_id = None
+        elif status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}:
+            attempt_id = str(job_row["current_attempt_id"])
+            attempt_row = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if attempt_row is None or attempt_row["lease_token"] is None:
+                raise StateConflict(f"job {job_id} has no cancellable attempt")
+            AttemptRegistry(self.store)._leased_row(
+                connection,
+                attempt_id=attempt_id,
+                fence_generation=int(attempt_row["fence_generation"]),
+                lease_token=str(attempt_row["lease_token"]),
+                timestamp=timestamp,
+                statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
+            )
+            connection.execute(
+                """
+                UPDATE attempts SET status='CANCEL_REQUESTED',updated_at_ms=?,version=version+1
+                WHERE attempt_id=? AND status IN ('CLAIMED','RUNNING','CHECKPOINTED')
+                """,
+                (timestamp, attempt_id),
+            )
+            connection.execute(
+                """
+                UPDATE jobs SET status='CANCEL_REQUESTED',cancel_requested_at_ms=?,
+                                updated_at_ms=?,version=version+1
+                WHERE job_id=?
+                """,
+                (timestamp, timestamp, job_id),
+            )
+            event_type = "JOB_CANCEL_REQUESTED"
+        elif status in {
+            JobStatus.RATE_LIMITED,
+            JobStatus.FAILED,
+            JobStatus.LOST,
+        }:
+            attempt_id = str(job_row["current_attempt_id"])
+            attempt_row = connection.execute(
+                "SELECT * FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()
+            if (
+                attempt_row is None
+                or AttemptStatus(attempt_row["status"])
+                not in _TERMINAL_ATTEMPT_STATUSES
+            ):
+                raise PersistenceError(
+                    f"terminal job {job_id} has no matching terminal attempt"
+                )
+            quota_row = connection.execute(
+                """
+                SELECT held_attempt_id FROM worker_quota_classes
+                WHERE worker_id=? AND quota_class=?
+                """,
+                (attempt_row["worker_id"], attempt_row["quota_class"]),
+            ).fetchone()
+            if quota_row is None or quota_row["held_attempt_id"] not in {
+                None,
+                attempt_id,
+            }:
+                raise PersistenceError(
+                    f"terminal job {job_id} has an inconsistent quota-class hold"
+                )
+            connection.execute(
+                """
+                UPDATE worker_quota_classes
+                SET held_attempt_id=NULL,updated_at_ms=?,version=version+1
+                WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
+                """,
+                (
+                    timestamp,
+                    attempt_row["worker_id"],
+                    attempt_row["quota_class"],
+                    attempt_id,
+                ),
+            )
+            connection.execute(
+                """
+                UPDATE jobs SET status='CANCELLED',cancel_requested_at_ms=?,
+                                updated_at_ms=?,version=version+1
+                WHERE job_id=?
+                """,
+                (timestamp, timestamp, job_id),
+            )
+            event_type = "JOB_CANCELLED"
+        else:
+            raise StateConflict(f"job {job_id} cannot cancel from {status.value}")
+        self.store.append_event(
+            connection,
+            aggregate_type="job",
+            aggregate_id=job_id,
+            event_type=event_type,
+            job_id=job_id,
+            attempt_id=attempt_id,
+            payload={"previous_status": status.value},
+            timestamp_ms=timestamp,
+        )
+        row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        return _job_from_row(row)
 
 
 REMOTE_LAUNCH_IDENTITY_KEY = "remote_launch_identity"
@@ -19991,6 +20001,7 @@ class AttemptRegistry:
         *,
         fence_generation: int,
         lease_token: str,
+        direct_terminal: dict | None = None,
     ) -> Job:
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
@@ -20002,22 +20013,31 @@ class AttemptRegistry:
                 timestamp=timestamp,
                 statuses={AttemptStatus.CANCEL_REQUESTED},
             )
+            job_row=connection.execute("SELECT * FROM jobs WHERE job_id=?", (row['job_id'],)).fetchone()
+            direct_admission=_direct_native_provenance(connection,job_row,required=False)
+            terminal_raw=None
+            if direct_admission is not None:
+                from control_plane.direct_native_correction import validate_terminal
+                terminal=validate_terminal(connection,row,direct_terminal)
+                terminal_raw=json.dumps(terminal,sort_keys=True,separators=(",",":"),ensure_ascii=False)
+            elif direct_terminal is not None:
+                raise StateConflict('direct cancellation evidence requires original direct admission')
             self._require_ohf_shutdown_before_legacy_terminal(connection, row)
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
             connection.execute(
                 """
                 UPDATE attempts SET status='CANCELLED',lease_token=NULL,finished_at_ms=?,
-                                    updated_at_ms=?,version=version+1
+                                    updated_at_ms=?,result_json=coalesce(?,result_json),version=version+1
                 WHERE attempt_id=?
                 """,
-                (timestamp, timestamp, attempt_id),
+                (timestamp, timestamp, terminal_raw, attempt_id),
             )
             connection.execute(
                 """
-                UPDATE jobs SET status='CANCELLED',updated_at_ms=?,version=version+1
+                UPDATE jobs SET status='CANCELLED',updated_at_ms=?,result_json=coalesce(?,result_json),version=version+1
                 WHERE job_id=? AND current_attempt_id=? AND status='CANCEL_REQUESTED'
                 """,
-                (timestamp, row["job_id"], attempt_id),
+                (timestamp, terminal_raw, row["job_id"], attempt_id),
             )
             connection.execute(
                 """
@@ -20039,6 +20059,8 @@ class AttemptRegistry:
                 worker_id=str(row["worker_id"]),
                 quota_class=str(row["quota_class"]),
                 timestamp_ms=timestamp,
+                payload=(dict(status='CANCELLED',direct_native_terminal_digest=orchestration_digest(terminal),
+                              admission_digest=orchestration_digest(direct_admission)) if terminal_raw is not None else None),
             )
             job_id = str(row["job_id"])
         job = JobRegistry(self.store).get_job(job_id)
@@ -28433,6 +28455,77 @@ class Runtime:
         return {"principal_scope":admitted["principal_scope"],"receiver_binding_digest":admitted["receiver_binding_digest"],
                 "source_digest":admitted["source_digest"],"admission_digest":orchestration_digest(admitted)}
 
+    def reserve_direct_native_cancel_call(self, attempt_id, *, fence_generation, lease_token):
+        """One original Supervisor adapter call; a retained intent forbids replay."""
+        with self.store.transaction() as connection:
+            attempt=self.attempts._leased_row(connection,attempt_id=attempt_id,
+                fence_generation=fence_generation,lease_token=lease_token,
+                timestamp=self.store.now_ms(),statuses={AttemptStatus.CANCEL_REQUESTED})
+            job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(attempt['job_id'],)).fetchone()
+            _direct_native_provenance(connection,job,required=True)
+            command=f'direct-native-cancel-call:{attempt_id}:{fence_generation}'
+            if connection.execute("SELECT event_id FROM events WHERE command_id=?",(command,)).fetchone() is not None:return False
+            _finite_existing_effect(self.store,connection,attempt['job_id'])
+            self.store.append_event(connection,aggregate_type='attempt',aggregate_id=attempt_id,
+                event_type='DIRECT_NATIVE_CANCEL_CALL_STARTED',job_id=attempt['job_id'],attempt_id=attempt_id,
+                command_id=command,actor='supervisor',payload=dict(fence_generation=fence_generation))
+            return True
+
+    def record_direct_native_cancel_unavailable(self, attempt_id, *, fence_generation, lease_token, unsupported):
+        with self.store.transaction() as connection:
+            attempt=self.attempts._leased_row(connection,attempt_id=attempt_id,
+                fence_generation=fence_generation,lease_token=lease_token,timestamp=self.store.now_ms(),
+                statuses={AttemptStatus.CANCEL_REQUESTED})
+            started=f'direct-native-cancel-call:{attempt_id}:{fence_generation}'
+            if connection.execute("SELECT event_id FROM events WHERE command_id=?",(started,)).fetchone() is None:
+                raise StateConflict('direct cancellation call has no original intent')
+            self.store.append_event(connection,aggregate_type='attempt',aggregate_id=attempt_id,
+                event_type='DIRECT_NATIVE_CANCEL_CALL_UNAVAILABLE',job_id=attempt['job_id'],attempt_id=attempt_id,
+                command_id=started+':unavailable',actor='supervisor',
+                payload=dict(fence_generation=fence_generation,reason='UNSUPPORTED' if unsupported else 'EFFECT_UNKNOWN'))
+
+    def inspect_direct_native_correction(self, selection, *, access):
+        from common import direct_native_result_contract as wire
+        from common import direct_native_correction_contract as correction
+        selected=wire.validate_request(selection)
+        with self.store.read() as connection:
+            self.require_direct_result_access(connection,selected,access)
+            row=connection.execute("SELECT current_attempt_id,status FROM jobs WHERE job_id=?",(selected['job_id'],)).fetchone()
+            if selected['attempt_id'] is None:selected['attempt_id']=row['current_attempt_id']
+            attempt=connection.execute("SELECT job_id,fence_generation FROM attempts WHERE attempt_id=?",(selected['attempt_id'],)).fetchone()
+            if attempt is None or attempt['job_id']!=selected['job_id'] or row['current_attempt_id']!=selected['attempt_id']:
+                raise StateConflict('direct correction has no exact current Attempt')
+            access.check()
+            return correction.validate_response(dict(schema=correction.SCHEMA,selection=selected,
+                fence_generation=attempt['fence_generation'],operation_key=None,status=row['status'],parent_consumed=False))
+
+    def request_direct_native_correction(self, request, *, access):
+        from common import direct_native_correction_contract as correction
+        selected = correction.validate_request(request)
+        selection = {key:selected[key] for key in ('work_ref','job_id','attempt_id')}
+        with self.store.transaction() as connection:
+            identity = self.require_direct_result_access(connection, selection, access)
+            command = 'direct-native-correction:' + orchestration_digest(dict(
+                operation_key=selected['operation_key'], identity=identity))
+            prior = connection.execute("SELECT payload_json FROM events WHERE command_id=?", (command,)).fetchone()
+            if prior is not None:
+                payload = _strict_canonical_json_loads(prior[0], name='direct correction Event')
+                if payload.get('request') != selected or payload.get('identity') != identity:
+                    raise StateConflict('direct correction command identity changed')
+                access.check()
+                return copy.deepcopy(payload['receipt'])
+            job = self.jobs._cancel_job_in_transaction(connection, selected['job_id'],
+                expected_attempt_id=selected['attempt_id'],
+                expected_fence_generation=selected['fence_generation'])
+            receipt = correction.receipt(selected, job.status.value)
+            access.check()
+            self.store.append_event(connection, aggregate_type='job', aggregate_id=job.job_id,
+                event_type='DIRECT_NATIVE_CORRECTION_REQUESTED', job_id=job.job_id,
+                attempt_id=selected['attempt_id'], actor='direct-native-parent', command_id=command,
+                payload=dict(request=selected, identity=identity, receipt=receipt))
+            access.check()
+            return receipt
+
     def require_direct_native_launch_access(self, job_id, attempt_id, access, *, lease):
         if type(access) is not direct_native.DirectNativeExecutionAccess:
             raise StateConflict("direct native final launch requires execution authority")
@@ -28458,6 +28551,19 @@ class Runtime:
             access.check()
 
     def validate_direct_completion(self, connection, selection):
+        job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection['job_id'],)).fetchone()
+        if job is not None and job['status']=='CANCELLED':
+            from control_plane.direct_native_correction import validate_terminal
+            attempt=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(selection['attempt_id'],)).fetchone()
+            if (attempt is None or attempt['status']!='CANCELLED' or attempt['lease_token'] is not None
+                or job['result_json']!=attempt['result_json']):
+                raise StateConflict('direct cancellation is not one settled Attempt')
+            terminal=validate_terminal(connection,attempt,_strict_canonical_json_loads(job['result_json'],name='direct cancelled terminal'))
+            digest=orchestration_digest(terminal)
+            events=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CANCELLED' AND job_id=? AND attempt_id=? LIMIT 2",(job['job_id'],attempt['attempt_id'])).fetchall()
+            if len(events)!=1 or json.loads(events[0][0])!=dict(status='CANCELLED',direct_native_terminal_digest=digest,admission_digest=terminal['admission_digest']):
+                raise StateConflict('direct cancellation lost its immutable settlement Event')
+            return dict(payload=copy.deepcopy(terminal['payload']),terminal_digest=digest,terminal_record=terminal)
         job=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection["job_id"],)).fetchone()
         admitted=_direct_native_provenance(connection,job,required=True)
         attempt=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(selection["attempt_id"],)).fetchone()
@@ -28488,7 +28594,7 @@ class Runtime:
                 row=connection.execute("SELECT current_attempt_id,status FROM jobs WHERE job_id=?",(selected["job_id"],)).fetchone()
                 if selected["attempt_id"] is None:
                     selected["attempt_id"]=row["current_attempt_id"]
-                if selected["attempt_id"] is None or row["status"] != "COMPLETED":
+                if selected["attempt_id"] is None or row["status"] not in {"COMPLETED","CANCELLED"}:
                     access.check()
                     return wire.unavailable(selected,"NOT_TERMINAL")
                 completion=self.validate_direct_completion(connection,selected)
