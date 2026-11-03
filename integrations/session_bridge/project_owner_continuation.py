@@ -27,7 +27,9 @@ MAX_INPUT_BYTES = 2 * 1024 * 1024
 # attended owner complete; only fixed projection/observation metadata is extra.
 METADATA_ALLOWANCE_BYTES = 8 * 1024
 MAX_CONTEXT_BYTES = MAX_BUNDLE_BYTES + METADATA_ALLOWANCE_BYTES
-TASK_ID = re.compile(r'P[1-9][0-9]*\.T[1-9][0-9]*(?:\.S[1-9][0-9]*)?\Z')
+# Wave numbers are the historical local P0 planning waves or positive without
+# leading zeros; task and subtask indices are positive without leading zeros.
+TASK_ID = re.compile(r'P(?:0|[1-9][0-9]*)\.T[1-9][0-9]*(?:\.S[1-9][0-9]*)?\Z')
 WORKSTREAM = re.compile(r'WS:[A-Z][A-Z0-9-]{0,95}\Z')
 SESSION = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\Z')
 OWNER = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:@-]{0,95}\Z')
