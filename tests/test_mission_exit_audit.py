@@ -255,13 +255,23 @@ def test_pending_current_head_ci_consumes_original_run_without_rerun(state):
     assert "current_head_ci" not in audit(data)["checks_passed"]
 
 
-@pytest.mark.parametrize("state", ["FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STALE"])
+@pytest.mark.parametrize("state", ["FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"])
 def test_terminal_ci_failure_is_diagnosed_not_blindly_retried(state):
     data = snapshot()
     data["source"].update(ci_conclusion=state, ci_run_ref="github:existing-ci")
     guidance = _gap_guidance(data, "current_head_ci")
     assert "original CI result" in guidance
     assert "no blind retry" in guidance
+
+
+def test_stale_current_head_ci_observation_requires_reconciliation_not_repair():
+    data = snapshot()
+    data["source"].update(ci_conclusion="STALE", ci_run_ref="github:existing-ci")
+    guidance = _gap_guidance(data, "current_head_ci")
+    assert "reconcile current-head CI identity and state with GitHub" in guidance
+    assert "identify a permitted repair" not in guidance
+    assert "current_head_ci" not in audit(data)["checks_passed"]
+    assert audit(data)["retry_authorized"] is False
 
 
 @pytest.mark.parametrize("state", [None, "unrecognized", [], {}])
