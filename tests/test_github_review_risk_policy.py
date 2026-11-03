@@ -31,7 +31,6 @@ def facts(paths=("app/src/component.tsx",), *, additions=12, deletions=4,
 @pytest.mark.parametrize("paths", [
     ("docs/user-guide.md",),
     ("README.md", "docs/screenshots/welcome.png"),
-    ("app/src/components/component.tsx",),
 ])
 def test_bounded_routine_changes_need_no_independent_review(paths):
     decision = assess_review_risk(facts(paths))
@@ -59,6 +58,10 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
     ("tests/conftest.py",),
     ("tests/test_ci_pytest_policy.py",),
     ("control_plane/executive_coo_policy.py",),
+    ("control_plane/executive_workspace.py",),
+    ("control_plane/executive_service.py",),
+    ("scripts/mastermind_workspace.py",),
+    ("integrations/studio_direct_mcp/git-publish.mjs",),
     ("config/unrun_test_waivers.yml",),
     ("skills/mastermind-fabric-delegate/SKILL.md",),
     ("plugins/mastermind-sol/skills/review-pull-request/SKILL.md",),
@@ -182,7 +185,7 @@ def test_previous_rename_path_is_accounted_for_in_verified_metrics():
     assert assess_review_risk(source).tier is ReviewTier.CRITICAL
 
 
-def test_ui_change_not_penalized_for_large_verification_evidence():
+def test_ui_executable_change_requires_standard_even_with_large_verification_evidence():
     source = replace(
         facts(("terminal/components/ChartPanel.tsx", "terminal/docs/verification/replay.log"),
               additions=900, deletions=3),
@@ -191,7 +194,7 @@ def test_ui_change_not_penalized_for_large_verification_evidence():
             ReviewFileStat(path="terminal/docs/verification/replay.log", additions=880, deletions=0),
         ),
     )
-    assert assess_review_risk(source).tier is ReviewTier.FAST
+    assert assess_review_risk(source).tier is ReviewTier.STANDARD
 
 
 @pytest.mark.parametrize("protected_path", [
@@ -234,3 +237,24 @@ def test_test_only_one_line_addition_is_standard_until_semantics_qualified():
         ),),
     )
     assert assess_review_risk(source).tier is ReviewTier.STANDARD
+
+
+def test_real_managed_workspace_identity_change_is_critical_with_verified_metrics():
+    # Mastermind #1993 is a real managed-source identity and publisher precheck change.
+    # Its small size must not reduce scrutiny of source-custody boundaries.
+    source = replace(
+        facts((
+            "control_plane/executive_workspace.py",
+            "scripts/mastermind_workspace.py",
+            "tests/test_mastermind_workspace_repositories.py",
+        ), additions=173, deletions=2),
+        file_metrics=(
+            ReviewFileStat("control_plane/executive_workspace.py", 69, 2),
+            ReviewFileStat("scripts/mastermind_workspace.py", 5, 0),
+            ReviewFileStat("tests/test_mastermind_workspace_repositories.py", 99, 0),
+        ),
+    )
+    verdict = assess_review_risk(source)
+    assert verdict.tier is ReviewTier.CRITICAL
+    assert verdict.minimum_independent_assessments == 2
+    assert verdict.minimum_formal_non_author_approvals == 1

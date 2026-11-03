@@ -33,7 +33,9 @@ _CRITICAL_PREFIXES = (
     "docs/authority_",
     "ops/executive_os/",
     "control_plane/github_review_",
+    "control_plane/executive_",
     "integrations/github_review_",
+    "integrations/studio_direct_mcp/",
     "scripts/deploy_",
     "scripts/release_",
     "security/",
@@ -65,6 +67,7 @@ _CRITICAL_EXACT = frozenset({
     "tox.ini",
     "noxfile.py",
     "setup.cfg",
+    "scripts/mastermind_workspace.py",
     "tests/conftest.py",
     "tests/pytest_plugins.py",
     "pyproject.toml",
@@ -259,6 +262,11 @@ def _is_critical_path(path: str) -> bool:
     lower = path.lower()
     if lower in {p.lower() for p in _CRITICAL_EXACT}:
         return True
+    if lower.rsplit("/", 1)[-1] in {
+        "agents.md", "claude.md", "skill.md", "codeowners",
+        "security.md", ".cursorrules", ".clinerules",
+    }:
+        return True
     if lower.endswith("/conftest.py") or lower.endswith("/pytest_plugins.py"):
         return True
     if any(lower.startswith(prefix) for prefix in _CRITICAL_PREFIXES):
@@ -290,22 +298,9 @@ def _is_test_path(path: str) -> bool:
     )
 
 
-_FAST_CODE_PREFIXES = (
-    "app/src/components/", "app/mastermind_os/src/components/",
-    "frontend/src/components/", "web/src/components/", "ui/",
-    "terminal/components/", "terminal/styles/", "terminal/assets/",
-)
-_FAST_CODE_SUFFIXES = (".css", ".scss", ".sass", ".less", ".svg")
-_FAST_COMPONENT_SUFFIXES = (".tsx", ".jsx")
-
-
-def _is_explicit_fast_source(path: str) -> bool:
-    lower = path.lower()
-    return (
-        lower.endswith(_FAST_CODE_SUFFIXES)
-        or (lower.startswith(_FAST_CODE_PREFIXES)
-            and lower.endswith(_FAST_COMPONENT_SUFFIXES))
-    )
+# No executable TSX/JSX/CSS files are FAST by filename or line count alone.
+# A future independently accepted semantic source qualifier may narrow this,
+# but no such receipt or trusted AST proof exists in the current ingress.
 
 
 _SUPPORTING_PREFIXES = (
@@ -320,7 +315,7 @@ _INERT_DOC_PREFIXES = (
     "docs/user/", "docs/guides/", "docs/faq/", "docs/tutorials/",
 )
 _VISUAL_SUFFIXES = (
-    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico",
     ".woff", ".woff2",
 )
 _INERT_TEXT_SUFFIXES = (".md", ".rst", ".txt")
@@ -376,7 +371,6 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
         return _result(facts, ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_EVIDENCE")
     if total > _FAST_MAX_LINES or material_count > _FAST_MAX_FILES:
         return _result(facts, ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
-    if all(_is_explicit_fast_source(p) or _is_supporting_change(p)
-           for p in facts.changed_paths):
-        return _result(facts, ReviewTier.FAST, "BOUNDED_PRESENTATION_CHANGE")
-    return _result(facts, ReviewTier.STANDARD, "SOURCE_PATH_NOT_QUALIFIED_FOR_FAST")
+    # Executable components, CSS and unqualified code require review even
+    # when the source diff is small. Patch availability is not proof of inertness.
+    return _result(facts, ReviewTier.STANDARD, "SOURCE_NOT_SEMANTICALLY_QUALIFIED_FOR_FAST")
