@@ -618,3 +618,25 @@ def test_original_compaction_goal_is_met_without_changing_the_baseline() -> None
 def test_each_actual_required_read_profile_meets_the_original_reduction(rels) -> None:
     # Same file unions, including reliability when its existing trigger applies.
     assert _bundle_bytes(rels) * 100 <= sum(_PIN_BYTES[p] for p in rels) * 60
+
+
+# The old protected-base composition duplicated this independently added entry.
+def _single_current_review_entry(text: str) -> None:
+    heading = "### `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md`"
+    assert text.count(heading) == 1, "current review-routing entry must occur once"
+    section = text.split(heading, 1)[1].split("\n### ", 1)[0]
+    assert "before choosing an avenue" in section
+    assert "same" in section and "verified protected Mastermind commit" in section
+
+
+def test_current_review_routing_entry_is_unique_and_action_gated() -> None:
+    _single_current_review_entry(_read("docs/sol_skills/INDEX.md"))
+
+
+@pytest.mark.parametrize("mutation", ("missing", "duplicate"))
+def test_current_review_routing_entry_rejects_missing_or_duplicate(mutation) -> None:
+    text = _read("docs/sol_skills/INDEX.md")
+    heading = "### `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md`"
+    changed = text.replace(heading, "### missing-review-entry", 1) if mutation == "missing" else text + "\n" + heading + "\n"
+    with pytest.raises(AssertionError):
+        _single_current_review_entry(changed)

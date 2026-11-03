@@ -7,9 +7,8 @@ skill: index
 
 # Sol Skillpack Index
 
-Procedure, not state: no live workstream/PR/Slack/runtime facts, credentials or
-Chairman decisions. Canonical repo:
-`mastermindx-market-intelligence/Mastermind`, protected publication branch `master`.
+Procedure only: no live state, credentials or Chairman decisions.
+Repo `mastermindx-market-intelligence/Mastermind`; protected `master`.
 
 ## Atomic-load law
 
@@ -98,8 +97,8 @@ Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO principal-d
 economics, packets, capacity routing or evidence/continuity work. No provider/account/credential/host/model-setting/reasoning-mode selection or lifecycle/admission/retry/transfer/effect/production authority.
 
 ### `REVIEW_RETURN.md`
-Adjudicate returned source/research/claimed completion against original outcome,
-not implementation quality alone.
+Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed
+completion. Reviews against original outcome, not merely implementation quality.
 
 ### `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md`
 For a *new independent PR/source review*, load this shared session-side guide from the **same
@@ -112,7 +111,8 @@ here does not install a ChatGPT Project instruction, Fabric plugin or native ski
 prove each live surface separately.
 
 ### `COMMISSION_WAVE.md`
-Authorized bounded delegation or production-proven Executive CEO request.
+Use when Chairman intent authorizes Sol to send bounded work to Fable/another operator or,
+once production-proven, to create one Executive CEO request.
 
 ### `WORKER_AVENUE_ROUTING.md`
 Mandatory before Chairman-mediated/manual Slack handoff or routing advice. Owns

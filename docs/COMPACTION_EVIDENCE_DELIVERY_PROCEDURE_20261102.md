@@ -34,7 +34,7 @@ still needs independent full-diff adjudication; tests do not prove model behavio
 
 | File | Original pin bytes | Published 7224 bytes | This candidate bytes |
 |---|---:|---:|---:|
-| docs/sol_skills/INDEX.md | 20014 | 19227 | 12232 |
+| docs/sol_skills/INDEX.md | 20014 | 19227 | 12304 |
 | docs/sol_skills/COLD_START.md | 10830 | 10205 | 5677 |
 | docs/sol_skills/ACTIVE_EXECUTION.md | 56650 | 54877 | 31418 |
 | docs/sol_skills/SESSION_RELIABILITY.md | 16465 | 16267 | 11477 |
@@ -42,16 +42,16 @@ still needs independent full-diff adjudication; tests do not prove model behavio
 | docs/CEO_PROJECT_PLAN_CONTINUITY.md | 20640 | 20500 | 11725 |
 | docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md | 25275 | 23344 | 15533 |
 
-Seven-file total: **167799 -> 99912 bytes (40.457333% reduction)**.
+Seven-file total: **167799 -> 99984 bytes (40.414424% reduction)**.
 The original >=40% and <=100,000-byte source budget is met by the measured candidate;
 no smaller target or relaxed ceiling is substituted. UTF-8 bytes include headings,
 frontmatter, code blocks, whitespace and owner pointers.
 
 | Controlled profile | Original bytes | Candidate bytes | Reduction |
 |---|---:|---:|---:|
-| short-source | 87494 | 49327 | 43.62242% |
-| tool-heavy-source | 103959 | 60804 | 41.511557% |
-| delegated-tool-heavy | 167799 | 99912 | 40.457333% |
+| short-source | 87494 | 49399 | 43.540128% |
+| tool-heavy-source | 103959 | 60876 | 41.442299% |
+| delegated-tool-heavy | 167799 | 99984 | 40.414424% |
 
 Profile file unions are unchanged: short source = INDEX/COLD_START/ACTIVE_EXECUTION;
 tool-heavy source adds SESSION_RELIABILITY; delegated/tool-heavy adds WEB_CEO,
@@ -134,14 +134,12 @@ then passed with zero failures/errors/skips. JUnit SHA256:
 The earlier418-case domain/recovery/routing/consumer qualification also passed on
 Python3.12; its evidence is retained in the same registered operation.
 
-A final consolidated run of the27 modules is a separate same-input qualification,
-not assumed green. Its actual terminal receipt and new-head hosted CI must be
-consumed on the original PR. The full rerun was not required to hide an assertion:
-the one fixed fixture genuinely failed before, and its production rejection and
-positive socket precondition now both run. No test function was removed.
+The final consolidated27-module run on the initial semantic publication completed exit0 with 1080 JUnit cases, 1063 testcase elements, zero failures/errors and 1 explicitly retained skip(s). All frozen postimages matched. JUnit SHA256 `16101d3a35209af0de8047eee61f16b461805a38a97bfd55a3313635ec5452c1`. The skip is the Git transport unable to construct a missing-blob fixture, not omitted source coverage.
+
+Current-base composition then exposed a duplicated protected review-routing entry in INDEX. This correction preserves its exact protected insertion context and adds missing/duplicate-entry falsifiers. The object-only repaired candidate composes byte-identically at that path with protected e999c6e2161a77c7e4f35a9acf3ec3e3f6b9fc0c as tree 34ddbc24ee8822c48c65d50a286583b19b0d5b80. The original full qualification is retained for unchanged code; the INDEX-specific delta has separate qualification below, not a false claim the old full run executed new bytes.
 
 Exact metrics and old-source counterexamples SHA256:
-`276c4b2614d0217854b8d19750b071f39ddc6ee2771ce46f5ac23fe1b2e6f464`.
+`7e7a89d7ab1682e5b5f706d8dbaf9b4553c269f217414992c9a2366b6f293963`.
 
 The initial wider run used host Python3.14. It exposed three inherited JSON-depth
 negative-fixture incompatibilities and an AF_UNIX path-length test-environment issue,
@@ -157,6 +155,8 @@ Unchanged liveness test SHA256:
 `16a17a44d405049af8da33ed4bb7968ef661edb18600152c3e706953aa7170ad`.
 Protected review guide SHA256:
 `f1599fb0fb113d30ca4177281e22a00ae9bfef6d0f2acc8584c14aa82b92e2c3`.
+
+Final INDEX-delta qualification: 450 JUnit cases / 442 testcase elements; zero failures/errors/skips across10 affected modules. JUnit SHA256 `8a77aa6dd91812ea079aab6f6862c8b54aa2c88ed3f1187594e92f95561e5a7b`. The exact immutable integrated-tree export separately passed the retained compaction contracts before publication; its receipt is retained on the original carrier.
 
 ## 6. Release, adoption and remaining acceptance
 
