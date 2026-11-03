@@ -13,6 +13,7 @@
     "native_files": 102,
     "source_inventory_sha256": "2b02de89d0fac9a72930e7aa1fbd302f710d3b2c36661245620e48b984e0c934"
   },
+  "count_correction": "The upstream-diagnostics aggregate reports 88, but contains 69 unique testcase records, all passing. Report 69 distinct tests; do not use the aggregate as that count.",
   "failed_github_run": 41609235395,
   "failed_jobs": [
     125830211419,
@@ -84,7 +85,15 @@
           "time": "94.073",
           "timestamp": "2026-11-03T15:27:39.515341-07:00"
         }
-      ]
+      ],
+      "testcase_records": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 182,
+        "skipped": 6,
+        "total": 188,
+        "unique_keys": 188
+      }
     },
     {
       "junit_sha256": "b19380ce4d9740da413bb3925a2b84fa79459134d34f6b0e71c07981d2eefc34",
@@ -102,7 +111,15 @@
           "time": "9.208",
           "timestamp": "2026-11-03T15:29:56.603947-07:00"
         }
-      ]
+      ],
+      "testcase_records": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 69,
+        "skipped": 0,
+        "total": 69,
+        "unique_keys": 69
+      }
     }
   ],
   "verified_files_sha256": {

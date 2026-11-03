@@ -198,8 +198,10 @@ The current source composes protected master `9f65957e29eba92245d78609f032aaea52
 
 The original catalog and diagnostic fixtures, original transition manifest, and historical transformation-chain pins remain unchanged. A supplemental byte-qualified fixture restores only the old executor during disposable historical reconstruction. Current-stage verification still precedes restoration, and all historical members are verified afterward.
 
-Focused regressions: **182 passed, 6 Linux-only skips**, plus **88 passed** for the affected upstream diagnostic paths. The current-manifest failures and all 32 historical successor tests now pass. These local results do not stand in for Linux CI, independent integration review, protected merge, or installation. Exact hashes and receipts are in `ci-repair-validation.json`.
+Focused regressions: **182 passed, 6 Linux-only skips**, plus **69 distinct tests passed** for the affected upstream diagnostic paths. The current-manifest failures and all 32 historical successor tests now pass. These local results do not stand in for Linux CI, independent integration review, protected merge, or installation. Exact hashes and receipts are in `ci-repair-validation.json`.
 
 The bounded integration-review request `fabric-ubuntu-ci-fixture-review-20261103-c4` was refused with `MANUAL_ROUTE_UNAVAILABLE`; same-ID status is `NOT_FOUND`, with execution absence unproven and retry disallowed. The operation is preserved without rerouting or replay. The earlier accepted executor review retains only its original scope.
 
 Ubuntu1 diagnosis now identifies its four CI runners’ startup refusal: disk use is 88.86%, above the installed guard’s 85% threshold. The guard also requires 100 GiB free. No CPU or memory refusal was observed. No disk threshold was lowered and no data was deleted. A bounded storage ownership read found the root-owned isolated runner directories unreadable as `longr`; the home census is partial.
+
+The diagnostics JUnit aggregate is 88, but its actual testcase records number 69 with no duplicate keys, failures, errors or skips. The distinct-case count is authoritative here. Later host/authentication and review-refusal observations are retained in `continuation-observations.json`; no denied run is replayed and no runtime hold is cleared.

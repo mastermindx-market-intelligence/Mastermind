@@ -1,0 +1,266 @@
+{
+  "fleet_last_verified": [
+    {
+      "free_gib": 106.414,
+      "host": "ubuntu0",
+      "maintenance": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "effect_state": "NOT_APPLIED",
+            "reason": "manager_target_handoff_unproven",
+            "state": "HELD_UNBOUND_CACHE_TARGET"
+          }
+        ],
+        "degraded": true,
+        "epoch": 1793743271.9403145,
+        "mode": "CRITICAL"
+      },
+      "observed_epoch": 1793744321.8969698,
+      "original_holds": {},
+      "service": {
+        "ActiveState": "failed",
+        "ExecMainStatus": "1",
+        "Result": "exit-code",
+        "SubState": "failed",
+        "UnitFileState": "static"
+      },
+      "timer": {
+        "ActiveState": "active",
+        "Result": "success",
+        "SubState": "waiting",
+        "UnitFileState": "enabled"
+      }
+    },
+    {
+      "free_gib": 147.919,
+      "host": "ubuntu1",
+      "maintenance": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          },
+          {
+            "cache": "uv",
+            "state": "SKIPPED_UNAVAILABLE"
+          },
+          {
+            "cache": "npm",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          }
+        ],
+        "degraded": false,
+        "epoch": 1793743351.5174341,
+        "mode": "CRITICAL"
+      },
+      "observed_epoch": 1793744321.9430208,
+      "original_holds": {},
+      "service": {
+        "ActiveState": "inactive",
+        "ExecMainStatus": "0",
+        "Result": "success",
+        "SubState": "dead",
+        "UnitFileState": "static"
+      },
+      "timer": {
+        "ActiveState": "active",
+        "Result": "success",
+        "SubState": "waiting",
+        "UnitFileState": "enabled"
+      }
+    },
+    {
+      "free_gib": 287.566,
+      "host": "ubuntu2",
+      "maintenance": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "state": "NO_PRESSURE"
+          }
+        ],
+        "degraded": false,
+        "epoch": 1793743313.761232,
+        "mode": "CALM"
+      },
+      "observed_epoch": 1793744321.8906157,
+      "original_holds": {
+        "news-w4-v91-v1-review-r1": "47c3a4ddfc701712f15e1b8b9e5cf01edde9451d77f5c3b296b670c8dc4b8871",
+        "news-w4-v91-v4-review-r1": "d2881145a8ab311b61a2cf1d5eececef6eb446ac9bc35e2a77202b0861249e1d",
+        "news-w4-v91-v6-review-r1": "634ed74ba0ebf0e1c7c1f3a1b0caed1fd7db421df60d0436b6c1312f69546628",
+        "news-w4-v91-v7-review-r2": "6f771b465065e2e45010fe48103117e685f7598349c0bf9ab2dd9b7de85d1f5a"
+      },
+      "service": {
+        "ActiveState": "inactive",
+        "ExecMainStatus": "0",
+        "Result": "success",
+        "SubState": "dead",
+        "UnitFileState": "static"
+      },
+      "timer": {
+        "ActiveState": "active",
+        "Result": "success",
+        "SubState": "waiting",
+        "UnitFileState": "enabled"
+      }
+    },
+    {
+      "free_gib": 108.416,
+      "host": "ubuntu3",
+      "maintenance": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "cache": "pip",
+            "state": "SKIPPED_UNTRUSTED_CACHE_PATH"
+          },
+          {
+            "cache": "uv",
+            "effect_state": "NOT_APPLIED",
+            "reason": "manager_target_handoff_unproven",
+            "state": "HELD_UNBOUND_CACHE_TARGET"
+          }
+        ],
+        "degraded": true,
+        "epoch": 1793743353.4724784,
+        "mode": "CRITICAL"
+      },
+      "observed_epoch": 1793744321.819365,
+      "original_holds": {},
+      "service": {
+        "ActiveState": "failed",
+        "ExecMainStatus": "1",
+        "Result": "exit-code",
+        "SubState": "failed",
+        "UnitFileState": "static"
+      },
+      "timer": {
+        "ActiveState": "active",
+        "Result": "success",
+        "SubState": "waiting",
+        "UnitFileState": "enabled"
+      }
+    },
+    {
+      "free_gib": 866.927,
+      "host": "ubuntu4",
+      "maintenance": {
+        "attributable_reclaimed_bytes": 0,
+        "cleanup": [
+          {
+            "state": "NO_PRESSURE"
+          }
+        ],
+        "degraded": false,
+        "epoch": 1793743289.413336,
+        "mode": "CALM"
+      },
+      "observed_epoch": 1793744321.8924253,
+      "original_holds": {},
+      "service": {
+        "ActiveState": "inactive",
+        "ExecMainStatus": "0",
+        "Result": "success",
+        "SubState": "dead",
+        "UnitFileState": "static"
+      },
+      "timer": {
+        "ActiveState": "active",
+        "Result": "success",
+        "SubState": "waiting",
+        "UnitFileState": "enabled"
+      }
+    }
+  ],
+  "grok_auth_diagnostic": {
+    "binary": "/usr/local/bin/grok",
+    "binding": "same existing native GROK_AUTH_PATH; all inherited GROK_* cleared; no credential contents read",
+    "catalog_default": "grok-4.6",
+    "catalog_message": "You are not authenticated.",
+    "catalog_models": [
+      "grok-4.6",
+      "grok-4.5"
+    ],
+    "catalog_rc": 0,
+    "commands": "read-only --version, models, and --help",
+    "human_control": "Existing Ubuntu0 account must sign in through grok login; then recheck the authenticated catalog before any new worker",
+    "limitation": "Unauthenticated catalog is not an authenticated model-entitlement proof; no downgrade or credential substitution",
+    "real_binary": "/home/ubuntu0/.grok/downloads/grok-linux-x86_64",
+    "version": "grok 1.0.44 (5b807183dd79)"
+  },
+  "grok_failure": {
+    "accepted": false,
+    "active_marker_absent": true,
+    "cleanup_proven": true,
+    "controller_pid": 46176,
+    "host": "ubuntu0",
+    "provider_lease": "5929ccc5650c",
+    "provider_lease_state": "released (read-only SQLite query)",
+    "provider_process_started": true,
+    "requested_model": "grok-4.7",
+    "residual_count": 0,
+    "result": "Error: Couldn't set model 'grok-4.7': Invalid params: \"unknown model id\". Run 'grok models' to see available models.\n",
+    "result_sha256": "f90a20db30e790ba335b5034788bb28b35046b0dfd547626cf3da4a72ebfad45",
+    "retry_allowed": false,
+    "returncode": 1,
+    "root_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+    "run_id": "fabric-ubuntu1-ci-cleanup-safety-review-20261103-c4"
+  },
+  "next_actions": [
+    "Complete existing Ubuntu0 Grok interactive sign-in; verify authenticated exact-model availability before any new commission; preserve failed run unchanged.",
+    "Finish current PR #2007 CI and non-author review, then use the original native release owner and production-path proof.",
+    "Continue Ubuntu1 recovery only on identified, lawfully reclaimable storage; isolated CI directories alone cannot clear the guard.",
+    "Keep Ubuntu4 work on existing #2008 and original qualification root; no competing sparse-routing implementation.",
+    "Preserve Ubuntu2's four original local unknown-effect holds and Ubuntu0/3's unbound-cache-target refusals until their actual predicates are satisfied."
+  ],
+  "recorded_at_utc": "2026-11-03T22:53:46.865177+00:00",
+  "refused_reviews": [
+    {
+      "error": "MANUAL_ROUTE_UNAVAILABLE",
+      "exact_read_only_preview_rc": 75,
+      "execution_absence_proven": false,
+      "preview_reason": "requested model/complexity escalation not admitted",
+      "retry_allowed": false,
+      "run_id": "fabric-ubuntu-ci-fixture-review-20261103-c4",
+      "same_id_status": "NOT_FOUND",
+      "scope": "pre-implementation fixture design"
+    },
+    {
+      "error": "MANUAL_ROUTE_UNAVAILABLE",
+      "exact_read_only_preview_rc": 75,
+      "execution_absence_proven": false,
+      "preview_reason": "bounded_complexity_requires_escalation",
+      "retry_allowed": false,
+      "run_id": "fabric-published-delta-b01f1068-review-20261103-c4",
+      "same_id_status": "NOT_FOUND",
+      "scope": "new exact published b01f1068 source delta"
+    }
+  ],
+  "schema": "mastermind.fabric_ubuntu_continuation_observations.v1",
+  "source_integration_commit": "b01f10683cd3cc4a9828cda23f70588060c13dec",
+  "source_scope": "Published and clean source candidate; no protected merge or live native installation",
+  "source_tree": "f2eae97c70f29c98edeb5a1b79a69efac1fbf021",
+  "ubuntu1": {
+    "ci_services": 4,
+    "deletion_performed": false,
+    "disk_used_percent": 88.86,
+    "guard_refusal": "critical disk pressure",
+    "guard_sha256": "031fc56aad4ec117bca4af8ff894f30800873ae0b1adabf64c11432608ede79e",
+    "other_storage_reads": "bounded and partial; no deletion eligibility inferred from names, age, process absence, or directory size",
+    "required": "used percent <85 AND free >=100 GiB",
+    "sealed_ci_total": "du -x --block-size=1G: 4 GiB rounded, insufficient to resolve pressure",
+    "state": "activating/start-pre",
+    "sudo_existing_permission": "NOPASSWD administrative access observed; used only for bounded size reads"
+  },
+  "ubuntu4": {
+    "head": "8d9d31b1f1d0694ed8ad8399e67318240404a586",
+    "operation": "ubuntu4-fabric-integration-20261103-c3",
+    "preserved": true,
+    "registry": "all seven original modes remain qualification-only; no mode promoted",
+    "relation": "PR #2008 records the same sparse-index-advice failures fixed by #2007; its current source, hosted checks, review, account qualification and native activation remain separate",
+    "source_carrier": "Mastermind PR #2008"
+  }
+}
