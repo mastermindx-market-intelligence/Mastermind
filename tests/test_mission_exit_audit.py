@@ -26,6 +26,7 @@ PROPHET_FIXTURE = (
 LANE_FLAGS = (
     "lane_local_wait_blocks_only_its_lane",
     "remaining_safe_work",
+    "scope_evidence_structurally_bound",
     "all_lanes_proven_blocked",
     "all_external_waits_proven_blocked",
     "checkpoint_continuation_verified",
@@ -44,6 +45,19 @@ def snapshot():
 def prophet_snapshot():
     return json.loads(PROPHET_FIXTURE.read_text(encoding="utf-8"))
 
+
+
+def _attest_complete_lanes(data):
+    """Synthetic shape for tests, not an authentic Agent OS receipt."""
+    data["lanes"]["scope_evidence"] = {
+        "source_ref": "agentos:program-waves",
+        "owner_readback_ref": "agentos:current-compiled",
+        "source_revision": "a" * 40,
+        "source_observed": True,
+        "all_dependencies_checked": True,
+        "canonical_lane_ids": [x["id"] for x in data["lanes"]["items"]],
+    }
+    return data
 
 def test_byteplus_terminal_analysis_is_not_release_or_accepted_work():
     report = audit(snapshot())
@@ -351,6 +365,7 @@ def test_all_lanes_proven_blocked_stop_is_lawful_fence():
         "wait_executor": {"started": False, "ref": None},
         "support_cycles_without_delta": 2,
     }
+    _attest_complete_lanes(data)
     report = audit(data)
     assert report["all_lanes_proven_blocked"] is True
     # A truthful proven-blocked terminal is the incumbent ALL_SCOPED_LANES_BLOCKED
@@ -442,6 +457,7 @@ def test_wait_claim_requires_started_durable_executor():
     data["lanes"]["wait_executor"] = {"started": True, "ref": "fabric:nightly-guard-run",
                                     "return_path_ref": "fabric:result-return",
                                     "owner_observed": True}
+    _attest_complete_lanes(data)
     report = audit(data)
     assert report["wait_requires_started_durable_executor"] is False
     assert report["premature_exit_detected"] is False
@@ -537,6 +553,7 @@ def test_proven_external_waits_allow_a_genuine_all_lanes_stop():
          "blocker_observed": True},
     ]
     data["lanes"]["exit_claim"] = "ALL_LANES_BLOCKED_STOP"
+    _attest_complete_lanes(data)
     result = audit(data)
     assert result["all_lanes_proven_blocked"] is True
     assert result["all_external_waits_proven_blocked"] is True
@@ -597,4 +614,55 @@ def test_started_wait_requires_canonical_return_path():
         audit(data)
     data["lanes"]["wait_executor"]["return_path_ref"] = "fabric:real-return"
     data["lanes"]["wait_executor"]["owner_observed"] = True
+    _attest_complete_lanes(data)
     assert audit(data)["premature_exit_detected"] is False
+
+
+def test_omitted_ready_lane_cannot_fake_an_all_blocked_stop():
+    data = prophet_snapshot()
+    canonical_ids = [row["id"] for row in data["lanes"]["items"]]
+    data["lanes"]["items"] = [
+        row for row in data["lanes"]["items"] if row["state"] != "SAFE_WORK_REMAINING"
+    ]
+    data["lanes"]["exit_claim"] = "ALL_LANES_BLOCKED_STOP"
+    out = audit(data)
+    assert out["scope_evidence_structurally_bound"] is False
+    assert out["all_lanes_proven_blocked"] is False
+    assert out["premature_exit_detected"] is True
+    assert out["no_delta_loop_forces_tactic_change"] is True
+    _attest_complete_lanes(data)
+    data["lanes"]["scope_evidence"]["canonical_lane_ids"] = canonical_ids
+    with pytest.raises(InvalidSnapshot, match="omit"):
+        audit(data)
+
+
+def test_durable_wait_cannot_hide_unlisted_ready_work():
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [
+        {"id": "github:ci-remaining", "state": "WAITING_EXTERNAL",
+         "blocker_ref": "github:run-123", "blocker_owner_ref": "github:actions",
+         "blocker_observed": True}
+    ]
+    data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
+    data["lanes"]["wait_executor"] = {
+        "started": True, "ref": "fabric:verified-run",
+        "return_path_ref": "fabric:verified-return", "owner_observed": True,
+    }
+    assert audit(data)["premature_exit_detected"] is True
+    _attest_complete_lanes(data)
+    assert audit(data)["premature_exit_detected"] is False
+
+
+@pytest.mark.parametrize("change", [
+    lambda d: d["lanes"]["scope_evidence"].update(source_revision="branch"),
+    lambda d: d["lanes"]["scope_evidence"].update(source_observed=False),
+    lambda d: d["lanes"]["scope_evidence"].update(all_dependencies_checked=False),
+    lambda d: d["lanes"]["scope_evidence"].update(owner_readback_ref=None),
+    lambda d: d["lanes"]["scope_evidence"].update(canonical_lane_ids=[]),
+    lambda d: d["lanes"]["scope_evidence"].update(canonical_lane_ids=["github:duplicate", "github:duplicate"]),
+])
+def test_unqualified_scope_claim_fails_closed(change):
+    data = _attest_complete_lanes(prophet_snapshot())
+    change(data)
+    with pytest.raises(InvalidSnapshot):
+        audit(data)

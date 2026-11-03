@@ -216,25 +216,56 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
             and checkpoint.get("custody_preserved") is True
             and checkpoint.get("mission_complete") is False
         )
+
+    # A list of blocked entries cannot prove the absence of omitted ready
+    # actions. Require an independently source-attributed, complete scoped
+    # inventory before this read-only diagnostic accepts a mission-wide stop.
+    # The caller still must authenticate this source against its canonical owner.
+    scope_coverage = False
+    scope = lanes.get("scope_evidence")
+    if scope is not None:
+        scope = _object(scope, "scope_evidence")
+        revision = scope.get("source_revision")
+        canonical_ids = scope.get("canonical_lane_ids")
+        if (
+            not _public_effect_ref(scope.get("source_ref"))
+            or not _public_effect_ref(scope.get("owner_readback_ref"))
+            or not isinstance(revision, str)
+            or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision) is None
+            or scope.get("source_observed") is not True
+            or scope.get("all_dependencies_checked") is not True
+            or not isinstance(canonical_ids, list)
+            or not canonical_ids
+            or len(canonical_ids) > 128
+            or any(not _public_effect_ref(i) for i in canonical_ids)
+            or len(set(canonical_ids)) != len(canonical_ids)
+        ):
+            raise InvalidSnapshot("scope coverage lacks current canonical owner evidence")
+        if set(canonical_ids) != seen_ids:
+            raise InvalidSnapshot("enumerated lanes omit a canonical scoped action")
+        scope_coverage = True
     waiting = "WAITING_EXTERNAL" in states
     safe_work = "SAFE_WORK_REMAINING" in states
     all_blocked = (
-        not safe_work
+        scope_coverage
+        and not safe_work
         and all(s in ("BLOCKED_PROVEN", "FENCED", "WAITING_EXTERNAL", "DONE") for s in states)
         and any(s != "DONE" for s in states)
     )
-    external_waits_only = waiting and all(s in ("WAITING_EXTERNAL", "DONE") for s in states)
+    external_waits_only = scope_coverage and waiting and all(s in ("WAITING_EXTERNAL", "DONE") for s in states)
     # No-delta is actionable when useful independent work remains; a proven
     # all-lanes block is a genuine terminal boundary, not an artificial loop.
-    no_delta_loop = cycles >= 2 and safe_work
+    no_delta_loop = cycles >= 2 and not all_blocked
     lawful_stop = (
         (exit_claim == "ALL_LANES_BLOCKED_STOP" and all_blocked)
-        or (exit_claim == "WAIT_EXTERNAL_EXECUTOR" and durable_wait and not safe_work)
+        or (exit_claim == "WAIT_EXTERNAL_EXECUTOR" and durable_wait and not safe_work
+            and scope_coverage)
         or (exit_claim == "CHECKPOINTED_CONTINUATION" and checkpoint_proven)
     )
     return {
         "lane_local_wait_blocks_only_its_lane": waiting and safe_work,
         "remaining_safe_work": safe_work,
+        "scope_evidence_structurally_bound": scope_coverage,
         "all_lanes_proven_blocked": all_blocked,
         "all_external_waits_proven_blocked": external_waits_only,
         "no_delta_loop_forces_tactic_change": no_delta_loop,
