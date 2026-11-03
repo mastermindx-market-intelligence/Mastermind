@@ -39,7 +39,7 @@ _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth':
          '    --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \\\n'
          '    --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"\n'
          'else\n'
-         '  printf \'mode=full\\\\ntier=HOLD\\\\nneeds_node=false\\\\n\' >> "$GITHUB_OUTPUT"\n'
+         '  printf \'mode=full\\ntier=HOLD\\nneeds_node=false\\n\' >> "$GITHUB_OUTPUT"\n'
          "  echo 'CI_SCOPE source not in protected base: required full suite'\n"
          'fi\n'}]
 _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},

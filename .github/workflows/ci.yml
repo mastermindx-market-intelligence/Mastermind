@@ -53,7 +53,7 @@ jobs:
               --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
               --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"
           else
-            printf 'mode=full\\ntier=HOLD\\nneeds_node=false\\n' >> "$GITHUB_OUTPUT"
+            printf 'mode=full\ntier=HOLD\nneeds_node=false\n' >> "$GITHUB_OUTPUT"
             echo 'CI_SCOPE source not in protected base: required full suite'
           fi
 

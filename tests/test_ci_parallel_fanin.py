@@ -449,3 +449,31 @@ def test_primary_checkout_credential_boundary_is_load_bearing(mutation):
         steps.append(dict(primary))
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
+    """Hosted first-install when protected base has no classifier: full suite.
+
+    Execute the exact shell fallback, not a string-only claim that it would
+    set mode=full. A literal backslash-n must never reach the fan-in status.
+    """
+    import os
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    scope = workflow["jobs"]["pr_scope"]["steps"][1]
+    fallback = [
+        line.strip() for line in scope["run"].splitlines()
+        if line.strip().startswith("printf 'mode=full")
+    ]
+    assert len(fallback) == 1
+    target = tmp_path / "github_output"
+    result = subprocess.run(
+        ["bash", "-e", "-c", fallback[0]], env={
+            **os.environ, "GITHUB_OUTPUT": str(target),
+        }, capture_output=True, text=True, timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
+    assert target.read_text().splitlines() == [
+        "mode=full", "tier=HOLD", "needs_node=false",
+    ]
