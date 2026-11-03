@@ -74,7 +74,12 @@ and original carrier. Independent ready work defeats all-lanes-blocked.
 
 `WAIT_EXTERNAL_EXECUTOR` requires a genuinely started executor with
 `ref`, `return_path_ref`, `owner_observed=true`, and `lane_id` naming an
-existing `WAITING_EXTERNAL` lane. The executor `ref` must equal the lane's
+existing `WAITING_EXTERNAL` lane. A historical START alone is insufficient:
+`state` must currently be `STARTED` or `RUNNING`, with source-attributed
+`state_ref` and `state_observed=true` from the incumbent owner. Terminal,
+failed, canceled, unknown, queued, or absent current state leaves the worker
+wait unverified; the read-only classifier never assumes a watcher or queue
+is a live executor. The executor `ref` must equal the lane's
 observed `blocker_ref` when that identifies the awaited run. If the blocker
 is a separate receipt, the lane may supply an explicit `executor_ref`,
 `executor_binding_ref` and `executor_binding_observed=true`; the executor

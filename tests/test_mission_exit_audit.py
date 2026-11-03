@@ -458,6 +458,8 @@ def test_wait_claim_requires_started_durable_executor():
         "started": True, "ref": "github:ci-pending-10289",
         "lane_id": "macro:pr-10289-hosted-exact-head-ci",
         "return_path_ref": "github:ci-result-return", "owner_observed": True,
+        "state": "RUNNING", "state_ref": "fabric:current-runtime-observation",
+        "state_observed": True,
     }
     _attest_complete_lanes(data)
     report = audit(data)
@@ -492,6 +494,8 @@ def test_status_summary_is_premature_even_with_unrelated_started_executor():
     data["lanes"]["wait_executor"] = {
         "started": True, "ref": "fabric:unrelated-worker",
         "return_path_ref": "fabric:unrelated-wake", "owner_observed": True,
+        "state": "RUNNING", "state_ref": "fabric:current-runtime-observation",
+        "state_observed": True,
     }
     report = audit(data)
     assert report["wait_executor_verified"] is False
@@ -616,6 +620,9 @@ def test_started_wait_requires_canonical_return_path():
         audit(data)
     data["lanes"]["wait_executor"]["return_path_ref"] = "fabric:real-return"
     data["lanes"]["wait_executor"]["owner_observed"] = True
+    data["lanes"]["wait_executor"].update(
+        state="RUNNING", state_ref="fabric:run-live-readback", state_observed=True
+    )
     _attest_complete_lanes(data)
     assert audit(data)["premature_exit_detected"] is True
     data["lanes"]["wait_executor"]["lane_id"] = "macro:ci-queued"
@@ -655,6 +662,8 @@ def test_durable_wait_cannot_hide_unlisted_ready_work():
         "started": True, "ref": "github:run-123",
         "lane_id": "github:ci-remaining",
         "return_path_ref": "github:verified-return", "owner_observed": True,
+        "state": "RUNNING", "state_ref": "fabric:current-runtime-observation",
+        "state_observed": True,
     }
     assert audit(data)["premature_exit_detected"] is True
     _attest_complete_lanes(data)
@@ -689,6 +698,8 @@ def test_executor_must_match_waiting_dependency_red_regression():
         "lane_id": "macro:ci-queued",
         "return_path_ref": "fabric:unrelated-return",
         "owner_observed": True,
+        "state": "RUNNING", "state_ref": "fabric:current-runtime-observation",
+        "state_observed": True,
     }
     _attest_complete_lanes(data)
     report = audit(data)
@@ -710,6 +721,8 @@ def test_durable_wait_needs_existing_waiting_lane_not_finished_or_unknown_lane()
     data["lanes"]["wait_executor"] = {
         "started": True, "ref": "github:review-415",
         "return_path_ref": "github:review-result", "owner_observed": True,
+        "state": "RUNNING", "state_ref": "fabric:current-runtime-observation",
+        "state_observed": True,
     }
     _attest_complete_lanes(data)
     assert audit(data)["premature_exit_detected"] is True
@@ -734,6 +747,8 @@ def test_distinct_blocker_receipt_needs_attributed_executor_ref_on_awaited_lane(
         "started": True, "ref": "fabric:nightly-guard-executor",
         "lane_id": "macro:nightly-guard",
         "return_path_ref": "fabric:original-result", "owner_observed": True,
+        "state": "RUNNING", "state_ref": "fabric:current-runtime-observation",
+        "state_observed": True,
     }
     _attest_complete_lanes(data)
     assert audit(data)["wait_executor_verified"] is False
@@ -765,6 +780,8 @@ def test_unrelated_durable_worker_does_not_cancel_all_lanes_stop_classification(
         "started": True, "ref": "fabric:unrelated-worker",
         "lane_id": "macro:ci-queued",
         "return_path_ref": "fabric:unrelated-return", "owner_observed": True,
+        "state": "RUNNING", "state_ref": "fabric:current-runtime-observation",
+        "state_observed": True,
     }
     _attest_complete_lanes(data)
     data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
@@ -772,3 +789,92 @@ def test_unrelated_durable_worker_does_not_cancel_all_lanes_stop_classification(
     data["lanes"]["exit_claim"] = "ALL_LANES_BLOCKED_STOP"
     assert audit(data)["all_lanes_proven_blocked"] is True
     assert audit(data)["premature_exit_detected"] is False
+
+
+def test_terminal_executor_cannot_keep_session_open_regression():
+    # A historical START does not prove the worker is still RUNNING.
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [{
+        "id": "macro:awaited-fabric-run", "state": "WAITING_EXTERNAL",
+        "blocker_ref": "fabric:run-123", "blocker_owner_ref": "fabric:runtime",
+        "blocker_observed": True,
+    }]
+    data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
+    data["lanes"]["wait_executor"] = {
+        "started": True, "ref": "fabric:run-123",
+        "lane_id": "macro:awaited-fabric-run",
+        "return_path_ref": "fabric:original-return",
+        "owner_observed": True, "state": "TERMINAL",
+        "state_ref": "fabric:terminal-readback", "state_observed": True,
+    }
+    _attest_complete_lanes(data)
+    out = audit(data)
+    assert out["all_lanes_proven_blocked"] is True
+    assert out["wait_executor_verified"] is False
+    assert out["premature_exit_detected"] is True
+
+
+
+@pytest.mark.parametrize("state", [
+    None, "NONE", "QUEUED", "TERMINAL", "FAILED", "CANCELED", "UNKNOWN",
+])
+def test_historical_start_with_nonlive_current_state_cannot_justify_wait(state):
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [{
+        "id": "macro:awaited-run", "state": "WAITING_EXTERNAL",
+        "blocker_ref": "fabric:run-123", "blocker_owner_ref": "fabric:runtime",
+        "blocker_observed": True,
+    }]
+    data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
+    data["lanes"]["wait_executor"] = {
+        "started": True, "ref": "fabric:run-123",
+        "lane_id": "macro:awaited-run", "owner_observed": True,
+        "return_path_ref": "fabric:original-return",
+        "state_ref": "fabric:current-readback", "state_observed": True,
+    }
+    if state is not None:
+        data["lanes"]["wait_executor"]["state"] = state
+    _attest_complete_lanes(data)
+    out = audit(data)
+    assert out["scope_evidence_structurally_bound"] is True
+    assert out["all_lanes_proven_blocked"] is True
+    assert out["wait_executor_verified"] is False
+    assert out["premature_exit_detected"] is True
+
+
+@pytest.mark.parametrize("state", ["STARTED", "RUNNING"])
+def test_active_state_requires_real_owner_readback_not_just_started_flag(state):
+    data = prophet_snapshot()
+    data["lanes"]["items"] = [{
+        "id": "macro:awaited-run", "state": "WAITING_EXTERNAL",
+        "blocker_ref": "fabric:run-123", "blocker_owner_ref": "fabric:runtime",
+        "blocker_observed": True,
+    }]
+    data["lanes"]["exit_claim"] = "WAIT_EXTERNAL_EXECUTOR"
+    data["lanes"]["wait_executor"] = {
+        "started": True, "ref": "fabric:run-123",
+        "lane_id": "macro:awaited-run", "owner_observed": True,
+        "return_path_ref": "fabric:original-return", "state": state,
+    }
+    _attest_complete_lanes(data)
+    with pytest.raises(InvalidSnapshot, match="state lacks current"):
+        audit(data)
+    data["lanes"]["wait_executor"]["state_ref"] = "fabric:latest-status-read"
+    with pytest.raises(InvalidSnapshot, match="state lacks current"):
+        audit(data)
+    data["lanes"]["wait_executor"]["state_observed"] = True
+    assert audit(data)["wait_executor_verified"] is True
+    assert audit(data)["premature_exit_detected"] is False
+    data["lanes"]["wait_executor"]["started"] = False
+    assert audit(data)["wait_executor_verified"] is False
+
+
+@pytest.mark.parametrize("state", ["SLEEPING", "DONE", True, [], {"status":"RUNNING"}])
+def test_unrecognized_current_executor_states_are_rejected(state):
+    data = prophet_snapshot()
+    data["lanes"]["wait_executor"] = {
+        "started": True, "ref": "fabric:run-123", "owner_observed": True,
+        "return_path_ref": "fabric:return", "state": state,
+    }
+    with pytest.raises(InvalidSnapshot, match="current executor state"):
+        audit(data)

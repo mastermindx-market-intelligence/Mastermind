@@ -72,6 +72,14 @@ VALID_CONTINUITY_REASONS = {
     "CONTEXT_PRESSURE", "SESSION_UNSTABLE", "SURFACE_TRANSITION",
     "NEXT_PHASE_EXCEEDS_LANDING_RESERVE",
 }
+# An old START receipt does not prove the executor remains live. These are
+# read-only observations from the incumbent Job/Attempt or original carrier;
+# only a currently observed STARTED/RUNNING state can support a worker-wait.
+VALID_EXECUTOR_STATES = {
+    "NONE", "QUEUED", "STARTED", "RUNNING",
+    "TERMINAL", "FAILED", "CANCELED", "UNKNOWN",
+}
+ACTIVE_EXECUTOR_STATES = {"STARTED", "RUNNING"}
 
 
 
@@ -197,6 +205,18 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
             lane_id = wait_executor.get("lane_id")
             if lane_id is not None and not _public_effect_ref(lane_id):
                 raise InvalidSnapshot("wait executor lane ID is invalid")
+            current_state = wait_executor.get("state")
+            if current_state is not None and (
+                type(current_state) is not str
+                or current_state not in VALID_EXECUTOR_STATES
+            ):
+                raise InvalidSnapshot("unknown current executor state")
+            live_state = current_state in ACTIVE_EXECUTOR_STATES
+            if live_state and (
+                not _public_effect_ref(wait_executor.get("state_ref"))
+                or wait_executor.get("state_observed") is not True
+            ):
+                raise InvalidSnapshot("active executor state lacks current owner readback")
             waiting_lane = waiting_lanes.get(lane_id)
             if waiting_lane is not None:
                 # Usually the blocker ref identifies the awaited run itself.
@@ -211,9 +231,10 @@ def _audit_lanes(snapshot: dict[str, Any], effect: dict[str, Any]) -> dict[str, 
                     or waiting_lane.get("executor_binding_observed") is not True
                 ):
                     raise InvalidSnapshot("waiting lane executor binding is unverified")
-                durable_wait = wait_executor["ref"] == related_ref
-            # A missing, finished, foreign or unrelated waiting lane is not a
-            # durable executor for this mission, regardless of worker START.
+                durable_wait = live_state and wait_executor["ref"] == related_ref
+            # A missing, terminal, queued, failed, foreign or unrelated run
+            # is not an active executor for this mission, even if a historical
+            # START and a valid return path are present.
         elif wait_executor.get("ref") is not None and not _public_effect_ref(wait_executor.get("ref")):
             raise InvalidSnapshot("invalid wait executor reference")
 
