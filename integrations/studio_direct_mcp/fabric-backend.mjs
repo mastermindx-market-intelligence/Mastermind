@@ -80,7 +80,7 @@ function tool(name, description, properties, required, readOnly) {
 }
 export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
-  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Never replay an interrupted request or move an existing Executive operation here.', {
+  tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Native placement for complex C2 reviews may require a factual escalation_reason; preview refusals never authorize retry. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
     max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
     work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
@@ -541,9 +541,23 @@ export function createFabricFacade(engine, options={}) {
           let route;
           try {
             const preview=await runCapturedShort(previewArgs);
-            if(preview.exit_code!==0) fail('MANUAL_ROUTE_UNAVAILABLE');
+            if(preview.exit_code!==0) {
+              // Keep native policy refusal distinct from unavailable/invalid
+              // transport. Only a closed, low-entropy reason token is exposed.
+              // This is diagnosis, never permission to replay the same run.
+              const refusal=/^NONE reason=([a-z][a-z0-9_]{0,79})\r?\n?$/.exec(preview.stdout);
+              if(refusal) fail('MANUAL_ROUTE_PREFLIGHT_REFUSED',{
+                native_reason:refusal[1],
+                ...(refusal[1]==='bounded_complexity_requires_escalation'
+                  ?{required_field:'escalation_reason'}:{})
+              });
+              fail('MANUAL_ROUTE_UNAVAILABLE');
+            }
             route=JSON.parse(preview.stdout);
-          } catch(error) { fail('MANUAL_ROUTE_UNAVAILABLE'); }
+          } catch(error) {
+            if(error instanceof Refusal) throw error;
+            fail('MANUAL_ROUTE_UNAVAILABLE');
+          }
           if(route?.state!=='PREVIEW_ONLY' || route.reserved!==false
             || route.strict_pin_enforced_at_request!==true
             || route.selection_rechecked_at_request!==true
