@@ -65,14 +65,16 @@ def actual_launch_payload(tmp_path,principal_scope,*,profile_ref="research_only"
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {stripTypeScriptTypes} from 'node:module';
+
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const {sourceTransformer}=await import(pathToFileURL(path.resolve(input.source,'../../../tests/typescript_transform.mjs')));
+const transformSource=await sourceTransformer(input.source);
 const folder=input.scratch;
 for(const [name,source] of [
  ['operation-key', 'orchestration/operation-key.ts'],
  ['executive-launch-command-port','orchestration/executive-launch-command-port.ts'],
  ['launch-config','launch-config.ts']]) {
- let code=stripTypeScriptTypes(fs.readFileSync(path.join(input.source,source),'utf8'),{mode:'transform'});
+ let code=transformSource(source,fs.readFileSync(path.join(input.source,source),'utf8'));
  if(name==='executive-launch-command-port') {
    if(!code.includes('"./operation-key"')) throw Error('unexpected dependency source');
    code=code.replace('"./operation-key"','"./operation-key.mjs"');

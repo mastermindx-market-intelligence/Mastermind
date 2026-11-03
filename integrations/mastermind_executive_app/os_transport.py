@@ -271,7 +271,12 @@ async def _drive_inner(
         if not replayed:
             replayed = True
             return {"type": "http.request", "body": replay_body, "more_body": False}
-        return {"type": "http.disconnect"}
+        # Exhausting the replayed body is not a real caller disconnect. Inner
+        # middleware may observe receive concurrently; a synthetic disconnect
+        # cancels the legitimate handler before it can finish. The existing
+        # bounded drive owns cancellation of this wait and its inner task.
+        await asyncio.Future()
+        raise AssertionError("unreachable replay receive")
 
     async def collect(event: Mapping[str, Any]) -> None:
         nonlocal start, body, total, complete

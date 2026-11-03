@@ -37,11 +37,13 @@ def actual_consume_payload(tmp_path,view,principal_scope):
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {stripTypeScriptTypes} from 'node:module';
+
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const {sourceTransformer}=await import(pathToFileURL(path.resolve(input.source,'../../../tests/typescript_transform.mjs')));
+const transformSource=await sourceTransformer(input.source);
 for(const [name,file] of [['operation-key','orchestration/operation-key.ts'],
  ['direct-native-result','direct-native-result.ts'],['direct-native-correction','direct-native-correction.ts'],['direct-native-command-port','orchestration/direct-native-command-port.ts']]) {
- let code=stripTypeScriptTypes(fs.readFileSync(path.join(input.source,file),'utf8'),{mode:'transform'});
+ let code=transformSource(file,fs.readFileSync(path.join(input.source,file),'utf8'));
  code=code.replaceAll('"./orchestration/operation-key"','"./operation-key.mjs"')
  .replaceAll('"./operation-key"','"./operation-key.mjs"')
  .replaceAll('"../direct-native-result"','"./direct-native-result.mjs"')
@@ -117,6 +119,12 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
                     return [dict(q) for q in connection.execute('SELECT * FROM worker_quota_classes ORDER BY worker_id,quota_class')]
             before_quotas=quota_rows()
             native=service.supervisor.primary
+            original_admission_settled=asyncio.Event()
+            actual_handler=service._handle_direct_native_app_frame
+            async def observe_original_handler(*args,**kwargs):
+                try:return await actual_handler(*args,**kwargs)
+                finally:original_admission_settled.set()
+            monkeypatch.setattr(service,'_handle_direct_native_app_frame',observe_original_handler)
             if execution=='correction':
                 release_collection=asyncio.Event()
                 actual_collect=native.adapter.collect_result
@@ -157,6 +165,10 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
                 manifest=dict(app.MANIFEST_PROJECTION,profiles=[*app.MANIFEST_PROJECTION['profiles'],dict(ref='native_research_only',label='Native research only')])
                 payload=app.actual_launch_payload(tmp_path,context.json()['principal_scope'],profile_ref='native_research_only',manifest_projection=manifest)
                 response=await http.post('/os/executive/submit',headers=headers(token),json={'arguments':payload})
+                if response.status_code==202:
+                    # A bounded transport timeout is not proof that its original
+                    # handler did not run. Consume that one actual completion.
+                    await asyncio.wait_for(original_admission_settled.wait(),30)
                 if execution=='admission-loss':
                     assert response.status_code==202 and response.json()['status']=='effect_unknown',response.text
                     assert len(service.runtime.jobs.list_jobs())==1 and service.runtime.attempts.list_attempts()==[]
@@ -187,9 +199,21 @@ def test_actual_native_ts_authenticated_http_unix_admits_one_role_null_job(rsa_k
                     # Studio preparation was independently reached; zero native
                     # Job is not a claim that source-publication had no effect.
                     return
-                assert response.status_code==200,response.text
-                result=response.json();assert result['status']=='accepted',result
-                receipt=result['receipt'];assert receipt['schema']=='mastermind.ceo_direct_native_receipt.v1'
+                if response.status_code==202:
+                    unknown=response.json()
+                    assert unknown['status']=='effect_unknown',unknown
+                    # Consume the actual original handler completion and real
+                    # status route; never repeat the timed-out submit.
+                    await asyncio.wait_for(original_admission_settled.wait(),30)
+                    original_id=ceo_request.automated_intent_id(unknown['request_ref'])
+                    recovered=await http.post('/os/executive/status',headers=headers(token),json={'arguments':{'intent_id':original_id}})
+                    assert recovered.status_code==200,recovered.text
+                    receipt=recovered.json()['data']
+                else:
+                    assert response.status_code==200,response.text
+                    result=response.json();assert result['status']=='accepted',result
+                    receipt=result['receipt']
+                assert receipt['schema']=='mastermind.ceo_direct_native_receipt.v1'
                 job=service.runtime.jobs.get_job(receipt['job_id'])
                 assert job.orchestration_role is None and job.parent_job_id is None and job.root_job_id==job.job_id
                 assert job.attempt_limit==1 and job.allowed_write_paths==[] and job.validation_commands==[]

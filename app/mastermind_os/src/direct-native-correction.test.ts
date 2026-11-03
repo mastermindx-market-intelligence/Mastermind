@@ -122,3 +122,26 @@ describe("same original direct Job correction", () => {
     ).toBeNull();
   });
 });
+
+it.each(["COMPLETED", "FAILED", "LOST", "RATE_LIMITED"])(
+  "resolves same-attempt %s by observation without asserting cancellation or sending again",
+  async (status) => {
+    const correction = vi.fn(async (_request: Record<string, unknown>) =>
+      response(null, status),
+    );
+    const port = new DirectNativeCommandPort(
+      { read: vi.fn(), consume: vi.fn(), correction },
+      owner,
+    );
+    const pointer = port.prepare(port.makeCorrectionIntent(selection, 7)!);
+    expect(
+      (await port.readOperation(pointer, new AbortController().signal))
+        .disposition,
+    ).toBe("accepted");
+    expect(correction.mock.calls).toHaveLength(1);
+    expect(correction.mock.calls[0][0].operation).toBe("inspect");
+    expect(
+      decodeDirectCorrection(response(null, status), selection)?.status,
+    ).toBe(status);
+  },
+);

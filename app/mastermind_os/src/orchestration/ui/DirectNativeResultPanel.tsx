@@ -268,6 +268,16 @@ export function DirectNativeResultPanel({
           )}
         </>
       ) : null}
+      {state?.availability === "AVAILABLE" || correction ? (
+        <p aria-live="polite">
+          {locale === "zh-CN" ? "当前任务状态" : "Current Job state"}:{" "}
+          {state?.availability === "AVAILABLE"
+            ? state.result?.terminal_status === "CANCELLED"
+              ? "CANCELLED"
+              : "COMPLETED"
+            : correction?.status}
+        </p>
+      ) : null}
       {recovery}
       <div>
         {(held || consuming) &&

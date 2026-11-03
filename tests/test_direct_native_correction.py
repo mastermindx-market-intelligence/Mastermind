@@ -112,3 +112,40 @@ def test_bound_adapter_cancel_called_once_unknown_or_unsupported_never_becomes_t
         assert settled.job.status.value=='CANCELLED' # only AFTER the later genuine fixture exit/seal
         assert calls==[active.process_ref]
     asyncio.run(run())
+
+
+def test_reentered_finish_uses_retained_original_cancel_intent_without_second_adapter_call(joined):
+    runtime,job,access,_,adapter,supervisor=joined
+    async def run():
+        active=await supervisor.start_direct_native_job(job.job_id,access=_execution(access))
+        attempt=active.lease.attempt
+        selected=dict(work_ref=access.work_ref,job_id=job.job_id,attempt_id=attempt.attempt_id)
+        runtime.request_direct_native_correction(dict(selected,fence_generation=attempt.fence_generation,operation_key='correct-original'),access=access)
+        assert runtime.reserve_direct_native_cancel_call(attempt.attempt_id,fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token)
+        calls=[];actual_cancel=adapter.cancel
+        async def counted_cancel(ref,reason):
+            calls.append(ref)
+            return await actual_cancel(ref,reason)
+        adapter.cancel=counted_cancel
+        await adapter.cancel(active.process_ref,'original fixture adapter call before interrupted observation')
+        # Reopen the actual existing Event store, then enter a new collection
+        # loop with the same exact lease/ProcessRef. No provider/start is replayed.
+        supervisor.runtime=er.Runtime.at(runtime.store.root,create=False,existing_writable=True,
+            clock=lambda:supervisor._joined_clock[0])
+        entered=asyncio.Event();release=asyncio.Event();actual_collect=adapter.collect_result
+        async def collect(ref):
+            entered.set();await release.wait()
+            return await actual_collect(ref)
+        adapter.collect_result=collect
+        pending=asyncio.create_task(supervisor.finish_job(active))
+        await entered.wait()
+        await asyncio.sleep(supervisor.heartbeat_interval_seconds*3)
+        assert calls==[active.process_ref]
+        assert supervisor.runtime.jobs.get_job(job.job_id).status.value=='CANCEL_REQUESTED'
+        release.set()
+        settled=await pending
+        assert settled.job.status.value=='CANCELLED'
+        assert calls==[active.process_ref] and adapter.start_count==1
+        with supervisor.runtime.store.read() as connection:
+            assert connection.execute("SELECT count(*) FROM events WHERE event_type='DIRECT_NATIVE_CANCEL_CALL_STARTED'").fetchone()[0]==1
+    asyncio.run(run())
