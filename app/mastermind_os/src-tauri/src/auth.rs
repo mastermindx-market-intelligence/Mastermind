@@ -25,6 +25,8 @@ const MAX_RESPONSE: usize = 2_000_000;
 const EXECUTIVE_SCOPE: &str = "mastermind.executive.read mastermind.executive.intent.submit";
 const EXECUTIVE_REQUEST_CAP: usize = 65_536;
 const EXECUTIVE_RESPONSE_CAP: usize = 262_144;
+const DIRECT_NATIVE_REQUEST_CAP: usize = 4_096;
+const DIRECT_NATIVE_RESPONSE_CAP: usize = 24_576;
 const MAX_SAFE_GENERATION: u64 = (1_u64 << 53) - 1;
 
 fn executive_resource(value: &str) -> Option<String> {
@@ -1323,6 +1325,35 @@ fn executive_body(body: &Value) -> Result<Vec<u8>> {
     }
     Ok(serialized)
 }
+// Mirror the existing closed direct-native wire contract. These selectors are
+// data only; the server rejoins the original principal, Job and Attempt.
+fn direct_native_body(body: &Value, consume: bool) -> Result<()> {
+    let invalid = || "DIRECT_SELECTION_INVALID".to_owned();
+    let object = body.as_object().ok_or_else(invalid)?;
+    let keys: &[&str] = if consume {
+        &["work_ref", "job_id", "attempt_id", "result_digest", "operation_key"]
+    } else {
+        &["work_ref", "job_id", "attempt_id"]
+    };
+    if object.len() != keys.len() || keys.iter().any(|key| !object.contains_key(*key)) {
+        return Err(invalid());
+    }
+    let identifier = |value: &Value| value.as_str().is_some_and(|text| {
+        !text.is_empty() && text.len() <= 128 && text.as_bytes()[0].is_ascii_alphanumeric()
+            && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || b"._:-".contains(&byte))
+    });
+    let work = body["work_ref"].as_str().ok_or_else(invalid)?;
+    if work.is_empty() || work.trim() != work || work.chars().count() > 512
+        || work.chars().any(|c| (c as u32) < 32 || c == '\u{7f}')
+        || !identifier(&body["job_id"])
+        || !(identifier(&body["attempt_id"]) || (!consume && body["attempt_id"].is_null()))
+        || (consume && (!body["result_digest"].as_str().is_some_and(|v| lowercase_hex(v, 64))
+            || !identifier(&body["operation_key"])))
+        || serde_json::to_vec(body).map_err(|_| invalid())?.len() > DIRECT_NATIVE_REQUEST_CAP {
+        return Err(invalid());
+    }
+    Ok(())
+}
 async fn executive_post(app: AppHandle, path: &'static str, body: Value) -> Result<Value> {
     let state = app.state::<NativeAuth>();
     executive_post_with_dispatch(&state, path, body, reqwest::RequestBuilder::send).await
@@ -1339,6 +1370,14 @@ where
     D: FnOnce(reqwest::RequestBuilder) -> F,
     F: std::future::Future<Output = std::result::Result<reqwest::Response, reqwest::Error>>,
 {
+    let direct_native = match path {
+        "/os/executive/direct-native/result" => Some(false),
+        "/os/executive/direct-native/consume" => Some(true),
+        _ => None,
+    };
+    if let Some(consume) = direct_native {
+        direct_native_body(&body, consume)?;
+    }
     let foreground_research = path == "/os/executive/submit"
         && body.get("arguments").and_then(|v| v.get("execution_profile"))
             .and_then(Value::as_str) == Some("research_only");
@@ -1350,8 +1389,9 @@ where
             | "/os/executive/status"
             | "/os/executive/session/context"
             | "/os/executive/session/reply"
-            | "/os/executive/session/references" => {}
-            "/os/executive/submit" => {
+            | "/os/executive/session/references"
+            | "/os/executive/direct-native/result" => {}
+            "/os/executive/submit" | "/os/executive/direct-native/consume" => {
                 if !token.executive_send {
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
                 }
@@ -1388,7 +1428,9 @@ where
         { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
         let status = response.status();
         let result = if status.is_success() {
-            read_json_body(response, EXECUTIVE_RESPONSE_CAP).await
+            read_json_body(response, if direct_native.is_some() {
+                DIRECT_NATIVE_RESPONSE_CAP
+            } else { EXECUTIVE_RESPONSE_CAP }).await
         } else {
             Err(match status.as_u16() {
                 401 => "EXECUTIVE_AUTH_REQUIRED",
@@ -1399,7 +1441,9 @@ where
         { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
         result
     };
-    if foreground_research {
+    if foreground_research || direct_native.is_some() {
+        // Same current-token owner, with the ordinary 30s transport ceiling for
+        // direct result/consume. Invalidation never replays a possible consume.
         executive_foreground_exchange(state, generation, token_expires, changed, exchange).await
     } else {
         exchange.await
@@ -1461,6 +1505,19 @@ pub async fn executive_status(app: AppHandle, intent_id: String) -> Result<Value
     if result.is_err() {
         emit(&app);
     }
+    result
+}
+
+#[tauri::command]
+pub async fn executive_direct_native_result(app: AppHandle, arguments: Value) -> Result<Value> {
+    let result = executive_post(app.clone(), "/os/executive/direct-native/result", arguments).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_direct_native_consume(app: AppHandle, arguments: Value) -> Result<Value> {
+    let result = executive_post(app.clone(), "/os/executive/direct-native/consume", arguments).await;
+    if result.is_err() { emit(&app); }
     result
 }
 
@@ -1988,6 +2045,156 @@ mod tests {
             .body(r#"{"fixture":"native-dispatch"}"#.to_owned())
             .unwrap()
             .into()
+    }
+
+    fn native_direct_request(consume: bool) -> Value {
+        let mut body = serde_json::json!({
+            "work_ref": "WS:NATIVE-H2", "job_id": "JOB-original", "attempt_id": "ATT-original",
+        });
+        if consume {
+            body["result_digest"] = Value::String("d".repeat(64));
+            body["operation_key"] = Value::String("mmos-consume-original".into());
+        }
+        body
+    }
+
+    #[test]
+    fn native_direct_result_closed_selectors_refuse_before_dispatch() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        for consume in [false, true] {
+            let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+            let mut bad = vec![Value::Null, serde_json::json!({})];
+            for (key, value) in [
+                ("job_id", serde_json::json!("JOB-original/other")),
+                ("attempt_id", serde_json::json!(42)),
+                ("work_ref", serde_json::json!("WS:NATIVE-H2\n")),
+                ("work_ref", serde_json::json!("x".repeat(513))),
+                ("resource", serde_json::json!("https://caller.invalid")),
+            ] {
+                let mut body = native_direct_request(consume);
+                body[key] = value;
+                bad.push(body);
+            }
+            if consume {
+                for (key, value) in [
+                    ("attempt_id", Value::Null),
+                    ("result_digest", Value::String("A".repeat(64))),
+                    ("operation_key", Value::String("caller/path".into())),
+                ] {
+                    let mut body = native_direct_request(true);
+                    body[key] = value;
+                    bad.push(body);
+                }
+            }
+            for body in bad {
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                    &state, path, body, |_| {
+                        calls.set(calls.get() + 1);
+                        std::future::ready(Ok(native_fixture_response()))
+                    }));
+                assert_eq!(result.unwrap_err(), "DIRECT_SELECTION_INVALID");
+                assert_eq!(calls.get(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_result_and_consume_keep_exact_grant_and_fixed_request() {
+        for scope in ["mastermind.executive.read", EXECUTIVE_SCOPE] {
+            for consume in [false, true] {
+                let state = native_executive_state(scope);
+                let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+                let mut body = native_direct_request(consume);
+                if !consume { body["attempt_id"] = Value::Null; }
+                let calls = std::cell::Cell::new(0);
+                let expected = body.clone();
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                    &state, path, body, |builder| {
+                        calls.set(calls.get() + 1);
+                        let request = builder.build().unwrap();
+                        assert_eq!(request.method(), reqwest::Method::POST);
+                        assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                        assert_eq!(request.headers()["authorization"], "Bearer fixture-native-executive");
+                        assert_eq!(serde_json::from_slice::<Value>(request.body().unwrap().as_bytes().unwrap()).unwrap(), expected);
+                        assert!(request.timeout().is_none(), "direct reads/consumes inherited the research foreground deadline");
+                        std::future::ready(Ok(native_fixture_response()))
+                    }));
+                if consume && scope != EXECUTIVE_SCOPE {
+                    assert_eq!(calls.get(), 0);
+                    assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+                } else {
+                    assert_eq!(calls.get(), 1);
+                    assert!(result.is_ok());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_result_and_consume_cancel_old_generation_without_replay() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        struct PendingDrop(Arc<AtomicBool>);
+        impl Drop for PendingDrop {
+            fn drop(&mut self) { self.0.store(true, Ordering::SeqCst); }
+        }
+        for consume in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+            let calls = std::cell::Cell::new(0);
+            let dropped = Arc::new(AtomicBool::new(false));
+            let sentinel = PendingDrop(dropped.clone());
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, path, native_direct_request(consume), |_| async {
+                    calls.set(calls.get() + 1);
+                    let _pending = sentinel;
+                    state.lock().unwrap().clear_executive();
+                    std::future::pending::<std::result::Result<reqwest::Response, reqwest::Error>>().await
+                }));
+            assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
+            assert_eq!(calls.get(), 1);
+            assert!(dropped.load(Ordering::SeqCst));
+        }
+    }
+
+    #[test]
+    fn native_direct_result_and_consume_missing_or_expired_grant_never_dispatch() {
+        for consume in [false, true] {
+            for expired in [false, true] {
+                let state = native_executive_state(EXECUTIVE_SCOPE);
+                {
+                    let mut inner = state.lock().unwrap();
+                    if expired { inner.executive.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1); }
+                    else { inner.executive = None; }
+                }
+                let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+                let calls = std::cell::Cell::new(0);
+                let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                    &state, path, native_direct_request(consume), |_| {
+                        calls.set(calls.get() + 1);
+                        std::future::ready(Ok(native_fixture_response()))
+                    }));
+                assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_REQUIRED");
+                assert_eq!(calls.get(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn native_direct_result_response_budget_is_bounded_before_webview_release() {
+        for consume in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let path = if consume { "/os/executive/direct-native/consume" } else { "/os/executive/direct-native/result" };
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, path, native_direct_request(consume), |_| {
+                    let response = tauri::http::Response::builder().status(200)
+                        .header("Content-Type", "application/json")
+                        .body(serde_json::to_string(&serde_json::json!({"oversized": "x".repeat(DIRECT_NATIVE_RESPONSE_CAP)})).unwrap())
+                        .unwrap().into();
+                    std::future::ready(Ok(response))
+                }));
+            assert_eq!(result.unwrap_err(), "RESPONSE_BOUND");
+        }
     }
 
     fn native_post_spy(state: &NativeAuth, path: &'static str) -> (Result<Value>, usize) {
