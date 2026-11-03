@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from threading import BoundedSemaphore, Lock
 from typing import Any
 
-from control_plane.github_review_intent import ReviewIntentRefusal, ReviewIntentSignatureError
+from control_plane.github_review_intent import ReviewIntentDecision, ReviewIntentRefusal, ReviewIntentSignatureError
 from control_plane.github_review_intent_ingress import (
     ActorPermissionPort,
     FabricJobAdmissionPort,
@@ -88,6 +88,7 @@ class GitHubReviewReceiver:
         fabric: FabricJobAdmissionPort,
         visibility: VisibilityPort | None = None,
         reconciliation_guard: Callable[[str], None] | None = None,
+        automatic_review_gate: Callable[[ReviewIntentDecision], object] | None = None,
     ) -> None:
         if not isinstance(settings, ReviewHostSettings):
             raise TypeError("expected enrolled review host settings")
@@ -100,6 +101,9 @@ class GitHubReviewReceiver:
         if reconciliation_guard is not None and not callable(reconciliation_guard):
             raise TypeError("reconciliation requires an incumbent owner guard")
         self._reconciliation_guard = reconciliation_guard
+        if automatic_review_gate is not None and not callable(automatic_review_gate):
+            raise TypeError("risk pre-admission gate must be host-bound")
+        self._automatic_review_gate = automatic_review_gate
         # Capacity guards only: no task queue, authority or replacement owner.
         # Slots are released by the real synchronous worker, not HTTP timeout.
         self._admission_slots = BoundedSemaphore(MAX_ACTIVE_ADMISSIONS)
@@ -134,6 +138,7 @@ class GitHubReviewReceiver:
             signature_header=signature, policy=self._settings.review_policy(),
             pull_requests=self._pulls, fabric=self._fabric, actors=self._actors,
             visibility=None, before_admission=within_budget,
+            automatic_review_gate=self._automatic_review_gate,
         )
 
     def _finished_admission(self, task: asyncio.Task, projection: dict[str, str],
@@ -194,6 +199,7 @@ class GitHubReviewReceiver:
             installation_id=self._settings.installation_id,
             owner_execution_ref=owner_execution_ref, authorize=self._reconciliation_guard,
             pull_requests=self._pulls, fabric=self._fabric, visibility=self._visibility,
+            automatic_review_gate=self._automatic_review_gate,
             start_page=start_page, max_pages=max_pages, per_page=per_page,
             resume_pull_number=resume_pull_number,
             time_budget_seconds=time_budget_seconds,

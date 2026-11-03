@@ -9,6 +9,10 @@ from control_plane import github_review_intent as core
 from control_plane import github_review_intent_ingress as ingress
 from control_plane.github_review_host_config import ReviewHostConfigError, ReviewHostSettings
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
+from control_plane.github_review_risk_dispatch import (
+    ReviewDispatch, RiskDispatchAdvice,
+)
+from control_plane.github_review_risk_policy import ReviewTier
 
 REPO = "example/repo"
 HEAD = "a" * 40
@@ -97,6 +101,15 @@ class Secrets:
         return SECRET
 
 
+def qualified_standard(decision):
+    return RiskDispatchAdvice(
+        action=ReviewDispatch.AUTO_REVIEW_ELIGIBLE,
+        source_tier=ReviewTier.STANDARD, reason="CURRENT_SOURCE_VERIFIED",
+        repository=decision.repository, pull_number=decision.pull_number,
+        head_sha=decision.frozen_head_sha,
+    )
+
+
 def admit(*, body=None, selected_policy=None, pulls=None, actors=None, fabric=None):
     body = body or payload()
     return ingress.admit_review_intent(
@@ -104,6 +117,7 @@ def admit(*, body=None, selected_policy=None, pulls=None, actors=None, fabric=No
         signature_header=core.sign_webhook_body(secret=SECRET, body=body),
         policy=selected_policy or policy(), pull_requests=pulls or Pulls(),
         actors=actors or Actors(), fabric=fabric or Fabric(),
+        automatic_review_gate=qualified_standard,
     )
 
 
@@ -275,7 +289,7 @@ def test_signed_http_lifecycle_and_manual_intents_share_real_runtime_identity(tm
     pulls = Pulls()
     app = GitHubReviewReceiver(
         settings=settings(), secret_source=Secrets(), pull_requests=pulls,
-        actors=Actors(), fabric=fabric,
+        actors=Actors(), fabric=fabric, automatic_review_gate=qualified_standard,
     )
     assert http(app, payload("opened"))[0] == 202
     for action in ("synchronize", "reopened", "ready_for_review", "labeled"):

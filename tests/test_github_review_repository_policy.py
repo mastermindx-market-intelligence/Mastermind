@@ -278,10 +278,14 @@ class Pages:
         return self.current.get(pull_number, facts(number=pull_number))
 
 
+from test_github_review_lifecycle import qualified_standard
+
+
 def scan(pulls, fabric, **kwargs):
     values = dict(policy=policy(), repository=REPO, installation_id=4242,
                   owner_execution_ref="ROOT-1740:cycle-1", authorize=lambda ref: None,
-                  pull_requests=pulls, fabric=fabric, per_page=2)
+                  pull_requests=pulls, fabric=fabric, per_page=2,
+                  automatic_review_gate=qualified_standard)
     values.update(kwargs)
     return ingress.reconcile_open_pull_requests(**values)
 

@@ -17,6 +17,7 @@ from control_plane.github_review_host_config import DeliverySecretSource, Review
 from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmission
 from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 from integrations.github_review_api import GitHubReviewAPI
+from integrations.github_review_risk_gate import GitHubReviewRiskGate
 from integrations.github_review_app_token import GitHubAppInstallationTokens
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
 from integrations.github_review_slack_visibility import SlackReviewVisibility
@@ -110,4 +111,5 @@ def compose_github_review_host(
         fabric=admission,
         visibility=visibility,
         reconciliation_guard=reconciliation_guard,
+        automatic_review_gate=GitHubReviewRiskGate(github=github, repository=repository),
     )

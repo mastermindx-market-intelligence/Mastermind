@@ -1010,6 +1010,57 @@ def _simple_refusal(
     )
 
 
+def automatic_review_risk_disposition(
+    *,
+    decision: ReviewIntentDecision,
+    automatic_review_gate: Callable[[ReviewIntentDecision], object] | None,
+) -> ReviewIngressOutcome | None:
+    """Fail closed before Executive Job admission for automatic review origins.
+
+    A FAST result is a normal refused/no-review disposition, not a transport
+    exception that could repeatedly redeliver the webhook. Manual review
+    intents never require this additional classifier. The gate must be bound
+    by the incumbent host to authenticated current GitHub source.
+    """
+    if (type(decision) is not ReviewIntentDecision
+            or not decision.admitted
+            or decision.intent_source not in {
+                IntentSource.PR_LIFECYCLE, IntentSource.OPEN_PR_RECONCILIATION,
+            }):
+        return None
+    from control_plane.github_review_risk_dispatch import (
+        ReviewDispatch, RiskDispatchAdvice,
+    )
+    from control_plane.github_review_risk_policy import ReviewTier
+
+    refusal = ReviewIntentRefusal.AUTOMATIC_REVIEW_RISK_UNVERIFIED
+    if callable(automatic_review_gate):
+        try:
+            advice = automatic_review_gate(decision)
+        except Exception:
+            advice = None
+        if (type(advice) is RiskDispatchAdvice
+                and advice.repository == decision.repository
+                and advice.pull_number == decision.pull_number
+                and advice.head_sha == decision.frozen_head_sha):
+            if (advice.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+                    and advice.source_tier in {ReviewTier.STANDARD, ReviewTier.CRITICAL}):
+                return None
+            if (advice.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
+                    and advice.source_tier is ReviewTier.FAST):
+                refusal = ReviewIntentRefusal.AUTOMATIC_REVIEW_NOT_REQUIRED
+
+    declined = dataclasses.replace(
+        decision, admitted=False, refusal=refusal, intent_source=None,
+        intent_id=None, command_id=None, policy_authority=None,
+        already_admitted=False,
+    )
+    return ReviewIngressOutcome(
+        state=AdmissionState.REFUSED,
+        decision=declined,
+    )
+
+
 def _parse_delivery(
     *,
     secret: str,
@@ -1077,6 +1128,7 @@ def admit_review_intent(
     actors: ActorPermissionPort | None = None,
     visibility: VisibilityPort | None = None,
     before_admission: Callable[[], None] | None = None,
+    automatic_review_gate: Callable[[ReviewIntentDecision], object] | None = None,
 ) -> ReviewIngressOutcome:
     """Walk one signed delivery to at most one admitted review run.
 
@@ -1265,6 +1317,15 @@ def admit_review_intent(
             visibility_error=_notify(visibility, decision, job_id=None),
         )
 
+    if before_admission is not None:
+        before_admission()
+    risk_refusal = automatic_review_risk_disposition(
+        decision=decision, automatic_review_gate=automatic_review_gate,
+    )
+    if risk_refusal is not None:
+        return risk_refusal
+    if before_admission is not None:
+        before_admission()
     return admit_decided_review(
         decision=decision, pull_request=pull_request, fabric=fabric_port, visibility=visibility,
         before_admission=before_admission,
@@ -1394,6 +1455,7 @@ def reconcile_open_pull_requests(
     owner_execution_ref: str, authorize: Callable[[str], None],
     pull_requests: OpenPullRequestReadPort, fabric: FabricJobAdmissionPort,
     visibility: VisibilityPort | None = None,
+    automatic_review_gate: Callable[[ReviewIntentDecision], object] | None = None,
     start_page: int = 1, max_pages: int = 2, per_page: int = 25,
     resume_pull_number: int | None = None,
     time_budget_seconds: float = 30.0,
@@ -1528,6 +1590,12 @@ def reconcile_open_pull_requests(
                 return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
                                number=number, command=decision.command_id)
             try:
+                risk_decline = automatic_review_risk_disposition(
+                    decision=decision, automatic_review_gate=automatic_review_gate,
+                )
+                if risk_decline is not None:
+                    outcomes.append(risk_decline)
+                    continue
                 outcome = admit_decided_review(
                     decision=decision, pull_request=current, fabric=fabric, visibility=visibility,
                 )

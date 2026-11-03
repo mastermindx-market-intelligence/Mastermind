@@ -40,7 +40,7 @@ SECRET = "test-webhook-secret"
 DELIVERY_ID = "11111111-2222-3333-4444-555555555555"
 
 
-@pytest.mark.parametrize("mode", ["manual", "standing", "unbound_policy"])
+@pytest.mark.parametrize("mode", ["manual", "standing", "unbound_policy", "fast", "risk_hold"])
 def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path, mode):
     async def exercise():
         source_checks = []
@@ -148,6 +148,13 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
         def github_transport(request):
             requests.append((request.method, request.url.path))
             assert request.headers["authorization"] == "Bearer synthetic-fenced-app-token"
+            if request.url.path.endswith("/pulls/42/files"):
+                assert request.url.query == b"per_page=100&page=1"
+                return httpx.Response(200, json=[{
+                    "filename": ("docs/user-guide.md" if mode == "fast"
+                                 else "server/handler.py"), "status": "modified",
+                    "additions": 1, "deletions": 0, "patch": "@@ -1 +1 @@",
+                }])
             if request.url.path.endswith("/collaborators/alice/permission"):
                 return httpx.Response(200, json={
                     "user": {"login": "alice"},
@@ -159,6 +166,8 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
                     "head": {"sha": SHA, "repo": {"full_name": REPO}},
                     "base": {"sha": "b" * 40, "repo": {"full_name": REPO}},
                     "title": "Source review", "body": "Untrusted PR content",
+                    "changed_files": (2 if mode == "risk_hold" else 1),
+                    "additions": 1, "deletions": 0,
                 })
             raise AssertionError("unrecognized GitHub API request")
 
@@ -226,6 +235,17 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             return sent[0]["status"], json.loads(sent[1]["body"])
 
         try:
+            if mode in {"fast", "risk_hold"}:
+                status, response = await deliver()
+                assert status == 200 and response["status"] == "REFUSED", response
+                assert response["reason"] == (
+                    "AUTOMATIC_REVIEW_NOT_REQUIRED" if mode == "fast"
+                    else "AUTOMATIC_REVIEW_RISK_UNVERIFIED"
+                )
+                assert handled_actions == []
+                assert runtime.jobs.list_jobs() == []
+                assert source_checks == notifications == []
+                return
             if mode == "unbound_policy":
                 status, _ = await deliver()
                 from test_github_review_receiver_capacity import drain

@@ -143,7 +143,8 @@ def test_composition_proves_job_and_no_duplicate_with_real_app_jwt(tmp_path):
     async def exercise():
         from test_github_review_receiver_capacity import drain
         try:
-            assert (await _deliver(app))[0] == 202
+            initial_status, initial_body = await _deliver(app)
+            assert initial_status == 202, (initial_body, calls)
             assert await asyncio.to_thread(post_started.wait, 3)
             # The same persistent host loop accepts/deduplicates while Slack
             # is still blocked, then remains alive to settle that projection.
