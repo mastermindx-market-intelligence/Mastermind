@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 
@@ -392,6 +394,77 @@ test('open invocation receives only the positive remaining budget', async () => 
   assert.deepEqual(opens, [['/Applications/Paper.app', fileId, 500]]);
   assert.equal(result.value.state, 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED');
   assert.equal(result.value.app_open_attempted, true);
+});
+
+test('fractional clock produces valid native child timeouts for status and catalog', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  const calls = [];
+  const run = promisify(execFile);
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls.push([args[1], options.timeout]);
+      // Use Node's real validator and a harmless child, never Paper or open(1).
+      const value = args[1] === 'status'
+        ? { state: 'CONNECTED', document: { identity: { kind: 'file-id', id: fileId } } }
+        : { write_schema: { accepted_for_write: true } };
+      await run(process.execPath, ['--version'], { timeout: options.timeout });
+      return { stdout: JSON.stringify(value) };
+    }),
+    readFile: async () => { clock.advance(0.25); return BRIDGE; },
+    openFile: async () => assert.fail('already on the exact file'),
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.value.state, 'PAPER_READY');
+  assert.deepEqual(calls, [['status', 999], ['catalog', 999]]);
+});
+
+test('submillisecond pre-open residual refuses before any desktop effect', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  let opens = 0;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    ...deps(async () => {
+      clock.advance(999);
+      return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE' }) };
+    }),
+    lstat: async (path) => {
+      if (path === '/Applications/Paper.app') clock.advance(0.25);
+      return { isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false };
+    },
+    openFile: async () => { opens++; clock.advance(1); },
+    sleep: async () => {},
+    now: clock,
+  });
+  const r = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(opens, 0);
+  assert.equal(r.value.state, 'PAPER_PREPARE_BUDGET_EXHAUSTED');
+  assert.equal(r.value.app_open_attempted, false);
+  assert.equal(r.effectUnknown, false);
+});
+
+test('open receives whole residual; submillisecond post-open budget never starts a poll', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  const calls = [];
+  const opens = [];
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls.push([args[1], options.timeout]);
+      clock.advance(997.25);
+      return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE' }) };
+    }),
+    openFile: async (_app, _id, timeout) => { opens.push(timeout); clock.advance(2); },
+    sleep: async () => {},
+    now: clock,
+  });
+  const r = await designer.call('paper_prepare', { file_id: fileId });
+  assert.deepEqual(opens, [2]);
+  assert.deepEqual(calls, [['status', 1_000]]);
+  assert.equal(r.value.state, 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED');
+  assert.equal(r.effectUnknown, true);
+  assert.equal(r.value.retry_allowed, false);
 });
 
 test('open carry stays bounded by the existing 15s owner cap', async () => {

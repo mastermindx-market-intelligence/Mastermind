@@ -355,6 +355,13 @@ function localFailure(editing, code) {
   };
 }
 
+// Native child_process timeouts are integer milliseconds; zero disables the
+// timeout. A positive submillisecond remainder cannot pay for another call.
+function remainingTimeoutMs(deadline, now) {
+  const ms = Math.floor(deadline - now());
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : 0;
+}
+
 export function createPaperDesigner(config, dependencies = {}) {
   const resolved = resolvePaperDesignConfig(config);
   if (!resolved) return null;
@@ -381,7 +388,7 @@ export function createPaperDesigner(config, dependencies = {}) {
     }
     // Use a monotonic clock and capture one remaining budget at the
     // immediate pre-spawn boundary; do not grant a fresh timeout after expiry.
-    const budgetRemaining = deadline === null ? null : deadline - deps.now();
+    const budgetRemaining = deadline === null ? null : remainingTimeoutMs(deadline, deps.now);
     if (budgetRemaining !== null && budgetRemaining <= 0) {
       // The prepare budget expired while bridge identity preflight ran.
       // No subprocess was launched, so this is a definite local no-effect;
@@ -491,7 +498,7 @@ export function createPaperDesigner(config, dependencies = {}) {
         // The clock is injectable so budget arithmetic stays deterministic in tests.
         const clock = deps.now;
         const deadline = clock() + Math.min(resolved.commandTimeoutMs, PREPARE_TOTAL_BUDGET_MS);
-        const remaining = () => Math.max(0, deadline - clock());
+        const remaining = () => remainingTimeoutMs(deadline, clock);
         const prepareTimeoutMs = Math.min(resolved.commandTimeoutMs, PREPARE_STATUS_TIMEOUT_MS);
         // Exhaustion before any desktop transition is a definite no-effect:
         // no open(1) ran, so no effect can be in flight and nothing is ambiguous.
