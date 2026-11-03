@@ -17,6 +17,7 @@ import asyncio
 from control_plane.workspace_owned_task import await_owned
 import math
 import os
+import secrets
 import socket
 import stat
 import threading
@@ -27,6 +28,15 @@ import time
 # read at call time so a test can rebind control_plane.workspace_control_room_
 # lifecycle._TRUSTED_SOCKET_PARENT_UID to os.geteuid() while it owns a tmp dir.
 _TRUSTED_SOCKET_PARENT_UID = 0
+
+
+def _workspace_instance_locked(owner):
+    """Reuse the actual ServerConfig identity; caller holds its state_lock."""
+    instance = getattr(owner, "_workspace_read_instance", None)
+    if instance is None:
+        instance = secrets.token_hex(32)
+        setattr(owner, "_workspace_read_instance", instance)
+    return instance
 
 
 class ControlRoomDrainUnavailable(RuntimeError):

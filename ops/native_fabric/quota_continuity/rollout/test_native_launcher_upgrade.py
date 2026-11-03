@@ -113,6 +113,13 @@ class PairedLauncherUpgrade(unittest.TestCase):
             if g.digest(yaml_preimage) != 'ea16d60373ccb50a93d85ed3f1557aad765174b7ddef81fb65622648b0c02f07' or old['ext/paid_yaml_runtime.py'] != g.digest(yaml_preimage):
                 raise AssertionError('historical YAML loader preimage differs')
             (cls.built / 'native-code-stage/ext/paid_yaml_runtime.py').write_bytes(yaml_preimage)
+            # The catalog reader overlays a new pool ledger in candidate/.
+            # This finite historical95 target retains the original source
+            # preimage, never the current namespace-bound reader bytes.
+            pool_preimage = (Path(builder.__file__).parent.parent / 'source/pool_ledger.py').read_bytes()
+            if g.digest(pool_preimage) != '85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e' or old['ext/pool_ledger.py'] != g.digest(pool_preimage):
+                raise AssertionError('historical pool ledger preimage differs')
+            (cls.built / 'native-code-stage/ext/pool_ledger.py').write_bytes(pool_preimage)
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:

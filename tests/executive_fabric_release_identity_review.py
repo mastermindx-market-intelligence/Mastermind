@@ -311,8 +311,12 @@ REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
 # literal sites (including two precise docstring account-name examples). No
 # caller identity, permission or runtime admission is granted; any source/token
 # drift exposes these sites to the unchanged guard again.
-REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': 'd7fcc70d413c5445ee38c21dc1e19b584da12e2afb3eab02fcd39e9241f469ad',
- 'sites': ((120, 73, 76, 'int', '501'), (305, 78, 81, 'int', '450'), (400, 83, 86, 'int', '501'))},
+# 2026-11-03 native-status composition: the original three identity comparisons
+# are unchanged; the extra startup module names shift the last two sites by five
+# lines. Previous source SHA d7fcc70d413c5445ee38c21dc1e19b584da12e2afb3eab02fcd39e9241f469ad.
+# No new identity site is qualified; any source drift restores the ordinary guard.
+REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '936701c295116b786dc36d018357dfe0217c7cee37c4b11c2b14223c59c4a664',
+ 'sites': ((120, 73, 76, 'int', '501'), (310, 78, 81, 'int', '450'), (405, 83, 86, 'int', '501'))},
  'control_plane/paid_fabric_wire.py': {'sha256': '6c9c16eaa48fa7f5ac7cbd4eaa113b619a5bb1e3d65ef69ab55c6f0d839fc9c6',
  'sites': ((98, 35, 38, 'int', '501'),)},
  'control_plane/paid_model_execution_principal.py': {'sha256': 'a20a4115599d93cb8a9c5397a84a58624f9cd24bb5ee00e219add653f832e79c',
@@ -477,6 +481,32 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_host_readiness
            (807, 26, 29, 'int', '501'),
            (811, 63, 66, 'int', '501'),
            (857, 57, 60, 'int', '501'))}
+# #1515 source-pin alignment candidate on unchanged app.py blob.
+# Eight exact action refusal statuses manually inspected; independent current-
+# head re-review remains required before protected release. These are HTTP response statuses,
+# not account/UID/GID values. Any changed byte/site restores ordinary D8.
+REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
+    'sha256': 'ff72b9f6d5165cd07bc41052fc322da84e02eef2e3041f58e7569de4f37bfb50',
+    'sites': ((135, 58, 61, 'int', '409'),),
+}
+# Current-base composition keeps the original action-handler AST unchanged.
+# These eight sites retain the same exact HTTP status literals.
+# 2026-11-03 catalog composition adds fixed metadata GETs before that handler;
+# its AST is still identical and all eight sites move by 58 lines. Previous
+# source SHA de6f82cd7861cd79d90bc058c2753f5912a20e47c4ff992201962d8abdc78f31.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {
+    'sha256': '624b6a49ac97eea32adfa0691e85f5d0c7dcdb784b00f5192b1c227dbce8e5eb',
+    'sites': (
+        (820, 71, 74, 'int', '400'),
+        (831, 71, 74, 'int', '403'),
+        (839, 71, 74, 'int', '400'),
+        (845, 79, 82, 'int', '400'),
+        (854, 71, 74, 'int', '400'),
+        (864, 71, 74, 'int', '403'),
+        (869, 76, 79, 'int', '503'),
+        (875, 71, 74, 'int', '403'),
+    ),
+}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -492,4 +522,18 @@ REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
 REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
     'sha256': 'f6b94b81eec07354bf74ae6d589e76b43255604006b11cf7a7712a02fe513379',
     'sites': ((190, 46, 49, 'int', '512'),),
+}
+
+# Frozen Portfolio mmtask source restored as reviewable data (P7.T5).
+# These are text display bounds, never UIDs. The payload's 500 Constant follows
+# an em dash, so its strictly opt-in site uses Python UTF-8 byte columns and
+# complete typed-Constant qualification. All legacy ASCII records are unchanged.
+REVIEWED_FILES['integrations/session_bridge/mmtask_restore/payload/mmtask'] = {
+    'sha256': '711ba4f46c80e518d99167877738db9e92182b78bf7b4e3052bcfee79316d54a',
+    'sites': ((659, 93, 96, 'int', '400'),),
+    'utf8_sites': ((214, 135, 138, 'int', '500'),),
+}
+REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
+    'sha256': '9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336',
+    'sites': ((556, 93, 96, 'int', '400'),),
 }

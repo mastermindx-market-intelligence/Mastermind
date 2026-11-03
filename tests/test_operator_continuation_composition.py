@@ -182,6 +182,59 @@ import pytest
 import dataclasses
 
 
+def test_initialized_contract_mismatch_refuses_before_continuation_prepare(
+    tmp_path, monkeypatch,
+):
+    from control_plane import operator_continuation_delivery as delivery
+    from control_plane.executive_operator_supervisor import (
+        ExecutiveOperatorSupervisorError,
+    )
+    from tests.test_executive_operator_supervisor import _ActiveAdapter
+
+    runtime, job, lease, _ = _successor(tmp_path, monkeypatch)
+    supervisor, made = _normal_supervisor(runtime)
+    attestations = []
+    original_attestation = _ActiveAdapter.observed_attestation
+
+    def mismatched_attestation(adapter, generation):
+        observed = original_attestation(adapter, generation)
+        attestations.append(adapter)
+        adapter.plan_contract = "executive-plan-v3"
+        return observed
+
+    prepare_calls = []
+    original_prepare = delivery._ContinuationDelivery.prepare
+
+    def observe_prepare(continuation, session):
+        prepare_calls.append(session)
+        return original_prepare(continuation, session)
+
+    monkeypatch.setattr(
+        _ActiveAdapter, "observed_attestation", mismatched_attestation,
+    )
+    monkeypatch.setattr(
+        delivery._ContinuationDelivery, "prepare", observe_prepare,
+    )
+    with pytest.raises(
+        ExecutiveOperatorSupervisorError,
+        match="legacy adapter plan contract",
+    ):
+        supervisor._run_claimed(job, lease)
+
+    assert len(made) == 1
+    assert made[0] in attestations
+    assert prepare_calls == []
+    assert runtime.events.get_event_by_command_id(
+        f"operator-continuation:prepare:{lease.attempt.attempt_id}"
+    ) is None
+    assert not _has_ack(runtime, lease)
+    assert made[0].begin_turn_calls == made[0].read_calls == 0
+    assert made[0].stop_calls == 1
+    assert runtime.attempts.get_attempt(
+        lease.attempt.attempt_id
+    ).status.value != "COMPLETED"
+
+
 @pytest.mark.parametrize('field,value', [
     ('retained_input_digest', 'f'*64), ('retained_input_byte_length', 1),
     ('turn_id', 'ohf-turn:foreign'), ('session_epoch_id', 'ohf-epoch:foreign'),

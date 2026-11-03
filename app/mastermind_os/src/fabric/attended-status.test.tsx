@@ -26,6 +26,36 @@ const enter = () => {
 };
 
 describe("direct Fabric status-only boundary", () => {
+
+  it("rejects accepted metadata after raw owner generation changes without notification", async () => {
+    let finish!: (value: AttendedStatus) => void;
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(resolve => { finish = resolve; })));
+    let generation = 0;
+    a.c.invalidationGeneration = () => generation;
+    const host = bindMissionHost(a.c);
+    const pending = host.readAttendedFabric!({ ...selected, signal: new AbortController().signal });
+    const rejected = expect(pending).rejects.toThrow("READ_CANCELLED");
+    generation++;
+    finish({ ...raw(), accepted: true, accepted_by: "reviewer",
+      acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" });
+    await rejected;
+    expect(a.read).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects accepted metadata after the exact status reader is replaced without notification", async () => {
+    let finish!: (value: AttendedStatus) => void;
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(resolve => { finish = resolve; })));
+    const host = bindMissionHost(a.c);
+    const pending = host.readAttendedFabric!({ ...selected, signal: new AbortController().signal });
+    const rejected = expect(pending).rejects.toThrow("READ_CANCELLED");
+    const replacement = vi.fn(async () => raw());
+    a.c.readAttendedFabric = replacement;
+    finish({ ...raw(), accepted: true, accepted_by: "reviewer",
+      acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" });
+    await rejected;
+    expect(a.read).toHaveBeenCalledTimes(1);
+    expect(replacement).not.toHaveBeenCalled();
+  });
   it("uses selectors, not paths, commands or guessed Executive IDs", () => {
     expect(attendedSelection(selected)).toEqual(selected);
     for (const bad of ["../root", "run;whoami", "a\n", "a".repeat(129), ""]) expect(attendedSelection({ rootId: "ok", runId: bad })).toBeNull();
@@ -51,6 +81,18 @@ describe("direct Fabric status-only boundary", () => {
     expect(() => decodeAttendedStatus({ ...raw(), root_id: "another-root" }, selected)).toThrow("FABRIC_ROOT_MISMATCH");
     for (const extra of [{ run_id: "other-run" }, { rc: NaN }, { result_bytes: -1 }, { result_bytes: 1.5 }, { result_available: false, result_bytes: 100 }, { accepted_by: "CEO" }])
       expect(() => decodeAttendedStatus({ ...raw(), ...extra }, selected)).toThrow();
+  });
+  it("clears manually entered original-run selectors when the host principal changes", () => {
+    const first = client(), second = client();
+    const view = render(<AttendedFabricInspector host={bindMissionHost(first.c)} />);
+    fireEvent.click(screen.getByText("Direct M2 Fabric · inspect an existing run"));
+    fireEvent.change(screen.getByLabelText("Original root"), { target: { value: "prior-root" } });
+    fireEvent.change(screen.getByLabelText("Existing run ID"), { target: { value: "prior-run" } });
+    view.rerender(<AttendedFabricInspector host={bindMissionHost(second.c)} />);
+    expect((screen.getByLabelText("Original root") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Existing run ID") as HTMLInputElement).value).toBe("");
+    expect(first.read).not.toHaveBeenCalled();
+    expect(second.read).not.toHaveBeenCalled();
   });
   it("does not expose a reader on unconfigured clients", () => {
     const a = client(); delete a.c.readAttendedFabric;

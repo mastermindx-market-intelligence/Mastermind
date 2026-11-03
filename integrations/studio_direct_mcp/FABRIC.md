@@ -6,7 +6,7 @@ This is a typed interface for the **existing** attended M2 Fabric adapter, not a
 
 `ChatGPT -> enrolled private tunnel -> existing Studio gateway -> fabric-backend.mjs -> maintained Desktop Commander process owner -> installed fabric_task.py -> incumbent provider/host pool`.
 
-The backend exposes seven tools: `fabric_capabilities`, `fabric_request`, `fabric_status`, `fabric_wait`, `fabric_result`, `fabric_accept`, and `fabric_controller_output`. The outer gateway may expose its existing liveness and retained-output paging tools. The Fabric-only installer profile explicitly disables Git, Paper, repository workspaces and commission publication. It does not modify another account's installed service, access settings or sandbox.
+The backend exposes eight tools: `fabric_capabilities`, `fabric_request`, `fabric_status`, `fabric_wait`, `fabric_result`, `fabric_result_page`, `fabric_accept`, and `fabric_controller_output`. The outer gateway may expose its existing liveness and retained-output paging tools. The Fabric-only installer profile explicitly disables Git, Paper, repository workspaces and commission publication. It does not modify another account's installed service, access settings or sandbox.
 
 The existing Studio private service and tunnel supervisors retain lifecycle ownership. Desktop Commander retains adapter process handles; the Fabric retains run state and results. The facade's bounded, in-memory attempted-call and controller-handle indexes only prevent frontend replay and arbitrary PID access within their generation. They are not a second durable operation ledger, queue, watcher or retry mechanism. No provider credentials are read or passed by the facade.
 
@@ -58,10 +58,41 @@ failed, or effect-unknown reviewer or silently move an established carrier.
 2. Select a stable child ID once. `fabric_request` reads that exact ID and submits only after a valid `NOT_FOUND` observation. Backend and adapter guards remain responsible for their respective concurrency boundaries.
 3. Retain the returned controller PID together with run/root and connection generation. `CONTROLLER_CREATED` is delivery to the process owner, **not proof of worker START**. A started provider must be established by actual Fabric evidence.
 4. Observe the same run with `fabric_status`, bounded `fabric_wait` (at most ten seconds), or the original `fabric_controller_output`. A `NOT_FOUND` observation after an interrupted request never proves no effect. A new backend generation cannot reconstruct the original PID binding.
-5. Retrieve only an available result whose ledger root matches. The adapter response must fit the requested result limit (default 8 KiB; maximum 64 KiB). The facade captures the original CLI stdout bytes on M2 before process-output formatting, verifies byte count/base64/SHA-256, and returns those bytes as UTF-8 plus their digest.
+5. Retrieve only an available result whose ledger root matches. `fabric_result` returns the complete adapter response when it fits the requested limit (default 8 KiB; maximum 64 KiB). For a larger response, use `fabric_result_page` as described below. Both reads follow the observed effective successor and return its `accept_run_id`; an unconfirmed continuation controller refuses result delivery. The facade captures the original CLI stdout bytes on M2 before process-output formatting and verifies byte count/base64/SHA-256.
 6. Review the result and real evidence. Only then call `fabric_accept` with the reviewed digest, verification summary, and actual deterministic/reviewer method. Use one fixed `verification_summary` evidence-basis code: deterministic_test_evidence, artifact_digest_comparison (with `by=deterministic`), manual_result_review or independent_review_evidence (with `by=reviewer`). No free-text review summary is accepted by the MCP boundary, so this field cannot carry classifier or workflow instructions. Preserve detailed review observations in the existing source/review evidence; the code is only caller-attested metadata and does not replace evidence or independent review. This does not guarantee every platform warning disappears. It re-reads the current complete response and rejects a changed digest before calling incumbent acceptance; it verifies the ledger's accepted state afterward.
 
 **Acceptance limit:** this digest identifies the complete adapter CLI response, not every referenced artifact. It does not make the legacy acceptance operation atomic or cryptographically attest the bytes originally reviewed. Do not claim stronger guarantees than the existing ledger supplies.
+
+### Retained result paging
+
+`fabric_result_page` reads the incumbent adapter's retained UTF-8 response, up to
+its existing 8 MiB ceiling. It accepts `offset` (default 0), `max_bytes` (1–4096,
+default 4096), and an optional `expected_response_sha256`. Each page contains
+`page_base64`, `page_bytes`, `page_sha256`, `next_offset`, the total
+`response_bytes` and the complete `response_sha256`. Every call re-reads, hashes
+and UTF-8 validates the complete adapter response before returning a bounded page.
+The facade does not open caller-selected artifact paths or retain another copy of
+the result. `studio_output_page` remains the separate gateway response-receipt
+mechanism; it does not replace reading every retained-result byte.
+
+Begin at offset 0, retain the returned effective leaf/`accept_run_id` and complete
+digest, and pass that digest on subsequent pages. Use `next_offset` for the next
+read and verify/reassemble the decoded bytes before accepting. A UTF-8 code point
+may cross a page boundary, so decode the assembled bytes rather than each page
+individually. `delivered_prefix_bytes` reports the contiguous prefix served for
+that exact leaf, root and digest; `full_result_delivered` becomes true only when
+all bytes have been served in order. A successor change starts a separate delivery
+record even when its bytes and digest are identical. Restart at offset 0 for the
+new leaf; its acceptance cannot inherit another leaf's delivery record.
+
+For responses larger than 64 KiB, `fabric_accept` requires full contiguous delivery
+in the current backend generation and rechecks the complete current digest before
+calling the incumbent acceptance operation. Use the explicit `accept_run_id` as
+`run_id`; accepting through a predecessor refuses `ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED`.
+Out-of-order pages, a backend restart or missing pages require completing the same
+leaf's reads, never rerunning its worker. The bounded, in-memory delivery record
+contains identity, digest, size and prefix length only; it is not durable custody
+or proof that a human or parent verified the returned artifacts.
 
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
 
@@ -190,8 +221,11 @@ sessionful legacy handler while sending malformed modern claims to the modern
 validator. Request-scoped views use the same backend owner and limiter, so completing
 an HTTP request detaches its view without closing retained Fabric controllers or
 results. Client metadata never supplies authentication; the existing private tunnel
-principal is checked on each request. Only the seven Fabric tools and the existing
-ping/output-page tools are available on this path. This does not supply individual
+principal is checked on each request. Only the seven original Fabric tools, the
+optional `fabric_result_page` when the installed backend advertises it, and the
+existing ping/output-page tools are available on this path. Adding the paging
+allowlist entry does not install a newer backend or synthesize a missing tool.
+This does not supply individual
 conversation authentication or the Executive v5 current-writer COMMIT fence.
 
 `/readyz` reports the selected modern protocol only after its handler is constructed.
@@ -208,12 +242,21 @@ The Fabric facade continues to use the existing pinned SDK v1. The opt-in HTTP e
 ```sh
 cd integrations/studio_direct_mcp
 npm ci --ignore-scripts --no-audit --no-fund
-node --test fabric-backend.test.mjs
+node --test fabric-backend.test.mjs fabric-backend-capacity.test.mjs fabric-result-paging.test.mjs fabric-turn-budget.test.mjs gateway-modern-fabric.test.mjs
 python3 -m unittest private_service_fabric_test private_service_test private_service_workspaces_test private_service_commission_test -q
 node fabric-preflight.mjs YOUR_UNUSED_CHECK_ID YOUR_VERIFIED_ROOT
 ```
 
-The tests use an isolated local CLI fixture, never real provider credentials or the production ledger. They cover strict inputs, literal packet transport, same-ID rejection, uncertain effects, root mismatch, byte capture, changed-result rejection, acceptance separation, original PID binding, and preservation of the restricted installation across restage/upgrade.
+The tests use an isolated local CLI fixture, never real provider credentials or the production ledger. They cover strict inputs, literal packet transport, same-ID rejection, uncertain effects, root mismatch, byte capture, changed-result rejection, complete paged delivery, exact-successor acceptance, isolation between successive leaves, acceptance separation, original PID binding, and preservation of the restricted installation across restage/upgrade.
+
+The optional `fabric-http-oversized-qualification.mjs` and
+`fabric-modern-oversized-qualification.mjs` exercise a 196,317-byte synthetic result
+through the real legacy or opt-in modern HTTP gateway/SDK and maintained Desktop
+Commander process engine. They reassemble and verify every page across client
+connections before deterministic acceptance. Run them only on the qualified host
+with `MMX_FABRIC_ENGINE_ENTRY` bound to the installed maintained engine. Their
+synthetic adapter uses no provider credentials, paid workers or production ledger;
+passing cloud source tests alone does not establish this installed-engine proof.
 
 The optional `fabric-http-manual-qualification.mjs` invokes a real authenticated
 HTTP gateway/SDK plus the maintained Desktop Commander process engine, but binds
