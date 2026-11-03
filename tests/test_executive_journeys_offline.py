@@ -125,7 +125,7 @@ JOURNEY_PROOF_NOTES = {
     "H5": (
         "Declaration-time refusal + touch-time rejection proven in-process. "
         "Declaration/grant time: escaping/absolute path declarations "
-        "(StateConflict chained from AuthorityDenied) and a child widening its parent's "
+        "(non-orchestration branch; StateConflict chained from AuthorityDenied) and a child widening its parent's "
         "allowed_write_paths (StateConflict) are refused with no durable "
         "effect. Touch time: Job allowed_write_paths -> real "
         "Supervisor._launch_spec allowed_artifact_paths -> offline fake-Codex "
@@ -876,6 +876,7 @@ def test_journey_h5_worker_write_outside_job_allowlist_is_rejected_invalid_resul
         lease_token=lease.lease_token,
     )
     job_before = _job_view(runtime, job.job_id)
+    store_before = _effect_snapshot(runtime)
 
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir(mode=0o700)
@@ -921,6 +922,7 @@ def test_journey_h5_worker_write_outside_job_allowlist_is_rejected_invalid_resul
         return await adapter.collect_result(ref)
 
     receipt = asyncio.run(run_worker())
+    assert receipt.result.status is cw.WorkerRunStatus.INVALID_RESULT
     written = sorted(
         entry.name
         for entry in workspace.iterdir()
@@ -939,6 +941,43 @@ def test_journey_h5_worker_write_outside_job_allowlist_is_rejected_invalid_resul
         },
     )
     assert failed.status is JobStatus.FAILED
+    store_after = _effect_snapshot(runtime)
+    # M1: the typed rejection is read back from the runtime's stored record
+    stored_job = runtime.jobs.get_job(job.job_id)
+    assert stored_job is not None
+    stored_failure = json.dumps(stored_job.result, sort_keys=True)
+    assert "unauthorized path(s): ignored.tmp" in stored_failure
+    # M2: store-wide delta -- only this job RUNNING->FAILED, only this attempt, and
+    # only this job's terminal events
+    changed_jobs = [
+        (b, a)
+        for b, a in zip(store_before["jobs"], store_after["jobs"], strict=True)
+        if b != a
+    ]
+    assert len(store_before["jobs"]) == len(store_after["jobs"])
+    assert [(b[0], b[1], a[1]) for b, a in changed_jobs] == [
+        (job.job_id, "RUNNING", "FAILED")
+    ]
+    changed_attempts = [
+        (b, a)
+        for b, a in zip(store_before["attempts"], store_after["attempts"], strict=True)
+        if b != a
+    ]
+    assert len(store_before["attempts"]) == len(store_after["attempts"])
+    assert [(b[0], b[1], a[1]) for b, a in changed_attempts] == [
+        (attempt.attempt_id, "RUNNING", "FAILED")
+    ]
+    new_events = [
+        event
+        for event in runtime.events.list_events(job_id=job.job_id)
+        if event.event_id > store_before["max_event_id"]
+    ]
+    assert new_events, "the terminal call must emit events"
+    assert (
+        store_after["event_count"] - store_before["event_count"] == len(new_events)
+    ), "events were emitted for another job"
+    assert [e.event_type for e in new_events][-1] == "JOB_FAILED"
+    assert "JOB_COMPLETED" not in [e.event_type for e in new_events]
 
     observation = {
         "job_allowed_write_paths": list(persisted_job.allowed_write_paths),
