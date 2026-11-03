@@ -84,6 +84,12 @@ proof obligation; it must not freeze unrelated permitted implementation or diagn
 
 Whenever an independent source/architecture review is required, use the shared [session review routing procedure](SESSION_INDEPENDENT_REVIEW_ROUTING.md). Discover actual Fabric capabilities in this session and preserve exact original root/effects before commissioning. One separately authorized Dot technical reviewer may be addressed through the existing Slack review channel when qualified; Slack delivery is not reviewer START, a refusal never authorizes cross-provider fallback, and a Dot source verdict is not formal non-author GitHub approval.
 
+### Native Codex/Claude instruction refresh
+
+The existing on-demand `scripts/project_execution_brief.py` is the **only** source-owned normal account-brief installer for these native Markdown instruction files. Preview before applying; require authorized host, exact file/preimage, no conflicting writer, preserved host-specific content, backup and post-write readback. When replacing the bounded `mastermind-active-owner-takeover-20261102` instruction installed on Ubuntu0/4 or M1/Ubuntu3, retire that now-superseded managed block rather than leaving duplicate owner rules. The older M2 `mastermind-leadership-continuity-20261024` block is separately preserved unless its exact user-approved replacement and equivalence are established. Running a source installer is not proof that a live Codex/Claude session reloaded the instructions.
+
+For formal GitHub review, a historical reviewer login is **preferred placement, not a permanent owner** unless an actual exact-seat requirement applies. The assigned principal recovers the review's current identity and requests an independently eligible **different reasoning reviewer**. Changing GitHub login within the same underlying source-building session does not qualify as independent review; require actual non-author scrutiny, exact-head native review readback and normal release gates. Do not re-route denied or EFFECT_UNKNOWN reviews through another account, carrier or provider.
+
 ## Shared ChatGPT Web Project instruction rollout
 
 The authoritative source is the **fenced Project instruction block** in `docs/sol_skills/BOOTSTRAP_KERNEL.md` on accepted protected `master`. A branch/PR and a chat memory are not an installed Project setting. The Project owner/editor updates each **distinct** authorized Mastermind Project once, rather than once per member; personal account custom instructions cannot replace Project instructions.

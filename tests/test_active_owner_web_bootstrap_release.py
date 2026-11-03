@@ -84,3 +84,19 @@ def test_native_guidance_uses_one_genuine_non_author_review_owner():
         "not a formal",
     ):
         assert phrase in review
+
+
+def test_native_installer_retires_our_takeover_block_preserving_old_m2():
+    installer = (ROOT / "scripts/project_execution_brief.py").read_text(encoding="utf-8")
+    assert "'mastermind-active-owner-takeover-20261102'" in installer
+    assert "'mastermind-leadership-continuity-20261024'" not in installer
+    account = ACCOUNT.read_text(encoding="utf-8")
+    for term in (
+        "scripts/project_execution_brief.py",
+        "Preview before applying",
+        "no conflicting writer",
+        "backup and post-write readback",
+        "preferred placement, not a permanent owner",
+        "different reasoning reviewer",
+    ):
+        assert term in account
