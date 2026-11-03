@@ -125,7 +125,7 @@ Current Chairman continuation retains the same source operation and PR #1977. Pr
 
 | ID | Dependencies | Task and bounded output | Acceptance and review | Editorial state |
 |---|---|---|---|---|
-| R14 | R5,R8,R10-R13 | Support multiple explicitly enrolled, exact repository/installation receiver bindings at the existing literal ASGI webhook mount. Reuse each receiver's signature, secret, source, admission and visibility owners. No new listener, automatic enrollment, provider router or lifecycle authority. | Two repositories sharing the route admit only through their exact enrolled receiver; malformed/duplicate/oversized hints, wrong signature/install/repository, disabled bindings, saturation, disconnect and unknown outcomes cannot select another receiver or call credentials/ports prematurely. Existing routes and single-receiver compatibility remain intact. | source design and implementation in progress |
+| R14 | R5,R8,R10-R13 | Support multiple explicitly enrolled, exact repository/installation receiver bindings at the existing literal ASGI webhook mount. Reuse each receiver's signature, secret, source, admission and visibility owners. No new listener, automatic enrollment, provider router or lifecycle authority. | Two repositories sharing the route admit only through their exact enrolled receiver; malformed/duplicate/oversized hints, wrong signature/install/repository, disabled bindings, saturation, disconnect and unknown outcomes cannot select another receiver or call credentials/ports prematurely. Existing routes and single-receiver compatibility remain intact. | corrected source verified; installed qualification and independent acceptance pending |
 
 This slice is independent of the held executive_service.py handler effect and original review01. Neither is retried or replaced. No activation, merge, branch-protection change or reviewer START is inferred from the new source. Advisory review remains nonblocking under the existing A0/READ job and COMMENT publication contracts.
 
@@ -209,3 +209,56 @@ Its sole change after compatible b2326bbe30e9988d26199f5e774a482b9c09068a
 is app/mastermind_os/src-tauri/src/auth.rs (#1991), with no governing-procedure,
 review integration or Runtime overlap. No held effect or review policy changes
 follow from that compatible protected-source update.
+
+
+## R14 corrected source qualification — 2026-11-03 UTC
+
+Original Fabric run `github-review-coverage-20261102-c2-multirepo01`, controller
+11857 on m1, completed `TERMINAL`, rc=0, signal=ok with the original root/parent
+verified. Its complete response digest is
+`a3b5906073b783377a5dcc22668a0d0e2f776f6240d08f1fa892b93536ce2e60`.
+The referenced 64,336-byte, 1,575-line patch was retrieved read-only through the
+verified original C2-to-m1 transport, SHA-256
+`22a44f76b6718a1938afe38a582fae6f317f35614853dbd4f365007ebe07019a`.
+It touched exactly the five allowed router/receiver/test paths and applied to
+the current bc7ec9b source (R15 is disjoint).
+
+Parent source review identified material gaps. Ten targeted regressions failed
+against the original proposal in 2.02s. An initial transfer lost chunk-boundary
+newlines and failed collection; it was corrected and exact source bytes were
+verified before the actual regression run. That collection error is not counted
+as a proposal defect. The original raw proposal is not accepted as a correct
+final artifact, and no `fabric_accept` or independent-review approval is claimed.
+
+Parent corrections release routing capacity before every reply or downstream
+call; refuse mixed disabled selections without incumbent fallback; coalesce
+bodies and replay exact bytes once; enforce 32-entry copied immutable maps,
+exact receiver/settings types and frozen collections; reject mismatched shared
+body envelopes; retain broader configured installation allowlists only through
+their singleton active policy; and detect settings replacement before selection
+and queued credential acquisition. The captured settings are reused for the
+secret installation and policy and rechecked before admission.
+
+**Final full qualification: 691 passed in 43.88s across 28 files.** Selection is
+all tests/test_github_review_*.py plus tests/test_delivery_review_readiness.py.
+All five final R14 files were hash-verified on C2 before execution. Retained log:
+`/tmp/github-review-r14-full-tests.log`, SHA-256
+`2bc96e1ffb3ae799b1e89710fce3b7d8bc83f01661dd29368f16584e0a102b2a`.
+The tests include blocked cross-tenant secret work, blocked refusal sends,
+malformed/fragmented bodies, exact settings drift, source policy, real local
+Unix sockets/Runtime, one-POST recovery and original-thread returns. Native
+parent QA reviewed the corrections and found no further material issue; it is
+not formal independent acceptance. No provider version or usage is inferred
+from the task's missing usage receipt.
+
+R14 and R15 are now source-implemented and verified. Live enrollment, the held
+Executive handler/return integration, automatic Dot initial assignment/return,
+current-head hosted CI and genuine independent acceptance remain distinct open
+gates. The old review01 was neither replayed nor replaced; no merge, production
+activation, formal approval or live all-PR coverage is asserted.
+
+At final publication, protected master was e39a617b6771cb6b07323a533b4cf9db7e78900a.
+The one-commit delta after e999c6e changes C4 Studio repository/pin enrollment,
+its tests and runbook; it has no review integration, Executive Runtime/handler
+or governing-procedure overlap. The original C2 source/publication owner is
+retained, and no C4 enrollment action is performed by this operation.

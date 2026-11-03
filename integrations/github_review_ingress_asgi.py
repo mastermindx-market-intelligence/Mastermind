@@ -14,7 +14,7 @@ import json
 import time
 from collections.abc import Callable, Mapping
 from threading import BoundedSemaphore, Lock
-from typing import Any
+from typing import Any, NamedTuple
 
 from control_plane.github_review_intent import ReviewIntentRefusal, ReviewIntentSignatureError
 from control_plane.github_review_intent_ingress import (
@@ -44,6 +44,93 @@ BODY_DEADLINE_SECONDS = 2.0
 MAX_ACTIVE_ADMISSIONS = 4
 MAX_ACTIVE_VISIBILITY = 2
 _SCHEMA = "mastermind.github_review_delivery_http.v1"
+
+#: Terminal reasons a bounded request-body read can end with.  They are named
+#: strings rather than exceptions so the caller answers each exactly once.
+BODY_DISCONNECTED = "DISCONNECTED"
+BODY_TOO_LARGE = "BODY_TOO_LARGE"
+BODY_TIMEOUT = "BODY_TIMEOUT"
+BODY_INVALID = "BODY_INVALID"
+
+
+def parse_delivery_headers(scope: Mapping[str, object]) -> dict[str, str] | None:
+    """Return the exact request headers, or ``None`` when they are unusable.
+
+    A repeated header name, a non-ASCII byte, a control character or an
+    oversized header block all fail closed: the caller must never guess which
+    of two same-named headers the edge meant, and must never forward an
+    ambiguous header set to a receiver.
+    """
+
+    raw = scope.get("headers")
+    if not isinstance(raw, (tuple, list)):
+        return None
+    values: dict[str, str] = {}
+    size = 0
+    try:
+        for key, value in raw:
+            if not isinstance(key, bytes) or not isinstance(value, bytes):
+                return None
+            size += len(key) + len(value)
+            if size > MAX_HEADER_BYTES:
+                return None
+            name = key.decode("ascii").lower()
+            content = value.decode("ascii")
+            if name in values or "\n" in content or "\r" in content:
+                return None
+            values[name] = content
+    except (ValueError, UnicodeError, TypeError):
+        return None
+    return values
+
+
+class RequestBodyRead(NamedTuple):
+    """The exact bytes of one bounded request body, or its terminal failure."""
+
+    chunks: tuple[bytes, ...]
+    total: int
+    failure: str | None
+
+
+async def read_bounded_request_body(
+    receive: Any, *, max_bytes: int, deadline_seconds: float
+) -> RequestBodyRead:
+    """Read at most ``max_bytes`` of request body within ``deadline_seconds``.
+
+    Coalescing bounds retained memory by bytes rather than chunk count; empty
+    chunks do not accumulate. A caller can replay the exact original bytes.
+    A client-side failure never raises here: the
+    failure code names the terminal condition and the caller answers it
+    exactly once.  This is the only body reader in the delivery path, so the
+    mounted route and the receiver can never drift onto different bounds.
+    """
+
+    body = bytearray()
+    total = 0
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + deadline_seconds
+    try:
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            message = await asyncio.wait_for(receive(), timeout=remaining)
+            if message.get("type") == "http.disconnect":
+                return RequestBodyRead((), 0, BODY_DISCONNECTED)
+            if message.get("type") != "http.request":
+                return RequestBodyRead((), 0, BODY_INVALID)
+            chunk = message.get("body", b"")
+            if not isinstance(chunk, bytes) or total + len(chunk) > max_bytes:
+                return RequestBodyRead((), 0, BODY_TOO_LARGE)
+            body.extend(chunk)
+            total += len(chunk)
+            if not message.get("more_body", False):
+                break
+    except asyncio.TimeoutError:
+        return RequestBodyRead((), 0, BODY_TIMEOUT)
+    except Exception:
+        return RequestBodyRead((), 0, BODY_INVALID)
+    return RequestBodyRead((bytes(body),), total, None)
 
 
 class _WorkerSlot:
@@ -117,21 +204,24 @@ class GitHubReviewReceiver:
             raise
 
     def _admit(self, *, body: bytes, delivery_id: str, event: str,
-               signature: str, deadline: float) -> ReviewIngressOutcome:
+               signature: str, deadline: float,
+               settings: ReviewHostSettings) -> ReviewIngressOutcome:
         def within_budget() -> None:
+            if self._settings is not settings:
+                raise ReviewIngressUnavailable("REVIEW_RECEIVER_BINDING_CHANGED")
             if time.monotonic() >= deadline:
                 raise ReviewAdmissionPreflightExpired("REVIEW_ADMISSION_PREFLIGHT_EXPIRED")
 
         within_budget()
         # Secret acquisition runs in the bounded worker, never on the loop.
         # Selection uses only host enrollment, not the untrusted body.
-        secret = self._secrets.webhook_secret(installation_id=self._settings.installation_id)
+        secret = self._secrets.webhook_secret(installation_id=settings.installation_id)
         if not isinstance(secret, str) or not secret:
             raise ValueError("secret unavailable")
         within_budget()
         return admit_review_intent(
             secret=secret, body=body, delivery_id=delivery_id, event=event,
-            signature_header=signature, policy=self._settings.review_policy(),
+            signature_header=signature, policy=settings.review_policy(),
             pull_requests=self._pulls, fabric=self._fabric, actors=self._actors,
             visibility=None, before_admission=within_budget,
         )
@@ -228,26 +318,7 @@ class GitHubReviewReceiver:
 
     @staticmethod
     def _headers(scope: Mapping[str, object]) -> dict[str, str] | None:
-        raw = scope.get("headers")
-        if not isinstance(raw, (tuple, list)):
-            return None
-        values: dict[str, str] = {}
-        size = 0
-        try:
-            for key, value in raw:
-                if not isinstance(key, bytes) or not isinstance(value, bytes):
-                    return None
-                size += len(key) + len(value)
-                if size > MAX_HEADER_BYTES:
-                    return None
-                name = key.decode("ascii").lower()
-                content = value.decode("ascii")
-                if name in values or "\n" in content or "\r" in content:
-                    return None
-                values[name] = content
-        except (ValueError, UnicodeError, TypeError):
-            return None
-        return values
+        return parse_delivery_headers(scope)
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -295,33 +366,23 @@ class GitHubReviewReceiver:
             if length < 0 or length > settings.max_body_bytes:
                 await self._reply(send, 413, "BODY_TOO_LARGE")
                 return
-        body = bytearray()
-        try:
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + BODY_DEADLINE_SECONDS
-            while True:
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    raise asyncio.TimeoutError()
-                message = await asyncio.wait_for(receive(), timeout=remaining)
-                if message.get("type") == "http.disconnect":
-                    return
-                if message.get("type") != "http.request":
-                    await self._reply(send, 400, "BODY_INVALID")
-                    return
-                chunk = message.get("body", b"")
-                if not isinstance(chunk, bytes) or len(body) + len(chunk) > settings.max_body_bytes:
-                    await self._reply(send, 413, "BODY_TOO_LARGE")
-                    return
-                body.extend(chunk)
-                if not message.get("more_body", False):
-                    break
-        except asyncio.TimeoutError:
-            await self._reply(send, 408, "BODY_TIMEOUT")
-            return
-        except Exception:
+        body_read = await read_bounded_request_body(
+            receive,
+            max_bytes=settings.max_body_bytes,
+            deadline_seconds=BODY_DEADLINE_SECONDS,
+        )
+        if body_read.failure is not None:
+            if body_read.failure == BODY_DISCONNECTED:
+                return
+            if body_read.failure == BODY_TOO_LARGE:
+                await self._reply(send, 413, "BODY_TOO_LARGE")
+                return
+            if body_read.failure == BODY_TIMEOUT:
+                await self._reply(send, 408, "BODY_TIMEOUT")
+                return
             await self._reply(send, 400, "BODY_INVALID")
             return
+        body = b"".join(body_read.chunks)
         if content_length is not None and len(body) != int(content_length):
             await self._reply(send, 400, "CONTENT_LENGTH_MISMATCH")
             return
@@ -333,8 +394,8 @@ class GitHubReviewReceiver:
         slot = _WorkerSlot(self._admission_slots)
         try:
             task = self._schedule(
-                slot, self._admit, body=bytes(body), delivery_id=delivery_id, event=event,
-                signature=signature, deadline=deadline,
+                slot, self._admit, body=body, delivery_id=delivery_id, event=event,
+                signature=signature, deadline=deadline, settings=settings,
             )
         except Exception:
             slot.release_if_unstarted()

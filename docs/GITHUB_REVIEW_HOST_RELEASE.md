@@ -485,3 +485,49 @@ than force-pushed to #1741. The protected master ALLGREEN/SQUASH merge queue
 and current-master merge group checks are distinct from branch-head green
 checks. No PR merge, mark-ready, production activation, or privilege
 escalation follows from this source improvement.
+
+
+## Multi-repository mount and Executive source binding — R14/R15
+
+The source pieces now support one shared webhook endpoint for multiple
+explicitly enrolled repositories. The incumbent host constructs each receiver
+with its own exact settings, credential custodian, authenticated API and the
+existing socket client, then wraps its existing ASGI app:
+
+```python
+mounted_app = GitHubReviewASGIMount(
+    existing_app=existing_app,
+    receiver_map={
+        (mastermind_settings.installation_id,
+         "mastermindx-market-intelligence/Mastermind"): mastermind_receiver,
+        (macro_settings.installation_id,
+         "mastermindx-market-intelligence/macro"): macro_receiver,
+        (terminal_settings.installation_id,
+         "mastermindx-market-intelligence/mastermind-terminal"): terminal_receiver,
+    },
+)
+```
+
+These names denote previously authenticated host bindings, not discoverable
+credentials or new enrollment. Construction is pure; it starts no listener,
+worker or callback. Values must be exact receivers with immutable singleton
+repository settings, matching active-installation policies and identical
+host/TLS/body-size envelopes. The map is bounded to 32 entries; the single
+`receiver` form remains compatible but cannot be combined with `receiver_map`.
+
+Inside the separate incumbent Executive process, construct the concrete
+`GitHubReviewSourcePreflight` from its own authenticated API/settings bindings
+and current local enrollment-generation fences. Pass BOTH
+`source_preflight=preflight` and
+`automatic_policies=preflight.automatic_policies` to the same
+`ExecutiveGitHubReviewSocketOwner`, alongside the existing admission arm and
+reconciliation execution-reference guard. Use one active reader per repository
+because manual v1 decisions lack installation provenance. The prepared check
+is created inside that process and never trusted from a socket frame.
+
+The original Executive handler-edit platform hold is unchanged. None of this
+source composition installs that handler, publishes an HTTPS route, enrolls an
+App, qualifies a provider or dispatches a Dot. Installed acceptance still needs
+the original owner's authorized release and real GitHub/worker/GitHub/Slack
+receipts. Default-off rollback remains the incumbent host's configuration arm;
+active or unknown effects retain their original reconciliation owner.

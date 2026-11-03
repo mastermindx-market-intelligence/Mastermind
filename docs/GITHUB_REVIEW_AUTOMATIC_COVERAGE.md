@@ -294,3 +294,59 @@ promoted to START by this source. For the current rollout, use qualified Fabric
 for automatic work and an explicitly authorized Dot session for supplemental
 independent assessment. Neither an uncertain Fabric operation nor a missing
 formal approval is resolved by silently assigning the same work elsewhere.
+
+
+## R14 shared-route multi-repository source — verified
+
+`GitHubReviewASGIMount` now accepts an optional host-owned `receiver_map` of exact
+`(installation_id, canonical_repository)` keys to already-composed receivers.
+The legacy single-receiver argument remains compatible; single and map forms
+are mutually exclusive. Empty and wholly disabled maps leave the incumbent
+application untouched. Once a map is active, unknown or disabled selections
+refuse and never fall through to incumbent OAuth/MCP handling.
+
+Enrollment is bounded to 32 receivers. Each value is the exact receiver class
+with exact immutable host settings and one repository. The active installation
+and derived singleton policy must match the map key; a broader configured
+installation allowlist never becomes additional routing authority. Duplicate
+and case-folded tenant collisions, one receiver reused under different keys,
+mutable settings and mismatched host/TLS/body-limit envelopes refuse during
+construction. The map is copied and immutable. Host configuration changes must
+recompose through the incumbent owner; replacing a retained receiver's settings
+is refused, including at the queued admission boundary before credential
+selection. Admission uses the same captured settings for secret identity and
+policy and rechecks it before admission.
+
+The shared route validates the literal path, raw path/query, method, host, TLS,
+headers and declared length before reading a body. Strict JSON hint parsing
+rejects duplicate keys, malformed/nonfinite values and unusable identities.
+Only one pre-enrolled receiver can be selected. Its ordinary HMAC, current
+GitHub source, policy, admission and Slack owners still decide eligibility;
+there is no authenticated shortcut or receiver fallback.
+
+Four routing slots bound body collection and parsing. The two-second routing
+body budget is checked again after parsing. Slots are released before response
+sending, credential/API calls or downstream admission, so one slow tenant does
+not occupy other tenants' parsing capacity. Empty/tiny fragments accumulate in
+byte-bounded storage and replay once as the exact original body bytes; network
+chunk boundaries are not part of HMAC identity. Scope and headers are unchanged.
+The selected receiver retains its existing four admission and two visibility
+slots. These are per-receiver pressure bounds, not provider quota or a new queue.
+
+The original MiniMax Fabric task returned a 64,336-byte patch proposal with
+verified terminal lineage (`rc=0`, `signal=ok`). Parent qualification exposed
+**10 deterministic regression failures** in that proposal: cross-tenant
+blocking, slow refusal responses, mixed disabled fallback, mismatched body caps,
+fragment retention, unbounded map input, subclass replacement and settings drift.
+Those defects were corrected in the parent source. The raw proposal is not
+accepted as a correct final artifact; terminal transport success is distinct
+from source acceptance or an independent review.
+
+Final combined qualification: **691 passed in 43.88s across 28 files**, every
+`tests/test_github_review_*.py` plus delivery readiness, on the original C2
+workspace. All five transferred R14 files were hash-verified before the run.
+Output `/tmp/github-review-r14-full-tests.log`, SHA-256
+`2bc96e1ffb3ae799b1e89710fce3b7d8bc83f01661dd29368f16584e0a102b2a`.
+This includes the concrete R15 source preflight, actual local sockets/Runtime,
+publication recovery and original-thread Slack tests with synthetic external
+services. It remains source qualification, not installed all-repository proof.

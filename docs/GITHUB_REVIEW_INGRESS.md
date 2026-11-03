@@ -473,3 +473,32 @@ calls, real Runtime writer-lock fences and a local Unix-socket admission with
 one QUEUED Job and zero Attempts. This does not install the held Executive
 handler or prove live credentials, worker START, GitHub publication or Slack
 delivery.
+
+
+## Shared webhook route for exact repository receivers — R14
+
+Compose one `GitHubReviewReceiver` per repository/active installation, then pass
+those existing objects to `GitHubReviewASGIMount(receiver_map=...)`. Up to 32 exact
+bindings share the same literal path, host, TLS posture and maximum body size.
+The mount copies the mapping and rejects ambiguity at construction. It never
+widens a receiver's policy or selects a second receiver after any refusal or
+unknown effect.
+
+Public repository/install hints select only an already-enrolled receiver. The
+original signed bytes and unchanged scope/headers reach that receiver's normal
+signature and current-source checks. Duplicate JSON keys and nonfinite values
+refuse before any secret read. Unknown or disabled tenants on an active route
+receive a refusal; they cannot select the incumbent application's auth path.
+An empty/all-disabled map and unrelated routes preserve the incumbent app.
+
+Routing has four transient read/parse slots with a bounded body budget. The
+slots are released before any response or downstream credential/admission call.
+Fragmentation does not accumulate per-chunk storage or cause quadratic replay.
+Per-receiver admission/visibility capacity remains with the receiver. A host
+settings replacement is refused before queued credential selection and before
+admission; enrollment changes require deliberate recomposition.
+
+For the R15 Executive source preflight, keep one active reader per repository:
+legacy v1 decisions do not carry installation identity. Bind the same exact
+repository policies to the receiving socket owner. Shared HTTP routing alone
+does not bind or activate that Executive consumer.
