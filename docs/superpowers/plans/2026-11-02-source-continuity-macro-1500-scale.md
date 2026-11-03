@@ -23,6 +23,8 @@ A read-only production-path measurement of macro#7870 on 2026-11-02 used the std
 
 Call breakdown: subject files 2. First census 1,525: roster 10, files 1,081, compare 9, commits 18, trees 407. Second census 10 (roster only). Latency p50 0.535 s, p95 1.17 s. Largest response 2,830,536 bytes, under the unchanged 5,000,000-byte cap. 50 foreign PRs needed more than one files page (179 extra calls), and 9 were saturated at page 30.
 
+Measurement caveats. The totals exclude the tree proof of saturated PR 7084, which timed out once (about 50 calls). The second census stopped after its 10 roster calls because a collider had moved (`REMOTE_PROOF_CHANGED`), so it measured the roster-only reuse cost, not a full second pass. A shipped-caps real-path run is recorded on the PR.
+
 The old roster loop also shared `_MAX_PAGES = 10` with subject-PR files. A roster stops only at its first short page, so 1,000 or more open PRs could never complete, whatever `_MAX_COLLISION_PRS` said. The new roster gets its own `_MAX_ROSTER_PAGES`.
 
 ## Closed profile
@@ -40,6 +42,10 @@ subject-PR file pages:     10 (unchanged)
 
 Scaling the 903-PR measurement linearly to 1,500 PRs gives 2,553 calls, 475 MB and 475 s. The budgets leave 1.60×, 1.69× and 1.89× headroom. A complete 1,500-PR census costs about half of a 5,000/hour REST token, which callers that share a token must plan for.
 
+That headroom is for the reuse path. With a conditional transport (production `_stdlib_http_get`), the second observation replays the strict reads by ETag, re-reads only the roster, and re-proves only foreign PRs whose identity moved or is new. If any foreign roster row has no parseable identity, such as a deleted fork with `head.repo: null`, the second observation is a full re-census. Scaled from the live numbers, that path exhausts the call budget near 1,210 open PRs, bytes near 1,380 and time near 1,470. Past that it refuses `REMOTE_CENSUS_INCOMPLETE`, fail-closed. On 2026-11-03 none of Macro's 908 open PRs had a null head repository, and at 908 even the full re-census fits (about 3,070 calls).
+
+A run that exhausts the call budget costs up to 4,096 reads, about 82% of a 5,000/hour token. The cooperative 900 s budget can overrun by one in-flight read (at most 20 s), so callers need a timeout of at least 920 s. That is longer than a 600 s foreground tool limit, so run long censuses in the background.
+
 ## Preserved semantics
 
 - One invocation-wide call, byte and time budget still spans both observations.
@@ -51,13 +57,15 @@ Scaling the 903-PR measurement linearly to 1,500 PRs gives 2,553 calls, 475 MB a
 
 ## RED-first evidence
 
-Run against protected master source, the updated tests fail on: every estate from 491 to 1,500; the 1,501+ refusal at 16 roster pages; the closed profile; the measured-profile scaling; the 768 MiB byte boundary; the 900 s timeout clip; the about-1,000-PR live-fanout estate; and the 1,500 exact and one-under call and byte discriminators. Under the new source, all 580 `tests/test_source_continuity*.py` cases pass.
+Run against protected master source, the updated tests fail on: every estate from 491 to 1,500; the 1,501+ refusal at 16 roster pages; the closed profile; the measured-profile scaling; the 768 MiB byte boundary; the 900 s timeout clip; the about-1,000-PR live-fanout estate; and the 1,500 exact and one-under call and byte discriminators. Under the new source, all 584 `tests/test_source_continuity*.py` cases pass (580 before the review repairs below).
 
 The roster page ceiling is discriminating: with `_MAX_ROSTER_PAGES` forced to 10 a 1,000-PR estate refuses, and with 15 a 1,500-PR estate refuses.
 
+Review repairs (independent review, PASS_WITH_MINORS). A conditional, parallel estate fixture with full identity rows pins the production reuse path at 1,000 and 1,500 PRs. Each foreign PR is read once, the roster twice, and every strict read is replayed by ETag. A deleted-fork row pins the full-re-census fallback. The census worker count now reads `_FOREIGN_PR_WORKERS`, and a test that sets it to 1 fails against the old hard-coded `min(4, ...)`. The large-fanout refusal is pinned to the call budget (exactly 4,096 transport reads).
+
 ## Exact source scope
 
-1. `scripts/source_continuity.py`: the profile constants and the two roster reads that used `_MAX_PAGES`
+1. `scripts/source_continuity.py`: the profile constants, the two roster reads that used `_MAX_PAGES`, and the census worker count
 2. `tests/test_source_continuity_census_budget.py`
 3. `tests/test_source_continuity_macro_scale.py`
 4. `tests/test_source_continuity_base_branch_semantics.py`
@@ -67,5 +75,9 @@ The roster page ceiling is discriminating: with `_MAX_ROSTER_PAGES` forced to 10
 ## Residual risk
 
 The live run also saw one transient 20 s timeout on a saturated PR's `git/trees` read (macro PR 7084; re-probe 0.56 s). The census has no retry, so a timeout like this still ends the run fail-closed with `REMOTE_PROBE_FAILED`. That is correct but can be noisy. Retry is out of scope here.
+
+The roster uses offset paging (`page=N`). A PR opened or closed while the roster is being read can shift rows between pages. Sixteen pages widen that window compared with ten. The cases this repair adds are a duplicated row, which refuses, and a skipped row, which the second observation's roster catches. It is not a new failure mode.
+
+The full-re-census fallback refuses above about 1,210 open PRs, as described under the closed profile.
 
 A merge grants no runtime, deployment, ranking, serving or trading authority.

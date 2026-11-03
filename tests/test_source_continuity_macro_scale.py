@@ -1,10 +1,13 @@
 """Macro-1500 Source Continuity profile regressions; no real HTTP or token."""
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
+import threading
+from urllib.parse import urlparse
 
 import pytest
 
@@ -41,6 +44,56 @@ def _foreign_file_calls(http) -> list[str]:
         for url, _, _ in http.calls
         if "/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
     ]
+
+
+class ConditionalEstateHTTP(budget.EstateHTTP):
+    """The estate behind the production transport contract: ETags, 304s, workers.
+
+    Roster rows carry the complete immutable identity GitHub returns, so the
+    second observation takes the custody-aware reuse path instead of a full
+    re-census. Numbers in ``identityless`` mimic a deleted fork (``head.repo``
+    null), which has no identity and forces the full-re-census fallback.
+    """
+
+    _source_continuity_conditional = True
+    _source_continuity_parallel_safe = True
+
+    def __init__(self, module, count, *, identityless=(), **kwargs):
+        super().__init__(count, **kwargs)
+        self.module = module
+        self.identityless = frozenset(identityless)
+        self.conditional_calls: list[str] = []
+
+    def _row(self, number):
+        if number == fx.PR_NUMBER:
+            head_sha, base_sha = fx.HEAD_SHA, fx.CURRENT_BASE_SHA
+        else:
+            head_sha, base_sha = f"{number:040x}", "d" * 40
+        head_repo = None if number in self.identityless else {"full_name": fx.REPOSITORY}
+        return {
+            "number": number,
+            "state": "open",
+            "head": {"sha": head_sha, "repo": head_repo},
+            "base": {"sha": base_sha, "repo": {"full_name": fx.REPOSITORY}},
+        }
+
+    def __call__(self, url, *, token, timeout, if_none_match=None):
+        assert token == fx.TOKEN and timeout > 0
+        if if_none_match is not None:
+            self.conditional_calls.append(url)
+            return self.module._HTTPRepresentation(
+                payload=None,
+                etag=if_none_match.removeprefix("W/"),
+                not_modified=True,
+            )
+        payload = super().__call__(url, token=token, timeout=timeout)
+        if urlparse(url).path.endswith("/pulls"):
+            payload = [self._row(row["number"]) for row in payload]
+        return self.module._HTTPRepresentation(
+            payload=payload,
+            etag='W/"' + hashlib.sha256(url.encode()).hexdigest() + '"',
+            not_modified=False,
+        )
 
 
 def test_cli_bootstrap_does_not_write_repository_bytecode(tmp_path) -> None:
@@ -195,7 +248,13 @@ def test_macro_1000_open_pr_estate_with_live_fanout_completes(
 def test_macro_1500_doubled_live_fanout_preserves_call_headroom(
     capsys, monkeypatch
 ) -> None:
-    """Twice the live fanout at the PR ceiling, observed in full on both passes."""
+    """Twice the live fanout at the PR ceiling, observed in full on both passes.
+
+    This is the full-re-census shape (identity-less rows or a non-conditional
+    transport). It omits the saturated compare/commit/tree reads, about 434 per
+    pass live, so it is not a headroom claim for that path in production: with
+    those reads the full re-census exhausts 4,096 calls near 1,210 open PRs.
+    """
     baseline_module = fx._cli_module()
     monkeypatch.setattr(baseline_module, "monotonic", budget.Clock())
     baseline = budget.EstateHTTP(1500)
@@ -209,6 +268,80 @@ def test_macro_1500_doubled_live_fanout_preserves_call_headroom(
     assert rc == 0, payload
     assert len(http.calls) == len(baseline.calls) + 2 * 340 == 3720
     assert module._MAX_HTTP_CALLS - len(http.calls) == 376
+
+
+def _census_threads(http) -> set[str]:
+    names: set[str] = set()
+    http.after_read = lambda url, _result: (
+        names.add(threading.current_thread().name)
+        if "/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
+        else None
+    )
+    return names
+
+
+def _roster_calls(http) -> list[str]:
+    return [url for url, _, _ in http.calls if "/pulls?" in url]
+
+
+@pytest.mark.parametrize("count", [1000, 1500])
+def test_conditional_reuse_path_reads_each_foreign_pr_once(
+    count, capsys, monkeypatch
+) -> None:
+    """Production shape: identity rows, ETag replay, four census workers."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", budget.Clock())
+    http = ConditionalEstateHTTP(
+        module, count, file_counts=_live_fanout_file_counts(1)
+    )
+    threads = _census_threads(http)
+    rc, payload = budget.run_cli(module, capsys, http)
+
+    assert rc == 0, payload
+    assert payload["collision_state"] == "DISJOINT"
+    assert payload["authority_effect"] == "NONE"
+    assert http.passes == 2
+    assert len(_roster_calls(http)) == 2 * (count // 100 + 1)
+    foreign_files = _foreign_file_calls(http)
+    assert len(foreign_files) == len(set(foreign_files)) == count - 1 + 170
+    strict = [
+        url
+        for url, _, _ in http.calls
+        if "/pulls?" not in url and url not in foreign_files
+    ]
+    assert sorted(http.conditional_calls) == sorted(strict)
+    assert any(name.startswith("source-continuity-read") for name in threads)
+    total = len(http.calls) + len(http.conditional_calls)
+    assert total == 2 * (count // 100 + 1) + count - 1 + 170 + 2 * len(strict)
+    assert total < module._MAX_HTTP_CALLS // 2
+
+
+def test_census_worker_count_is_the_shared_constant(capsys, monkeypatch) -> None:
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", budget.Clock())
+    monkeypatch.setattr(module, "_FOREIGN_PR_WORKERS", 1)
+    http = ConditionalEstateHTTP(module, 200)
+    threads = _census_threads(http)
+    rc, payload = budget.run_cli(module, capsys, http)
+    assert rc == 0, payload
+    assert threads == {threading.current_thread().name}
+
+
+def test_identityless_foreign_row_forces_full_second_census(
+    capsys, monkeypatch
+) -> None:
+    """A deleted-fork row has no identity, so every foreign PR is re-read."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", budget.Clock())
+    http = ConditionalEstateHTTP(
+        module, 1000, identityless={1000}, file_counts=_live_fanout_file_counts(1)
+    )
+    rc, payload = budget.run_cli(module, capsys, http)
+
+    assert rc == 0, payload
+    assert payload["collision_state"] == "DISJOINT"
+    assert http.passes == 2
+    assert len(_foreign_file_calls(http)) == 2 * (999 + 170)
 
 
 def test_time_budget_accepts_last_finite_instant_and_refuses_deadline(

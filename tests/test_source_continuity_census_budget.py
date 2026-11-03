@@ -195,7 +195,8 @@ def test_large_foreign_file_fanout_remains_bounded(files, capsys, monkeypatch):
     http = EstateHTTP(200, files_per_pr=files)
     rc, payload = run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
-    assert len(http.calls) <= 4096
+    # The call budget binds: admission refuses the 4,097th read before transport.
+    assert len(http.calls) == 4096
 
 
 def test_accounting_preserves_unconsumed_unicode_metadata(capsys, monkeypatch):

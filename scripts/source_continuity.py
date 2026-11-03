@@ -81,6 +81,9 @@ _MAX_ROSTER_PAGES = _MAX_COLLISION_PRS // _PAGE_SIZE + 1
 # One invocation-local cooperative budget spans both observations, not hard preemption.
 # Sized from the live 903-PR Macro census of 2026-11-02 (1,537 calls, 286,139,447
 # normalized bytes, ~286 s at four workers) scaled to the PR ceiling, >= 1.6x headroom.
+# That headroom is for the reuse path, where every foreign row carries its identity.
+# One identity-less row (a deleted fork) forces a full second census, which these
+# budgets cover only up to about 1,210 open PRs; beyond that it refuses, fail-closed.
 _MAX_HTTP_CALLS = 4096
 _HTTP_READ_BUDGET_SECONDS = 900.0
 _MAX_HTTP_NORMALIZED_BYTES = 768 * 1024 * 1024
@@ -1406,7 +1409,11 @@ def _collision_census_details(
         return _ForeignCollisionRecord(number, identity, evidence, overlaps)
 
     records: list[_ForeignCollisionRecord]
-    workers = min(4, len(foreign)) if getattr(reader, "parallel_safe", False) else 1
+    workers = (
+        min(_FOREIGN_PR_WORKERS, len(foreign))
+        if getattr(reader, "parallel_safe", False)
+        else 1
+    )
     if workers <= 1:
         records = [observe(item) for item in foreign]
     else:
