@@ -704,6 +704,138 @@ def _enforce_manual_route(route: dict[str, str], pool: str | None, model: str | 
         raise FabricTaskError("MANUAL_MODEL_ROUTE_MISMATCH")
 
 
+
+def _live_host_tctl_c(host: str, registry: dict[str, Any]) -> float | None:
+    """Read the physical guard's CPU sensor *before* any provider lease.
+
+    This is a read-only placement hint, not a second admission authority. The
+    remote LaneLease rechecks the same sensor under its physical admission lock.
+    An SSH/parse failure is not proof that another execution can be attempted.
+    """
+    import ast
+    import math
+
+    entry = registry.get(host)
+    alias = entry.get("ssh_alias") if isinstance(entry, dict) else None
+    if (not isinstance(alias, str)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", alias) is None):
+        raise FabricTaskError("THERMAL_PREFLIGHT_ROUTE_UNQUALIFIED")
+    try:
+        original = _bounded_regular(HERE / "lane_runtime.py", 262144).decode("utf-8")
+        parsed = ast.parse(original)
+        functions = [node for node in parsed.body
+                     if isinstance(node, ast.FunctionDef)
+                     and node.name == "_linux_cpu_tctl_c"]
+        if len(functions) != 1:
+            raise ValueError("physical_sensor_source_missing")
+        function = ast.get_source_segment(original, functions[0])
+        if not function:
+            raise ValueError("physical_sensor_source_unreadable")
+    except (OSError, ValueError, SyntaxError, UnicodeError) as exc:
+        raise FabricTaskError("THERMAL_PREFLIGHT_SOURCE_UNAVAILABLE") from exc
+    program = ("from pathlib import Path\nimport math\n" + function
+               + "\nvalue = _linux_cpu_tctl_c()\n"
+               + "print('UNKNOWN' if value is None else format(value, '.3f'))\n")
+    ssh = os.environ.get("REMOTE_SUB_SSH_CMD", "ssh")
+    if not ssh or any(c.isspace() for c in ssh):
+        raise FabricTaskError("THERMAL_PREFLIGHT_TRANSPORT_UNQUALIFIED")
+    try:
+        observed = subprocess.run(
+            [ssh, "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+             alias, "python3 -I -S -B -c " + shlex.quote(program)],
+            capture_output=True, text=True, timeout=12, check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        raise FabricTaskError("THERMAL_PREFLIGHT_UNAVAILABLE") from exc
+    if observed.returncode != 0:
+        raise FabricTaskError("THERMAL_PREFLIGHT_UNAVAILABLE")
+    result = observed.stdout.strip()
+    if result == "UNKNOWN":
+        return None
+    try:
+        value = float(result)
+    except (TypeError, ValueError) as exc:
+        raise FabricTaskError("THERMAL_PREFLIGHT_UNQUALIFIED") from exc
+    if not math.isfinite(value) or not 10 <= value <= 120:
+        raise FabricTaskError("THERMAL_PREFLIGHT_UNQUALIFIED")
+    return value
+
+
+def _prelease_select_cool_host(
+    initial_route: dict[str, str],
+    route_options: dict[str, Any],
+    select_route: Any,
+    *,
+    observe: Any = _live_host_tctl_c,
+) -> dict[str, str]:
+    """Same-request host fallback, only for positively observed host thermals.
+
+    The immutable task packet/root remain unchanged. No provider lease, remote
+    upload, physical lane marker, or worker launch has occurred at this point.
+    Re-selection is *never* replay of a remotely refused run.
+    """
+    import host_pick
+    import math
+
+    registry = host_pick.load_registry(str(HERE / "hosts.json"))
+    original = {key: initial_route[key] for key in ("POOL", "MODE", "MODEL")}
+    excluded = set(route_options.get("excluded_hosts") or ())
+    current = initial_route
+    for ordinal in range(min(8, len(registry) + 1)):
+        host = current["HOST"]
+        entry = registry.get(host)
+        if not isinstance(entry, dict):
+            raise FabricTaskError("THERMAL_PREFLIGHT_HOST_UNREGISTERED")
+        # A Linux worker without explicit thermal enrollment is a malformed
+        # placement policy, not permission to bypass a physical guard. The
+        # incumbent remote launcher also defaults missing enrollment to false;
+        # fail here instead of inheriting that unsafe ambiguity.
+        platform = entry.get("platform")
+        if (platform not in ("linux", "darwin")
+                or ("require_thermal" in entry
+                    and type(entry["require_thermal"]) is not bool)
+                or (platform == "linux"
+                    and entry.get("require_thermal") is not True)):
+            raise FabricTaskError("THERMAL_PREFLIGHT_POLICY_INVALID")
+        if entry.get("require_thermal") is not True:
+            return current
+        limit = entry.get("cpu_tctl_limit_c")
+        if (type(limit) not in (int, float) or not math.isfinite(limit)
+                or not 50 <= limit <= 100):
+            raise FabricTaskError("THERMAL_PREFLIGHT_POLICY_INVALID")
+        reading = observe(host, registry)
+        if reading is not None:
+            if (type(reading) not in (int, float) or not math.isfinite(reading)
+                    or not 10 <= reading <= 120):
+                raise FabricTaskError("THERMAL_PREFLIGHT_UNQUALIFIED")
+            if reading < limit:
+                return current
+        # Only an actual successful sensor observation (including UNKNOWN)
+        # may exclude this particular host. A transport or permission error
+        # propagates immediately and cannot be retried on another host.
+        excluded.add(host)
+        print("FABRIC_PRELEASE_HOST_THERMAL_HOLD host=" + host, file=sys.stderr)
+        # Retain only the caller's existing exact model pin, if any. A model
+        # chosen by AUTO must be checked for equality after selection, not
+        # converted into a manual pin that the picker may legitimately refuse.
+        next_options = dict(route_options, pool=original["POOL"],
+                            requested_model=route_options.get("requested_model"),
+                            excluded_hosts=sorted(excluded))
+        # A real exhausted picker is distinct from an integrity or transport
+        # failure; do not disguise an unqualified replacement as no capacity.
+        selected_line = select_route(next_options, ordinal + 1)
+        if isinstance(selected_line, str) and selected_line.startswith("NONE "):
+            if selected_line.startswith("NONE reason=no eligible remote mode"):
+                raise FabricTaskError("NO_ELIGIBLE_THERMAL_HOST")
+            raise FabricTaskError("THERMAL_PREFLIGHT_RESELECT_REFUSED")
+        replacement = _parse_route(selected_line)
+        if (any(replacement.get(k) != v for k, v in original.items())
+                or replacement["HOST"] in excluded):
+            raise FabricTaskError("THERMAL_PREFLIGHT_ROUTE_CHANGED")
+        current = replacement
+    raise FabricTaskError("THERMAL_PREFLIGHT_HOST_BOUND_EXHAUSTED")
+
+
 def preview_route(
     run_id: str,
     task_class: str,
@@ -772,6 +904,7 @@ def request(
     request_deadline_ns: int | None = None,
     not_before: str | None = None,
     strict_manual_pin: bool = False,
+    prelease_live_thermal: bool = False,
 ) -> int:
     rid = validate_run_id(run_id)
     # Match preview: AUTO is never a literal provider/model pin. Validate
@@ -779,6 +912,14 @@ def request(
     pool = _manual_token(pool)
     requested_model = _manual_token(requested_model)
     prefer = _manual_token(prefer)
+    if type(prelease_live_thermal) is not bool:
+        raise FabricTaskError("PRELEASE_LIVE_THERMAL_INVALID")
+    if prelease_live_thermal and os.environ.get("FABRIC_CANONICAL_PAID_MODE"):
+        raise FabricTaskError("PRELEASE_LIVE_THERMAL_SEALED_MODE_REFUSED")
+    if prelease_live_thermal and (pool is not None or qualification_host is not None
+            or new_macro_worktree is not None or cpu_scope_percent is not None
+            or native_return or artifact_names or strict_manual_pin):
+        raise FabricTaskError("PRELEASE_LIVE_THERMAL_SCOPE_REFUSED")
     if bool(packet) == bool(stdin_bytes is not None):
         raise ValueError("provide exactly one of packet or stdin")
     if max_turns is not None:
@@ -904,6 +1045,23 @@ def request(
             route = _parse_route(
                 _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
                 if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
+            # A live thermal reading closes the picker-to-physical-admission
+            # telemetry gap on ordinary automatic host routes. Keep explicit
+            # host qualification, CPU/worktree scope, native-return and sealed
+            # paid bindings outside this new prelease placement path.
+            if (prelease_live_thermal and pool is None and qualification_host is None
+                    and new_macro_worktree is None and cpu_scope_percent is None
+                    and not artifact_names and not native_return
+                    and not env.get("FABRIC_CANONICAL_PAID_MODE")):
+                def select_after_thermal(options: dict[str, Any], ordinal: int) -> str:
+                    check_deadline()
+                    if request_deadline_ns is not None:
+                        return _route_with_deadline(
+                            task_class, options, request_deadline_ns, env,
+                            state_dir, rid[:60] + ".thermal." + str(ordinal))
+                    return pick.format_pick(task_class, **options)
+                route = _prelease_select_cool_host(
+                    route, route_options, select_after_thermal)
         if strict_manual_pin:
             _enforce_manual_route(route, pool, requested_model)
         check_deadline()
