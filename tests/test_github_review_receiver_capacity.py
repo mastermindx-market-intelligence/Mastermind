@@ -255,3 +255,35 @@ def test_cancelled_http_caller_does_not_release_running_admission_or_duplicate_i
         assert fabric.calls == 1
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("upstream_status,expected", [
+    (429, "ADMISSION_SOURCE_DEFERRED"),
+    (401, "ADMISSION_SOURCE_DEFERRED"),
+    (503, "ADMISSION_UNAVAILABLE"),
+])
+def test_real_actor_permission_read_failure_is_http_deferral_not_permission_verdict(upstream_status, expected):
+    import httpx
+    from test_github_review_http_recovery import adapter
+    app, _, _, fabric = make()
+    requests = []
+
+    def wire(req):
+        requests.append(req)
+        headers = {"retry-after": "120"} if upstream_status == 429 else {}
+        return httpx.Response(upstream_status, headers=headers)
+
+    github = adapter(wire)
+    app._actors = app._pulls = github
+
+    async def exercise():
+        status, body, headers = await request(app)
+        assert status == 503 and body["status"] == expected
+        assert "reason" not in body and fabric.calls == 0
+        assert all(req.url.path.endswith("/collaborators/alice/permission") for req in requests)
+        assert len(requests) == (2 if upstream_status == 503 else 1)
+        if upstream_status == 429:
+            assert headers[b"retry-after"] == b"120"
+        await drain(app)
+
+    asyncio.run(exercise())

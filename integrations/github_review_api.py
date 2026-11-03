@@ -344,8 +344,17 @@ class GitHubReviewAPI:
             obj = _obj(self._request(
                 "GET", f"{route}/collaborators/{login}/permission"
             ))
-        except GitHubReviewAPIUnavailable:
-            return None
+        except GitHubReviewReadDeferred:
+            # A shared source limit is not a collaborator permission verdict.
+            # Preserve it through HTTP so an authorized trigger is visibly
+            # deferred and cannot fall back to static actor association.
+            raise
+        except GitHubReviewAPIUnavailable as exc:
+            if str(exc) == "GITHUB_READ_NOT_FOUND":
+                return None
+            # Transport/schema failures remain unavailable, not evidence that
+            # this actor was observed to have no permission.
+            raise
         user = obj.get("user")
         if not isinstance(user, dict) or not isinstance(user.get("login"), str):
             return None
