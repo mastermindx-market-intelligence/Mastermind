@@ -350,14 +350,26 @@ def _run(svc, args, effect):
             svc._fabric_release_new(path / "intent.json", encode({
                 "schema": SCHEMA, "planSha256": args.expected_plan_sha256}))
         plan, raw = retained(svc, pin, roots, path, args.expected_plan_sha256, original, fingerprint)
-        progress = observe(svc, roots, plan, raw)
-        static_seal(svc, pin, roots, original)
         committed = os.path.lexists(path / "result.json")
+        paper_v20_selected = False
+        try:
+            progress = observe(svc, roots, plan, raw)
+        except SystemExit as exc:
+            if (args.operation != "status" or not committed
+                    or exc.code != "NATIVE_PIN_ENROLLMENT_FOREIGN_STATE"
+                    or not _c4_paper_v20_post_enrollment(svc, roots, plan, raw)):
+                raise
+            progress = len(ORDER)
+            paper_v20_selected = True
+        static_seal(svc, pin, roots, original)
         if committed and (progress != len(ORDER)
                 or pin.decode(svc._fabric_release_bytes(path / "result.json")) != result_record(plan)):
             fail("RESULT_REFUSED")
         if args.operation == "status":
-            return report(plan, progress, committed)
+            result = report(plan, progress, committed)
+            if paper_v20_selected:
+                result["paperV20Selected"] = True
+            return result
         stopped(svc, roots)
         if committed:
             return report(plan, progress, True)
@@ -394,6 +406,55 @@ def _run(svc, args, effect):
         return report(plan, len(ORDER), True)
 
 
+# One closed Paper v20 successor of the already completed C4 publisher
+# enrollment. These are SHA-256s of exact source-projected bytes, not inputs.
+# The enrollment owner remains the only startup attestor for that transaction.
+C4_ENROLLED_CONFIG_SHA256 = "37680eb009b4199ffba209e0d88775b73e00a4ca0ca8f0785a22d33ec2d81d2b"
+C4_ENROLLED_MANIFEST_SHA256 = "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f"
+C4_PAPER_V20_CONFIG_SHA256 = "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df"
+C4_PAPER_V20_MANIFEST_SHA256 = "06fd20cb3f50e0e7f909506e90773c80c228556eff8e7aba6bdb6085dcfc7de8"
+
+
+def _c4_paper_v20_post_enrollment(svc, roots, plan, raw):
+    """Read-only proof of exactly Paper-only v20 after completed enrollment.
+
+    Called ONLY after retained original/second pin proofs, immutable enrollment
+    plan, original selected pool and completed result are authenticated.
+    """
+    if (digest(raw["config.after"]) != C4_ENROLLED_CONFIG_SHA256
+            or digest(raw["manifest.after"]) != C4_ENROLLED_MANIFEST_SHA256):
+        return False
+    # No module generation, publisher, adapter or file-mode drift is allowed.
+    for name in ("gateway.mjs", "git-publish.mjs", "workspace-access.mjs"):
+        target = destination(roots, name)
+        if (mode(target) != plan["files"][name]["mode"]
+                or svc._fabric_release_bytes(target) != raw[name + ".after"]):
+            return False
+    original = svc._pin_owner_module().decode(raw["config.after"])
+    manifest = svc._pin_owner_module().decode(raw["manifest.after"])
+    home = svc._user_root()
+    if (original.get("paperDesign") != svc._paper_design_config(home)
+            or manifest.get("configHash") != C4_ENROLLED_CONFIG_SHA256
+            or manifest.get("account") != ACCOUNT):
+        return False
+    future = copy.deepcopy(original)
+    future["paperDesign"] = svc._paper_design_config(
+        home, rel=svc.PAPER_RUNTIME_V20_REL,
+        bridge_sha256=svc.PAPER_V20_BRIDGE_SHA256)
+    config = encode(future)
+    expected_manifest = copy.deepcopy(manifest)
+    expected_manifest["configHash"] = digest(config)
+    manifest_bytes = encode(expected_manifest)
+    if (digest(config) != C4_PAPER_V20_CONFIG_SHA256
+            or digest(manifest_bytes) != C4_PAPER_V20_MANIFEST_SHA256):
+        return False
+    if any(mode(roots[name]) != plan["files"][name]["mode"]
+           for name in ("config", "manifest")):
+        return False
+    return (svc._fabric_release_bytes(roots["config"]) == config
+            and svc._fabric_release_bytes(roots["manifest"]) == manifest_bytes)
+
+
 def require_start(svc, account, roots):
     if account != ACCOUNT:
         fail("START_REFUSED")
@@ -403,6 +464,14 @@ def require_start(svc, account, roots):
     with original_pin(svc, roots, "status") as (pin, original, fingerprint):
         plan, raw = retained(svc, pin, roots, path, digest(encode(plan)), original, fingerprint)
         static_seal(svc, pin, roots, original)
-        if (observe(svc, roots, plan, raw) != len(ORDER)
-                or pin.decode(svc._fabric_release_bytes(path / "result.json")) != result_record(plan)):
+        if pin.decode(svc._fabric_release_bytes(path / "result.json")) != result_record(plan):
+            fail("START_REFUSED")
+        try:
+            complete = observe(svc, roots, plan, raw) == len(ORDER)
+        except SystemExit as exc:
+            if (exc.code != "NATIVE_PIN_ENROLLMENT_FOREIGN_STATE"
+                    or not _c4_paper_v20_post_enrollment(svc, roots, plan, raw)):
+                raise
+            complete = True
+        if not complete:
             fail("START_REFUSED")

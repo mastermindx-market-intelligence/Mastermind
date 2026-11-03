@@ -91,6 +91,22 @@ COHORTS = {
 }
 
 
+# A separately reviewed, exact post-#1992 C4 publisher-enrollment
+# predecessor. This is one alternate sealed state of the SAME chatgpt4
+# account, not a ninth seat, new installer or permission expansion.
+# It is eligible only after the original enrollment owner authenticates
+# its committed result and native-pool selection at the call site.
+C4_POST_ENROLLMENT = {
+    "bridge_sha256": PREDECESSORS["v12"],
+    "config_sha256": "37680eb009b4199ffba209e0d88775b73e00a4ca0ca8f0785a22d33ec2d81d2b",
+    "file_count": 12,
+    "generation": "v12",
+    "manifest_sha256": "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f",
+    "nonpaper_sha256": "12ae346e48d5215654a0040eaa61c82ce8cdea7f4618ac462d294c5fd394d8b2",
+    "plist_sha256": COHORTS["chatgpt4"]["plist_sha256"],
+}
+
+
 def _sha(blob: bytes) -> str:
     return hashlib.sha256(blob).hexdigest()
 
@@ -108,6 +124,9 @@ def plan_selection(account: str, *, manifest_bytes: bytes, config_bytes: bytes,
     CAS the old manifest before commit, preserve effects and reconcile timeouts.
     """
     pin = COHORTS.get(account)
+    if (account == "chatgpt4" and type(account) is str
+            and _sha(manifest_bytes) == C4_POST_ENROLLMENT["manifest_sha256"]):
+        pin = C4_POST_ENROLLMENT
     if pin is None or type(account) is not str:
         raise ValueError("Paper fleet account is not in the reviewed cohort")
     if (_sha(manifest_bytes) != pin["manifest_sha256"]

@@ -138,6 +138,79 @@ class TestPaperV20SealedFleet(unittest.TestCase):
                 self.assertEqual(before_m, as_bytes(c[3]))
                 self.assertEqual(before_p, c[5])
 
+    def test_c4_enrolled_alternate_retains_exact_eight_seat_boundary(self):
+        self.assertEqual(len(cohorts.COHORTS), 8)
+        self.assertEqual(cohorts.C4_POST_ENROLLMENT["manifest_sha256"],
+                         "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f")
+        self.assertEqual(cohorts.C4_POST_ENROLLMENT["file_count"], 12)
+        self.assertEqual(cohorts.C4_POST_ENROLLMENT["config_sha256"],
+                         "37680eb009b4199ffba209e0d88775b73e00a4ca0ca8f0785a22d33ec2d81d2b")
+        self.assertNotIn("fabric-read", cohorts.COHORTS)
+        self.assertNotIn("fabric-design", cohorts.COHORTS)
+
+    def test_c4_post_enrollment_paper_only_inert_alternate_and_negative_cas(self):
+        home = Path("/synthetic-c4-home")
+        account = "chatgpt4"
+        runtime = home / ".local/share/mastermind-paper/runtime/v12"
+        paper = {
+            "enabled": True,
+            "pythonPath": str(runtime / "venv/bin/python"),
+            "bridgePath": str(runtime / "source/bridge.py"),
+            "bridgeSha256": cohorts.PREDECESSORS["v12"],
+            "appPath": str(home / "Applications/Paper.app"),
+            "commandTimeoutMs": 70000,
+        }
+        config = {
+            "accountLabel": account, "paperDesign": paper,
+            "gitPublish": {"commandTimeoutMs": 45000, "preserved": True},
+            "repositoryWorkspaces": {
+                "enabled": True,
+                "allowedRepositories": ["mastermind", "macro", "terminal"],
+            },
+        }
+        cbytes = as_bytes(config)
+        plist = b"closed exact C4 launchd identity"
+        manifest = {
+            "version": 2, "account": account,
+            "label": "com.mastermind.studio-direct-private." + account,
+            "files": {str(i): "a" * 64 for i in range(12)},
+            "configHash": sha(cbytes), "plistHash": sha(plist),
+        }
+        mbytes = as_bytes(manifest)
+        enrolled = {
+            "generation": "v12", "bridge_sha256": cohorts.PREDECESSORS["v12"],
+            "manifest_sha256": sha(mbytes), "config_sha256": sha(cbytes),
+            "plist_sha256": sha(plist),
+            "nonpaper_sha256": cohorts._canonical_hash({
+                k: v for k, v in config.items() if k != "paperDesign"}),
+            "file_count": 12,
+        }
+        original = {"manifest_sha256": "0" * 64}
+        def select(c=cbytes, m=mbytes, p=plist):
+            with mock.patch.object(cohorts, "COHORTS", {account: original}), \
+                 mock.patch.object(cohorts, "C4_POST_ENROLLMENT", enrolled):
+                return cohorts.plan_selection(
+                    account, manifest_bytes=m, config_bytes=c, plist_bytes=p, home=home)
+        plan = select()
+        changed = json.loads(plan["configBytes"])
+        self.assertEqual(changed["gitPublish"], config["gitPublish"])
+        self.assertEqual(changed["repositoryWorkspaces"], config["repositoryWorkspaces"])
+        self.assertEqual(set(k for k in changed if changed[k] != config[k]), {"paperDesign"})
+        self.assertEqual(json.loads(plan["manifestBytes"])["files"], manifest["files"])
+        self.assertEqual(plan["preservedGatewayFiles"], 12)
+        with self.assertRaisesRegex(ValueError, "CAS"):
+            select(c=as_bytes({**config, "gitPublish": {"preserved": False}}))
+        with self.assertRaisesRegex(ValueError, "CAS"):
+            select(m=as_bytes({**manifest, "files": {**manifest["files"], "0": "b" * 64}}))
+        with self.assertRaisesRegex(ValueError, "CAS"):
+            select(p=plist + b"foreign")
+        with mock.patch.object(cohorts, "COHORTS", {account: original}), \
+             mock.patch.object(cohorts, "C4_POST_ENROLLMENT", enrolled):
+            with self.assertRaisesRegex(ValueError, "not in the reviewed cohort"):
+                cohorts.plan_selection(
+                    "fabric-read", manifest_bytes=mbytes, config_bytes=cbytes,
+                    plist_bytes=plist, home=home)
+
     def test_unknown_account_never_selects(self):
         c = self.make_case()
         with mock.patch.object(cohorts, "COHORTS", {c[0]: c[4]}):
