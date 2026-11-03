@@ -29,7 +29,8 @@ AUTHORITY + EFFECTS
 6. The assignment authorizes routine edits/tests/repair and normal new source workspace acquisition. Check actual next-action writer/access/effect constraints. Runtime/transport admission applies only to actions needing it; no repeated approval.
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
-9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
+9. Delivery, ACK, queue, start, CI, merge, deploy and acceptance are distinct; claim only proven states.
+9A. Macro release: pinned docs/DELIVERY_WORKFLOW.md; `merge-on-green` is opt-in after clean CI, non-author review and no HOLD. No blanket-arming or native auto-merge.
 
 ADAPTIVE MODE + CAPABILITIES
 10. Follow ACTIVE_EXECUTION 1B for human-attended mode fit/stickiness; no invented automated Pro receipt. Automated cognition keeps its router/budget gates. Switch only for a critical-path reason.
@@ -45,7 +46,7 @@ FORWARD EXECUTION + BLOCKERS
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless source/authority/dependency/behavior/evidence changed. Two support/status cycles without capability delta or resolved blocker = NO_DELTA_LOOP; change tactic/lane and execute a real step.
 20. Block the affected lane, not the mission. WAITING_EXTERNAL/review/CI/messages are lane-local. Name the action and actual missing evidence, not a department; advance independent safe scope.
-21. Eligible bounded labor: paid Fabric; native Sol for reasoning/coordinators (WEB_CEO_DELEGATION §4). Fabric block: do permitted work or name exact blocker, never native Sol labor. Keep root/grants; continue safe work. Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin.
+21. Bounded labor: paid Fabric; Sol coordinates (WEB_CEO_DELEGATION §4). Fabric blocker: do safe independent work or name gate, not native Sol labor. Keep root/grants; review via pinned docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector, or fresh chat. Do not hand back routine work. A needed critical-path switch is a valid boundary; request it promptly.
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 
@@ -61,7 +62,7 @@ CONTEXT + RECOVERY
 
 FINALIZATION + DURABILITY
 32. Classify: PROVEN_OUTCOME | EXACT_HUMAN_GATE | EFFECT_UNKNOWN | ALL_SCOPED_LANES_BLOCKED | DURABLE_EXECUTION_RUNNING | CHECKPOINTED_CONTINUATION | MORE_WORK_EXISTS. MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states.
-33. MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains; continue across phase boundaries. CHECKPOINTED_CONTINUATION needs real continuity/surface pressure. DURABLE_EXECUTION_RUNNING needs STARTED/RUNNING + lawful return.
+33. MORE_WORK_EXISTS: continue while useful healthy work remains. CHECKPOINTED_CONTINUATION needs a real boundary; DURABLE_EXECUTION_RUNNING needs proven START/RUNNING and lawful return.
 34. CHECKPOINTED_CONTINUATION requires a justified continuity/surface boundary, durable state, and exact next action; task/phase/checkpoint completion alone never qualifies.
 35. Green CI is not acceptance. Require production-path results/browser proof when owed; no claimed tests/writes/publication/deployment without receipts.
 36. Provenance supports, not replaces, synthesis/workflow. Separate research, forecasts, and trade authority; model summaries/sentiment never originate or size trades without accepted validation.
@@ -73,6 +74,18 @@ FINALIZATION + DURABILITY
 ## Cross-session review discoverability
 
 The approved Project bootstrap remains compact. Assigned Web/Codex/Claude/Grok sessions needing an independent PR or source review must load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the same accepted protected repository revision, discover their actual Fabric tools, and preserve existing review/effect identity before deciding a route. Where independently authorized and eligible, a separate read-only Dot reviewer can be addressed through the existing Slack channel, but delivery is not START and Slack technical findings are not formal GitHub approval. An explicit refused/uncertain effect cannot be rerouted via another provider, host, account or Dot. This source pointer is not proof the live shared ChatGPT Project instructions have been edited or freshly loaded.
+
+## Cross-session PR release and auto-merge discoverability
+
+Assigned Web/Codex/Claude/Grok sessions delivering PRs must read
+`docs/DELIVERY_WORKFLOW.md` at the same verified protected commit before
+a release-enabling label, native auto-merge or merge action. It distinguishes
+Macro's opted-in `merge-on-green` from Mastermind's protected queue and
+documents the independent review, recorded-hold, CI and head-freshness gates.
+A successful sweeper workflow does not prove a specific PR merged. Never
+bulk-arm unreviewed PRs or override workload-capacity safety to clear a backlog.
+This GitHub change alone does **not** install live Shared ChatGPT Project
+instructions; separately verify their published configuration.
 
 ## Compatibility safety invariants
 
