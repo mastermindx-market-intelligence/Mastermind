@@ -5,7 +5,7 @@ import email.message
 import io
 import json
 import ssl
-from http.client import BadStatusLine, IncompleteRead, RemoteDisconnected
+from http.client import BadStatusLine, IncompleteRead, InvalidURL, RemoteDisconnected
 from urllib.error import HTTPError, URLError
 
 import pytest
@@ -207,6 +207,32 @@ def test_diagnostic_never_carries_the_token_or_a_foreign_cause(capsys, monkeypat
     }
 
 
+class _BrokenStream:
+    def write(self, _text):
+        raise BrokenPipeError()
+
+    def flush(self):
+        raise BrokenPipeError()
+
+
+@pytest.mark.parametrize("stream", [None, _BrokenStream()])
+def test_unwritable_stderr_keeps_the_single_receipt(stream, capsys, monkeypatch):
+    module = fx._cli_module()
+    _patch_time(module, monkeypatch)
+    http = Flaky(
+        budget.EstateHTTP(1),
+        SUBJECT_URL,
+        [_error(module, "http_503", transient=True) for _ in range(3)],
+    )
+    monkeypatch.setattr(module.sys, "stderr", stream)
+    exit_code = fx._run_cli(module, fx._cli_argv(), http=http)
+    monkeypatch.undo()
+    lines = capsys.readouterr().out.splitlines()
+    assert exit_code == 2
+    assert len(lines) == 1
+    assert json.loads(lines[0])["code"] == "REMOTE_PROBE_FAILED"
+
+
 # --- The shared call and time budgets bound every attempt.
 
 
@@ -222,7 +248,8 @@ def test_retry_attempts_are_calls_against_the_shared_budget(capsys, monkeypatch)
     rc, payload = budget.run_cli(
         module, capsys, http, read_failure=_diagnostic("timeout", 2, True)
     )
-    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    # The retry that cannot be afforded keeps the refusal the failure earned.
+    assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
     assert http.target_reads == 2
     assert sleeper.delays == [1.0]
 
@@ -246,23 +273,32 @@ def test_backoff_that_would_cross_the_deadline_refuses_without_sleeping(
     capsys, monkeypatch
 ):
     module = fx._cli_module()
-    clock, sleeper = _patch_time(module, monkeypatch)
+    # Backoff 1.0 s plus the 2.0 s minimum call window must stay short of the deadline.
+    window = 1.0 + module._HTTP_RETRY_MIN_CALL_SECONDS
+    for remaining, affordable in ((window, False), (window + 0.01, True)):
+        clock, sleeper = _patch_time(module, monkeypatch)
 
-    def late():
-        clock.now = module._HTTP_READ_BUDGET_SECONDS - 0.5
+        def late(clock=clock, remaining=remaining):
+            clock.now = module._HTTP_READ_BUDGET_SECONDS - remaining
 
-    http = Flaky(
-        budget.EstateHTTP(1),
-        SUBJECT_URL,
-        [_error(module, "timeout", transient=True)],
-        on_failure=late,
-    )
-    rc, payload = budget.run_cli(
-        module, capsys, http, read_failure=_diagnostic("timeout", 1, True)
-    )
-    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
-    assert sleeper.delays == []
-    assert http.target_reads == 1
+        http = Flaky(
+            budget.EstateHTTP(1),
+            SUBJECT_URL,
+            [_error(module, "timeout", transient=True)],
+            on_failure=late,
+        )
+        if affordable:
+            rc, payload = budget.run_cli(module, capsys, http)
+            assert rc == 0, payload
+            assert sleeper.delays == [1.0]
+            assert http.target_reads == _subject_reads(http.base) + 1
+        else:
+            rc, payload = budget.run_cli(
+                module, capsys, http, read_failure=_diagnostic("timeout", 1, True)
+            )
+            assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
+            assert sleeper.delays == []
+            assert http.target_reads == 1
 
 
 # --- Conditional replays, parallel census reads and lawful absences.
@@ -513,7 +549,9 @@ def _opener(*outcomes):
         (_http_error(503), "http_503", True),
         (_http_error(504), "http_504", True),
         (URLError(ssl.SSLCertVerificationError()), "tls_verify", False),
-        (URLError("unknown url type"), "connection", False),
+        (URLError("unknown url type"), "invalid_url", False),
+        (InvalidURL("bad port"), "invalid_url", False),
+        (URLError(object()), "connection", False),
         (_http_error(501), "http_501", False),
         (_http_error(422), "http_422", False),
         (_http_error(429), "http_429", False),
@@ -595,6 +633,57 @@ def test_stdlib_transport_not_modified_is_a_representation(monkeypatch):
     assert payload == module._HTTPRepresentation(payload=None, etag='"abc"', not_modified=True)
 
 
+class _RaisingBody:
+    def __init__(self, error):
+        self.error = error
+
+    def read(self, *_args):
+        raise self.error
+
+    def close(self):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("read_error", "cause", "transient"),
+    [
+        (TimeoutError(), "timeout", True),
+        (ConnectionResetError(), "connection", True),
+        (IncompleteRead(b""), "incomplete_response", True),
+    ],
+)
+def test_stdlib_transport_labels_a_failed_not_modified_read(
+    read_error, cause, transient, monkeypatch
+):
+    module = fx._cli_module()
+    headers = email.message.Message()
+    headers["ETag"] = '"abc"'
+    not_modified = HTTPError(HEAD_COMMIT_URL, 304, "status", headers, _RaisingBody(read_error))
+    monkeypatch.setattr(module, "urlopen", _opener(not_modified))
+    with pytest.raises(module._RemoteProbeError) as raised:
+        module._stdlib_http_get(
+            HEAD_COMMIT_URL, token=fx.TOKEN, timeout=20.0, if_none_match='"abc"'
+        )
+    assert module._read_cause(raised.value) == cause
+    assert module._is_transient(raised.value) is transient
+
+
+@pytest.mark.parametrize(
+    ("representation", "cause"),
+    [
+        ({"payload": {"sha": "x"}, "etag": '"abc"', "not_modified": True}, "not_modified_body"),
+        ({"payload": None, "etag": '"other"', "not_modified": True}, "invalid_validator"),
+        ({"payload": None, "etag": "", "not_modified": True}, "invalid_representation"),
+    ],
+)
+def test_replay_check_labels_each_refusal(representation, cause):
+    module = fx._cli_module()
+    with pytest.raises(module._RemoteProbeError) as raised:
+        module._replay_check('"abc"')(module._HTTPRepresentation(**representation))
+    assert module._read_cause(raised.value) == cause
+    assert module._is_transient(raised.value) is False
+
+
 # --- The production transport inside the bounded reader.
 
 
@@ -641,5 +730,6 @@ def test_retry_profile_is_closed():
     module = fx._cli_module()
     assert module._HTTP_READ_ATTEMPTS == 3
     assert module._HTTP_RETRY_BACKOFF_SECONDS == (1.0, 2.0)
+    assert module._HTTP_RETRY_MIN_CALL_SECONDS == 2.0
     assert len(module._HTTP_RETRY_BACKOFF_SECONDS) == module._HTTP_READ_ATTEMPTS - 1
     assert module._TRANSIENT_HTTP_STATUSES == frozenset({500, 502, 503, 504})

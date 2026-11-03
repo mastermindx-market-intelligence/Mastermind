@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
-from http.client import HTTPException, IncompleteRead
+from http.client import HTTPException, IncompleteRead, InvalidURL
 import json
 import math
 import os
@@ -92,10 +92,13 @@ _HTTP_READ_BUDGET_SECONDS = 900.0
 _MAX_HTTP_NORMALIZED_BYTES = 768 * 1024 * 1024
 # A transient transport failure (timeout, dropped connection, HTTP 500/502/503/504)
 # repeats the same idempotent GET in place. Every attempt is one call against the
-# shared budget, and a backoff that would cross the deadline refuses instead of
-# sleeping. Rate limits (403, 429), every other 4xx and malformed bodies never retry.
+# shared budget. A retry that cannot be afforded (no call left, or the backoff plus
+# a minimum call window would reach the deadline) never sleeps and re-raises the
+# original failure. Rate limits (403, 429), every other 4xx and malformed bodies
+# never retry.
 _HTTP_READ_ATTEMPTS = 3
 _HTTP_RETRY_BACKOFF_SECONDS = (1.0, 2.0)
+_HTTP_RETRY_MIN_CALL_SECONDS = 2.0
 _TRANSIENT_HTTP_STATUSES = frozenset({500, 502, 503, 504})
 _READ_CAUSE_RE = re.compile(
     r"^(?:timeout|connection|tls_verify|incomplete_response|protocol|missing_etag"
@@ -218,7 +221,11 @@ def _http_status_cause(code: object) -> str:
 
 
 def _transport_failure(error: BaseException) -> Exception:
-    """Classify a failure below HTTP status: everything but a rejected certificate repeats."""
+    """Classify a failure below HTTP status.
+
+    Timeouts, dropped connections and broken responses repeat. A rejected
+    certificate, a malformed URL and an unrecognized reason do not.
+    """
 
     reason = error.reason if isinstance(error, URLError) else error
     if isinstance(reason, TimeoutError):
@@ -227,6 +234,8 @@ def _transport_failure(error: BaseException) -> Exception:
         return _labelled(_RemoteProbeError(), "tls_verify")
     if isinstance(reason, OSError):
         return _labelled(_RemoteProbeError(), "connection", transient=True)
+    if isinstance(reason, (str, InvalidURL)):
+        return _labelled(_RemoteProbeError(), "invalid_url")
     if isinstance(reason, IncompleteRead):
         return _labelled(_RemoteProbeError(), "incomplete_response", transient=True)
     if isinstance(reason, HTTPException):
@@ -395,9 +404,10 @@ def _replay_check(validator: str) -> Callable[[object], None]:
             or (payload.not_modified is not True and payload.not_modified is not False)
         ):
             raise _labelled(_RemoteProbeError(), "invalid_representation")
-        if payload.not_modified is True and (
-            payload.payload is not None
-            or not _etags_match_validator(validator, payload.etag)
+        if payload.not_modified is True and payload.payload is not None:
+            raise _labelled(_RemoteProbeError(), "not_modified_body")
+        if payload.not_modified is True and not _etags_match_validator(
+            validator, payload.etag
         ):
             raise _labelled(_RemoteProbeError(), "invalid_validator")
 
@@ -503,7 +513,10 @@ class _BoundedHTTPGet:
     def _backoff(self, delay: float) -> None:
         with self._lock:
             now = self._checked_now_locked()
-            if self._calls >= _MAX_HTTP_CALLS or now + delay >= self._deadline:
+            if (
+                self._calls >= _MAX_HTTP_CALLS
+                or now + delay + _HTTP_RETRY_MIN_CALL_SECONDS >= self._deadline
+            ):
                 raise _ReadBudgetExceeded()
         sleep(delay)
 
@@ -560,8 +573,9 @@ class _BoundedHTTPGet:
                     self._backoff(_HTTP_RETRY_BACKOFF_SECONDS[attempt - 2])
                     call_timeout = self._admit_call(timeout)
                 except _ReadBudgetExceeded:
+                    # An unaffordable retry keeps the refusal the failure earned.
                     self._record_read_failure(url, failure, attempt - 1)
-                    raise
+                    raise failure from None
             try:
                 if if_none_match is None:
                     payload = self._transport(url, token=token, timeout=call_timeout)
@@ -843,13 +857,18 @@ def _refusal(code: RefusalCode, exit_code: int) -> SourceContinuityRefusal:
 def _emit(result: object, reader: _BoundedHTTPGet | None = None) -> int:
     if isinstance(result, SourceContinuityRefusal):
         print(canonical_json(result.to_dict()))
-        # The receipt stays the one stdout line; which read failed goes to stderr.
+        # The receipt stays the one stdout line; which read failed goes to stderr,
+        # best effort, so a missing or closed stderr never changes the receipt.
         failure = reader.read_failure() if reader is not None else None
-        if failure is not None:
-            print(
-                canonical_json({"diagnostic": "READ_FAILED", **failure}),
-                file=sys.stderr,
-            )
+        stream = sys.stderr
+        if failure is not None and stream is not None:
+            try:
+                print(
+                    canonical_json({"diagnostic": "READ_FAILED", **failure}),
+                    file=stream,
+                )
+            except Exception:
+                pass
         return result.exit_code
     print(canonical_json(result.to_dict()))
     return 0
@@ -1005,7 +1024,10 @@ def _stdlib_http_get(
             etag = _single_etag(exc.headers)
             if not etag:
                 raise _labelled(_RemoteProbeError(), "missing_etag")
-            raw = exc.read(_MAX_HTTP_BODY_BYTES + 1)
+            try:
+                raw = exc.read(_MAX_HTTP_BODY_BYTES + 1)
+            except (URLError, TimeoutError, OSError, HTTPException) as read_error:
+                raise _transport_failure(read_error) from None
             if raw:
                 raise _labelled(_RemoteProbeError(), "not_modified_body")
             return _HTTPRepresentation(payload=None, etag=etag, not_modified=True)
