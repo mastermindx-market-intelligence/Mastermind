@@ -23,7 +23,9 @@ A read-only production-path measurement of macro#7870 on 2026-11-02 used the std
 
 Call breakdown: subject files 2. First census 1,525: roster 10, files 1,081, compare 9, commits 18, trees 407. Second census 10 (roster only). Latency p50 0.535 s, p95 1.17 s. Largest response 2,830,536 bytes, under the unchanged 5,000,000-byte cap. 50 foreign PRs needed more than one files page (179 extra calls), and 9 were saturated at page 30.
 
-Measurement caveats. The totals exclude the tree proof of saturated PR 7084, which timed out once (about 50 calls). The second census stopped after its 10 roster calls because a collider had moved (`REMOTE_PROOF_CHANGED`), so it measured the roster-only reuse cost, not a full second pass. A shipped-caps real-path run is recorded on the PR.
+Measurement caveats. The totals exclude the tree proof of saturated PR 7084, which timed out once (about 50 calls). The second census stopped after its 10 roster calls because a collider had moved (`REMOTE_PROOF_CHANGED`), so it measured the roster-only reuse cost, not a full second pass.
+
+Shipped-caps real-path run (2026-11-03 00:35Z): macro#7870 at `d418ed38`, 908 open PRs, production transport, no ceiling lifted. The first observation ran 1,561 calls, 269,848,038 normalized bytes and 465.6 s. All three are inside the new budgets, and the run got past the old 491-PR refusal. It then ended `REMOTE_PROBE_FAILED` on one failed read. The transport does not record which read failed. The network was slow during the run (465.6 s against 277 s for a similar call count), and the next API call hit a TLS handshake timeout. So the caps no longer bind, but this run does not prove a completed census.
 
 The old roster loop also shared `_MAX_PAGES = 10` with subject-PR files. A roster stops only at its first short page, so 1,000 or more open PRs could never complete, whatever `_MAX_COLLISION_PRS` said. The new roster gets its own `_MAX_ROSTER_PAGES`.
 
@@ -74,9 +76,9 @@ Review repairs (independent review, PASS_WITH_MINORS). A conditional, parallel e
 
 ## Residual risk
 
-The live run also saw one transient 20 s timeout on a saturated PR's `git/trees` read (macro PR 7084; re-probe 0.56 s). The census has no retry, so a timeout like this still ends the run fail-closed with `REMOTE_PROBE_FAILED`. That is correct but can be noisy. Retry is out of scope here.
+Both live runs at this scale lost one read. The measurement run hit a 20 s timeout on a saturated PR's `git/trees` read (macro PR 7084; re-probe 0.56 s). The shipped-caps run failed on a read the transport did not identify. Right afterwards a single 22 KB read of PR 7084 took 8.8 s. The census has no retry, and `_stdlib_http_get` raises a bare `_RemoteProbeError` that drops the cause. At about 1,560 reads, one slow or failed read therefore ends the run fail-closed with `REMOTE_PROBE_FAILED`. That is the correct refusal, but gate 4 will not complete reliably at Macro scale until there is a bounded retry for idempotent transient failures (timeouts and 5xx, inside the shared budget) and a recorded failure cause. Both are out of scope here.
 
-The roster uses offset paging (`page=N`). A PR opened or closed while the roster is being read can shift rows between pages. Sixteen pages widen that window compared with ten. The cases this repair adds are a duplicated row, which refuses, and a skipped row, which the second observation's roster catches. It is not a new failure mode.
+The roster uses offset paging (`page=N`). A PR opened or closed while the roster is being read can shift rows between pages, and sixteen pages widen that window compared with ten. A duplicated row refuses. A row skipped by one roster read is caught by the other observation's roster. A row skipped by both reads goes unnoticed. That needs two shifts that both land on the same row, and it was already possible at ten pages, so this change widens an existing risk rather than adding a new one.
 
 The full-re-census fallback refuses above about 1,210 open PRs, as described under the closed profile.
 
