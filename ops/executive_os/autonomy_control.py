@@ -305,6 +305,7 @@ OS_GATEWAY_PUBLICATION = "OS_GATEWAY_PUBLICATION"
 OS_GATEWAY_COMMANDS = frozenset({"publish-os-gateway", "reconcile-os-gateway"})
 OS_GATEWAY_RECEIPT = CONFIG_ROOT / "os-gateway-publication-v1.json"
 OS_GATEWAY_RECEIPT_SCHEMA = "mastermind.executive_os_gateway_receipt/v1"
+OS_GATEWAY_SUCCESSOR_RECEIPT_SCHEMA = "mastermind.executive_os_gateway_receipt/v2"
 OS_GATEWAY_MCP_CONFIG = Path(
     "/Library/Application Support/MastermindExecutive/config/executive-mcp.json"
 )
@@ -345,6 +346,11 @@ _GATEWAY_STUDIO_PLIST_REL = Path(
     f"Library/LaunchAgents/{OS_GATEWAY_STUDIO_LABEL}.plist"
 )
 _GATEWAY_GRANT_ARCHIVE = "prior-os-commission-grant.json"
+_GATEWAY_RECEIPT_ARCHIVE = "prior-os-gateway-receipt.json"
+_GATEWAY_SUCCESSOR_FIELDS = frozenset({
+    "gateway_predecessor_receipt_sha256", "gateway_predecessor_receipt_identity",
+    "gateway_predecessor_archive_identity",
+})
 # The canonical audit-directory prerequisite is bound in the SAME retained
 # intent as the three DATA targets: its before-identity (qualified present
 # custody or explicit absence) plus the planned metadata, sealed BEFORE the
@@ -361,6 +367,17 @@ def _gateway_inode_identity(value: Any) -> bool:
     return (type(value) is list and len(value) == 2
             and all(type(item) is int and item >= 0 for item in value)
             and value[1] > 0)
+
+
+def _gateway_receipt_identity(info: os.stat_result) -> list[int]:
+    return [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+            info.st_ctime_ns, info.st_nlink, info.st_uid, info.st_gid, info.st_mode]
+
+
+def _gateway_receipt_identity_valid(value: Any) -> bool:
+    return (type(value) is list and len(value) == 9
+            and all(type(item) is int and item >= 0 for item in value)
+            and value[1] > 0 and value[2] > 0 and value[5:] == [1, 0, 0, stat.S_IFREG | 0o444])
 
 _GATEWAY_MANIFEST_FIELDS = frozenset(
     {
@@ -396,6 +413,7 @@ _GATEWAY_DIGEST_MANIFEST_FIELDS = frozenset(
 _GATEWAY_PHASES = frozenset(
     {
         "LOCKED",
+        "PREDECESSOR_RECEIPT_RETAINED",
         "AUDIT_DIRECTORY_READY",
         "GRANT_PUBLISHED",
         "GATEWAY_CONFIG_REPLACED",
@@ -715,6 +733,14 @@ class GatewayPublicationRequest:
     prior_grant_sha256: str | None = None
     prior_grant_absent: bool = False
     transaction_id: str | None = None
+    predecessor_receipt_sha256: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class GatewayPredecessorReceipt:
+    raw: bytes
+    identity: tuple[int, ...]
+    document: Mapping[str, Any]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1104,6 +1130,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     gateway_publish.add_argument(
         "--expected-grant-absent", action=_StoreTrueOnce, nargs=0, default=False
+    )
+    gateway_publish.add_argument(
+        "--expected-predecessor-receipt-sha256", type=_exact_digest, action=_StoreOnce,
+        help="Explicit successor publication from this exact completed gateway receipt.",
     )
     gateway_reconcile = sub.add_parser(
         "reconcile-os-gateway",
@@ -3533,12 +3563,27 @@ class ProductionTransactionHost(ProductionArmHost):
                 or (value[_GATEWAY_AUDIT_STATE_FIELD] == "present"
                     and not _gateway_inode_identity(before_inode))
                 or (after_inode is not None and not _gateway_inode_identity(after_inode))
-                or (value.get("phase") != "LOCKED" and after_inode is None)
+                or (value.get("phase") not in {"LOCKED", "PREDECESSOR_RECEIPT_RETAINED"}
+                    and after_inode is None)
             ):
                 raise TransactionEffectUnknown()
             required |= _GATEWAY_MANIFEST_FIELDS
         elif value.get("operation") == OS_GATEWAY_PUBLICATION:
             # A gateway marker is never valid without its own closed fields.
+            raise TransactionEffectUnknown()
+        if set(value) & _GATEWAY_SUCCESSOR_FIELDS:
+            archive_identity = value.get("gateway_predecessor_archive_identity")
+            if (value.get("operation") != OS_GATEWAY_PUBLICATION
+                    or not _GATEWAY_SUCCESSOR_FIELDS <= set(value)
+                    or type(value.get("gateway_predecessor_receipt_sha256")) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", value["gateway_predecessor_receipt_sha256"]) is None
+                    or not _gateway_receipt_identity_valid(value.get("gateway_predecessor_receipt_identity"))
+                    or (archive_identity is not None and not _gateway_receipt_identity_valid(archive_identity))
+                    or (value.get("phase") != "LOCKED" and archive_identity is None)
+                    or value.get("gateway_prior_grant_present") is not True):
+                raise TransactionEffectUnknown()
+            required |= _GATEWAY_SUCCESSOR_FIELDS
+        elif value.get("operation") == OS_GATEWAY_PUBLICATION and value.get("phase") == "PREDECESSOR_RECEIPT_RETAINED":
             raise TransactionEffectUnknown()
         if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             required |= _CANARY_MANIFEST_FIELDS
@@ -3624,6 +3669,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _PAID_RECEIPT_FIELDS})
         if current is not None and set(current) & _GATEWAY_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _GATEWAY_MANIFEST_FIELDS})
+        if current is not None and set(current) & _GATEWAY_SUCCESSOR_FIELDS:
+            value.update({key: current[key] for key in _GATEWAY_SUCCESSOR_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -5616,6 +5663,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         super().__init__()
         self._sealed_gateway: dict[str, Any] | None = None
         self._prior_grant_bytes: bytes | None = None
+        self._predecessor_receipt: GatewayPredecessorReceipt | None = None
 
     # ------------------------------------------------------------------
     # Closed compiler adapter.  The publication compiler is a separate pure
@@ -6619,11 +6667,132 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             raise GatewayPublicationError("gateway_receipt_invalid") from exc
         raise GatewayPublicationError("gateway_receipt_conflict")
 
+    @staticmethod
+    def _gateway_receipt_history_path(receipt_sha256: str) -> Path:
+        if type(receipt_sha256) is not str or re.fullmatch(r"[0-9a-f]{64}", receipt_sha256) is None:
+            raise GatewayPublicationError("gateway_receipt_invalid")
+        return CONFIG_ROOT / ("os-gateway-publication-" + receipt_sha256 + ".json")
+
+    @staticmethod
+    def _gateway_receipt_bytes(path: Path, *, mode: int) -> tuple[bytes, os.stat_result]:
+        raw, info = _read_root_file(path, modes=frozenset({mode}), uid=0, gid=0)
+        # The incumbent reader owns root custody. Join its descriptor's
+        # observation back to the same unchanged leaf after the bounded read.
+        # A renamed same-byte replacement is not the admitted predecessor.
+        if _gateway_receipt_identity(info) != _gateway_receipt_identity(path.lstat()):
+            raise TransactionEffectUnknown()
+        return raw, info
+
+    def gateway_receipt_admission(
+        self, request: GatewayPublicationRequest
+    ) -> GatewayPredecessorReceipt | None:
+        """Default absence law, or an explicit exact completed predecessor.
+
+        This is still the same publication owner. A successor cannot select a
+        path, rewrite its predecessor, or adopt an occupied transaction. The
+        permanent archive name is derived from the qualified receipt bytes.
+        """
+        expected = request.predecessor_receipt_sha256
+        if expected is None:
+            self.require_gateway_receipt_absent()
+            return None
+        if (type(expected) is not str or re.fullmatch(r"[0-9a-f]{64}", expected) is None
+                or request.prior_grant_absent is not False
+                or type(request.prior_grant_sha256) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", request.prior_grant_sha256) is None):
+            raise GatewayPublicationError("gateway_receipt_conflict")
+        try:
+            raw, info = self._gateway_receipt_bytes(OS_GATEWAY_RECEIPT, mode=0o444)
+            payload = json.loads(raw)
+        except (HostControlError, OSError, ValueError, UnicodeError, TransactionEffectUnknown) as exc:
+            raise GatewayPublicationError("gateway_receipt_invalid") from exc
+        if sha256_bytes(raw) != expected:
+            raise GatewayPublicationError("gateway_receipt_conflict")
+        if (type(payload) is not dict or raw != _encoded_json(payload)
+                or type(payload.get("expected_sha")) is not str
+                or _SHA_RE.fullmatch(payload["expected_sha"]) is None
+                or payload["expected_sha"] == request.expected_sha
+                or type(payload.get("transaction_id")) is not str
+                or re.fullmatch(r"autonomy-[0-9a-f]{12}", payload["transaction_id"]) is None
+                or type(payload.get("release_bundle_digest")) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", payload["release_bundle_digest"]) is None
+                or type(payload.get("prior_commission_grant_present")) is not bool):
+            raise GatewayPublicationError("gateway_receipt_invalid")
+        validate_gateway_receipt_document(
+            payload, transaction_id=payload["transaction_id"],
+            expected_sha=payload["expected_sha"], bundle_digest=payload["release_bundle_digest"],
+            mcp_config_sha256=request.prior_mcp_config_sha256,
+            mcp_plist_sha256=request.prior_mcp_plist_sha256,
+            grant_sha256=request.prior_grant_sha256,
+            prior_grant_present=payload["prior_commission_grant_present"],
+            predecessor_receipt_sha256=payload.get("predecessor_receipt_sha256"),
+        )
+        history = self._gateway_receipt_history_path(expected)
+        if history.exists() or history.is_symlink():
+            raise GatewayPublicationError("gateway_receipt_conflict")
+        return GatewayPredecessorReceipt(raw, tuple(_gateway_receipt_identity(info)), payload)
+
+    def qualify_gateway_predecessor(
+        self, predecessor: GatewayPredecessorReceipt, preparation: GatewayPreparation
+    ) -> None:
+        document = predecessor.document
+        if document["expected_sha"] != preparation.prior_release:
+            raise GatewayPublicationError("gateway_receipt_invalid")
+        tree = self._gateway_release_tree(preparation.prior_release)
+        _raw, _launch, bundle = self.qualify_launch_publication(preparation.prior_release, tree)
+        if bundle != document["release_bundle_digest"]:
+            raise GatewayPublicationError("gateway_receipt_invalid")
+        try:
+            self._require_predecessor_receipt_current(
+                sha256_bytes(predecessor.raw), list(predecessor.identity),
+            )
+        except TransactionEffectUnknown as exc:
+            raise GatewayPublicationError("gateway_receipt_conflict") from exc
+
+    def _require_predecessor_receipt_current(self, receipt_sha256: str, identity: list[int]) -> None:
+        try:
+            raw, info = self._gateway_receipt_bytes(OS_GATEWAY_RECEIPT, mode=0o444)
+            if sha256_bytes(raw) != receipt_sha256 or _gateway_receipt_identity(info) != identity:
+                raise ValueError("predecessor receipt changed")
+        except (HostControlError, OSError, ValueError) as exc:
+            raise TransactionEffectUnknown() from exc
+
+    def _predecessor_receipt_archive(self, manifest: Mapping[str, Any], *, permanent: bool) -> bytes:
+        """Qualify retained bytes; reconciliation never creates either archive."""
+        expected = manifest["gateway_predecessor_receipt_sha256"]
+        path = (self._gateway_receipt_history_path(expected) if permanent
+                else AUTONOMY_TRANSACTION / _GATEWAY_RECEIPT_ARCHIVE)
+        try:
+            raw, info = self._gateway_receipt_bytes(path, mode=0o444 if permanent else 0o400)
+            if (sha256_bytes(raw) != expected
+                    or (permanent and _gateway_receipt_identity(info)
+                        != manifest["gateway_predecessor_archive_identity"])):
+                raise ValueError("retained predecessor differs")
+        except (HostControlError, OSError, ValueError) as exc:
+            raise TransactionEffectUnknown() from exc
+        return raw
+
+    def _retain_gateway_predecessor(self, transaction: TransactionContext) -> None:
+        manifest = self._manifest()
+        if not _GATEWAY_SUCCESSOR_FIELDS <= set(manifest):
+            return
+        self._recheck_gateway_bound(transaction)
+        raw = self._predecessor_receipt_archive(manifest, permanent=False)
+        path = self._gateway_receipt_history_path(manifest["gateway_predecessor_receipt_sha256"])
+        # This exclusive immutable copy follows the complete durable intent,
+        # precedes every target write, and survives normal marker cleanup.
+        _atomic_file(path, raw, mode=0o444, uid=0, gid=0, replace=False)
+        retained, info = self._gateway_receipt_bytes(path, mode=0o444)
+        if retained != raw or self._sealed_gateway is None:
+            raise TransactionEffectUnknown()
+        self._sealed_gateway["gateway_predecessor_archive_identity"] = _gateway_receipt_identity(info)
+        self._persist_phase(transaction, "PREDECESSOR_RECEIPT_RETAINED")
+
     # ------------------------------------------------------------------
     # The one canonical audit-directory prerequisite.
     #
-    # The fixed leaf below the qualified fixed parent is the ONLY node this
-    # owner may create, and only through a held fixed-parent descriptor with
+    # The fixed leaf below the qualified fixed parent is the ONLY directory
+    # this owner may create, and only through a held fixed-parent descriptor with
     # an exclusive no-follow mkdir, a parent fsync and real UID/GID plus mode
     # proven on the held same inode.  Its before-identity (qualified present
     # custody or explicit absence) plus the planned metadata are bound in the
@@ -6921,7 +7090,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         return value
 
     def _persist_phase(self, transaction: TransactionContext, phase: str, *, operation: str | None = None) -> None:
-        if phase != "AUDIT_DIRECTORY_READY":
+        if phase not in {"AUDIT_DIRECTORY_READY", "PREDECESSOR_RECEIPT_RETAINED"}:
             super()._persist_phase(transaction, phase, operation=operation)
             return
         if self._transaction_owner_fd is None or self._active_transaction != transaction:
@@ -6929,17 +7098,26 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         self._verify_published_inode(self._transaction_owner_fd)
         current = self._manifest()
         value = self._manifest_document(transaction, phase, operation=OS_GATEWAY_PUBLICATION)
+        retaining = phase == "PREDECESSOR_RECEIPT_RETAINED"
+        changed_field = "gateway_predecessor_archive_identity" if retaining else _GATEWAY_AUDIT_AFTER_FIELD
+        prior_phase = ("PREDECESSOR_RECEIPT_RETAINED"
+                       if not retaining and _GATEWAY_SUCCESSOR_FIELDS <= set(current) else "LOCKED")
         if (
             current.get("operation") != OS_GATEWAY_PUBLICATION
-            or current.get("phase") != "LOCKED"
+            or current.get("phase") != prior_phase
             or operation not in (None, OS_GATEWAY_PUBLICATION)
+            or (retaining and (not _GATEWAY_SUCCESSOR_FIELDS <= set(current)
+                               or current.get(changed_field) is not None))
             or {key: item for key, item in current.items()
-                if key not in ("phase", _GATEWAY_AUDIT_AFTER_FIELD)}
+                if key not in ("phase", changed_field)}
             != {key: item for key, item in value.items()
-                if key not in ("phase", _GATEWAY_AUDIT_AFTER_FIELD)}
+                if key not in ("phase", changed_field)}
         ):
             raise TransactionEffectUnknown()
-        self._verify_gateway_audit_directory(value)
+        if retaining:
+            self._predecessor_receipt_archive(value, permanent=True)
+        else:
+            self._verify_gateway_audit_directory(value)
         _atomic_file(self._manifest_path(), _encoded_json(value), mode=0o400,
                      uid=0, gid=0, replace=True)
 
@@ -6962,6 +7140,9 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             gid=0,
             replace=False,
         )
+        if self._predecessor_receipt is not None:
+            _atomic_file(generation / _GATEWAY_RECEIPT_ARCHIVE, self._predecessor_receipt.raw,
+                         mode=0o400, uid=0, gid=0, replace=False)
         _fsync_directory(generation)
 
     def new_transaction_id(self) -> str:
@@ -6993,6 +7174,13 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             != manifest["gateway_studio_definition_sha256"]
         ):
             raise TransactionEffectUnknown()
+        if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest):
+            self._require_predecessor_receipt_current(
+                manifest["gateway_predecessor_receipt_sha256"],
+                manifest["gateway_predecessor_receipt_identity"],
+            )
+            if manifest["gateway_predecessor_archive_identity"] is not None:
+                self._predecessor_receipt_archive(manifest, permanent=True)
 
     def _recheck_gateway_preimages(
         self, transaction: TransactionContext, preparation: GatewayPreparation
@@ -7129,6 +7317,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         ):
             raise TransactionEffectUnknown()
         self._verify_published_inode(self._transaction_owner_fd)
+        manifest = self._manifest()
         encoded = _encoded_json(receipt)
         replace = OS_GATEWAY_RECEIPT.exists() or OS_GATEWAY_RECEIPT.is_symlink()
         if replace:
@@ -7143,6 +7332,14 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
                 has_acl=False,
             ):
                 raise TransactionEffectUnknown()
+        if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest):
+            self._predecessor_receipt_archive(manifest, permanent=True)
+            # Last admission after the legacy metadata/ACL reader, immediately
+            # before replacement: that read cannot conceal an outside rename.
+            self._require_predecessor_receipt_current(
+                manifest["gateway_predecessor_receipt_sha256"],
+                manifest["gateway_predecessor_receipt_identity"],
+            )
         _atomic_file(
             OS_GATEWAY_RECEIPT, encoded, mode=0o444, uid=0, gid=0, replace=replace
         )
@@ -7181,6 +7378,7 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
                 mcp_plist_sha256=manifest["gateway_target_mcp_plist_sha256"],
                 grant_sha256=manifest["gateway_target_grant_sha256"],
                 prior_grant_present=manifest["gateway_prior_grant_present"],
+                predecessor_receipt_sha256=manifest.get("gateway_predecessor_receipt_sha256"),
             )
         except (HostControlError, GatewayPublicationError) as exc:
             raise TransactionEffectUnknown() from exc
@@ -7190,6 +7388,9 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         # The whole publication is complete ONLY with its canonical audit
         # prerequisite still qualified and bound to THIS original intent.
         self._verify_gateway_audit_directory(manifest)
+        if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest):
+            self._predecessor_receipt_archive(manifest, permanent=False)
+            self._predecessor_receipt_archive(manifest, permanent=True)
         control_candidate, worker_candidate = self._candidate_paths(
             transaction.transaction_id
         )
@@ -7201,9 +7402,12 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             "prior-worker.json",
             _GATEWAY_GRANT_ARCHIVE,
         }
+        archives = (*self._archive_paths(), AUTONOMY_TRANSACTION / _GATEWAY_GRANT_ARCHIVE)
+        if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest):
+            expected.add(_GATEWAY_RECEIPT_ARCHIVE)
+            archives += (AUTONOMY_TRANSACTION / _GATEWAY_RECEIPT_ARCHIVE,)
         if set(os.listdir(AUTONOMY_TRANSACTION)) != expected:
             raise TransactionEffectUnknown()
-        archives = (*self._archive_paths(), AUTONOMY_TRANSACTION / _GATEWAY_GRANT_ARCHIVE)
         for path in (*archives, self._manifest_path()):
             info = path.lstat()
             if (
@@ -7233,11 +7437,13 @@ def _gateway_receipt_document(
     grant_sha256: str,
     prior_grant_present: bool,
     now: datetime,
+    predecessor_receipt_sha256: str | None = None,
 ) -> dict[str, Any]:
     """The ONE fixed terminal receipt: original id plus exact target hashes."""
 
-    return {
-        "schema_version": OS_GATEWAY_RECEIPT_SCHEMA,
+    value = {
+        "schema_version": (OS_GATEWAY_RECEIPT_SCHEMA if predecessor_receipt_sha256 is None
+                           else OS_GATEWAY_SUCCESSOR_RECEIPT_SCHEMA),
         "state": "PUBLISHED",
         "operation": OS_GATEWAY_PUBLICATION,
         "transaction_id": transaction_id,
@@ -7250,6 +7456,9 @@ def _gateway_receipt_document(
         "observed_at": _receipt_timestamp(now),
         "tool_version": TOOL_VERSION,
     }
+    if predecessor_receipt_sha256 is not None:
+        value["predecessor_receipt_sha256"] = predecessor_receipt_sha256
+    return value
 
 
 _GATEWAY_RECEIPT_KEYS = frozenset(
@@ -7280,11 +7489,22 @@ def validate_gateway_receipt_document(
     mcp_plist_sha256: str,
     grant_sha256: str,
     prior_grant_present: bool,
+    predecessor_receipt_sha256: str | None = None,
 ) -> None:
+    keys = _GATEWAY_RECEIPT_KEYS
+    schema = OS_GATEWAY_RECEIPT_SCHEMA
+    if predecessor_receipt_sha256 is not None:
+        if (type(predecessor_receipt_sha256) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", predecessor_receipt_sha256) is None
+                or prior_grant_present is not True):
+            raise GatewayPublicationError("gateway_receipt_invalid")
+        keys = keys | {"predecessor_receipt_sha256"}
+        schema = OS_GATEWAY_SUCCESSOR_RECEIPT_SCHEMA
     if (
         type(payload) is not dict
-        or set(payload) != _GATEWAY_RECEIPT_KEYS
-        or payload["schema_version"] != OS_GATEWAY_RECEIPT_SCHEMA
+        or set(payload) != keys
+        or payload["schema_version"] != schema
+        or payload.get("predecessor_receipt_sha256") != predecessor_receipt_sha256
         or payload["state"] != "PUBLISHED"
         or payload["operation"] != OS_GATEWAY_PUBLICATION
         or payload["transaction_id"] != transaction_id
@@ -7543,9 +7763,11 @@ def execute_gateway_publication(
     # protected configuration, receipt or marker IO.
     host.effective_uid()
     host.require_gateway_module_origin(request.expected_sha)
-    host.require_gateway_receipt_absent()
+    predecessor = host.gateway_receipt_admission(request)
     host.require_transaction_absent()
     preparation = prepare_gateway_publication(host, request)
+    if predecessor is not None:
+        host.qualify_gateway_predecessor(predecessor, preparation)
     transaction = TransactionContext(
         transaction_id=host.new_transaction_id(),
         expected_sha=request.expected_sha,
@@ -7567,6 +7789,13 @@ def execute_gateway_publication(
         _GATEWAY_AUDIT_AFTER_FIELD: None,
     }
     host._prior_grant_bytes = preparation.prior_grant_bytes
+    host._predecessor_receipt = predecessor
+    if predecessor is not None:
+        host._sealed_gateway.update({
+            "gateway_predecessor_receipt_sha256": sha256_bytes(predecessor.raw),
+            "gateway_predecessor_receipt_identity": list(predecessor.identity),
+            "gateway_predecessor_archive_identity": None,
+        })
     host._active_transaction = transaction
     try:
         host._create_marker(transaction, operation=OS_GATEWAY_PUBLICATION)
@@ -7575,6 +7804,7 @@ def execute_gateway_publication(
         raise GatewayPublicationError("gateway_transaction_incomplete") from exc
     try:
         host._recheck_gateway_preimages(transaction, preparation)
+        host._retain_gateway_predecessor(transaction)
         # The canonical audit prerequisite is created strictly from the
         # RETAINED intent, already sealed before any effect.
         host._sealed_gateway[_GATEWAY_AUDIT_AFTER_FIELD] = (
@@ -7610,6 +7840,7 @@ def execute_gateway_publication(
             grant_sha256=preparation.candidate["commission_grant_sha256"],
             prior_grant_present=preparation.prior_grant_present,
             now=now,
+            predecessor_receipt_sha256=request.predecessor_receipt_sha256,
         )
         host.write_gateway_receipt(transaction, receipt)
         host._persist_phase(transaction, "GATEWAY_RECEIPT_REPLACED")
@@ -7656,6 +7887,10 @@ def reconcile_gateway_publication(
     host._sealed_gateway = {
         field: manifest[field] for field in _GATEWAY_MANIFEST_FIELDS
     }
+    if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest):
+        host._sealed_gateway.update({field: manifest[field] for field in _GATEWAY_SUCCESSOR_FIELDS})
+        host._predecessor_receipt_archive(manifest, permanent=False)
+        host._predecessor_receipt_archive(manifest, permanent=True)
     configs = host.checked_gateway_configs(
         request.expected_sha,
         allowed_plist_sha256s=frozenset(
@@ -7743,6 +7978,7 @@ def reconcile_gateway_publication(
             mcp_plist_sha256=manifest["gateway_target_mcp_plist_sha256"],
             grant_sha256=manifest["gateway_target_grant_sha256"],
             prior_grant_present=manifest["gateway_prior_grant_present"],
+            predecessor_receipt_sha256=manifest.get("gateway_predecessor_receipt_sha256"),
         )
     host.complete_transaction(transaction)
     return transaction.transaction_id
@@ -7762,6 +7998,7 @@ def _run_gateway_command(
                 prior_mcp_plist_sha256=args.expected_mcp_plist_sha256,
                 prior_grant_sha256=args.expected_grant_sha256,
                 prior_grant_absent=args.expected_grant_absent,
+                predecessor_receipt_sha256=args.expected_predecessor_receipt_sha256,
             )
             result = execute_gateway_publication(host, request, now=now)
             document = operation_document(
