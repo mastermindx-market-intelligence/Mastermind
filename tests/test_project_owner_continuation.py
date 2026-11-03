@@ -96,6 +96,89 @@ def test_ambiguity_and_unqualified_source_preserve_no_action(change):
     assert project(db,b)['candidate'] is None
 
 
+@pytest.mark.parametrize('bad_id', ['P00.T1','P01.T1','P0.T0','P0.T01','P0.T1.S0','P0.T1.S01',
+    'P0T1','p0.T1','P0.','P0.Tx1','Px.T1','P1.T0','P1.T1.S0','P0.T1.S2.S3'])
+def test_p0_grammar_rejects_leading_zero_and_malformed_ids(bad_id):
+    db=document();db['tasks'][0]['id']=bad_id
+    result=project(db)
+    assert result['state']=='NO_CANDIDATE' and result['reason']=='TASK_IDENTITY_AMBIGUOUS'
+    assert result['candidate'] is None
+    assert result['action_recommendation'] is False and result['effect_eligibility']=='UNOBSERVED'
+
+
+def test_duplicate_p0_identity_stays_ambiguous():
+    db=document();db['tasks'][0]['id']='P0.T1'
+    archived=copy.deepcopy(db['tasks'][0]);archived.update(status='accepted',owner='fixture-owner')
+    db['tasks'].append(archived)
+    result=project(db)
+    assert result['state']=='NO_CANDIDATE' and result['reason']=='TASK_IDENTITY_AMBIGUOUS'
+    assert result['candidate'] is None and result['action_recommendation'] is False
+
+
+def test_archived_p0_history_preserves_unique_ready_p1_candidate():
+    db=document()
+    db['waves'].append({'p':'P0','id':'bootstrap','workstream':WS,'status':'done','source':'agentos'})
+    for task_id in ('P0.T1','P0.T2','P0.T3'):
+        archived=copy.deepcopy(db['tasks'][0])
+        archived.update(id=task_id,wave='bootstrap',status='accepted',owner='fixture-owner')
+        db['tasks'].append(archived)
+    assert [t['id'] for t in db['tasks']]==['P1.T1','P0.T1','P0.T2','P0.T3']
+    result=project(db)
+    assert result['state']=='CANDIDATE' and result['candidate']['task_id']=='P1.T1'
+    assert result['candidate']['workstream']==WS
+    assert result['action_recommendation'] is False and result['effect_eligibility']=='UNOBSERVED'
+
+
+def test_ready_p0_task_and_subtask_qualify_under_existing_conditions():
+    db=document()
+    db['waves'][0].update(p='P0',id='bootstrap')
+    db['tasks'][0].update(id='P0.T4',wave='bootstrap')
+    for task_id in ('P0.T1','P0.T2','P0.T3'):
+        archived=copy.deepcopy(db['tasks'][0])
+        archived.update(id=task_id,wave='bootstrap',status='accepted',owner='fixture-owner')
+        db['tasks'].append(archived)
+    assert project(db)['candidate']['task_id']=='P0.T4'
+    sub=copy.deepcopy(db)
+    sub['tasks'][0].update(id='P0.T1.S2',parent='P0.T1',depends_on=[])
+    result=project(sub)
+    assert result['state']=='CANDIDATE' and result['candidate']['task_id']=='P0.T1.S2'
+    assert result['action_recommendation'] is False and result['effect_eligibility']=='UNOBSERVED'
+
+
+@pytest.mark.parametrize('task_id', ['P0.T1','P0.T10','P0.T3.S2','P0.T12.S7'])
+def test_positive_p0_id_families_still_qualify(task_id):
+    db=document()
+    if task_id.count('.')==2:
+        parent_id=task_id.rsplit('.',1)[0]
+        db['tasks'][0].update(id=task_id,parent=parent_id)
+        parent=copy.deepcopy(db['tasks'][0])
+        parent.update(id=parent_id,status='accepted',owner='fixture-owner')
+        db['tasks'].append(parent)
+    else:
+        db['tasks'][0]['id']=task_id
+    assert project(db)['candidate']['task_id']==task_id
+    assert project(db)['action_recommendation'] is False
+
+
+def test_blocked_accepted_and_in_progress_p0_rows_never_become_candidates():
+    db=document()
+    db['waves'].append({'p':'P0','id':'bootstrap','workstream':WS,'status':'in_progress','source':'agentos'})
+    blocked=copy.deepcopy(db['tasks'][0])
+    blocked.update(id='P0.T1',wave='bootstrap',status='blocked',owner='fixture-owner',reason='EFFECT_UNKNOWN')
+    accepted=copy.deepcopy(db['tasks'][0])
+    accepted.update(id='P0.T2',wave='bootstrap',status='accepted',owner='fixture-owner')
+    db['tasks'] += [blocked,accepted]
+    result=project(db)
+    assert result['state']=='CANDIDATE' and result['candidate']['task_id']=='P1.T1'
+    assert result['action_recommendation'] is False
+    active=copy.deepcopy(db['tasks'][0])
+    active.update(id='P0.T3',wave='bootstrap',status='in_progress',owner='fixture-owner')
+    db['tasks'].append(active)
+    result=project(db)
+    assert result['state']=='NO_CANDIDATE' and result['reason']=='OWNER_ALREADY_STARTED'
+    assert result['candidate'] is None and result['action_recommendation'] is False
+
+
 def test_semantic_identity_stable_across_time_and_raw_bundle_regeneration():
     first=project();b=bundle();b['generated_at']='2026-11-02T12:01:00Z'
     assert project(b=b)['candidate']==first['candidate']
