@@ -180,6 +180,14 @@
       });
     }).catch(function () { return { ok: false, status: 0, data: {} }; });
   }
+  // Only a real account document may speak for identity: a JSON object (not
+  // null/array) carrying an explicit Boolean authenticated. api() masks a body
+  // decode failure into {} while keeping ok=true, so load() shape-checks the
+  // broker payload before it may influence identity, config or a guest verdict.
+  function validAccountDoc(d) {
+    return !!d && typeof d === 'object' && !Array.isArray(d) &&
+      typeof d.authenticated === 'boolean';
+  }
   function load() {
     // Idle warm + click must share one read. Competing stale guest responses
     // used to overwrite an authenticated panel after the second request won.
@@ -187,15 +195,15 @@
     state.loaded = false;
     render();
     var read = api('/api/account').then(function (res) {
-      var a = res.data || {};
+      var a = res.data;
+      if (!res.ok || !validAccountDoc(a)) { finishLoad({ access_unconfirmed: true }); return; }
       if (!SUPA && a.supabase) SUPA = normSupa(a.supabase);
-      if (!res.ok) { finishLoad({ access_unconfirmed: true }); return; }
       if (!a.authenticated && hasSessionHint()) {
         // An auth cookie is not a grant, but one temporary broker/Supabase
         // miss is not proof of logout. Re-read once, then show a neutral
         // retry state instead of falsely advertising sign-in or upgrades.
         return api('/api/account').then(function (r2) {
-          finishLoad(r2.ok && r2.data && r2.data.authenticated
+          finishLoad(r2.ok && validAccountDoc(r2.data) && r2.data.authenticated === true
             ? r2.data : { access_unconfirmed: true });
         });
       }

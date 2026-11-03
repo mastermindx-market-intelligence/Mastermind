@@ -13,7 +13,14 @@ ASSET = ROOT / "app" / "static" / "account.js"
 def test_account_failure_state_uses_no_premium_grant_or_false_guest():
     source = ASSET.read_text()
     assert "function hasSessionHint()" in source
-    assert "if (!res.ok) { finishLoad({ access_unconfirmed: true }); return; }" in source
+    # Only a real account document may speak for identity: api() masks a decode
+    # failure into {} with ok still true, so load() must shape-check before the
+    # payload can influence identity, config or any guest classification.
+    assert "function validAccountDoc(d)" in source
+    assert "!Array.isArray(d)" in source
+    assert "typeof d.authenticated === 'boolean'" in source
+    assert "if (!res.ok || !validAccountDoc(a)) { finishLoad({ access_unconfirmed: true }); return; }" in source
+    assert "r2.ok && validAccountDoc(r2.data) && r2.data.authenticated === true" in source
     assert "if (!a.authenticated && hasSessionHint())" in source
     assert "accessUnconfirmedHTML()" in source
     assert "if (_accountRequest) return _accountRequest" in source
@@ -31,6 +38,9 @@ assert(source.includes(marker), "source-entry seam moved; update behavior test")
 source = source.replace(marker,
   "  window.__test = {load, state: () => state, bind: root => {_root = root; _mode = 'standalone';}, hasSessionHint};\n" + marker);
 const tick = () => new Promise(resolve => setImmediate(resolve));
+// Marks a response whose body cannot be JSON-decoded at all (api() must still
+// surface it through the same reply seam as any other status).
+const DECODE_FAIL = Symbol("json-decode-failure");
 
 async function harness(cookie) {
   const replies = [], root = {innerHTML: ""};
@@ -56,9 +66,26 @@ async function harness(cookie) {
   window.__test.bind(root);
   function reply(i, status, body) {
     assert(replies[i], "missing requested API call " + i);
-    replies[i]({ok: status >= 200 && status < 300, status, json: async () => body});
+    replies[i]({ok: status >= 200 && status < 300, status, json: async () => {
+      if (body === DECODE_FAIL) throw new SyntaxError("Unexpected end of JSON input");
+      return body;
+    }});
   }
   return {window, root, replies, reply, document};
+}
+
+// A 200 whose body is not a valid account document (decode failure, JSON null,
+// array, plain object) is uncertainty on ANY read: never a guest classification.
+async function expectUnconfirmed(body, label) {
+  const h = await harness("");
+  const work = h.window.__test.load();
+  await tick(); assert.equal(h.replies.length, 1, label);
+  h.reply(0, 200, body); await work;
+  assert.equal(h.window.__test.state().acct.access_unconfirmed, true, label);
+  assert.equal(h.window.__test.state().acct.authenticated, undefined, label);
+  assert.match(h.root.innerHTML, /Account access could not be verified/, label);
+  assert.match(h.root.innerHTML, /Check access again/, label);
+  assert.doesNotMatch(h.root.innerHTML, /Sign in to Mastermind|Upgrade to Pro|mmacc-pro-card/, label);
 }
 
 (async () => {
@@ -120,7 +147,64 @@ async function harness(cookie) {
     assert.doesNotMatch(h.root.innerHTML, /mmacc-pro-card/,
       "verified identity alone cannot grant or upsell a marketing plan");
   }
-  process.stdout.write("PASS: Bot Portfolio account pending/unavailable/guest/recovery/no-duplicate-read\n");
+  // A malformed account payload on the first read stays unconfirmed whether
+  // or not a session hint exists: {} and decode failures previously kept
+  // ok=true and slid the user into the sign-in form.
+  for (const [label, body] of [
+    ["empty-object", {}],
+    ["json-null", null],
+    ["array", [{authenticated: true}]],
+    ["decode-failure", DECODE_FAIL],
+  ]) {
+    await expectUnconfirmed(body, "initial read " + label + " must not become a guest or identity");
+  }
+  // A non-Boolean authenticated flag cannot establish identity on the first
+  // read either, with or without a readable session hint.
+  for (const cookie of ["", "sb-proj-auth-token=shared"]) {
+    const h = await harness(cookie);
+    const work = h.window.__test.load();
+    await tick(); assert.equal(h.replies.length, 1);
+    h.reply(0, 200, {authenticated: "yes"}); await work;
+    assert.equal(h.window.__test.state().acct.access_unconfirmed, true,
+      "a non-Boolean authenticated hint must not sign the user in");
+    assert.equal(h.window.__test.state().acct.authenticated, undefined);
+    assert.doesNotMatch(h.root.innerHTML, /Signed in|Sign in to Mastermind|Upgrade to Pro/);
+    assert.match(h.root.innerHTML, /Check access again/);
+  }
+  // The bounded second read is held to the same standard: only a valid
+  // document whose authenticated === true may establish identity there.
+  // A truthy non-Boolean flag previously passed the bare truthiness check and
+  // was adopted as a signed-in identity.
+  for (const [label, body] of [
+    ["empty-object", {}],
+    ["json-null", null],
+    ["array", [1]],
+    ["wrong-type-authenticated", {authenticated: "yes"}],
+  ]) {
+    const h = await harness("sb-proj-auth-token=shared");
+    const work = h.window.__test.load();
+    await tick(); assert.equal(h.replies.length, 1, label);
+    h.reply(0, 200, {authenticated: false});
+    await tick(); assert.equal(h.replies.length, 2, label);
+    h.reply(1, 200, body); await work;
+    assert.equal(h.window.__test.state().acct.access_unconfirmed, true,
+      "second read " + label + " must stay unconfirmed");
+    assert.equal(h.window.__test.state().acct.authenticated, undefined,
+      "second read " + label + " cannot establish identity");
+    assert.doesNotMatch(h.root.innerHTML, /Signed in|Sign in to Mastermind|Upgrade to Pro/, label);
+  }
+  // A decode failure on the bounded second read is also unconfirmed, and the
+  // neutral retry stays the only account CTA.
+  {
+    const h = await harness("sb-proj-auth-token=shared");
+    const work = h.window.__test.load();
+    await tick(); h.reply(0, 200, {authenticated: false});
+    await tick(); h.reply(1, 200, DECODE_FAIL); await work;
+    assert.equal(h.window.__test.state().acct.access_unconfirmed, true);
+    assert.match(h.root.innerHTML, /Check access again/);
+    assert.doesNotMatch(h.root.innerHTML, /Signed in|Sign in to Mastermind|Upgrade to Pro/);
+  }
+  process.stdout.write("PASS: Bot Portfolio account pending/unavailable/guest/recovery/malformed/no-duplicate-read\n");
 })().catch(err => { console.error(err); process.exitCode = 1; });
 """
     result = subprocess.run(
