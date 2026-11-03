@@ -81,6 +81,8 @@ fn main() {
             auth::read_mission_v3,
             auth::read_admitted_plan,
             auth::read_retained_activity,
+            auth::read_fabric_catalog,
+            auth::read_fabric_status,
             auth::read_result,
             auth::read_result_references,
             auth::read_current_window,

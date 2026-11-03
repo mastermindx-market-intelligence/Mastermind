@@ -1018,6 +1018,65 @@ pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> 
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct FabricStatusSelection {
+    root_id: String,
+    run_id: String,
+}
+impl FabricStatusSelection {
+    fn validate(&self) -> Result<()> {
+        let root = self.root_id.strip_prefix("JOB-").ok_or("SELECTION_INVALID")?;
+        if root.is_empty() || root.len() > 9 || !root.bytes().all(|b| b.is_ascii_digit())
+            || !self.run_id.strip_prefix("ATT-").is_some_and(|v| lowercase_hex(v, 32)) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+fn fabric_read_target(selection: Option<&FabricStatusSelection>) -> Result<(Url, &'static str, usize)> {
+    let (path, schema, cap) = if selection.is_some() {
+        ("/workspace/fabric/status/current", "mastermind.fabric_task_status.v1", 16_384)
+    } else {
+        ("/workspace/fabric/catalog/current", "mastermind.attended_fabric_catalog.v1", 65_536)
+    };
+    let mut url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID")?;
+    if let Some(selected) = selection {
+        selected.validate()?;
+        url.query_pairs_mut().append_pair("root_id", &selected.root_id)
+            .append_pair("run_id", &selected.run_id);
+    }
+    Ok((url, schema, cap))
+}
+async fn read_fabric(app: AppHandle, selection: Option<FabricStatusSelection>) -> Result<Value> {
+    let (url, schema, cap) = fabric_read_target(selection.as_ref())?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    // Unavailable/error bodies cannot become successful run observations.
+    let result = bounded_json(response, cap).await;
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(schema) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The same strict frontend decoders retain only approved metadata and
+    // enforce exact-run browser scope; no machine-local credential is used.
+    Ok(value)
+}
+#[tauri::command]
+pub async fn read_fabric_catalog(app: AppHandle) -> Result<Value> {
+    read_fabric(app, None).await
+}
+#[tauri::command]
+pub async fn read_fabric_status(app: AppHandle, selection: FabricStatusSelection) -> Result<Value> {
+    read_fabric(app, Some(selection)).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetainedActivitySelection {
     work_ref: String,
     root_job_id: String,
@@ -2010,6 +2069,56 @@ mod tests {
         }
     }
 
+}
+
+#[cfg(test)]
+mod fabric_read_selection_tests {
+    use super::*;
+
+    #[test]
+    fn catalog_and_status_have_fixed_origin_routes_and_byte_limits() {
+        let (catalog, schema, cap) = fabric_read_target(None).unwrap();
+        assert_eq!(catalog.as_str(), "https://mcp.mastermind-x.com/workspace/fabric/catalog/current");
+        assert_eq!(schema, "mastermind.attended_fabric_catalog.v1");
+        assert_eq!(cap, 65_536);
+        assert!(catalog.query().is_none());
+        let selected = FabricStatusSelection { root_id: "JOB-42".into(),
+            run_id: format!("ATT-{}", "a".repeat(32)) };
+        let (status, schema, cap) = fabric_read_target(Some(&selected)).unwrap();
+        assert_eq!(status.origin().ascii_serialization(), "https://mcp.mastermind-x.com");
+        assert_eq!(status.path(), "/workspace/fabric/status/current");
+        assert_eq!(schema, "mastermind.fabric_task_status.v1");
+        assert_eq!(cap, 16_384);
+        assert_eq!(status.query_pairs().into_owned().collect::<Vec<_>>(), vec![
+            ("root_id".to_string(), selected.root_id), ("run_id".to_string(), selected.run_id),
+        ]);
+    }
+
+    #[test]
+    fn paid_selector_rejects_foreign_namespaces_paths_and_aliases() {
+        for root in ["ROOT:manual", "../JOB-1", "JOB-", "JOB--1", "JOB-1234567890",
+                     "https://example.invalid/root", "JOB-1&run_id=foreign"] {
+            assert!(fabric_read_target(Some(&FabricStatusSelection { root_id: root.into(),
+                run_id: format!("ATT-{}", "a".repeat(32)) })).is_err());
+        }
+        for run in ["ATT-1", "../foreign", "att-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "ATT-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "run&root_id=foreign"] {
+            assert!(fabric_read_target(Some(&FabricStatusSelection { root_id: "JOB-1".into(),
+                run_id: run.into() })).is_err());
+        }
+    }
+
+    #[test]
+    fn selector_accepts_only_the_two_typed_fields() {
+        let valid = serde_json::json!({"root_id":"JOB-1", "run_id":format!("ATT-{}", "a".repeat(32))});
+        assert!(serde_json::from_value::<FabricStatusSelection>(valid.clone()).unwrap().validate().is_ok());
+        let mut extra = valid.clone();
+        extra["owner_path"] = serde_json::json!("/private/foreign");
+        assert!(serde_json::from_value::<FabricStatusSelection>(extra).is_err());
+        let mut mistyped = valid;
+        mistyped["run_id"] = serde_json::json!(3);
+        assert!(serde_json::from_value::<FabricStatusSelection>(mistyped).is_err());
+    }
 }
 
 #[cfg(test)]
