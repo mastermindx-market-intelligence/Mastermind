@@ -280,7 +280,9 @@ From the repo root, as the operator user on ubuntu1:
 umask 077
 mkdir -p "$HOME/.config/hermes-runtime/credentials" \
   "$HOME/.local/state" \
-  "$HOME/.config/systemd/user"
+  "$HOME/.local/share/hermes-stage/systemd/user"
+# This directory must be inert, unsymlinked, and outside active systemd user search.
+# Never use $HOME/.config/systemd/user for this staging-only installer.
 # Create the 0600 files above out of band. Do not echo tokens into the shell history.
 
 python3 integrations/hermes_harness/hermesctl doctor
@@ -290,7 +292,7 @@ python3 integrations/hermes_harness/hermesctl doctor
 python3 integrations/hermes_harness/hermesctl install \
   --role mmsecretary \
   --state "$HOME/.local/state/hermes-runtime-mmsecretary" \
-  --systemd-user-dir "$HOME/.config/systemd/user" \
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user" \
   --secrets-file "$HOME/.config/hermes-runtime/mmsecretary.secrets.env" \
   --hermes-bin "$HERMES_BIN" \
   --fetch
@@ -298,21 +300,27 @@ python3 integrations/hermes_harness/hermesctl install \
 python3 integrations/hermes_harness/hermesctl install \
   --role mmmeta \
   --state "$HOME/.local/state/hermes-runtime-mmmeta" \
-  --systemd-user-dir "$HOME/.config/systemd/user" \
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user" \
   --secrets-file "$HOME/.config/hermes-runtime/mmmeta.secrets.env" \
   --hermes-bin "$HERMES_BIN" \
-  --upstream-source "$HOME/.local/state/hermes-runtime-mmsecretary/current/upstream"
+  --fetch
 ```
 
 `--fetch` is the only network step. It refuses every revision except the pin.
-The second install copies that attested tree and does not fetch again.
-`--upstream-source` records `upstream_attested: false` unless the bytes came
-from `--fetch`.
+Each role independently fetches the exact pinned upstream source and must
+have its **own** `upstream_attested: true` install receipt before the operator
+canary is eligible. Reusing the first role's checkout through
+`--upstream-source` produces `upstream_attested: false` and therefore
+blocks the second role's canary; never paper over that attestation gate.
+All installs are operator-authorized postrelease actions, not CI steps.
 
 `install` writes:
 
-- `hermes-runtime-mmsecretary.service` and `hermes-runtime-mmmeta.service` in the user unit directory
-- a `default.target.wants` symlink for each
+- legacy **user** unit artifacts only in the inert, isolated staging directory
+- legacy `default.target.wants` symlinks **inside that inert directory**,
+  never in an active user-manager search path; do not enable/start those units
+- the root operator separately renders/reviews/installs the PID1-managed
+  system units from `ROOT_CONFINED_SYSTEM_UNIT.md` after acceptance gates
 - role-local gateway ports `127.0.0.2:8765` (Secretary) and `127.0.0.3:8865` (Meta-CEO); never activate staged user units
 - `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, only\n  role-specific host-prefix `IPAddressAllow` rules (no blanket `localhost` 127/8)
 - `EnvironmentFile=` pointing at that unit's 0600 secrets file, and no secret bytes in the unit
@@ -528,11 +536,11 @@ systemctl --user daemon-reload
 
 python3 integrations/hermes_harness/hermesctl uninstall \
   --state "$HOME/.local/state/hermes-runtime-mmsecretary" \
-  --systemd-user-dir "$HOME/.config/systemd/user"
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user"
 
 python3 integrations/hermes_harness/hermesctl uninstall \
   --state "$HOME/.local/state/hermes-runtime-mmmeta" \
-  --systemd-user-dir "$HOME/.config/systemd/user"
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user"
 ```
 
 A second uninstall prints `ABSENT`. To keep the tree and undo one bad

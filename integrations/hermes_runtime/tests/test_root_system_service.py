@@ -181,6 +181,18 @@ class RootManagedUnitTests(unittest.TestCase):
         secret.assert_not_called()
         runtime.assert_not_called()
 
+    def test_operator_runbook_avoids_live_user_units_and_unattested_second_role(self):
+        doc = (REPO / "docs/hermes/DEPLOY_UBUNTU1.md").read_text(encoding="utf-8")
+        stage = '--systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user"'
+        self.assertEqual(doc.count(stage), 4)  # both installs and uninstalls
+        self.assertNotIn('--systemd-user-dir "$HOME/.config/systemd/user"', doc)
+        self.assertNotIn("systemctl --user enable --now", doc)
+        section = doc.split("## Install\n", 1)[1].split("`install` writes:", 1)[0]
+        self.assertEqual(section.count("  --fetch"), 2)
+        self.assertNotIn("  --upstream-source ", section)
+        self.assertIn("sudo systemctl enable --now hermes-runtime-mmsecretary.service", doc)
+        self.assertIn("sudo systemctl disable --now hermes-runtime-mmmeta.service", doc)
+
     def test_refused_role_exits_without_operator_secrets(self):
         with self.assertRaises(RuntimeRefusal):
             assert_root_service_cgroup("unknown", raw="0::/system.slice/hermes-runtime-unknown.service")
