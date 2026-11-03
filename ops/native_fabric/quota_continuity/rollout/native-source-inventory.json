@@ -576,9 +576,9 @@
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 59042,
+      "bytes": 59855,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d",
+      "sha256": "7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2",
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {

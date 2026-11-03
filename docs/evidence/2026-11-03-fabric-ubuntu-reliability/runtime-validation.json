@@ -1,0 +1,752 @@
+{
+  "schema": "mastermind.fabric_repair_runtime_evidence.v1",
+  "operation_id": "fabric-ubuntu-reliability-20261103-c4",
+  "state": "PARTIAL_REPAIR_NO_FLEET_WIDE_ACCEPTANCE",
+  "successful_bounded_run": {
+    "run_id": "fabric-fleet-byte-validation-20261103-c4",
+    "root_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+    "host": "ubuntu0",
+    "pool": "glm",
+    "model": "glm-5.3-flash",
+    "requested_max_turns": 4,
+    "result": {
+      "schema": "mastermind.fabric_mcp.v1",
+      "action": "fabric_result",
+      "run_id": "fabric-fleet-byte-validation-20261103-c4",
+      "effective_run_id": "fabric-fleet-byte-validation-20261103-c4",
+      "accept_run_id": "fabric-fleet-byte-validation-20261103-c4",
+      "root_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+      "adapter_response": "```json\n{\n  \"gib\": {\n    \"ubuntu0\": 94.236,\n    \"ubuntu1\": 98.096,\n    \"ubuntu2\": 287.707,\n    \"ubuntu3\": 127.494,\n    \"ubuntu4\": 866.960\n  },\n  \"all_above_75_gib\": true,\n  \"whole_fleet_worker_readiness_proven\": false\n}\n```\n",
+      "response_sha256": "7ab6209eb1c46fb6e86a60e38ea578ef65d6a864a9545075b1553f4668f8c92b",
+      "response_bytes": 224,
+      "accepted": false,
+      "digest_scope": "exact complete adapter CLI response; not a cryptographic artifact attestation",
+      "retry_allowed": false
+    },
+    "verification": {
+      "checks": [
+        {
+          "host": "ubuntu0",
+          "expected": 94.236,
+          "actual": 94.236,
+          "passed": true
+        },
+        {
+          "host": "ubuntu1",
+          "expected": 98.096,
+          "actual": 98.096,
+          "passed": true
+        },
+        {
+          "host": "ubuntu2",
+          "expected": 287.707,
+          "actual": 287.707,
+          "passed": true
+        },
+        {
+          "host": "ubuntu3",
+          "expected": 127.494,
+          "actual": 127.494,
+          "passed": true
+        },
+        {
+          "host": "ubuntu4",
+          "expected": 866.96,
+          "actual": 866.96,
+          "passed": true
+        }
+      ],
+      "expected": {
+        "ubuntu0": 94.236,
+        "ubuntu1": 98.096,
+        "ubuntu2": 287.707,
+        "ubuntu3": 127.494,
+        "ubuntu4": 866.96
+      },
+      "passed": true,
+      "response_sha256": "7ab6209eb1c46fb6e86a60e38ea578ef65d6a864a9545075b1553f4668f8c92b",
+      "format_note": "Correct content enclosed in one Markdown JSON fence; not raw-JSON serialization compliance. Reviewed as a text arithmetic result."
+    },
+    "acceptance": {
+      "schema": "mastermind.fabric_mcp.v1",
+      "action": "fabric_accept",
+      "run_id": "fabric-fleet-byte-validation-20261103-c4",
+      "root_id": "agent-fabric-end-to-end-fable-integration-20260913-sol-001",
+      "accepted": true,
+      "accepted_by": "reviewer",
+      "reviewed_response_sha256": "7ab6209eb1c46fb6e86a60e38ea578ef65d6a864a9545075b1553f4668f8c92b",
+      "verification_summary": "manual_result_review",
+      "legacy_acceptance_not_atomic_attestation": true,
+      "retry_allowed": false
+    },
+    "process_observation": {
+      "process": {
+        "schema": "mastermind.local_owned_process_receipt.v1",
+        "label": "fabric-fleet-byte-validation-20261103-c4",
+        "pid": 2053614,
+        "returncode": 0,
+        "started_at": "2026-11-03T08:23:45.050Z",
+        "ended_at": "2026-11-03T08:24:44.314Z",
+        "timed_out": false,
+        "runtime_failure_code": null
+      },
+      "cleanup": {
+        "status": "not_needed",
+        "identity_verified": true,
+        "census_proven": true,
+        "residual_count": 0,
+        "reason": "normal_completion"
+      }
+    },
+    "local_marker_readback": {
+      "active_marker_exists": false,
+      "process_receipt_exists": false,
+      "run_id": "fabric-fleet-byte-validation-20261103-c4"
+    },
+    "usage_receipt": "MISSING; no usage or spending claim",
+    "scope": "Text arithmetic result and one admitted worker path; no historical recovery or whole-host qualification"
+  },
+  "failed_runs": [
+    {
+      "run_id": "fabric-ubuntu-reliability-20261103-c4-source-audit",
+      "host": "ubuntu1",
+      "pool": "glm",
+      "model": "glm-5.3-flash",
+      "rc": 1,
+      "kind": "turn_limit",
+      "max_turns": 18,
+      "accepted": false,
+      "retry_allowed": false
+    },
+    {
+      "run_id": "fabric-ubuntu-maintenance-doc-review-20261103-c4",
+      "host": "ubuntu3",
+      "pool": "bailian",
+      "model": "qwen3.8-max",
+      "rc": 1,
+      "kind": "QWEN_FINAL_RESPONSE_UNCONFIRMED",
+      "wrapper_classification": "429 cooldown=1800; local inference, not verified provider HTTP status",
+      "accepted": false,
+      "retry_allowed": false,
+      "response_sha256": "81812fc5ded8db7036a4e51ec92ff6b22913bc44bfe48768f0a7e6df5f8a7593"
+    }
+  ],
+  "ubuntu2_original_incident": {
+    "root_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+    "parent_run_id": "orch-v91-seat-direct-20261102",
+    "lineage_basis": "Original ledger rows and exact preserved broker lease identities; status does not promote EFFECT_UNKNOWN to eligible terminal execution",
+    "original_support_digest": "858b767be20a09d32f38995296fec25a514f4442a847b8ed7e24e678ee6139de",
+    "original_executor_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
+    "helper_git_blob": "75297acb10d0cef4d01730a59fdcad19c7cfd3e6",
+    "host_git_version": "2.43.0",
+    "retained_markers": [
+      {
+        "hold": "news-w4-v91-v1-review-r1",
+        "sha256": "47c3a4ddfc701712f15e1b8b9e5cf01edde9451d77f5c3b296b670c8dc4b8871",
+        "bytes": 621
+      },
+      {
+        "hold": "news-w4-v91-v4-review-r1",
+        "sha256": "d2881145a8ab311b61a2cf1d5eececef6eb446ac9bc35e2a77202b0861249e1d",
+        "bytes": 621
+      },
+      {
+        "hold": "news-w4-v91-v6-review-r1",
+        "sha256": "634ed74ba0ebf0e1c7c1f3a1b0caed1fd7db421df60d0436b6c1312f69546628",
+        "bytes": 621
+      },
+      {
+        "hold": "news-w4-v91-v7-review-r2",
+        "sha256": "6f771b465065e2e45010fe48103117e685f7598349c0bf9ab2dd9b7de85d1f5a",
+        "bytes": 621
+      }
+    ],
+    "mint_receipts": [
+      {
+        "events": [
+          {
+            "keys": [
+              "cleanup",
+              "ended_at",
+              "label",
+              "nice_applied",
+              "nice_requested",
+              "pgid",
+              "pid",
+              "returncode",
+              "runtime_failure_code",
+              "schema",
+              "started_at",
+              "stderr_bytes",
+              "stderr_truncated",
+              "stdout_bytes",
+              "stdout_sha256",
+              "stdout_truncated",
+              "timed_out"
+            ],
+            "projection": {
+              "label": "news-w4-v91-v1-review-r1:workspace-mint",
+              "pgid": 1220328,
+              "pid": 1220328,
+              "returncode": 1,
+              "schema": "mastermind.local_owned_process_receipt.v1",
+              "started_at": "2026-11-02T05:26:31.543Z",
+              "stderr_truncated": false,
+              "stdout_truncated": false,
+              "timed_out": false
+            }
+          }
+        ],
+        "launcher_rc": "76",
+        "launcher_sentinel": "FABRIC_SPARSE_MINT_UNVERIFIED",
+        "receipt_sha256": "131d90056db32151c2a1eba865c17a3bd21890bd95ac596852cd21bacea7e03c",
+        "run": "news-w4-v91-v1-review-r1"
+      },
+      {
+        "events": [
+          {
+            "keys": [
+              "cleanup",
+              "ended_at",
+              "label",
+              "nice_applied",
+              "nice_requested",
+              "pgid",
+              "pid",
+              "returncode",
+              "runtime_failure_code",
+              "schema",
+              "started_at",
+              "stderr_bytes",
+              "stderr_truncated",
+              "stdout_bytes",
+              "stdout_sha256",
+              "stdout_truncated",
+              "timed_out"
+            ],
+            "projection": {
+              "label": "news-w4-v91-v4-review-r1:workspace-mint",
+              "pgid": 1220580,
+              "pid": 1220580,
+              "returncode": 1,
+              "schema": "mastermind.local_owned_process_receipt.v1",
+              "started_at": "2026-11-02T05:26:32.525Z",
+              "stderr_truncated": false,
+              "stdout_truncated": false,
+              "timed_out": false
+            }
+          }
+        ],
+        "launcher_rc": "76",
+        "launcher_sentinel": "FABRIC_SPARSE_MINT_UNVERIFIED",
+        "receipt_sha256": "c9fd4323c0fd7acb03bb16948a94b929caf268ed108ffdeb8c01401652eb2b00",
+        "run": "news-w4-v91-v4-review-r1"
+      },
+      {
+        "events": [
+          {
+            "keys": [
+              "cleanup",
+              "ended_at",
+              "label",
+              "nice_applied",
+              "nice_requested",
+              "pgid",
+              "pid",
+              "returncode",
+              "runtime_failure_code",
+              "schema",
+              "started_at",
+              "stderr_bytes",
+              "stderr_truncated",
+              "stdout_bytes",
+              "stdout_sha256",
+              "stdout_truncated",
+              "timed_out"
+            ],
+            "projection": {
+              "label": "news-w4-v91-v6-review-r1:workspace-mint",
+              "pgid": 1221025,
+              "pid": 1221025,
+              "returncode": 1,
+              "schema": "mastermind.local_owned_process_receipt.v1",
+              "started_at": "2026-11-02T05:26:35.860Z",
+              "stderr_truncated": false,
+              "stdout_truncated": false,
+              "timed_out": false
+            }
+          }
+        ],
+        "launcher_rc": "76",
+        "launcher_sentinel": "FABRIC_SPARSE_MINT_UNVERIFIED",
+        "receipt_sha256": "600e3e4255387523b6586c7e0477f8a2e7f5393ebeca51f9e1dc8fd50e1a569a",
+        "run": "news-w4-v91-v6-review-r1"
+      },
+      {
+        "events": [
+          {
+            "keys": [
+              "cleanup",
+              "ended_at",
+              "label",
+              "nice_applied",
+              "nice_requested",
+              "pgid",
+              "pid",
+              "returncode",
+              "runtime_failure_code",
+              "schema",
+              "started_at",
+              "stderr_bytes",
+              "stderr_truncated",
+              "stdout_bytes",
+              "stdout_sha256",
+              "stdout_truncated",
+              "timed_out"
+            ],
+            "projection": {
+              "label": "news-w4-v91-v7-review-r2:workspace-mint",
+              "pgid": 1221531,
+              "pid": 1221531,
+              "returncode": 1,
+              "schema": "mastermind.local_owned_process_receipt.v1",
+              "started_at": "2026-11-02T05:26:41.174Z",
+              "stderr_truncated": false,
+              "stdout_truncated": false,
+              "timed_out": false
+            }
+          }
+        ],
+        "launcher_rc": "76",
+        "launcher_sentinel": "FABRIC_SPARSE_MINT_UNVERIFIED",
+        "receipt_sha256": "09a0b4b300d20c1fe4d571eb6bc03c8fe523be19b5276de4a75bf97233ec22e6",
+        "run": "news-w4-v91-v7-review-r2"
+      }
+    ],
+    "mint_terminal_cleanup": [
+      {
+        "run": "news-w4-v91-v1-review-r1",
+        "terminal": {
+          "cleanup": {
+            "census_proven": true,
+            "error_code": null,
+            "identity_verified": true,
+            "reason": "leader_exited_with_descendants",
+            "residual_count": 0,
+            "session_id": 1220328,
+            "sigkill_member_count": 0,
+            "sigkill_sent": false,
+            "sigterm_member_count": 4,
+            "sigterm_sent": true,
+            "status": "terminated",
+            "stderr_capture_complete": true,
+            "stderr_capture_error": null,
+            "stdin_delivery_complete": true,
+            "stdin_delivery_error": null,
+            "stdout_capture_complete": true,
+            "stdout_capture_error": null
+          },
+          "ended_at": "2026-11-02T05:27:31.732Z",
+          "runtime_failure_code": null,
+          "stderr_bytes": 55,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "worker_process_receipt_exists": false
+      },
+      {
+        "run": "news-w4-v91-v4-review-r1",
+        "terminal": {
+          "cleanup": {
+            "census_proven": true,
+            "error_code": null,
+            "identity_verified": true,
+            "reason": "leader_exited_with_descendants",
+            "residual_count": 0,
+            "session_id": 1220580,
+            "sigkill_member_count": 0,
+            "sigkill_sent": false,
+            "sigterm_member_count": 4,
+            "sigterm_sent": true,
+            "status": "terminated",
+            "stderr_capture_complete": true,
+            "stderr_capture_error": null,
+            "stdin_delivery_complete": true,
+            "stdin_delivery_error": null,
+            "stdout_capture_complete": true,
+            "stdout_capture_error": null
+          },
+          "ended_at": "2026-11-02T05:27:32.693Z",
+          "runtime_failure_code": null,
+          "stderr_bytes": 55,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "worker_process_receipt_exists": false
+      },
+      {
+        "run": "news-w4-v91-v6-review-r1",
+        "terminal": {
+          "cleanup": {
+            "census_proven": true,
+            "error_code": null,
+            "identity_verified": true,
+            "reason": "leader_exited_with_descendants",
+            "residual_count": 0,
+            "session_id": 1221025,
+            "sigkill_member_count": 0,
+            "sigkill_sent": false,
+            "sigterm_member_count": 4,
+            "sigterm_sent": true,
+            "status": "terminated",
+            "stderr_capture_complete": true,
+            "stderr_capture_error": null,
+            "stdin_delivery_complete": true,
+            "stdin_delivery_error": null,
+            "stdout_capture_complete": true,
+            "stdout_capture_error": null
+          },
+          "ended_at": "2026-11-02T05:27:36.018Z",
+          "runtime_failure_code": null,
+          "stderr_bytes": 55,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "worker_process_receipt_exists": false
+      },
+      {
+        "run": "news-w4-v91-v7-review-r2",
+        "terminal": {
+          "cleanup": {
+            "census_proven": true,
+            "error_code": null,
+            "identity_verified": true,
+            "reason": "leader_exited_with_descendants",
+            "residual_count": 0,
+            "session_id": 1221531,
+            "sigkill_member_count": 0,
+            "sigkill_sent": false,
+            "sigterm_member_count": 4,
+            "sigterm_sent": true,
+            "status": "terminated",
+            "stderr_capture_complete": true,
+            "stderr_capture_error": null,
+            "stdin_delivery_complete": true,
+            "stdin_delivery_error": null,
+            "stdout_capture_complete": true,
+            "stdout_capture_error": null
+          },
+          "ended_at": "2026-11-02T05:27:41.368Z",
+          "runtime_failure_code": null,
+          "stderr_bytes": 55,
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "worker_process_receipt_exists": false
+      }
+    ],
+    "original_provider_leases": [
+      {
+        "granted_at": 1793597189.557523,
+        "host": "ubuntu2",
+        "id": "1b0bdd5ad66e",
+        "last_heartbeat": 1793597251.957649,
+        "model": "",
+        "orchestrator_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "pid": 15179,
+        "pool": "minimax",
+        "renewable": 1,
+        "state": "released",
+        "task_class": "remote-minimax"
+      },
+      {
+        "granted_at": 1793597194.143463,
+        "host": "ubuntu2",
+        "id": "2a516f9a6004",
+        "last_heartbeat": 1793597256.275146,
+        "model": "",
+        "orchestrator_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "pid": 15471,
+        "pool": "minimax",
+        "renewable": 1,
+        "state": "released",
+        "task_class": "remote-minimax"
+      },
+      {
+        "granted_at": 1793597190.830761,
+        "host": "ubuntu2",
+        "id": "420414bf9f91",
+        "last_heartbeat": 1793597252.9482,
+        "model": "",
+        "orchestrator_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "pid": 15278,
+        "pool": "minimax",
+        "renewable": 1,
+        "state": "released",
+        "task_class": "remote-minimax"
+      },
+      {
+        "granted_at": 1793597199.4283671,
+        "host": "ubuntu2",
+        "id": "f267daff4251",
+        "last_heartbeat": 1793597261.61077,
+        "model": "",
+        "orchestrator_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "pid": 15716,
+        "pool": "minimax",
+        "renewable": 1,
+        "state": "released",
+        "task_class": "remote-minimax"
+      }
+    ],
+    "original_execution_rows": [
+      {
+        "available_keys": [
+          "accepted_by",
+          "cached_tokens",
+          "credit_rate",
+          "credits",
+          "escalated",
+          "escalation_reason",
+          "input_tokens",
+          "job_class",
+          "key",
+          "model",
+          "output_tokens",
+          "parent_run_id",
+          "pool",
+          "rc",
+          "reason",
+          "retries",
+          "review_rejected",
+          "root_id",
+          "run_id",
+          "scope_violation",
+          "signal",
+          "task_class",
+          "tokens",
+          "ts",
+          "wall_s",
+          "window_id"
+        ],
+        "model": null,
+        "parent_run_id": "orch-v91-seat-direct-20261102",
+        "pool": "minimax",
+        "rc": 76,
+        "reason": "remote_cleanup_unproven",
+        "root_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "run_id": "news-w4-v91-v1-review-r1",
+        "signal": "effect_unknown",
+        "task_class": "remote-minimax",
+        "ts": 1793597252
+      },
+      {
+        "available_keys": [
+          "accepted_by",
+          "cached_tokens",
+          "credit_rate",
+          "credits",
+          "escalated",
+          "escalation_reason",
+          "input_tokens",
+          "job_class",
+          "key",
+          "model",
+          "output_tokens",
+          "parent_run_id",
+          "pool",
+          "rc",
+          "reason",
+          "retries",
+          "review_rejected",
+          "root_id",
+          "run_id",
+          "scope_violation",
+          "signal",
+          "task_class",
+          "tokens",
+          "ts",
+          "wall_s",
+          "window_id"
+        ],
+        "model": null,
+        "parent_run_id": "orch-v91-seat-direct-20261102",
+        "pool": "minimax",
+        "rc": 76,
+        "reason": "remote_cleanup_unproven",
+        "root_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "run_id": "news-w4-v91-v4-review-r1",
+        "signal": "effect_unknown",
+        "task_class": "remote-minimax",
+        "ts": 1793597253
+      },
+      {
+        "available_keys": [
+          "accepted_by",
+          "cached_tokens",
+          "credit_rate",
+          "credits",
+          "escalated",
+          "escalation_reason",
+          "input_tokens",
+          "job_class",
+          "key",
+          "model",
+          "output_tokens",
+          "parent_run_id",
+          "pool",
+          "rc",
+          "reason",
+          "retries",
+          "review_rejected",
+          "root_id",
+          "run_id",
+          "scope_violation",
+          "signal",
+          "task_class",
+          "tokens",
+          "ts",
+          "wall_s",
+          "window_id"
+        ],
+        "model": null,
+        "parent_run_id": "orch-v91-seat-direct-20261102",
+        "pool": "minimax",
+        "rc": 76,
+        "reason": "remote_cleanup_unproven",
+        "root_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "run_id": "news-w4-v91-v6-review-r1",
+        "signal": "effect_unknown",
+        "task_class": "remote-minimax",
+        "ts": 1793597256
+      },
+      {
+        "available_keys": [
+          "accepted_by",
+          "cached_tokens",
+          "credit_rate",
+          "credits",
+          "escalated",
+          "escalation_reason",
+          "input_tokens",
+          "job_class",
+          "key",
+          "model",
+          "output_tokens",
+          "parent_run_id",
+          "pool",
+          "rc",
+          "reason",
+          "retries",
+          "review_rejected",
+          "root_id",
+          "run_id",
+          "scope_violation",
+          "signal",
+          "task_class",
+          "tokens",
+          "ts",
+          "wall_s",
+          "window_id"
+        ],
+        "model": null,
+        "parent_run_id": "orch-v91-seat-direct-20261102",
+        "pool": "minimax",
+        "rc": 76,
+        "reason": "remote_cleanup_unproven",
+        "root_id": "e3d62d36-ba30-4fed-a723-f6ce79ba4f99",
+        "run_id": "news-w4-v91-v7-review-r2",
+        "signal": "effect_unknown",
+        "task_class": "remote-minimax",
+        "ts": 1793597262
+      }
+    ],
+    "retained_packet_metadata": [
+      {
+        "bytes": 6259,
+        "packet_exists": true,
+        "packet_sha256": "f27d1c5990d1fa645f632bde91e982abcc9384e03920df75fd5e1ca742bd1662",
+        "run": "news-w4-v91-v1-review-r1",
+        "sha40_candidates": [
+          "be8ba1ddae4131f2acd7b5dba150b966feb2e3a7"
+        ]
+      },
+      {
+        "bytes": 6416,
+        "packet_exists": true,
+        "packet_sha256": "849cc1f613354ec2e104fa142cd0703774dc71a6baf2489856e1c6aee2441311",
+        "run": "news-w4-v91-v4-review-r1",
+        "sha40_candidates": [
+          "51955ba01467e9810d701ae1201db9c8f18ea529"
+        ]
+      },
+      {
+        "bytes": 6342,
+        "packet_exists": true,
+        "packet_sha256": "bfb74cc6a10c47e540bd69b3e781454e2ac2c12fe24c3c1ee2b596513189b966",
+        "run": "news-w4-v91-v6-review-r1",
+        "sha40_candidates": [
+          "e9f7867823c2efc6863cdbfafae3faf8a83020fc"
+        ]
+      },
+      {
+        "bytes": 4613,
+        "packet_exists": true,
+        "packet_sha256": "ba8e95fc63b86d7c5b5fbfb165bc402d5be7b6897192205897191c82a3961c9f",
+        "run": "news-w4-v91-v7-review-r2",
+        "sha40_candidates": [
+          "4f087b7deda2ae59f1bc1a6cd827eacbeb2ad0a0",
+          "8f7223120b649c2829f7c0e3448374a944a3f366"
+        ]
+      }
+    ],
+    "closed_git_readback": [
+      {
+        "branch_ref_file_exists": false,
+        "branch_ref_rc": 1,
+        "branch_reflog_exists": false,
+        "matching_gitdir_records": [],
+        "objects": [
+          {
+            "kind": "commit",
+            "packet_sha_candidate": "be8ba1ddae4131f2acd7b5dba150b966feb2e3a7",
+            "rc": 0,
+            "stderr_bytes": 0
+          }
+        ],
+        "run": "news-w4-v91-v1-review-r1",
+        "transport_allowlist_empty": true,
+        "workspace_lexists": false,
+        "worktree_list_branch_present": false,
+        "worktree_list_target_present": false
+      },
+      {
+        "branch_ref_file_exists": false,
+        "branch_ref_rc": 1,
+        "branch_reflog_exists": false,
+        "matching_gitdir_records": [],
+        "objects": [
+          {
+            "kind": "commit",
+            "packet_sha_candidate": "51955ba01467e9810d701ae1201db9c8f18ea529",
+            "rc": 0,
+            "stderr_bytes": 0
+          }
+        ],
+        "run": "news-w4-v91-v4-review-r1",
+        "transport_allowlist_empty": true,
+        "workspace_lexists": false,
+        "worktree_list_branch_present": false,
+        "worktree_list_target_present": false
+      }
+    ],
+    "readback_limit": "Only v1 and v4 metadata/object checks completed. v6 cat-file for the packet SHA candidate timed out after 10 seconds despite disabled transport; v7 was not queried. Subsequent exact-SHA process census found no matching residual processes. No retry or allocation was performed.",
+    "observer_residual_census": [
+      {
+        "exact_pin_matching_processes": []
+      }
+    ],
+    "stderr_limit": "The original mint owner retained stderr byte counts, not the 55 stderr bytes. Missing local commit is a hypothesis consistent with the helper's early guard; it is not established as the original cause.",
+    "disposition": "All four local reconciliation holds retained. Current object/destination observations and process cleanup alone do not authorize release. No original provider or workspace operation was replayed."
+  }
+}

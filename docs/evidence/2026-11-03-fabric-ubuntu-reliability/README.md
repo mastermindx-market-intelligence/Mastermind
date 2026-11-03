@@ -1,6 +1,6 @@
 # Ubuntu maintenance repair and Fabric qualification checkpoint
 
-**Status: maintenance configured on Ubuntu0–4; Fabric worker qualification remains incomplete.**
+**Status: maintenance configured on Ubuntu0–4; one Ubuntu0 worker path verified; source fixes tested but unreleased; fleet qualification remains incomplete.**
 
 This is a bounded maintenance and recovery slice of the existing
 WS:EXECUTIVE-CAPACITY-FABRIC program, integration root
@@ -75,9 +75,25 @@ floor for a non-degraded receipt. The proposed documentation change explicitly
 requires that binding before activation, explains the exact observed failure,
 preserves pre-existing configuration, and distinguishes maintenance observation
 from worker admission and CI requirements. No executable hygiene behavior
-changes in this branch.
+changes in this branch. A separate native executor repair in this same branch
+adds local-commit preflight and suppresses a specific Git informational advisory;
+see [source-fix.md](source-fix.md) and its exact validation hashes.
 
 ## Fabric execution proof and remaining failures
+
+The distinct bounded arithmetic task `fabric-fleet-byte-validation-20261103-c4`
+completed on Ubuntu0 through GLM with rc0. Every returned value was recomputed
+and verified, and the exact 224-byte response was accepted by the assigning
+parent. The owned-process receipt reports normal completion, verified process
+identity/census and zero residuals; the local worker marker is absent. Its
+usage receipt was missing, so no usage or spend is claimed. This establishes
+one bounded worker path, not full host qualification. The text response wrapped
+its correct JSON in Markdown; raw JSON formatting compliance is not claimed.
+
+The distinct Qwen documentation review on Ubuntu3 returned
+`QWEN_FINAL_RESPONSE_UNCONFIRMED`, rc1 and no accepted review. Its wrapper's
+429 label is local inference, not verified provider HTTP status. Full bounded
+runtime projections are in [runtime-validation.json](runtime-validation.json).
 
 The bounded source audit `fabric-ubuntu-reliability-20261103-c4-source-audit`
 was admitted on Ubuntu1 through GLM / `glm-5.3-flash` with an 18-turn ceiling.
@@ -98,7 +114,10 @@ Ubuntu2 remains held by four original `sparse_workspace_effect_unknown` runs:
 - `news-w4-v91-v7-review-r2`
 
 Their original owner reports `EFFECT_UNKNOWN`; no result, parent acceptance or
-safe release proof is established. Maintenance installation does not reconcile
+safe release proof is established. Original ledger rows bind them to root
+`e3d62d36-ba30-4fed-a723-f6ce79ba4f99` and parent
+`orch-v91-seat-direct-20261102`. The exact provider lease rows now report
+released, while the four local reconciliation holds remain. Maintenance installation does not reconcile
 them. Age, a missing process or excess disk cannot release these holds.
 
 Ubuntu4 retains its qualification-only provider modes. Ample capacity and a
@@ -111,8 +130,13 @@ fleet can be called fully working.
 
 Live proof covers source and config readback, effective user units, persistent
 timer activation, report-only validation and canonical service receipts.
-There is no code behavior change that would justify new mirror tests.
-Review the documentation diff and machine-readable receipts, then continue
+The native executor source changes passed 79 focused tests with no failures or
+skips, including the full existing composition suite and new preflight cases.
+The rebuilt 102-member inventory changes only the executor. These are source
+candidate checks; the live generation has not changed.
+Review the source diff, [source-fix.md](source-fix.md), and machine-readable receipts, then continue
 through the original Fabric reconciliation, source-release and fleet retention
 owners. Preserve currently held or conflicting source carriers (#1836, #1877,
-#1951, #1894 and #1902); this branch does not modify their owned source paths.
+#1951, #1894 and #1902). This branch does not adopt their held executable
+candidates. Shared release metadata must be rebuilt against any separately
+merged native changes before release; it is not permission to select a held candidate.

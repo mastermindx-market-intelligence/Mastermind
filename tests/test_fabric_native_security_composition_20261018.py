@@ -31,7 +31,10 @@ PRE_GROK_COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699
 GROK_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-grok-forward-20261023.patch"
 GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c830269b736"
 COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
-FINAL_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+PRE_PIN_PREFLIGHT_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
+FINAL_COMPOSED_SHA = "7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2"
+PIN_PREFLIGHT_PATCH = ROOT / "tests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch"
+PIN_PREFLIGHT_PATCH_SHA = "34d3cbbe2033bc8a1a68d6d711407ad57ee892a951f4ef68303c719f3585a9c9"
 H1_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-h1-provider-entry-forward.patch"
 H1_FORWARD_PATCH_SHA = "4be46626757b8654babb5140ffc757d0fa74de879a37240965737a0c874b2918"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
@@ -52,7 +55,7 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "55cc9fcdd3e03696311532b0ab7dcd2c54eaad0ac039280d3c844de87dbc4054"
+NATIVE_MANIFEST_SHA = "5650b1d55f8e67bf15964bc026be98ca93d2eef4eab04ce67c54f68885058f20"
 
 
 def _sha(raw):
@@ -105,6 +108,10 @@ def _composition(directory):
     assert _sha(H1_FORWARD_PATCH.read_bytes()) == H1_FORWARD_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(H1_FORWARD_PATCH))
     donor_contract._git(directory, "apply", str(H1_FORWARD_PATCH))
+    assert _sha(target.read_bytes()) == PRE_PIN_PREFLIGHT_SHA
+    assert _sha(PIN_PREFLIGHT_PATCH.read_bytes()) == PIN_PREFLIGHT_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(PIN_PREFLIGHT_PATCH))
+    donor_contract._git(directory, "apply", str(PIN_PREFLIGHT_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     assert _sha(composed) == FINAL_COMPOSED_SHA
     assert target.read_bytes() == composed
