@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 class ProviderDiagnosticExportTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
+        # Keep the real custody guard: /tmp is world-writable on Linux.
+        cls.tmp = tempfile.TemporaryDirectory(dir=ROOT)
         result = subprocess.run([sys.executable, str(ROOT/'ops/native_fabric/quota_continuity/rollout/build_review_stage.py'), '--output', cls.tmp.name], capture_output=True, text=True)
         if result.returncode: raise AssertionError(result.stderr)
         cls.ext = Path(cls.tmp.name)/'native-code-stage/ext'
@@ -111,7 +112,7 @@ for raw,receipt in [(raw_events(status=True),{}),(raw_events(status=404),{'api_s
 
     def test_remote_projection_contains_no_raw_capture(self):
         self.run_case("""
-with tempfile.TemporaryDirectory() as t:
+with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
  request,lane,outcome=fixture(Path(t).resolve());row=c.remote_diagnostic_envelope(request,home=Path(t).resolve())
  assert row['state']=='DIAGNOSED',row
  data=c.canonical(row)
@@ -122,7 +123,7 @@ with tempfile.TemporaryDirectory() as t:
     def test_fixed_paths_wrong_identity_and_unknown_keys(self):
         self.run_case("""
 for change in ['run','root','path','unknown','parent','layout']:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   request,lane,outcome=fixture(Path(t).resolve())
   if change in ['run','root','parent']:request[{'run':'run_id','root':'root','parent':'parent'}[change]]='wrong'
   if change=='layout':request['diagnostic']['lane_root']={'path':'/different'}
@@ -136,7 +137,7 @@ for change in ['run','root','path','unknown','parent','layout']:
     def test_symlink_permissions_owner_and_hash_mutation(self):
         self.run_case("""
 for change in ['symlink','writable','size','digest','truncated','provider','owner','active','process','packet','parent','cleaned']:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   request,lane,outcome=fixture(Path(t).resolve());p=lane/request['diagnostic']['capture']['file']
   if change=='symlink':p.rename(lane/'private');p.symlink_to(lane/'private')
   if change=='writable':p.chmod(0o666)
@@ -163,7 +164,7 @@ for change in ['symlink','writable','size','digest','truncated','provider','owne
 
     def test_generated_reader_has_same_safe_boundary(self):
         self.run_case("""
-with tempfile.TemporaryDirectory() as t:
+with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
  request,lane,outcome=fixture(Path(t).resolve());code=c.code_for_request(request);ns={}
  exec(code[:code.rfind('\\ntry:\\n raw=')],ns)
  row=ns['remote_envelope'](request,home=Path(t).resolve())
@@ -197,7 +198,7 @@ assert p['initial_rejection'] is True
 
     def test_mutation_after_parse_refuses_without_leakage(self):
         self.run_case("""
-with tempfile.TemporaryDirectory() as t:
+with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
  request,lane,outcome=fixture(Path(t).resolve());original=c.project_provider_capture
  def race(raw,outcome):
   value=original(raw,outcome);(lane/'synthetic-run.process.jsonl').write_text('SECRET');return value
@@ -209,7 +210,7 @@ with tempfile.TemporaryDirectory() as t:
     def test_process_provider_disagreement_and_unknown_custody(self):
         self.run_case("""
 for change in ['rc','hash','cleanup','timeout','boolpid','residual','stdin','time']:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   request,lane,outcome=fixture(Path(t).resolve());process=reader.strict_json((lane/'synthetic-run.process.jsonl').read_bytes())
   if change=='rc':process['returncode']=2
   if change=='hash':process['stdout_sha256']='a'*64
@@ -234,7 +235,7 @@ with patch.dict(os.environ,{'CODEX_THREAD_ID':'child','POOL_ORCHESTRATOR_ID':'ro
 
     def test_local_lease_and_source_rechecks_before_publication(self):
         self.run_case("""
-with tempfile.TemporaryDirectory() as t:
+with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
  request,lane,outcome=fixture(Path(t).resolve());original=(request,'hostalias','a'*64,'b'*64,{})
  response=c.canonical(c.remote_diagnostic_envelope(request,home=Path(t).resolve()))
  with patch.object(c,'qualify_provider_diagnostics',side_effect=[original,ValueError('SECRET https://u:pw@bad')]),patch.object(d,'transport',return_value=response),patch.object(d,'reserve_destination',synthetic_destination):
@@ -247,7 +248,7 @@ with tempfile.TemporaryDirectory() as t:
     def test_transport_and_response_refusals_do_not_echo_untrusted_text(self):
         self.run_case("""
 for effect in ['transport','extra','invalid']:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   request,lane,outcome=fixture(Path(t).resolve());original=(request,'hostalias','a'*64,'b'*64,{})
   response=c.remote_diagnostic_envelope(request,home=Path(t).resolve())
   if effect=='extra':response['SECRET']='https://u:pw@bad'
@@ -263,7 +264,7 @@ for effect in ['transport','extra','invalid']:
         self.run_case("""
 import provider_outcome as po
 for change in ['qualified','success','missing','malformed','truncated','symlink','mode','active']:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   home=Path(t).resolve();request,lane,outcome=fixture(home)
   if change=='success':
    outcome['command_rc']=0
@@ -285,7 +286,7 @@ for change in ['qualified','success','missing','malformed','truncated','symlink'
         self.run_case("""
 import fabric_task
 for change in ['qualified','active','unknown','root','parent','process','hold']:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   home=Path(t).resolve();request,lane,outcome=fixture(home);base=home/'lanes/ext/state/remote_sub';base.mkdir(parents=True)
   for suffix in ['provider.json','process.jsonl']:
    data=(lane/('synthetic-run.'+suffix)).read_bytes();p=base/('synthetic-run.'+suffix);p.write_bytes(data);p.chmod(0o600)
@@ -313,7 +314,7 @@ for change in ['qualified','active','unknown','root','parent','process','hold']:
     def test_successful_safe_publication_and_publication_race(self):
         self.run_case("""
 for mutate in [False,True]:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   home=Path(t).resolve();request,lane,outcome=fixture(home);original=(request,'alias','a'*64,'b'*64,{})
   response=c.canonical(c.remote_diagnostic_envelope(request,home=home));counter=[0]
   def qualify(*args,**kwargs):
@@ -341,7 +342,7 @@ start=source.index('  require_bound_lane_layout_after_launch before_cleanup')
 end=source.index('\\nfi\\n\\nrequire_bound_lane_layout_after_launch after_collection',start)
 branch=source[start:end]
 for change in ['qualified','success','missing','malformed','truncated','duplicate-provider','duplicate-process','duplicate-meta','nonfinite']:
- with tempfile.TemporaryDirectory() as t:
+ with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
   home=Path(t).resolve();request,lane,outcome=fixture(home);rid='synthetic-run'
   support=home/'lanes/support-releases'/request['contract']['support_digest']/'ext'
   for name in ['provider_outcome.py','lane_runtime.py']:
@@ -381,4 +382,20 @@ for key,value in [('error_types',['SECRET https://u:pw@bad']),('dns_error','SECR
  try:c.validate_diagnostic_projection(row)
  except ValueError as error:assert str(error)=='diagnostic_unavailable'
  else:raise AssertionError(key)
+""")
+
+    def test_world_writable_ancestor_refuses_with_trusted_sibling_positive(self):
+        self.run_case("""
+import provider_outcome as po
+with tempfile.TemporaryDirectory(dir=c.HERE.parent.parent) as t:
+ base=Path(t).resolve()
+ for mode in [0o700,0o777]:
+  ancestor=base/('trusted' if mode==0o700 else 'untrusted');ancestor.mkdir(mode=mode);ancestor.chmod(mode)
+  home=ancestor/'fixture';home.mkdir(mode=0o700);request,lane,outcome=fixture(home)
+  row=c.remote_diagnostic_envelope(request,home=home)
+  if mode==0o700:
+   assert row['state']=='DIAGNOSED' and po.diagnostic_retention_ready(str(home/'lanes'),'synthetic-run','root')
+  else:
+   assert row['state']=='UNAVAILABLE' and row['reason']=='diagnostic_unavailable'
+   assert not po.diagnostic_retention_ready(str(home/'lanes'),'synthetic-run','root')
 """)
