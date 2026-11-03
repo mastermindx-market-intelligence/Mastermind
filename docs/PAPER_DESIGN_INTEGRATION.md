@@ -1,3 +1,48 @@
+## C2 Personal v12 -> v20 selection prepared (source-only, 2026-11-02)
+
+The legacy C2 Personal M2 seat now selects exact v12 (bridge
+`82bc7f2d...`) on the sealed 12-file closed-publisher generation, so the
+historical v10 -> v12 admission above can never fire for it again. The running
+catalog keeps `accepted_for_write=false` for Paper 0.5.18 and the Business-seat
+v20 rollout does not update this consumer, so the installer's
+`paper-runtime-upgrade` operation now recognizes this one exact cohort and
+selects the accepted immutable v20 generation through the identical single-use
+manifest-CAS transaction. Every other admission — both C2 accounts and C4 —
+remains the unchanged v10 -> v12 selection, and the global runtime pin stays
+v12.
+
+Admission pins for the new path: freshly observed predecessor manifest CAS
+`c5cdba867972f547aaefa7dbfc5840467d2961c7f4d346e8de1f1ba575686ef6`; sealed
+non-Paper configuration
+`201288e64eadeb25e16306e737831fb828ce638a54b0e41c16945bd1c737eb08`; the
+installed 12-file cohort re-derived from the reviewed closed-publisher patch
+plus unchanged fleet modules (no byte identity invented); and target bridge
+`1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced`, whose
+directory remains owned by `runtime_stage.py`'s immutable v20 staging. The
+node/backend/dependency identity is inherited from the seat's sealed C2
+predecessor because the publisher patch changed only module bytes; a live
+manifest that disagrees refuses closed and requires fresh observation of the
+exact differing identity fields before any source change. Both the retained
+v12 runtime and the staged v20 generation must pass the existing verifier
+before any write.
+
+Prepared operator sequence (independently reviewed release only; not executed
+here): stage and verify v20 with the `runtime_stage.py` owner, run the
+read-only preflight with
+`--account chatgpt2-personal --expected-manifest-sha256
+<fresh-observed-manifest-sha256> --preflight-only`, then stop the seat with the
+accepted helper and repeat without `--preflight-only` from a carrier that
+survives stopping C2 — never a self-cutover through this gateway. Only
+`paperDesign` and the manifest `configHash` change; every module byte, plist,
+node/backend/dependency seal and source pointer is preserved, and pre-commit
+failures restore the original bytes while post-commit failures stay
+EFFECT_UNKNOWN with no replay. A stale CAS, changed profile, wrong cohort or
+identity, invalid v20 receipt/bridge/python, loaded service or concurrent
+drift is a gate. As with the proposal below, this source readiness is not
+deployment acceptance: the v20 BUILT_NOT_PROVEN receipts (independent review,
+protected merge, real exact-target edit, readback, screenshot and reconnect)
+remain outstanding before any live selection.
+
 ## P00 pre-dispatch requalification repair (source candidate; not installed)
 
 P00's inspection of the existing #1011 path observed Paper Desktop 0.5.18
