@@ -6,6 +6,10 @@ No provider, live host, real lease or production workspace is used.
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+import subprocess
+
 import pytest
 
 import test_fabric_native_security_composition_20261018 as composition
@@ -149,3 +153,49 @@ def test_clean_materialized_tracked_content_is_preserved(repository):
     assert len(f.calls) == 1
     assert path.read_text() == "tracked fixture\n"
     assert (f.original / "preserve.txt").read_text() == "ORIGINAL UNCOMMITTED WORK\n"
+
+
+def test_sparse_index_observer_preserves_index_and_config_bytes(repository):
+    f = repository
+    common = f.original / ".git"
+    gitdir = Path(donor_contract._git(
+        f.alternate, "rev-parse", "--path-format=absolute", "--git-dir"))
+    paths = [common / "config", gitdir / "index", gitdir / "config.worktree",
+             gitdir / "info/sparse-checkout"]
+    before = {path: path.read_bytes() if path.exists() else None for path in paths}
+    result = f.module["_sparse_git"](
+        f.alternate, common, "ls-files", "-v", "--stage", "-z", "--",
+        "scripts/worktree_sparse.py")
+    assert b"\tscripts/worktree_sparse.py\0" in result
+    assert {path: path.read_bytes() if path.exists() else None for path in paths} == before
+    assert not (gitdir / "index.lock").exists()
+    assert_no_helper_effect(f)
+
+
+def test_zero_exit_valid_stdout_with_other_stderr_still_refuses(repository, monkeypatch):
+    f = repository
+
+    class DiagnosticObservation:
+        # Pipe-only fixture: Git reports a valid type and exits zero, but emits
+        # another diagnostic. Suppressing one advice must not admit this case.
+        def __init__(self, *args, **kwargs):
+            pipes = [os.pipe(), os.pipe()]
+            os.write(pipes[0][1], b"commit\n")
+            os.write(pipes[1][1], b"fixture unrelated Git diagnostic\n")
+            for _, writer in pipes:
+                os.close(writer)
+            self.stdout, self.stderr = [os.fdopen(reader, "rb") for reader, _ in pipes]
+
+        def wait(self, timeout):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", DiagnosticObservation)
+    with pytest.raises(f.module["SparseWorkspaceRefused"],
+                       match="GIT_OBSERVATION_UNQUALIFIED") as raised:
+        f.module["_sparse_git"](f.alternate, f.original / ".git",
+                               "cat-file", "-t", f.head)
+    assert not raised.value.effect_unknown
+    assert_no_helper_effect(f)

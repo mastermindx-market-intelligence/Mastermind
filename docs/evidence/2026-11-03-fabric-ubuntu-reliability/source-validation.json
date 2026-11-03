@@ -35,5 +35,30 @@
   },
   "release_state": "SOURCE_CANDIDATE_NOT_INSTALLED_OR_SELECTED",
   "historical_holds_reconciled": false,
-  "external_reference": "https://git-scm.com/docs/git-config/2.46.2.html"
+  "external_reference": "https://git-scm.com/docs/git-config/2.46.2.html",
+  "supplemental_tests": {
+    "command": "python3 -m pytest -q tests/test_fabric_sparse_commit_preflight_20261103.py -k 'sparse_index_observer_preserves or zero_exit_valid_stdout' --basetemp <owned-temp>/pytest-advice-edges --junitxml <owned-temp>/pytest-advice-edges.xml -ra",
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "rc": 0,
+    "duration_seconds": 1.479,
+    "test_sha256": "1f9eb383c445071b4957e35460c56dffb8febec8adf92a1297f3505dae600cc7"
+  },
+  "test_evidence_total": {
+    "earlier_full_targeted_run": 79,
+    "supplemental_distinct_tests": 2,
+    "total_passing": 81,
+    "not_a_single_81_test_run": true
+  },
+  "independent_review": {
+    "run_id": "fabric-sparse-source-review-20261103-c4",
+    "reviewed_head": "bb0266fc54124255e5373ec20607ba410674cecd",
+    "response_sha256": "7f9062a1c449fe08c4b3c89d0b89c77712e743df17303f3879e35dcd45eab5b8",
+    "accepted": true,
+    "verdict": "NO_BLOCKING_FINDING_WITHIN_SCOPE",
+    "scope": "Exact patch and supplied function excerpts; executable digest unchanged by later tests/evidence.",
+    "formal_github_approval": false
+  }
 }

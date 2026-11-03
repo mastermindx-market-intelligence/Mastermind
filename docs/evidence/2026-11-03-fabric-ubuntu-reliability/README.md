@@ -1,6 +1,6 @@
 # Ubuntu maintenance repair and Fabric qualification checkpoint
 
-**Status: maintenance configured on Ubuntu0–4; one Ubuntu0 worker path verified; source fixes tested but unreleased; fleet qualification remains incomplete.**
+**Status: maintenance configured on Ubuntu0–4; two bounded Ubuntu0 worker routes verified; source fixes tested and technically reviewed but unreleased; fleet qualification remains incomplete.**
 
 This is a bounded maintenance and recovery slice of the existing
 WS:EXECUTIVE-CAPACITY-FABRIC program, integration root
@@ -140,3 +140,52 @@ owners. Preserve currently held or conflicting source carriers (#1836, #1877,
 #1951, #1894 and #1902). This branch does not adopt their held executable
 candidates. Shared release metadata must be rebuilt against any separately
 merged native changes before release; it is not permission to select a held candidate.
+
+
+## Final observed checkpoint
+
+The fresh read-only host snapshot at approximately **09:03:54 UTC** is in
+[closing-validation.json](closing-validation.json). All hosts were reachable,
+all installed hashes still matched, and all five timers were enabled and active
+after their next scheduled executions. Ubuntu1/2/4 returned service exit 0;
+Ubuntu0/3 still returned the existing unbound-cache-target hold. Available disk
+was 110.096, 145.848, 287.707, 108.483 and 866.958 GiB respectively. This is a
+new observation, not storage reclaimed by this operation. Subsequent telemetry
+reported NORMAL thermal risk on all five hosts.
+
+Ubuntu1's four `pc-ci` services remained `activating/start-pre`; `df` showed
+89% used. Its separate CI disk condition remains unresolved. Ubuntu2's four
+original hold hashes still exactly matched. Ubuntu4's current registry still
+lists every allowed provider mode as qualification-only. The installed Fabric
+request schema has no host/qualification-host field; the Studio host-command
+tool is not an agent-handoff surface. No alternate submission route was used.
+
+The independent source review `fabric-sparse-source-review-20261103-c4`
+ran through the Grok pool on Ubuntu0 and completed with rc0. Its exact 6,204-byte
+result (SHA256 `7f9062a1c449fe08c4b3c89d0b89c77712e743df17303f3879e35dcd45eab5b8`)
+was independently rehashed, adjudicated and accepted. The process receipt proves
+normal completion and zero residuals; the local marker is absent and the exact
+provider lease reads released. The requested model was `grok-4.7`; the usage
+receipt does not independently prove the served model.
+
+The verdict is **NO_BLOCKING_FINDING_WITHIN_SCOPE**, for the exact two-hunk
+patch and supplied functions at `bb0266fc54124255e5373ec20607ba410674cecd`.
+The reviewer did not execute tests or inspect the whole repository. The full
+unchanged response, runtime receipts, limits and parent adjudication are in
+[review-result.json](review-result.json). This technical review is not a formal
+GitHub approval.
+
+Two additional regression checks passed in 1.479 seconds: the real sparse-index
+observation preserved index/configuration bytes, and exit-zero/valid stdout
+with unrelated stderr still refused. Together with the earlier 79-test run,
+the evidence covers **81 distinct passing tests**, not a single 81-test run.
+The executable candidate hash remains unchanged.
+
+The original selected native generation was not replaced. GitHub formal review
+submissions and combined status contexts were empty at readback. The connector
+reported `mergeable=false`, although the observed upstream commit changed
+unrelated paths and a read-only merge-tree calculation found no conflict.
+No approval, green CI, mergeability, installation or whole-fleet readiness is
+inferred from those observations. The next release action remains with the
+existing non-author review and protected native publication owners, followed
+by real worker qualification and original-incident reconciliation.

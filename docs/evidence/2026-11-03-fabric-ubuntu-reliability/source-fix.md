@@ -114,3 +114,32 @@ bounded GLM task, returned verified arithmetic, received parent acceptance and
 cleaned up normally. The larger GLM audit and the Qwen review did not deliver
 accepted work. Ubuntu4 remains qualification-only, and Ubuntu2 remains held.
 No whole-fleet-ready claim follows from the 79 source tests.
+
+
+## Independent review and supplemental checks
+
+The bounded Grok-pool technical review at source head
+`bb0266fc54124255e5373ec20607ba410674cecd` returned
+`NO_BLOCKING_FINDING_WITHIN_SCOPE`. The assigning parent verified the exact
+response digest and accepted it. This is an excerpt review, not whole-repository
+approval or a formal GitHub review; see [review-result.json](review-result.json).
+
+The reviewer identified two low nonblocking limits: collapsing known-effect
+diagnostic reasons under the pin-refusal code, and the need to establish that
+suppressing advice does not conceal persistent index changes. The original
+observer cause remains chained. The setting is process-scoped and does not
+persist Git configuration. The pre/post metadata fingerprint does not cover
+index bytes; no broader concurrent-index guarantee is claimed.
+
+Two additional focused tests now establish that the previously failing real
+sparse-index read preserves index/config/sparse-checkout bytes and that valid
+stdout with exit 0 still refuses unrelated stderr. Both passed, with no skips,
+errors or failures. They supplement the earlier 79 passing cases. Source
+inspection also confirms the unchanged executor consumer holds uncertain
+effects and returns 76, while known pre-launch refusals return 78 and exit the
+lease context normally. The lease's sticky preserve flag retains unknown-effect
+markers.
+
+Only tests and evidence changed after the reviewed source head. The executable,
+forward patch, manifest and inventory hashes recorded above remain exact.
+No installed runtime, historical hold or provider qualification changed.
