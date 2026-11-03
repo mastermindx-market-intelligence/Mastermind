@@ -65,3 +65,22 @@ def test_project_installation_needs_editor_readback_and_behavioral_canary():
         "not proof of ChatGPT settings installation",
     ):
         assert phrase in instructions
+
+
+def test_native_guidance_uses_one_genuine_non_author_review_owner():
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        entry = (ROOT / name).read_text(encoding="utf-8")
+        assert "reviewer login is a **placement preference, not an owner wait**" in entry
+        assert "same reasoning session between two GitHub accounts" in entry
+        assert "No impersonation, author self-review" in entry
+    review = (ROOT / "docs/sol_skills/REVIEW_RETURN.md").read_text(encoding="utf-8")
+    for phrase in (
+        "not an exclusive owner/approver",
+        "A different connector login in the **same underlying reasoning session**",
+        "full current head SHA",
+        "one native submitted GitHub review",
+        "review ID",
+        "`commit_id`",
+        "not a formal",
+    ):
+        assert phrase in review
