@@ -1364,6 +1364,11 @@ def main(argv: list[str] | None = None) -> int:
         for name in (("binding", "destination") if command == "collect" else ("collection", "receipt-sha256")):
             collect_parser.add_argument("--"+name, required=True)
 
+    p_diag = sub.add_parser("provider-diagnostics", help="Explicit original-owner safe diagnostic projection; no raw capture or acceptance")
+    p_diag.add_argument("run_id")
+    for name in ("root", "parent", "binding", "destination"):
+        p_diag.add_argument("--"+name, required=True)
+
     p_status = sub.add_parser("status")
     p_status.add_argument("run_id")
     p_status.add_argument("--follow", action="store_true")
@@ -1459,6 +1464,15 @@ def main(argv: list[str] | None = None) -> int:
     p_completed.add_argument("--apply", action="store_true")
 
     args = parser.parse_args(argv)
+    if args.cmd == "provider-diagnostics":
+        import original_delivery_collector as collector
+        try:
+            result=collector.collect_provider_diagnostics(args.binding,run_id=args.run_id,root=args.root,parent=args.parent,destination=args.destination)
+            print(json.dumps(result,sort_keys=True))
+            return 0
+        except Exception:
+            print('{"state":"UNAVAILABLE","reason":"diagnostic_unavailable"}')
+            return 76
     if args.cmd in {"collect", "collection-result"}:
         command = ["/bin/bash", str(HERE/"remote_sub.sh"), "--collect-existing", args.run_id,
                    "--root", args.root, "--parent", args.parent]

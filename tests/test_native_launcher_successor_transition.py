@@ -60,11 +60,21 @@ def source_owners(tmp_path_factory):
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
     assert set(manifest) == set(historical_manifest)
-    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(retained['files']) == {
-        'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    # S7 changed three additional members of the CURRENT closure. Restore
+    # their exact protected predecessor bytes in this historical B11 fixture;
+    # the immutable original fixture and paired-upgrade target stay unchanged.
+    diagnostic_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-diagnostic-predecessors-e5f49cf4.json').read_bytes()
+    assert g.digest(diagnostic_raw) == 'fcc3ab7de9a8f517ca59d94cf745c1d894fc14478f399e7d18f198f0679233df'
+    diagnostic = json.loads(diagnostic_raw)
+    assert diagnostic['schema'] == 'mastermind.test_native_diagnostic_predecessors/v1'
+    assert diagnostic['source_commit'] == 'e5f49cf4dbe8d06382c1d6f32368e9e9fb51c63d'
+    assert set(retained['files']) == {'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    assert set(diagnostic['files']) == {'ext/original_delivery_collector.py',
+                                      'ext/provider_outcome.py', 'ext/remote_sub.sh'}
+    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(retained['files']) | set(diagnostic['files'])
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
-    for name, item in retained['files'].items():
+    for name, item in {**retained['files'], **diagnostic['files']}.items():
         raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
         assert len(raw) == item['bytes']
         assert g.digest(raw) == item['sha256'] == historical_manifest[name]
