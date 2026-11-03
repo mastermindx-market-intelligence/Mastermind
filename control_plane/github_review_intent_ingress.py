@@ -102,6 +102,9 @@ from control_plane.github_review_intent import (
 )
 
 
+from control_plane.github_review_risk_dispatch import ReviewDispatch, RiskDispatchAdvice
+
+
 SCHEMA = "mastermind.github_review_intent_ingress.v1"
 
 #: The GitHub review body verb for each incumbent verdict.  ``PASS`` maps to a
@@ -161,6 +164,10 @@ class ReviewAdmissionPreflightExpired(ReviewIngressUnavailable):
     """This invocation expired before it called the admission effect port."""
 
 
+class ReviewRiskSourceUnqualified(ReviewIngressUnavailable):
+    """Automatic review risk facts failed closed before any admission effect."""
+
+
 class ExistingReviewDecisionUnavailable(ReviewIngressUnavailable):
     """A verified existing Job lacks a recorded full original decision.
 
@@ -213,6 +220,7 @@ class AdmissionState(str, Enum):
     ADMITTED = "ADMITTED"
     ALREADY_ADMITTED = "ALREADY_ADMITTED"
     REFUSED = "REFUSED"
+    SKIPPED = "SKIPPED"
 
 
 class PublishState(str, Enum):
@@ -1077,6 +1085,7 @@ def admit_review_intent(
     actors: ActorPermissionPort | None = None,
     visibility: VisibilityPort | None = None,
     before_admission: Callable[[], None] | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
 ) -> ReviewIngressOutcome:
     """Walk one signed delivery to at most one admitted review run.
 
@@ -1267,7 +1276,7 @@ def admit_review_intent(
 
     return admit_decided_review(
         decision=decision, pull_request=pull_request, fabric=fabric_port, visibility=visibility,
-        before_admission=before_admission,
+        before_admission=before_admission, review_risk_gate=review_risk_gate,
     )
 
 
@@ -1275,6 +1284,7 @@ def admit_decided_review(
     *, decision: ReviewIntentDecision, pull_request: PullRequestFacts,
     fabric: FabricJobAdmissionPort, visibility: VisibilityPort | None = None,
     before_admission: Callable[[], None] | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
 ) -> ReviewIngressOutcome:
     """Common commit boundary for authenticated origins, with first-winner joins."""
     if not decision.admitted:
@@ -1282,6 +1292,49 @@ def admit_decided_review(
             state=(AdmissionState.ALREADY_ADMITTED if decision.already_admitted else AdmissionState.REFUSED),
             decision=decision,
         )
+    if review_risk_gate is not None:
+        if not callable(review_risk_gate):
+            raise ReviewIngressUnavailable("REVIEW_RISK_CONSUMER_UNBOUND")
+        if before_admission is not None:
+            if not callable(before_admission) or before_admission() is not None:
+                raise ReviewIngressUnavailable("REVIEW_ADMISSION_PREFLIGHT_UNAVAILABLE")
+        advice = review_risk_gate(decision=decision, pull_request=pull_request)
+        if type(advice) is not RiskDispatchAdvice:
+            raise ReviewIngressUnavailable("REVIEW_RISK_ADVICE_INVALID")
+        automatic = decision.intent_source in {
+            IntentSource.PR_LIFECYCLE, IntentSource.OPEN_PR_RECONCILIATION,
+        }
+        if automatic:
+            if advice.action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE:
+                raise ReviewRiskSourceUnqualified("REVIEW_RISK_SOURCE_UNQUALIFIED")
+            if (advice.repository != decision.repository
+                    or advice.pull_number != decision.pull_number
+                    or advice.head_sha != decision.frozen_head_sha):
+                raise ReviewIngressUnavailable("REVIEW_RISK_EXACT_HEAD_MISMATCH")
+            if advice.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED:
+                # Never mask a canonical already-admitted Job as a new skip.
+                # The incumbent ledger has the only command status identity.
+                existing = getattr(fabric, "has_admitted_command", None)
+                if not callable(existing):
+                    raise ReviewIngressUnavailable("REVIEW_RISK_COMMAND_STATUS_UNAVAILABLE")
+                already = existing(decision.command_id)
+                if type(already) is not bool:
+                    raise ReviewIngressUnavailable("REVIEW_RISK_COMMAND_STATUS_INVALID")
+                if not already:
+                    skipped = dataclasses.replace(
+                        decision, admitted=False,
+                        refusal=ReviewIntentRefusal.REVIEW_NOT_REQUIRED,
+                        intent_source=None, actor=None,
+                        delivery_command_id=None, policy_authority=None,
+                    )
+                    return ReviewIngressOutcome(
+                        state=AdmissionState.SKIPPED, decision=skipped,
+                    )
+                # Existing work is reconciled by the original canonical join.
+            elif advice.action is not ReviewDispatch.AUTO_REVIEW_ELIGIBLE:
+                raise ReviewIngressUnavailable("REVIEW_RISK_ADVICE_INVALID")
+        elif advice.action is not ReviewDispatch.USE_EXISTING_MANUAL_INGRESS:
+            raise ReviewIngressUnavailable("REVIEW_MANUAL_INTENT_RISK_ROUTE_MISMATCH")
     objective = build_review_job_objective(
         pull_request=pull_request, intent_source=decision.intent_source
     )
@@ -1394,6 +1447,7 @@ def reconcile_open_pull_requests(
     owner_execution_ref: str, authorize: Callable[[str], None],
     pull_requests: OpenPullRequestReadPort, fabric: FabricJobAdmissionPort,
     visibility: VisibilityPort | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
     start_page: int = 1, max_pages: int = 2, per_page: int = 25,
     resume_pull_number: int | None = None,
     time_budget_seconds: float = 30.0,
@@ -1527,10 +1581,23 @@ def reconcile_open_pull_requests(
             if clock() >= deadline:
                 return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
                                number=number, command=decision.command_id)
+            def scan_admission_guard() -> None:
+                check_owner()
+                if clock() >= deadline:
+                    raise ReviewAdmissionPreflightExpired(
+                        "REVIEW_RECONCILIATION_BUDGET_EXHAUSTED"
+                    )
             try:
                 outcome = admit_decided_review(
                     decision=decision, pull_request=current, fabric=fabric, visibility=visibility,
+                    review_risk_gate=review_risk_gate, before_admission=scan_admission_guard,
                 )
+            except ReviewRiskSourceUnqualified:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_RISK_HOLD",
+                               number=number, command=decision.command_id)
+            except ReviewAdmissionPreflightExpired:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
+                               number=number, command=decision.command_id)
             except Exception:
                 return receipt(page=page, code="REVIEW_RECONCILIATION_ADMISSION_UNRECONCILED",
                                number=number, command=decision.command_id)

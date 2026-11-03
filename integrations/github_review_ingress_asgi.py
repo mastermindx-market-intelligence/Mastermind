@@ -36,6 +36,7 @@ from control_plane.github_review_host_config import (
     DeliverySecretSource,
     ReviewHostSettings,
 )
+from integrations.github_review_risk_consumer import GitHubReviewRiskConsumer
 
 
 MAX_HEADER_BYTES = 8192
@@ -175,6 +176,7 @@ class GitHubReviewReceiver:
         fabric: FabricJobAdmissionPort,
         visibility: VisibilityPort | None = None,
         reconciliation_guard: Callable[[str], None] | None = None,
+        risk_consumer: GitHubReviewRiskConsumer | None = None,
     ) -> None:
         if not isinstance(settings, ReviewHostSettings):
             raise TypeError("expected enrolled review host settings")
@@ -184,6 +186,9 @@ class GitHubReviewReceiver:
         self._actors = actors
         self._fabric = fabric
         self._visibility = visibility
+        if risk_consumer is not None and type(risk_consumer) is not GitHubReviewRiskConsumer:
+            raise TypeError("risk consumer must be bound to incumbent GitHub App")
+        self._risk_consumer = risk_consumer
         if reconciliation_guard is not None and not callable(reconciliation_guard):
             raise TypeError("reconciliation requires an incumbent owner guard")
         self._reconciliation_guard = reconciliation_guard
@@ -219,11 +224,19 @@ class GitHubReviewReceiver:
         if not isinstance(secret, str) or not secret:
             raise ValueError("secret unavailable")
         within_budget()
+        def risk_gate(*, decision, pull_request):
+            if self._risk_consumer is None:
+                raise ReviewIngressUnavailable("REVIEW_RISK_CONSUMER_UNBOUND")
+            return self._risk_consumer(
+                decision=decision, pull_request=pull_request,
+                budget_check=within_budget,
+            )
         return admit_review_intent(
             secret=secret, body=body, delivery_id=delivery_id, event=event,
             signature_header=signature, policy=settings.review_policy(),
             pull_requests=self._pulls, fabric=self._fabric, actors=self._actors,
             visibility=None, before_admission=within_budget,
+            review_risk_gate=(risk_gate if self._risk_consumer is not None else None),
         )
 
     def _finished_admission(self, task: asyncio.Task, projection: dict[str, str],
@@ -284,6 +297,7 @@ class GitHubReviewReceiver:
             installation_id=self._settings.installation_id,
             owner_execution_ref=owner_execution_ref, authorize=self._reconciliation_guard,
             pull_requests=self._pulls, fabric=self._fabric, visibility=self._visibility,
+            review_risk_gate=self._risk_consumer,
             start_page=start_page, max_pages=max_pages, per_page=per_page,
             resume_pull_number=resume_pull_number,
             time_budget_seconds=time_budget_seconds,
@@ -436,7 +450,10 @@ class GitHubReviewReceiver:
             return
 
         state = outcome.state.value
-        if state == "ADMITTED":
+        if state == "SKIPPED":
+            await self._reply(send, 200, "SKIPPED_NOT_REQUIRED",
+                              reason=ReviewIntentRefusal.REVIEW_NOT_REQUIRED)
+        elif state == "ADMITTED":
             await self._reply(send, 202, "ADMITTED", job_id=outcome.job_id,
                               visibility=projection.get("visibility"))
         elif state == "ALREADY_ADMITTED":

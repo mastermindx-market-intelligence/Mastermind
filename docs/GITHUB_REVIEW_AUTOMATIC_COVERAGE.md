@@ -350,3 +350,16 @@ Output `/tmp/github-review-r14-full-tests.log`, SHA-256
 This includes the concrete R15 source preflight, actual local sockets/Runtime,
 publication recovery and original-thread Slack tests with synthetic external
 services. It remains source qualification, not installed all-repository proof.
+
+
+## Risk-tier pre-admission consumer — source-only 2026-11-03
+
+Accepted Mastermind #1989 merged into protected master at `910803421beca53ca25145392725ab2d84c7a8e9`. This #1977 source branch retains the accepted immutable risk policy/reader/dispatch source blobs and adds only the incumbent-host consumer integration. It does **not** enroll/install the receiver, grant credentials, change PR Ready/labels, merge anything, activate an automatic review watcher, or create a second Job/scheduler.
+
+- `integrations/github_review_risk_consumer.py` binds the existing installation-scoped `GitHubReviewAPI` to an exact approved intent and verified PR head; automatic decisions use the accepted source census and fresh final GET, while authorized manual review costs zero risk GETs.
+- The existing signed ingress and original reconciliation call the same `admit_decided_review` commit boundary with the risk hook *before* any new Executive Job. FAST is an explicit `SKIPPED_NOT_REQUIRED` (no Job/visibility notice); STANDARD/CRITICAL preserve the original canonical command; unknown, stale, malformed, permission-denied or incomplete source holds before a new Job. An already-existing canonical command is checked through the incumbent EventStore/Executive socket, not hidden by a subsequent FAST result.
+- `compose_github_review_host` binds the risk consumer to its existing GitHub App object; no independent transport, account, token, database or side-effect plane is introduced. The receiver stays default OFF pending release qualification and actual host enrollment.
+- Source acceptance tests: focused risk, signed ASGI webhook, canonical admission, reconciliation, lifecycle and multi-repository suites passed (300 tests; command captured on the C2 original source carrier). The legacy composition test requiring real local `PyJWT` could not obtain its mock GitHub App token because this M2 `python3` lacks the `jwt` module; this is an **environment dependency failure before GitHub source reads**, not a verified deployment result. Do not claim every test/environment passed.
+- **Unresolved performance gate:** accepted source census takes four sequential GitHub GETs after the incumbent admission path's first PR GET. The webhook owner retains its original six-second deadline, and its final pre-effect budget guard prevents late Job creation. Slow-path latency, timeout behavior and actual installed production p50/p95 have **not** been proven; optimize within the original reader/transport before enrollment rather than silently extending deadlines or reusing stale source.
+
+No real webhook, Fabric Job, protected merge, production site, app setting or PR status was changed by these source-level tests.

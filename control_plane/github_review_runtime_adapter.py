@@ -57,6 +57,22 @@ class ExecutiveReviewJobAdmission:
         events = self._runtime.store.list_events(command_id_prefix=PREFIX)
         return frozenset(e.command_id for e in events if e.event_type == "JOB_CREATED")
 
+    def has_admitted_command(self, command_id: str) -> bool:
+        """Exact read-only canonical command existence for FAST skip fencing.
+
+        This uses the incumbent EventStore UNIQUE key, not a new cache or
+        review registry. An inconsistent event refuses before any new Job.
+        """
+        self._authorize()
+        if type(command_id) is not str or not command_id.startswith(PREFIX):
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_ID_INVALID")
+        existing = self._runtime.store.get_event_by_command_id(command_id)
+        if existing is None:
+            return False
+        if existing.event_type != "JOB_CREATED" or not existing.job_id:
+            raise ReviewAdmissionUnavailable("REVIEW_COMMAND_ID_COLLISION")
+        return True
+
     def _reconcile(
         self, *, decision: ReviewIntentDecision, objective: str
     ) -> str | None:

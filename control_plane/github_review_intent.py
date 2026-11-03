@@ -325,6 +325,7 @@ class ReviewIntentRefusal(str, Enum):
     ADMITTED_DECISION_UNAVAILABLE = "ADMITTED_DECISION_UNAVAILABLE"
     RERUN_NOT_AUTHORIZED = "RERUN_NOT_AUTHORIZED"
     HEAD_MOVED = "HEAD_MOVED"
+    REVIEW_NOT_REQUIRED = "REVIEW_NOT_REQUIRED"
 
 
 # ---------------------------------------------------------------------------
