@@ -76,8 +76,8 @@ and evidence, not live Jobs, retries, leases or provider credentials.
 
 The candidate adds Ubuntu4 to exactly the sparse-host allowlists in
 `candidate/fabric_task.py` and `candidate/remote_sub.sh`. It updates the current
-controller composition digest, both generated source declarations and both current
-manifest assertions. Executor bytes, historical upgrade fixtures and all provider
+controller composition digest, both generated source declarations and the current
+source and manifest assertions. Executor bytes, historical upgrade fixtures and all provider
 qualification policy remain unchanged.
 
 - Focused adapter regression: the original source reproduced the Ubuntu4 refusal;
@@ -127,3 +127,29 @@ needs the accepted source release and Ubuntu4's own qualified Macro donor.
 No live Ubuntu4 provider task was submitted, no provider hold was removed and no
 native generation was selected by this source change. Offline controller session
 fixtures are not a claimed real provider session.
+
+## Independent review and current-reader repair
+
+Fabric review `u4-sparse-review-20261103-c3-a` inspected immutable source
+`6208177cff22ec6c849b5b2f78ac261691b396ef` and returned **CHANGES_REQUIRED**:
+five additional current-source tests still pinned the previous manifest,
+controller or adapter digest. The parent read and verified each finding and
+accepted the useful review response, not the source candidate. Exact complete
+review-response SHA-256:
+`1d09fdd7f19c7ecdf012c8b478a8ee6c56740ed490333554b1b6a4b94e2f07c5`.
+
+The repair updates only those five current assertions in
+`tests/test_catalog_native_release_staging.py`,
+`tests/test_host_pull_launchd_admission.py`,
+`tests/test_paid_initializer.py`,
+`tests/test_native_manual_auto_source_20261024.py`, and
+`ops/native_fabric/quota_continuity/tests/test_terminal_poll_margin.py`.
+The native runtime bytes and manifest/inventory digests are unchanged from the
+first candidate. Historical predecessor fixture digests are preserved.
+
+The actual affected readers passed under Python 3.12: **8 tests**, comprising
+the current catalog staging suite, host-pull admission suite, initializer exact
+preimage-member case, native AUTO source contract and terminal-poll inventory
+closure case. Diagnostic log:
+`/Users/chriswong/.local/share/mastermind-test-tmp/ubuntu4-review-repair-validation.log`.
+A separate immutable-head follow-up review is still required before release.
