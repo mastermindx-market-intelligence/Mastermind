@@ -60,10 +60,38 @@ def source_owners(tmp_path_factory):
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
     assert set(manifest) == set(historical_manifest)
-    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(retained['files']) == {
-        'ext/fabric_task.py', 'ext/pool_ledger.py'}
+    # Verify today's complete source before restoring this disposable fixture
+    # to the single, immutable historical successor target.
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
+
+    remote_name = 'ext/remote_sub.sh'
+    remote_path = target / 'native-code-stage' / remote_name
+    current_remote = remote_path.read_bytes()
+    assert g.digest(current_remote) == manifest[remote_name] == (
+        'c7b078c07f4403d6263462650990fceffeb99ca9dd3359b147e8fddb2eeaf678'
+    )
+    current_block = (
+        b'  # Registered Linux fleet hosts; enrollment and donor custody remain separate.\n'
+        b'  case "$HOST_ARG" in\n'
+        b'    ubuntu0|ubuntu1|ubuntu2|ubuntu3|ubuntu4) ;;'
+    )
+    historical_block = (
+        b'  # This initial implementation covers the four Linux fleet hosts only.\n'
+        b'  case "$HOST_ARG" in\n'
+        b'    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;'
+    )
+    assert current_remote.count(current_block) == 1
+    historical_remote = current_remote.replace(current_block, historical_block, 1)
+    assert len(historical_remote) == 103957
+    assert g.digest(historical_remote) == historical_manifest[remote_name] == (
+        'eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0'
+    )
+    remote_path.write_bytes(historical_remote)
+    manifest[remote_name] = historical_manifest[remote_name]
+    # All remaining divergence must still be the original two retained members.
+    assert {name for name in manifest if manifest[name] != historical_manifest[name]} == set(retained['files']) == {
+        'ext/fabric_task.py', 'ext/pool_ledger.py'}
     for name, item in retained['files'].items():
         raw = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
         assert len(raw) == item['bytes']
