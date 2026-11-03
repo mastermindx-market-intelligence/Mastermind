@@ -50,6 +50,161 @@ class Client:
 
 class ContractResilienceTests(unittest.TestCase):
 
+    def test_requested_tool_drift_during_guard_refuses_before_dispatch(self):
+        cases = [
+            ("edit", "write_html", {"fileId": FILE_ID, "targetNodeId": "artboard-1",
+                                     "mode": "insert-children", "html": "<div>QA</div>"}),
+            ("edit", "create_file", {"sourceFileId": FILE_ID, "name": "QA fixture"}),
+            ("read", "get_jsx", {"fileId": FILE_ID, "nodeId": "artboard-1"}),
+        ]
+        for action, tool, arguments in cases:
+            with self.subTest(tool=tool):
+                class ChangedAfterGuard(Client):
+                    armed = False
+
+                    def call(self, name, args):
+                        response = super().call(name, args)
+                        if self.armed and name == "get_basic_info":
+                            key = "readOnlyHint" if action == "read" else "destructiveHint"
+                            self.value[tool]["annotations"][key] = False
+                        return response
+
+                c = ChangedAfterGuard()
+                guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+                c.calls.clear()
+                c.armed = True
+                with tempfile.TemporaryDirectory() as tmp:
+                    with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                        b.execute(action, tool=tool, arguments=arguments,
+                                  expected_snapshot=guard, operation_id="guard-tool-drift",
+                                  allow_write=True, client=c, lock_root=Path(tmp))
+                self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_material_schema_drift_during_guard_refuses_before_dispatch(self):
+        class ChangedAfterGuard(Client):
+            armed = False
+
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if self.armed and name == "get_basic_info":
+                    self.value["write_html"]["inputSchema"]["properties"]["mode"]["enum"] = ["new-mode"]
+                return response
+
+        c = ChangedAfterGuard()
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        c.armed = True
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                b.execute("edit", tool="write_html", arguments={"fileId": FILE_ID,
+                          "targetNodeId": "artboard-1", "mode": "insert-children",
+                          "html": "<div>QA</div>"}, expected_snapshot=guard,
+                          operation_id="guard-schema-drift", allow_write=True,
+                          client=c, lock_root=Path(tmp))
+        self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_reviewed_text_profile_switch_revalidates_payload_after_guard(self):
+        for before_catalog, after_catalog, field, refusal in [
+            (M2, CATALOGS[0], "html", "PAPER_LEGACY_TEXT_SCHEMA_REQUIRED"),
+            (CATALOGS[0], M2, "textContent", "PAPER_RICH_TEXT_SCHEMA_REQUIRED"),
+        ]:
+            with self.subTest(field=field):
+                class ChangedAfterGuard(Client):
+                    armed = False
+
+                    def call(self, name, arguments):
+                        response = super().call(name, arguments)
+                        if self.armed and name == "get_basic_info":
+                            self.value["set_text_content"] = copy.deepcopy(after_catalog["set_text_content"])
+                        return response
+
+                c = ChangedAfterGuard(before_catalog)
+                guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+                c.calls.clear()
+                c.armed = True
+                with tempfile.TemporaryDirectory() as tmp:
+                    with self.assertRaisesRegex(b.Refusal, refusal):
+                        b.execute("edit", tool="set_text_content", allow_write=True,
+                                  arguments={"fileId": FILE_ID,
+                                             "updates": [{"nodeId": "text-1", field: "QA"}]},
+                                  expected_snapshot=guard, operation_id="guard-text-switch",
+                                  client=c, lock_root=Path(tmp))
+                self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_getter_or_identity_drift_during_guard_blocks_requested_call(self):
+        for change in ("getter", "identity"):
+            with self.subTest(change=change):
+                class ChangedAfterGuard(Client):
+                    armed = False
+
+                    def call(self, name, arguments):
+                        response = super().call(name, arguments)
+                        if self.armed and name == "get_basic_info":
+                            if change == "getter":
+                                self.value[name]["annotations"]["readOnlyHint"] = False
+                            else:
+                                self.server["name"] = "different-server"
+                        return response
+
+                c = ChangedAfterGuard()
+                guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+                c.calls.clear()
+                c.armed = True
+                with tempfile.TemporaryDirectory() as tmp:
+                    with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+                        b.execute("edit", tool="write_html", arguments={"fileId": FILE_ID},
+                                  expected_snapshot=guard, operation_id="guard-critical-drift",
+                                  allow_write=True, client=c, lock_root=Path(tmp))
+                self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
+    def test_benign_guard_drift_keeps_file_creation_single_and_strips_source_id(self):
+        class ChangedAfterGuard(Client):
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if name == "get_basic_info":
+                    self.value["create_file"]["description"] += " Vendor explanation."
+                    self.value["archive_resources"]["description"] += " Unrelated change."
+                return response
+
+        c = ChangedAfterGuard()
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            result = b.execute("edit", tool="create_file",
+                               arguments={"sourceFileId": FILE_ID, "name": "QA fixture"},
+                               expected_snapshot=guard, operation_id="benign-guard-drift",
+                               allow_write=True, client=c, lock_root=Path(tmp))
+        self.assertEqual(result["state"], "RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION")
+        self.assertEqual([args for name, args in c.calls if name == "create_file"],
+                         [{"name": "QA fixture"}])
+
+    def test_catalog_failure_after_guard_refuses_before_mutation(self):
+        class CatalogFailsAfterGuard(Client):
+            armed = False
+            catalog_unavailable = False
+
+            def catalog(self):
+                if self.catalog_unavailable:
+                    raise b.Refusal("UPSTREAM_UNAVAILABLE")
+                return super().catalog()
+
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if self.armed and name == "get_basic_info":
+                    self.catalog_unavailable = True
+                return response
+
+        c = CatalogFailsAfterGuard()
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        c.armed = True
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(b.Refusal, "UPSTREAM_UNAVAILABLE"):
+                b.execute("edit", tool="write_html", arguments={"fileId": FILE_ID},
+                          expected_snapshot=guard, operation_id="guard-catalog-failure",
+                          allow_write=True, client=c, lock_root=Path(tmp))
+        self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
+
     def test_post_edit_getter_drift_returns_effect_unknown_before_unsafe_verification(self):
         class ChangedAfterEdit(Client):
             def call(self, name, arguments):
@@ -440,3 +595,4 @@ class ContractResilienceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

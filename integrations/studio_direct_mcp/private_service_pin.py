@@ -441,6 +441,36 @@ def run(svc, args):
         return report(svc, args, plan, "APPLIED", "COMPLETE", receipt_committed=True)
 
 
+def _c2_paper_v20_postpin_start(svc, account, roots, plan, raw, current, manifest):
+    """Recognize ONLY the reviewed C2 v12 -> v20 Paper-only successor.
+
+    A selected native-pool pin remains independently enforced: this does not
+    alter its transaction states or allow subsequent unreviewed pin drift.
+    """
+    if (account != svc.C2_PAPER_ACCOUNT
+            or plan.get("manifest_after") != svc.C2_PAPER_V12_MANIFEST_SHA256):
+        return False
+    if any(stat.S_IMODE(roots[n].lstat().st_mode) != plan[n + "_mode"]
+           for n in ("config", "manifest")):
+        return False
+    pinned_config = decode(raw["config.after.json"])
+    pinned_manifest = decode(raw["manifest.after.json"])
+    root = svc._user_root()
+    if (pinned_config.get("paperDesign") != svc._paper_design_config(root)
+            or pinned_manifest.get("configHash") != digest(raw["config.after.json"])):
+        return False
+    expected_config = copy.deepcopy(pinned_config)
+    expected_config["paperDesign"] = svc._paper_design_config(
+        root, rel=svc.PAPER_RUNTIME_V20_REL,
+        bridge_sha256=svc.PAPER_V20_BRIDGE_SHA256)
+    config_bytes = json.dumps(expected_config, indent=2, sort_keys=True).encode("utf-8")
+    expected_manifest = copy.deepcopy(pinned_manifest)
+    expected_manifest["configHash"] = digest(config_bytes)
+    manifest_bytes = json.dumps(
+        expected_manifest, indent=2, sort_keys=True).encode("utf-8")
+    return current == config_bytes and manifest == manifest_bytes
+
+
 def require_start(svc, account, roots):
     """Only an OWNED future-pin transition adds a startup fence."""
     path = roots["state"] / "native-pool-pin"
@@ -478,7 +508,13 @@ def require_start(svc, account, roots):
         if (
             result
             != {"schema": SCHEMA, "planSha256": plan_sha(svc, p), "effect": "APPLIED"}
-            or state(svc, roots, raw, plan) != "COMPLETE"
+            or not (
+                (current == raw["config.after.json"]
+                 and manifest == raw["manifest.after.json"]
+                 and state(svc, roots, raw, plan) == "COMPLETE")
+                or _c2_paper_v20_postpin_start(
+                    svc, account, roots, plan, raw, current, manifest)
+            )
             or binding.get("phase") != "SELECTED"
             or svc._stable_regular_file_hash(
                 Path(p["pool_target"]), label="native pool"

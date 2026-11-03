@@ -146,6 +146,8 @@ universal procedure owner. Read it before creating or relying on a temporary wat
 
 For independent PR/source review, load [the single shared session routing procedure](docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md) and check actual admitted Fabric tool/root/effect evidence. A separately authorized Dot can receive one source-bound Slack technical-review assignment when genuinely eligible; no duplicate or refused-operation workaround, fictional START, or formal GitHub approval inferred from a Slack result. Existing Executive/GitHub authority remains controlling.
 
+A historically named GitHub reviewer login is a **placement preference, not an owner wait**, unless an actual current exact-seat instruction or repository rule binds it. The active assigned principal checks the review's exact PR/head, connected authenticated login, commit/author/coauthor independence and existing review/effect state under `docs/sol_skills/REVIEW_RETURN.md`; it may request a different eligible **genuinely independent** reviewer through GitHub's existing review path. Switching the same reasoning session between two GitHub accounts is not independent substantive review. No impersonation, author self-review, duplicate/denied-effect reroute, self-approval or self-merge. Keep executing other permitted work while the real review is pending.
+
 ## Agent OS — the organizational knowledge plane
 
 Durable org memory — workstreams (`WS-*`), decisions (`DEC-*`), discoveries (`DSC-*`),

@@ -24,6 +24,7 @@ MEMORY_MARKER = 'mastermind-execution-memory-advisory-v1'
 LEGACY_BLOCKS = (
     'mastermind-ceo-forward-execution',
     'mastermind-ghost-owner-recovery-v1',
+    'mastermind-active-owner-takeover-20261102',
     'mastermind-autonomous-blocker-self-remedy-v1',
 )
 CODEX_SECTIONS = {
