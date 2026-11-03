@@ -892,7 +892,8 @@ def request(
                 requested_model=requested_model, route_key=rid,
                 **({"required_modes": sorted(artifact_production.MODES),
                     "required_platforms": ["linux"]} if artifact_names else
-                   {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
+                   {"required_modes": sorted({"glm", "glm-codex", "minimax", "qwen"}),
+                    "required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
             )
             if max_turns is not None:
                 # Only these admitted remote wrappers enforce the existing Claude
