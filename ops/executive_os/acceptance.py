@@ -1335,8 +1335,10 @@ class Acceptance:
         ``phase-{phase}-started.json`` is written through the ordinary guarded
         receipt path before the body runs; ``phase-{phase}-finished.json`` is
         written only after the body returns normally, so a body that raises
-        keeps its STARTED receipt and never gains a FINISHED one. Receipts
-        carry only the fixed closed fields below: no job, path, payload, or
+        keeps its STARTED receipt and never gains a FINISHED one. The final
+        maintenance_finish phase retains STARTED only; its canonical carry
+        owns completion. STARTED alone means neither failure nor acceptance.
+        Receipts carry only the fixed closed fields below: no job, path, payload, or
         error detail, and no acceptance verdict; a phase receipt is progress
         observability, never an acceptance summary or carry. A phase name
         outside the closed set, a clock failure, or a refused receipt write
@@ -1359,6 +1361,10 @@ class Acceptance:
             },
         )
         yield
+        # The canonical carry is the final completion edge. Observability must
+        # add no fallible clock read or receipt write after that commit.
+        if phase == "maintenance_finish":
+            return
         elapsed_seconds = max(0.0, time.monotonic() - started_monotonic)
         cpu_seconds = max(0.0, time.process_time() - started_cpu)
         self._write_json(

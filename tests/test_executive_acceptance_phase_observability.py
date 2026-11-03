@@ -62,7 +62,6 @@ PHASE_SEQUENCE_WITH_MAINTENANCE = [
     "write phase-credential_leakage_scan-finished.json",
     "write phase-maintenance_finish-started.json",
     "maintenance.finish",
-    "write phase-maintenance_finish-finished.json",
 ]
 DIGEST = "a" * 64
 
@@ -181,11 +180,11 @@ def test_finished_receipt_measures_monotonic_and_process_time_from_phase_start(
     monkeypatch.setattr(acceptance.time, "monotonic", lambda: next(monotonic_values))
     monkeypatch.setattr(acceptance.time, "process_time", lambda: next(process_time_values))
 
-    with instance._phase_observability("maintenance_finish"):
+    with instance._phase_observability("maintenance_after_backup"):
         pass
 
-    started = _receipt("phase-maintenance_finish-started.json", instance.receipt_root)
-    finished = _receipt("phase-maintenance_finish-finished.json", instance.receipt_root)
+    started = _receipt("phase-maintenance_after_backup-started.json", instance.receipt_root)
+    finished = _receipt("phase-maintenance_after_backup-finished.json", instance.receipt_root)
     assert started["elapsed_seconds"] == 0
     assert started["cpu_seconds"] == 0
     assert finished["elapsed_seconds"] == 2.5
@@ -375,7 +374,7 @@ def _maintenance_stub(events: list[str]) -> SimpleNamespace:
     )
 
 
-def test_run_emits_phase_receipts_in_order_and_summary_last(tmp_path):
+def test_run_emits_phase_receipts_and_preserves_summary_carry_order(tmp_path):
     harness = _acceptance(tmp_path)
     events: list[str] = []
     _stub_run(harness, tmp_path, events)
@@ -406,7 +405,6 @@ def test_run_emits_phase_receipts_in_order_and_summary_last(tmp_path):
         "phase-maintenance_after_backup-started.json",
         "phase-maintenance_before_backup-finished.json",
         "phase-maintenance_before_backup-started.json",
-        "phase-maintenance_finish-finished.json",
         "phase-maintenance_finish-started.json",
     ]
     summary = _receipt("acceptance-summary.json", harness.receipt_root)
@@ -476,8 +474,79 @@ def test_run_failed_phase_leaves_no_later_phase_receipts_or_summary(tmp_path):
     # No later phase receipt and no acceptance summary may exist.
     for name in (
         "phase-maintenance_finish-started.json",
-        "phase-maintenance_finish-finished.json",
         "acceptance-summary.json",
         "final-host-status.txt",
     ):
         assert not (receipt_root / name).exists()
+
+
+def test_canonical_finish_has_no_followup_progress_write_or_clock_read(tmp_path, monkeypatch):
+    harness = _acceptance(tmp_path)
+    events: list[str] = []
+    _stub_run(harness, tmp_path, events)
+    harness.maintenance = _maintenance_stub(events)
+    canonical_carry = tmp_path / "canonical-carry.json"
+    committed = False
+    real_write_json = harness._write_json
+    real_monotonic = acceptance.time.monotonic
+    real_process_time = acceptance.time.process_time
+
+    def finish(proof_ids, summary):
+        nonlocal committed
+        events.append("maintenance.finish")
+        canonical_carry.write_text('{"passed": true}\n', encoding="utf-8")
+        committed = True
+
+    def write_json(name, value, **kwargs):
+        if committed:
+            raise AssertionError("progress write after canonical finish")
+        return real_write_json(name, value, **kwargs)
+
+    def monotonic():
+        if committed:
+            raise AssertionError("progress clock read after canonical finish")
+        return real_monotonic()
+
+    def process_time():
+        if committed:
+            raise AssertionError("progress CPU clock read after canonical finish")
+        return real_process_time()
+
+    harness.maintenance.finish = finish
+    harness._write_json = write_json
+    monkeypatch.setattr(acceptance.time, "monotonic", monotonic)
+    monkeypatch.setattr(acceptance.time, "process_time", process_time)
+
+    harness.run()
+
+    assert committed
+    assert json.loads(canonical_carry.read_text()) == {"passed": True}
+    assert events.count("maintenance.finish") == 1
+    assert events[-1] == "maintenance.finish"
+    started = _receipt("phase-maintenance_finish-started.json", harness.receipt_root)
+    _assert_closed_receipt(started, phase="maintenance_finish", state="STARTED")
+    assert not (harness.receipt_root / "phase-maintenance_finish-finished.json").exists()
+
+
+def test_actual_canonical_finish_error_propagates_without_finished_progress(tmp_path):
+    harness = _acceptance(tmp_path)
+    events: list[str] = []
+    _stub_run(harness, tmp_path, events)
+    harness.maintenance = _maintenance_stub(events)
+    original = RuntimeError("canonical finish refused")
+
+    def finish(proof_ids, summary):
+        raise original
+
+    harness.maintenance.finish = finish
+    with pytest.raises(RuntimeError) as raised:
+        harness.run()
+
+    assert raised.value is original
+    started = _receipt("phase-maintenance_finish-started.json", harness.receipt_root)
+    _assert_closed_receipt(started, phase="maintenance_finish", state="STARTED")
+    assert not (harness.receipt_root / "phase-maintenance_finish-finished.json").exists()
+    assert "passed" not in started and "error" not in started
+    # The pre-existing summary-before-carry order stays unchanged; phase STARTED
+    # does not substitute for the canonical carry that this finish refused.
+    assert (harness.receipt_root / "acceptance-summary.json").is_file()
