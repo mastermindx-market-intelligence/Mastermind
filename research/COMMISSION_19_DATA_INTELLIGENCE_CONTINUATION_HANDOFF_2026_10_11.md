@@ -48,7 +48,7 @@ This file is the resumable program state. A cold stranger resumes from the LAST 
   - Fabric admission: `mastermind-executive` MCP requires OAuth the session cannot start → DARK_OR_DISCONNECTED for this seat. `mmx-cimd-probe` ECONNREFUSED. Public MCP gateway not probed this session.
   - Linear: `linear-server` MCP requires OAuth → MAS-263 link/status = human-gated projection write; no `linear` CLI on host.
   - External pool (`~/.local/bin/pool status`, 2026-10-11T08:13:07Z, host m2studio, schema `mastermind.provider_capacity.v1`): glm 24 cap / 24 remaining; minimax 7/7; grok 11 cap / 9 remaining (2 active); cursor 11/11; bailian 9/9; go 9/9; ocfree 3/3; codex-native 1/1; claude-native 0 cap. Status read only; **no lane has been run**. Usage shape: `pool run <glm|minimax|grok|cursor|qwen|glm-codex|minimax-codex|go-codex|go-claude|oc-free> "<prompt>" [cwd] [model]`.
-  - GitHub: `gh auth status` → logged in (account `mastermindxryan`, scopes gist/read:org/repo/workflow). No PR existed for this branch before this operation (`gh pr list --head <branch> --state all` → `[]`); no open PR mentions `commission_19` (`gh pr list --search "commission_19 in:title,body"` → empty).
+  - GitHub: `gh auth status` → logged in (account login removed in r22, scopes gist/read:org/repo/workflow). No PR existed for this branch before this operation (`gh pr list --head <branch> --state all` → `[]`); no open PR mentions `commission_19` (`gh pr list --search "commission_19 in:title,body"` → empty).
 - **F6 Composer / incumbents (from Macro `origin/main` and packet S06/S07, not rerun).** `app/integrated_answer.py` default-off nine-leg route merged via #8596 (head `9ee3015938b3`, merge `55e8cf84`); financial leg returns absent for non-AAPL with fixed historical parameters; capital structure held; basket labels/membership fixed absent (packet F01). Source-clock normalization assigns UTC to naive timestamps and midnight-UTC to date-only strings (packet F03); relative freshness test compares legs to the page max clock, not request time (packet F04). EXP-1 raw-capture consumer merged (#8337) with normalized baseline deliberately null (packet F06). These are reused, not rebuilt.
 - **F7 I1 spec Hxx table (Macro `origin/main:research/product_intelligence_local_delivery/I1_INTEGRATED_ANSWER_COMPOSITION_SPEC_2026-10-06.md` lines 11–14, 16–27).** H01 (MAS-268, financial query kernel) ACCEPTED via `DEC:FIF-3A3-ACCEPTED-GOLDEN-QUERY-ON-MAIN`; H04 (MAS-271) BUILT_NOT_ACCEPTED (`engine/expectation_state.py`; E0 path absent on main; K3E held off main at authoring — superseded in part by #8337 merge, see F6); H05 (MAS-272) ABSENT (W4/W6 todo); H06 labelled "MAS-273, FIF publication / private-default seam" BUILT_NOT_ACCEPTED (default-off snapshots). I0 freeze list item 10: "MAS ↔ macro acceptance map — GAP (Linear IDs not in macro tree)".
 - **F8 Live MAS-273 scope ≠ I1 H06.** Packet `ISSUE_CROSSWALK.json` row 10 (observed 2026-10-11): MAS-273 = "Typed macro release / expectations bundle" (Backlog); packet S09 confirms. I1's H06 label binds MAS-273 to FIF private-default publication. This is the planning/acceptance defect WP02 repairs (§4, D3). It is not a production defect.
@@ -1743,7 +1743,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 - #1926 landing: the merge queue removed it twice, the seat parked it (D36), and the seat re-queued it once at 21:07:54Z (FACTS, below). MERGED 2026-11-02T21:31:05Z as `04ca04c7` through the merge queue. Land-check: the ledger blob at the merge, `0807ad1f`, equals the reviewed head's. The merge-group run 41525561874 passed all six shards, and that run is the proof for this tree. The post-merge push run 41529056577 on master concluded CANCELLED at 21:41Z: `ci.yml` cancels an in-progress run of the same ref when a newer push arrives (`cancel-in-progress: true`), and #1935 (`ab93f3ed`) landed behind #1926. Its `test` gate then reported failure by design ("a skipped/cancelled/failed matrix must not turn into a green required gate"). No test failed, nothing was re-run, and master's live proof moved to `ab93f3ed`'s run. #1243 pointer: comment 6589086446 (21:37:29Z).
 
 **Corrections (§7.5)**
-1. **Line 1220 (r18) names the sweeper by a personal login.** That breaks this ledger's own rule against logins (AF, item AF4). r22 replaces the login in place with "the sweeper identity", and the line's meaning is unchanged. A search of the file at `645854cc` found that login on line 1220 only. Git history keeps the old text.
+1. **Line 1220 (r18) names the sweeper by a personal login.** That breaks this ledger's own rule against logins (AF, item AF4). r22 replaces the login in place with "the sweeper identity", and the line's meaning is unchanged. A search of the file at `645854cc` found that login on line 1220 only. Git history keeps the old text. Lane AH (below) found a second login of a different shape at line 51 (r1): the account name in a `gh auth status` readback. r22 replaces it in place the same way; the line's meaning is unchanged.
 2. **RETRACTED: "the sweeper's freshness rule" as the cause of #10365's wait after 12:18Z on 11-02.**
    - r21's FACTS (lines 1663–1675) were true when written: sweep 41383331001 ran at 03:34Z.
    - From 12:18Z they were not. Macro main #10543 (`554cdd64`) changed `_leg_capital_structure()` to `_leg_capital_structure(ticker, composed_at)`. That was a real content conflict with #10365's `_read_legs` list, and the sweeper labelled #10365 `merge-blocked`.
@@ -1757,7 +1757,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
    - That does not show which path merged it. Line 1220 records the sweeper merging under that same login, and line 1674 finds 96 of 100 merges under it.
    - Either path was before the ruling.
 6. **The watcher handles at lines 1682–1685 and 1719 are replaced** (FACTS — watching).
-7. **(F)'s rung at lines 1663 and 1703, "CI (green at `4146ca96`)", is superseded.** The head is now `e55d37ba` (FACTS, below): accepted and armed, CI not yet concluded.
+7. **(F)'s rung at lines 1663 and 1704, "CI (green at `4146ca96`)", is superseded.** The head is now `e55d37ba` (FACTS, below): accepted and armed, CI not yet concluded.
 
 **FACTS — Mastermind #1926 (r21): two queue removals, a park, one re-enqueue**
 - **First enqueue: 05:31:33Z. Removed: 06:21:32Z** (failed_checks).
@@ -1804,6 +1804,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 - Seat merge `58c943cb` keeps all three entries. The own-diff fingerprint `740a753173ef506b` is unchanged, so no re-review is owed.
 - At the merge, the CI-pack suite and the two 13F suites gave 289 passed and 2 skipped. Pushed; MERGEABLE.
 - No label until #10365 merges and main's integration-baseline is green (r21 correction 8).
+- r21 line 1658 says "only the sweeper syncs, after labelling". That sentence is about a base sync that turns a stale green head fresh, which the seat never does by hand. It does not cover a content conflict: the sweeper never resolves one, so the author must, on its own branch, and the merge still belongs to the sweeper. `e55d37ba` (#10365) and `58c943cb` (#10391) are conflict resolutions of that kind, each followed by D28's own-diff check. Both sentences stand.
 
 **FACTS — WP31 header re-read: a new release episode**
 - Universe headers were re-read at 2026-11-02T22:39Z (submissions: form, filing date, acceptance time and items only; no document or value read). The 03:52Z read's `hdr2b.py` was re-used with one change: the user agent is read from `config.yml` without PyYAML, which this host's Python lacks.
@@ -1817,7 +1818,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 - **#10391.** `bzl34mkpx` → `bu97m2me7` → `b0f6ia4a8` (stopped 20:19Z).
 - **#10365 and #10391 together.** Both are now on `bknyctzjp` (`watch_macro_agg2.sh`, 900 s, 12 h bound). It fires on CONFLICTING, any label change, red, a head or own-diff change, or a merge.
 - **#9569.** `b16aua885` → `bhmf62n1h` (hourly).
-- **#1926.** `bu54wlaq8` → `b70bmcpdr` → queue watcher `bhz7xguuz` (EVENT 07:55Z) → shard watcher `b52gp5w9n` → `bahskh4yo` (EVENT 21:05Z; condition consumed) → queue watcher `by8ys94d8` (EVENT MERGED, 21:36Z) → master-CI watcher `bd4dvegui` on `04ca04c7` (600 s, 3 h bound).
+- **#1926.** `bu54wlaq8` → `b70bmcpdr` → queue watcher `bhz7xguuz` (EVENT 07:55Z) → shard watcher `b52gp5w9n` → `bahskh4yo` (EVENT 21:05Z; condition consumed) → queue watcher `by8ys94d8` (EVENT MERGED, 21:36Z) → master-CI watcher `bd4dvegui` on `04ca04c7` (600 s, 3 h bound; EVENT 21:48Z on the cancelled push run described above; done, nothing waits on it).
 
 **W15 lanes, continued**
 
@@ -1828,6 +1829,7 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 | AF | narrow re-review of the repair at `645854cc` | glm-5.3, ubuntu2 (`c19-w15-af-rereview-r21-20261102`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (AF1–AF6 PASS); notes and slips above |
 | AG | re-review of Macro #10365 at `e55d37ba` | glm-5.3, ubuntu1 (`c19-w15-ag-rereview-coldcompose-20261102`) | refused at admission (rc=75), never started |
 | AG2 | re-review of Macro #10365 at `e55d37ba` | glm-5.3, ubuntu0 (`c19-w15-ag2-rereview-coldcompose-20261102`) | ACCEPT AS INDEPENDENT REVIEW, APPROVE_WITH_NOTES (AG1–AG6 PASS); comment 6587510737 |
+| AH | independent review of Mastermind #1974 (this r22) at `f996e6f0` | glm-5.3, ubuntu0 (`c19-w15-ah-review-r22-20261103`) | APPROVE_WITH_NOTES (AH1–AH3, AH5–AH8 PASS; AH4 one citation off by one). Five notes: the 1703→1704 citation, the line-51 login, `bd4dvegui`'s closure, r21 line 1658's "only the sweeper syncs" against this cycle's seat conflict resolutions, and the unnamed verifier at the task_a5897a2e item. All five are repaired in the commit after `f996e6f0`; a narrow re-review covers the repair before the queue |
 
 **DECIDED**
 - **D36. Park rule for Mastermind #1926 after two equivalent removals (L.4, count 2).**
@@ -1854,11 +1856,11 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 - **Macro #9569**, branch owner or Chairman → unchanged (D25). `bhmf62n1h` reads it hourly (D31).
 - **WP31**, seat → Read 3 is done (FACTS). Next: re-read the universe headers at a natural boundary; one evaluator run (D29) only on a further new release episode. The label for the new episode matures under prereg §3.3.
 - **WP31 reader finding**, WP31 source owners → Read 3's `companyfacts_unavailable=5/5`, `revisions_reader_final_failures=1` and three `chain_unreadable` episodes (FACTS). Diagnose from the adapters' own logs, not from the report body. The seat does not edit `c19_wp31_*` outside a §10 amendment.
-- **Seven dark 13F census suites**, separate task `task_a5897a2e` → the Chairman started it in its own session at ~21:25Z on 11-02, before #10391 merged. r21 sequenced it after #10391 because both touch Macro `tests/test_ci_pack.py` (`CURATED_EXCLUSIVE`) and `.github/ci/`. Whichever lands second re-conflicts on those files (O.1). The seat keeps #10391's own diff fixed; if that task lands first, #10391 gets a third conflict resolution with its own diff unchanged, re-tested, and no re-review.
+- **Seven dark 13F census suites**, separate task `task_a5897a2e` → the Chairman started it in its own session at ~21:25Z on 11-02, before #10391 merged. r21 sequenced it after #10391 because both touch Macro `tests/test_ci_pack.py` (`CURATED_EXCLUSIVE`) and `.github/ci/`. Whichever lands second re-conflicts on those files (O.1). The seat keeps #10391's own diff fixed; if that task lands first, #10391 gets a third conflict resolution with its own diff unchanged, re-tested, and no re-review. The seat verifies that: before the push, the own-diff fingerprint must equal `740a753173ef506b` (FACTS — #10391); if it differs, D28 applies and a fresh re-review is owed.
 - **Unchanged from r21:** everything in r21's "Unchanged from r20" line.
 
 **NEXT**
-1. Carry this r22 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243.
+1. Carry this r22 through a fresh non-authoring review and the Mastermind merge queue, then post a pointer on #1243. Lane AH reviewed `f996e6f0` (table above); its notes are repaired here, and a narrow re-review of the repair precedes the queue entry.
 2. `bknyctzjp` owns the #10365 and #10391 waits. On MERGED, run the (F) steps under OPEN and record the result in r23.
 3. `bhmf62n1h` owns the #9569 wait (D31).
 4. Seat end state for this cycle: r21 MERGED and pointed; #10365 ACCEPTED and ARMED at `e55d37ba`, CI pending; #10391 MERGEABLE, unlabelled by rule; WP31 Read 3 done, no look spent; D35 and #9569 unchanged. Watchers: `bknyctzjp` (#10365, #10391), `bhmf62n1h` (#9569).
