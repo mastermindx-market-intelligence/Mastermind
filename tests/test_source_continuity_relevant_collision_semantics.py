@@ -86,7 +86,7 @@ class CollisionChurnHTTP:
     def _open_roster_url(self) -> str:
         return (
             f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls"
-            "?state=open&per_page=100&page=1"
+            "?state=open&sort=created&direction=asc&per_page=100&page=1"
         )
 
     def _plain(self, url: str, *, token: str, timeout: float) -> object:
@@ -224,7 +224,39 @@ def test_missing_disjoint_pr_may_drop_only_when_direct_detail_proves_closed(
     )
 
 
-def test_missing_disjoint_pr_that_direct_detail_still_reports_open_refuses(
+@pytest.mark.parametrize(
+    ("path", "collision_state"),
+    [("docs/a.md", "DISJOINT"), ("scripts/source_continuity.py", "OVERLAP")],
+)
+def test_missing_pr_that_direct_detail_still_reports_open_is_reproved(
+    path: str,
+    collision_state: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Offset paging skips a row when an earlier row closes mid-read, so absence
+    # from the second roster is not closure.
+    module = sat._module()
+    http = CollisionChurnHTTP(
+        module,
+        first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
+        second_roster=[_target_row()],
+        foreign_files={FOREIGN_A: (path,)},
+        direct_details={
+            FOREIGN_A: _foreign_row(FOREIGN_A, head_sha=A_HEAD, state="open"),
+        },
+    )
+
+    result = _run(module, http, capsys)
+
+    _assert_receipt(result)
+    assert result[1]["collision_state"] == collision_state
+    assert (
+        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls/{FOREIGN_A}"
+        in http.plain_calls
+    )
+
+
+def test_missing_colliding_pr_that_moved_refuses(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = sat._module()
@@ -232,9 +264,9 @@ def test_missing_disjoint_pr_that_direct_detail_still_reports_open_refuses(
         module,
         first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
         second_roster=[_target_row()],
-        foreign_files={FOREIGN_A: ("docs/a.md",)},
+        foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
         direct_details={
-            FOREIGN_A: _foreign_row(FOREIGN_A, head_sha=A_HEAD, state="open"),
+            FOREIGN_A: _foreign_row(FOREIGN_A, head_sha=A_HEAD_MOVED, state="open"),
         },
     )
 

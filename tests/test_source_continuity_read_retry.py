@@ -525,7 +525,7 @@ def test_diagnostic_endpoint_refuses_unrecognized_urls(url):
 
 def test_diagnostic_endpoint_keeps_a_github_api_path_and_query():
     module = fx._cli_module()
-    endpoint = f"repos/{fx.REPOSITORY}/pulls?state=open&per_page=100&page=16"
+    endpoint = f"repos/{fx.REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page=16"
     assert module._diagnostic_endpoint(f"{fx.API_ROOT}/{endpoint}") == endpoint
 
 

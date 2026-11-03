@@ -1129,7 +1129,7 @@ def test_saturated_compare_representation_binds_exact_requested_url(bad_url) -> 
 
 TARGET_PULL_URL = f"https://api.github.com/repos/{REPOSITORY}/pulls/{TARGET_PR}"
 OPEN_PULLS_URL = (
-    f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&per_page=100&page=1"
+    f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"
 )
 FOREIGN_FILES_URL = (
     f"https://api.github.com/repos/{REPOSITORY}/pulls/{FOREIGN_PR}"
@@ -1548,7 +1548,7 @@ def test_main_issues_receipt_when_changed_open_roster_keeps_collision_semantics(
 
     module = _module()
     open_pulls = (
-        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls?state=open&per_page=100&page=1"
+        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"
     )
     first_roster = [
         {

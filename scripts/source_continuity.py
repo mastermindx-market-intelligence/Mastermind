@@ -289,12 +289,14 @@ def _open_pull_roster_semantics(url: object, payload: object) -> object:
         if equals != "=" or not key:
             return _UNPROVABLE
         pairs.append((key, value))
-    if len(pairs) != 3 or len({key for key, _ in pairs}) != 3:
+    if len(pairs) != 5 or len({key for key, _ in pairs}) != 5:
         return _UNPROVABLE
     params = dict(pairs)
     page = params.get("page")
     if (
         params.get("state") != "open"
+        or params.get("sort") != "created"
+        or params.get("direction") != "asc"
         or params.get("per_page") != str(_PAGE_SIZE)
         or page is None
         or not page.isdigit()
@@ -1582,12 +1584,15 @@ def _read_open_pull_roster(
     token: str,
     repository: str,
 ) -> tuple[list[object], bool]:
+    # Offset pages, oldest first: a PR opened mid-read appends after the rows
+    # already read instead of pushing one of them onto the next page.
     pulls: list[object] = []
     for page in range(1, _MAX_ROSTER_PAGES + 1):
         payload = _api(
             http_get,
             token,
-            f"repos/{repository}/pulls?state=open&per_page={_PAGE_SIZE}&page={page}",
+            f"repos/{repository}/pulls?state=open&sort=created&direction=asc"
+            f"&per_page={_PAGE_SIZE}&page={page}",
         )
         if not isinstance(payload, list) or len(payload) > _PAGE_SIZE:
             raise _RemoteProbeError()
@@ -1747,9 +1752,10 @@ def _revalidate_collision_census(
     """Re-prove custody under a complete second open-PR census.
 
     Stable foreign identities reuse their first collision evidence. New or
-    moved disjoint identities are freshly checked. A missing first-pass
-    disjoint PR must be directly proven closed; a colliding PR may never move
-    or disappear.
+    moved disjoint identities are freshly checked. A first-pass PR missing
+    from the second roster is read directly, because offset paging skips a row
+    when an earlier row closes mid-read. A colliding PR may never move or
+    close.
     """
 
     reader = _collision_reader(http_get)
@@ -1794,22 +1800,27 @@ def _revalidate_collision_census(
         if record.identity is None:
             raise _RemoteProbeError()
         raw_pr = second_foreign.pop(number, None)
-        if record.overlaps:
-            if raw_pr is None:
-                return False, True
-            if _foreign_pull_identity(raw_pr, repository) != record.identity:
-                return False, True
-            continue
-
         if raw_pr is None:
+            # Absence from an offset-paged roster is not proof of closure.
             direct = _api(http_get=reader, token=token, endpoint=f"repos/{repository}/pulls/{number}")
-            if not isinstance(direct, dict) or direct.get("state") != "closed":
+            if not isinstance(direct, dict):
+                return False, True
+            state = direct.get("state")
+            if state not in ("open", "closed"):
                 return False, True
             if _foreign_pull_identity(direct, repository).pr_number != number:
                 raise _RemoteProbeError()
-            continue
+            if state == "closed":
+                if record.overlaps:
+                    return False, True
+                continue
+            raw_pr = direct
 
         second_identity = _foreign_pull_identity(raw_pr, repository)
+        if record.overlaps:
+            if second_identity != record.identity:
+                return False, True
+            continue
         if second_identity == record.identity:
             continue
         _, overlaps = _foreign_collision_evidence(
