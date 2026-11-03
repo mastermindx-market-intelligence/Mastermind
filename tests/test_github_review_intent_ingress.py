@@ -504,7 +504,7 @@ class TestUnsupportedChannel:
 
     def test_unsupported_action_is_refused_without_a_read(self) -> None:
         parsed = json.loads(_label_body())
-        parsed["action"] = "opened"
+        parsed["action"] = "closed"
         reads = FakePullRequests()
         outcome = _admit(json.dumps(parsed).encode(), pull_requests=reads)
         assert outcome.decision.refusal is gri.ReviewIntentRefusal.ACTION_NOT_SUPPORTED

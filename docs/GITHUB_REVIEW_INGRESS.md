@@ -94,9 +94,9 @@ repository and the signed number (`PULL_NUMBER_MISMATCH` otherwise). A correct
 HMAC proves who signed the bytes; it never proves which pull request a wrong
 caller route selected.
 
-## The three intent channels
+## Explicit and automatic intent channels
 
-All three require an **allowlisted login**. Authority beyond the allowlist comes
+All channels require an **allowlisted human login**. Authority beyond the allowlist comes
 from exactly one of two places, and from nothing else.
 
 | Channel | Delivery | GitHub's own enforcement | Fresh read required? |
@@ -104,6 +104,7 @@ from exactly one of two places, and from nothing else.
 | Configured reviewer requested | `pull_request` / `review_requested` | Refused unless the actor holds triage/write at delivery time | No, unless `require_current_permission_for_all_channels` |
 | Intent label | `pull_request` / `labeled` | Same | Same |
 | Slash command comment | `issue_comment` / `created` | **None** — writable by anyone | **Yes** |
+| Opt-in automatic lifecycle review | `pull_request` / `opened`, `synchronize`, `reopened`, `ready_for_review` | No collaborator authority follows from these actions | **Always**, even if static actor fallback is enabled |
 
 `issue_comment` is the open channel: GitHub's reported `author_association`
 travels in the payload and is a **claim**, not authority. With no externally
@@ -113,11 +114,24 @@ permission read; a current permission of `none` (revoked) or below
 `minimum_permission` (default `triage`) is refused with
 `ACTOR_PERMISSION_INSUFFICIENT`.
 
-Two relaxations exist, both explicit and both off by default:
-`allow_static_actor_authority` falls back to the association ceiling when no read
-is bound, and `require_current_permission_for_all_channels` extends the strict
-posture to the two channels GitHub polices itself. The module never claims a
-fresh permission check it did not perform.
+The pure policy has explicit, default-off switches:
+`allow_static_actor_authority` permits the existing explicit-channel fallback
+when no read is bound, while `require_current_permission_for_all_channels`
+extends the strict posture to the two channels GitHub polices itself. The host
+requires fresh permission on every channel. Lifecycle review never accepts the
+static fallback, regardless of policy flags.
+
+Automatic lifecycle review also requires `allow_lifecycle_review=True`; its
+default is `False` in both the host settings and decision policy. Disabled
+lifecycle deliveries are refused before authenticated reads or ledger inspection.
+Automatic drafts defer; existing authorized label/comment draft advisory remains.
+GitHub bot senders are observed without acquiring human authority. All channels
+share the same repository/PR/head admission identity. The receiver reports the
+closed refusal `reason` alongside its existing `REFUSED` status.
+
+See [automatic coverage and rollout](GITHUB_REVIEW_AUTOMATIC_COVERAGE.md) for
+model assessment, Slack Dot review, the remaining bot/backlog authority gaps,
+and the separate host/App and formal-approval gates.
 
 The command matches the **first non-empty comment line exactly**. A comment that
 merely mentions `/independent-review` never triggers a run.
@@ -128,7 +142,7 @@ Every non-admitted decision names exactly one closed-vocabulary value. The
 notable ones:
 
 `SIGNATURE_INVALID`, `BODY_TOO_LARGE`, `EVENT_NOT_SUPPORTED`,
-`ACTION_NOT_SUPPORTED`, `REPOSITORY_NOT_ALLOWLISTED`,
+`ACTION_NOT_SUPPORTED`, `AUTOMATIC_REVIEW_DISABLED`, `REPOSITORY_NOT_ALLOWLISTED`,
 `INSTALLATION_NOT_ALLOWLISTED`, `REVIEW_REQUEST_FOR_OTHER_REVIEWER`,
 `COMMAND_NOT_PRESENT`, `LABEL_NOT_PRESENT`, `ACTOR_NOT_AUTHORIZED`,
 `ACTOR_ASSOCIATION_INSUFFICIENT`, `ACTOR_PERMISSION_NOT_REVERIFIED`,

@@ -6,8 +6,8 @@ lifecycle, retry plane, Slack transport, or review publisher.  It classifies
 caller-supplied, already-verified facts so a host ingress can ask one question
 and get one deterministic, replayable answer:
 
-    is this signed, allowlisted, explicitly intended pull request eligible for
-    exactly one independent review run?
+    is this signed, allowlisted pull request eligible under an explicit request
+    or enabled lifecycle policy for exactly one independent review run?
 
 Existing owners this module composes rather than replaces
 ---------------------------------------------------------
@@ -43,12 +43,14 @@ write permission, so those two channels carry a contemporaneous, GitHub-enforced
 basis.  ``issue_comment`` is writable by anyone and GitHub's reported
 ``author_association`` is only a claim, so that channel requires an externally
 reverified current collaborator permission.  With no such read, the channel is
-refused by name rather than passed on a stale or claimed basis.
+refused by name rather than passed on a stale or claimed basis. Automatic PR
+lifecycle events also require fresh collaborator permission; static actor
+fallback never establishes authority for that channel.
 
 One-review law
 --------------
 One exact pull-request head earns one review run, regardless of how many of the
-three intent channels fire for it.  The channel is deliberately *not* part of
+manual or automatic intent channels fire for it.  The channel is deliberately *not* part of
 the admission identity, so the existing ``events.command_id`` UNIQUE index
 settles the duplicate instead of a second paid Fabric review.  A distinct second
 review of the same head exists only behind an explicit, separately authorized
@@ -188,11 +190,12 @@ class ReviewIntentSignatureError(ReviewIntentError):
 
 
 class IntentSource(str, Enum):
-    """The three explicit, human-expressed review-intent channels."""
+    """Explicit review requests and opt-in, permission-verified PR events."""
 
     REVIEW_REQUESTED = "REVIEW_REQUESTED"
     COMMAND_COMMENT = "COMMAND_COMMENT"
     INTENT_LABEL = "INTENT_LABEL"
+    PR_LIFECYCLE = "PR_LIFECYCLE"
 
 
 class ActorPermissionBasis(str, Enum):
@@ -209,16 +212,22 @@ class ActorPermissionBasis(str, Enum):
       and GitHub enforces nothing.  The association is an unverified *claim*
       carried in the payload, so it is never authority; this basis requires an
       externally reverified current collaborator permission.
+    * ``REVERIFIED_LIFECYCLE_PERMISSION`` — PR lifecycle actions establish no
+      collaborator permission; this channel always needs a fresh permission read.
     """
 
     GITHUB_ENFORCED_TRIAGE_WRITE = "GITHUB_ENFORCED_TRIAGE_WRITE"
     REPORTED_AUTHOR_ASSOCIATION = "REPORTED_AUTHOR_ASSOCIATION"
+    REVERIFIED_LIFECYCLE_PERMISSION = "REVERIFIED_LIFECYCLE_PERMISSION"
 
 
 #: The exact (event, action) pairs that can carry review intent.  Anything else
 #: is refused by name rather than raising, so an unrelated delivery is reported
 #: instead of crashing the ingress.
+LIFECYCLE_ACTIONS = frozenset({"opened", "synchronize", "reopened", "ready_for_review"})
+
 SUPPORTED_CHANNELS = {
+    **{("pull_request", action): IntentSource.PR_LIFECYCLE for action in LIFECYCLE_ACTIONS},
     ("pull_request", "review_requested"): IntentSource.REVIEW_REQUESTED,
     ("issue_comment", "created"): IntentSource.COMMAND_COMMENT,
     ("pull_request", "labeled"): IntentSource.INTENT_LABEL,
@@ -240,6 +249,7 @@ class ReviewIntentRefusal(str, Enum):
     BODY_TOO_LARGE = "BODY_TOO_LARGE"
     EVENT_NOT_SUPPORTED = "EVENT_NOT_SUPPORTED"
     ACTION_NOT_SUPPORTED = "ACTION_NOT_SUPPORTED"
+    AUTOMATIC_REVIEW_DISABLED = "AUTOMATIC_REVIEW_DISABLED"
     REPOSITORY_NOT_ALLOWLISTED = "REPOSITORY_NOT_ALLOWLISTED"
     INSTALLATION_NOT_ALLOWLISTED = "INSTALLATION_NOT_ALLOWLISTED"
     REVIEW_REQUEST_FOR_OTHER_REVIEWER = "REVIEW_REQUEST_FOR_OTHER_REVIEWER"
@@ -455,6 +465,7 @@ class ReviewIntentPolicy:
     allow_static_actor_authority: bool = False
     require_current_permission_for_all_channels: bool = False
     allow_explicit_rerun: bool = False
+    allow_lifecycle_review: bool = False
 
     def __post_init__(self) -> None:
         if not self.repositories:
@@ -501,6 +512,7 @@ class ReviewIntentPolicy:
                 "policy.require_current_permission_for_all_channels",
             ),
             (self.allow_explicit_rerun, "policy.allow_explicit_rerun"),
+            (self.allow_lifecycle_review, "policy.allow_lifecycle_review"),
         ):
             if type(flag) is not bool:
                 raise ReviewIntentError(f"{name} must be a bool")
@@ -556,6 +568,9 @@ class ReviewIntentPolicy:
             return ReviewIntentRefusal.ACTOR_NOT_AUTHORIZED
 
         if current is None:
+            # PR creation/update establishes no collaborator permission.
+            if signal.permission_basis is ActorPermissionBasis.REVERIFIED_LIFECYCLE_PERMISSION:
+                return ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
             # GitHub's enforcement proves at most the channel's baseline
             # triage/write capability, never a higher configured policy floor
             # such as MAINTAIN or ADMIN. An unread permission cannot satisfy
@@ -711,6 +726,19 @@ def _login(value: object, *, name: str) -> str:
     return login
 
 
+def _observed_sender_login(value: object) -> str:
+    """Parse an observed sender without enlarging the authorized-user policy.
+
+    GitHub App bot senders receive ACTOR_NOT_AUTHORIZED instead of a malformed
+    delivery. Their suffix is retained; it never becomes a human identity.
+    """
+    login = _text(value, name="payload.sender.login", max_chars=44)
+    if (_LOGIN_RE.fullmatch(login) is None
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}\[bot\]", login) is None):
+        raise ReviewIntentError("payload.sender.login is not a valid GitHub sender")
+    return login
+
+
 def _pull_number(value: object, *, name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ReviewIntentError(f"{name} must be a positive integer")
@@ -844,6 +872,13 @@ def parse_webhook_envelope(
 
 def extract_intent_signal(*, body: Mapping[str, object], event: str, action: str) -> IntentSignal:
     """Read the acting identity and intent signal from a verified delivery."""
+
+    if event == "pull_request" and action in LIFECYCLE_ACTIONS:
+        sender = _mapping(body.get("sender"), name="payload.sender")
+        return IntentSignal(
+            actor_login=_observed_sender_login(sender.get("login")),
+            permission_basis=ActorPermissionBasis.REVERIFIED_LIFECYCLE_PERMISSION,
+        )
 
     if event == "pull_request" and action == "review_requested":
         sender = _mapping(body.get("sender"), name="payload.sender")
@@ -1084,6 +1119,9 @@ def decide_review_intent(
             ReviewIntentRefusal.INSTALLATION_NOT_ALLOWLISTED, envelope=envelope
         )
 
+    if channel is IntentSource.PR_LIFECYCLE and not policy.allow_lifecycle_review:
+        return _refuse(ReviewIntentRefusal.AUTOMATIC_REVIEW_DISABLED, envelope=envelope)
+
     # --- the signed PR identity, before anything is read or written ----------
     # A supported channel whose payload names no pull request (a slash command
     # on a plain issue) earns no GitHub read and no ledger write at all.
@@ -1146,15 +1184,17 @@ def decide_review_intent(
     # an explicitly authorized label/comment and a fresh permission read.
     # Keep GitHub review-requested behavior closed on a draft, independent
     # of whether the external API happens to accept such a request.
-    if pull_request.draft and channel is IntentSource.REVIEW_REQUESTED:
+    if pull_request.draft and channel in (IntentSource.REVIEW_REQUESTED, IntentSource.PR_LIFECYCLE):
         return _refuse(
             ReviewIntentRefusal.PULL_REQUEST_DRAFT,
             envelope=envelope,
             pull_request=pull_request,
         )
 
-    # --- the explicit human intent channel ---------------------------------
-    if channel is IntentSource.REVIEW_REQUESTED:
+    # --- explicit request or host-enabled lifecycle coverage ----------------
+    if channel is IntentSource.PR_LIFECYCLE:
+        intent_source = channel
+    elif channel is IntentSource.REVIEW_REQUESTED:
         if signal.requested_reviewer != policy.configured_reviewer:
             return _refuse(
                 ReviewIntentRefusal.REVIEW_REQUEST_FOR_OTHER_REVIEWER,
@@ -1194,6 +1234,16 @@ def decide_review_intent(
             envelope=envelope,
             pull_request=pull_request,
             actor=signal.actor_login,
+        )
+
+    # Lifecycle events cannot borrow the explicit-channel permission basis,
+    # even if a direct caller supplies the wrong signal basis or static fallback.
+    if (channel is IntentSource.PR_LIFECYCLE
+            and policy.actor_is_listed(login=signal.actor_login)
+            and not current_permission_is_valid(current_permission)):
+        return _refuse(
+            ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED,
+            envelope=envelope, pull_request=pull_request, actor=signal.actor_login,
         )
 
     # --- actor authority: allowlist AND a real permission basis -------------

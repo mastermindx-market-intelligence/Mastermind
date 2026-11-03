@@ -3,6 +3,7 @@ import asyncio
 import json
 
 import httpx
+import pytest
 
 from control_plane.executive_runtime import Runtime
 from control_plane.github_review_intent import sign_webhook_body
@@ -31,7 +32,8 @@ class HostCredentials:
         return "only-test-token"
 
 
-def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
+@pytest.mark.parametrize("action", ["labeled", "opened"])
+def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path, action):
     github_requests = []
     def handler(request):
         github_requests.append((request.method, request.url.path))
@@ -74,7 +76,8 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
         client=slack, threads=ExecutiveSlackReviewThreads(runtime=runtime)
     )
     settings = ReviewHostSettings(
-        enabled=True, publication_enabled=True, expected_host="review.example.com",
+        enabled=True, publication_enabled=True, allow_lifecycle_review=True,
+        expected_host="review.example.com",
         require_https=True, installation_id=4242,
         installation_ids=frozenset({4242}), repositories=frozenset({REPO}),
         configured_reviewer="reviewer", authorized_actors=frozenset({"alice"}),
@@ -84,7 +87,7 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
         pull_requests=github, actors=github, fabric=fabric, visibility=visibility,
     )
     body = json.dumps({
-        "action": "labeled", "installation": {"id": 4242},
+        "action": action, "installation": {"id": 4242},
         "repository": {"full_name": REPO}, "number": 42,
         "pull_request": {"number": 42, "base": {"repo": {"full_name": REPO}}},
         "sender": {"login": "alice"}, "label": {"name": "independent-review"},

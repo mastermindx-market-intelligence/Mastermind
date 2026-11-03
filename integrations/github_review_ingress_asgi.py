@@ -14,7 +14,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from control_plane.github_review_intent import ReviewIntentSignatureError
+from control_plane.github_review_intent import ReviewIntentRefusal, ReviewIntentSignatureError
 from control_plane.github_review_intent_ingress import (
     ActorPermissionPort,
     FabricJobAdmissionPort,
@@ -59,8 +59,13 @@ class GitHubReviewReceiver:
         self._visibility = visibility
 
     @staticmethod
-    async def _reply(send: Any, status: int, code: str, *, job_id: str | None = None) -> None:
+    async def _reply(
+        send: Any, status: int, code: str, *, job_id: str | None = None,
+        reason: ReviewIntentRefusal | None = None,
+    ) -> None:
         response: dict[str, str] = {"schema": _SCHEMA, "status": code}
+        if reason is not None:
+            response["reason"] = reason.value
         if job_id is not None:
             response["job_id"] = job_id
         body = json.dumps(response, sort_keys=True, separators=(",", ":")).encode("ascii")
@@ -221,4 +226,4 @@ class GitHubReviewReceiver:
         elif state == "ALREADY_ADMITTED":
             await self._reply(send, 200, "ALREADY_ADMITTED")
         else:
-            await self._reply(send, 200, "REFUSED")
+            await self._reply(send, 200, "REFUSED", reason=outcome.decision.refusal)

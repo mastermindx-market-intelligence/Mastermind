@@ -105,9 +105,10 @@ class ReviewHostSettings:
     and no field is a secret.
     """
 
-    # --- gates, both default-off -------------------------------------------
+    # --- receiver/publication gates and automatic coverage, all default-off ---
     enabled: bool = False
     publication_enabled: bool = False
+    allow_lifecycle_review: bool = False
 
     # --- exact ingress surface ---------------------------------------------
     expected_host: str = "127.0.0.1"
@@ -137,7 +138,7 @@ class ReviewHostSettings:
     job_review_required: bool = False
 
     def __post_init__(self) -> None:
-        for name in ("enabled", "publication_enabled", "require_https", "job_review_required"):
+        for name in ("enabled", "publication_enabled", "require_https", "job_review_required", "allow_lifecycle_review"):
             value = getattr(self, name)
             if not isinstance(value, bool):
                 raise ReviewHostConfigError(f"{name} must be a boolean")
@@ -256,6 +257,7 @@ class ReviewHostSettings:
                 require_current_permission_for_all_channels=True,
                 allow_static_actor_authority=False,
                 allow_explicit_rerun=False,
+                allow_lifecycle_review=self.allow_lifecycle_review,
             )
         except ReviewIntentError as exc:
             raise ReviewHostConfigError(f"host settings do not project a policy: {exc}") from exc
@@ -267,6 +269,7 @@ class ReviewHostSettings:
             "schema": SCHEMA,
             "enabled": self.enabled,
             "publication_enabled": self.publication_enabled,
+            "allow_lifecycle_review": self.allow_lifecycle_review,
             "expected_host": self.expected_host,
             "delivery_path": self.delivery_path,
             "require_https": self.require_https,

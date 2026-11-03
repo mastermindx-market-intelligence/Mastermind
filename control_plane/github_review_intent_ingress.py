@@ -74,6 +74,7 @@ from control_plane.github_review_intent import (
     SUPPORTED_EVENTS,
     CurrentPermission,
     IntentSignal,
+    IntentSource,
     PullRequestFacts,
     ReviewIntentDecision,
     ReviewIntentError,
@@ -991,6 +992,24 @@ def admit_review_intent(
             visibility_error=_notify(visibility, decision, job_id=None),
         )
 
+    # A disabled lifecycle channel and an un-enrolled installation earn no
+    # authenticated reads or ledger inspection, even for a valid signature.
+    preflight_refusal = None
+    if envelope.installation_id not in policy.installation_ids:
+        preflight_refusal = ReviewIntentRefusal.INSTALLATION_NOT_ALLOWLISTED
+    elif (intent_channel_for(envelope.event, envelope.action) is IntentSource.PR_LIFECYCLE
+            and not policy.allow_lifecycle_review):
+        preflight_refusal = ReviewIntentRefusal.AUTOMATIC_REVIEW_DISABLED
+    if preflight_refusal is not None:
+        decision = _simple_refusal(
+            refusal=preflight_refusal, delivery_id=delivery_id,
+            repository=envelope.repository, pull_number=envelope.pull_number,
+        )
+        return ReviewIngressOutcome(
+            state=AdmissionState.REFUSED, decision=decision,
+            visibility_error=_notify(visibility, decision, job_id=None),
+        )
+
     if envelope.pull_number is None:
         # A supported channel whose signed payload identifies no pull request —
         # a slash command on a plain issue.  Refused before any read, ledger
@@ -1028,6 +1047,18 @@ def admit_review_intent(
     current_permission = _current_permission(
         actors, repository=envelope.repository, login=signal.actor_login
     )
+
+    if (intent_channel_for(envelope.event, envelope.action) is IntentSource.PR_LIFECYCLE
+            and current_permission is None):
+        decision = _simple_refusal(
+            refusal=ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED,
+            delivery_id=delivery_id, repository=envelope.repository,
+            pull_number=envelope.pull_number,
+        )
+        return ReviewIngressOutcome(
+            state=AdmissionState.REFUSED, decision=decision,
+            visibility_error=_notify(visibility, decision, job_id=None),
+        )
 
     pull_request = pull_read.read_pull_request(
         repository=envelope.repository, pull_number=envelope.pull_number
