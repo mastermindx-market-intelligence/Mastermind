@@ -1,3 +1,37 @@
+## P00 pre-dispatch requalification repair (source candidate; not installed)
+
+P00's inspection of the existing #1011 path observed Paper Desktop 0.5.18
+catalog `16e6b93f...` accepted under `TOOL_SCOPED_CONTRACT_V1`. The historical
+whole-catalog mismatch is resolved on that observed direct path; do not change
+the expected upstream digest or repeat the already accepted v20 installation.
+
+An independent offline source assessment found a remaining ordering gap: an
+edit or snapshot-guarded read qualified its requested tool, invoked the vendor
+`get_basic_info` guard, then dispatched the requested tool using the earlier
+qualification. A material descriptor change during that intervening RPC could
+therefore reach Paper. The proposed immutable v21 bridge rechecks the live
+server/getter contract, the requested tool and its outgoing inputs after the
+guard and immediately before dispatch. The shared validator also rechecks
+HTML versus legacy text payloads if the vendor changes between reviewed
+profiles. Pre-dispatch refusal remains a refusal with no requested mutation;
+post-dispatch verification uncertainty remains `EFFECT_UNKNOWN`, never replay.
+
+The v2-v20 pins remain byte-for-byte historical identities. V21 is only a source
+candidate until independent original-owner review, required hosted checks,
+protected release, and an admitted same-service activation occur. Do not
+hotpatch an installed bundle, select a new runtime, restart a service or change
+credentials from this source receipt. Accepted v20 direct-path evidence stays
+preserved, with this newly found condition carried into the next review.
+
+This repair does not broaden the allowlists. Folder creation/resource moves/
+archive/unarchive remain blocked. `create_file` still requires an exact guarded
+source or clone file and rejects `parentId`; file rename still excludes folders.
+The published app's older file-creation/focus/exclusive-file wording must be
+refreshed through the same app's normal approved action publication, not through
+a source rewrite or alternate carrier. No new whole-file or page-wide lock is
+introduced. Qualification cannot guarantee atomic vendor behavior between the
+final catalog read and call; it removes the deterministic intervening-RPC gap.
+
 ## Upgrade-resilient tool-scoped Paper compatibility (proposed source, 2026-11-02)
 
 PROBLEM: the historic full-catalog SHA admission rule made every
@@ -744,3 +778,4 @@ accepted installer from an independently authorized local or RDC host installati
 context, checking each stage before the next. A command launched through the C4 backend
 itself is not a qualified self-cutover mechanism. The subsequent Paper prepare/edit and
 visual readback remain on Studio Direct C4.
+
