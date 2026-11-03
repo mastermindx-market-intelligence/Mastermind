@@ -258,6 +258,48 @@ class C4RepositorySuccessorTests(unittest.TestCase):
         self.assertEqual(repaired["effect_state"],"APPLIED")
         self.assertEqual(c4.run(self.svc,self.args("status",plan))["phase"],"COMPLETE")
 
+    def test_interrupted_journal_is_completed_under_same_plan_before_any_module_write(self):
+        plan = self.preview()
+        self.svc.fail_new_name = "intent.json"
+        with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_C4_EFFECT_UNKNOWN"):
+            c4.run(self.svc, self.args("apply", plan))
+        self.assertEqual(self.roots["manifest"].read_bytes(),
+                         json_bytes(self.orig_manifest))
+        self.assertEqual(self.roots["config"].read_bytes(),
+                         json_bytes(self.orig_cfg))
+        journal = self.roots["state"] / c4.TX_NAME
+        self.assertFalse((journal / "intent.json").exists())
+        result = c4.run(self.svc, self.args("reconcile", plan))
+        self.assertEqual(result["effect_state"], "APPLIED")
+        c4.require_start(self.svc, self.roots)
+
+    def test_foreign_partial_journal_is_never_overwritten(self):
+        plan = self.preview()
+        self.svc.fail_new_name = "intent.json"
+        with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_C4_EFFECT_UNKNOWN"):
+            c4.run(self.svc, self.args("apply", plan))
+        journal = self.roots["state"] / c4.TX_NAME
+        target = journal / "gateway.mjs.after"
+        original = target.read_bytes()
+        target.write_bytes(b"foreign")
+        with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_C4_TRANSACTION_REFUSED"):
+            c4.run(self.svc, self.args("reconcile", plan))
+        self.assertEqual(target.read_bytes(), b"foreign")
+        self.assertNotEqual(original, b"foreign")
+        self.assertEqual(self.roots["manifest"].read_bytes(),
+                         json_bytes(self.orig_manifest))
+
+    def test_missing_plan_cannot_be_recreated_by_reconciliation(self):
+        plan = self.preview()
+        self.svc.fail_new_name = "intent.json"
+        with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_C4_EFFECT_UNKNOWN"):
+            c4.run(self.svc, self.args("apply", plan))
+        journal = self.roots["state"] / c4.TX_NAME
+        (journal / "plan.json").unlink()
+        with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_C4_TRANSACTION_REFUSED"):
+            c4.run(self.svc, self.args("reconcile", plan))
+        self.assertFalse((journal / "plan.json").exists())
+
     def test_manifest_committed_without_result_refuses_start_until_original_reconcile(self):
         plan=self.preview()
         self.svc.fail_new_name="result.json"

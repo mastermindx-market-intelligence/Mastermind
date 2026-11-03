@@ -334,6 +334,54 @@ def transaction(svc, roots, expected_sha, original_sha):
         fail("TRANSACTION_REFUSED")
 
 
+def restore_incomplete_prewrite_journal(svc, roots, args, original_sha):
+    """Complete only missing journal entries of this exact original transaction.
+
+    This is NOT an apply replay. A retained plan and unchanged installed
+    predecessor must both exist; present bytes are immutable. Once a module
+    may have been modified, journal repair is categorically unavailable.
+    """
+    tx = transaction_dir(roots)
+    pin = pin_owner(svc)
+    try:
+        pin.directory(svc, tx)
+        current_plan = pin.decode(svc._fabric_release_bytes(tx / "plan.json"))
+        if plan_hash(svc, current_plan) != args.expected_plan_sha256:
+            fail("PLAN_CAS_REFUSED")
+        if not isinstance(args.source, str) or not args.source:
+            fail("SOURCE_REFUSED")
+        plan, payloads = snapshot(svc, roots, args.source, original_sha)
+        if (plan != current_plan or
+                plan_hash(svc, plan) != args.expected_plan_sha256):
+            fail("PLAN_CAS_REFUSED")
+        expected = {
+            "plan.json": svc._fabric_release_json(plan),
+            **payloads,
+            "intent.json": svc._fabric_release_json({
+                "schema": SCHEMA, "planSha256": args.expected_plan_sha256,
+            }),
+        }
+        names = {p.name for p in tx.iterdir()}
+        if names - set(expected):
+            fail("TRANSACTION_REFUSED")
+        # Read every existing value before creating a missing file. A crashed
+        # partial write or foreign file never gets silently overwritten.
+        for name in names:
+            if svc._fabric_release_bytes(tx / name) != expected[name]:
+                fail("TRANSACTION_REFUSED")
+    except (OSError, ValueError, TypeError, KeyError):
+        fail("TRANSACTION_REFUSED")
+    # Missing journal writes are effects, even if no installed module moved.
+    # A failed write must preserve uncertainty on this original transaction.
+    try:
+        for name in sorted(set(expected) - names - {"intent.json"}):
+            svc._fabric_release_new(tx / name, expected[name])
+        if "intent.json" not in names:
+            svc._fabric_release_new(tx / "intent.json", expected["intent.json"])
+    except BaseException:
+        fail("EFFECT_UNKNOWN")
+
+
 def current_state(svc, roots, retained):
     """Only accept a strict manifest-last prefix of the five fixed mutations."""
     states = []
@@ -491,6 +539,21 @@ def run(svc, args):
                 fail("EFFECT_UNKNOWN")
         if not os.path.lexists(tx):
             fail("TRANSACTION_REFUSED")
+        if args.operation == "reconcile":
+            # Only prepare an incomplete journal against the untouched
+            # predecessor, retaining the same plan SHA and original tx path.
+            # No fallback is attempted for a completed/valid journal.
+            pin = pin_owner(svc)
+            pin.directory(svc, tx)
+            if not os.path.lexists(tx / "intent.json"):
+                try:
+                    restore_incomplete_prewrite_journal(
+                        svc, roots, args, original_sha
+                    )
+                except SystemExit:
+                    raise
+                except BaseException:
+                    fail("EFFECT_UNKNOWN")
         plan, retained, committed = transaction(
             svc, roots, args.expected_plan_sha256, original_sha
         )
