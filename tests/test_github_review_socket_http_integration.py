@@ -153,12 +153,23 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
                     "user": {"login": "alice"},
                     "permission": "write", "role_name": "write",
                 })
+            if request.url.path.endswith("/pulls/42/files"):
+                # Automatic webhook review must first consume the complete
+                # current-head risk source. Use a genuinely CRITICAL CI change
+                # so both old and risk-relieved policy still require review.
+                assert dict(request.url.params) == {"per_page": "100", "page": "1"}
+                return httpx.Response(200, json=[{
+                    "filename": ".github/workflows/ci.yml",
+                    "status": "modified", "additions": 1, "deletions": 0,
+                    "patch": "@@ -1 +1 @@",
+                }])
             if request.url.path.endswith("/pulls/42"):
                 return httpx.Response(200, json={
                     "number": 42, "state": "open", "draft": False,
                     "head": {"sha": SHA, "repo": {"full_name": REPO}},
                     "base": {"sha": "b" * 40, "repo": {"full_name": REPO}},
                     "title": "Source review", "body": "Untrusted PR content",
+                    "changed_files": 1, "additions": 1, "deletions": 0,
                 })
             raise AssertionError("unrecognized GitHub API request")
 
