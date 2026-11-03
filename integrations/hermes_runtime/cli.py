@@ -127,6 +127,8 @@ def _canary(profile_path: Path, hermes_bin: Path) -> int:
     # The local operator must route through the actual unit; no out-of-cgroup
     # invocation may even read a provider credential.
     assert_role_service_cgroup(profile.role)
+    from .system_service import assert_role_network_profile
+    assert_role_network_profile(profile)
     current = state / "current"
     manifest_path = state / "install-manifest.json"
     receipt_path = current / "install-receipt.json"
@@ -192,9 +194,10 @@ def _supervise(args: argparse.Namespace) -> int:
     # systemd --user cannot attach IPAddressDeny eBPF on Ubuntu1. Never read
     # a provider credential or spawn Hermes from that ineffective manager.
     # Only PID1's exact system.slice service cgroup is an eligible process.
-    from .system_service import assert_root_service_cgroup
+    from .system_service import assert_root_service_cgroup, assert_role_network_profile
     try:
         assert_root_service_cgroup(profile.role)
+        assert_role_network_profile(profile)
     except RuntimeRefusal as exc:
         print(exc.code, file=sys.stderr)
         return CONFIG_EXIT

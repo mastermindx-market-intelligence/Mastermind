@@ -57,6 +57,14 @@ def assert_root_service_cgroup(role: str, *, raw: str | None = None) -> None:
         raise RuntimeRefusal("ROOT_UNIT_CGROUP_UNQUALIFIED")
 
 
+def assert_role_network_profile(profile: RuntimeProfile) -> None:
+    """Require role-exclusive gateway/backend/proxy alias before any secrets."""
+    if (type(profile) is not RuntimeProfile
+            or profile.role not in ROLE_PROXY_HOST
+            or profile.gateway_host != ROLE_PROXY_HOST[profile.role]):
+        raise RuntimeRefusal("ROOT_UNIT_SHARED_LOOPBACK_REFUSED")
+
+
 def render_host_unit(
     profile: RuntimeProfile, *, runtime_user: str, runtime_group: str,
     python_executable: str, repo_root: Path,
@@ -81,6 +89,7 @@ def render_host_unit(
             or not profile.secrets_file.is_absolute()):
         raise RuntimeRefusal("ROOT_UNIT_PATH_INVALID")
     role_ip = ROLE_PROXY_HOST[profile.role]
+    assert_role_network_profile(profile)
     seconds = int(profile.restart_sec) if float(profile.restart_sec).is_integer() else profile.restart_sec
     unit = f"""# ROOT-OWNED /etc/systemd/system/{profile.service_name}.service
 # Enforcing IPAddressDeny requires PID1's system manager; NEVER systemd --user.
@@ -125,7 +134,6 @@ AmbientCapabilities=
 UMask=0077
 RestrictAddressFamilies=AF_UNIX AF_INET
 IPAddressDeny=any
-IPAddressAllow=127.0.0.1/32
 IPAddressAllow={role_ip}/32
 RestrictSUIDSGID=true
 LockPersonality=true
@@ -136,7 +144,7 @@ TasksAccounting=true
 WantedBy=multi-user.target
 """
     allows = [line for line in unit.splitlines() if line.startswith("IPAddressAllow=")]
-    if (allows != ["IPAddressAllow=127.0.0.1/32", f"IPAddressAllow={role_ip}/32"]
+    if (allows != [f"IPAddressAllow={role_ip}/32"]
             or unit.count("EnvironmentFile=") != 1
             or "IPAddressAllow=localhost" in unit
             or "IPAddressAllow=any" in unit

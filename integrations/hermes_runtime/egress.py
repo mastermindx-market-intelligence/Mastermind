@@ -2,7 +2,10 @@
 
 No proxy is created or launched here. The existing role-private 0600 secrets
 file supplies only its own per-role proxy address. RestrictAddressFamilies,
-IPAddressDeny=any remains; per-role IPAddressAllow now selects the exact role\nloopback alias and the shared original backend 127.0.0.1 only. The unit's\nactual cgroup BPF enforcement and parent slice policy still require proof.
+IPAddressDeny=any remains. The root-managed unit permits only the role's
+one loopback alias for its authenticated gateway, native backend and
+approved vendor CONNECT proxy. Shared 127.0.0.1 is not permitted by
+the actual root unit. Kernel and parent-slice enforcement need host proof.
 Source qualification is not evidence of an installed policy, real CONNECT,
 TLS verification or an authenticated provider response.
 """
@@ -52,5 +55,5 @@ def native_egress_child_env(role: str, private_values: Mapping[str, str]) -> dic
     # tokens never reach the child.
     return {
         "HTTPS_PROXY": raw,
-        "NO_PROXY": "127.0.0.1,localhost",
+        "NO_PROXY": f"127.0.0.1,localhost,{host}",
     }

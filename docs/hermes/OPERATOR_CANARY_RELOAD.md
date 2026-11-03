@@ -4,7 +4,7 @@
 
 ## Why this is needed
 
-A valid model-output parser in a developer shell does not prove that a Hermes role can authenticate, reach its intended provider, or remain network-confined on Ubuntu1. The pinned native subprocess is normally launched by `integrations.hermes_runtime.supervisor.ServiceRuntime` inside one `systemd --user` unit with `IPAddressDeny=any` and `IPAddressAllow=localhost`. Running a canary from a user's ordinary shell bypasses that unit's real confinement and is therefore not accepted evidence.
+A valid model-output parser in a developer shell does not prove that a Hermes role can authenticate, reach its intended provider, or remain network-confined on Ubuntu1. The pinned native subprocess must run inside the exact **PID1-managed system unit**, under a non-root User/Group, with enforced `IPAddressDeny=any` and only its role-specific alias permitted. Ubuntu1's prior `systemd --user` network deny was observed ineffective. Running a canary from a user's ordinary shell bypasses that unit's real confinement and is therefore not accepted evidence.
 
 This candidate adds one `ExecReload` command to **each existing role service**. Systemd executes it as a control process in that service cgroup, using its original `EnvironmentFile=` and existing release. It calls `integrations.hermes_runtime.cli._canary` (same code path as `python -m integrations.hermes_runtime canary`) and the exact existing `ServiceRuntime._model_child_env` owner to reconstruct one role-private, proxy-bound model environment.
 
@@ -15,15 +15,16 @@ There is **no new daemon, Slack listener, timer, network listening socket, crede
 An authorized Ubuntu1 operator first verifies all of these through the proper private host/credential owners:
 
 1. #1952, #1947 and this PR have passed exact-head checks, independent non-author review, normal protected release and on-host installed-source validation.
-2. The role's user unit, 0600 secrets file, provider pointer and **distinct** gateway/dashboard keys are installed. The on-disk manifest points to the actual current numbered release, whose install receipt has `upstream_attested=true` and SHA-256 hashes matching both its immutable profile and native config, and the local pinned Git checkout is exactly `1c0cd667746d3395fe9e1b6c74f8f85952486f18`.
+2. The role's root-managed system unit, 0600 secrets file, provider pointer and **distinct** gateway/dashboard keys are installed. The on-disk manifest points to the actual current numbered release, whose install receipt has `upstream_attested=true` and SHA-256 hashes matching both its immutable profile and native config, and the local pinned Git checkout is exactly `1c0cd667746d3395fe9e1b6c74f8f85952486f18`.
 3. The independently owned per-role localhost CONNECT proxy is listening with an actual inspected hostname/port allowlist. Secretary's proxy must bind `127.0.0.2` and reach only `ark.ap-southeast.bytepluses.com:443`; Meta-CEO's proxy must bind `127.0.0.3` and reach only `api.z.ai:443`; off-list destinations and cross-role access are **proven denied**, not assumed from the URL. The native HTTPS client must still validate TLS; a token-bearing provider request is not a reason to relax `IPAddressDeny=any`.
-**Cross-role TCP caveat:** both `systemd --user` units may run under the
-**same Linux account**. Merely assigning 127.0.0.1:18651 and
-127.0.0.1:18652, or setting a role label in a 0600 file, does **not**
-prevent one unit from connecting to the other unit's loopback proxy.
-The updated per-role unit now permits only 127.0.0.1/32 for the
-existing dashboard and the role's unique proxy alias (127.0.0.2/32
-for Secretary, 127.0.0.3/32 for Meta-CEO) under IPAddressDeny=any.
+**Cross-role and shared-localhost caveat:** the root-managed services
+may run as the same non-root account, but their enforced
+IPAddressDeny=any must allow only 127.0.0.2/32 for Secretary or
+127.0.0.3/32 for Meta-CEO. The authenticated gateway, pinned backend
+and own vendor proxy all bind the same role-local alias. Shared
+127.0.0.1/32 is forbidden: systemd IP filters ignore TCP ports, and
+Ubuntu1 has unrelated 127.0.0.1 listeners. Never use user-manager
+units, blanket localhost, shared proxy IPs or a role label as isolation.
 The host network owner must prove real source-cgroup/credential-based
 isolation (and verify parent slices do not grant a broader loopback
 allowance) with
@@ -37,9 +38,9 @@ Only once those gates are real, each role is triggered separately via the existi
 
 ```sh
 # On ubuntu1, by its authorized operator. No keys or prompt on command line.
-systemctl --user reload hermes-runtime-mmsecretary.service
+sudo systemctl reload hermes-runtime-mmsecretary.service
 # Later, as another explicitly authorized attempt:
-systemctl --user reload hermes-runtime-mmmeta.service
+sudo systemctl reload hermes-runtime-mmmeta.service
 ```
 
 This is `ExecReload` (not a restart or reload-all hook), and the operator uses the installed systemd service, **not** `python ... canary` from an unrestricted shell. One invocation performs one fixed, nonce-challenged native `chat -Q --query-file - --format stream-json` request with an upper-bound timeout and byte limits. The model receives no Slack token, gateway bearer, arbitrary prompt, extra provider key or inherited shell proxy.

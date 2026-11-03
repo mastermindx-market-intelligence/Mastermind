@@ -58,9 +58,10 @@ class RootManagedUnitTests(unittest.TestCase):
                 ]
                 self.assertEqual(
                     allows,
-                    ["IPAddressAllow=127.0.0.1/32", f"IPAddressAllow={own}/32"],
+                    [f"IPAddressAllow={own}/32"],
                 )
                 self.assertNotIn(other, "\n".join(allows))
+                self.assertNotIn("IPAddressAllow=127.0.0.1/32", unit)
                 self.assertIn("IPAddressDeny=any\n", unit)
                 self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET\n", unit)
                 self.assertNotIn("IPAddressAllow=localhost", unit)
@@ -82,6 +83,15 @@ class RootManagedUnitTests(unittest.TestCase):
                 self.assertEqual(unit.count("EnvironmentFile="), 1)
                 self.assertNotIn("synthetic-private-token", unit)
                 self.assertNotIn("127.0.0.0/8", unit)
+
+    def test_shared_loopback_or_sibling_gateway_refused_before_system_unit(self):
+        for role, sibling in (("mmsecretary", "127.0.0.3"), ("mmmeta", "127.0.0.2")):
+            for host in ("127.0.0.1", sibling):
+                with self.subTest(role=role, host=host):
+                    profile = replace(self.profile(role), gateway_host=host)
+                    with self.assertRaises(RuntimeRefusal) as cm:
+                        self.render(role, profile=profile)
+                    self.assertEqual(cm.exception.code, "ROOT_UNIT_SHARED_LOOPBACK_REFUSED")
 
     def test_only_exact_nonroot_users_and_validated_paths(self):
         for user, group in (
@@ -150,6 +160,25 @@ class RootManagedUnitTests(unittest.TestCase):
         self.assertEqual(err.getvalue().strip(), "ROOT_UNIT_CGROUP_UNQUALIFIED")
         gate.assert_called_once_with("mmsecretary")
         secrets.assert_not_called()
+        runtime.assert_not_called()
+
+    def test_shared_loopback_supervisor_refuses_before_loading_secrets(self):
+        profile = replace(self.profile("mmsecretary"), gateway_host="127.0.0.1")
+        args = argparse.Namespace(
+            profile=Path("/synthetic/profile.yaml"), state=None,
+            secrets_file=None, hermes_bin=Path("/synthetic/hermes"),
+        )
+        with (
+            mock.patch.object(cli, "load_profile", return_value=profile),
+            mock.patch("integrations.hermes_runtime.system_service.assert_root_service_cgroup"),
+            mock.patch.object(cli, "load_secrets", side_effect=AssertionError("secret read")) as secret,
+            mock.patch.object(cli, "ServiceRuntime", side_effect=AssertionError("runtime")) as runtime,
+            redirect_stderr(io.StringIO()) as error,
+        ):
+            code = cli._supervise(args)
+        self.assertEqual(code, CONFIG_EXIT)
+        self.assertEqual(error.getvalue().strip(), "ROOT_UNIT_SHARED_LOOPBACK_REFUSED")
+        secret.assert_not_called()
         runtime.assert_not_called()
 
     def test_refused_role_exits_without_operator_secrets(self):

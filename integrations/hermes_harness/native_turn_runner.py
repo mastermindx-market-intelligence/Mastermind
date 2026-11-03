@@ -92,7 +92,7 @@ def _private_child_environment(profile: RuntimeProfile, env: Mapping[str, str]) 
     if not re.fullmatch(rf"http://{re.escape(expected_host)}:([1-9][0-9]{{3,4}})", proxy):
         raise RuntimeRefusal("NATIVE_CANARY_PROXY_NOT_QUALIFIED")
     port = int(proxy.rpartition(":")[2])
-    if not 1024 <= port <= 65535 or env["NO_PROXY"] != "127.0.0.1,localhost":
+    if not 1024 <= port <= 65535 or env["NO_PROXY"] != f"127.0.0.1,localhost,{expected_host}":
         raise RuntimeRefusal("NATIVE_CANARY_PROXY_NOT_QUALIFIED")
     return dict(env)
 
@@ -191,6 +191,8 @@ def run_native_canary(
             or not hermes_bin.is_file()):
         raise RuntimeRefusal("NATIVE_CANARY_PROFILE_UNQUALIFIED")
     assert_role_service_cgroup(profile.role)
+    from integrations.hermes_runtime.system_service import assert_role_network_profile
+    assert_role_network_profile(profile)
     env = _private_child_environment(profile, model_child_env)
     try:
         spec = native_provider(profile.role, profile.native_provider_id)

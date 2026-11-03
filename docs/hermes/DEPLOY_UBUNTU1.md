@@ -66,13 +66,16 @@ native model child; its sibling's provider credential is not forwarded.
 
 ## Native HTTPS egress — mandatory, not automatically provisioned
 
-Native BYOK source is no longer permitted to spawn a model child without a
-role-private, canonical localhost HTTPS CONNECT proxy setting. Keep
-`IPAddressDeny=any`, role-specific `IPAddressAllow=127.0.0.1/32` plus\n`IPAddressAllow=127.0.0.2/32` for Secretary or\n`IPAddressAllow=127.0.0.3/32` for Meta-CEO, and
-`RestrictAddressFamilies=AF_UNIX AF_INET` in both units. No direct public
-egress, `IPAddressAllow=any`, arbitrary proxy hostname, embedded proxy
-credential, inherited shell proxy, shared proxy endpoint, or role substitution
-is allowed.
+Native BYOK requires a role-private, canonical HTTPS CONNECT proxy.
+Only the **PID1-managed** root-owned system units are eligible to serve
+on Ubuntu1. They keep `IPAddressDeny=any` and
+`RestrictAddressFamilies=AF_UNIX AF_INET` and allow **only** the assigned
+role IP: 127.0.0.2/32 (Secretary) or 127.0.0.3/32 (Meta-CEO).
+The runtime gateway and pinned Hermes backend also bind that role IP.
+Never add shared 127.0.0.1/32, blanket localhost, public egress,
+arbitrary proxy hosts, inherited shell proxy or cross-role credentials.
+Legacy generated systemd --user units are inert staging artifacts and
+their startup is rejected by the production supervisor on Ubuntu1.
 
 The **existing private 0600 Secretary** file additionally needs these
 operator-provisioned settings (port shown as an example only):
@@ -112,9 +115,11 @@ binary, proxy listener, hostname allowlist, TLS peer or remote inference.
 **Critical cross-role isolation:** `IPAddressAllow=localhost` was
 originally broad (`127.0.0.0/8` and `::1/128`) and allowed either role
 to connect to a sibling proxy on a different localhost port. The updated
-unit now permits only **its own** 127.0.0.2/32 or 127.0.0.3/32 proxy
-address, plus 127.0.0.1/32 for the existing native Hermes gateway. The
-proxy must actually bind the selected role IP (not 0.0.0.0 or 127.0.0.1),
+root-managed unit now permits only **its own** 127.0.0.2/32 or
+127.0.0.3/32 IP for all local role services (gateway, backend, proxy).
+A 127.0.0.1/32 grant allows **every port** on that address, including
+unrelated host listeners, so it is forbidden for either root unit.
+The proxy must actually bind the selected role IP (not 0.0.0.0 or 127.0.0.1),
 and the host must prove that effective parent/system/user slice rules do
 not add a broader localhost allowance.
 
@@ -184,10 +189,13 @@ automatic fallback, enabled Steward MCP or computer-use tool. The disabled
 Cursor endpoint defaults to `https://cursor-pool.invalid/v1`. Personal
 Coding Plan `/api/coding` provider URLs are refused.
 
-Each always-on Hermes agent has its own systemd user unit and its own 0600
-secrets file. The Slack bot identity is per unit, not shared with Grok Secretary.
+Each role has a separate **root-managed system unit running as a
+non-root account** and its own mode-0600 secrets file. The old user
+units are generated only into an inert staging directory; do not
+enable/start them. Slack bot identities are role-private and not
+shared with Grok Secretary.
 
-| Agent | User unit | Secrets file |
+| Agent | Root-managed system unit | Secrets file |
 | --- | --- | --- |
 | `hermes-secretary` | `hermes-runtime-mmsecretary.service` | `~/.config/hermes-runtime/mmsecretary.secrets.env` |
 | `hermes-metaceo` | `hermes-runtime-mmmeta.service` | `~/.config/hermes-runtime/mmmeta.secrets.env` |
@@ -305,7 +313,7 @@ from `--fetch`.
 
 - `hermes-runtime-mmsecretary.service` and `hermes-runtime-mmmeta.service` in the user unit directory
 - a `default.target.wants` symlink for each
-- loopback ports `127.0.0.1:8765` (Secretary) and `127.0.0.1:8865` (Meta-CEO)
+- role-local gateway ports `127.0.0.2:8765` (Secretary) and `127.0.0.3:8865` (Meta-CEO); never activate staged user units
 - `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, only\n  role-specific host-prefix `IPAddressAllow` rules (no blanket `localhost` 127/8)
 - `EnvironmentFile=` pointing at that unit's 0600 secrets file, and no secret bytes in the unit
 - provider overlay `provider-overlay.yaml` and `vision-overlay.yaml` under the role's `hermes-home`
@@ -386,14 +394,18 @@ receiving-owner evidence and independent review exist. Do not remove the
 `enabled: false` fence to make a model start or call a tool. No
 `hermesctl install` receipt or local health response can prove those grants.
 
-Enable each user unit on its own. One unit does not start the other.
-This still does not post to Slack:
+**Only after** the normal protected release, independent review, root
+operator approval, installed one-Squid proxy and a proven fail-closed
+PID1 cgroup firewall, enable each **system** unit separately. Never
+enable a user-manager Hermes unit; this still does not post to Slack:
 
 ```sh
-systemctl --user daemon-reload
-systemctl --user enable --now hermes-runtime-mmsecretary.service
-systemctl --user enable --now hermes-runtime-mmmeta.service
-systemctl --user status hermes-runtime-mmsecretary.service hermes-runtime-mmmeta.service
+sudo systemctl daemon-reload
+# Requires independently approved root-owned unit files and host network tests.
+sudo systemctl enable --now hermes-runtime-mmsecretary.service
+# Only after Secretary isolation passes; a separate controlled cutover.
+sudo systemctl enable --now hermes-runtime-mmmeta.service
+sudo systemctl status hermes-runtime-mmsecretary.service hermes-runtime-mmmeta.service
 python3 integrations/hermes_harness/hermesctl status \
   --state "$HOME/.local/state/hermes-runtime-mmsecretary"
 python3 - <<'PY'
@@ -405,7 +417,7 @@ token = next(
     for line in text.splitlines()
     if line.startswith("HERMES_GATEWAY_TOKEN=")
 )
-request = urllib.request.Request("http://127.0.0.1:8765/api/health")
+request = urllib.request.Request("http://127.0.0.2:8765/api/health")
 request.add_header("Authorization", f"Bearer {token}")
 with urllib.request.urlopen(request, timeout=5) as response:
     print(response.status)
@@ -413,7 +425,7 @@ PY
 ```
 
 Expect `200` from health **only after** the pinned child process is
-running and its separate `127.0.0.1` backend responds to `GET /api/health`
+running and its separate `127.0.0.2` backend responds to `GET /api/health`
 with HTTP `200`, a JSON object containing `"ok": true`, and a `commit`
 exactly equal to the protected Hermes donor pin
 `1c0cd667746d3395fe9e1b6c74f8f85952486f18`. This is the pinned
@@ -501,10 +513,15 @@ A passing shadow is not a cutover. Grok Secretary keeps the live seat.
 
 ## Rollback
 
-Stop the user services first. Uninstall removes the state directory and the
-user unit. It leaves the 0600 secrets files in place.
+Stop approved root-owned **system** services first. Uninstall affects
+legacy staged user-unit artifacts and installed runtime state, not the
+root-owned service files: the root operator must separately remove those
+after verifying their original identities. Keep 0600 secrets private.
 
 ```sh
+sudo systemctl disable --now hermes-runtime-mmsecretary.service || true
+sudo systemctl disable --now hermes-runtime-mmmeta.service || true
+# Legacy user-manager units, only if installed; never restart them.
 systemctl --user disable --now hermes-runtime-mmsecretary.service || true
 systemctl --user disable --now hermes-runtime-mmmeta.service || true
 systemctl --user daemon-reload

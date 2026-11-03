@@ -46,7 +46,7 @@ class ProfilePinTests(unittest.TestCase):
                 profile = load_profile(PROFILES / f"{role}.yaml")
                 self.assertEqual(profile.sha, PINNED_UPSTREAM_SHA)
                 self.assertEqual(profile.repository, UPSTREAM_REPOSITORY)
-                self.assertEqual(profile.gateway_host, "127.0.0.1")
+                self.assertEqual(profile.gateway_host, {"mmsecretary": "127.0.0.2", "mmmeta": "127.0.0.3"}[role])
                 self.assertTrue(profile.auth_required)
                 self.assertEqual(profile.tool_allowlist, frozenset({"clarify"}))
                 self.assertEqual(profile.model_default, model)

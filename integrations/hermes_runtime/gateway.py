@@ -1,4 +1,4 @@
-"""Authenticated loopback front door. The socket is created only for 127.0.0.1."""
+"""Authenticated loopback front door, bound to a qualified role-local address."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -10,14 +10,19 @@ import threading
 import urllib.parse
 
 from .constants import DASHBOARD_PATH, HEALTH_PATH, LOOPBACK_HOST
+from .egress import ROLE_PROXY_HOST
+
+ALLOWED_LOOPBACK_HOSTS = frozenset((LOOPBACK_HOST, *ROLE_PROXY_HOST.values()))
 from .errors import RuntimeRefusal
 
 
-def reserve_loopback_port() -> int:
-    """Bind 127.0.0.1:0 and release it. Callers accept the small race."""
+def reserve_loopback_port(host: str = LOOPBACK_HOST) -> int:
+    """Bind one qualified loopback alias and release it; caller accepts race."""
+    if host not in ALLOWED_LOOPBACK_HOSTS:
+        raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock.bind((LOOPBACK_HOST, 0))
+        sock.bind((host, 0))
         return int(sock.getsockname()[1])
     finally:
         sock.close()
@@ -37,7 +42,7 @@ class _LoopbackServer(ThreadingHTTPServer):
 
 class Gateway:
     def __init__(self, host: str, port: int, token: str, snapshot: Callable[[], tuple[int, dict]]):
-        if host != LOOPBACK_HOST:
+        if host not in ALLOWED_LOOPBACK_HOSTS:
             raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
         if not token:
             raise RuntimeRefusal("SECRETS_TOKEN_MISSING")
@@ -46,7 +51,7 @@ class Gateway:
         handler = _handler_factory(self)
         self._httpd = _LoopbackServer((host, port), handler)
         bound_host, bound_port = self._httpd.socket.getsockname()[:2]
-        if bound_host != LOOPBACK_HOST:
+        if bound_host != host:
             self._httpd.server_close()
             raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
         self.host = bound_host
@@ -103,7 +108,7 @@ def _handler_factory(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                     "hermes-runtime\n"
                     f"role={text.get('role', '')}\n"
                     f"sha={text.get('pinned_sha', '')}\n"
-                    "loopback=127.0.0.1\n"
+                    f"loopback={gateway.host}\n"
                     "auth=required\n"
                 ).encode("utf-8")
                 if token.encode("utf-8") in body:

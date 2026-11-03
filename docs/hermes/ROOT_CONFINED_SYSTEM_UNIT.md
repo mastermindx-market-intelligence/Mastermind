@@ -30,11 +30,15 @@ The system_service.py module generates one **root-owned systemd SYSTEM**
 unit per role, not a user-manager unit. PID1 manages the cgroup firewall
 while User=longr and Group=longr keep the Hermes process unprivileged.
 Each unit requires the one approved hermes-egress.service proxy and
-uses only its own loopback proxy /32 plus 127.0.0.1/32 for the native
-gateway. No blanket localhost, root process, new scheduler or
-alternate credential store.
+allows exactly one role-specific loopback /32: 127.0.0.2 for Secretary,
+127.0.0.3 for Meta-CEO. Its existing gateway, pinned native backend and
+vendor CONNECT proxy bind distinct ports on that **same role-only IP**.
+Neither unit grants 127.0.0.1, the sibling alias, wildcard loopback,
+public IPs, root execution, a new scheduler or another credential store.
+The system renderer and the production supervisor refuse a legacy profile
+that still binds the shared 127.0.0.1 gateway before credential access.
 
-The existing CLI supervise entrypoint now rejects all processes outside
+The existing CLI supervise and operator canary entrypoints reject processes outside
 the exact /system.slice/hermes-runtime-ROLE.service cgroup **before**
 loading the role's secret file. This means even a previously generated
 systemd --user unit cannot begin a provider session through the new
@@ -74,8 +78,13 @@ Review the complete generated source text; the root operator must install
 it as root:root mode 0644 under /etc/systemd/system/ and run
 systemd-analyze verify. Source rendering itself makes NO host writes.
 Before any charged model canary, prove actual unit-cgroup policy in BOTH
-directions from the final installed system services: own proxy allowed;
-other proxy, unrelated loopback and direct public 443 all denied.
+directions from the **final installed** services: own vendor proxy,
+own gateway and native backend allowed; sibling alias, a confirmed
+listening 127.0.0.1 service, unrelated loopback and direct public 443
+all denied. A missing listener/connection-refused result does not prove
+the firewall denied the connection. systemd IPAddressAllow is an
+IP-prefix filter, not a per-port firewall; do not add back
+127.0.0.1/32 to make a gateway/health test pass.
 Confirm effective parent policy and absence of unsupported-BPF warnings.
 Test the actual reviewed Squid config for denied off-list CONNECT,
 private IP targets, wrong ports and wildcard services.
