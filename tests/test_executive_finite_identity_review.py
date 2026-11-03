@@ -8,9 +8,10 @@ from tests.test_executive_a2_identity_review import scan
 
 STAGE = 'ops/executive_os/attended_control_staging.py'
 REGISTER = 'control_plane/fabric_attended_registration.py'
+RETIRE = 'ops/executive_os/attended_control_retirement.py'
 
 
-@pytest.mark.parametrize('path,count', [(STAGE, 7), (REGISTER, 1)])
+@pytest.mark.parametrize('path,count', [(STAGE, 7), (REGISTER, 1), (RETIRE, 7)])
 def test_exact_review_preserves_scan_of_other_identity(path, count):
     text = (Path(__file__).parents[1]/path).read_text()
     assert len(reviewed_literal_spans(path, text)) == count
@@ -27,6 +28,10 @@ def test_exact_review_preserves_scan_of_other_identity(path, count):
     (REGISTER, "'_mastermind_minimax'", "'_mastermind_other'"),
     (REGISTER, "label = 'mastermind-minimax'", "label = 'another-account'"),
     (REGISTER, '    guard()\n    if existing', '    if existing'),
+    (RETIRE, '!= 470', '!= 471'),
+    (RETIRE, "'_mastermind_minimax'", "'_mastermind_other'"),
+    (RETIRE, 'self.require_service_uids_quiescent()', 'self.require_services_already_stopped()'),
+    (RETIRE, 'self._active_transaction is not tx', 'self._active_transaction is tx'),
 ])
 def test_semantic_or_identity_drift_exposes_entire_anchor(path, before, after):
     text = (Path(__file__).parents[1]/path).read_text()

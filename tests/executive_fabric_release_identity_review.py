@@ -64,40 +64,28 @@ REVIEWED_FILES = {
                                                                                              90,
                                                                                              'int',
                                                                                              '0o700'))},
- 'ops/executive_os/acceptance.py': {'sha256': '6bb540de6bafd49b08ae0eb085c5e9dd6ddd67e9c9de92549850f6809d09672b',
-                                    # Re-pinned for argv redaction + newline flattening in the
-                                    # failure artifact: _redact_failure_text extracted from
-                                    # _redact_failure_stream, argv_text now redacted and
-                                    # newline-flattened; the same 21 reviewed principal/UID
-                                    # literals stay at their exact line/column positions; no new literal added.
-                                    # Re-pinned 2026-10-19 for the byte-bounded, line-preserving
-                                    # failure-artifact repair (A1 byte bound on
-                                    # _redact_failure_stream, A2 control chars + line prefix,
-                                    # assert -> raise on _build_failure_payload): the 21 reviewed
-                                    # principal/UID literals shifted by +3 lines from the new
-                                    # _FAILURE_CONTROL_CHARS_RE definition; no new literal added.
-                                    # Re-pinned 2026-10-19 (PR 1637 hardening): write-once _write_bytes; sites unchanged.
-                                    'sites': ((887, 59, 62, 'int', '454'),
-                                              (887, 64, 67, 'int', '455'),
-                                              (887, 69, 72, 'int', '456'),
-                                              (888, 23, 26, 'int', '450'),
-                                              (888, 45, 48, 'int', '450'),
-                                              (889, 49, 52, 'int', '400'),
-                                              (889, 64, 67, 'int', '500'),
-                                              (896, 28, 53, 'str', 'r"_mastermind_[a-z0-9_]+"'),
-                                              (904, 39, 64, 'str', 'r"_mastermind_[a-z0-9_]+"'),
-                                              (965, 44, 47, 'int', '454'),
-                                              (965, 49, 52, 'int', '455'),
-                                              (965, 54, 57, 'int', '456'),
-                                              (966, 44, 47, 'int', '454'),
-                                              (966, 49, 52, 'int', '455'),
-                                              (966, 54, 57, 'int', '456'),
-                                              (1087, 56, 59, 'int', '400'),
-                                              (1087, 85, 88, 'int', '500'),
-                                              (1088, 85, 88, 'int', '453'),
-                                              (1088, 90, 93, 'int', '454'),
-                                              (1088, 95, 98, 'int', '455'),
-                                              (1088, 100, 103, 'int', '456'))},
+ 'ops/executive_os/acceptance.py': {'sha256': '5d71c73a71c0d0835caa7a66d36b588e7e210ef8424ac8b219b3df742943bd87',
+ 'sites': ((893, 59, 62, 'int', '454'),
+           (893, 64, 67, 'int', '455'),
+           (893, 69, 72, 'int', '456'),
+           (894, 23, 26, 'int', '450'),
+           (894, 45, 48, 'int', '450'),
+           (895, 49, 52, 'int', '400'),
+           (895, 64, 67, 'int', '500'),
+           (902, 28, 53, 'str', 'r"_mastermind_[a-z0-9_]+"'),
+           (910, 39, 64, 'str', 'r"_mastermind_[a-z0-9_]+"'),
+           (971, 44, 47, 'int', '454'),
+           (971, 49, 52, 'int', '455'),
+           (971, 54, 57, 'int', '456'),
+           (972, 44, 47, 'int', '454'),
+           (972, 49, 52, 'int', '455'),
+           (972, 54, 57, 'int', '456'),
+           (1093, 56, 59, 'int', '400'),
+           (1093, 85, 88, 'int', '500'),
+           (1094, 85, 88, 'int', '453'),
+           (1094, 90, 93, 'int', '454'),
+           (1094, 95, 98, 'int', '455'),
+           (1094, 100, 103, 'int', '456'))},
  'ops/executive_os/attended_worker_definition.py': {'sha256': '267ca3fceea48d2c3a1e8a4aaefbf8a90bd595d0c324f1a503826e9604ead92d',
  'sites': ((255, 31, 51, 'str', "'_mastermind_worker'"), (351, 95, 100, 'int', '0o660'))},
  'ops/executive_os/bootstrap-host.sh': {'sha256': '805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce',
@@ -444,16 +432,14 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
-# Successor receipt/CAS support preserves these same four exact identity and
-# mode tokens. Their containing authority/gateway validation expressions are
-# unchanged; only full-file identity and relocated token spans are updated.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': '32ee125b30dbf50fb210dbe83bed44059b71c88af05ad469f96659242c9dbcca',
-    'sites': ((336, 24, 27, 'int', '501'),
-              (6605, 35, 37, 'int', '80'),
-              (6606, 50, 55, 'int', '0o755'),
-              (7283, 41, 46, 'int', '0o644')),
-}
+# PR2012 successor publication and finite retirement retain these same four
+# exact identity/mode tokens. Preserve both source changes; bind the actual
+# combined full-file digest and relocated complete-token sites.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': 'b6ff496b3b4af339332a8d1adbc4b4ca635d4624979617633eddb9c01c3b1d59',
+ 'sites': ((336, 24, 27, 'int', '501'),
+           (6610, 35, 37, 'int', '80'),
+           (6611, 50, 55, 'int', '0o755'),
+           (7288, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.

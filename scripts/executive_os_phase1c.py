@@ -346,6 +346,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bridge_armed",
         "canonical_paid_fabric",
         "fabric_attended_probe",
+        "retired_finite_composition",
         "native_capacity_v2",
     }
 )
@@ -389,6 +390,12 @@ def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
 
 
 def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
+    if 'retired_finite_composition' in raw:
+        from control_plane.fabric_attended_routing import retired_finite_selection
+        try:
+            retired_finite_selection(raw)
+        except ValueError as exc:
+            raise ServiceError(str(exc)) from None
     armed = raw.get("fabric_bridge_armed", False)
     if type(armed) is not bool:
         raise ServiceError("fabric_bridge_armed must be boolean")

@@ -73,6 +73,10 @@ def _parser() -> argparse.ArgumentParser:
         help="With --observe-only, retain one exclusive receipt in an existing private directory.",
     )
     parser.add_argument(
+        "--installed-release-sha",
+        help="With --observe-only and --observation-receipt, require the real installed root owner; no root or saved input override.",
+    )
+    parser.add_argument(
         "--summarize-observations", type=Path, nargs="+", metavar="RECEIPT",
         help="Offline JSON close/report over exactly these receipts; no Runtime read or campaign qualification.",
     )
@@ -180,7 +184,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.summarize_observations:
-        if args.root or args.observe_only or args.observation_receipt or args.no_boot_packet or args.boot_packet_file:
+        if (args.root or args.observe_only or args.observation_receipt or args.no_boot_packet
+                or args.boot_packet_file or args.installed_release_sha is not None):
             parser.error("--summarize-observations accepts only receipt paths and --json")
         try:
             result = summarize_observations(args.summarize_observations)
@@ -189,19 +194,30 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(json.dumps(result, indent=2, sort_keys=True))
         return 2 if result["failures"] or result["observer_failure_count"] else 0
+    if args.installed_release_sha is not None:
+        if (not args.observe_only or not args.observation_receipt
+                or args.root is not None or args.boot_packet_file is not None):
+            parser.error("--installed-release-sha requires --observe-only and --observation-receipt without --root or --boot-packet-file")
     if args.observation_receipt:
         if not args.observe_only:
             parser.error("--observation-receipt requires --observe-only")
         # Retain the existing JSON owner report; there is no action-changing path.
         args.json = True
         origin = "saved_file" if args.boot_packet_file else "not_collected" if args.no_boot_packet else "owner_collected"
+        def observe(runtime_root=None):
+            if runtime_root is not None:
+                # Only the installed source/config owner can supply this path.
+                args.root = str(runtime_root)
+            return _run(args)
         try:
             code, out, err = capture_observation(
-                args.observation_receipt, lambda: _run(args),
-                runtime_root=Path(args.root).resolve() if args.root else _ROOT,
+                args.observation_receipt, observe,
+                runtime_root=None if args.installed_release_sha is not None else Path(args.root).resolve() if args.root else _ROOT,
                 boot_packet_origin=origin,
-                source_files=(Path(__file__), Path(observe_capacity_campaign.__code__.co_filename),
+                source_files=() if args.installed_release_sha is not None else (
+                              Path(__file__), Path(observe_capacity_campaign.__code__.co_filename),
                               Path(observe_runtime_workload.__code__.co_filename)),
+                installed_release_sha=args.installed_release_sha,
             )
         except (ObservationEvidenceError, OSError, FilesystemSecurityError) as exc:
             print(f"observation evidence unavailable: {type(exc).__name__}", file=sys.stderr)

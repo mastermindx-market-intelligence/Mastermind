@@ -22,6 +22,7 @@ from typing import Callable
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
 
 RECEIPT_SCHEMA = "mastermind.capacity_observation_receipt.v1"
+INSTALLED_RECEIPT_SCHEMA = "mastermind.capacity_observation_receipt.v2"
 REPORT_SCHEMA = "mastermind.capacity_observation_collection.v1"
 MAX_RECEIPT_BYTES = 16 * 1024 * 1024
 MAX_COLLECTION_BYTES = 128 * 1024 * 1024
@@ -163,8 +164,9 @@ def _source_files(paths):
 
 
 def capture_observation(
-    path: Path, observe: Callable[[], int], *, runtime_root: Path,
+    path: Path, observe: Callable[..., int], *, runtime_root: Path | None,
     boot_packet_origin: str, source_files: tuple[Path, ...],
+    installed_release_sha: str | None = None,
 ) -> tuple[int, str, str]:
     """Reserve once, invoke the existing observer once, retain its exact streams.
 
@@ -174,21 +176,35 @@ def capture_observation(
     """
     evidence = _EvidenceFile(path, create=True)
     try:
-        before_sources = _source_files(source_files)
         started = _utc_now()
         tick = time.monotonic_ns()
+        installed = None
+        if installed_release_sha is not None:
+            from ops.executive_os.installed_capacity_observation import (
+                InstalledSourceObservation, source_paths,
+            )
+            _require(runtime_root is None and not source_files
+                     and boot_packet_origin in ("owner_collected", "not_collected"),
+                     "INSTALLED_OBSERVATION_OVERRIDE_REFUSED")
+            installed = InstalledSourceObservation(installed_release_sha)
+            runtime_root = installed.runtime_root
+            source_files = source_paths(installed_release_sha)
+        before_sources = _source_files(source_files)
+        before_observer = time.monotonic_ns()
         stdout, stderr = io.StringIO(), io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            code = observe()
-        elapsed = time.monotonic_ns() - tick
-        finished = _utc_now()
+            code = observe(runtime_root) if installed is not None else observe()
+        after_observer = time.monotonic_ns()
         _require(type(code) is int and code in (0, 2, 3), "UNEXPECTED_OBSERVER_EXIT")
         out, err = stdout.getvalue(), stderr.getvalue()
         after_sources = _source_files(source_files)
+        binding = installed.finish() if installed is not None else None
+        done = time.monotonic_ns()
+        finished = _utc_now()
         receipt = {
             "schema": RECEIPT_SCHEMA, "writer_uid": os.geteuid(),
             "capture_started_at": started, "capture_finished_at": finished,
-            "acquisition_monotonic_ns": elapsed,
+            "acquisition_monotonic_ns": done - tick,
             "execution_provenance": "UNATTESTED_SOURCE_OBSERVATION",
             "installed_coverage_claimed": False, "campaign_qualified": False,
             "runtime_root": str(runtime_root), "boot_packet_origin": boot_packet_origin,
@@ -197,6 +213,19 @@ def capture_observation(
             "observer_return_code": code, "stdout": out, "stderr": err,
             "stdout_sha256": _sha(out.encode()), "stderr_sha256": _sha(err.encode()),
         }
+        if binding is not None:
+            from ops.executive_os.installed_capacity_observation import PROVENANCE, SOURCE_SCOPE
+            receipt.update(
+                schema=INSTALLED_RECEIPT_SCHEMA, execution_provenance=PROVENANCE,
+                source_binding_scope=SOURCE_SCOPE, installed_source_binding=binding,
+                acquisition_phases_monotonic_ns={
+                    "installed_preflight": before_observer - tick,
+                    "observer": after_observer - before_observer,
+                    "installed_recheck": done - after_observer,
+                },
+            )
+            # A refused final join never becomes a source-only fallback receipt.
+            _validate(receipt)
         evidence.write((json.dumps(receipt, sort_keys=True, indent=2, allow_nan=False) + "\n").encode())
         return code, out, err
     finally:
@@ -204,17 +233,44 @@ def capture_observation(
 
 
 def _validate(receipt):
-    _require(isinstance(receipt, dict) and receipt.get("schema") == RECEIPT_SCHEMA,
+    _require(isinstance(receipt, dict) and receipt.get("schema") in (RECEIPT_SCHEMA, INSTALLED_RECEIPT_SCHEMA),
              "INVALID_RECEIPT_SCHEMA")
-    _require(set(receipt) == {"schema", "writer_uid", "capture_started_at", "capture_finished_at",
+    installed = receipt["schema"] == INSTALLED_RECEIPT_SCHEMA
+    fields = {"schema", "writer_uid", "capture_started_at", "capture_finished_at",
              "acquisition_monotonic_ns", "execution_provenance", "installed_coverage_claimed",
              "campaign_qualified", "runtime_root", "boot_packet_origin", "source_files_before",
              "source_files_after", "source_binding_scope", "observer_return_code", "stdout",
-             "stderr", "stdout_sha256", "stderr_sha256"}, "INVALID_RECEIPT_FIELDS")
+             "stderr", "stdout_sha256", "stderr_sha256"}
+    if installed:
+        fields.update({"installed_source_binding", "acquisition_phases_monotonic_ns"})
+    _require(set(receipt) == fields, "INVALID_RECEIPT_FIELDS")
     _require(receipt.get("writer_uid") == os.geteuid()
              and type(receipt.get("writer_uid")) is int, "WRITER_CUSTODY_MISMATCH")
-    _require(receipt.get("execution_provenance") == "UNATTESTED_SOURCE_OBSERVATION"
-             and receipt.get("source_binding_scope") == "OBSERVED_FILE_BYTES_NOT_EXECUTING_RELEASE_ATTESTATION"
+    provenance = "UNATTESTED_SOURCE_OBSERVATION"
+    scope = "OBSERVED_FILE_BYTES_NOT_EXECUTING_RELEASE_ATTESTATION"
+    if installed:
+        from ops.executive_os.installed_capacity_observation import (
+            PROVENANCE, SOURCE_FILES, SOURCE_SCOPE, source_paths, validate_binding,
+        )
+        provenance, scope = PROVENANCE, SOURCE_SCOPE
+        _require(receipt["writer_uid"] == 0, "INSTALLED_OBSERVATION_ROOT_WRITER_REQUIRED")
+        binding = validate_binding(receipt["installed_source_binding"])
+        _require(receipt["runtime_root"] == binding["resolved_runtime_root"]
+                 and receipt["boot_packet_origin"] in ("owner_collected", "not_collected"),
+                 "INSTALLED_OBSERVATION_INPUT_MISMATCH")
+        # JSON object order is not authority; join each fixed relative path.
+        expected_sources = {str(path): binding["qualified_source_files"][relative]
+                            for path, relative in zip(source_paths(binding["release_sha"]), SOURCE_FILES, strict=True)}
+        _require(receipt["source_files_before"] == expected_sources,
+                 "INSTALLED_OBSERVATION_SOURCE_MISMATCH")
+        phases = receipt["acquisition_phases_monotonic_ns"]
+        _require(type(phases) is dict and set(phases) == {
+            "installed_preflight", "observer", "installed_recheck"}
+            and all(type(value) is int and value >= 0 for value in phases.values())
+            and sum(phases.values()) == receipt["acquisition_monotonic_ns"],
+            "INVALID_INSTALLED_ACQUISITION_TIMING")
+    _require(receipt.get("execution_provenance") == provenance
+             and receipt.get("source_binding_scope") == scope
              and receipt.get("installed_coverage_claimed") is False
              and receipt.get("campaign_qualified") is False, "UNSUPPORTED_PROVENANCE_CLAIM")
     start, end = _stamp(receipt.get("capture_started_at")), _stamp(receipt.get("capture_finished_at"))
@@ -286,7 +342,8 @@ def summarize_observations(paths: list[Path]) -> dict:
             failures.append({"path": str(path), "reason": reason})
         inputs.append(row)
     points.sort(key=lambda item: (item[0], item[1], item[2]))
-    identities = {json.dumps([p[3]["runtime_root"], p[3]["source_files_before"], p[3]["boot_packet_origin"]],
+    identities = {json.dumps([p[3]["runtime_root"], p[3]["source_files_before"], p[3]["boot_packet_origin"],
+                             p[3]["execution_provenance"], p[3].get("installed_source_binding")],
                             sort_keys=True) for p in points}
     if len(identities) > 1:
         failures.append({"path": None, "reason": "MIXED_RUNTIME_SOURCE_OR_BOOT_INPUTS"})
@@ -299,12 +356,26 @@ def summarize_observations(paths: list[Path]) -> dict:
         details.append({"sha256": digest, "capture_started_at": receipt["capture_started_at"],
                         "capture_finished_at": receipt["capture_finished_at"],
                         "observer_return_code": receipt["observer_return_code"],
+                        "acquisition_monotonic_ns": receipt["acquisition_monotonic_ns"],
+                        "acquisition_phases_monotonic_ns": receipt.get("acquisition_phases_monotonic_ns"),
+                        "execution_provenance": receipt["execution_provenance"],
+                        "installed_source_binding": receipt.get("installed_source_binding"),
                         "point_status": point["point_status"] if point else "UNAVAILABLE",
                         "unavailable_metrics": point.get("unavailable_metrics") if point else None,
                         "source_coverage": point.get("source_coverage") if point else None,
                         "runtime_workload": point.get("runtime_workload") if point else None,
                         "current_attention_by_kind": point.get("current_attention_by_kind") if point else None,
                         "interval_summaries": point.get("interval_summaries") if point else None})
+    installed_points = [p for p in points if p[3]["schema"] == INSTALLED_RECEIPT_SCHEMA]
+    source_set_qualified = bool(installed_points) and len(installed_points) == len(points) and not failures
+    unproven = {name: {"state": "UNAVAILABLE", "value": None,
+                      "reason": "NO_QUALIFIED_PRODUCER_JOIN_IN_THIS_COLLECTION"}
+                for name in _UNPROVEN}
+    if source_set_qualified:
+        unproven["installed_source_and_runtime_attestation"] = {
+            "state": "PARTIAL", "value": None,
+            "reason": "INSTALLED_SOURCE_AND_CONFIG_CUSTODY_JOINED; LIVE_SERVICE_PEER_AND_RUNTIME_NAMESPACE_UNPROVEN",
+        }
     return {
         "schema": REPORT_SCHEMA, "mode": "closed_explicit_input_set_report",
         "scope": "SUPPLIED_RECEIPTS_NOT_COMPLETE_CAMPAIGN_CENSUS",
@@ -312,12 +383,14 @@ def summarize_observations(paths: list[Path]) -> dict:
         "state": "INPUTS_INCOMPLETE" if failures else "UNQUALIFIED_OBSERVATIONS_REPORTED",
         "inputs": inputs, "input_count_requested": len(paths), "failures": failures,
         "observations": details, "observation_count": len(points),
+        "installed_source_bound_observation_count": len(installed_points),
+        "healthy_installed_source_bound_observation_count": sum(p[3]["observer_return_code"] == 0 for p in installed_points),
+        "installed_source_and_config_custody_qualified": source_set_qualified,
+        "installed_service_peer_attested": False, "runtime_namespace_continuity_attested": False,
         "observer_failure_count": sum(p[3]["observer_return_code"] != 0 for p in points),
         "recorded_wall_clock_span_seconds": (max(p[1] for p in points) - points[0][0]).total_seconds() if points else None,
         "recorded_gaps": gaps,
         "max_recorded_gap_seconds": max((g["recorded_gap_seconds"] for g in gaps), default=None),
         "clock_scope": "HOST_UTC_LABELS; PHYSICAL_ELAPSED_ACCURACY_AND_CONTINUOUS_COVERAGE_UNPROVEN",
-        "unproven_requirements": {name: {"state": "UNAVAILABLE", "value": None,
-                                       "reason": "NO_QUALIFIED_PRODUCER_JOIN_IN_THIS_COLLECTION"}
-                                  for name in _UNPROVEN},
+        "unproven_requirements": unproven,
     }
