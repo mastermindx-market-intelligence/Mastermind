@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const execFileDefault = promisify(execFileCallback);
@@ -120,9 +120,11 @@ export const STUDIO_GIT_PUSH_CURRENT_BRANCH_TOOL = Object.freeze({
     'Push exactly the current HEAD of one existing clean Mastermind attended Web workspace to its ' +
     'same host-resolved sol/web-* origin branch without force, tags, branch selection or credential input. ' +
     'Requires the caller to fence the action with the exact expected local HEAD. If the remote already ' +
-    'equals that HEAD, no push is issued. A failure after push starts is EFFECT_UNKNOWN unless remote ' +
-    'readback proves the exact HEAD is applied. EFFECT_UNKNOWN remains unresolved and carries no retry authority; ' +
-    'studio_git_publish_status exposes read-only reconciliation state for any later decision.',
+    'equals that HEAD, no push is issued. Readback of the exact pinned ref proves successful publication. ' +
+    'A Git porcelain one-ref rejection with the remote ref unchanged returns NOT_APPLIED for that ref, ' +
+    'but never grants retry or alternative-carrier permission; diagnose its unknown cause read-only on ' +
+    'the original carrier. All other unresolved push failures remain EFFECT_UNKNOWN and fenced. ' +
+    'studio_git_publish_status provides read-only reconciliation.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -354,6 +356,19 @@ function commitActionRef(operationId, branch, oldHead, tree, message, protectedB
   return hash.update('\0').update(tree).update('\0').update(message).digest('hex');
 }
 
+// A rejected *one-ref* push and a lost push response are different effects.
+// Inspect only Git's machine-readable porcelain status for this exact pinned
+// destination, never untrusted remote prose or a generic exit code.
+function explicitlyRejectedExactRef(error, ref) {
+  if (error?.code !== 1 || error?.killed === true || error?.signal) return false;
+  const output = [error?.stdout, error?.stderr]
+    .filter((value) => typeof value === 'string').join('\n');
+  return output.split(/\r?\n/).some((line) => {
+    const match = line.match(/^!\t([^\t\r\n]+)\t\[remote rejected\](?:\s*\([^\r\n]*\))?\s*$/);
+    return match !== null && match[1].endsWith(`:${ref}`);
+  });
+}
+
 function publicStatus(state) {
   return {
     operation_id: state.operationId,
@@ -484,8 +499,33 @@ export function createGitPublisher(config, dependencies = {}) {
   async function seedPrivateIndex(workspacePath, indexPath) {
     const {stdout} = await git(workspacePath, ['rev-parse', '--git-path', 'index']);
     const realIndexPath = path.resolve(workspacePath, oneLine(stdout, 'real index path'));
-    const originalIndex = await readFile(realIndexPath);
+    // Bind bytes and metadata to one inode even if Git replaces the pathname.
+    // The existing real-index byte comparisons still fence concurrent writers.
+    const source = await open(realIndexPath, 'r');
+    let originalIndex;
+    let originalMtimeNs;
+    try {
+      originalMtimeNs = (await source.stat({bigint: true})).mtimeNs;
+      originalIndex = await source.readFile();
+    } finally {
+      await source.close();
+    }
+
+    // A newer copy can hide a same-size edit in a racily clean cached entry.
+    // Floor integer nanoseconds before conversion so floating-point rounding
+    // cannot advance the private index into the following second.
+    const nsPerSecond = 1_000_000_000n;
+    let seconds = originalMtimeNs / nsPerSecond;
+    if (originalMtimeNs < 0n && originalMtimeNs % nsPerSecond !== 0n) seconds -= 1n;
+    const timestamp = Number(seconds);
+    if (!Number.isSafeInteger(timestamp)) {
+      throw new Error('real index timestamp is outside the supported range');
+    }
     await writeFile(indexPath, originalIndex);
+    await utimes(indexPath, timestamp, timestamp);
+    if ((await stat(indexPath, {bigint: true})).mtimeNs > originalMtimeNs) {
+      throw new Error('private index timestamp advanced during preparation');
+    }
     return {realIndexPath, originalIndex};
   }
 
@@ -1109,6 +1149,26 @@ export function createGitPublisher(config, dependencies = {}) {
             action_ref: ref,
             push_attempted: true,
             ...publicStatus(afterFailure),
+          };
+        }
+        // Do not turn an explicit porcelain ref rejection into EFFECT_UNKNOWN
+        // when the same pinned destination is authoritatively unchanged.
+        // This classifies the requested ref only; it does not classify the
+        // host's reason or authorize an automatic retry or carrier switch.
+        if (explicitlyRejectedExactRef(error, before.ref) &&
+            afterFailure.remoteHead === before.remoteHead) {
+          return {
+            schema: 'mastermind.studio_git_push_result.v1',
+            status: 'REFUSED',
+            effect_state: 'NOT_APPLIED',
+            code: 'REMOTE_REF_REJECTED_UNCHANGED',
+            action_ref: ref,
+            push_attempted: true,
+            retry_allowed: false,
+            diagnostic_scope: 'SAME_CARRIER_READ_ONLY',
+            rejection_reason: 'UNDETERMINED',
+            ...publicStatus(afterFailure),
+            ready_to_push: false, // A rejected write is not automatically re-admitted.
           };
         }
       } catch {
