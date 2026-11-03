@@ -78,9 +78,14 @@ load; this evidence makes no end-to-end maintenance acceptance speed claim.
 The running 09b acceptance, installed source, credentials, runtime and service
 configuration were untouched.
 
-- Exact receipt: `native-microbenchmark.json`, SHA-256
+- Exact raw receipt: [`native-microbenchmark.json` at the original commit](https://github.com/mastermindx-market-intelligence/Mastermind/blob/9a0b1c50affabab716de54ee8077928a61a94651/docs/evidence/2026-11-03-acl-binding-reuse/native-microbenchmark.json), SHA-256
   `c55677ea9391b86279ccbec6f03a24889d90666180886849423995e6aecdaeb6`.
-- Exact driver: `measure-native.py`, SHA-256
+- Current metrics projection: `native-microbenchmark-metrics.json` preserves all
+  timing samples, source hashes, native transition results and measurement
+  context, omitting the raw host UID. It identifies the exact original receipt
+  and commit; it is not represented as the original receipt.
+- Exact measured driver: `measure-native.py` at original published commit
+  `9a0b1c50affabab716de54ee8077928a61a94651`, SHA-256
   `30527aab0a4a86da8bbd32a8f227cf1c43fa15a8ad12b933a78071c5a71e86fb`.
 
 For reproduction, place the driver in a new private temporary directory beside
@@ -88,4 +93,36 @@ For reproduction, place the driver in a new private temporary directory beside
 `candidate_fs_security.py` from this source slice. The driver verifies their
 hashes and the pinned interpreter before creating its disposable fixture. It
 requires its output `result.json` to be absent and never imports installed
-Mastermind code.
+Mastermind code. The current driver also requires `--expected-uid` with the
+explicitly selected, verified unprivileged runner UID; there is no UID default.
+
+## Hosted CI repair: explicit benchmark identity
+
+Initial automatic run `41592711859`, attempt 1, at head
+`9a0b1c50affabab716de54ee8077928a61a94651` failed job `125772874394`
+(`pytest shard 0`) in `test_d8_template_topology_and_protected_defaults`.
+The protected-identity guard correctly rejected the benchmark helper's
+hard-coded UID and the numeric UID in its raw evidence JSON. The same test failed locally on the candidate; binding its Git
+HEAD reads to the exact base commit passed. The ACL implementation was not the
+cause.
+
+The helper now takes a required `--expected-uid` argument, refuses non-positive
+identities, and still requires both real and effective UIDs to match before
+loading source or creating a fixture. Six focused tests cover missing input,
+root/negative input, real/effective mismatches, and successful admission through
+to source validation: **6 passed**. The unchanged protected-identity scanner
+also passes the repaired helper. No guard or production identity policy changed.
+The complete affected D8 group plus the driver admission tests passed:
+**234 passed, 23 deselected** in 7.69 seconds.
+
+The committed JSON is now a metrics projection without host-identity metadata;
+the original raw receipt remains unmodified at the original commit linked above.
+The actual runner identity remains documented as a historical observation in
+this narrative. No numeric identity is introduced into executable/configuration
+data to represent that observation.
+
+The current driver SHA-256 is
+`6058ddf7e19cab9e268119e01bfbc9fba976f7cd19a7b93fc77db5e09d21e627`.
+It has not been rerun on M2 as part of this repair. Production source and the
+original native measurement receipt remain byte-identical, and the exact driver used for
+the recorded run remains available at the original commit above.

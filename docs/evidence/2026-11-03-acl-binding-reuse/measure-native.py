@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Finite native ACL comparison on an owned empty disposable fixture only."""
 from pathlib import Path
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -29,7 +30,11 @@ def load(name, expected):
 
 
 def main():
-    assert sys.platform == "darwin" and os.getuid() == os.geteuid() == 501
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--expected-uid", type=int, required=True)
+    args = parser.parse_args()
+    assert args.expected_uid > 0
+    assert sys.platform == "darwin" and os.getuid() == os.geteuid() == args.expected_uid
     assert platform.python_version() == "3.12.10"
     modules = {"baseline": load("baseline", BASELINE), "candidate": load("candidate", CANDIDATE)}
     rows = []

@@ -1,6 +1,7 @@
 {
   "baseline_sha256": "aad443d4d712cc2483a912b6371779bd56f05ee08bc07bff9b3c3008ab0b52e7",
   "candidate_sha256": "4a9aa64a34cbc84601fbfd5ea68b9792eb1c5558116c48d52c797ad0c83758a5",
+  "derivation": "Derived from the original native receipt with host UID omitted; all timing rows retained.",
   "executable": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
   "fixture_removed": true,
   "iterations_per_sample": 512,
@@ -174,8 +175,12 @@
       "wall_ns": 22740208
     }
   ],
-  "schema": "mastermind.acl_binding_microbenchmark.v1",
+  "schema": "mastermind.acl_binding_microbenchmark_metrics.v1",
   "scope": "isolated observer calls; no installed acceptance speedup claimed",
+  "source_receipt_commit": "9a0b1c50affabab716de54ee8077928a61a94651",
+  "source_receipt_sha256": "c55677ea9391b86279ccbec6f03a24889d90666180886849423995e6aecdaeb6",
+  "source_receipt_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/9a0b1c50affabab716de54ee8077928a61a94651/docs/evidence/2026-11-03-acl-binding-reuse/native-microbenchmark.json",
+  "source_schema": "mastermind.acl_binding_microbenchmark.v1",
   "summaries": {
     "held_descriptor": {
       "cpu_ns_baseline_over_candidate": 18.183965640658553,
@@ -202,6 +207,5 @@
       }
     }
   },
-  "transition_passed": true,
-  "uid": 501
+  "transition_passed": true
 }
