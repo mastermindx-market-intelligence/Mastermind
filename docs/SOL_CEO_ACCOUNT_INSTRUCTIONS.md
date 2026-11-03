@@ -105,10 +105,15 @@ For any source release, first read the same-pinned
 `main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
 auto-merge is **not** a safe shortcut where binding checks are not protected.
 The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
-Check current PR/head, binding CI, actual non-author release decision, title/body/
-comments for recorded holds and the repository's source/lease gates **before**
-adding the label. Do not auto-arm every open PR or merge using the shared
-author account. A full successful sweeper run may still defer a PR because
+Check current PR/head, binding CI, genuine independent formal GitHub review,
+title/body/comments for recorded holds and repository source/lease gates
+**before** adding the label. **Until the incumbent controller or protected
+policy actually enforces those gates and is proven live**, retain the current
+independent non-author arming/release decision. **After** that machine guard
+is installed and verified, review once and let existing automation perform
+the protected release without a second human operator. Never auto-arm all
+open PRs, mistake a technical `SOURCE_PASS` for approval, or self-merge
+through a shared author account or REST/admin bypass. A full successful sweeper run may still defer a PR because
 `main` changed CI definitions, active CI workload exceeds the controller
 refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
 success badge. Mastermind `master` retains its separate protected merge-queue
