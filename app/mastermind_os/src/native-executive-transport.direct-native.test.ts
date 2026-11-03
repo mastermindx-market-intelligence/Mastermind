@@ -20,9 +20,9 @@ describe("native existing direct result and explicit consumption", () => {
     const f = await fixture(), signal = new AbortController().signal;
     await expect(f.transport.directNative!.read(selection, signal)).resolves.toEqual({ retained: true });
     expect(f.invoke.mock.calls).toEqual([["executive_auth_status"],
-      ["executive_direct_result", { arguments: selection }]]);
+      ["executive_direct_native_result", { arguments: selection }]]);
     await f.transport.directNative!.consume(consumption, signal);
-    expect(f.invoke.mock.calls[2]).toEqual(["executive_direct_consume", { arguments: consumption }]);
+    expect(f.invoke.mock.calls[2]).toEqual(["executive_direct_native_consume", { arguments: consumption }]);
   });
   it("rejects unknown selectors and incomplete consumption before invoking native code", async () => {
     const f = await fixture(), signal = new AbortController().signal;
@@ -61,8 +61,8 @@ describe("native existing direct result and explicit consumption", () => {
     const client = await createNativeClient(invoke as never, async () => () => {});
     await Promise.resolve();
     await client.executive!.directNative!.read(selection, new AbortController().signal);
-    expect(invoke).toHaveBeenCalledWith("executive_direct_result", { arguments: selection });
-    expect(invoke.mock.calls.map(([command]) => command)).not.toContain("executive_direct_consume");
+    expect(invoke).toHaveBeenCalledWith("executive_direct_native_result", { arguments: selection });
+    expect(invoke.mock.calls.map(([command]) => command)).not.toContain("executive_direct_native_consume");
   });
   it("maps correction inspect and exact fenced request without inventing terminal consumption", async () => {
     const f = await fixture(), signal = new AbortController().signal;
@@ -75,7 +75,7 @@ describe("native existing direct result and explicit consumption", () => {
       ["executive_direct_correction", { arguments: inspect }],
       ["executive_direct_correction", { arguments: request }],
     ]);
-    expect(f.invoke.mock.calls.map(([command]) => command)).not.toContain("executive_direct_consume");
+    expect(f.invoke.mock.calls.map(([command]) => command)).not.toContain("executive_direct_native_consume");
   });
   it("refuses correction mutation fields in inspect and invalid fences before native dispatch", async () => {
     const f = await fixture(), signal = new AbortController().signal;

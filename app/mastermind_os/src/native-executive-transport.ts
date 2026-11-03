@@ -66,7 +66,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
 
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_reply" | "executive_session_references" |
-    "executive_direct_result" | "executive_direct_consume" | "executive_direct_correction",
+    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
     if (!available || signal.aborted) return Promise.reject(new Error("EXECUTIVE_UNAVAILABLE"));
@@ -99,7 +99,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       read: (selection, signal) => {
         const normalized = normalizeDirectSelection(selection);
         if (!normalized) return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
-        return call("executive_direct_result", signal, { arguments: normalized });
+        return call("executive_direct_native_result", signal, { arguments: normalized });
       },
       consume: (request, signal) => {
         if (!request || typeof request !== "object" || Array.isArray(request) ||
@@ -112,7 +112,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
             typeof result_digest !== "string" || !/^[a-f0-9]{64}$/.test(result_digest) ||
             typeof operation_key !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(operation_key))
           return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
-        return call("executive_direct_consume", signal, {
+        return call("executive_direct_native_consume", signal, {
           arguments: { ...normalized, result_digest, operation_key },
         });
       },
