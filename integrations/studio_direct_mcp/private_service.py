@@ -3857,20 +3857,34 @@ def cmd_stop(args) -> int:
         return 1
 
     deadline = time.monotonic() + 10
-    try:
-        while _lifecycle_inspect(account, label, roots) is not None:
-            if time.monotonic() >= deadline:
-                print(json.dumps({"stopped": False, "reason": "still loaded"}))
-                return 1
+    strict_account = (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+                      or account in FABRIC_BACKEND_ACCOUNTS
+                      or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL)
+    # launchd may transiently report an indeterminate state immediately after a
+    # successful bootout. Continue OBSERVING only, never repeat the bootout.
+    # A strict owner must still see an exact positive ABSENT receipt before
+    # reporting stopped; persistent uncertainty remains EFFECT_UNKNOWN.
+    for poll in range(51):
+        try:
+            remaining = _lifecycle_inspect(account, label, roots)
+        except SystemExit as exc:
+            if not strict_account:
+                raise
+            if time.monotonic() >= deadline or poll == 50:
+                subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+                           else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
+                raise SystemExit(
+                    f"{subject} stop: EFFECT_UNKNOWN after bootout; "
+                    "service absence is unverified"
+                ) from exc
             time.sleep(0.2)
-    except SystemExit as exc:
-        if (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
-                or account in FABRIC_BACKEND_ACCOUNTS
-                or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL):
-            subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
-                       else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
-            raise SystemExit(f"{subject} stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
-        raise
+            continue
+        if remaining is None:
+            break
+        if time.monotonic() >= deadline or poll == 50:
+            print(json.dumps({"stopped": False, "reason": "still loaded"}))
+            return 1
+        time.sleep(0.2)
 
     print(json.dumps({"stopped": True, "account": account}))
     return 0

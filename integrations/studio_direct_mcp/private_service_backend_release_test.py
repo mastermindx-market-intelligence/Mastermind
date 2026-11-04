@@ -749,8 +749,11 @@ class ModernBackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
                         self.assertIs(result['stopped'], True)
                         self.assertEqual(result['account'], self.account)
                     else:
-                        with self.assertRaisesRegex(SystemExit, 'EFFECT_UNKNOWN after bootout; service absence is unverified'):
-                            svc.cmd_stop(SimpleNamespace(account=self.account))
+                        # Persistently unverified absence remains EFFECT_UNKNOWN
+                        # at the existing settle deadline; no duplicate bootout.
+                        with mock.patch.object(svc.time, "monotonic", side_effect=[100.0, 111.0]):
+                            with self.assertRaisesRegex(SystemExit, 'EFFECT_UNKNOWN after bootout; service absence is unverified'):
+                                svc.cmd_stop(SimpleNamespace(account=self.account))
                 self.assertEqual(calls, [
                     ['launchctl', 'print', target],
                     ['launchctl', 'bootout', target],
