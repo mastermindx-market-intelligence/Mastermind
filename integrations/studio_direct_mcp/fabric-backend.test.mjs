@@ -619,6 +619,42 @@ test('real subprocess captures the exact native C2 policy refusal from STDERR, w
  } finally {await rm(dir,{recursive:true,force:true});}
 });
 
+test('exact native no-host stderr maps to closed refusal without request dispatch',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');
+ const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'mmx-fabric-nohost-stderr-'));
+ try {
+  const fixture=join(dir,'native-preview.py');
+  const cases=[
+   ['NONE reason=pool grok has no eligible mode on requested host\n','MANUAL_ROUTE_PREFLIGHT_REFUSED'],
+   ['NONE reason=pool unknown has no eligible mode on requested host\n','MANUAL_ROUTE_UNAVAILABLE'],
+   ['NONE reason=pool grok has no eligible mode on requested host\nOTHER_LINE','MANUAL_ROUTE_UNAVAILABLE'],
+   ['NONE reason=pool grok has no eligible mode on requested host;extra\n','MANUAL_ROUTE_UNAVAILABLE'],
+  ];
+  for(const [line,expected] of cases) {
+   await writeFile(fixture,[
+    'import json,sys',
+    'cmd=sys.argv[1]',
+    'if cmd=="request" and "--help" in sys.argv: print("usage: request --strict-manual-pin")',
+    'elif cmd=="status": print(json.dumps({"schema":"mastermind.fabric_task_status.v1","run_id":"web-fabric-001","root_id":None,"parent_run_id":None,"state":"NOT_FOUND","result_available":False,"accepted":None}))',
+    'elif cmd=="preview": sys.stderr.write('+JSON.stringify(line)+'); sys.exit(75)',
+    'else: sys.exit(66)',
+    ''
+   ].join('\n'));
+   const e=await makeRealSubprocessEngine(dir,fixture);
+   const result=unwrap(await api.createFabricFacade(e,{adapterPath:fixture,python:'python3',workerCwd:'~'}).call('fabric_request',manualPinned));
+   assert.equal(result.error,expected);
+   assert.equal(result.retry_allowed,false);
+   assert.equal(result.execution_absence_proven,false);
+   assert.equal(Object.hasOwn(result,'native_reason'),expected==='MANUAL_ROUTE_PREFLIGHT_REFUSED');
+   if(expected==='MANUAL_ROUTE_PREFLIGHT_REFUSED') assert.equal(result.native_reason,'no_eligible_host');
+   assert.equal(e.calls.length,3,'help, missing original run, one preview');
+   assert.equal(e.calls.filter(c=>c.arguments.command.includes("'request' '--id'")).length,0);
+  }
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
 test('extra unverified native refusal fields cannot pass the capture boundary',async()=>{
  for(const reason of ['bad-hyphen','x'.repeat(81),'<malicious>']){
   const raw=JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,stdout_sha256:digest(''),native_reason:reason});
