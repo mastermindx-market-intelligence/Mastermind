@@ -43,11 +43,12 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     const web = fakeWebOwner();
     window.MastermindMissionHost = web.host;
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     const input = screen.getByRole("textbox", { name: "Direction to Meta-CEO" }) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "Unsent exact private draft - retain." } });
     expect(canNavigateForAutomaticSignIn()).toBe(false);
     await act(async () => { web.publish(expired); });
-    expect(input.value).toBe("Unsent exact private draft - retain.");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("Unsent exact private draft - retain.");
     expect(canNavigateForAutomaticSignIn()).toBe(false);
     expect(web.host.auth!.getState().acquisition).toBe(false);
     // A new identity may be about to authenticate. The old draft disappears
@@ -61,12 +62,13 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     window.MastermindMissionHost = web.host;
     const user = userEvent.setup();
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     fireEvent.change(screen.getByRole("textbox", {name:"Direction to Meta-CEO"}),
       {target:{value:"Off-view draft needs a safe return."}});
     await navigateCompanyOperation(user, "Work");
     await act(async () => { web.publish(expired); });
     expect(canNavigateForAutomaticSignIn()).toBe(false);
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", {name:"Direction to Meta-CEO"}).value)
       .toBe("Off-view draft needs a safe return.");
     expect(web.host.auth!.getState().acquisition).toBe(false);
@@ -76,6 +78,7 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     const web = fakeWebOwner();
     window.MastermindMissionHost = web.host;
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }),
       { target: { value: "Must not survive quota-rejected logout." } });
     expect(localStorage.getItem(logoutKey)).toBeNull();
@@ -92,6 +95,7 @@ describe("passive web Auth0 expiry preserves ONLY this page's unsent user text",
     const web = fakeWebOwner();
     window.MastermindMissionHost = web.host;
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Meta-CEO" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }),
       { target: { value: "User text cannot cross sign-out." } });
     await act(async () => { web.publish(expired); });

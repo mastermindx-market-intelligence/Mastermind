@@ -2548,6 +2548,10 @@ def _service_from_config(
                 bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime),
                 product_acceptance_basis_reader=packet_collector.product_acceptance_basis_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_plan_reader=packet_collector.project_plan_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                project_journal_reader=packet_collector.project_journal_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 product_acceptance_owner_target=original_target,
                 product_acceptance_owner_guard=original_target_guard,
                 product_acceptance_read=read_acceptance,

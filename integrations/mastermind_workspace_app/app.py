@@ -51,6 +51,9 @@ _MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
 _RESULT_REFERENCES_ROUTE = "/workspace/result-references/current"
 _PLAN_ROUTE = "/workspace/plan/current"
+_PROJECT_PLAN_ROUTE = "/workspace/project-plan/current"
+_PROJECT_JOURNAL_ROUTE = "/workspace/project-journal/current"
+_AUTONOMY_ROUTE = "/workspace/autonomy/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
 _FABRIC_STATUS_ROUTE = "/workspace/fabric/status/current"
@@ -320,7 +323,19 @@ def _mission_selection(query: Mapping[str, str]) -> tuple[dict[str, str] | None,
 
 
 def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str, str] | None:
-    """Dispatch the v2 selection validator by frozen operation."""
+    """Dispatch fixed read selectors through their own closed contract."""
+    if operation == "project_plan":
+        from common.workspace_project_plan_contract import validate_selection
+        try:
+            return validate_selection(dict(query))
+        except (TypeError, ValueError):
+            return None
+    if operation == "project_journal":
+        from common.workspace_project_journal_contract import validate_selection
+        try:
+            return validate_selection(dict(query))
+        except (TypeError, ValueError):
+            return None
     if operation == "mission_v4_original":
         from common.product_acceptance_acquisition_contract import selection
         try:
@@ -340,7 +355,7 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return activity.selection(dict(query))
         except (TypeError, ValueError):
             return None
-    if operation in ("mission_v3", "admitted_plan"):
+    if operation in ("mission_v3", "admitted_plan", "autonomy"):
         return _mission_v3_selection(query)
     if operation == "mission_v4":
         from common.product_acceptance_read_contract import selection
@@ -953,7 +968,24 @@ async def _dispatch_v2(
         return _refuse_json(403, "access_denied")
 
     try:
-        if operation == "mission_v4_original":
+        if operation == "autonomy":
+            from common import workspace_autonomy_read_contract as autonomy_wire
+            frame = autonomy_wire.validate_frame({"schema": autonomy_wire.FRAME_SCHEMA,
+                "operation": autonomy_wire.OPERATION, "selection": selection_value,
+                "principal": principal_frame})
+        elif operation == "project_journal":
+            from common import workspace_project_journal_contract as plan_wire
+            frame = plan_wire.validate_frame({
+                "schema": plan_wire.FRAME_SCHEMA, "operation": plan_wire.OPERATION,
+                "selection": selection_value, "principal": principal_frame,
+            })
+        elif operation == "project_plan":
+            from common import workspace_project_plan_contract as plan_wire
+            frame = plan_wire.validate_frame({
+                "schema": plan_wire.FRAME_SCHEMA, "operation": plan_wire.OPERATION,
+                "selection": selection_value, "principal": principal_frame,
+            })
+        elif operation == "mission_v4_original":
             from common import product_acceptance_acquisition_contract as acquisition_contract
             frame = acquisition_contract.validate_frame({
                 "schema": acquisition_contract.FRAME_SCHEMA, "operation": operation,
@@ -1009,7 +1041,7 @@ async def _dispatch_v2(
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
-    if operation in ("admitted_plan", "retained_activity", "result_references") and isinstance(envelope, dict) and envelope.get("ok") is True:
+    if operation in ("admitted_plan", "retained_activity", "result_references", "project_plan", "project_journal", "autonomy") and isinstance(envelope, dict) and envelope.get("ok") is True:
         body = envelope.get("result")
         if type(body) is not dict or body.get("selection") != selection_value:
             return _refuse_json(503, "source_unavailable")
@@ -1186,6 +1218,69 @@ async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONR
                               required_keys=_MISSION_QUERY_KEYS, response_fn=_plan_envelope_response)
 
 
+def _project_plan_envelope_response(envelope):
+    from common import workspace_project_plan_contract as plan_wire
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}:
+            raise ValueError("invalid envelope")
+        body = plan_wire.validate_body(envelope["result"])
+        contract.bounded_canonical(envelope, limit=plan_wire.MAX_RESPONSE_BYTES)
+        raw = contract.bounded_canonical(body, limit=plan_wire.MAX_RESPONSE_BYTES)
+    except (TypeError, ValueError, KeyError, RecursionError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200 if body["availability"] == "AVAILABLE" else 503,
+                    media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+async def project_plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_plan",
+        required_keys=frozenset({"work_ref"}), response_fn=_project_plan_envelope_response)
+
+
+def _project_journal_envelope_response(envelope):
+    from common import workspace_project_journal_contract as plan_wire
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}:
+            raise ValueError("invalid envelope")
+        body = plan_wire.validate_body(envelope["result"])
+        contract.bounded_canonical(envelope, limit=plan_wire.MAX_RESPONSE_BYTES)
+        raw = contract.bounded_canonical(body, limit=plan_wire.MAX_RESPONSE_BYTES)
+    except (TypeError, ValueError, KeyError, RecursionError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200 if body["availability"] == "AVAILABLE" else 503,
+                    media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+async def project_journal_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_journal",
+        required_keys=frozenset({"work_ref"}), response_fn=_project_journal_envelope_response)
+
+
+def _autonomy_envelope_response(envelope):
+    from common import workspace_autonomy_read_contract as autonomy_wire
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}:
+            raise ValueError("invalid_input")
+        body = autonomy_wire.validate_body(envelope["result"])
+        contract.bounded_canonical(envelope, limit=autonomy_wire.MAX_RESPONSE_BYTES - 1)
+        raw = contract.bounded_canonical(body, limit=autonomy_wire.MAX_RESPONSE_BYTES - 1)
+    except (TypeError, ValueError, KeyError, RecursionError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200 if body["availability"] == "AVAILABLE" else 503,
+                    media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+async def autonomy_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="autonomy",
+        required_keys=_MISSION_QUERY_KEYS, response_fn=_autonomy_envelope_response)
+
+
 def _activity_envelope_response(envelope):
     """Closed 16KiB App boundary; never echo raw owner or provider fields."""
     from common import executive_workspace_activity_contract as activity
@@ -1294,6 +1389,14 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def project_plan_endpoint(request: Request) -> JSONResponse:
+        return await project_plan_current(request, config=config)
+    async def project_journal_endpoint(request: Request) -> JSONResponse:
+        return await project_journal_current(request, config=config)
+
+    async def autonomy_endpoint(request: Request) -> JSONResponse:
+        return await autonomy_current(request, config=config)
+
     async def activity_endpoint(request: Request) -> JSONResponse:
         return await activity_current(request, config=config)
 
@@ -1320,6 +1423,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
+        Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
+        Route(_PROJECT_JOURNAL_ROUTE, project_journal_endpoint, methods=["GET"]),
+        Route(_AUTONOMY_ROUTE, autonomy_endpoint, methods=["GET"]),
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
         Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),

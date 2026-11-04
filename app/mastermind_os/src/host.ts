@@ -1,3 +1,6 @@
+import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
+import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
+import { decodeProjectPlan, validProjectPlanSelection, type ProjectPlanRead, type ProjectPlanSelection } from "./planning/project-plan";
 import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import { decodeBrowserScopedFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
@@ -72,6 +75,9 @@ export interface RawClient {
   signOut(): Promise<unknown>;
   restore?(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
+  readAutonomyPolicy?(request: AutonomySelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
@@ -135,6 +141,9 @@ export interface MissionHost {
   readMissionV3?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
+  readAutonomyPolicy?: (request: AutonomySelection & { signal: AbortSignal }) => Promise<AutonomyRead>;
+  readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
+  readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
@@ -279,6 +288,54 @@ export function bindMissionHost(
         return client.signOut();
       },
     },
+    ...(client.readAutonomyPolicy && client.invalidationGeneration ? {
+      async readAutonomyPolicy(request: AutonomySelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!isAutonomySelection(selected)) throw new Error("AUTONOMY_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("AUTONOMY_READ_UNAUTHORIZED");
+        const raw = await client.readAutonomyPolicy!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeAutonomyPolicy(raw, selected);
+      },
+    } : {}),
+    ...(client.readProjectPlan && client.invalidationGeneration ? {
+      async readProjectPlan(request: ProjectPlanSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validProjectPlanSelection(selected)) throw new Error("PROJECT_PLAN_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_PLAN_READ_UNAUTHORIZED");
+        const raw = await client.readProjectPlan!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeProjectPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readProjectJournal && client.invalidationGeneration ? {
+      async readProjectJournal(request: JournalSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validJournalSelection(selected)) throw new Error("PROJECT_JOURNAL_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PROJECT_JOURNAL_READ_UNAUTHORIZED");
+        const raw = await client.readProjectJournal!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeProjectJournal(raw, selected.work_ref);
+      },
+    } : {}),
     ...(client.readAdmittedPlan && client.invalidationGeneration ? {
       async readAdmittedPlan(request: PlanSelection & { signal: AbortSignal }) {
         if (!validPlanSelection({ work_ref: request.work_ref, root_job_id: request.root_job_id })) throw new Error("PLAN_SELECTION_INVALID");
@@ -655,6 +712,9 @@ export async function createNativeClient(
       | "read_work"
       | "read_mission"
       | "read_mission_v3"
+      | "read_autonomy_policy"
+      | "read_project_plan"
+      | "read_project_journal"
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_fabric_catalog"
@@ -750,6 +810,24 @@ export async function createNativeClient(
       return read("read_mission", signal, {
         selection: { work_ref, root_job_id },
       });
+    },
+    readAutonomyPolicy: (request) => {
+      const { signal, ...selected } = request;
+      if (!isAutonomySelection(selected))
+        return Promise.reject(new Error("AUTONOMY_SELECTION_INVALID"));
+      return read("read_autonomy_policy", signal, { selection: selected });
+    },
+    readProjectPlan: (request) => {
+      const { signal, ...selected } = request;
+      if (!validProjectPlanSelection(selected))
+        return Promise.reject(new Error("PROJECT_PLAN_SELECTION_INVALID"));
+      return read("read_project_plan", signal, { selection: selected });
+    },
+    readProjectJournal: (request) => {
+      const { signal, ...selected } = request;
+      if (!validJournalSelection(selected))
+        return Promise.reject(new Error("PROJECT_JOURNAL_SELECTION_INVALID"));
+      return read("read_project_journal", signal, { selection: selected });
     },
     readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
       if (!validPlanSelection({ work_ref, root_job_id }))
