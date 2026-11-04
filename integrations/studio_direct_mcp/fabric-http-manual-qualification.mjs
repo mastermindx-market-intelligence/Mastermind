@@ -41,7 +41,8 @@ test('authenticated Web MCP exact GLM and Experiential synthetic pins -> strict 
  assert.ok(spec);
  assert.deepEqual(spec.properties.pool.enum,['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
  assert.equal(spec.properties.model.type,'string');
- assert.equal(spec.properties.retention_opt_in.type,'boolean');
+ for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+   assert.equal(spec.properties[consent].type,'boolean');
  const cap=await call(first.client,'fabric_capabilities',{});
  assert.equal(cap.manual_routing.available,true);
  assert.equal(cap.manual_routing.cross_provider_fallback,false);
@@ -75,17 +76,24 @@ test('authenticated Web MCP exact GLM and Experiential synthetic pins -> strict 
  const expRequest=await call(second.client,'fabric_request',{...exp,parent_id:exp.root_id,
    task_class:'mechanical',task_complexity:'C0_MECHANICAL',
    pool:'experiential',model:'glm-5.3-uncensored',retention_opt_in:true,
+   sensitive_data_opt_in:true,code_exposure_opt_in:true,
    work_packet:'PUBLIC SYNTHETIC manual model selection; never contact a provider.'});
  assert.equal(expRequest.delivery,'CONTROLLER_CREATED',JSON.stringify(expRequest));
  assert.equal(expRequest.worker_started,null);
  assert.equal(expRequest.requested_pool,'experiential');
  assert.equal(expRequest.requested_model,'glm-5.3-uncensored');
  assert.equal(expRequest.retention_opt_in,true);
+ assert.equal(expRequest.sensitive_data_opt_in,true);
+ assert.equal(expRequest.code_exposure_opt_in,true);
  assert.equal(expRequest.strict_manual_pin,true);
  const expRoute=JSON.parse(await readFile(join(state,exp.run_id+'.route'),'utf8'));
  assert.deepEqual(expRoute,{pool:'experiential',model:'glm-5.3-uncensored',
    strict:true,quota_fallback:false,max_turns:null,subject_pool:null,
-   root:exp.root_id,parent:exp.root_id});
+   root:exp.root_id,parent:exp.root_id,
+   experiential_retention_acknowledged:true,
+   experiential_sensitive_data_opt_in:true,
+   experiential_proprietary_code:true,
+   experiential_code_exposure_opt_in:true});
  assert.match(await readFile(join(state,exp.run_id+'.packet'),'utf8'),/PUBLIC SYNTHETIC/);
  const expStatus=await call(second.client,'fabric_status',exp);
  assert.equal(expStatus.status.state,'DONE');

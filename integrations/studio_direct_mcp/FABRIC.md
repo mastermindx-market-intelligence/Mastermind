@@ -48,11 +48,19 @@ uncensored route and accepts exactly `model: "glm-5.3-uncensored"` — no omitte
 every deviation is refused before reservation or dispatch. The current native
 source contract admits only the plugin's `mechanical` and `fix_build` labor
 classes; `review`, `audit`, and `census` are refused before any native call.
-**That provider retains prompts and responses.** Each request must therefore also carry `retention_opt_in: true`, an
-explicit per-request caller acknowledgment that the packet will reach a prompt+response-
-retaining provider; the field is refused for every other pool and is never forwarded to the
-provider. Never send proprietary or unpublished source to this pool without that deliberate
-opt-in. `max_turns` is refused for this pool until the native adapter proves compatibility.
+**That provider retains prompts and responses.** Every experiential request must carry all
+three explicit acknowledgments: `retention_opt_in: true`, `sensitive_data_opt_in: true`,
+and `code_exposure_opt_in: true`. This conservative code consent is required even for
+public-looking packets because a worker may later access repository source.
+The fields are refused for other pools; they are never sent to the provider.
+For experiential, the incumbent native `request --help` must advertise the four
+exact independent gates `--experiential-retention-acknowledged`,
+`--experiential-sensitive-data-opt-in`, `--experiential-proprietary-code`,
+`--experiential-code-exposure-opt-in` before any native status/preview/launch.
+The facade passes all four to the **native worker authority** (not HTTP inference);
+older native adapters fail closed as `MANUAL_ROUTE_UNAVAILABLE`.
+This is a mechanism for carrying explicit caller acknowledgments, not proof that
+a ChatGPT identity authenticated the consent or that any provider is qualified. `max_turns` is refused for this pool until the native adapter proves compatibility.
 The same native `preview`, `--strict-manual-pin` recheck, exact run/pool/model witnesses and
 no-fallback rules apply, with the experiential slug compared exactly; if the native adapter
 has no qualified Experiential route the request fails closed with `MANUAL_ROUTE_UNAVAILABLE`

@@ -93,7 +93,9 @@ export const FABRIC_TOOLS = Object.freeze([
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
     pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation. experiential additionally requires the exact model glm-5.3-uncensored and retention_opt_in:true on every request.'},
     model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model. pool experiential accepts only the exact glm-5.3-uncensored; auto and every other slug are refused before dispatch.'},
-    retention_opt_in:{type:'boolean',description:'Explicit caller acknowledgment that the Experiential uncensored provider retains prompts and responses. Required exactly true for pool experiential before any packet is sent; never sent to the provider and refused for every other pool. Never send proprietary or unpublished code to that provider without this deliberate opt-in.'},
+    retention_opt_in:{type:'boolean',description:'Experiential uncensored retains prompts and responses, including after storage settings are disabled. Required true for every explicit experiential manual request.'},
+    sensitive_data_opt_in:{type:'boolean',description:'Explicit approval for submitting this request to an external prompt-retaining provider. Required true for experiential only; not passed to the provider.'},
+    code_exposure_opt_in:{type:'boolean',description:'Explicit permission for potential proprietary code exposure by the worker to the retaining provider. Required true for experiential, even when the immediate packet is public, and independently rechecked by the native owner.'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
@@ -147,11 +149,18 @@ function validate(name, args) {
     if (args.pool===EXPERIENTIAL_POOL) {
       if (args.model!==EXPERIENTIAL_MODEL) fail('INVALID_ARGUMENT',{field:'model'});
       if (args.retention_opt_in!==true) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
+      if (args.sensitive_data_opt_in!==true) fail('INVALID_ARGUMENT',{field:'sensitive_data_opt_in'});
+      // Treat the worker's potential code access as proprietary by default:
+      // never let the caller assert public-data-only to bypass code consent.
+      if (args.code_exposure_opt_in!==true) fail('INVALID_ARGUMENT',{field:'code_exposure_opt_in'});
       // The native experiential53 source contract currently admits bounded labor only.
       // Avoid misleading positive previews for reviewer/audit classes it cannot run.
       if (!['mechanical','fix_build'].includes(args.task_class))
         fail('INVALID_ARGUMENT',{field:'task_class'});
-    } else if (args.retention_opt_in!==undefined) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
+    } else {
+      for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+        if(args[field]!==undefined) fail('INVALID_ARGUMENT',{field});
+    }
   }
 }
 function response(value, isError=false) {
@@ -544,6 +553,15 @@ export function createFabricFacade(engine, options={}) {
         if(args.pool) {
           requestHelp ??= await runCapturedShort(['request','--help']);
           if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--strict-manual-pin')) fail('MANUAL_ROUTE_UNAVAILABLE');
+          // The native request entrypoint must independently own and attest the
+          // retention, sensitive-disclosure, and conservative code-exposure gates.
+          // Old adapters never receive this request, even if preview claims a route.
+          if(args.pool===EXPERIENTIAL_POOL && ![
+            '--experiential-retention-acknowledged',
+            '--experiential-sensitive-data-opt-in',
+            '--experiential-proprietary-code',
+            '--experiential-code-exposure-opt-in',
+          ].every(flag=>requestHelp.stdout.includes(flag))) fail('MANUAL_ROUTE_UNAVAILABLE');
         }
         if(cfg.quotaFallback && !args.pool && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
         const s=await status(args,false);
@@ -578,6 +596,12 @@ export function createFabricFacade(engine, options={}) {
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
         if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
         if(args.pool) argv.push('--pool',args.pool,'--strict-manual-pin');
+        if(args.pool===EXPERIENTIAL_POOL) argv.push(
+          '--experiential-retention-acknowledged',
+          '--experiential-sensitive-data-opt-in',
+          '--experiential-proprietary-code',
+          '--experiential-code-exposure-opt-in',
+        );
         if(args.model && args.model.toLowerCase()!=='auto') argv.push('--model',args.model);
         if(args.max_turns!==undefined) argv.push('--max-turns',String(args.max_turns));
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
@@ -601,7 +625,9 @@ export function createFabricFacade(engine, options={}) {
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
           ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true,
-            ...(args.pool===EXPERIENTIAL_POOL?{retention_opt_in:true}:{})}:{}),
+            ...(args.pool===EXPERIENTIAL_POOL?{
+              retention_opt_in:true,sensitive_data_opt_in:true,code_exposure_opt_in:true,
+            }:{})}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }

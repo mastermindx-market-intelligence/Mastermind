@@ -48,7 +48,8 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  assert.deepEqual(requestSchema.properties.pool.enum,
    ['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
  assert.equal(requestSchema.properties.model.type,'string');
- assert.equal(requestSchema.properties.retention_opt_in.type,'boolean');
+ for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+   assert.equal(requestSchema.properties[consent].type,'boolean');
  assert.equal(requestSchema.additionalProperties,false);
  const identity={run_id:'http-fixture-001',root_id:'http-qualification-001'};
  // Experiential is manual-only, exact slug + explicit retention acknowledgment.
@@ -58,6 +59,8 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
    ['wrong-model',{model:'glm-5.3-flash-uncensored',retention_opt_in:true}],
    ['auto-model',{model:'auto',retention_opt_in:true}],
    ['false-opt-in',{model:'glm-5.3-uncensored',retention_opt_in:false}],
+   ['no-sensitive-opt-in',{model:'glm-5.3-uncensored',retention_opt_in:true,code_exposure_opt_in:true}],
+   ['no-code-opt-in',{model:'glm-5.3-uncensored',retention_opt_in:true,sensitive_data_opt_in:true}],
  ]) {
    const badId={run_id:'http-exp-'+suffix,root_id:identity.root_id};
    const rejected=await call(first.client,'fabric_request',{...badId,parent_id:badId.root_id,

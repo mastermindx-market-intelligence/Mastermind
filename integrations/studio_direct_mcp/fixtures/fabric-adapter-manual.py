@@ -31,6 +31,10 @@ parser.add_argument('--subject-pool')
 parser.add_argument('--escalation-reason')
 parser.add_argument('--max-turns', type=int)
 parser.add_argument('--strict-manual-pin', action='store_true')
+parser.add_argument('--experiential-retention-acknowledged', action='store_true')
+parser.add_argument('--experiential-sensitive-data-opt-in', action='store_true')
+parser.add_argument('--experiential-proprietary-code', action='store_true')
+parser.add_argument('--experiential-code-exposure-opt-in', action='store_true')
 parser.add_argument('--quota-fallback', action='store_true')
 parser.add_argument('--follow', action='store_true')
 args = parser.parse_args()
@@ -66,7 +70,11 @@ elif args.action == 'request':
     elif args.pool == 'experiential':
         if (args.requested_model != 'glm-5.3-uncensored'
             or args.task_class != 'mechanical' or args.max_turns is not None
-            or args.subject_pool is not None):
+            or args.subject_pool is not None
+            or not args.experiential_retention_acknowledged
+            or not args.experiential_sensitive_data_opt_in
+            or not args.experiential_proprietary_code
+            or not args.experiential_code_exposure_opt_in):
             raise SystemExit(78)
     else:
         raise SystemExit(78)
@@ -81,7 +89,13 @@ elif args.action == 'request':
     (root / (rid + '.route')).write_text(json.dumps(dict(pool=args.pool,
          model=args.requested_model, strict=args.strict_manual_pin,
          quota_fallback=args.quota_fallback, max_turns=args.max_turns,
-         subject_pool=args.subject_pool, root=args.root, parent=args.parent)))
+         subject_pool=args.subject_pool, root=args.root, parent=args.parent,
+         **(dict(
+             experiential_retention_acknowledged=args.experiential_retention_acknowledged,
+             experiential_sensitive_data_opt_in=args.experiential_sensitive_data_opt_in,
+             experiential_proprietary_code=args.experiential_proprietary_code,
+             experiential_code_exposure_opt_in=args.experiential_code_exposure_opt_in,
+         ) if args.pool == 'experiential' else {}))))
     print(json.dumps(status))
 elif args.action in ('status', 'wait'):
     print(path.read_text() if path.exists() else json.dumps(empty))
