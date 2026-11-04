@@ -81,11 +81,11 @@ COHORTS = {
     },
     "mastermind-os-publication": {
         "bridge_sha256": "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb",
-        "config_sha256": "ace958d0fe23f0a1fe4f02de835ad152a42d0a0c2eaebb98df5e48cc84e9773a",
+        "config_sha256": "6b1f07a31e207828473f0f387515db02139731aaa1508bd8d34bc826a2753f11",
         "file_count": 13,
         "generation": "v12",
-        "manifest_sha256": "aba7a5755ae71a12b9359890cb5d8cda7bd179b176fcb77d6119edd802809983",
-        "nonpaper_sha256": "bf613e14397fbb2c56b6f386d8ab9fb438101ecabcf3ed33c94b297114c2b98d",
+        "manifest_sha256": "bd9dfc4e315541085342c410f0575ddbba0d40afb9d0208709078bf9b3b0c9ed",
+        "nonpaper_sha256": "c0faa52703c8e670b47427bb66a74adbf24cb55ef0586164a70c9975e8234b8b",
         "plist_sha256": "525ed99524c4fa060a8d8ada0967b06509c42f970270f8b2619537516ebfdb34"
     }
 }

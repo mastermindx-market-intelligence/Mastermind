@@ -95,7 +95,7 @@ PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
 PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
 PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
 PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
-FLEET_V20_COHORT_SOURCE_SHA256 = "60baccde73b771b9a1d149b9e899d95ed8c70c08f431dba6eda661c950e91e0f"
+FLEET_V20_COHORT_SOURCE_SHA256 = "a32957f008704cd0cafa69764237c8b69ee6f0dc68ac5a1b48e860ff04e778a9"
 # One closed admission set shared by the dispatcher and real lifecycle-lock gate.
 FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
     "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
