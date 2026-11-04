@@ -2024,7 +2024,7 @@ describe("App command composition", () => {
     const pointer = await store.read("owner-a");
     if (state === "lost-response") await act(async () => response.reject(new Error("lost response")));
     act(() => made.setView({ projects: [], profiles: [], session: null }));
-    expect(screen.getByText("Launch choices are unavailable. Your draft is retained.")).toBeTruthy();
+    expect(screen.getByText("Work options are unavailable. Your draft is kept.")).toBeTruthy();
     expect(screen.queryByLabelText("Goal")).toBeNull();
     expect(await store.read("owner-a")).toEqual(pointer);
     if (state === "lost-response") expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
