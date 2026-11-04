@@ -1055,6 +1055,44 @@ pub async fn read_project_plan(app: AppHandle, selection: ProjectPlanSelection) 
     Ok(value)
 }
 
+const PROJECT_DIRECTION_PATH: &str = "/workspace/project-direction/current";
+const PROJECT_DIRECTION_SCHEMA: &str = "mastermind.workspace_project_direction.v1";
+const PROJECT_DIRECTION_RESPONSE_CAP: usize = 65_536;
+fn project_direction_target(selection: &ProjectPlanSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PROJECT_DIRECTION_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref);
+    Ok(url)
+}
+fn project_direction_header_matches(value: &Value, selection: &ProjectPlanSelection) -> bool {
+    value.get("schema").and_then(Value::as_str) == Some(PROJECT_DIRECTION_SCHEMA)
+        && value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) == Some(selection.work_ref.as_str())
+}
+#[tauri::command]
+pub async fn read_project_direction(app: AppHandle, selection: ProjectPlanSelection) -> Result<Value> {
+    let url = project_direction_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PROJECT_DIRECTION_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PROJECT_DIRECTION_SCHEMA, false))
+    } else {
+        bounded_json(response, PROJECT_DIRECTION_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !project_direction_header_matches(&value, &selection) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Full closed-body validation remains in the existing host decode boundary.
+    Ok(value)
+}
+
 const PROJECT_JOURNAL_PATH: &str = "/workspace/project-journal/current";
 const PROJECT_JOURNAL_SCHEMA: &str = "mastermind.workspace_project_journal.v1";
 const PROJECT_JOURNAL_RESPONSE_CAP: usize = 131_072;
@@ -3130,5 +3168,44 @@ mod project_session_read_tests {
         for (work,root) in [("WS:lower", "JOB-1"), ("WS:--TEST", "JOB-1"), ("WS:TEST", "JOB-private"), ("WS:TEST", "JOB-1234567890")] {
             assert!(project_session_target(&MissionSelection { work_ref: work.into(), root_job_id: root.into() }).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod project_direction_read_tests {
+    use super::*;
+
+    #[test]
+    fn project_direction_is_one_fixed_rootless_read_target() {
+        let selected = ProjectPlanSelection { work_ref: "WS:DIRECTION-TEST".into() };
+        let url = project_direction_target(&selected).unwrap();
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.path(), "/workspace/project-direction/current");
+        assert_eq!(url.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect::<Vec<_>>(),
+            vec![("work_ref".to_owned(), "WS:DIRECTION-TEST".to_owned())]);
+        assert_eq!(PROJECT_DIRECTION_RESPONSE_CAP, 65_536);
+    }
+
+    #[test]
+    fn project_direction_refuses_paths_foreign_roots_and_extra_selectors() {
+        for work in ["../private", "WS:lower", "WS:AA/BB", "JOB-1", "WS:A", "WS:AA--BB"] {
+            assert!(project_direction_target(&ProjectPlanSelection { work_ref: work.into() }).is_err());
+        }
+        for extra in ["path", "root_job_id", "commit", "history_revision"] {
+            let mut raw = serde_json::json!({"work_ref": "WS:DIRECTION-TEST"});
+            raw[extra] = serde_json::json!("caller-selected");
+            assert!(serde_json::from_value::<ProjectPlanSelection>(raw).is_err());
+        }
+    }
+
+    #[test]
+    fn project_direction_response_header_stays_bound_to_exact_scope_and_schema() {
+        let selected = ProjectPlanSelection { work_ref: "WS:DIRECTION-TEST".into() };
+        assert!(project_direction_header_matches(&serde_json::json!({"schema": PROJECT_DIRECTION_SCHEMA,
+            "selection": {"work_ref": "WS:DIRECTION-TEST"}}), &selected));
+        assert!(!project_direction_header_matches(&serde_json::json!({"schema": PROJECT_PLAN_SCHEMA,
+            "selection": {"work_ref": "WS:DIRECTION-TEST"}}), &selected));
+        assert!(!project_direction_header_matches(&serde_json::json!({"schema": PROJECT_DIRECTION_SCHEMA,
+            "selection": {"work_ref": "WS:OTHER"}}), &selected));
     }
 }

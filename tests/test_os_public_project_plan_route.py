@@ -11,7 +11,8 @@ def test_new_read_is_fixed_get_and_old_publication_remains_an_exact_predecessor(
     assert ROUTE not in POST_ROUTES
     assert (PRE_PROJECT_PLAN_GET_ROUTES, POST_ROUTES) in TRANSITION_ROUTE_PROFILES
     assert set(GET_ROUTES) - set(PRE_PROJECT_PLAN_GET_ROUTES) == {
-        ROUTE, "/workspace/project-journal/current", "/workspace/autonomy/current"}
+        ROUTE, "/workspace/project-journal/current", "/workspace/autonomy/current",
+        "/workspace/resources/capacity/current", "/workspace/project-direction/current", "/workspace/project-session/current"}
     template = _TEMPLATE.read_text()
     get_block = template.split("@get {", 1)[1].split("handle @get", 1)[0]
     post_block = template.split("@post {", 1)[1].split("handle @post", 1)[0]

@@ -2,6 +2,7 @@ import { decodeProjectAssociation, normalizeProjectAssociationSelection, type Pr
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
+import { decodeAcceptedDirection, validDirectionSelection, type DirectionSelection, type AcceptedDirectionRead } from "./direction/accepted-direction";
 import { decodeProjectPlan, validProjectPlanSelection, type ProjectPlanRead, type ProjectPlanSelection } from "./planning/project-plan";
 import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import { decodeBrowserScopedFabricCatalog, type FabricCatalog } from "./fabric/catalog-contract";
@@ -9,6 +10,7 @@ import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type A
 import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
 import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
+import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
@@ -59,6 +61,8 @@ import {
 } from "./control-room";
 
 export interface RawClient {
+  /** Public fixed navigation only; Terminal owns its user's authentication and access. */
+  openTerminalBriefs?(): Promise<unknown>;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional private owner publication; never reconstructed from browser input. */
@@ -81,6 +85,7 @@ export interface RawClient {
   readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectSessionAssociation?(request: ProjectAssociationSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectDirection?(request: DirectionSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
@@ -135,6 +140,8 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost {
+  /** Optional zero-input navigation; no private content or access receipt. */
+  openTerminalBriefs?: TerminalBriefsNavigationPort;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   readonly productAcceptanceOwner?: ProductAcceptanceOwner;
@@ -149,6 +156,7 @@ export interface MissionHost {
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
   readProjectSessionAssociation?: (request: ProjectAssociationSelection & { signal: AbortSignal }) => Promise<ProjectAssociationDocument>;
   readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
+  readProjectDirection?: (request: DirectionSelection & { signal: AbortSignal }) => Promise<AcceptedDirectionRead>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
@@ -281,6 +289,9 @@ export function bindMissionHost(
   }
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
+    ...(client.openTerminalBriefs ? {
+      openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
+    } : {}),
     invalidationGeneration: () => epoch,
     auth: {
       getState: () => client.getState(),
@@ -342,6 +353,23 @@ export function bindMissionHost(
         const body = decodeProjectAssociation(raw, selected);
         if (!body) throw new Error("PROJECT_SESSION_RESPONSE_INVALID");
         return body;
+      },
+    } : {}),
+    ...(client.readProjectDirection && client.invalidationGeneration ? {
+      async readProjectDirection(request: DirectionSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validDirectionSelection(selected)) throw new Error("DIRECTION_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readProjectDirection!;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && Number.isSafeInteger(source) && source >= 0 && started === epoch &&
+            source === client.invalidationGeneration?.() && reader === client.readProjectDirection &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("DIRECTION_READ_UNAUTHORIZED");
+        const raw = await reader({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeAcceptedDirection(raw, selected);
       },
     } : {}),
     ...(client.readProjectJournal && client.invalidationGeneration ? {
@@ -757,6 +785,7 @@ export async function createNativeClient(
       | "read_project_plan"
       | "read_project_journal"
       | "read_project_session"
+      | "read_project_direction"
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
@@ -808,6 +837,7 @@ export async function createNativeClient(
   return {
     executive: executive.transport,
     executiveSession: executive.sessionTransport,
+    openTerminalBriefs: createTerminalBriefsNavigationPort((command) => invoke(command)),
     getState: () => ({ ...current }),
     invalidationGeneration: () => epoch,
     subscribe(listener) {
@@ -871,6 +901,12 @@ export async function createNativeClient(
       const selected = normalizeProjectAssociationSelection(value);
       if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
       return read("read_project_session", signal, { selection: { work_ref: selected.workRef, root_job_id: selected.rootJobId } });
+    },
+    readProjectDirection: (request) => {
+      const { signal, ...selected } = request;
+      if (!validDirectionSelection(selected))
+        return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
+      return read("read_project_direction", signal, { selection: selected });
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;

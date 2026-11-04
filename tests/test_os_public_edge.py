@@ -47,6 +47,8 @@ def test_authenticated_control_room_routes_are_exact_and_method_scoped():
         "/workspace/project-journal/current",
         "/workspace/autonomy/current",
         "/workspace/project-session/current",
+        "/workspace/resources/capacity/current",
+        "/workspace/project-direction/current",
     }
     expected_post = {
         "/workspace/control-room/open",

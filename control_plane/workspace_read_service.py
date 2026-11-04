@@ -495,7 +495,7 @@ class WorkspaceReadService:
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
                  product_acceptance_observe=None, activity_membership=None,
-                 project_plan_reader=None, project_journal_reader=None, project_session_source=None,
+                 project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None,
                  control_room_presenter=None,
                  control_room_actions=None):
         self.cache = cache
@@ -571,6 +571,11 @@ class WorkspaceReadService:
             if type(project_journal_reader) is not AgentOsProjectJournalReader:
                 raise ValueError("exact installed Agent OS journal reader required")
         self._project_journal_reader = project_journal_reader
+        self._project_direction_reader = project_direction_reader
+        self._direction_read_adapter = None
+        if project_direction_reader is not None:
+            from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
+            self._direction_read_adapter = ProjectDirectionReadAdapter(workspace=self, reader=project_direction_reader)
         if project_session_source is not None:
             from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
             if type(project_session_source) is not ExistingManagedProjectSessionSource:
@@ -1614,6 +1619,11 @@ class WorkspaceReadService:
         return self._read_mission_v3({"selection": selection})["result"]
 
     async def handle_frame(self, frame, *, action_host_ready=None):
+        from common.workspace_project_direction_contract import FRAME_SCHEMA as DIRECTION_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") == DIRECTION_FRAME_SCHEMA:
+            from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
+            adapter = self._direction_read_adapter or ProjectDirectionReadAdapter(workspace=self, reader=None)
+            return await adapter.handle_frame(frame)
         from common.workspace_autonomy_read_contract import FRAME_SCHEMA as AUTONOMY_READ_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == AUTONOMY_READ_FRAME_SCHEMA:
             from control_plane.workspace_autonomy_policy_adapter import read_autonomy_policy
@@ -1857,7 +1867,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None, activity_membership=None,
-                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None,
+                               project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None,
                                cross_plane_context=None, cross_plane_enrollment=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
@@ -1922,5 +1932,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_plan_reader=project_plan_reader,
                                     project_journal_reader=project_journal_reader,
                                     project_session_source=session_source,
+                                    project_direction_reader=project_direction_reader,
                                     activity_membership=activity_membership)
     return provide

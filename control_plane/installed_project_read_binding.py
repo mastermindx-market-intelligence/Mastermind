@@ -1,4 +1,4 @@
-"""Opaque, process-local composition for the two installed Agent OS readers.
+"""Opaque, process-local composition for the installed Agent OS readers.
 
 The integration owns collector qualification and issuance. Core reads no
 integration module, accepts no serialized grant and creates no reader registry.
@@ -12,7 +12,8 @@ import weakref
 
 _ISSUE_KEY = object()
 _METHODS = {"project_plan": "read_project_plan", "project_journal": "read_project_journal",
-            "project_creation_source": "read_project_creation_source"}
+            "project_creation_source": "read_project_creation_source",
+            "project_direction": "read_project_direction"}
 _COORDINATES = ("_source_root", "_macro_root", "_code_root", "_python",
                 "_expected_source_sha", "_allow_synthetic_fixture")
 

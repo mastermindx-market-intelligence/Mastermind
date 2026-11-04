@@ -2,6 +2,7 @@ import { normalizeProjectAssociationSelection } from "./conversations/project-as
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
+import { validDirectionSelection } from "./direction/accepted-direction";
 import { validProjectPlanSelection } from "./planning/project-plan";
 import { guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import {
@@ -1192,6 +1193,13 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       if (!selected) return Promise.reject(new Error("PROJECT_SESSION_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/project-session/current?${new URLSearchParams({ work_ref: selected.workRef, root_job_id: selected.rootJobId })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_project_session_association.v1" });
+    },
+    readProjectDirection: (request) => {
+      const { signal, ...selected } = request;
+      if (!validDirectionSelection(selected))
+        return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-direction/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
+        signal, { cap: 65_536, typedUnavailableSchema: "mastermind.workspace_project_direction.v1" });
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;

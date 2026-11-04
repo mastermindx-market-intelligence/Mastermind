@@ -1586,3 +1586,48 @@ describe("project-session fixed Web READ", () => {
     expect(e.fetcher).toHaveBeenCalledTimes(1);
   });
 });
+
+import acceptedDirectionFixture from "./direction/fixtures/accepted-direction-owner.json";
+describe("canonical accepted Direction fixed Web READ", () => {
+  const selected = acceptedDirectionFixture.selection;
+  const request = () => ({ ...selected, signal: new AbortController().signal });
+  it("uses the existing Acquisition identity for one fixed rootless GET", async () => {
+    const e = setup(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectDirection!(request())).rejects.toThrow("DIRECTION_READ_UNAUTHORIZED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response(acceptedDirectionFixture));
+    expect((await host.readProjectDirection!(request())).availability).toBe("AVAILABLE");
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/project-direction/current");
+    expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(selected);
+    expect(options).toMatchObject({ method: "GET", credentials: "omit", redirect: "error", cache: "no-store" });
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("retains typed absence and rejects an unsupported old backend response", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const absent = { ...acceptedDirectionFixture, availability: "UNAVAILABLE", source: null, direction: null, reason_codes: ["NOT_DECLARED"] };
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(absent), { status: 503, headers: { "content-type": "application/json" } }));
+    await expect(bindMissionHost(e.client).readProjectDirection!(request())).resolves.toMatchObject({ availability: "UNAVAILABLE", direction: null });
+    e.fetcher.mockResolvedValueOnce(new Response("not installed", { status: 404 }));
+    await expect(bindMissionHost(e.client).readProjectDirection!(request())).rejects.toThrow();
+    expect(e.fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("discards a reply after identity loss without a second request", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const late = deferred<Response>(); e.fetcher.mockReturnValueOnce(late.promise);
+    const host = bindMissionHost(e.client); const pending = host.readProjectDirection!(request());
+    const rejected = expect(pending).rejects.toThrow();
+    await host.auth!.signOut(); late.resolve(response(acceptedDirectionFixture)); await rejected;
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("rejects caller selectors, source substitution and oversized raw responses", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear(); const host = bindMissionHost(e.client);
+    await expect(host.readProjectDirection!({ ...request(), commit: "a".repeat(40) } as never)).rejects.toThrow("DIRECTION_SELECTION_INVALID");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    e.fetcher.mockResolvedValueOnce(response({ ...acceptedDirectionFixture, selection: { work_ref: "WS:OTHER" } }));
+    await expect(host.readProjectDirection!(request())).rejects.toThrow("DIRECTION_INVALID");
+    e.fetcher.mockResolvedValueOnce(response({ padding: "x".repeat(65_537) }));
+    await expect(host.readProjectDirection!(request())).rejects.toThrow();
+  });
+});

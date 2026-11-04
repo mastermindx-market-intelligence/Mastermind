@@ -2560,6 +2560,8 @@ def _service_from_config(
                 project_journal_reader=packet_collector.project_journal_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 project_session_source_factory=managed_project_session_source,
+                project_direction_reader=packet_collector.project_direction_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 product_acceptance_owner_target=original_target,
                 product_acceptance_owner_guard=original_target_guard,
                 product_acceptance_read=read_acceptance,
