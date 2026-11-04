@@ -5,6 +5,10 @@ export async function navigateCompanyOperation(
   user: { click(element: HTMLElement): Promise<void> },
   route: "Work" | "Programs" | "Fleet & Capacity",
 ) {
+  // Full labeled sidebar exposes these same incumbent route owners directly.
+  const label = route === "Work" ? "Work queue" : `${route} workspace`;
+  const direct = screen.queryByRole("button", { name: label });
+  if (direct) { await user.click(direct); return; }
   let context = screen.queryByRole("navigation", { name: "Company operations" })
     ?? screen.queryByRole("navigation", { name: "Project operations" });
   if (!context) {

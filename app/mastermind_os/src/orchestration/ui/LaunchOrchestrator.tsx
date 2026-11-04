@@ -50,6 +50,8 @@ export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 
 export interface LaunchOrchestratorProps {
   locale?: "en" | "zh-CN";
+  /** Presentation only; all original selection and submission guards remain shared. */
+  presentation?: "standard" | "composer";
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   frontierModels?: readonly LaunchChoice[];
@@ -106,6 +108,7 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 
 export function LaunchOrchestrator({
   locale = "en",
+  presentation = "standard",
   projects,
   profiles,
   frontierModels,
@@ -249,10 +252,10 @@ export function LaunchOrchestrator({
       : undefined;
 
   return (
-    <section className="card">
+    <section className={`card launch-orchestrator${presentation === "composer" ? " launch-orchestrator-composer" : ""}`}>
       <div className="section-title">
         <div>
-          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : "Launch Orchestrator"}</h2>
+          <h2>{selectedProfile === "native_research_only" ? (locale === "zh-CN" ? "启动单个原生任务" : "Launch one native task") : (locale === "zh-CN" ? "启动项目" : "Launch Orchestrator")}</h2>
         </div>
       </div>
 
@@ -263,9 +266,9 @@ export function LaunchOrchestrator({
       ) : (
         <form onSubmit={handleSubmit} noValidate>
           {/* Goal textarea */}
-          <div className="form-field">
+          <div className="form-field launch-goal">
             <label htmlFor={goalId}>
-              <span>Goal</span>
+              <span>{locale === "zh-CN" ? "目标" : "Goal"}</span>
               {goalTooLong && (
                 <span className="field-error">
                   {" "}
@@ -277,8 +280,8 @@ export function LaunchOrchestrator({
               id={goalId}
               value={draftGoal}
               onChange={(e) => { setDraftGoal(e.target.value); onDraftChange?.(e.target.value); }}
-              rows={4}
-              placeholder="Describe the objective for this launch…"
+              rows={presentation === "composer" ? 2 : 4}
+              placeholder={locale === "zh-CN" ? "描述你希望完成的目标…" : "Describe the objective for this launch…"}
               disabled={launchPending}
               aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
               aria-invalid={!!goalError}
@@ -292,7 +295,7 @@ export function LaunchOrchestrator({
 
           {/* Project select */}
           <div className="form-field">
-            <label htmlFor={projectId}>Project</label>
+            <label htmlFor={projectId}>{locale === "zh-CN" ? "项目" : "Project"}</label>
             <select
               id={projectId}
               value={selectedProject}
@@ -321,7 +324,7 @@ export function LaunchOrchestrator({
 
           {/* Profile select */}
           <div className="form-field">
-            <label htmlFor={profileId}>Profile</label>
+            <label htmlFor={profileId}>{locale === "zh-CN" ? "执行方式" : "Profile"}</label>
             <select
               id={profileId}
               value={selectedProfile}
@@ -390,10 +393,10 @@ export function LaunchOrchestrator({
           {/* Actions */}
           <div className="form-actions">
             <button type="submit" disabled={!canSubmit} className="primary">
-              {launchPending ? "Launching…" : "Launch"}
+              {launchPending ? (locale === "zh-CN" ? "正在启动…" : "Launching…") : (locale === "zh-CN" ? "启动" : "Launch")}
             </button>
             <button type="button" onClick={onCancel} disabled={launchPending}>
-              Cancel
+              {locale === "zh-CN" ? "取消" : "Cancel"}
             </button>
           </div>
         </form>

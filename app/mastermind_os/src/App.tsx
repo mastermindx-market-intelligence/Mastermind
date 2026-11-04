@@ -10,6 +10,7 @@ import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { Today } from "./today/Today";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
@@ -91,6 +92,7 @@ export const navigation = [
   "Inbox",
   "Conversations",
   "Knowledge",
+  "Meta-CEO",
   "Work",
   "Programs",
   "Control Room",
@@ -132,24 +134,32 @@ const missionNavigation: readonly View[] = [
   "Connections",
   "Evidence",
 ];
+const advancedNavigation: readonly View[] = ["Meta-CEO", "Work", "Programs", "Control Room", "Fleet & Capacity", ...missionNavigation];
+const advancedLabel = (view: View, locale: "en" | "zh-CN") => locale === "zh-CN" ? navigationLabel(view, locale) :
+  view === "Work" ? "Work queue" : view === "Programs" ? "Programs workspace" :
+  view === "Control Room" ? "Control Room workspace" : view === "Fleet & Capacity" ? "Fleet & Capacity workspace" : view;
 const projectTabs = ["Overview", "Plan", "Work", "Evidence", "More"] as const;
 type ProjectTab = (typeof projectTabs)[number];
-const navGlyph: Record<View, string> = {
-  Today: "⌂",
-  Projects: "◫",
-  Inbox: "▤",
-  Conversations: "◌",
-  Knowledge: "□",
-  Work: "▤",
-  Programs: "◫",
-  "Control Room": "◎",
-  "Fleet & Capacity": "◇",
-  "Mission Workspace": "◎",
-  Conversation: "◌",
-  Activity: "↯",
-  Connections: "⌘",
-  Evidence: "□",
+const navigationPaths: Record<View, string> = {
+  Today: "M3 10 12 3l9 7v11H3zM9 21v-7h6v7",
+  Projects: "M3 6h6l2 2h10v12H3z", Inbox: "M3 5h18v15H3zM3 14h5l2 3h4l2-3h5",
+  Conversations: "M4 4h16v12H9l-5 4z", Knowledge: "M4 3h7v17H4zM14 3h6v17h-6z",
+  "Meta-CEO": "M12 3 3 8l9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5",
+  Work: "M6 4h15v17H6zM2 8h8M2 13h8M2 18h8", Programs: "M3 4h18v16H3zM8 4v16M3 9h18",
+  "Control Room": "M4 5h16v14H4zM8 9h2M14 9h2M8 14h8", "Fleet & Capacity": "M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01",
+  "Mission Workspace": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 8v8M8 12h8",
+  Conversation: "M4 4h16v12H9l-5 4z", Activity: "M2 12h5l3-8 4 16 3-8h5",
+  Connections: "M9 8 5 12l4 4M15 8l4 4-4 4M10 12h4", Evidence: "M5 3h10l4 4v14H5zM14 3v5h5M8 12h8M8 16h6",
 };
+function NavigationIcon({ view }: { view: View }) {
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={navigationPaths[view]} /></svg>;
+}
+function navigationLabel(view: View, locale: "en" | "zh-CN"): string {
+  if (locale === "en") return view;
+  const labels: Record<View, string> = { Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "计算资源", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
+  return labels[view];
+}
+
 interface BuildReceipt {
   version: string;
   source_revision: string;
@@ -1299,8 +1309,44 @@ export interface AppProps {
   /** Explicit render inputs only; never inferred from auth, storage or OS preferences. */
   locale?: "en" | "zh-CN";
   theme?: "dark" | "light";
+  preferencesControl?: React.ReactNode;
 }
-export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
+export function App({ locale = "en", theme = "dark", preferencesControl }: AppProps = {}) {
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationPane = useRef<HTMLElement>(null);
+  const navigationToggle = useRef<HTMLButtonElement>(null);
+  const closeNavigation = () => { setNavigationOpen(false); navigationToggle.current?.focus(); };
+  useEffect(() => {
+    if (!navigationOpen) return;
+    const drawerMedia = window.matchMedia?.("(max-width: 959px)");
+    const leaveDrawerForDesktop = () => {
+      if (drawerMedia?.matches) return;
+      setNavigationOpen(false);
+      // The mobile toggle/close controls are hidden in the desktop layout.
+      document.getElementById("content")?.focus();
+    };
+    if (drawerMedia && !drawerMedia.matches) { leaveDrawerForDesktop(); return; }
+    drawerMedia?.addEventListener("change", leaveDrawerForDesktop);
+    const pane = navigationPane.current;
+    pane?.querySelector<HTMLButtonElement>("button")?.focus();
+    const handle = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); closeNavigation(); }
+      if (event.key !== "Tab" || !pane) return;
+      const items = Array.from(pane.querySelectorAll<HTMLElement>("button:not(:disabled), summary, a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex=\"0\"]"));
+      const visible = items.filter(element => {
+        const style = window.getComputedStyle(element);
+        return element.getClientRects().length > 0 && style.visibility !== "hidden" && style.display !== "none";
+      });
+      const first = visible[0], last = visible.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener("keydown", handle);
+    return () => {
+      document.removeEventListener("keydown", handle);
+      drawerMedia?.removeEventListener("change", leaveDrawerForDesktop);
+    };
+  }, [navigationOpen]);
   const native = "__TAURI_INTERNALS__" in window,
     initialLocation = useMemo(() => directLocationInput(), []),
     initial = useMemo(
@@ -2983,6 +3029,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     ) : commandReady && commandView ? (
       <>
         <LaunchOrchestrator
+          presentation={active === "Today" ? "composer" : "standard"}
           locale={locale}
           key={JSON.stringify([
             ownerContext?.principalScope,
@@ -3507,6 +3554,13 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     ) : null;
   let content: React.ReactNode;
   if (active === "Today")
+    content = <Today locale={locale} projection={office.projection} work={workState}
+      composer={commandPanel}
+      onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
+      onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
+      onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
+    />;
+  else if (active === "Meta-CEO")
     content = (
       <>
         <MetaCeoOffice
@@ -3939,7 +3993,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       }}>
         Skip to workspace
       </a>
-      <aside>
+      {navigationOpen && <button className="navigation-backdrop" aria-label={locale === "zh-CN" ? "关闭导航" : "Close navigation"} tabIndex={-1} onClick={closeNavigation} />}
+      <aside id="workspace-navigation" ref={navigationPane} data-open={navigationOpen ? "true" : "false"}>
+        <button type="button" className="navigation-close" onClick={closeNavigation}>{locale === "zh-CN" ? "关闭导航" : "Close navigation"}</button>
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">
             M
@@ -3955,23 +4011,24 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               <button
                 key={x}
                 className={active === x ? "active" : ""}
-                aria-label={x}
+                aria-label={navigationLabel(x, locale)}
                 aria-current={active === x ? "page" : undefined}
                 onClick={() => {
                   setProjectTab(null);
                   setActive(x);
+                  if (navigationOpen) closeNavigation();
                 }}
               >
                 <span className="nav-glyph" aria-hidden="true">
-                  {navGlyph[x]}
+                  <NavigationIcon view={x} />
                 </span>
-                <span className="nav-label">{x}</span>
+                <span className="nav-label">{navigationLabel(x, locale)}</span>
               </button>
             ))}
           </nav>
         </div>
         <div className="nav-section mission-nav">
-          <span className="nav-section-label">CURRENT MISSION</span>
+          <span className="nav-section-label">{locale === "zh-CN" ? "工作与上下文" : "WORK & CONTEXT"}</span>
           {selection ? (
             <div className="mission-context">
               <b>{d?.program.title || selection.workRef}</b>
@@ -3983,25 +4040,27 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             </div>
           )}
           <nav aria-label="Mission navigation">
-            {missionNavigation.map((x) => (
+            {advancedNavigation.map((x) => (
               <button
                 key={x}
                 className={active === x ? "active" : ""}
-                aria-label={x}
+                aria-label={advancedLabel(x, locale)}
                 aria-current={active === x ? "page" : undefined}
                 onClick={() => {
                   setProjectTab(null);
                   setActive(x);
+                  if (navigationOpen) closeNavigation();
                 }}
               >
                 <span className="nav-glyph" aria-hidden="true">
-                  {navGlyph[x]}
+                  <NavigationIcon view={x} />
                 </span>
-                <span className="nav-label">{x}</span>
+                <span className="nav-label">{navigationLabel(x, locale)}</span>
               </button>
             ))}
           </nav>
         </div>
+        {preferencesControl}
         <div className="side-note">
           <b>Source-qualified viewer</b>
           <br />
@@ -4010,16 +4069,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         </div>
       </aside>
       <main id="content" tabIndex={-1}>
-        <header>
-          <div>
+        <header className={active === "Today" ? "workspace-header workspace-header-quiet" : "workspace-header"}>
+          <div className="workspace-route">
+            <button ref={navigationToggle} type="button" className="navigation-toggle" aria-expanded={navigationOpen} aria-controls="workspace-navigation" aria-label={locale === "zh-CN" ? "打开导航" : "Open navigation"} onClick={() => setNavigationOpen(value => !value)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
             <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : active}</span>
-            <h1 ref={routeHeading} tabIndex={-1}>
+            {active === "Today" ? <h2 ref={routeHeading} tabIndex={-1}>{locale === "zh-CN" ? "今天" : "Today"}</h2> : <h1 ref={routeHeading} tabIndex={-1}>
               {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : active}
-            </h1>
-            <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>
+            </h1>}
+            {active !== "Today" && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {!directRoute ? <State value={headerState} /> : null}
+            {!directRoute ? active === "Today" ? <details className="workspace-qualification"><summary>{locale === "zh-CN" ? "来源状态" : "Source status"} <State value={headerState} /></summary><p>{headerSummary}</p><p role="status">{visibleNotice}</p></details> : <State value={headerState} /> : null}
             {authState ? (
               <div>
                 <small>
@@ -4098,7 +4158,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             }}>Discard all unsent work</button>
           </section>
         ) : null}
-        {active !== "Control Room" && !directRoute ? (
+        {active !== "Control Room" && active !== "Today" && !directRoute ? (
           <div className="notice" role="status">{visibleNotice}</div>
         ) : null}
         {build ? (
