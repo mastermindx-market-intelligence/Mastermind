@@ -477,3 +477,102 @@ def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
     assert target.read_text().splitlines() == [
         "mode=full", "tier=HOLD", "needs_node=false",
     ]
+
+
+# Execute the workflow's real shell gate, not just its mirrored validator text.
+# Only canonical plan execution is replaced with a recording stub; separate
+# tests above prove the real discovery plan's exact six-shard coverage.
+_GATE_PASS_CASES = [
+    ("pull_request", "full", ("success", "skipped", "success")),
+    ("pull_request", "fast", ("success", "success", "skipped")),
+    ("pull_request", "smoke", ("success", "success", "skipped")),
+    ("merge_group", "", ("skipped", "skipped", "success")),
+    ("push", "", ("skipped", "skipped", "success")),
+    ("workflow_dispatch", "", ("skipped", "skipped", "success")),
+]
+
+
+def _run_exact_workflow_gate(tmp_path, event, mode, states, *, plan_exit=0):
+    import os
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    gate = next(step for step in workflow["jobs"]["test"]["steps"]
+                if step.get("name") == "Run repository test gate")
+    calls = tmp_path / "plan-calls"
+    python_stub = tmp_path / "python"
+    python_stub.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CI_GATE_TEST_CALLS\"\n"
+        "exit \"$CI_GATE_TEST_PLAN_EXIT\"\n"
+    )
+    python_stub.chmod(0o700)
+    result = subprocess.run(
+        ["/bin/bash", "-c", gate["run"]], cwd=tmp_path,
+        env={
+            "PATH": str(tmp_path) + os.pathsep + os.defpath,
+            "EVENT_TYPE": event,
+            "PR_SCOPE_MODE": mode,
+            "PR_SCOPE_STATUS": states[0],
+            "PR_FAST_STATUS": states[1],
+            "SHARDS_STATUS": states[2],
+            "CI_GATE_TEST_CALLS": str(calls),
+            "CI_GATE_TEST_PLAN_EXIT": str(plan_exit),
+        }, capture_output=True, text=True, timeout=5,
+    )
+    return result, calls.read_text().splitlines() if calls.exists() else []
+
+
+@pytest.mark.parametrize("event,mode,states", _GATE_PASS_CASES)
+def test_actual_shell_gate_accepts_only_the_complete_expected_path(
+    tmp_path, event, mode, states,
+):
+    result, calls = _run_exact_workflow_gate(tmp_path, event, mode, states)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert calls == ["scripts/ci_pytest.py --plan-only --jobs 6"]
+
+
+@pytest.mark.parametrize("event,mode,states,field,bad_status", [
+    (*case, field, bad_status)
+    for case in _GATE_PASS_CASES
+    for field in range(3)
+    for bad_status in ("success", "skipped", "failure", "cancelled", "", "unknown")
+    if bad_status != case[2][field]
+])
+def test_actual_shell_gate_rejects_missing_failed_cancelled_or_wrong_job_states(
+    tmp_path, event, mode, states, field, bad_status,
+):
+    changed = list(states)
+    changed[field] = bad_status
+    result, calls = _run_exact_workflow_gate(tmp_path, event, mode, changed)
+    assert result.returncode != 0
+    assert calls == []
+
+
+@pytest.mark.parametrize("mode", ["", "HOLD", "FAST", "unqualified"])
+@pytest.mark.parametrize("states", [
+    ("success", "skipped", "success"),
+    ("success", "success", "skipped"),
+])
+def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
+    result, calls = _run_exact_workflow_gate(tmp_path, "pull_request", mode, states)
+    assert result.returncode != 0
+    assert calls == []
+
+
+@pytest.mark.parametrize("event", ["merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("mode", ["fast", "smoke"])
+def test_actual_shell_gate_never_uses_pr_fast_results_for_release(tmp_path, event, mode):
+    result, calls = _run_exact_workflow_gate(
+        tmp_path, event, mode, ("success", "success", "skipped"),
+    )
+    assert result.returncode != 0
+    assert calls == []
+
+
+@pytest.mark.parametrize("event,mode,states", _GATE_PASS_CASES)
+def test_actual_shell_gate_preserves_canonical_plan_failure(tmp_path, event, mode, states):
+    result, calls = _run_exact_workflow_gate(
+        tmp_path, event, mode, states, plan_exit=17,
+    )
+    assert result.returncode == 17
+    assert calls == ["scripts/ci_pytest.py --plan-only --jobs 6"]
