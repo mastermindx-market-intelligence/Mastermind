@@ -85,9 +85,13 @@ EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their 
 owners. When the original session is itself the target of a proof, retain that precise
 proof obligation; it must not freeze unrelated permitted implementation or diagnosis.
 
-## Cross-session independent review
+## Session-owned review: no required third-party chat
 
-Whenever an independent source/architecture review is required, use the shared [session review routing procedure](SESSION_INDEPENDENT_REVIEW_ROUTING.md). Discover actual Fabric capabilities in this session and preserve exact original root/effects before commissioning. One separately authorized Dot technical reviewer may be addressed through the existing Slack review channel when qualified; Slack delivery is not reviewer START, a refusal never authorizes cross-provider fallback, and a Dot source verdict is not formal non-author GitHub approval.
+Before any review routing, load [SESSION_LOCAL_REVIEW_POLICY.md](SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin and apply the actually accepted risk tier. The active session owns the adversarial diff check, test evidence and finding disposition. Ordinary FAST/STANDARD work does not need an independent outside session when the zero-external-review policy is accepted. A separate top-level ChatGPT Web conversation, account or historical reviewer is never an internal procedural requirement.
+
+Where independent technical scrutiny is owed, a verified **native review subagent spawned within this same parent session** can supply a genuinely distinct-context review: ChatGPT Web Pro when an actual native spawn capability is exposed, native Codex/Claude subagents, or an admitted Fabric review worker under its real root/parent/budget. Use read-only exact-head input, check child START/return and adjudicate its independent findings. If only the author performs a second pass, report `SELF_REVIEWED`; do not assert that an independent child ran. If native tools are unavailable, only the affected review gate stays held; do not stop other work or demand another Web chat by habit.
+
+Use [SESSION_INDEPENDENT_REVIEW_ROUTING.md](SESSION_INDEPENDENT_REVIEW_ROUTING.md) **only when a genuinely separate review avenue is required and lawful**. A Dot or cross-account reviewer is optional, never the default. Preserve existing live/denied/uncertain operations on their original carrier. A technical subagent verdict is not GitHub's formal non-author `APPROVED`; satisfy actual branch protection, required CI, source holds and protected merge independently.
 
 ### Native Codex/Claude instruction refresh
 

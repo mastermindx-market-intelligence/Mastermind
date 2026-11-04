@@ -1,4 +1,4 @@
-"""Exact C4 repository enrollment, owned by the existing private-service installer.
+"""Exact C4 and admin-business enrollment, owned by the private-service installer.
 
 This extends the completed native-pool-pin chain; it never restages that chain,
 controls service lifetime, publishes Git, selects a native generation, or grants
@@ -23,6 +23,22 @@ TRANSACTION = "native-pool-pin-enrollment"
 BEFORE_MANIFEST = "168bb25afd7d710799fb86f8912389d49c86371c107ee9544d65fdc2b9d390e2"
 BEFORE_CONFIG = "f02e385e234f7f88619058485b61f17834d3cfc33896ce3f5606bd64fcecce21"
 ORIGINAL_PLAN = "4732de6c370ca3385d17749e411f634d149b7701971219baea65707d6c069818"
+# Two exact, manifest-pinned original accounts; no runtime account selector.
+PROFILES = {
+    ACCOUNT: {
+        "account": ACCOUNT, "generation": GENERATION, "port": 45024,
+        "before_manifest": BEFORE_MANIFEST, "before_config": BEFORE_CONFIG,
+        "original_plan": ORIGINAL_PLAN,
+    },
+    "admin-business": {
+        "account": "admin-business",
+        "generation": "admin-business-closed-repositories-20261104-v1",
+        "port": 45030,
+        "before_manifest": "35903622d2e10b3ba56aedbf64cc2484d8b53bdb67ab71a8e0f9b0b7ebacc148",
+        "before_config": "2f0fd933062a0168093caa6a675dc27c91746837701fd28d74b7baf5ff3f4863",
+        "original_plan": "25870fe238760b16ccc41b005c3a4289b8327dbe5a4d8b10015c00faaac15bac",
+    },
+}
 # Immutable generation, deliberately independent of all generic upgrade targets.
 TARGET_FILES = {
     "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
@@ -48,6 +64,19 @@ def fail(code):
     raise SystemExit("NATIVE_PIN_ENROLLMENT_" + code)
 
 
+def frozen_profile(account):
+    if account == ACCOUNT:
+        # Preserve the original C4 owner's exact mutable-constant fixture contract.
+        # Production constants remain source-frozen; synthetic tests patch them.
+        return {"account": ACCOUNT, "generation": GENERATION, "port": 45024,
+                "before_manifest": BEFORE_MANIFEST, "before_config": BEFORE_CONFIG,
+                "original_plan": ORIGINAL_PLAN}
+    result = PROFILES.get(account)
+    if result is None:
+        fail("INPUT_REFUSED")
+    return result
+
+
 def digest(raw):
     return hashlib.sha256(raw).hexdigest()
 
@@ -57,8 +86,10 @@ def encode(value):
     return json.dumps(value, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
 
 
-def target_config(home, before):
-    """One fixed enrollment transformation; no future generic profile dependency."""
+def target_config(home, before, profile=None):
+    """One frozen account profile; neither caller nor a mutable config picks targets."""
+    if profile is None:  # Retain exact C4's existing pure-function test contract.
+        profile = frozen_profile(ACCOUNT)
     common = {
         "enabled": True, "workspaceCli": str(home / ".local/bin/mmx-workspace"),
         "gitBinary": "/usr/bin/git", "commandTimeoutMs": 15000,
@@ -72,7 +103,7 @@ def target_config(home, before):
     remote = "https://github.com/mastermindx-market-intelligence/"
     original_git = dict(common, sourceRepository=str(home / profiles[0][1]),
                         allowedRemoteUrls=[remote + "Mastermind.git"])
-    if (before.get("accountLabel") != ACCOUNT
+    if (before.get("accountLabel") != profile["account"]
             or before.get("gitPublish") != original_git
             or "repositoryWorkspaces" in before):
         fail("PROFILE_REFUSED")
@@ -113,20 +144,20 @@ def pin_fingerprint(svc, pin, path):
 
 
 @contextmanager
-def original_pin(svc, roots, operation):
+def original_pin(svc, roots, operation, profile):
     """Authenticate retained proof with the actual existing native selection owner."""
     pin = svc._pin_owner_module()
     path = roots["state"] / "native-pool-pin"
     fingerprint = pin_fingerprint(svc, pin, path)
     p = pin.decode(svc._fabric_release_bytes(path / "plan.json"))
-    if (fingerprint["plan.json"] != ORIGINAL_PLAN
-            or p.get("schema") != pin.SCHEMA or p.get("account") != ACCOUNT
+    if (fingerprint["plan.json"] != profile["original_plan"]
+            or p.get("schema") != pin.SCHEMA or p.get("account") != profile["account"]
             or p.get("uid") != os.getuid()
-            or p.get("manifest_after") != BEFORE_MANIFEST
-            or p.get("config_after") != BEFORE_CONFIG):
+            or p.get("manifest_after") != profile["before_manifest"]
+            or p.get("config_after") != profile["before_config"]):
         fail("ORIGINAL_PIN_REFUSED")
     args = SimpleNamespace(
-        account=ACCOUNT, expected_manifest_sha256=p["manifest_before"],
+        account=profile["account"], expected_manifest_sha256=p["manifest_before"],
         successor_bundle=p["successor_bundle"],
         successor_plan_sha256=p["successor_digest"],
         expected_plan_sha256=pin.plan_sha(svc, p),
@@ -148,14 +179,14 @@ def original_pin(svc, roots, operation):
             fail("ORIGINAL_PIN_REFUSED")
 
 
-def projected(svc, pin, original):
+def projected(svc, pin, original, profile):
     before_config = original["config.after.json"]
     before_manifest = original["manifest.after.json"]
-    if digest(before_config) != BEFORE_CONFIG or digest(before_manifest) != BEFORE_MANIFEST:
+    if digest(before_config) != profile["before_config"] or digest(before_manifest) != profile["before_manifest"]:
         fail("PROFILE_REFUSED")
-    after_config = encode(target_config(svc._user_root(), pin.decode(before_config)))
+    after_config = encode(target_config(svc._user_root(), pin.decode(before_config), profile))
     manifest = pin.decode(before_manifest)
-    if (manifest.get("account") != ACCOUNT or manifest.get("port") != 45024
+    if (manifest.get("account") != profile["account"] or manifest.get("port") != profile["port"]
             or manifest.get("host") != "127.0.0.1"
             or len(manifest.get("files", {})) != 11
             or "workspace-access.mjs" in manifest["files"]):
@@ -163,15 +194,15 @@ def projected(svc, pin, original):
     after = copy.deepcopy(manifest)
     after["configHash"] = digest(after_config)
     after["files"].update(TARGET_FILES)
-    if not svc._native_pin_manifest_valid(after, ACCOUNT, after["label"]):
+    if not svc._native_pin_manifest_valid(after, profile["account"], after["label"]):
         fail("PROFILE_REFUSED")
     return {"config.before": before_config, "config.after": after_config,
             "manifest.before": before_manifest, "manifest.after": encode(after)}
 
 
-def expected_plan(raw, modes, original_fingerprint):
+def expected_plan(raw, modes, original_fingerprint, profile):
     return {
-        "schema": SCHEMA, "generation": GENERATION, "account": ACCOUNT,
+        "schema": SCHEMA, "generation": profile["generation"], "account": profile["account"],
         "uid": os.getuid(), "originalPin": original_fingerprint,
         "files": {name: {
             "before": digest(raw[name + ".before"]) if name + ".before" in raw else None,
@@ -217,7 +248,7 @@ def observe(svc, roots, plan, raw):
     return progress
 
 
-def candidate(svc, pin, args, roots, original, original_fingerprint):
+def candidate(svc, pin, args, roots, original, original_fingerprint, profile):
     source = Path(args.source) if isinstance(args.source, str) else Path(".")
     if not source.is_absolute() or source.is_symlink() or not source.is_dir():
         fail("SOURCE_REFUSED")
@@ -226,7 +257,7 @@ def candidate(svc, pin, args, roots, original, original_fingerprint):
         source.relative_to(svc._user_root())
     except ValueError:
         fail("SOURCE_REFUSED")
-    raw = projected(svc, pin, original)
+    raw = projected(svc, pin, original, profile)
     before = pin.decode(raw["manifest.before"])
     modes = {}
     for name in ORDER:
@@ -245,14 +276,14 @@ def candidate(svc, pin, args, roots, original, original_fingerprint):
                 raw[name + ".before"] = svc._fabric_release_bytes(path)
                 if digest(raw[name + ".before"]) != before["files"][name]:
                     fail("FOREIGN_STATE")
-    plan = expected_plan(raw, modes, original_fingerprint)
+    plan = expected_plan(raw, modes, original_fingerprint, profile)
     if observe(svc, roots, plan, raw) != 0:
         fail("FOREIGN_STATE")
     static_seal(svc, pin, roots, original)
     return plan, raw
 
 
-def retained(svc, pin, roots, path, expected_sha, original, original_fingerprint):
+def retained(svc, pin, roots, path, expected_sha, original, original_fingerprint, profile):
     pin.directory(svc, path)
     names = set(x.name for x in path.iterdir())
     if not FILES - {"result.json"} <= names or names - FILES:
@@ -261,7 +292,7 @@ def retained(svc, pin, roots, path, expected_sha, original, original_fingerprint
     if digest(encode(plan)) != expected_sha:
         fail("PLAN_REFUSED")
     raw = {name: svc._fabric_release_bytes(path / name) for name in PAYLOADS}
-    if any(raw[name] != data for name, data in projected(svc, pin, original).items()):
+    if any(raw[name] != data for name, data in projected(svc, pin, original, profile).items()):
         fail("TRANSACTION_REFUSED")
     before = pin.decode(raw["manifest.before"])
     for name, wanted in TARGET_FILES.items():
@@ -272,15 +303,15 @@ def retained(svc, pin, roots, path, expected_sha, original, original_fingerprint
     modes = {name: plan["files"][name]["mode"] for name in ORDER}
     if (any(type(value) is not int or value not in (0o400, 0o600) for value in modes.values())
             or modes["workspace-access.mjs"] != 0o600
-            or plan != expected_plan(raw, modes, original_fingerprint)
+            or plan != expected_plan(raw, modes, original_fingerprint, profile)
             or pin.decode(svc._fabric_release_bytes(path / "intent.json"))
                != {"schema": SCHEMA, "planSha256": expected_sha}):
         fail("TRANSACTION_REFUSED")
     return plan, raw
 
 
-def stopped(svc, roots):
-    if svc._lifecycle_inspect(ACCOUNT, "com.mastermind.studio-direct-private." + ACCOUNT,
+def stopped(svc, roots, profile):
+    if svc._lifecycle_inspect(profile["account"], "com.mastermind.studio-direct-private." + profile["account"],
                               roots, require_positive=True) is not None:
         fail("SERVICE_LOADED")
 
@@ -289,10 +320,10 @@ def result_record(plan):
     return {"schema": SCHEMA, "planSha256": digest(encode(plan)), "effect": "APPLIED"}
 
 
-def report(plan, progress, committed):
+def report(plan, progress, committed, profile):
     phase = "OLD" if progress == 0 else "COMPLETE" if progress == len(ORDER) else "PARTIAL"
     return {
-        "schema": SCHEMA, "generation": GENERATION, "account": ACCOUNT,
+        "schema": SCHEMA, "generation": profile["generation"], "account": profile["account"],
         "planSha256": digest(encode(plan)), "phase": phase,
         "effect": "APPLIED" if committed else "NOT_APPLIED" if progress == 0
                   else "EFFECT_UNKNOWN" if progress == len(ORDER) else "PARTIAL",
@@ -317,23 +348,24 @@ def run(svc, args):
 
 
 def _run(svc, args, effect):
-    if (args.account != ACCOUNT or args.operation not in ("preview", "apply", "status", "reconcile")
-            or args.expected_manifest_sha256 != BEFORE_MANIFEST
+    profile = frozen_profile(args.account)
+    if (args.operation not in ("preview", "apply", "status", "reconcile")
+            or args.expected_manifest_sha256 != profile["before_manifest"]
             or (args.operation != "preview" and not svc._sha256_hex(args.expected_plan_sha256))):
         fail("INPUT_REFUSED")
-    roots = svc._build_runtime_roots(ACCOUNT)
+    roots = svc._build_runtime_roots(profile["account"])
     path = roots["state"] / TRANSACTION
     modifying = args.operation in ("apply", "reconcile")
-    lock = svc._c2_lifecycle_mutex(ACCOUNT) if modifying else nullcontext()
-    with lock, original_pin(svc, roots, args.operation) as (pin, original, fingerprint):
+    lock = svc._c2_lifecycle_mutex(profile["account"]) if modifying else nullcontext()
+    with lock, original_pin(svc, roots, args.operation, profile) as (pin, original, fingerprint):
         if args.operation in ("preview", "apply"):
             if os.path.lexists(path):
                 fail("RECONCILIATION_REQUIRED")
             if modifying:
-                stopped(svc, roots)
-            plan, raw = candidate(svc, pin, args, roots, original, fingerprint)
+                stopped(svc, roots, profile)
+            plan, raw = candidate(svc, pin, args, roots, original, fingerprint, profile)
             if args.operation == "preview":
-                value = report(plan, 0, False)
+                value = report(plan, 0, False, profile)
                 value["phase"] = "PREVIEW"
                 return value
             if digest(encode(plan)) != args.expected_plan_sha256:
@@ -349,7 +381,7 @@ def _run(svc, args, effect):
                 svc._fabric_release_new(path / name, data)
             svc._fabric_release_new(path / "intent.json", encode({
                 "schema": SCHEMA, "planSha256": args.expected_plan_sha256}))
-        plan, raw = retained(svc, pin, roots, path, args.expected_plan_sha256, original, fingerprint)
+        plan, raw = retained(svc, pin, roots, path, args.expected_plan_sha256, original, fingerprint, profile)
         progress = observe(svc, roots, plan, raw)
         static_seal(svc, pin, roots, original)
         committed = os.path.lexists(path / "result.json")
@@ -357,14 +389,14 @@ def _run(svc, args, effect):
                 or pin.decode(svc._fabric_release_bytes(path / "result.json")) != result_record(plan)):
             fail("RESULT_REFUSED")
         if args.operation == "status":
-            return report(plan, progress, committed)
-        stopped(svc, roots)
+            return report(plan, progress, committed, profile)
+        stopped(svc, roots, profile)
         if committed:
-            return report(plan, progress, True)
+            return report(plan, progress, True, profile)
         changed = False
         try:
             for index in range(progress, len(ORDER)):
-                stopped(svc, roots)
+                stopped(svc, roots, profile)
                 static_seal(svc, pin, roots, original)
                 if (observe(svc, roots, plan, raw) != index
                         or pin_fingerprint(svc, pin, roots["state"] / "native-pool-pin") != fingerprint):
@@ -377,7 +409,7 @@ def _run(svc, args, effect):
             if observe(svc, roots, plan, raw) != len(ORDER):
                 fail("FOREIGN_STATE")
             static_seal(svc, pin, roots, original)
-            stopped(svc, roots)
+            stopped(svc, roots, profile)
             if pin_fingerprint(svc, pin, roots["state"] / "native-pool-pin") != fingerprint:
                 fail("ORIGINAL_PIN_REFUSED")
             changed = True
@@ -391,17 +423,16 @@ def _run(svc, args, effect):
             if changed:
                 fail("EFFECT_UNKNOWN")
             raise
-        return report(plan, len(ORDER), True)
+        return report(plan, len(ORDER), True, profile)
 
 
 def require_start(svc, account, roots):
-    if account != ACCOUNT:
-        fail("START_REFUSED")
+    profile = frozen_profile(account)
     pin = svc._pin_owner_module()
     path = roots["state"] / TRANSACTION
     plan = pin.decode(svc._fabric_release_bytes(path / "plan.json"))
-    with original_pin(svc, roots, "status") as (pin, original, fingerprint):
-        plan, raw = retained(svc, pin, roots, path, digest(encode(plan)), original, fingerprint)
+    with original_pin(svc, roots, "status", profile) as (pin, original, fingerprint):
+        plan, raw = retained(svc, pin, roots, path, digest(encode(plan)), original, fingerprint, profile)
         static_seal(svc, pin, roots, original)
         if (observe(svc, roots, plan, raw) != len(ORDER)
                 or pin.decode(svc._fabric_release_bytes(path / "result.json")) != result_record(plan)):

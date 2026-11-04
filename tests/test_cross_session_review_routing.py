@@ -121,3 +121,51 @@ def test_source_only_prevents_false_installed_and_live_claims():
     assert "not a live" in guide or "no ability to enroll" in guide
     assert "NOT_PROVEN" in guide
     assert "fresh" in guide.lower()
+
+
+def test_session_local_review_does_not_preempt_unmerged_standard_policy():
+    policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
+    agents = _read("AGENTS.md")
+    claude = _read("CLAUDE.md")
+    for required in (
+        "Before #2018 is protected",
+        "one independent technical assessment and real non-author formal approval",
+        "SELF_REVIEWED",
+        "a second prompt in the builder's own context is SELF_REVIEWED",
+        "On `EFFECT_UNKNOWN`",
+        "original",
+    ):
+        assert required in policy, f"local-first cannot silently waive prior source: {required}"
+    assert "Only after #2018's risk-tier source is protected" in agents
+    assert "STANDARD's zero-extra-review rule is conditional" in claude
+    assert "docs/SESSION_LOCAL_REVIEW_POLICY.md" in claude
+    assert GUIDE in claude, "external avenue remains discoverable when genuinely needed"
+
+
+def test_project_installed_fence_separates_native_review_from_formal_approval():
+    block = _project_instructions(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
+    for guard in (
+        "Native read-only child may review here",
+        "child != GitHub APPROVED",
+        "No denied/EFFECT_UNKNOWN review reroute",
+        "Independent non-author review only when required",
+        "No impersonation, self-review, duplicate or denial evasion",
+        "Review: load " + GUIDE + " at pin.",
+        "docs/SESSION_LOCAL_REVIEW_POLICY.md",
+    ):
+        assert guard in block, f"uninstalled outside-fence safeguard: {guard}"
+    assert len(block.encode("utf-8")) <= 8000
+
+
+def test_session_finishes_original_pr_not_draft_or_ci_handoff():
+    policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
+    agents = _read("AGENTS.md")
+    for required in (
+        "Finish-to-release ownership",
+        "A draft, comment, reviewer request, CI observation, checkpoint",
+        "existing",
+        "no self-merge",
+    ):
+        assert required.lower() in policy.lower()
+    assert "Finish the actual PR, not its draft" in agents
+    assert "do not" in policy.lower() and "EFFECT_UNKNOWN" in policy

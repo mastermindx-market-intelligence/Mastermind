@@ -89,7 +89,7 @@ def scope(key, mode, model, here, env, *, timing=None):
     # Diagnostic values never participate in admission or lease settlement.
     if timing is not None:
         timing["remote_scope_checked_at"] = now
-    if not 0 < deadline-issued <= 7200 or not -30 <= now-issued <= 30 or now >= deadline:
+    if not 0 < deadline-issued <= 14400 or not -30 <= now-issued <= 30 or now >= deadline:
         raise ValueError("native_remote_lease_window_invalid")
     return value
 
