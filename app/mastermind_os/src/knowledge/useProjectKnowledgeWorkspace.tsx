@@ -39,6 +39,9 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
   const contexts = useRef<{scope:string; values:Partial<Record<ProjectSourceAction,unknown>>}|null>(null);
   const prepared = useRef<{scope:string; value:PreparedProjectKnowledgeWrite;sourceOwner:KnowledgeLibrarySourceOwner;contextTicket:object;codeContext:ProjectKnowledgeCodeContext}|null>(null);
   const pendingPrepare = useRef<AbortController|null>(null);
+  // A rendered Review gesture is single-use even after durable settlement.
+  // This never replaces/clears the controller pointer or asserts an outcome.
+  const usedReviewGestures=useRef(new WeakSet<PreparedProjectKnowledgeWrite>());
   const phaseRef = useRef<{scope:string;value:KnowledgeEditPhase}>({scope,value:'idle'});
   const [, repaint] = useState(0);
   const setPhase = (value:KnowledgeEditPhase) => {phaseRef.current={scope:live.current.scope,value};repaint(n=>n+1);};
@@ -148,12 +151,14 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
   }
   function canPublish() {
     const anchor=prepared.current;
-    return !!anchor && anchor.scope===scope && current() && sourceOwner.current?.value===anchor.sourceOwner && contexts.current===anchor.contextTicket && sameKnowledgeCodeContext(anchor.codeContext,codeContext({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision})??undefined) && sourceCurrent({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision});
+    return !!anchor && !usedReviewGestures.current.has(anchor.value) && anchor.scope===scope && current() && sourceOwner.current?.value===anchor.sourceOwner && contexts.current===anchor.contextTicket && sameKnowledgeCodeContext(anchor.codeContext,codeContext({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision})??undefined) && sourceCurrent({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision});
   }
   async function publish(expected:PreparedProjectKnowledgeWrite) {
     const anchor=prepared.current;
     if (!current() || !controller || anchor?.scope!==scope || anchor.value!==expected) return;
+    if (usedReviewGestures.current.has(expected)) return;
     if (!canPublish()) {setPhase('stale');return;}
+    usedReviewGestures.current.add(expected);
     setPhase('pending');
     const result=await controller.begin({kind:'project_source_write',targetKey:anchor.value.targetKey,
       payload:{action:anchor.value.target.action,request:anchor.value.request}});

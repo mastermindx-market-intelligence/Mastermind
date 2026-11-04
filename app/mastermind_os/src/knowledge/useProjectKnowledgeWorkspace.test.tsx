@@ -117,3 +117,11 @@ it('legacy Library bodies remain read-only without an independent CODE owner',as
   expect(f.transport.prepareSourceOperation).not.toHaveBeenCalled();expect(f.transport.submitSourceOperation).not.toHaveBeenCalled();
   expect(await f.store.read(f.journey.context.owner_context.principal_scope)).toBeNull();
 });
+
+it('consumes the rendered publication gesture once even when an immediate terminal receipt clears its pointer',async()=>{
+  const f=setup();await f.ready();vi.mocked(f.transport.submitSourceOperation).mockResolvedValue(f.journey.source_status);
+  await act(async()=>{await f.result.current.prepare(f.request);});const retained=f.result.current.publish;
+  await act(async()=>{await retained();});expect(f.result.current.phase).toBe('source-published');
+  expect(await f.store.read(f.journey.context.owner_context.principal_scope)).toBeNull();
+  await act(async()=>{await retained();});expect(f.transport.submitSourceOperation).toHaveBeenCalledTimes(1);
+});
