@@ -242,10 +242,16 @@ def _validate(facts: ReviewChangeFacts) -> None:
 
 
 def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
+    # Chairman's 2026-11-03 Web-CEO review waiver: no *additional*
+    # independent review or formal approval is imposed by this classifier,
+    # even for risk-elevated code. The tier still governs focused security,
+    # correctness and production-path qualification; native GitHub rules and
+    # explicit release/security holds are adjudicated by their own owners.
+    # Manual authorized review stays available on the existing ingress.
     review_counts = {
         ReviewTier.FAST: (0, 0),
-        ReviewTier.STANDARD: (1, 1),
-        ReviewTier.CRITICAL: (2, 1),
+        ReviewTier.STANDARD: (0, 0),
+        ReviewTier.CRITICAL: (0, 0),
         ReviewTier.HOLD: (0, 0),
     }
     assessments, approvals = review_counts[tier]

@@ -25,7 +25,7 @@ permissions or override those actual controls.
 
 Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
 and merge decisions follow the currently authorized role and operation, not a
-historical session name. Independent review applies only when the accepted risk tier or native rule requires it; protected source/release controls still apply.
+historical session name. Independent review is not mandatory for CEO Web work; protected source/release controls still apply.
 These role descriptions do not themselves grant authority.
 
 **Source-of-truth order** — higher layer wins on conflict:

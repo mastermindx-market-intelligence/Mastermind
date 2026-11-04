@@ -97,7 +97,7 @@ def test_auth_change_is_critical_even_when_pr_claims_fast():
     fixture = ApiFixture(files=[file("backend/auth/session.py")])
     risk = assess(fixture)
     assert risk.tier is ReviewTier.CRITICAL
-    assert auto_decide(fixture, risk).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+    assert auto_decide(fixture, risk).action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
 
 
 def test_manual_intent_is_unaffected_even_when_source_is_fast():
@@ -249,9 +249,8 @@ def test_real_reviewer_falsifiers_through_signed_reader_and_dispatch(path, tier)
     assessment = assess(fixture)
     assert assessment.tier is tier
     advice = auto_decide(fixture, assessment)
-    expected = (ReviewDispatch.SKIP_NO_REVIEW_NEEDED if tier is ReviewTier.FAST
-                else ReviewDispatch.AUTO_REVIEW_ELIGIBLE)
-    assert advice.action is expected
+    assert advice.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
+    assert advice.source_tier is tier
 
 
 def test_explicit_manual_review_skips_risk_preflight_and_keeps_original_route():

@@ -69,11 +69,11 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
     ("plugins/mastermind-sol/skills/review-pull-request/SKILL.md",),
     ("pytest.ini",),
 ])
-def test_small_sensitive_changes_never_use_fast_lane(paths):
+def test_small_sensitive_changes_are_critical_but_do_not_force_reviewer(paths):
     decision = assess_review_risk(facts(paths, additions=1, deletions=0))
     assert decision.tier is ReviewTier.CRITICAL
-    assert decision.minimum_independent_assessments == 2
-    assert decision.minimum_formal_non_author_approvals == 1
+    assert decision.minimum_independent_assessments == 0
+    assert decision.minimum_formal_non_author_approvals == 0
     assert not decision.fast_lane_candidate
 
 
@@ -86,11 +86,11 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
     ("control_plane/ordinary_worker.py",),
     ("integrations/external_client.py",),
 ])
-def test_consequential_code_gets_one_review(paths):
+def test_consequential_code_keeps_elevated_tier_without_mandatory_review(paths):
     decision = assess_review_risk(facts(paths))
     assert decision.tier is ReviewTier.STANDARD
-    assert decision.minimum_independent_assessments == 1
-    assert decision.minimum_formal_non_author_approvals == 1
+    assert decision.minimum_independent_assessments == 0
+    assert decision.minimum_formal_non_author_approvals == 0
 
 
 def test_large_unremarkable_diff_gets_one_review():
@@ -258,8 +258,8 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     )
     verdict = assess_review_risk(source)
     assert verdict.tier is ReviewTier.CRITICAL
-    assert verdict.minimum_independent_assessments == 2
-    assert verdict.minimum_formal_non_author_approvals == 1
+    assert verdict.minimum_independent_assessments == 0
+    assert verdict.minimum_formal_non_author_approvals == 0
 
 
 @pytest.mark.parametrize("path", [

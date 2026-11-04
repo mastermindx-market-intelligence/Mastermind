@@ -41,7 +41,7 @@ Use [REVIEW_RISK_POLICY.md](REVIEW_RISK_POLICY.md) and its source-verified advis
 
 1. Run the smallest relevant local test set while iterating. Publish a truthful
    candidate once its scoped source is stable and the relevant local qualification passes.
-   When the accepted risk tier or native rules require a non-author GitHub review, mark a qualified Draft PR **Ready for Review
+   When a native GitHub rule or authorized explicit manual request actually requires a review, mark a qualified Draft PR **Ready for Review
    before asking the reviewer**. FAST changes must not dispatch a review merely to satisfy an obsolete universal-review habit. Hosted CI may still be queued or running: full required
    CI is a merge/release gate, not a prerequisite for review readiness. Keep unfinished
    or locally failing work in Draft; do not imply a reviewer is working just because

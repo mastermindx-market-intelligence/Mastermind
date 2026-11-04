@@ -34,7 +34,7 @@ W0/W1/W2 records (Mastermind #1664/#1666, macro #9967), not another `P1.T*` wave
 Ownership is a role, not a session. Old authors/chats/titles are not live approvers.
 Current assignment owns recovery and records takeover in the source-linked handoff,
 without waiting for orphan ACKs or asking for old chats. Protect live owners/effects
-(A.2); FAST skips review; others follow binding gates. Never self-merge or approve.
+(A.2); CEO Web needs no independent review. Native gates bind; no self-merge/approve.
 
 This contract does not edit `docs/sol_skills/BOOTSTRAP_KERNEL.md` (recorded master
 blob `0cc09227c77068c3997ff0a24bfef58cadeb7f44`; #1846 is the single bootstrap kernel).

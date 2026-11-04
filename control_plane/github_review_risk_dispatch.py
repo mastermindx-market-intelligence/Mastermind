@@ -112,15 +112,18 @@ def decide_risk_dispatch(
         "pull_number": expected_pull_number,
         "head_sha": expected_head_sha,
     }
-    if assessment.tier is ReviewTier.FAST:
+    if assessment.tier in (ReviewTier.FAST, ReviewTier.STANDARD, ReviewTier.CRITICAL):
+        if (
+            assessment.minimum_independent_assessments != 0
+            or assessment.minimum_formal_non_author_approvals != 0
+        ):
+            return RiskDispatchAdvice(
+                ReviewDispatch.AUTO_REVIEW_ELIGIBLE, assessment.tier,
+                "REVIEW_REQUIRED_BY_ACCEPTED_POLICY", **bound,
+            )
         return RiskDispatchAdvice(
-            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, ReviewTier.FAST,
-            "FAST_NO_INDEPENDENT_REVIEW_REQUIRED", **bound,
-        )
-    if assessment.tier in (ReviewTier.STANDARD, ReviewTier.CRITICAL):
-        return RiskDispatchAdvice(
-            ReviewDispatch.AUTO_REVIEW_ELIGIBLE, assessment.tier,
-            "INDEPENDENT_REVIEW_REQUIRED", **bound,
+            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, assessment.tier,
+            "CHAIRMAN_NO_MANDATORY_AUTO_REVIEW", **bound,
         )
     return _hold("RISK_TIER_INVALID")
 
