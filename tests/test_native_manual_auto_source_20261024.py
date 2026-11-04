@@ -22,7 +22,8 @@ NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PATCH = ROOT / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
 HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
-CURRENT_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
+PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
+CURRENT_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -136,6 +137,19 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
             assert sha(source) == CURRENT_TASK_SHA
+            # The historical manual-auto fixture remains cryptographically
+            # immutable; only two finite long-horizon budget constants changed
+            # in the current source after that historical acceptance.
+            latest = source.read_bytes()
+            precursor = latest.replace(
+                b'request_remaining_seconds <= 14400',
+                b'request_remaining_seconds <= 7200', 1,
+            ).replace(
+                b'time.monotonic_ns() + 14400 * 1_000_000_000',
+                b'time.monotonic_ns() + 7200 * 1_000_000_000', 1,
+            )
+            assert precursor != latest
+            assert hashlib.sha256(precursor).hexdigest() == PRE_LONG_HORIZON_TASK_SHA
             assert sha(HISTORICAL_TASK) == AFTER[relative]
             current = HISTORICAL_TASK.read_bytes()
         else:

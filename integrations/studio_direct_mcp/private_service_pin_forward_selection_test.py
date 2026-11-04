@@ -20,7 +20,7 @@ REVIEWED_SEATS = (
     "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9", "chatgpt4",
 )
 UNENROLLED = ("chatgpt2-personal", "mastermind-os-publication",
-              "fabric-read", "fabric-design", "chatgpt3-forged")
+              "fabric-read", "fabric-design", "chatgpt3-other", "chatgpt3-forged")
 
 ORIGINAL_TARGET = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
 CURRENT_TARGET = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"

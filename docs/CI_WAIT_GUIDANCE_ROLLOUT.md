@@ -50,3 +50,29 @@ chats and other hosts need their own actual load/install evidence. Existing obse
 prompts containing the old permanent ban need a bounded, authorized correction using
 their original automation identity. Preserve notification policy, human decisions,
 original grants and uncertain effects; do not create replacement observers.
+
+
+## Short attended validation (ChatGPT Web and local instruction consumers)
+
+The canonical marked block now keeps an attended session active for validation
+expected to finish in seconds to minutes. Retain the exact head/run observer,
+continue independent work, consume the terminal result in the same session and
+advance the next authorized step. A bounded wait on the original observer is
+appropriate when no other useful work is ready; do not end merely because a
+short check is pending. Real session-health/permission/return-path boundaries
+remain explicit. This adds no watcher, retry plane or relaxation of a CI gate.
+
+Existing account instructions with the exact previous protected block are
+upgraded by its SHA-256 identity. Only that known preimage, the current block or
+an unambiguous fresh-install anchor is accepted. Unknown edits, duplicate or
+reversed markers still refuse before any writes; backups, modes, partial-failure
+receipts and idempotence remain the incumbent installer's responsibility.
+The guard/context hook decision code and 300-second read cooldown are unchanged.
+
+A merged source change is not installation or proof of model adoption. ChatGPT
+Web sessions load the protected ACTIVE_EXECUTION source through the existing
+bootstrap. Local Codex/Claude consumers need the normal accepted-source install
+and hash readback; loaded sessions are not retroactively changed. Test the real
+workflow with a legitimate fast validation, keep its observer handle in the same
+session, record result consumption and the next action, and distinguish that
+case from an actual long full-suite run. No dummy push is needed to test a watch.

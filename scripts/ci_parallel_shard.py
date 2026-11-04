@@ -18,6 +18,154 @@ from typing import Sequence
 from scripts import ci_pytest
 
 
+_REQUIRED_SHARDS_IF = "${{ always() && (github.event_name != 'pull_request' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
+_REQUIRED_PR_FAST_IF = "${{ always() && github.event_name == 'pull_request' && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
+
+
+_EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
+ {'name': 'Classify exact PR diff using protected base code',
+  'id': 'scope',
+  'env': {'PR_BASE_SHA': '${{ github.event.pull_request.base.sha }}'},
+  'run': 'set -euo pipefail\n'
+         'trusted="$RUNNER_TEMP/ci-trusted-base"\n'
+         'mkdir -p "$trusted"\n'
+         'if git cat-file -e "${PR_BASE_SHA}:scripts/ci_pr_scope.py" 2>/dev/null &&\n'
+         '   git cat-file -e "${PR_BASE_SHA}:control_plane/github_review_risk_policy.py" '
+         '2>/dev/null; then\n'
+         '  git archive "$PR_BASE_SHA" scripts/ci_pr_scope.py '
+         'control_plane/github_review_risk_policy.py |\n'
+         '    tar -x -C "$trusted"\n'
+         '  PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \\\n'
+         '    --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \\\n'
+         '    --repository "$GITHUB_REPOSITORY" --output "$GITHUB_OUTPUT"\n'
+         'else\n'
+         '  printf \'mode=full\\ntier=HOLD\\nneeds_node=false\\n\' >> "$GITHUB_OUTPUT"\n'
+         "  echo 'CI_SCOPE source not in protected base: required full suite'\n"
+         'fi\n'}]
+_EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
+ {'name': 'Verify exact changed source without executing untrusted PR text',
+  'env': {'PR_BASE_SHA': '${{ github.event.pull_request.base.sha }}',
+          'PR_HEAD_SHA': '${{ github.event.pull_request.head.sha }}'},
+  'run': 'set -euo pipefail\n'
+         'git diff --check "$PR_BASE_SHA...$PR_HEAD_SHA"\n'
+         'python -m compileall -q scripts/ci_pr_scope.py '
+         'control_plane/github_review_risk_policy.py\n'},
+ {'uses': 'actions/setup-python@v5',
+  'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
+  'with': {'python-version': '3.12', 'cache': 'pip'}},
+ {'name': 'Install focused Python test dependencies',
+  'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
+  'run': 'python -m pip install --disable-pip-version-check -e ".[dev]"'},
+ {'name': 'Bounded source-proximate PR tests',
+  'if': "${{ needs.pr_scope.outputs.mode == 'smoke' }}",
+  'env': {'PR_BASE_SHA': '${{ github.event.pull_request.base.sha }}',
+          'PR_HEAD_SHA': '${{ github.event.pull_request.head.sha }}'},
+  'run': 'python -m scripts.ci_pr_smoke --repo . --base "$PR_BASE_SHA" --head "$PR_HEAD_SHA"'},
+ {'uses': 'actions/setup-node@v4',
+  'if': "${{ needs.pr_scope.outputs.needs_node == 'true' }}",
+  'with': {'node-version': '22.14.0',
+           'cache': 'npm',
+           'cache-dependency-path': 'app/mastermind_os/package-lock.json'}},
+ {'name': 'Typecheck affected web application',
+  'if': "${{ needs.pr_scope.outputs.needs_node == 'true' }}",
+  'run': 'npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund\n'
+         'npm --prefix app/mastermind_os run typecheck\n'}]
+
+
+def _validate_pr_fast_lane(jobs: dict) -> None:
+    """Strict structure: scope from protected base, fast PR only, no bypass."""
+    scope, fast = jobs["pr_scope"], jobs["pr_fast"]
+    if not isinstance(scope, dict) or not isinstance(fast, dict):
+        raise ci_pytest.PolicyError("PR scope and fast CI jobs must be mappings")
+    if (
+        scope.get("name") != "PR test scope"
+        or scope.get("if") != "${{ github.event_name == 'pull_request' }}"
+        or scope.get("needs") is not None
+        or scope.get("permissions") != {"contents": "read"}
+        or scope.get("runs-on") != "ubuntu-latest"
+        or scope.get("timeout-minutes") != 3
+        or scope.get("outputs") != {
+            "mode": "${{ steps.scope.outputs.mode }}",
+            "tier": "${{ steps.scope.outputs.tier }}",
+            "needs_node": "${{ steps.scope.outputs.needs_node }}",
+        }
+        or scope.get("continue-on-error") is not None
+        or fast.get("name") != "PR fast checks"
+        or fast.get("if") != _REQUIRED_PR_FAST_IF
+        or fast.get("needs") != ["pr_scope"]
+        or fast.get("permissions") != {"contents": "read"}
+        or fast.get("runs-on") != "ubuntu-latest"
+        or fast.get("timeout-minutes") != 8
+        or fast.get("continue-on-error") is not None
+    ):
+        raise ci_pytest.PolicyError("PR scope must be trusted and PR fast lane must be bounded")
+    scope_steps, fast_steps = scope.get("steps"), fast.get("steps")
+    if not isinstance(scope_steps, list) or len(scope_steps) != 2 or not isinstance(fast_steps, list) or len(fast_steps) != 7:
+        raise ci_pytest.PolicyError("PR scope/fast steps missing or duplicated")
+    if scope_steps != _EXPECTED_SCOPE_STEPS or fast_steps != _EXPECTED_FAST_STEPS:
+        raise ci_pytest.PolicyError("PR fast lane source or commands drifted")
+    checkout, qualifier = scope_steps
+    if (
+        checkout.get("uses") != "actions/checkout@v4"
+        or checkout.get("with") != {"fetch-depth": 0, "persist-credentials": False}
+        or qualifier.get("name") != "Classify exact PR diff using protected base code"
+        or qualifier.get("id") != "scope"
+        or qualifier.get("env") != {"PR_BASE_SHA": "${{ github.event.pull_request.base.sha }}"}
+        or qualifier.get("if") is not None
+    ):
+        raise ci_pytest.PolicyError("PR scope must use exact source-bound protected checkout")
+    body = qualifier.get("run")
+    # A PR author cannot override these immutable routing decisions. Checking
+    # the exact required fragments prevents a casual always-FAST replacement;
+    # the base-archive full path and controlled outputs are load-bearing.
+    expected_scope = (
+        'set -euo pipefail',
+        'git cat-file -e "${PR_BASE_SHA}:scripts/ci_pr_scope.py"',
+        'git cat-file -e "${PR_BASE_SHA}:control_plane/github_review_risk_policy.py"',
+        'git archive "$PR_BASE_SHA" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py',
+        'PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py"',
+        "--repository \"$GITHUB_REPOSITORY\" --output \"$GITHUB_OUTPUT\"",
+        "mode=full", "tier=HOLD",
+    )
+    if not isinstance(body, str) or any(x not in body for x in expected_scope):
+        raise ci_pytest.PolicyError("PR scope is not protected-base, fail-closed classification")
+    for job_step in [*scope_steps, *fast_steps]:
+        if not isinstance(job_step, dict) or job_step.get("continue-on-error") is not None:
+            raise ci_pytest.PolicyError("PR scope and fast checks may not bypass failures")
+    names = [step.get("name") for step in fast_steps]
+    if names != [
+        None, "Verify exact changed source without executing untrusted PR text",
+        None, "Install focused Python test dependencies",
+        "Bounded source-proximate PR tests", None,
+        "Typecheck affected web application",
+    ]:
+        raise ci_pytest.PolicyError("PR fast steps must preserve exact bounded checks")
+    for i in (0, 2, 5):
+        if fast_steps[i].get("uses") != [
+            "actions/checkout@v4", "actions/setup-python@v5",
+            "actions/setup-node@v4",
+        ][(0, 2, 5).index(i)]:
+            raise ci_pytest.PolicyError("PR fast check toolchain is invalid")
+    if fast_steps[0].get("with") != {"fetch-depth": 0, "persist-credentials": False}:
+        raise ci_pytest.PolicyError("PR fast checkout must not persist credentials")
+    if (
+        fast_steps[2].get("if") != "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
+        or fast_steps[3].get("if") != fast_steps[2].get("if")
+        or fast_steps[4].get("if") != fast_steps[2].get("if")
+        or fast_steps[5].get("if") != "${{ needs.pr_scope.outputs.needs_node == 'true' }}"
+        or fast_steps[6].get("if") != fast_steps[5].get("if")
+        or "git diff --check" not in str(fast_steps[1].get("run"))
+        or fast_steps[3].get("run") != 'python -m pip install --disable-pip-version-check -e ".[dev]"'
+        or "python -m scripts.ci_pr_smoke" not in str(fast_steps[4].get("run"))
+        or "npm --prefix app/mastermind_os run typecheck" not in str(fast_steps[6].get("run"))
+    ):
+        raise ci_pytest.PolicyError("PR fast lane must retain source, Python, and web checks")
+
+
+_REQUIRED_GATE_RUN = 'set -euo pipefail\nif [ "$EVENT_TYPE" = "pull_request" ]; then\n  if [ "$PR_SCOPE_STATUS" != success ]; then\n    echo "trusted PR risk-source qualification unavailable"\n    exit 1\n  fi\n  case "$PR_SCOPE_MODE" in\n    full)\n      if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then\n        echo "critical/unqualified PR must pass all six pytest shards"\n        exit 1\n      fi\n      ;;\n    fast|smoke)\n      if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ]; then\n        echo "eligible PR must pass its exact fast/smoke check"\n        exit 1\n      fi\n      ;;\n    *)\n      echo "no verified CI source scope"\n      exit 1\n      ;;\n  esac\nelse\n  # No fast mode exists for merge_group, protected pushes, or a\n  # deliberate workflow_dispatch. The full matrix is mandatory.\n  if [ "$SHARDS_STATUS" != success ] ||\n     [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then\n    echo "integration/release CI must pass the full matrix"\n    exit 1\n  fi\nfi\n# Revalidate the same canonical test discovery/exclusion/cover plan.\n# PR smoke does not change the module set used in merge_group.\npython scripts/ci_pytest.py --plan-only --jobs 6\n'
+
+
+
 def validate_parallel_workflow(text: str) -> None:
     """Ensure the required "test" gate cannot pass without every shard."""
     import yaml
@@ -27,8 +175,9 @@ def validate_parallel_workflow(text: str) -> None:
     if payload.get("permissions") != {"contents": "read"}:
         raise ci_pytest.PolicyError("CI workflow root may only read source")
     jobs = payload.get("jobs")
-    if not isinstance(jobs, dict) or set(jobs) != {"pytest_shards", "test"}:
-        raise ci_pytest.PolicyError("parallel CI jobs must be exactly shards and test gate")
+    if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pytest_shards", "test"}:
+        raise ci_pytest.PolicyError("parallel CI requires one trusted scope, PR fast check, shards, and test gate")
+    _validate_pr_fast_lane(jobs)
     shards, gate = jobs["pytest_shards"], jobs["test"]
     if not isinstance(shards, dict) or not isinstance(gate, dict):
         raise ci_pytest.PolicyError("parallel CI job configuration is invalid")
@@ -47,13 +196,14 @@ def validate_parallel_workflow(text: str) -> None:
         or indices != list(range(6))
         or strategy.get("fail-fast") is not False
         or strategy.get("max-parallel") != 6
-        or shards.get("if") is not None
+        or shards.get("needs") != ["pr_scope"]
+        or shards.get("if") != _REQUIRED_SHARDS_IF
         or shards.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
     if (
         gate.get("name") != "test"
-        or gate.get("needs") != ["pytest_shards"]
+        or gate.get("needs") != ["pr_scope", "pr_fast", "pytest_shards"]
         or gate.get("if") != "${{ always() }}"
         or gate.get("continue-on-error") is not None
     ):
@@ -86,7 +236,7 @@ def validate_parallel_workflow(text: str) -> None:
     # global uniqueness across both CI jobs rather than depending on runner
     # behavior for duplicate IDs.
     seen_step_ids: set[str] = set()
-    for step in (*shard_steps, *gate_steps):
+    for step in (*jobs["pr_scope"]["steps"], *jobs["pr_fast"]["steps"], *shard_steps, *gate_steps):
         if not isinstance(step, dict):
             raise ci_pytest.PolicyError("parallel CI steps must be mappings")
         if "id" not in step:
@@ -215,29 +365,24 @@ def validate_parallel_workflow(text: str) -> None:
         raise ci_pytest.PolicyError("required fan-in gate step is missing")
     final = test_steps[0]
     code = final.get("run")
-    # The control-flow guard must be executable and ordered. A substring
-    # search would falsely accept a commented-out `exit 1` or an exit placed
-    # after `fi`, allowing a failed matrix to report a successful `test`.
-    expected_lines = [
-        'if [ "$SHARDS_STATUS" != success ]; then',
-        'echo "required pytest shard matrix did not fully succeed"',
-        "exit 1",
-        "fi",
-        "# Same discovery/exclusion/total-cover plan, never a test skip.",
-        "python scripts/ci_pytest.py --plan-only --jobs 6",
-    ]
-    actual_lines = [line.strip() for line in code.splitlines() if line.strip()] if isinstance(code, str) else []
+    # Exact gate source is tested as a whole, not by searching for "exit 1"
+    # text in comments or after a branch that already accepted fast PR mode.
     env = final.get("env")
     if (
-        not isinstance(env, dict)
-        or env.get("SHARDS_STATUS") != "${{ needs.pytest_shards.result }}"
-        or actual_lines != expected_lines
+        env != {
+            "EVENT_TYPE": "${{ github.event_name }}",
+            "PR_SCOPE_STATUS": "${{ needs.pr_scope.result }}",
+            "PR_SCOPE_MODE": "${{ needs.pr_scope.outputs.mode }}",
+            "PR_FAST_STATUS": "${{ needs.pr_fast.result }}",
+            "SHARDS_STATUS": "${{ needs.pytest_shards.result }}",
+        }
+        or code != _REQUIRED_GATE_RUN
         or final.get("shell") not in (None, "bash")
-        # A skipped required step can make the whole `test` job green while
-        # its matrix failed, even when its shell body is otherwise correct.
         or final.get("if") is not None
     ):
-        raise ci_pytest.PolicyError("required fan-in guard must reject non-success before parsing the plan")
+        raise ci_pytest.PolicyError(
+            "required fan-in guard must enforce exact PR scope and mandatory full merge group"
+        )
     if any(
         isinstance(step, dict) and step.get("continue-on-error") is not None
         for step in (*shard_steps, *gate_steps)

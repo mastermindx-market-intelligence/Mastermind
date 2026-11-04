@@ -921,7 +921,7 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
-    if account == "chatgpt4" and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
+    if account in ("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
         _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
     _pin_owner_module().require_start(sys.modules[__name__], account, roots)
@@ -3921,7 +3921,7 @@ def build_parser() -> argparse.ArgumentParser:
     pin.set_defaults(func=cmd_native_pool_pin)
 
     enrollment = sub.add_parser("native-pool-pin-enrollment")
-    enrollment.add_argument("--account", choices=("chatgpt4",), required=True)
+    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)
     enrollment.add_argument("--expected-manifest-sha256", required=True)
     enrollment.add_argument("--expected-plan-sha256")
     enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")

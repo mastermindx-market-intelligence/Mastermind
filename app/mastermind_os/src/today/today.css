@@ -1,0 +1,324 @@
+/* AT01 Today. Scoped to .atelier-today; theme aliases only, no new palette,
+   no container-edge accents, no global selectors. */
+.atelier-today {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  max-width: 1120px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 64px 0;
+  color: var(--text);
+  font-family: var(--font-ui);
+}
+.atelier-today p {
+  margin: 0;
+}
+.atelier-today h1,
+.atelier-today h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+.atelier-today button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.atelier-today button:hover {
+  background: var(--brass-wash);
+}
+.atelier-today button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.atelier-today .today-primary {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: var(--bg);
+}
+.atelier-today .today-primary:hover {
+  background: var(--focus);
+}
+.atelier-today details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+.atelier-today details > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.today-hero h1 {
+  font-size: 40px;
+  line-height: 48px;
+}
+.today-hero p {
+  margin-top: var(--sp-3);
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--muted);
+}
+
+.today-composer > :first-child {
+  margin-top: 0;
+}
+.today-composer > :last-child {
+  margin-bottom: 0;
+}
+.today-composer:empty {
+  display: none;
+}
+
+.today-lower {
+  display: grid;
+  grid-template-columns: 56fr 44fr;
+  gap: 32px;
+  align-items: start;
+}
+.today-side {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.today-attention,
+.today-programs,
+.today-work {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.today-module-title {
+  font-size: 24px;
+  line-height: 32px;
+}
+.today-eyebrow {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--faint);
+}
+.today-muted {
+  color: var(--muted);
+}
+.today-faint {
+  color: var(--faint);
+}
+.today-attention-reason {
+  font-size: 16px;
+  line-height: 24px;
+}
+.today-attention-clear {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+.today-exception {
+  color: var(--brass);
+}
+.today-attention-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.today-attention-item {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.today-state {
+  align-self: flex-start;
+  font-size: 14px;
+  line-height: 20px;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+}
+.today-state[data-state="CURRENT"] {
+  color: var(--text);
+}
+.today-state[data-state="STALE"],
+.today-state[data-state="UNKNOWN"],
+.today-state[data-state="UNAVAILABLE"],
+.today-state[data-state="WITHHELD"],
+.today-state[data-state="UNASSOCIATED"] {
+  color: var(--faint);
+}
+
+.today-programs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.today-view-all {
+  padding: 0 12px;
+}
+.today-project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.today-project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0;
+  border-top: 1px solid var(--border);
+}
+.today-project-row:first-child {
+  border-top: none;
+}
+.today-project-row > div {
+  min-width: 0;
+}
+.today-project-row[aria-current] .today-project-name {
+  color: var(--brass);
+}
+.today-project-name {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.today-project-row p {
+  overflow-wrap: anywhere;
+}
+.today-project-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--muted);
+  text-align: right;
+}
+.today-project-row button {
+  flex: none;
+}
+.today-unavailable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.today-work-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+.today-work-root p span {
+  color: var(--faint);
+  margin-right: 8px;
+}
+.today-receipts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+}
+.today-receipts div {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+}
+.today-receipts p {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.today-receipts strong {
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.today-provenance dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+}
+.today-provenance dt {
+  color: var(--faint);
+  font-size: 14px;
+  line-height: 20px;
+}
+.today-provenance dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .atelier-today {
+    gap: 24px;
+    padding: 24px 0 48px;
+  }
+  .today-hero h1 {
+    font-size: 30px;
+    line-height: 36px;
+  }
+  .today-lower {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .today-attention,
+  .today-programs,
+  .today-work {
+    padding: 20px;
+  }
+}
+@media (max-width: 390px) {
+  .atelier-today {
+    padding: 24px 0 40px;
+  }
+  .today-project-row {
+    flex-wrap: wrap;
+  }
+  .today-project-state {
+    align-items: flex-start;
+    text-align: left;
+  }
+}
+
+/* The shared shell owns horizontal gutters and the quiet 64px header. */
+.atelier-today > .today-hero { display: block; margin: 0; }
+.today-composer { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 20px; min-width: 0; }
+.today-composer > .card { margin: 0; }
+.today-lower > *, .today-side { min-width: 0; }
+
+/* AT01 keeps the project list open; supporting runtime facts stay optional. */
+.atelier-today .today-programs { background: transparent; border: 0; padding: 0; }
+.today-programs-head { padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+.today-project-row:first-child { border-top: 1px solid var(--border); }
+.today-work-details > summary { border-top: 1px solid var(--border); font-size: 14px; }
+.today-work-details .today-work { margin-top: 12px; }
+.today-work-clock { display: grid; grid-template-columns: max-content 1fr; gap: 8px; font-size: 14px; color: var(--muted); }
+.today-work-clock dd { margin: 0; overflow-wrap: anywhere; }
