@@ -39,8 +39,9 @@ test('authenticated Web MCP exact GLM pin -> native preview -> strict request ->
  const first=await connect();
  const spec=(await first.client.listTools()).tools.find(x=>x.name==='fabric_request')?.inputSchema;
  assert.ok(spec);
- assert.deepEqual(spec.properties.pool.enum,['grok','glm','minimax','bailian','cursor','ocfree','go']);
+ assert.deepEqual(spec.properties.pool.enum,['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
  assert.equal(spec.properties.model.type,'string');
+ assert.equal(spec.properties.retention_opt_in.type,'boolean');
  const cap=await call(first.client,'fabric_capabilities',{});
  assert.equal(cap.manual_routing.available,true);
  assert.equal(cap.manual_routing.cross_provider_fallback,false);

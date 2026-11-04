@@ -46,10 +46,27 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  const requestSchema=listed.find(t=>t.name==='fabric_request')?.inputSchema;
  assert.ok(requestSchema);
  assert.deepEqual(requestSchema.properties.pool.enum,
-   ['grok','glm','minimax','bailian','cursor','ocfree','go']);
+   ['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
  assert.equal(requestSchema.properties.model.type,'string');
+ assert.equal(requestSchema.properties.retention_opt_in.type,'boolean');
  assert.equal(requestSchema.additionalProperties,false);
  const identity={run_id:'http-fixture-001',root_id:'http-qualification-001'};
+ // Experiential is manual-only, exact slug + explicit retention acknowledgment.
+ // Invalid requests must not create even a synthetic native adapter packet.
+ for(const [suffix,overrides] of [
+   ['no-opt-in',{model:'glm-5.3-uncensored'}],
+   ['wrong-model',{model:'glm-5.3-flash-uncensored',retention_opt_in:true}],
+   ['auto-model',{model:'auto',retention_opt_in:true}],
+   ['false-opt-in',{model:'glm-5.3-uncensored',retention_opt_in:false}],
+ ]) {
+   const badId={run_id:'http-exp-'+suffix,root_id:identity.root_id};
+   const rejected=await call(first.client,'fabric_request',{...badId,parent_id:badId.root_id,
+     task_class:'mechanical',task_complexity:'C0_MECHANICAL',
+     pool:'experiential',work_packet:'SYNTHETIC ONLY. Refuse before adapter.',...overrides});
+   assert.equal(rejected.error,'INVALID_ARGUMENT',suffix);
+   await assert.rejects(readFile(join(directory,badId.run_id+'.packet')),
+     err=>err?.code==='ENOENT');
+ }
  // An older installed native CLI (this fixture) lacks --strict-manual-pin.
  // That refusal must survive HTTP/MCP serialization and create no adapter run.
  const manualId={run_id:'http-fixture-manual-rejected',root_id:identity.root_id};
