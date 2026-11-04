@@ -208,7 +208,7 @@ function ProjectAssociationBody(props: ProjectConversationAssociationProps) {
             <dt>provider_session_sha256</dt><dd className="visible-text">{document.materialization.provider_session_sha256}</dd>
             <dt>{ui(locale, "Owner receipt recorded at")}</dt><dd className="visible-text">{document.materialization.recorded_at}</dd>
           </dl>}
-          <p className="muted">{ui(locale, "The receipt time above is recorded by the owner; it is not a locally observed clock.")}</p>
+          {document.materialization !== null && <p className="muted">{ui(locale, "The receipt time above is recorded by the owner; it is not a locally observed clock.")}</p>}
         </details>
       ) : null}
       <div className="conversation-context">

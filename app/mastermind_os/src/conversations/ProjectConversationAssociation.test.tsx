@@ -165,6 +165,7 @@ describe("ProjectConversationAssociation observation read", () => {
     mount(port);
     await settle();
     expect(screen.getByText("The actual project source and runtime root are recorded; no materialization is recorded.")).toBeTruthy();
+    expect(screen.queryByText("The receipt time above is recorded by the owner; it is not a locally observed clock.")).toBeNull();
     expect(screen.getByText("agentos/workstreams/WS-ALPHA01.md")).toBeTruthy();
     expect(screen.getByText("runtime-intent-1")).toBeTruthy();
     expect(screen.queryByText("receipt_sha256")).toBeNull();
