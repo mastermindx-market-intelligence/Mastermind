@@ -113,3 +113,73 @@ def qualify_grok_native_route(
     return qualify_model(
         route["MODEL"], witness, provider="grok", host=route["HOST"], now=now
     )
+
+
+# Grok Build's documented "grok models" display is an ACP model-list
+# observation, not a provider-call/authorization proof. See
+# https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/src/models.rs
+_GROK_LOGIN = re.compile(r"You are logged in with [A-Za-z0-9][A-Za-z0-9.:-]{0,127}\.\Z")
+_GROK_MODEL_CREDENTIAL = re.compile(
+    r"Model '([A-Za-z0-9][A-Za-z0-9._:-]{0,95})' is using its own API key\.\Z"
+)
+
+
+@dataclass(frozen=True)
+class ParsedGrokCatalog:
+    models: tuple[str, ...]
+    default_model: str
+    auth_banner: str
+    # This parse cannot certify executable, credentials, host, account,
+    # exit code, complete capture, timing, or launch permission.
+
+
+def parse_grok_models_output(output: bytes) -> ParsedGrokCatalog:
+    """Parse only a complete documented, bounded CLI model-list display.
+
+    An original trusted host owner must separately attest the actual binary,
+    argv, identity, credential realm, zero exit, untruncated capture, cleanup,
+    and UTC observation time. Parsing a caller-supplied string is never
+    source verification; do not set ModelWitness.source_verified from it.
+    """
+    if type(output) is not bytes or not 0 < len(output) <= 8192 or not output.endswith(b"\n"):
+        raise ValueError("GROK_CATALOG_CAPTURE_INVALID")
+    try:
+        lines = output.decode("ascii", errors="strict").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError("GROK_CATALOG_CAPTURE_INVALID") from exc
+    if len(lines) < 6 or lines[1:2] != [""] or lines[3:4] != [""] or lines[4] != "Available models:":
+        raise ValueError("GROK_CATALOG_LAYOUT_INVALID")
+    banner = lines[0]
+    if banner in ("You are using XAI_API_KEY.", "You are authenticated via deployment key."):
+        auth = "API_KEY" if banner.startswith("You are using") else "DEPLOYMENT_KEY"
+    elif _GROK_LOGIN.fullmatch(banner):
+        auth = "LOGIN"
+    elif _GROK_MODEL_CREDENTIAL.fullmatch(banner):
+        auth = "MODEL_KEY"
+    else:
+        raise ValueError("GROK_CATALOG_AUTH_UNVERIFIED")
+    if not lines[2].startswith("Default model: "):
+        raise ValueError("GROK_CATALOG_DEFAULT_INVALID")
+    default = lines[2][len("Default model: "):]
+    if not _valid_identifier(default, _MODEL):
+        raise ValueError("GROK_CATALOG_DEFAULT_INVALID")
+    if not 1 <= len(lines) - 5 <= MAX_MODELS:
+        raise ValueError("GROK_CATALOG_SIZE_INVALID")
+    available: list[str] = []
+    marked_default = 0
+    for line in lines[5:]:
+        if line.startswith(" * ") and line.endswith(" (default)"):
+            value = line[3:-len(" (default)")]
+            marked_default += 1
+            if value != default:
+                raise ValueError("GROK_CATALOG_MARKER_INVALID")
+        elif line.startswith(" - "):
+            value = line[3:]
+        else:
+            raise ValueError("GROK_CATALOG_ROW_INVALID")
+        if not _valid_identifier(value, _MODEL) or value in available:
+            raise ValueError("GROK_CATALOG_ROW_INVALID")
+        available.append(value)
+    if marked_default != 1 or default not in available:
+        raise ValueError("GROK_CATALOG_DEFAULT_NOT_LISTED")
+    return ParsedGrokCatalog(models=tuple(available), default_model=default, auth_banner=auth)

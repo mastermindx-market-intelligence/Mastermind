@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 import unittest
 
 from control_plane.fabric_model_readiness import (
-    ModelWitness, qualify_model, qualify_grok_native_route, MAX_AGE
+    ModelWitness, qualify_model, qualify_grok_native_route,
+    parse_grok_models_output, MAX_AGE
 )
 
 NOW = datetime(2026, 11, 3, 23, 0, tzinfo=timezone.utc)
@@ -127,6 +128,83 @@ class TestNativeGrokRoute(unittest.TestCase):
                     route, witness(host="ubuntu3"), now=NOW, original_state="NEW_UNATTEMPTED")
                 self.assertFalse(found.eligible)
                 self.assertFalse(found.dispatch_authorized)
+
+
+class TestGrokCliCatalogParser(unittest.TestCase):
+    """Vendor-documented display fixtures; no provider command or auth calls."""
+
+    @staticmethod
+    def sample(banner="You are logged in with grok.com."):
+        return (banner
+                + "\n\nDefault model: grok-4.7\n\nAvailable models:\n"
+                + " * grok-4.7 (default)\n - grok-4.6\n").encode("ascii")
+
+    def test_exact_catalog_and_default(self):
+        parsed = parse_grok_models_output(self.sample())
+        self.assertEqual(parsed.models, ("grok-4.7", "grok-4.6"))
+        self.assertEqual(parsed.default_model, "grok-4.7")
+        self.assertEqual(parsed.auth_banner, "LOGIN")
+        self.assertFalse(hasattr(parsed, "source_verified"))
+        # A parsed string is not a trusted host-owner witness.
+        route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.7",
+                 "HOST": "ubuntu3"}
+        untrusted = qualify_grok_native_route(
+            route, None, now=NOW, original_state="NEW_UNATTEMPTED")
+        self.assertEqual(untrusted.code, "MODEL_PREFLIGHT_EVIDENCE_MISSING")
+
+    def test_documented_auth_banner_variants(self):
+        banners = (
+            ("You are using XAI_API_KEY.", "API_KEY"),
+            ("You are authenticated via deployment key.", "DEPLOYMENT_KEY"),
+            ("Model 'grok-4.7' is using its own API key.", "MODEL_KEY"),
+        )
+        for banner, auth in banners:
+            with self.subTest(auth=auth):
+                self.assertEqual(
+                    parse_grok_models_output(self.sample(banner)).auth_banner, auth
+                )
+
+    def test_unverified_and_broken_auth_fail_closed(self):
+        for banner in (
+            "You are not authenticated.",
+            "Logged in!",
+            "You are logged in with grok.com.\x1b[31m",
+            "You are logged in with invalid host.",
+        ):
+            with self.subTest(banner=banner):
+                with self.assertRaises(ValueError):
+                    parse_grok_models_output(self.sample(banner))
+
+    def test_incomplete_duplicated_and_contradictory_catalogs_refuse(self):
+        base = self.sample()
+        invalid = (
+            base[:-1],
+            base.replace(b" * grok-4.7 (default)", b" - grok-4.7"),
+            base.replace(b" * grok-4.7 (default)", b" * grok-4.6 (default)"),
+            base + b" - grok-4.6\n",
+            base.replace(b"Default model: grok-4.7", b"Default model: grok-5"),
+            base.replace(b"Available models:", b"Model list:"),
+            base.replace(b" - grok-4.6", b" - grok-4.6 trailing text"),
+            base + b"\n",
+        )
+        for raw in invalid:
+            with self.subTest(kind=raw[-25:]):
+                with self.assertRaises(ValueError):
+                    parse_grok_models_output(raw)
+
+    def test_output_bounds_controls_and_untrusted_data(self):
+        valid = self.sample()
+        invalid = (
+            b"",
+            "not bytes",
+            valid + b"a" * 8193,
+            valid.replace(b"grok-4.6", b"grok-\xff"),
+            valid.replace(b"grok-4.6", b"grok-4.6\x1b[0m"),
+            valid.replace(b"grok-4.6", b"../model"),
+        )
+        for raw in invalid:
+            with self.assertRaises(ValueError):
+                parse_grok_models_output(raw)
 
 
 if __name__ == "__main__":
