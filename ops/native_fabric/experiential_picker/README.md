@@ -18,7 +18,7 @@ case-sensitive `model=glm-5.3-uncensored` — and nothing else:
 - **Manual-only identity.** The pool refuses any other spelling (`GLM-5.3-Uncensored`,
   whitespace, `glm-5.3`, `glm-5.3-flash`, Z.AI slugs), refuses pool selection
   without the exact pin, refuses the model pin on any other pool, and refuses
-  labor classes. No default model emission for the pool.
+  judgment classes (`review`, `audit`, `verify`, architecture) and any\n  task class outside `mechanical` and `fix_build`. No default model emission for the pool.
 - **Owner-verified witnesses, fail closed.** Admission requires
   `orch/fabric/experiential_witnesses.json` (beside `pools.yaml`, under the
   existing root-bound `orch` binding) carrying `schema`
@@ -83,8 +83,8 @@ python3 ops/native_fabric/experiential_picker/qualify_experiential_current.py
 
 Qualification (source-only) result facts: `state=QUALIFIED_SOURCE_ONLY_NOT_INSTALLED`,
 `changed_files=["ext/pick.py"]`, installed predecessor `8cefc4b2…`,
-candidate pick sha256 `87aaa13f55e20858aa5db75eb4b9b884ae2eb1a48a11a4a7bb6782219b91c1fb`,
-scratch closure manifest sha256 `f1a511ab109ebb3a5e53f85e72c463207a7dd9192f7438199288ab1a269cb1f1`,
+candidate pick sha256 `5de4a92b8327c53407ccffb723cb00cba0d23743d814a6e7c0754be50117daf9`,
+scratch closure manifest sha256 `72299a9d6707ec205e98ceca9439c8ea3e08fbbae847b71d15d5ce9031141d46`,
 scratch previous/verify/CAS-select PASS, stale-CAS refusal PASS,
 witness gate `FAIL_CLOSED_BEFORE_ANY_WORKER_LAUNCH`.
 
