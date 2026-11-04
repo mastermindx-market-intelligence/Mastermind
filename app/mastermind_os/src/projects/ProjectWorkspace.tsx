@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode, Ref } from 'react';
 import './project-workspace.css';
 
 /**
@@ -21,6 +21,7 @@ export interface ProjectWorkspaceProps {
   locale: ProjectWorkspaceLocale;
   title: string | null;
   headingLevel?: 1 | 2;
+  headingRef?: Ref<HTMLHeadingElement>;
   goal: string | null;
   conversationPanel: ReactNode;
   composerPanel: ReactNode;
@@ -174,7 +175,7 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
   return (
     <div className="mm-project-workspace" lang={locale} data-workspace-root="true">
       <header className="mm-project-workspace__header">
-        <Heading className="mm-project-workspace__title">{title ?? copy.fallbackTitle}</Heading>
+        <Heading ref={props.headingRef} tabIndex={props.headingRef ? -1 : undefined} className="mm-project-workspace__title">{title ?? copy.fallbackTitle}</Heading>
         <div className="mm-project-workspace__goal-block">
           <p className="mm-project-workspace__sr-only">{copy.goalLabel}</p>
           {goal === null ? (

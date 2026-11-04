@@ -1080,13 +1080,15 @@ function Evidence({ d }: { d: MissionDocument }) {
 function ProjectTabs({
   active,
   onChange,
+  tablistRef,
 }: {
   active: ProjectTab;
   onChange: (tab: ProjectTab) => void;
+  tablistRef?: React.Ref<HTMLDivElement>;
 }) {
   return (
     <nav className="card" aria-label="Project sections">
-      <div className="segmented" role="tablist" aria-label="Project workspace">
+      <div ref={tablistRef} className="segmented" role="tablist" aria-label="Project workspace">
         {projectTabs.map((tab) => (
           <button
             key={tab}
@@ -1607,7 +1609,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
-  const projectConversationActive = active === "Projects" && projectTab === "Conversation" && !catalogueProject;
+  const projectConversationActive = active === "Projects" && projectTab === "Conversation" && !catalogueProject &&
+    missionSelectionState === "AVAILABLE" && office.projection.programs.source.state === "CURRENT" && !!selection &&
+    index.programs.filter(card => card.workRef === selection.workRef).length === 1 &&
+    index.programs.some(card => card.workRef === selection.workRef && card.rootState === "RESOLVED" &&
+      card.rootJobId === selection.rootJobId && card.rootCandidates.length === 1 &&
+      card.rootCandidates[0] === selection.rootJobId);
   const answerView = useQualifiedOriginalAnswer();
   // React may abandon an interrupted render. Only the committed layout
   // publishes a current identity to the private reply acceptance fence.
@@ -1886,11 +1893,16 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       resultController.current?.abort();
     };
   }, [resultContext]);
+  const projectHeading = useRef<HTMLHeadingElement>(null);
+  const legacyProjectTabs = useRef<HTMLDivElement>(null);
+  const pendingLegacyTabFocus = useRef<ProjectTab | null>(null);
+  const pendingProjectHeadingFocus = useRef<HTMLElement | null>(null);
   const routeHeading = useRef<HTMLHeadingElement>(null),
     // Project tabs and data refreshes retain focus. Collection/detail and exact
     // project identity changes can remove the content action that held it.
     viewIdentity = JSON.stringify([
       active,
+      active === "Projects" && catalogueProject ? ["catalogue", catalogueProject.workRef] :
       active === "Projects" && projectTab && selection
         ? [selection.workRef, selection.rootJobId]
         : null,
@@ -1901,9 +1913,36 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     previousView.current = viewIdentity;
     // A removed content action leaves focus on body. Preserve connected
     // controls (including navigation), and never move focus for data refreshes.
-    if (!document.activeElement || document.activeElement === document.body)
-      routeHeading.current?.focus();
+    pendingProjectHeadingFocus.current = null;
+    if (!document.activeElement || document.activeElement === document.body) {
+      const target = projectHeading.current ?? routeHeading.current;
+      target?.focus();
+      if (active === "Projects" && projectTab === "Conversation" && !projectHeading.current)
+        pendingProjectHeadingFocus.current = target;
+    }
   }, [viewIdentity]);
+  useLayoutEffect(() => {
+    const pending = pendingProjectHeadingFocus.current;
+    if (!pending) return;
+    if (active !== "Projects" || ![pending, document.body].includes(document.activeElement as HTMLElement)) {
+      pendingProjectHeadingFocus.current = null;
+      return;
+    }
+    // Complete only the navigation handoff we initiated. A later source read
+    // must never move focus away from a control the user subsequently chose.
+    if (projectHeading.current) {
+      pendingProjectHeadingFocus.current = null;
+      projectHeading.current.focus();
+    }
+  });
+  useLayoutEffect(() => {
+    if (!pendingLegacyTabFocus.current) return;
+    pendingLegacyTabFocus.current = null;
+    if (document.activeElement === document.body) {
+      const selected = legacyProjectTabs.current?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+      (selected ?? projectHeading.current)?.focus();
+    }
+  });
   useEffect(
     () =>
       window.MastermindMissionHost?.auth?.subscribe((state) => {
@@ -3622,7 +3661,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       />
     ) : null;
   const quietHeader = active === "Today" || active === "Knowledge" ||
-    active === "Projects" && !directRoute && (!projectTab || projectTab === "Conversation" || Boolean(catalogueWorkRef));
+    active === "Projects" && !directRoute && (!projectTab ||
+      Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const projectReadGeneration = JSON.stringify([authRevision, retainedHostGeneration, selectionSeq.current]);
   const currentConversationPanel = (
       <>
@@ -3665,6 +3705,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           ? sessionPanel : null}
       </>
     );
+  const changeProjectTab = (tab: ProjectTab) => {
+    pendingLegacyTabFocus.current = tab;
+    setProjectTab(tab);
+  };
   let content: React.ReactNode;
   if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
@@ -3732,7 +3776,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       <>
         {programsRefreshControl}
         {!directSelected && projectWorkRef && (catalogueWorkRef || projectTab === "Conversation") ? (
-          <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel}) => <ProjectWorkspace headingLevel={1} locale={locale}
+          <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
             scopeKey={JSON.stringify([authRevision, projectWorkRef,
               projectConversationActive ? selection?.rootJobId : null, sessionTargetKey])}
             title={currentProjectCards[0].title || projectWorkRef} goal={objective}
@@ -3741,6 +3785,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             composerPanel={projectConversationActive ? sessionContinuationPanel ?? sessionPanel
               : <p>{locale === "zh-CN" ? "尚未提供此项目的对话发送入口。" : "A conversation send route is not supplied for this project."}</p>}
             filesPanel={projectConversationActive ? retainedResultsPanel : undefined}
+            statusPanel={!catalogueProject && selection?.workRef === projectWorkRef ? <>
+              <div><small>{locale === "zh-CN" ? "任务来源" : "Mission source"}</small>
+                <State value={d?.read_state.state ?? ("reason" in mission &&
+                  (mission.reason === "SOURCE_READ_PENDING" || mission.reason === "PROGRAM_SELECTION_PENDING")
+                    ? "SOURCE_READ_PENDING" : "UNAVAILABLE")}/></div>
+              {projectConversationActive && d ? <div>
+                <small>{locale === "zh-CN" ? "执行观测" : "Execution observation"}</small>
+                <State value={d.execution.state}/>
+              </div> : null}
+              <details className="reason-details"><summary>{locale === "zh-CN" ? "任务范围与来源详情" : "Mission scope and source details"}</summary>
+                <dl><dt>{locale === "zh-CN" ? "所选根任务" : "Selected Mission root"}</dt><dd><code>{selection.rootJobId}</code></dd></dl>
+                {"reason" in mission ? <code>{mission.reason}</code> : null}
+              </details>
+            </> : undefined}
             detailsPanel={<>
               {panel}{recordedProjectJournal}
               {projectConversationActive ? <>
@@ -3748,7 +3806,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
                   sourceGeneration={projectReaders.generation?.() ?? "SOURCE_UNAVAILABLE"} locale={locale}/>
                 <details className="reason-details"><summary>{locale === "zh-CN" ? "更多工作详情" : "More work details"}</summary>
-                  <ProjectTabs active="Conversation" onChange={setProjectTab}/>
+                  <ProjectTabs active="Conversation" onChange={changeProjectTab}/>
                 </details>
               </> : null}
             </>}/>}/>
@@ -3784,7 +3842,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </div>
             </div>
           </section>
-          {!directSelected ? <ProjectTabs active={projectTab ?? "Overview"} onChange={setProjectTab} /> : null}
+          {!directSelected ? <ProjectTabs tablistRef={legacyProjectTabs} active={projectTab ?? "Overview"} onChange={changeProjectTab} /> : null}
           {retainedResultsPanel}
           {directSelected ? directResultPanel : !d ? (
             <section className="card empty-panel">
@@ -3800,6 +3858,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   {"reason" in mission ? mission.reason : "SOURCE_UNAVAILABLE"}
                 </code>
               </details>
+            </section>
+          ) : projectTab === "Conversation" ? (
+            <section className="card empty-panel">
+              <h2>{locale === "zh-CN" ? "项目对话" : "Project conversation"}</h2>
+              <p>{locale === "zh-CN" ? "当前来源尚未确认此项目与任务的关联，无法显示项目对话。" : "The current catalogue has not qualified this project’s Mission association. Its conversation is unavailable here."}</p>
             </section>
           ) : projectTab === "Overview" ? (
             <>

@@ -19,3 +19,11 @@ export async function navigateCompanyOperation(
     name: route === "Programs" ? "Open Programs" : route,
   }));
 }
+
+
+/** Explicit drilldown to retained legacy reader tabs from the Paper workspace. */
+export async function openLegacyProjectTabs(user: {click(element: HTMLElement): Promise<void>}) {
+  if (screen.queryByRole("tablist", {name:"Project workspace"})) return;
+  await user.click(await screen.findByRole("button", {name:"Project details"}));
+  await user.click(screen.getByText("More work details", {selector:"summary"}));
+}

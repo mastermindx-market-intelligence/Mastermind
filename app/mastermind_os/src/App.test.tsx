@@ -495,7 +495,7 @@ describe("Executive OS convergence surfaces", () => {
     expect(
       screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
     ).toBeTruthy();
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(screen.queryByText("Missingness and source state")).toBeNull();
   });
 
@@ -2287,7 +2287,7 @@ describe("App command composition", () => {
       screen.getByRole("heading", { name: "Projects", level: 1 }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
+      screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected"),
     ).toBe("true");
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledTimes(1);

@@ -125,7 +125,8 @@ describe("Programs collection manual recovery", () => {
     const before = location.href; await click("Refresh Projects");
     expect(read).toHaveBeenCalledTimes(3); expect(readMission).toHaveBeenCalledTimes(1);
     expect(readMission.mock.calls[0][0]).toMatchObject({ workRef: "WS:BETA", rootJobId: "JOB-B" });
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Overview");
+    expect(container.querySelector('.mm-project-workspace h1')?.textContent).toBe("Beta program");
+    expect(Array.from(container.querySelectorAll("button")).some(n => n.textContent === "Project details")).toBe(true);
     expect(location.href).toBe(before); expect(readWork).toHaveBeenCalledTimes(1);
   });
 

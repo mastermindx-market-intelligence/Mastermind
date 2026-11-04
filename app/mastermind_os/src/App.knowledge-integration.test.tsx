@@ -59,7 +59,7 @@ async function fixture(holdResult = false) {
   });
   const client = await createNativeClient(invoke as never,async (_event,listener)=>{notify=listener;return()=>{};});
   const host = bindMissionHost(client), read = vi.spyOn(host,"readResult");
-  return {host,read,invoke,notify,settle,exact,result};
+  return {host,read,invoke,notify,settle,exact,result,room};
 }
 async function start(f:Awaited<ReturnType<typeof fixture>>) {
   window.MastermindMissionHost=f.host;render(<App/>);
@@ -124,9 +124,10 @@ it("invalidates the current source and draft when the actual selected work/root 
 it("opens the actual conversation as the project default and preserves its mounted draft across Details",async()=>{
   const f=await fixture();window.MastermindMissionHost=f.host;render(<App/>);
   fireEvent.click(screen.getByRole("button",{name:"Projects"}));
-  fireEvent.click(await screen.findByRole("button",{name:"Open project Alpha program"}));
+  const action = await screen.findByRole("button",{name:"Open project Alpha program"});
+  action.focus();fireEvent.click(action);
   await screen.findByText(paired.window.view.items.find(item=>item.text)!.text!);
-  expect(screen.getByRole("heading",{name:"Alpha program",level:1})).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getByRole("heading",{name:"Alpha program",level:1}));
   fireEvent.click(screen.getByRole("button",{name:"Unsent notes"}));
   const draft=screen.getByRole("textbox",{name:"Unsent notes"});
   fireEvent.change(draft,{target:{value:question}});
@@ -137,4 +138,17 @@ it("opens the actual conversation as the project default and preserves its mount
   expect(screen.getByRole("textbox",{name:"Unsent notes"})).toBe(draft);
   expect(draft).toHaveProperty("value",question);
   expect(f.invoke.mock.calls.some(([name])=>/submit|prepare|send/.test(name))).toBe(false);
+});
+
+
+it.each(["different-root","unknown","conflict"] as const)("does not activate a project conversation for a same-work %s catalogue",async mode=>{
+  const f=await fixture();
+  if(mode==="unknown")f.room.autonomy.responsibilities=[];
+  if(mode==="conflict")Object.assign(f.room.autonomy.responsibilities[0],{
+    runtime_root_state:"CONFLICT",root_job_id:null,root_job_candidates:[paired.selection.root_job_id,"JOB-OTHER"],root_job_ambiguous:true});
+  window.MastermindMissionHost=f.host;render(<App/>);
+  act(()=>{history.pushState(null,"",`/os/?work_ref=${encodeURIComponent(paired.selection.work_ref)}&root_job_id=${mode==="different-root"?"JOB-WRONG":paired.selection.root_job_id}`);window.dispatchEvent(new PopStateEvent("popstate"));});
+  await screen.findByRole("heading",{name:"Alpha program",level:1});
+  expect(f.invoke.mock.calls.filter(([name])=>name==="read_current_window")).toHaveLength(0);
+  expect(screen.queryByText(paired.window.view.items.find(item=>item.text)!.text!)).toBeNull();
 });

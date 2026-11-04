@@ -366,7 +366,8 @@ describe("Knowledge retained-result source reading", () => {
     await user.click(screen.getByRole("button", { name: "Show retained results" }));
     await user.click(await screen.findByRole("button", { name: "Open retained result — JOB-002" }));
     await screen.findByRole("button", { name: "Back to retained results" });
-    expect((screen.getByRole("searchbox", { name: "Search supplied knowledge" }) as HTMLInputElement).value).toBe("review");
+    expect(screen.queryByRole("searchbox", {name:"Search supplied knowledge"})).toBeNull();
+    expect(search.value).toBe("review");
     await user.click(screen.getByRole("button", { name: "Back to retained results" }));
     const searchAfter = screen.getByRole("searchbox", { name: "Search supplied knowledge" }) as HTMLInputElement;
     expect(searchAfter.value).toBe("review");

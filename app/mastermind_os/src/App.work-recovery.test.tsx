@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { openLegacyProjectTabs } from "./test-operational-navigation";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -135,11 +136,12 @@ describe("Work read recovery in the actual App", () => {
     const user = userEvent.setup(); render(<App />);
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(await screen.findByRole("button", { name: "Open project Alpha program" }));
-    await screen.findByRole("heading", { name: "Mission" });
+    await screen.findByRole("heading", { name: "Alpha program", level: 1 });
     await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await user.type(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }), "Keep this direction");
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(screen.getByRole("button", { name: "Open project Alpha program" }));
+    await openLegacyProjectTabs(user);
     await user.click(screen.getByRole("tab", { name: "Work" }));
     await screen.findByText("SOURCE_UNAVAILABLE");
     const locationBefore = location.href;
