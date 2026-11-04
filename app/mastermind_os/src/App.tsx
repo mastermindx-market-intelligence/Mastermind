@@ -84,7 +84,7 @@ import {
   type Missionv3Document,
   type UnavailableMission,
 } from "./mission";
-import { type ControlRoomState } from "./control-room";
+import { controlRoomActionIsUncertain, type ControlRoomState } from "./control-room";
 import { ControlRoomPanel } from "./ControlRoomPanel";
 import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
@@ -4192,8 +4192,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       </section>
     );
   else if (active === "Session Estate")
-    content = <><SessionEstate key={authRevision} state={currentControlRoom} locale={locale}
+    content = <><SessionEstate key={"estate:" + authRevision} state={currentControlRoom} locale={locale}
       controlsHeld={controlRoomSurfaceControls.held}
+      canOpenSurface={controlRoomSurfaceControls.canAct && !controlRoomSurfaceControls.held
+        && controlRoomSurfaceControls.action.state !== "PENDING"
+        && !(controlRoomSurfaceControls.action.state === "WITHHELD" && controlRoomSurfaceControls.action.held)
+        && !(controlRoomSurfaceControls.action.state === "FAILURE" && controlRoomSurfaceControls.action.disposition === "EFFECT_UNKNOWN")
+        && !(controlRoomSurfaceControls.action.state === "RESULT" && controlRoomActionIsUncertain(controlRoomSurfaceControls.action.result))}
+      onOpenSurface={controlRoomSurfaceControls.onOpenSurface}
       canRefresh={Boolean(authState?.acquisition) && typeof window.MastermindMissionHost?.readControlRoomState === "function"}
       onRefresh={() => setControlRoomRevision(revision => revision + 1)} onOpenMission={open}>
       <ControlRoomSurfaceControls key={"estate-controls:" + authRevision}

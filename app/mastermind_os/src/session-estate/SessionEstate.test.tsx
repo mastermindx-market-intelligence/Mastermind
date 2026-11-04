@@ -164,6 +164,55 @@ function detailRegion(): HTMLElement {
 }
 
 describe("SessionEstate", () => {
+  it("opens only the inspected exact binding through the incumbent owner", async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    const mission = vi.fn();
+    render(<SessionEstate state={mainRead()} canRefresh onRefresh={vi.fn()} onOpenMission={mission}
+      canOpenSurface onOpenSurface={open} />);
+    expect(screen.queryByRole("button", { name: "Open session" })).toBeNull();
+    await inspect(requireRow(bindingId(1)), user);
+    await user.click(within(detailRegion()).getByRole("button", { name: "Open session" }));
+    expect(open).toHaveBeenLastCalledWith({ binding_id: bindingId(1) });
+    expect(mission).not.toHaveBeenCalled();
+    await inspect(requireRow(bindingId(3)), user);
+    await user.click(within(detailRegion()).getByRole("button", { name: "Open session" }));
+    expect(open).toHaveBeenLastCalledWith({ binding_id: bindingId(3) });
+  });
+
+  it.each(["missing-owner", "ineligible", "held", "refresh-pending", "chatgpt"])(
+    "withholds session opening for %s", async (reason) => {
+      const user = userEvent.setup();
+      const open = vi.fn();
+      render(<SessionEstate state={mainRead(reason === "refresh-pending" ? { refreshPending: true } : {})}
+        canRefresh onRefresh={vi.fn()} onOpenMission={vi.fn()}
+        canOpenSurface={reason !== "ineligible"} controlsHeld={reason === "held"}
+        onOpenSurface={reason === "missing-owner" ? undefined : open} />);
+      await inspect(requireRow(bindingId(reason === "chatgpt" ? 4 : 1)), user);
+      const button = within(detailRegion()).getByRole("button", { name: "Open session" }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      await user.click(button);
+      expect(open).not.toHaveBeenCalled();
+    });
+
+  it("removes a withdrawn selected binding action on the current read", async () => {
+    const user = userEvent.setup();
+    const open = vi.fn();
+    const props = {canRefresh: true, onRefresh: vi.fn(), onOpenMission: vi.fn(), canOpenSurface: true, onOpenSurface: open};
+    const view = render(<SessionEstate state={mainRead()} {...props} />);
+    await inspect(requireRow(bindingId(1)), user);
+    view.rerender(<SessionEstate state={mainRead({ navigation: makeNav([makeBinding(3)]) })} {...props} />);
+    expect(screen.queryByRole("button", { name: "Open session" })).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("labels the explicit session control in Chinese", async () => {
+    const user = userEvent.setup();
+    render(<SessionEstate locale="zh-CN" state={mainRead()} canRefresh onRefresh={vi.fn()} onOpenMission={vi.fn()}
+      canOpenSurface onOpenSurface={vi.fn()} />);
+    await inspect(requireRow(bindingId(1)), user);
+    expect(screen.getByRole("button", { name: "打开会话" })).toBeTruthy();
+  });
   it("leads with the real supplied project and retains a visible hold above closed advanced controls", async () => {
     const user = userEvent.setup();
     render(<SessionEstate state={mainRead({programs:[makeProgram(ALPHA_WORK, {

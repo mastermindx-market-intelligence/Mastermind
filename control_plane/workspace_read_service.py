@@ -806,9 +806,9 @@ class WorkspaceReadService:
             frame = wire.validate_frame(frame)
         except (TypeError, ValueError): return error("invalid_input", 400)
         try:
-            if self.authorize(frame["principal"]) is not True: return error("access_denied", 403)
+            if self.authorize(frame["principal"]) is not True: return error("access_denied", int(HTTPStatus.FORBIDDEN))
             stamp = permission_stamp(self.authorize, frame["principal"])
-        except Exception: return error("access_denied", 403)
+        except Exception: return error("access_denied", int(HTTPStatus.FORBIDDEN))
         task = asyncio.create_task(asyncio.to_thread(self._read_project_knowledge,
             frame["operation"], frame["selection"]))
         try:
@@ -820,8 +820,8 @@ class WorkspaceReadService:
         try:
             if (self.authorize(frame["principal"]) is not True
                     or permission_stamp(self.authorize, frame["principal"]) != stamp):
-                return error("access_denied", 403)
-        except Exception: return error("access_denied", 403)
+                return error("access_denied", int(HTTPStatus.FORBIDDEN))
+        except Exception: return error("access_denied", int(HTTPStatus.FORBIDDEN))
         return result
 
     async def _handle_original_acceptance_frame(self, frame):

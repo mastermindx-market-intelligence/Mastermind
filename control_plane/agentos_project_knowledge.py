@@ -336,7 +336,7 @@ class _Session:
 @contextlib.contextmanager
 def _parser_session(session, parser_text):
     """Run the captured Macro parser under an isolated, restored module id."""
-    module = types.ModuleType("_mastermind_bound_project_knowledge_owner")
+    module = types.ModuleType("agentos_bound_project_knowledge_owner")
     module.__file__ = str(session.root / "scripts" / "agentos.py")
     name = module.__name__
     prior = sys.modules.get(name)
