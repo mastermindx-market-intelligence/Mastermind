@@ -222,3 +222,7 @@ responding to `--help` are not proof of a usable dispatch path.
 actual Fabric START + terminal retained result + exact returned bytes/digest +
 original-parent adjudication is live proof. `FABRIC_ADAPTER_SANDBOX_DENIED`
 and `NOT_FOUND` are negative canary results, not a completed worker.
+
+## Independent PR review: one portable source contract
+
+When the assigned Codex session needs an independent PR/source reviewer, load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the *same verified protected Mastermind pin* before considering a new child. Use this native adapter only with real original root/parent, reviewer-versus-author separation and no existing same-scope review/uncertain effects. A separate Slack Dot technical assessment is manual transport only when independently eligible, never a fallback for an explicitly denied Fabric review. Neither a paid Fabric PASS nor a Dot verdict is a submitted non-author GitHub PR review. Source skill update does not prove fresh provider-home installation.

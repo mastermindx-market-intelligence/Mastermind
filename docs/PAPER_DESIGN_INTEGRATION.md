@@ -1,3 +1,164 @@
+## C2 Personal v12 -> v20 selection prepared (source-only, 2026-11-02)
+
+The legacy C2 Personal M2 seat now selects exact v12 (bridge
+`82bc7f2d...`) on the sealed 12-file closed-publisher generation, so the
+historical v10 -> v12 admission above can never fire for it again. The running
+catalog keeps `accepted_for_write=false` for Paper 0.5.18 and the Business-seat
+v20 rollout does not update this consumer, so the installer's
+`paper-runtime-upgrade` operation now recognizes this one exact cohort and
+selects the accepted immutable v20 generation through the identical single-use
+manifest-CAS transaction. Every other admission — both C2 accounts and C4 —
+remains the unchanged v10 -> v12 selection, and the global runtime pin stays
+v12.
+
+Admission pins for the new path: freshly observed predecessor manifest CAS
+`c5cdba867972f547aaefa7dbfc5840467d2961c7f4d346e8de1f1ba575686ef6`; sealed
+non-Paper configuration
+`201288e64eadeb25e16306e737831fb828ce638a54b0e41c16945bd1c737eb08`; the
+installed 12-file cohort re-derived from the reviewed closed-publisher patch
+plus unchanged fleet modules (no byte identity invented); and target bridge
+`1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced`, whose
+directory remains owned by `runtime_stage.py`'s immutable v20 staging. The
+node/backend/dependency identity is inherited from the seat's sealed C2
+predecessor because the publisher patch changed only module bytes; a live
+manifest that disagrees refuses closed and requires fresh observation of the
+exact differing identity fields before any source change. Both the retained
+v12 runtime and the staged v20 generation must pass the existing verifier
+before any write.
+
+Prepared operator sequence (independently reviewed release only; not executed
+here): stage and verify v20 with the `runtime_stage.py` owner, run the
+read-only preflight with
+`--account chatgpt2-personal --expected-manifest-sha256
+<fresh-observed-manifest-sha256> --preflight-only`, then stop the seat with the
+accepted helper and repeat without `--preflight-only` from a carrier that
+survives stopping C2 — never a self-cutover through this gateway. Only
+`paperDesign` and the manifest `configHash` change; every module byte, plist,
+node/backend/dependency seal and source pointer is preserved, and pre-commit
+failures restore the original bytes while post-commit failures stay
+EFFECT_UNKNOWN with no replay. A stale CAS, changed profile, wrong cohort or
+identity, invalid v20 receipt/bridge/python, loaded service or concurrent
+drift is a gate. As with the proposal below, this source readiness is not
+deployment acceptance: the v20 BUILT_NOT_PROVEN receipts (independent review,
+protected merge, real exact-target edit, readback, screenshot and reconnect)
+remain outstanding before any live selection.
+
+## Upgrade-resilient tool-scoped Paper compatibility (proposed source, 2026-11-02)
+
+PROBLEM: the historic full-catalog SHA admission rule made every
+otherwise-working Paper edit unavailable when any upstream tool was
+added/removed or when an unrelated description changed. Paper's release
+version has already been diagnostic-only; it is NOT a version-equality bug.
+Previous reviewed full-catalog digests remain recorded as historical
+provenance, but they are no longer the normal whole-service write gate
+in this proposed bridge 0.1.8.
+
+DECISION: derive reviewed, per-tool input contracts from the four retained
+full-catalog fixtures (0.5.14/0.5.15/0.5.16/0.5.18). For each vendor call,
+enumerate the live catalog on the incumbent loopback client and compare
+the requested operation's JSON-schema structure and safety annotations
+against those source-owned contracts. Ignore harmless presentation fields,
+required/enum ordering, unrelated new/removed vendor tools, and new optional
+top-level inputs that have no default (the bridge rejects callers supplying
+such newly added optional inputs before dispatch). Vendor version is logged
+only. Do NOT auto-admit a new tool name or a changed required parameter,
+type, nested input schema, constraint, default or destructive/read-only
+annotation. The source-owned bridge allowlists remain unchanged.
+
+FAILURE ISOLATION: a material mismatch in one writing tool returns
+TOOL_SCHEMA_CHANGED for that tool only, before any upstream dispatch.
+Other still-qualified edits and read-only access continue. The critical
+get_basic_info document/snapshot schema and paper-desktop server identity
+must remain compatible for any write, since unsafe targeting would affect
+every operation. All existing explicit fileId/snapshot/operation-ID,
+per-desktop mutex, guarded file management, no replay and EFFECT_UNKNOWN
+requirements are unchanged. paper_catalog reports catalog_policy,
+full_catalog_known, compatible_write_tools, incompatible_write_tools,
+optional_vendor_inputs_ignored, and marks held operations edit_held_schema.
+paper_prepare readiness means at least one write tool is compatible, not
+that every edit is permitted; the actual chosen tool is revalidated on its
+own paper_edit call.
+
+SELF-HEALING BOUNDARY: benign changes are accepted automatically at the
+very next tool call without a daemon, restart, new tunnel, new auth plane or
+release-hash hotpatch. Material semantic changes still require an explicit
+reviewed source update for only the affected operation; no software can
+prove unchanged behavior solely from an input schema. Immutable
+v17 and v18 remain historical, rejected-for-release candidates: the
+later source review found unqualified reads and unsafe verification
+under mid-operation vendor descriptor drift. Proposed immutable v20
+requalifies each reviewed read/write tool and its outgoing arguments,
+including implicit get_basic_info and the post-edit verification getter.
+In addition, after the FIRST get_basic_info read it requalifies the
+critical live getter again before any SECOND file-only snapshot call;
+unsafe drift refuses without dispatching the second getter. If
+post-write verification cannot safely proceed, retain EFFECT_UNKNOWN
+with no replay, not an invented successful receipt. v19 is now a
+preserved but superseded, release-ineligible runtime generation.
+
+The v20 source remains BUILT_NOT_PROVEN until a new independent exact-head
+review, required hosted CI, protected merge of the #1925 -> #1935 ->
+#1942 chain, original Ryan same-label installer selection, and a real
+exact-target scratch edit, readback, screenshot and reconnect receipt.
+Synthetic tests and read-only live catalog checks are not deployment
+acceptance. Preserve prior immutable runtime generations and do not
+select or overwrite v17/v18/v19 candidates.
+
+## M1 Paper 0.5.16 exact catalog compatibility candidate - 2026-11-02
+
+This source-only follow-up is based on PR #1925's unchanged semantic source head
+e7016693f602f9f8c2dc52c99ac7111d4a641773, not on a deployed v15
+runtime. M1 Studio was independently observed running Paper Desktop 0.5.16
+and canonical full 37-tool SHA256
+955e92cd0477027dcc5fe666810e49393f42f453c1c362e64cd0f3b3ab9f10cf.
+The complete observed catalog is checked in at
+tests/fixtures/paper_desktop/955e92_full_catalog.json.
+
+Compared to approved 37-tool 1b9aff baseline, no tools were added or removed.
+Exactly six descriptors changed: get_comment_thread, get_jsx, get_node_info,
+set_text_content, update_styles, write_html. Like the independently reviewed
+M2 Paper 0.5.18 41-tool catalog, M1 requires updates[].html rather than legacy
+textContent. New bridge 0.1.7 admits only this reviewed full digest as an
+additional explicit alternative, keeps the old approved catalogs, blocks
+all prior four M1 resource tools, rejects obsolete text edits before upstream
+dispatch, and proposes new immutable v16 pin without mutating v2-v15.
+
+This is NOT a review, merged source, Paper app update, M1 deployment or
+production write receipt. The actual M1 active v12/v14 runtime remains
+unchanged pending its own independent review, accepted release and real
+exact-file guarded editing/visual proof. Never silently use the M2 digest for
+M1 version 0.5.16.
+
+## Paper 0.5.18 exact-catalog compatibility candidate - 2026-11-01
+
+The M2 Paper Desktop has two installations: /Applications/Paper.app v0.5.11
+and the intended ~/Applications/Paper.app v0.5.18. A graceful transition to
+the latter restored a direct paper_inspect CONNECTED response for explicit
+MASTERMIND PAGES file 01M2WGNCX9475G79JRKJTCM08P. This is a connection
+receipt, not a live write or restart-resilience acceptance result.
+
+The captured 0.5.18 41-tool full catalog is retained as
+tests/fixtures/paper_desktop/16e6b_full_catalog.json; its canonical SHA-256 is
+16e6b93f0c51a1574ba8acee4df732052898707a04731d3817530971a88fdefd.
+Compared to accepted 37-tool 1b9aff..., no names were removed; the four new
+resource tools archive_resources, create_folder, move_resources and
+unarchive_resources stay uncallable. Ten existing descriptors changed,
+including rich HTML set_text_content (updates[].html replaces
+updates[].textContent), get_jsx styling default, and optional resource
+parameters. The guarded successor bridge 0.1.6 admits this exact full-catalog
+digest and refuses obsolete text-edit payloads before dispatch, retaining
+all file/snapshot/operation/unknown-effect constraints. Historical catalog
+receipts remain accepted. Any future descriptor drift fails closed.
+
+This is a source-only candidate, not a live activation. Immutable
+runtime_stage.py v15 is proposed as a new hash-pinned generation; do not alter
+v2-v14. After an independent non-author review, accepted source release, and
+installer-controlled seat replacement with original manifest/seat identity,
+prove on the same direct carrier: accepted live schema, exact scratch-file read
+and prepare, a bounded guarded edit using updates[].html, same-file post-read,
+screenshot, and reconnect without duplicate clients. Never manually repin the
+installed v13 bridge or claim deployment from green synthetic tests.
+
 # Paper.design integration - bounded local and web design capability
 
 ## Guarded file/page administration candidate (2026-10-22; NOT installed)

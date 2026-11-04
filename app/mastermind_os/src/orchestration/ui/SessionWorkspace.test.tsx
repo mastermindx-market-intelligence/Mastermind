@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionWorkspace, type SessionCompletion } from "./SessionWorkspace";
+import { canNavigateForAutomaticSignIn } from "../../auth-navigation-guard";
 
 const makeProps = (overrides = {}) =>
   ({
@@ -37,6 +38,18 @@ afterEach(() => {
 });
 
 describe("SessionWorkspace", () => {
+  it("holds automatic Auth0 navigation through dirty drafts and unresolved sends", () => {
+    const { rerender, unmount } = render(<SessionWorkspace {...makeProps()} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    fireEvent.change(messageBox(), { target: { value: "Unsent private note" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    fireEvent.change(messageBox(), { target: { value: "" } });
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+    rerender(<SessionWorkspace {...makeProps({ sending: true })} />);
+    expect(canNavigateForAutomaticSignIn()).toBe(false);
+    unmount();
+    expect(canNavigateForAutomaticSignIn()).toBe(true);
+  });
   describe("rendering", () => {
     it("renders title and connection status", () => {
       render(<SessionWorkspace {...makeProps()} />);

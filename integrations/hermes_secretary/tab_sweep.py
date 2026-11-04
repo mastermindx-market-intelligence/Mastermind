@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 _CLOSE_OTHER = frozenset({"KRIS KE", "Y7"})
+
+
+def _is_chatgpt_url(value: object) -> bool:
+    """Select the real supported origin, never a hostname in path/query/userinfo."""
+    if not isinstance(value, str) or any(ord(ch) <= 32 or ord(ch) == 127 for ch in value):
+        return False
+    try:
+        parsed = urlsplit(value)
+        return (parsed.scheme in {"http", "https"}
+                and parsed.hostname == "chatgpt.com"
+                and parsed.username is None and parsed.password is None
+                and parsed.port in (None, 80 if parsed.scheme == "http" else 443))
+    except (TypeError, ValueError):
+        return False
 
 
 def plan_tabs(profile: dict) -> dict:
@@ -18,7 +34,7 @@ def plan_tabs(profile: dict) -> dict:
         }
     tabs = profile["tabs"]
     keep: set[int] = set()
-    chatgpt = [tab for tab in tabs if "chatgpt.com" in tab["url"]]
+    chatgpt = [tab for tab in tabs if _is_chatgpt_url(tab["url"])]
     if chatgpt:
         keep.add(chatgpt[0]["index"])
     for tab in tabs:

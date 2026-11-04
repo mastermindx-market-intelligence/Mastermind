@@ -97,9 +97,16 @@ def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     config = render(manifest, 49152)
     for route in routes:
         assert route in config
-    assert config.count("reverse_proxy 127.0.0.1:49152") == 2
+    # Four fixed branches: OS GET, OS POST, and the two public MCP entrypoint
+    # branches (RFC 9728 metadata GET, POST /mcp). Asset names only ever widen
+    # the OS GET matcher; they cannot create or alter an MCP branch.
+    assert config.count("reverse_proxy 127.0.0.1:49152") == 4
     assert "path /os/executive/context /os/executive/submit /os/executive/status" in config
-    assert "/mcp" not in config
+    assert "path /.well-known/oauth-protected-resource/mcp\n" in config
+    assert "path /mcp\n" in config
+    assert config.count("/mcp") == 2
+    assert config.count("header_up Host mcp.mastermind-x.com") == 3
+    assert config.count("header_up Host 127.0.0.1") == 1
 
 
 @pytest.mark.parametrize("fault", ["extra-directory", "missing-license", "extra-source-map", "symlink-license", "index-loads-lazy-chunk", "oversize-license", "empty-license"])
