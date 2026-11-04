@@ -846,17 +846,21 @@ if current==old:
  i._upgrade_entries(p);phase='PREVIOUS'
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
-elif (sys.argv[4]=='chatgpt4'
+elif (sys.argv[4] in (
+        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt3',
+        'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
       and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
       and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
       and new['sequence']==24
       and isinstance(current,dict)
-      and current.get('sequence',0)>new['sequence']
+      and current.get('schema')==g.POINTER_SCHEMA
+      and type(current.get('sequence')) is int
+      and current['sequence']>new['sequence']
       and current.get('previous') not in (None,current.get('generation'))):
- # The selected native owner may legitimately publish a *newer* immutable
- # generation. This exception is C4-only and binds one frozen, completed
- # historical pin; it does not admit a new pin, unverified native code or a
- # changed pool ingress. Native verification owns current code identity.
+ # Each original seven-seat native pin shares this exact completed immutable
+ # sequence-24 successor. Later native releases do not invalidate historical
+ # ingress, but only these seven enrolled accounts may accept the verified
+ # forward selection. No other pin/generation/account gains admission.
  g.verify(store,new['generation'])
  g.verify(store,current['generation'])
  g.verify(store,current['previous'])

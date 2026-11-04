@@ -1,4 +1,4 @@
-"""Hermetic C4-only native-selection forward-admission regressions.
+"""Hermetic seven-seat native-selection forward-admission regressions.
 
 The test executes the exact sandboxed subprocess proof from private_service,
 using nonprivileged synthetic rollout modules and isolated files. It never
@@ -15,6 +15,13 @@ import private_service as svc
 
 
 ORIGINAL_SUCCESSOR = "77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7"
+REVIEWED_SEATS = (
+    "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
+    "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9", "chatgpt4",
+)
+UNENROLLED = ("chatgpt2-personal", "mastermind-os-publication",
+              "fabric-read", "fabric-design", "chatgpt3-forged")
+
 ORIGINAL_TARGET = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
 CURRENT_TARGET = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"
 PRIOR_TARGET = "a" * 64
@@ -143,8 +150,49 @@ class NativeSelectionForwardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr[-250:])
         self.assertEqual(json.loads(result.stdout)["phase"], "PREVIOUS")
 
-    def test_non_c4_account_is_never_admitted_to_forward_exception(self):
-        self.assertNotEqual(self.run_proof("chatgpt3").returncode, 0)
+    def test_seven_seats_match_existing_paper_fleet_not_native_pool_umbrella(self):
+        # Native pool admits other services; this exception never expands to them.
+        self.assertEqual(
+            set(REVIEWED_SEATS),
+            set(svc.FLEET_V20_ENROLLED_ACCOUNTS) - {"mastermind-os-publication"},
+        )
+        self.assertTrue(set(REVIEWED_SEATS).issubset(svc.NATIVE_POOL_PIN_ACCOUNTS))
+        self.assertNotEqual(set(REVIEWED_SEATS), set(svc.NATIVE_POOL_PIN_ACCOUNTS))
+
+    def test_all_seven_exact_original_seats_admit_selected_forward_pin(self):
+        for account in REVIEWED_SEATS:
+            with self.subTest(account=account):
+                response = self.run_proof(account)
+                self.assertEqual(response.returncode, 0, response.stderr[-250:])
+                proof = json.loads(response.stdout)
+                self.assertEqual(proof["phase"], "SELECTED")
+                self.assertEqual(proof["selection"], self.forward)
+
+    def test_unenrolled_accounts_cannot_use_historical_forward_exception(self):
+        for account in UNENROLLED:
+            with self.subTest(account=account):
+                self.assertNotEqual(self.run_proof(account).returncode, 0)
+
+    def test_newer_sequence_27_remains_admissible_for_all_seven(self):
+        newer = dict(self.forward, sequence=27)
+        self.set_selection(newer)
+        for account in REVIEWED_SEATS:
+            with self.subTest(account=account):
+                response = self.run_proof(account)
+                self.assertEqual(response.returncode, 0, response.stderr[-250:])
+                self.assertEqual(json.loads(response.stdout)["selection"], newer)
+
+    def test_wrong_pointer_schema_fails_for_every_seat(self):
+        self.set_selection(dict(self.forward, schema="foreign-schema"))
+        for account in REVIEWED_SEATS:
+            with self.subTest(account=account):
+                self.assertNotEqual(self.run_proof(account).returncode, 0)
+
+    def test_wrong_pointer_sequence_type_is_refused(self):
+        for bad in (None, "27", True, 27.5):
+            with self.subTest(sequence=bad):
+                self.set_selection(dict(self.forward, sequence=bad))
+                self.assertNotEqual(self.run_proof("admin-business").returncode, 0)
 
     def test_mismatched_successor_digest_rejects_forward_exception(self):
         self.plan["digest"] = "f" * 64
