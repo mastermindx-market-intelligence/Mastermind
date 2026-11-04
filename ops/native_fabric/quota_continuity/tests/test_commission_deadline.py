@@ -321,7 +321,7 @@ class ControllerDeadline(unittest.TestCase):
         write(self.bin/'fixture-python','#!'+sys.executable+'\n'+PYTHON_FIXTURE,executable=True)
 
     def run_controller(self,case,budget=4,broker_delay=0,mode='minimax',model='fixture-model',
-                       allow_prelease_refusal=False,escalation_reason=None):
+                       allow_prelease_refusal=False,escalation_reason=None,harness_timeout=20):
         origin=time.monotonic_ns()+int(budget*1_000_000_000)
         env={'PATH':str(self.bin)+':/usr/bin:/bin','LANG':'C','LC_ALL':'C',
              'PYTHONDONTWRITEBYTECODE':'1','PYTHONNOUSERSITE':'1','TMPDIR':str(self.tmp),
@@ -345,7 +345,7 @@ class ControllerDeadline(unittest.TestCase):
         proc=subprocess.Popen(command,cwd=self.root,env=env,stdin=subprocess.DEVNULL,
                               stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
         try:
-            stdout,stderr=proc.communicate(timeout=20)
+            stdout,stderr=proc.communicate(timeout=harness_timeout)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid,signal.SIGTERM)
             try: stdout,stderr=proc.communicate(timeout=3)
@@ -434,7 +434,11 @@ class ControllerDeadline(unittest.TestCase):
         # An actual qwen plain controller run through the real Bash: the
         # transport readback, the verified receipt and the fsynced binding all
         # appear in strict order in the per-run log before the launch event.
-        result=self.run_controller('plain_ok',budget=8,mode='qwen',model='qwen3.8-flash')
+        # This positive case proves transport identity/ordering, not host speed.
+        # Keep original short-expiry tests unchanged; allow finite startup
+        # headroom for the real shell/Python fixture on a loaded local machine.
+        result=self.run_controller('plain_ok',budget=30,mode='qwen',
+                                   model='qwen3.8-flash',harness_timeout=40)
         self.assertEqual(result['returncode'],0,result['stderr'])
         tracked,log_path=self.tracked_log_events('offline-plain_ok')
         self.assertEqual([name for name,_ in tracked],
@@ -479,7 +483,11 @@ class ControllerDeadline(unittest.TestCase):
         self.packet=retained
         before=retained.stat()
         digest=hashlib.sha256(retained.read_bytes()).hexdigest()
-        result=self.run_controller('plain_ok',budget=8,mode='qwen',model='qwen3.8-flash')
+        # This positive case proves transport identity/ordering, not host speed.
+        # Keep original short-expiry tests unchanged; allow finite startup
+        # headroom for the real shell/Python fixture on a loaded local machine.
+        result=self.run_controller('plain_ok',budget=30,mode='qwen',
+                                   model='qwen3.8-flash',harness_timeout=40)
         self.assertEqual(result['returncode'],0,result['stderr'])
         after=retained.stat()
         self.assertEqual((before.st_dev,before.st_ino,before.st_mtime_ns),

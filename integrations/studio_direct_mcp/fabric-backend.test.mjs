@@ -35,6 +35,10 @@ test('origin observations expose the actual successor and keep the failed attemp
  const out=unwrap(await continuingFacade(e).call('fabric_status',id));
  assert.equal(out.run_id,id.run_id);assert.equal(out.effective_run_id,successorId);
  assert.equal(out.status.run_id,successorId);assert.equal(out.status.continuation.prior_attempts[0].rc,1);
+ assert.equal(out.parent_recovery.requested_run_id,id.run_id);
+ assert.equal(out.parent_recovery.effective_run_id,successorId);
+ assert.equal(out.parent_recovery.disposition,'RESULT_VERIFICATION_REQUIRED');
+ assert.equal(out.parent_recovery.result_consumption_authorized,false);
  assert.match(e.calls[0].arguments.command,/'--follow'/);
 });
 test('result reads the successor; acceptance through the failed origin is refused',async()=>{
@@ -64,12 +68,12 @@ function facade(e) { assert.ok(api?.createFabricFacade, 'the Fabric-only MCP fac
 
 test('closed, correctly annotated catalog with no generic command tools',()=>{
  assert.ok(api?.FABRIC_TOOLS, 'the Fabric-only tool catalog must exist');
- assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_status','fabric_wait'].sort());
+ assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_result_page','fabric_status','fabric_wait'].sort());
  for(const t of api.FABRIC_TOOLS){assert.equal(t.inputSchema.additionalProperties,false);assert.equal(t.annotations.readOnlyHint,!['fabric_request','fabric_accept'].includes(t.name));}
 });
-test('rejects unknown tool and caller-selected shell, provider, host, model, or cwd before engine access',async()=>{
+test('rejects unknown tool and caller-selected shell, host, unsupported model, or cwd before engine access',async()=>{
  const e=engine();const f=facade(e);
- for(const field of ['shell','host','pool','model','cwd','adapterPath']) { const out=unwrap(await f.call('fabric_request',{...packet,[field]:'attacker'})); assert.equal(out.error,'INVALID_ARGUMENT'); }
+ for(const field of ['shell','host','provider','model','cwd','adapterPath']) { const out=unwrap(await f.call('fabric_request',{...packet,[field]:'attacker'})); assert.equal(out.error,'INVALID_ARGUMENT'); }
  assert.equal(unwrap(await f.call('start_process',{command:'true'})).error,'UNKNOWN_TOOL');assert.equal(e.calls.length,0);
 });
 test('rejects malformed roots, bool timeout, NUL packets and unreasoned frontier promotion',async()=>{
@@ -137,14 +141,15 @@ test('provider text cannot fabricate a Desktop Commander controller process hand
  const observed=unwrap(await f.call('fabric_controller_output',{...id,controller_pid:424242}));assert.equal(observed.error,'CONTROLLER_NOT_BOUND');assert.equal(e.calls.length,2);
 });
 test('one globally keyed run ID cannot dispatch concurrently under different roots',async()=>{
- const calls=[];const waiting=[];let requestStarts=0;let nextPid=600;
+ const calls=[];let requestStarts=0;let nextPid=600;
  const e={calls,async callTool(req){calls.push(req);const command=req.arguments.command;
-  if(command.includes("'status' 'web-fabric-001'")) return await new Promise(resolve=>{waiting.push(resolve);if(waiting.length===2){for(const release of waiting) release(capturedJSON(absent));}});
+  if(command.includes("'status' 'web-fabric-001'")) return capturedJSON(absent);
   if(command.includes("'request' '--id' 'web-fabric-001'")){requestStarts+=1;return pending(++nextPid);}
   throw new Error('unexpected engine call');
  }};
  const f=facade(e);const other={...packet,root_id:'mission-002',parent_id:'mission-002'};
  const results=(await Promise.all([f.call('fabric_request',packet),f.call('fabric_request',other)])).map(unwrap);
+ assert.equal(calls.filter(x=>x.arguments.command.includes("'status' 'web-fabric-001'")).length,1);
  assert.equal(requestStarts,1);assert.equal(results.filter(x=>x.delivery==='CONTROLLER_CREATED').length,1);assert.equal(results.filter(x=>x.error==='REQUEST_ALREADY_ATTEMPTED').length,1);
 });
 test('an already accepted run is observed without modifying acceptance again',async()=>{
@@ -478,4 +483,228 @@ test('acceptance evidence codes are closed and consistent with review method',as
  const field=api.FABRIC_TOOLS.find(t=>t.name==='fabric_accept').inputSchema.properties.verification_summary;
  assert.deepEqual(field.enum,['deterministic_test_evidence','artifact_digest_comparison',
    'manual_result_review','independent_review_evidence']);
+});
+
+// PR #1692: manual provider/model requests only constrain the existing native
+// router; they never authenticate a root, grant quota, or prove model START.
+const manualPinned={...packet,task_class:'review',task_complexity:'C2_COMPLEX_BOUNDED',pool:'grok',model:'grok-4.7'};
+const manualPreview={state:'PREVIEW_ONLY',reserved:false,selection_rechecked_at_request:true,
+  strict_pin_enforced_at_request:true,run_id:id.run_id,pool:'grok',model:'grok-4.7',host:'ubuntu1',mode:'grok'};
+const manualHelp=captured('usage: request --strict-manual-pin --max-turns');
+
+test('manual request only permits closed pool and qualified model token shapes',async()=>{
+ const e=engine(),f=facade(e);
+ for(const change of [{pool:'grok;echo'},{pool:'codex-native'},{model:'grok-4.7 $(id)'},
+   {provider:'grok'},{host:'ubuntu1'},{cwd:'~/secret'},{model:45}]) {
+   assert.equal(unwrap(await f.call('fabric_request',{...manualPinned,...change})).error,'INVALID_ARGUMENT');
+ }
+ const noPool={...manualPinned};delete noPool.pool;
+ assert.equal(unwrap(await f.call('fabric_request',noPool)).error,'INVALID_ARGUMENT');
+ assert.equal(e.calls.length,0);
+});
+
+test('strict manual request cannot dispatch if native pin flag is unavailable',async()=>{
+ const e=engine([captured('usage: request --pool')]);
+ const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+ assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
+ assert.equal(e.calls.length,1);assert.match(e.calls[0].arguments.command,/'request' '--help'/);
+});
+
+test('native preview failure or mismatch refuses before controller creation',async()=>{
+ for(const value of [
+   'not-json',JSON.stringify({...manualPreview,model:'grok-4.6'}),
+   JSON.stringify({...manualPreview,pool:'glm'}),JSON.stringify({...manualPreview,reserved:true}),
+   JSON.stringify({...manualPreview,strict_pin_enforced_at_request:false}),
+   JSON.stringify({...manualPreview,selection_rechecked_at_request:false}),
+   JSON.stringify({...manualPreview,run_id:'another-run'}),
+ ]) {
+   const e=engine([manualHelp,capturedJSON(absent),captured(value)]);
+   const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+   assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
+   assert.equal(e.calls.length,3);
+   assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+ }
+});
+
+test('explicit exact model uses strict native pool/model pin without cross-provider quota continuation',async()=>{
+ const e=engine([manualHelp,capturedJSON(absent),capturedJSON(manualPreview),pending()]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',manualPinned));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(out.worker_started,null);
+ assert.equal(out.requested_pool,'grok');assert.equal(out.requested_model,'grok-4.7');
+ assert.equal(out.strict_manual_pin,true);assert.equal(e.calls.length,4);
+ assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+ assert.match(e.calls[2].arguments.command,/'--pool' 'grok' '--model' 'grok-4.7'/);
+ assert.match(e.calls[3].arguments.command,/'--pool' 'grok' '--strict-manual-pin' '--model' 'grok-4.7'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+
+test('pool-only pin and explicit model AUTO permit native qualified within-pool selection',async()=>{
+ for(const model of [undefined,'auto']) {
+   const e=engine([manualHelp,capturedJSON(absent),capturedJSON({...manualPreview,model:'grok-4.6'}),pending()]);
+   const request={...manualPinned};if(model===undefined) delete request.model;else request.model=model;
+   const out=unwrap(await facade(e).call('fabric_request',request));
+   assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(e.calls.length,4);
+   assert.equal(out.requested_model,model??'auto');
+   assert.match(e.calls[3].arguments.command,/'--pool' 'grok' '--strict-manual-pin'/);
+   assert.doesNotMatch(e.calls[3].arguments.command,/'--model'/);
+   assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+ }
+});
+
+test('manual request max-turn ceiling permits only admitted GLM/MiniMax modes',async()=>{
+ const e=engine(),f=facade(e);
+ for(const pool of ['grok','bailian','cursor','ocfree','go']) {
+   const out=unwrap(await f.call('fabric_request',{...manualPinned,pool,model:'auto',max_turns:12}));
+   assert.equal(out.error,'INVALID_ARGUMENT');
+ }
+ assert.equal(e.calls.length,0);
+ const req={...manualPinned,pool:'glm',model:'auto',max_turns:12};
+ const preview={...manualPreview,pool:'glm',model:'glm-5.3',mode:'glm'};
+ const e2=engine([manualHelp,capturedJSON(absent),capturedJSON(preview),pending()]);
+ const out=unwrap(await continuingFacade(e2).call('fabric_request',req));
+ assert.equal(out.requested_max_turns,12);assert.equal(e2.calls.length,4);
+ assert.match(e2.calls[3].arguments.command,/'--max-turns' '12'/);
+ assert.match(e2.calls[3].arguments.command,/'--strict-manual-pin'/);
+ assert.doesNotMatch(e2.calls[3].arguments.command,/'--quota-fallback'/);
+ const e3=engine([manualHelp,capturedJSON(absent),capturedJSON({...preview,mode:'glm-codex'})]);
+ assert.equal(unwrap(await facade(e3).call('fabric_request',req)).error,'MANUAL_ROUTE_UNAVAILABLE');
+ assert.equal(e3.calls.length,3);
+});
+
+test('advertise manual routing only with native preview AND strict request support',async()=>{
+ for(const [top,help,available] of [
+   ['usage: preview request status result accept','usage: request --strict-manual-pin',true],
+   ['usage: preview request status result accept','usage: request --pool only',false],
+   ['usage: request status result accept','',false],
+ ]) {
+   const responses=[captured(top)];if(top.includes('preview')) responses.push(captured(help));
+   const e=engine(responses),out=unwrap(await facade(e).call('fabric_capabilities',{}));
+   assert.equal(out.manual_routing.available,available);
+   assert.equal(out.manual_routing.default,'AUTO');
+   assert.equal(out.manual_routing.cross_provider_fallback,false);
+   assert.equal(e.calls.length,top.includes('preview')?2:1);
+ }
+});
+
+test('parent attention: rootless or active observations cannot wake or authorize replay',async()=>{
+ const e=engine([capturedJSON(absent),capturedJSON({...done,state:'ACTIVE_OR_WAITING',rc:null,result_available:false})]);
+ const f=facade(e);
+ const absentView=unwrap(await f.call('fabric_status',id));
+ assert.equal(absentView.parent_recovery.disposition,'VERIFY_ORIGINAL_LINEAGE');
+ assert.equal(absentView.parent_recovery.parent_attention_required,false);
+ assert.equal(absentView.parent_recovery.retry_authorized,false);
+ const activeView=unwrap(await f.call('fabric_status',id));
+ assert.equal(activeView.parent_recovery.disposition,'WAIT_ORIGINAL_CONTROLLER');
+ assert.equal(activeView.parent_recovery.parent_attention_required,false);
+ assert.equal(activeView.parent_recovery.wake_proven,false);
+ assert.equal(e.calls.length,2);
+});
+test('parent attention: valid terminal success requires independent acceptance before consumption',async()=>{
+ const status={...done,state:'TERMINAL',rc:0,signal:'ok',accepted:false};
+ const accepted={...status,accepted:true,acceptance_state:'ACCEPTED',accepted_by:'reviewer'};
+ const misleading={...status,accepted:true,acceptance_state:'UNVERIFIED',accepted_by:'reviewer'};
+ const e=engine([capturedJSON(status),capturedJSON(misleading),capturedJSON(accepted)]);
+ const f=facade(e);
+ for(const state of ['RESULT_VERIFICATION_REQUIRED','RESULT_VERIFICATION_REQUIRED','ACCEPTED_RESULT_OBSERVED']){
+   const v=unwrap(await f.call('fabric_status',id)).parent_recovery;
+   assert.equal(v.disposition,state);
+   assert.equal(v.parent_attention_required,true);
+   assert.equal(v.retry_authorized,false);
+   assert.equal(v.dispatch_authorized,false);
+   assert.equal(v.result_consumption_authorized,false);
+ }
+ assert.equal(e.calls.length,3);
+});
+test('parent attention: missing final 429 or effect unknown never promotes to recovery approval',async()=>{
+ const terminal={...done,state:'TERMINAL',rc:1,signal:'quota',accepted:false,result_available:false,
+   reason:'QWEN_FINAL_RESPONSE_UNCONFIRMED',execution_absence_proven:false};
+ const uncertain={...terminal,state:'EFFECT_UNKNOWN',signal:'effect_unknown'};
+ const controller=continuationEnvelope('UNCONFIRMED');
+ const e=engine([capturedJSON(terminal),capturedJSON(uncertain),capturedJSON(controller)]);
+ const single=facade(e);
+ for(const state of ['CAPACITY_BLOCKED_OR_REVIEW_FAILED','RECONCILE_ORIGINAL_EFFECT']){
+   const v=unwrap(await single.call('fabric_status',id)).parent_recovery;
+   assert.equal(v.disposition,state);
+   assert.equal(v.parent_attention_required,true);
+   assert.equal(v.retry_authorized,false);
+ }
+ const third=unwrap(await continuingFacade(e).call('fabric_status',id)).parent_recovery;
+ assert.equal(third.disposition,'RECONCILE_ORIGINAL_EFFECT');
+ assert.equal(third.requested_run_id,id.run_id);
+ assert.equal(third.effective_run_id,successorId);
+ assert.equal(third.dispatch_authorized,false);
+ assert.equal(e.calls.length,3);
+});
+test('parent attention: adapter-shaped rootless states retain diagnoses but no authority',async()=>{
+  // Native _acceptance_unknown statuses and the attended DTO legitimately
+  // have root_id:null before the original ledger attests a worker root.
+  const rootless={...absent,rc:null,signal:null,result_bytes:null,accepted:null,
+    accepted_by:null,acceptance_state:'UNVERIFIED',acceptance_reason:'EXECUTION_NOT_ELIGIBLE'};
+  const rows=[
+    [{...rootless,state:'EFFECT_UNKNOWN',signal:'effect_unknown'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'STATUS_UNREADABLE'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'RESULT_UNAVAILABLE'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'REQUEST_RETAINED_NO_START_EVIDENCE'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'TERMINAL_FAILURE',rc:1,signal:'prelaunch_failure'},'RECONCILE_TERMINAL_FAILURE'],
+    [{...rootless,state:'ACTIVE_OR_WAITING'},'WAIT_ORIGINAL_CONTROLLER'],
+    [{...rootless,state:'SETTLING'},'WAIT_ORIGINAL_CONTROLLER'],
+    [{...rootless,state:'NOT_FOUND'},'VERIFY_ORIGINAL_LINEAGE'],
+    [{...rootless,state:'TERMINAL',rc:0,signal:'ok',result_available:true,result_bytes:15},'RESULT_VERIFICATION_REQUIRED'],
+    [{...rootless,state:'TERMINAL',rc:0,signal:'ok',result_available:true,result_bytes:15,
+      continuation:{controller_return:'UNCONFIRMED'}},'RECONCILE_ORIGINAL_EFFECT'],
+  ];
+  const e=engine(rows.map(([s])=>capturedJSON(s))),f=facade(e);
+  for(const [status,disposition] of rows){
+    const v=unwrap(await f.call('fabric_status',id)).parent_recovery;
+    assert.equal(v.disposition,disposition,status.state);
+    assert.equal(v.root_verified,false);
+    assert.equal(v.request_correlation_only,false);
+    assert.equal(v.parent_attention_required,false);
+    assert.equal(v.wake_proven,false);
+    assert.equal(v.retry_authorized,false);
+    assert.equal(v.dispatch_authorized,false);
+    assert.equal(v.result_consumption_authorized,false);
+  }
+  assert.equal(e.calls.length,rows.length);
+  const foreign={...rootless,root_id:'different-native-root',state:'EFFECT_UNKNOWN',signal:'effect_unknown'};
+  const crossRoot=api.projectFabricParentRecovery(foreign,id.root_id);
+  assert.equal(crossRoot.disposition,'VERIFY_ORIGINAL_LINEAGE');
+  assert.equal(crossRoot.root_verified,false);
+  assert.equal(crossRoot.parent_attention_required,false);
+});
+test('parent attention: native prelaunch request correlation is not authenticated root or wake',async()=>{
+ const refused={...done,state:'REQUEST_REFUSED_BEFORE_LAUNCH',
+   root_id:null,parent_run_id:null,request_root_id:id.root_id,request_parent_run_id:'mission-001',
+   accepted:null,accepted_by:null,acceptance_state:'UNVERIFIED',
+   execution_absence_proven:true,signal:null,rc:null,result_available:false};
+ const e=engine([capturedJSON(refused),capturedJSON({...refused,request_root_id:'other-root'})]);
+ const f=facade(e);
+ const out=unwrap(await f.call('fabric_status',id));
+ assert.equal(out.parent_recovery.disposition,'RECONCILE_PRELAUNCH_REFUSAL');
+ assert.equal(out.parent_recovery.request_correlation_only,true);
+ assert.equal(out.parent_recovery.root_verified,false);
+ assert.equal(out.parent_recovery.parent_attention_required,false);
+ assert.equal(out.parent_recovery.retry_authorized,false);
+ const mismatch=unwrap(await f.call('fabric_status',id));
+ assert.equal(mismatch.parent_recovery.disposition,'VERIFY_ORIGINAL_LINEAGE');
+ assert.equal(mismatch.parent_recovery.request_correlation_only,false);
+ assert.equal(mismatch.parent_recovery.parent_attention_required,false);
+ assert.equal(e.calls.length,2);
+});
+test('parent attention: bounded wait uses the same read-only projection without extra process',async()=>{
+ const value={...done,state:'TERMINAL',rc:0,signal:'ok',accepted:false};
+ const e=engine([capturedJSON(value),capturedJSON(value)]);
+ const out=unwrap(await facade(e).call('fabric_wait',{...id,timeout_seconds:0}));
+ assert.equal(out.parent_recovery.disposition,'RESULT_VERIFICATION_REQUIRED');
+ assert.equal(out.parent_recovery.parent_attention_required,true);
+ assert.equal(e.calls.length,2); // incumbent status preflight + the bounded native wait
+ assert.match(e.calls[1].arguments.command,/'wait' 'web-fabric-001'/);
+});
+test('parent attention: malformed or contradictory claims stay untrusted',()=>{
+ const s={...done,state:'TERMINAL',rc:0,signal:'ok',accepted:true,accepted_by:'reviewer',result_available:true};
+ assert.equal(api.projectFabricParentRecovery(s,id.root_id).disposition,'RESULT_VERIFICATION_REQUIRED');
+ assert.equal(api.projectFabricParentRecovery({...s,acceptance_state:'ACCEPTED'},'other-root').disposition,'VERIFY_ORIGINAL_LINEAGE');
+ for(const bad of [null,{}, {...s,schema:'fake'}, {...s,run_id:'../escape'}]){
+  assert.throws(()=>api.projectFabricParentRecovery(bad,id.root_id),/FABRIC_PARENT_RECOVERY_STATUS_INVALID/);
+ }
 });

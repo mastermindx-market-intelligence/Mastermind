@@ -18,14 +18,24 @@ from control_plane.model_router import (
 )
 
 
-def _policy(tmp_path, *, provider="codex", remove_default=False):
+def _policy(tmp_path, *, provider="codex", remove_default=False, disable_provider=False):
     raw = json.loads(DEFAULT_POLICY_PATH.read_text(encoding="utf-8"))
+    if disable_provider:
+        raw["providers"][provider]["enabled"] = False
+        raw["providers"][provider]["autonomous_allowed"] = False
     raw["model_aliases"]["fixture.frontier"] = {
         **raw["model_aliases"]["frontier.orchestrator"],
         "provider_alias": provider,
         "model": "fixture-frontier-model",
         "execution_profile_id": "operator.appserver.readonly.docs-mcp.native-helper.v1",
     }
+    if disable_provider:
+        # Closed disabled catalogue: a deliberately disabled provider must not
+        # keep any armed alias. worker_eligible=False is forced on EVERY alias
+        # matching the disabled provider, including fixture.frontier above.
+        for alias in raw["model_aliases"].values():
+            if alias["provider_alias"] == provider:
+                alias["worker_eligible"] = False
     if remove_default:
         del raw["model_aliases"]["frontier.orchestrator"]
     path = tmp_path / "routes.json"
@@ -73,9 +83,10 @@ def test_explicit_frontier_selection_returns_selected_identity_without_worker_au
 def test_disabled_provider_can_describe_logical_cognition_without_admission(
     tmp_path, provider
 ):
-    router = _policy(tmp_path, provider=provider)
+    router = _policy(tmp_path, provider=provider, disable_provider=True)
     assert not router.providers[provider].enabled
     assert not router.providers[provider].autonomous_allowed
+    assert router.model_aliases["fixture.frontier"].worker_eligible is False
 
     decision = router.route(
         WorkRequest("planning"), frontier_model_alias="fixture.frontier"

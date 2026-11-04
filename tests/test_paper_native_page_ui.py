@@ -298,6 +298,27 @@ class NativePageUITests(unittest.TestCase):
                              and x[3] == 257), 0)
         self.assertEqual(len(client.files[CLONE]["pages"]), 2)
 
+    def test_second_copy_link_missing_marker_refuses_without_delete(self):
+        client, clipboard, ui = scenario()
+        writes = []
+
+        def set_clipboard(value):
+            writes.append(value)
+            if len(writes) == 1:
+                clipboard["value"] = value
+
+        result = ui_module.prune_one(
+            fixture_plan(), "p-3-0", "paper-scratch-ui-20261022",
+            313, 100, 165, client=client, ui=ui,
+            clipboard=lambda: clipboard["value"], clipboard_set=set_clipboard)
+        self.assertEqual(len(writes), 2)
+        self.assertEqual(result["state"], "UI_CLIPBOARD_MARKER_NOT_SET")
+        self.assertEqual(ui.right_clicks, 2)
+        self.assertEqual(sum(1 for x in ui.calls
+                             if x[0] == "click" and x[3] == 257), 0)
+        self.assertEqual(client.files[SRC]["pages"], [PAGE1, PAGE2])
+        self.assertEqual(client.files[CLONE]["pages"], [PAGE1, PAGE2])
+
     def test_second_menu_page_drift_refuses_before_destructive_dispatch(self):
         client, clipboard, ui = scenario()
         ui.drift_second_menu_to_keep = True

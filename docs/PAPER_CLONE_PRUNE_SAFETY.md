@@ -155,9 +155,11 @@ No GUI mutation or Paper source deletion is performed by this helper. For the ex
 `integrations/paper_desktop/native_page_ui.py` is a **single-page**, fail-closed
 native UI deletion candidate. It is separate from the reviewed Paper MCP
 catalogue because Paper 0.5.14/0.5.15 do not expose a `delete_page` MCP tool.
-Do not advertise this candidate as an accepted worker-facing `paper_edit`
-action until exact-source review, a selected-host scratch canary, protected
-merge, runtime stage, and the actual ChatGPT app publication have passed.
+The accepted source scope is attended disposable clones only. Do not
+advertise it as a worker-facing `paper_edit` action. Any operational release
+requires an accepted atomic file/page capability or a separately approved
+narrowly attended contract, exact-source review, a selected-host scratch
+canary, protected merge, runtime stage and actual ChatGPT app publication.
 
 The adapter uses the **existing** Paper Desktop bridge for source/clone/page
 readback and the same OS-user desktop mutex. It does not create another
@@ -201,8 +203,10 @@ A successful one-page result is not a complete 57-page migration, and the
 adapter intentionally reports `production_migration_accepted:false`.
 Do not claim all image URLs, attached comments, cross-file links, fonts,
 shared components, or large-file stability are proven by page metadata
-alone. Reviewers must inspect the exact M1 Paper UI scratch receipt and
-adversarial tests before enabling this as an autonomous operation.
+alone. Six-character name admission does not prove that six glyphs are
+visible in the crop, and the final screenshot-to-click interval is non-atomic.
+Reviewers must retain those limits when evaluating an attended disposable
+scratch canary. This source does not authorize autonomous production deletion.
 
 ## Release and permission fence
 
