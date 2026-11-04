@@ -27171,6 +27171,27 @@ class BoundedRuntimeReadObservation:
             self._failed = True
             raise
 
+    def read_retained_capacity_bounded(
+        self, root_job_id: str, job_id: str, attempt_id: str,
+    ) -> Any:
+        """One current Attempt's original retained claim evidence; no acquisition.
+
+        The authenticated Workspace owner independently qualifies membership,
+        permission and its before/after publication bracket. The finalized SAME
+        receipt remains mandatory; returned source material is not entitlement.
+        """
+        self._select()
+        try:
+            from control_plane.workspace_resource_capacity import acquire_retained_capacity
+            result = acquire_retained_capacity(
+                self._acquisition, self._vm_progress,
+                root_job_id=root_job_id, job_id=job_id, attempt_id=attempt_id,
+            )
+            return dataclasses.replace(result, observation_source_identity=self._identity)
+        except BaseException:
+            self._failed = True
+            raise
+
     def read_retained_operator_activity_bounded(
         self, root_job_id: str, job_id: str, attempt_id: str,
     ) -> Any:
