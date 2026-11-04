@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -9,7 +9,7 @@ beforeEach(() => {
   delete window.MastermindMissionHost;
   delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("readable workspace shell", () => {
   it("retains the separate Meta-CEO office and all incumbent deep routes", () => {
@@ -39,6 +39,26 @@ describe("readable workspace shell", () => {
     await user.click(within(company).getByRole("button", {name:"Knowledge"}));
     expect(menu.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(menu);
+  });
+  it("releases the mobile focus trap on a desktop resize without focusing the hidden toggle", async () => {
+    let mobile = true;
+    const listeners = new Set<() => void>();
+    vi.stubGlobal("matchMedia", () => ({ get matches() { return mobile; },
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }));
+    const user = userEvent.setup();
+    render(<App/>);
+    const menu = screen.getByRole("button", {name:"Open navigation"});
+    await user.click(menu);
+    expect(menu.getAttribute("aria-expanded")).toBe("true");
+    act(() => { mobile = false; for (const listener of listeners) listener(); });
+    expect(menu.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+    const event = new KeyboardEvent("keydown", {key:"Tab",bubbles:true,cancelable:true});
+    document.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(listeners.size).toBe(0);
   });
   it("cycles focus through visible drawer controls without entering closed Settings", async () => {
     vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(function (this: HTMLElement) {

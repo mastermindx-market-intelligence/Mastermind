@@ -1317,6 +1317,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   const closeNavigation = () => { setNavigationOpen(false); navigationToggle.current?.focus(); };
   useEffect(() => {
     if (!navigationOpen) return;
+    const drawerMedia = window.matchMedia?.("(max-width: 959px)");
+    const leaveDrawerForDesktop = () => {
+      if (drawerMedia?.matches) return;
+      setNavigationOpen(false);
+      // The mobile toggle/close controls are hidden in the desktop layout.
+      document.getElementById("content")?.focus();
+    };
+    if (drawerMedia && !drawerMedia.matches) { leaveDrawerForDesktop(); return; }
+    drawerMedia?.addEventListener("change", leaveDrawerForDesktop);
     const pane = navigationPane.current;
     pane?.querySelector<HTMLButtonElement>("button")?.focus();
     const handle = (event: KeyboardEvent) => {
@@ -1332,7 +1341,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
     document.addEventListener("keydown", handle);
-    return () => document.removeEventListener("keydown", handle);
+    return () => {
+      document.removeEventListener("keydown", handle);
+      drawerMedia?.removeEventListener("change", leaveDrawerForDesktop);
+    };
   }, [navigationOpen]);
   const native = "__TAURI_INTERNALS__" in window,
     initialLocation = useMemo(() => directLocationInput(), []),
