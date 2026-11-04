@@ -594,6 +594,9 @@ class _ExecutivePathFence:
                 "/workspace/result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
+                "/workspace/project-plan/current",
+                "/workspace/project-journal/current",
+                "/workspace/autonomy/current",
                 "/workspace/operator/activity/current",
             ))
             # v2 routes carry a query string; the legacy v1 mission route does too.
@@ -604,6 +607,9 @@ class _ExecutivePathFence:
                 "/workspace/result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
+                "/workspace/project-plan/current",
+                "/workspace/project-journal/current",
+                "/workspace/autonomy/current",
                 "/workspace/operator/activity/current",
             ))
         if content_app is not None:
@@ -1408,6 +1414,9 @@ def _build_profile_mcp_app(
                              "/workspace/result/current",
                              "/workspace/result-references/current",
                              "/workspace/plan/current",
+                             "/workspace/project-plan/current",
+                "/workspace/project-journal/current",
+                "/workspace/autonomy/current",
                              "/workspace/operator/activity/current"))
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])

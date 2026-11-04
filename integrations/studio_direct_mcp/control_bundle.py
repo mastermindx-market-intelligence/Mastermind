@@ -26,7 +26,16 @@ LEGACY_CONTROL_FILES = (
     "private_tunnel_service.py",
     "studio_direct_control.py",
 )
-CONTROL_FILES = (*LEGACY_CONTROL_FILES, "private_service_status_successor.py")
+STATUS_CONTROL_FILES = (*LEGACY_CONTROL_FILES, "private_service_status_successor.py")
+CONTROL_FILES = (
+    *STATUS_CONTROL_FILES,
+    "private_service_pin.py",
+    "private_service_pin_enrollment.py",
+    "paper_v20_fleet_cohorts.py",
+    "ops/native_fabric/quota_continuity/rollout/native_install.py",
+    "ops/native_fabric/quota_continuity/rollout/native_generation.py",
+    "ops/fabric_launch/install.py",
+)
 FILE_MODE = 0o600
 DIR_MODE = 0o700
 
@@ -47,12 +56,14 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _require_regular(path: Path, *, executable: bool = False) -> Path:
+def _require_regular(path: Path, *, executable: bool = False, private: bool = False) -> Path:
     info = path.lstat()
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise Refusal("REGULAR_FILE_REQUIRED")
-    if info.st_uid != os.getuid():
+    if info.st_uid != os.getuid() or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) & 0o022:
         raise Refusal("CURRENT_USER_OWNERSHIP_REQUIRED")
+    if private and stat.S_IMODE(info.st_mode) != FILE_MODE:
+        raise Refusal("PRIVATE_FILE_REQUIRED")
     if executable and not (info.st_mode & stat.S_IXUSR):
         raise Refusal("EXECUTABLE_REQUIRED")
     return path
@@ -62,18 +73,118 @@ def _require_private_dir(path: Path) -> Path:
     info = path.lstat()
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
         raise Refusal("PRIVATE_DIRECTORY_REQUIRED")
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != DIR_MODE:
         raise Refusal("PRIVATE_DIRECTORY_REQUIRED")
     return path
 
 
+def _require_control_paths(control_root: Path, launcher: Path) -> None:
+    home = Path.home()
+    if (not home.is_absolute()
+            or control_root != home / ".local/share/studio-direct-mcp/control"
+            or launcher != home / ".local/bin/studio-direct"):
+        raise Refusal("CONTROL_LAYOUT_INVALID")
+    # Match the consumer boundary; platform aliases above HOME remain allowed.
+    for path in (control_root, launcher.parent):
+        current = path
+        while True:
+            info = current.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) & 0o022):
+                raise Refusal("CONTROL_ANCESTOR_UNSAFE")
+            if current == home:
+                break
+            current = current.parent
+
+
 def _source_files(source: Path) -> dict[str, Path]:
-    if source.is_symlink() or not source.is_dir():
-        raise Refusal("SOURCE_DIRECTORY_INVALID")
+    # The existing source entrypoint remains integrations/studio_direct_mcp.
+    # Native imports retain their repository-relative depth inside the bundle.
+    if source.parts[-2:] != ("integrations", "studio_direct_mcp"):
+        raise Refusal("SOURCE_LAYOUT_INVALID")
+    repository = source.parent.parent
     rows = {}
     for name in CONTROL_FILES:
-        rows[name] = _require_regular(source / name)
+        relative = Path(name) if "/" in name else Path("integrations/studio_direct_mcp") / name
+        path = repository / relative
+        current = repository
+        for part in (None, *relative.parts[:-1]):
+            if part is not None:
+                current = current / part
+            info = current.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) & 0o022):
+                raise Refusal("SOURCE_DIRECTORY_INVALID")
+        rows[name] = _require_regular(path)
     return rows
+
+
+def _directory_members(names):
+    directories = {Path("."): {"manifest.json"}}
+    for name in names:
+        relative = Path(name)
+        for index, part in enumerate(relative.parts):
+            parent = Path(*relative.parts[:index])
+            directories.setdefault(parent, set()).add(part)
+            if index < len(relative.parts) - 1:
+                directories.setdefault(parent / part, set())
+    return directories
+
+
+def _require_code_layout(root: Path, names, *, complete: bool, allow_cache: bool = False) -> None:
+    directories = _directory_members(names)
+    for relative, expected in directories.items():
+        directory = root / relative
+        if not os.path.lexists(directory):
+            if complete:
+                raise Refusal("CONTROL_BUNDLE_CONTENTS_INVALID")
+            continue
+        _require_private_dir(directory)
+        observed = {path.name for path in directory.iterdir()}
+        if relative == Path("."):
+            for metadata in ("manifest.json", ".control-bundle.lock"):
+                if metadata in observed:
+                    _require_regular(directory / metadata, private=True)
+            observed.discard(".control-bundle.lock")
+        if relative == Path(".") and "__pycache__" in observed and allow_cache:
+            # Admit only bounded old caches for legacy observation or migration.
+            # A new installed bundle never executes or retains these bytes.
+            cache = directory / "__pycache__"
+            info = cache.lstat()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) & 0o022):
+                raise Refusal("CONTROL_BUNDLE_CONTENTS_INVALID")
+            stems = {Path(name).stem for name in names if "/" not in name}
+            for cached in cache.iterdir():
+                if (not cached.name.endswith(".pyc")
+                        or not any(cached.name.startswith(stem + ".") for stem in stems)):
+                    raise Refusal("CONTROL_BUNDLE_CONTENTS_INVALID")
+                _require_regular(cached)
+            observed.remove("__pycache__")
+        if not observed <= expected or (complete and observed != expected):
+            raise Refusal("CONTROL_BUNDLE_CONTENTS_INVALID")
+    for name in names:
+        path = root / name
+        if os.path.lexists(path):
+            _require_regular(path, private=True)
+
+
+def _member_path(root: Path, name: str) -> Path:
+    path = root / name
+    current = root
+    for part in Path(name).parts[:-1]:
+        current = current / part
+        _require_private_dir(current)
+    return path
+
+
+def _unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate control manifest key")
+        value[key] = item
+    return value
 
 
 def _bundle_digest(files: dict[str, str], launcher_hash: str) -> str:
@@ -98,19 +209,20 @@ def _manifest_payload(source: Path, files: dict[str, Path], launcher: Path) -> d
 
 
 def _read_manifest(path: Path) -> dict:
-    _require_regular(path)
+    _require_regular(path, private=True)
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
     except (OSError, UnicodeError, ValueError) as exc:
         raise Refusal("CONTROL_MANIFEST_INVALID") from exc
     expected_keys = {"schema", "files", "launcher", "launcherHash", "bundleDigest", "source"}
     if not isinstance(value, dict) or set(value) != expected_keys or value.get("schema") != SCHEMA:
         raise Refusal("CONTROL_MANIFEST_INVALID")
     files = value.get("files")
-    # Accept the exact prior 3-file generation for read-only verification and
-    # atomic install. The post-install manifest must include all four files.
+    # Legacy three/four-member identities remain observable for migration.
+    # New runtime admission and post-install verification require the full ten.
     if (not isinstance(files, dict)
             or frozenset(files) not in (frozenset(LEGACY_CONTROL_FILES),
+                                       frozenset(STATUS_CONTROL_FILES),
                                        frozenset(CONTROL_FILES))):
         raise Refusal("CONTROL_MANIFEST_INVALID")
     if any(not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) for digest in files.values()):
@@ -131,15 +243,19 @@ def _read_manifest(path: Path) -> dict:
     return value
 
 
-def verify(*, control_root: Path, launcher: Path) -> dict:
+def _verify_locked(*, control_root: Path, launcher: Path) -> dict:
     root = _require_private_dir(control_root)
     manifest = _read_manifest(root / "manifest.json")
     _require_regular(launcher, executable=True)
     if manifest.get("launcher") != str(launcher) or manifest.get("launcherHash") != _sha256(launcher):
         raise Refusal("CONTROL_BUNDLE_MISMATCH")
+    _require_code_layout(
+        root, manifest["files"], complete=True,
+        allow_cache=set(manifest["files"]) != set(CONTROL_FILES),
+    )
     observed = {}
     for name in manifest["files"]:
-        path = _require_regular(root / name)
+        path = _require_regular(_member_path(root, name), private=True)
         observed[name] = _sha256(path)
         if manifest["files"].get(name) != observed[name]:
             raise Refusal("CONTROL_BUNDLE_MISMATCH")
@@ -153,18 +269,45 @@ def verify(*, control_root: Path, launcher: Path) -> dict:
     }
 
 
+def verify(*, control_root: Path, launcher: Path) -> dict:
+    _require_control_paths(control_root, launcher)
+    root = _require_private_dir(control_root)
+    if not os.path.lexists(root / ".control-bundle.lock"):
+        # Legacy identity observation is read-only and does not claim a locked
+        # generation. New ten-file bundles require their existing owner lock.
+        manifest = _read_manifest(root / "manifest.json")
+        if set(manifest["files"]) == set(CONTROL_FILES):
+            raise Refusal("CONTROL_BUNDLE_LOCK_REQUIRED")
+        observed = _verify_locked(control_root=root, launcher=launcher)
+        identity = ("schema", "files", "launcherHash", "bundleDigest", "source")
+        if (os.path.lexists(root / ".control-bundle.lock")
+                or any(observed[key] != manifest[key] for key in identity)):
+            raise Refusal("CONTROL_BUNDLE_CHANGED")
+        return observed
+    with _lock(root, shared=True, create=False):
+        return _verify_locked(control_root=root, launcher=launcher)
+
+
 @contextlib.contextmanager
-def _lock(root: Path):
+def _lock(root: Path, *, shared: bool = False, create: bool = True):
     path = root / ".control-bundle.lock"
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, FILE_MODE)
+    flags = os.O_RDONLY if shared else os.O_RDWR
+    if create:
+        flags |= os.O_CREAT
+    fd = os.open(path, flags | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, FILE_MODE)
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != FILE_MODE):
             raise Refusal("CONTROL_BUNDLE_LOCK_UNSAFE")
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            operation = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+            fcntl.flock(fd, operation | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise Refusal("CONTROL_BUNDLE_BUSY") from exc
+        named = path.lstat()
+        if (info.st_dev, info.st_ino) != (named.st_dev, named.st_ino):
+            raise Refusal("CONTROL_BUNDLE_LOCK_UNSAFE")
         yield
     finally:
         os.close(fd)
@@ -182,38 +325,64 @@ def _write_private(path: Path, data: bytes) -> None:
 
 
 def install(*, source: Path, control_root: Path, launcher: Path) -> dict:
+    _require_control_paths(control_root, launcher)
     root = _require_private_dir(control_root)
     _require_regular(launcher, executable=True)
     source_files = _source_files(source)
     payload = _manifest_payload(source, source_files, launcher)
     with _lock(root):
+        _require_code_layout(root, CONTROL_FILES, complete=False, allow_cache=True)
         stage = Path(tempfile.mkdtemp(prefix=".control-bundle.stage-", dir=root))
-        stage.chmod(DIR_MODE)
         committed = False
         try:
+            stage.chmod(DIR_MODE)
+            directories = sorted(_directory_members(CONTROL_FILES), key=lambda item: len(item.parts))
+            for relative in directories:
+                if relative != Path("."):
+                    (stage / relative).mkdir(mode=DIR_MODE)
             for name, src in source_files.items():
                 _write_private(stage / name, src.read_bytes())
                 if _sha256(stage / name) != payload["files"][name]:
                     raise Refusal("STAGED_HASH_MISMATCH")
             manifest_bytes = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
             _write_private(stage / "manifest.json", manifest_bytes)
-            for name in CONTROL_FILES:
-                os.replace(stage / name, root / name)
+            cache = root / "__pycache__"
+            if os.path.lexists(cache):
                 committed = True
+                shutil.rmtree(cache)
+            for relative in directories:
+                if relative == Path("."):
+                    continue
+                destination = root / relative
+                if not os.path.lexists(destination):
+                    committed = True
+                    destination.mkdir(mode=DIR_MODE)
+                _require_private_dir(destination)
+            for name in CONTROL_FILES:
+                committed = True
+                os.replace(stage / name, _member_path(root, name))
             os.replace(stage / "manifest.json", root / "manifest.json")
-            dir_fd = os.open(root, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-            result = verify(control_root=root, launcher=launcher)
-        except (OSError, Refusal) as exc:
+            # Exactly one cleanup attempt. A failure after installed writes
+            # preserves its stage and effect classification for reconciliation.
+            shutil.rmtree(stage)
+            for relative in reversed(directories):
+                directory = _require_private_dir(root / relative)
+                dir_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            result = _verify_locked(control_root=root, launcher=launcher)
+            if set(result["files"]) != set(CONTROL_FILES):
+                raise Refusal("CONTROL_BUNDLE_MISMATCH")
+        except BaseException as exc:
             if committed:
                 raise EffectUnknown("CONTROL_BUNDLE_EFFECT_UNKNOWN") from exc
-            raise
-        finally:
-            if stage.exists():
+            try:
                 shutil.rmtree(stage)
+            except OSError as cleanup:
+                raise Refusal("CONTROL_BUNDLE_STAGE_CLEANUP_FAILED") from cleanup
+            raise
     return {**result, "state": "CONTROL_BUNDLE_INSTALLED"}
 
 

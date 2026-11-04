@@ -80,7 +80,7 @@ describe("Fleet route — separate Fabric observation and Capacity truth", () =>
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Fleet & Capacity");
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Recent Fabric runs" })).toBeTruthy();
     expect(screen.getByText(/No authorized catalog reader is connected/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Load runs" }).hasAttribute("disabled")).toBe(true);
@@ -94,7 +94,7 @@ describe("Fleet route — separate Fabric observation and Capacity truth", () =>
     const user = userEvent.setup();
     render(<App />);
     await navigateCompanyOperation(user, "Fleet & Capacity");
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(owner.catalogRead).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Load runs" }));
     expect(await screen.findByRole("button", { name: /fabric-selected-run · TERMINAL/ })).toBeTruthy();
@@ -109,7 +109,7 @@ describe("Fleet route — separate Fabric observation and Capacity truth", () =>
     await user.click(inspector.getByRole("button", { name: "Inspect run" }));
     await waitFor(() => expect(owner.statusRead).toHaveBeenCalledTimes(1));
     expect(inspector.getByText("NOT_ACCEPTED")).toBeTruthy();
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
   });
 
   it("invalidates selections and keeps source reads disabled after sign-out", async () => {

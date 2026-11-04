@@ -191,13 +191,17 @@ def qualify_unchanged_transition(preview, *, manifest_before_bytes,
 
 # One transaction under the EXISTING private-service owner and lifecycle lock.
 # This module does not start, stop, repair or reselect any account.
+import ctypes
 import os
 from pathlib import Path
+import shutil
+import sys
+import tempfile
 import re
 import stat
 import subprocess
 from types import SimpleNamespace
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 
 TRANSACTION = "fleet-status-module-successor"
 FILE_NAMES = frozenset((
@@ -302,13 +306,14 @@ def _original_pin(svc, account, roots):
         ep = roots["state"] / enrollment.TRANSACTION
         if not ep.is_dir():
             fail("C4_ENROLLMENT_MISSING")
-        with enrollment.original_pin(svc, roots, "status") as (
+        profile = enrollment.frozen_profile("chatgpt4")
+        with enrollment.original_pin(svc, roots, "status", profile) as (
                 enpin, enoriginal, fingerprint):
             stored = enpin.decode(svc._fabric_release_bytes(ep / "plan.json"))
             eplan, eraw = enrollment.retained(
                 svc, enpin, roots, ep,
                 enrollment.digest(enrollment.encode(stored)),
-                enoriginal, fingerprint,
+                enoriginal, fingerprint, profile,
             )
             receipt = enpin.decode(svc._fabric_release_bytes(ep / "result.json"))
             if receipt != enrollment.result_record(eplan):
@@ -418,6 +423,133 @@ def _source_plan(svc, args, roots):
     return plan, raw
 
 
+
+@contextmanager
+def _owned_directory_fd(svc, path):
+    """Anchor a private owner directory; opening or syncing must never be ignored."""
+    svc._assert_dest_safe(path)
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != svc.DIR_MODE):
+            fail("PUBLICATION_DIRECTORY_UNSAFE")
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _sync_directory(svc, path):
+    with _owned_directory_fd(svc, path) as fd:
+        os.fsync(fd)
+
+
+def _identity(path):
+    info = path.lstat()
+    return info.st_dev, info.st_ino
+
+
+def _same_identity(path, identity):
+    try:
+        return _identity(path) == identity
+    except OSError:
+        return False
+
+
+def _rename_new(svc, source, destination):
+    """Atomic no-replacement publication, retaining the single-link contract.
+
+    Darwin renameatx_np(RENAME_EXCL=4), Linux renameat2(RENAME_NOREPLACE=1).
+    Unsupported symbols/filesystems fail closed; ordinary rename is no fallback.
+    """
+    if sys.platform not in ("darwin", "linux"):
+        fail("EXCLUSIVE_PUBLICATION_UNAVAILABLE")
+    try:
+        library = ctypes.CDLL(None, use_errno=True)
+        rename = getattr(library, "renameatx_np" if sys.platform == "darwin" else "renameat2")
+    except (AttributeError, OSError):
+        fail("EXCLUSIVE_PUBLICATION_UNAVAILABLE")
+    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                       ctypes.c_char_p, ctypes.c_uint)
+    rename.restype = ctypes.c_int
+    svc._assert_dest_safe(source)
+    svc._assert_dest_safe(destination)
+    identity = _identity(source)
+    with _owned_directory_fd(svc, source.parent) as source_fd:
+        with _owned_directory_fd(svc, destination.parent) as destination_fd:
+            if (source.name == destination.name
+                    and _identity(source.parent) == _identity(destination.parent)):
+                fail("PUBLICATION_IDENTITY_INVALID")
+            flag = 4 if sys.platform == "darwin" else 1
+            if rename(source_fd, os.fsencode(source.name), destination_fd,
+                      os.fsencode(destination.name), flag) != 0:
+                raise OSError(ctypes.get_errno(), "exclusive publication refused")
+            if (not _same_identity(destination, identity)
+                    or os.path.lexists(source)):
+                fail("PUBLICATION_IDENTITY_UNKNOWN")
+            # Confirm both the new name and removal of the old name. A failure
+            # here occurs AFTER publication and must retain the final evidence.
+            os.fsync(destination_fd)
+            os.fsync(source_fd)
+
+
+def _publish_intent(svc, account, roots, target, plan, raw):
+    stage = Path(tempfile.mkdtemp(prefix=".fleet-status-intent.", dir=target.parent))
+    identity = _identity(stage)
+    attempted = False
+    try:
+        svc._fabric_release_new(stage / "plan.json", _encode(plan))
+        for name, blob in raw.items():
+            svc._fabric_release_new(stage / name, blob)
+        svc._fabric_release_new(stage / "intent.json", _encode({
+            "schema": SCHEMA, "planSha256": _plan_digest(plan)}))
+        retained_plan, retained_raw, pd = _retained(svc, account, roots, stage)
+        if (retained_plan != plan or retained_raw != raw or pd != _plan_digest(plan)):
+            fail("PREPARED_INTENT_CHANGED")
+        _sync_directory(svc, stage)
+        attempted = True
+        _rename_new(svc, stage, target)
+    except BaseException:
+        # A signal may arrive after rename but before any Python bookkeeping.
+        # The source inode, not a post-call boolean, distinguishes that boundary.
+        if attempted and not _same_identity(stage, identity):
+            fail("EFFECT_UNKNOWN_PREPARATION_RECONCILE_SAME_OWNER")
+        raise
+    finally:
+        # Never remove the final name or a replacement/foreign staging directory.
+        if _same_identity(stage, identity):
+            shutil.rmtree(stage)
+
+
+def _publish_result(svc, target, value):
+    # Keep temporary names outside the strict active-transaction file set.
+    stage = Path(tempfile.mkdtemp(prefix=".fleet-status-result.", dir=target.parent))
+    identity = _identity(stage)
+    try:
+        source = stage / "result.json"
+        encoded = _encode(value)
+        svc._fabric_release_new(source, encoded)
+        if svc._fabric_release_bytes(source) != encoded:
+            fail("PREPARED_RESULT_CHANGED")
+        _sync_directory(svc, stage)
+        _rename_new(svc, source, target / "result.json")
+    finally:
+        if _same_identity(stage, identity):
+            shutil.rmtree(stage)
+
+
+def _confirm_retained_durability(svc, roots, target):
+    try:
+        # Reconciliation may observe both installed postimages after a rename
+        # whose directory sync failed. Confirm those parents even when no
+        # replacement needs replay, including the existing-result/start path.
+        for directory in dict.fromkeys((
+                target, target.parent, roots["base"], roots["manifest"].parent)):
+            _sync_directory(svc, directory)
+    except BaseException:
+        fail("EFFECT_UNKNOWN_DURABILITY_RECONCILE_SAME_OWNER")
+
+
 def _retained(svc, account, roots, path):
     svc._assert_dest_safe(path)
     if not path.is_dir() or path.is_symlink():
@@ -460,7 +592,7 @@ def _retained(svc, account, roots, path):
     return plan, raw, digest_plan
 
 
-def _record(svc, plan, effect, phase, receipt):
+def _record(svc, plan, effect, phase, receipt, *, durable=False):
     return {
         "schema": SCHEMA, "generation": SOURCE_GENERATION,
         "account": plan["account"], "planSha256": _plan_digest(plan),
@@ -468,7 +600,8 @@ def _record(svc, plan, effect, phase, receipt):
         "manifestSha256": plan["manifestAfterSha256"],
         "moduleSha256": plan["moduleAfterSha256"],
         "serviceStarted": False, "existingNativePinPreserved": True,
-        "receiptCommitted": receipt, "retryAllowed": False,
+        "receiptCommitted": receipt, "durabilityConfirmed": durable,
+        "retryAllowed": False,
     }
 
 
@@ -489,6 +622,7 @@ def require_start(svc, account, roots):
             or json.loads(svc._fabric_release_bytes(path / "result.json"))
             != {"schema": SCHEMA, "planSha256": pd, "effect": "APPLIED"}):
         fail("START_NOT_COMMITTED")
+    _confirm_retained_durability(svc, roots, path)
     svc._verify_staged_install(
         account, "com.mastermind.studio-direct-private." + account,
         roots, require_runtime_seal=True)
@@ -523,20 +657,7 @@ def run(svc, args):
                 fail("PREIMAGE_CHANGED")
             svc._ensure_secure_dir(roots["state"])
             svc._assert_dest_safe(target)
-            applied = False
-            try:
-                target.mkdir(mode=svc.DIR_MODE)
-                applied = True
-                svc._fsync_dir(target.parent)
-                svc._fabric_release_new(target / "plan.json", _encode(plan))
-                for name, blob in raw.items():
-                    svc._fabric_release_new(target / name, blob)
-                svc._fabric_release_new(target / "intent.json", _encode({
-                    "schema": SCHEMA, "planSha256": _plan_digest(plan)}))
-            except BaseException:
-                if applied:
-                    fail("EFFECT_UNKNOWN_PREPARATION_RECONCILE_SAME_OWNER")
-                raise
+            _publish_intent(svc, args.account, roots, target, plan, raw)
         plan, raw, pd = _retained(svc, args.account, roots, target)
         phase = _static_state(svc, args.account, roots, plan, raw)
         result = target / "result.json"
@@ -552,7 +673,10 @@ def run(svc, args):
                            "NOT_APPLIED" if phase == "OLD" else "PARTIAL",
                            phase, has_result)
         if has_result:
-            return _record(svc, plan, "APPLIED", phase, True)
+            _confirm_retained_durability(svc, roots, target)
+            return _record(svc, plan, "APPLIED", phase, True, durable=True)
+        if args.operation == "reconcile":
+            _confirm_retained_durability(svc, roots, target)
         _stopped(svc, args.account, roots)
         changed = False
         try:
@@ -579,12 +703,12 @@ def run(svc, args):
                 roots, require_runtime_seal=True)
             _stopped(svc, args.account, roots)
             changed = True
-            svc._fabric_release_new(result, _encode({
-                "schema": SCHEMA, "planSha256": pd, "effect": "APPLIED"}))
+            _publish_result(svc, target, {
+                "schema": SCHEMA, "planSha256": pd, "effect": "APPLIED"})
             if not require_start(svc, args.account, roots):
                 fail("START_GUARD_INVALID")
         except BaseException:
             if changed:
                 fail("EFFECT_UNKNOWN_RECONCILE_SAME_OWNER")
             raise
-        return _record(svc, plan, "APPLIED", "COMMITTED", True)
+        return _record(svc, plan, "APPLIED", "COMMITTED", True, durable=True)

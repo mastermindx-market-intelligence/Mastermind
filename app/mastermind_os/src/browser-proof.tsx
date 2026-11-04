@@ -25,6 +25,9 @@
 import { useSyncExternalStore, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { createFixtureCommandBinding } from "./browser-proof-command-fixture";
+import { DisplayPreferences, DisplayPreferencesRoot } from "./preferences/DisplayPreferences";
+import { writeDisplayPreferences } from "./preferences/display-preferences";
 import { createOsExecutiveSessionHost } from "./orchestration/os-executive-session-host";
 import type { OsExecutiveSessionHost } from "./orchestration/os-executive-session-host";
 import { createIndexedDbSessionPendingPointerStore } from "./orchestration/indexeddb-session-pending-pointer-store";
@@ -432,6 +435,11 @@ function ensureFixtureSelectionQuery(): void {
     return;
   }
   const next = new URLSearchParams({ work_ref: "WS:ALPHA", root_job_id: "JOB-1" });
+  // Retain only the closed test presentation cells when normalizing selection.
+  const theme = params.get("fixture_theme"), locale = params.get("fixture_locale");
+  if (theme === "dark" || theme === "light") next.set("fixture_theme", theme);
+  if (locale === "en" || locale === "zh-CN") next.set("fixture_locale", locale);
+  if (params.get("fixture_composer") === "ready") next.set("fixture_composer", "ready");
   window.history.replaceState(
     null,
     "",
@@ -456,7 +464,9 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
   const store = createIndexedDbSessionPendingPointerStore(indexedDB);
   const sessionHost = createOsExecutiveSessionHost(transport, store);
   mountedSessionHost = sessionHost;
+  const readyComposer = new URLSearchParams(window.location.search).get("fixture_composer") === "ready";
   window.MastermindMissionHost = {
+    ...(readyComposer ? { commandBinding: createFixtureCommandBinding(store) } : {}),
     sessionCommandBinding: sessionHost.binding,
     session: {
       refresh: (selection: unknown) => sessionHost.refresh(selection as MissionSelection),
@@ -475,7 +485,19 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)) {
     },
   };
   createRoot(requireElement("fixture-controls")).render(<FixtureControls />);
-  createRoot(requireElement("root")).render(<App />);
+  // Test-only visual matrix; the permanent SOURCE FIXTURE banner remains.
+  const presentation = new URLSearchParams(window.location.search);
+  const fixtureTheme = presentation.get("fixture_theme") === "light" ? "light" : "dark";
+  const fixtureLocale = presentation.get("fixture_locale") === "zh-CN" ? "zh-CN" : "en";
+  // Explicit matrix operands seed only the incumbent display-preferences key on
+  // this dedicated SOURCE FIXTURE origin. Settings then uses the real root.
+  if (presentation.has("fixture_theme") || presentation.has("fixture_locale")) {
+    writeDisplayPreferences({ theme: fixtureTheme, locale: fixtureLocale });
+  }
+  createRoot(requireElement("root")).render(<DisplayPreferencesRoot>
+    {({ theme, locale, control }) => <App theme={theme} locale={locale}
+      preferencesControl={<DisplayPreferences control={control} />} />}
+  </DisplayPreferencesRoot>);
   console.info(
     "[SOURCE FIXTURE] mounted — synthetic transport only; no authentication, " +
       "provider task, real SEND or parent consumption.",

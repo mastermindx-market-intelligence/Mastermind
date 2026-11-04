@@ -207,6 +207,7 @@ class OwnerTransactionTests(unittest.TestCase):
                    (self.new, "a" * 40))
         self.roots = svc._build_runtime_roots(self.account)
         self.roots["base"].mkdir(parents=True, exist_ok=True)
+        self.roots["base"].chmod(0o700)
         self.roots["state"].mkdir(parents=True, exist_ok=True)
         self.roots["plist"].parent.mkdir(parents=True, exist_ok=True)
         self.roots["node_modules"].mkdir(parents=True, exist_ok=True)
@@ -375,6 +376,293 @@ class OwnerTransactionTests(unittest.TestCase):
             s.require_start(self.svc, self.account, self.roots)
 
 
+    def test_torn_result_is_never_visible_and_reconcile_does_not_replay_modules(self):
+        plan = self.preview()
+        actual = self.svc._fabric_release_new
+        def torn(path, blob):
+            if path.name == "result.json":
+                self.write(path, blob[:1])
+                raise OSError("injected result write failure")
+            return actual(path, blob)
+        with mock.patch.object(self.svc, "_fabric_release_new", side_effect=torn):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.apply(plan)
+        result = self.roots["state"] / s.TRANSACTION / "result.json"
+        self.assertFalse(result.exists(), "partial result became an active receipt")
+        self.assertEqual(self.run_op("status")["phase"], "COMMITTED")
+        with mock.patch.object(self.svc, "_atomic_write_bytes",
+                               side_effect=AssertionError("completed module write replayed")):
+            self.assertEqual(self.run_op("reconcile")["effect"], "APPLIED")
+        self.assertEqual(result.stat().st_nlink, 1)
+        self.assertTrue(s.require_start(self.svc, self.account, self.roots))
+
+
+    def assert_original_bytes(self):
+        self.assertEqual((self.roots["base"] / s.MODULE).read_bytes(), self.old)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.before)
+
+    def test_intent_rename_then_interrupt_retains_complete_same_owner_recovery(self):
+        target = self.roots["state"] / s.TRANSACTION
+        actual = s._rename_new
+        def interrupted(svc, source, destination):
+            actual(svc, source, destination)
+            if destination == target:
+                raise KeyboardInterrupt("after successful intent rename")
+        with mock.patch.object(s, "_rename_new", side_effect=interrupted):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN_PREPARATION"):
+                self.apply(self.preview())
+        self.assertEqual({p.name for p in target.iterdir()}, s.FILE_NAMES - {"result.json"})
+        self.assert_original_bytes()
+        self.assertEqual(self.run_op("status")["phase"], "OLD")
+        self.assertFalse(self.run_op("status")["durabilityConfirmed"])
+        with self.assertRaisesRegex(SystemExit, "START_NOT_COMMITTED"):
+            s.require_start(self.svc, self.account, self.roots)
+        self.assertTrue(self.run_op("reconcile")["durabilityConfirmed"])
+
+    def test_result_rename_then_interrupt_is_complete_and_never_replayed(self):
+        actual = s._rename_new
+        def interrupted(svc, source, destination):
+            actual(svc, source, destination)
+            if destination.name == "result.json":
+                raise KeyboardInterrupt("after successful result rename")
+        with mock.patch.object(s, "_rename_new", side_effect=interrupted):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.apply(self.preview())
+        target = self.roots["state"] / s.TRANSACTION
+        result = target / "result.json"
+        before = result.read_bytes()
+        self.assertEqual(json.loads(before)["effect"], "APPLIED")
+        self.assertEqual({p.name for p in target.iterdir()}, s.FILE_NAMES)
+        self.assertEqual(result.stat().st_nlink, 1)
+        with mock.patch.object(self.svc, "_atomic_write_bytes",
+                               side_effect=AssertionError("completed write replayed")):
+            self.assertTrue(self.run_op("reconcile")["durabilityConfirmed"])
+        self.assertEqual(result.read_bytes(), before)
+
+    def test_intent_parent_sync_failure_keeps_complete_old_phase(self):
+        target = self.roots["state"] / s.TRANSACTION
+        actual = s.os.fsync
+        state_identity = s._identity(target.parent)
+        def interrupted(fd):
+            info = s.os.fstat(fd)
+            if (info.st_dev, info.st_ino) == state_identity and target.exists():
+                raise OSError("parent sync after intent publication")
+            return actual(fd)
+        with mock.patch.object(s.os, "fsync", side_effect=interrupted):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN_PREPARATION"):
+                self.apply(self.preview())
+        self.assert_original_bytes()
+        self.assertEqual(self.run_op("status")["phase"], "OLD")
+        self.assertTrue(self.run_op("reconcile")["durabilityConfirmed"])
+
+    def test_result_parent_sync_failure_recovers_without_module_replay(self):
+        target = self.roots["state"] / s.TRANSACTION
+        actual = s.os.fsync
+        def interrupted(fd):
+            info = s.os.fstat(fd)
+            if ((target / "result.json").exists()
+                    and (info.st_dev, info.st_ino) == s._identity(target)):
+                raise OSError("result directory sync failure")
+            return actual(fd)
+        with mock.patch.object(s.os, "fsync", side_effect=interrupted):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.apply(self.preview())
+        self.assertEqual(json.loads((target / "result.json").read_bytes())["effect"], "APPLIED")
+        with mock.patch.object(self.svc, "_atomic_write_bytes",
+                               side_effect=AssertionError("completed write replayed")):
+            self.assertTrue(self.run_op("reconcile")["durabilityConfirmed"])
+
+    def test_strict_directory_open_failure_cannot_publish_an_intent(self):
+        actual = s.os.open
+        def refused(path, flags, *args, **kwargs):
+            if (str(path).split("/")[-1].startswith(".fleet-status-intent.")
+                    and flags & s.os.O_DIRECTORY):
+                raise OSError("staging directory open refused")
+            return actual(path, flags, *args, **kwargs)
+        with mock.patch.object(s.os, "open", side_effect=refused):
+            with self.assertRaises(OSError):
+                self.apply(self.preview())
+        self.assertFalse((self.roots["state"] / s.TRANSACTION).exists())
+        self.assert_original_bytes()
+
+    def test_manifest_parent_sync_interruption_requires_strict_recovery_without_replay(self):
+        actual = self.svc._fsync_dir
+        parent = self.roots["manifest"].parent
+        def interrupted(path):
+            if Path(path) == parent and self.roots["manifest"].read_bytes() == self.after:
+                raise OSError("manifest rename succeeded but base sync failed")
+            return actual(path)
+        with mock.patch.object(self.svc, "_fsync_dir", side_effect=interrupted):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.apply(self.preview())
+        self.assertEqual(self.run_op("status")["phase"], "COMMITTED")
+        self.assertFalse((self.roots["state"] / s.TRANSACTION / "result.json").exists())
+        with mock.patch.object(s, "_sync_directory", wraps=s._sync_directory) as synced:
+            with mock.patch.object(self.svc, "_atomic_write_bytes",
+                                   side_effect=AssertionError("completed write replayed")):
+                self.assertTrue(self.run_op("reconcile")["durabilityConfirmed"])
+        self.assertIn(parent, [call.args[1] for call in synced.call_args_list])
+
+    def test_persistent_base_sync_failure_never_claims_durable_or_allows_start(self):
+        self.apply(self.preview())
+        target = self.roots["state"] / s.TRANSACTION
+        receipt = (target / "result.json").read_bytes()
+        actual = s._sync_directory
+        def refused(svc, path):
+            if path == self.roots["base"]:
+                raise OSError("installed base sync unavailable")
+            return actual(svc, path)
+        with mock.patch.object(s, "_sync_directory", side_effect=refused):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN_DURABILITY"):
+                self.run_op("reconcile")
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN_DURABILITY"):
+                s.require_start(self.svc, self.account, self.roots)
+        self.assertEqual((target / "result.json").read_bytes(), receipt)
+        self.assertTrue(self.run_op("reconcile")["durabilityConfirmed"])
+
+    def test_status_remains_read_only_and_does_not_claim_new_durability_proof(self):
+        self.apply(self.preview())
+        with mock.patch.object(s, "_sync_directory",
+                               side_effect=AssertionError("status attempted a durability effect")):
+            observed = self.run_op("status")
+        self.assertEqual(observed["effect"], "APPLIED")
+        self.assertFalse(observed["durabilityConfirmed"])
+
+    def test_real_native_exclusive_publication_retains_inode_and_single_link(self):
+        for is_directory in (False, True):
+            with self.subTest(directory=is_directory):
+                source = self.roots["state"] / ("source-dir" if is_directory else "source-file")
+                destination = self.roots["state"] / ("final-dir" if is_directory else "final-file")
+                if is_directory:
+                    source.mkdir(mode=0o700)
+                    self.write(source / "retained", b"complete")
+                else:
+                    self.write(source, b"complete")
+                source.parent.chmod(0o700)
+                identity = s._identity(source)
+                s._rename_new(self.svc, source, destination)
+                self.assertFalse(source.exists())
+                self.assertEqual(s._identity(destination), identity)
+                file = destination / "retained" if is_directory else destination
+                self.assertEqual(file.read_bytes(), b"complete")
+                self.assertEqual(file.stat().st_nlink, 1)
+
+    def test_result_collision_preserves_foreign_receipt_and_committed_postimages(self):
+        actual = s._rename_new
+        foreign = s._encode({"schema": s.SCHEMA, "planSha256": "0" * 64, "effect": "APPLIED"})
+        def collision(svc, source, destination):
+            if destination.name == "result.json":
+                self.write(destination, foreign)
+            return actual(svc, source, destination)
+        with mock.patch.object(s, "_rename_new", side_effect=collision):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                self.apply(self.preview())
+        result = self.roots["state"] / s.TRANSACTION / "result.json"
+        self.assertEqual(result.read_bytes(), foreign)
+        self.assertEqual((self.roots["base"] / s.MODULE).read_bytes(), self.new)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.after)
+        with self.assertRaisesRegex(SystemExit, "RESULT_OR_STATE_CHANGED"):
+            self.run_op("reconcile")
+        self.assertEqual(result.read_bytes(), foreign)
+
+    def test_unsupported_publication_platform_refuses_without_fallback(self):
+        with mock.patch.object(s.sys, "platform", "unsupported"):
+            with mock.patch.object(s.os, "rename", side_effect=AssertionError("rename fallback")):
+                with mock.patch.object(s.os, "replace", side_effect=AssertionError("replace fallback")):
+                    with self.assertRaisesRegex(SystemExit, "EXCLUSIVE_PUBLICATION_UNAVAILABLE"):
+                        self.apply(self.preview())
+        self.assertFalse((self.roots["state"] / s.TRANSACTION).exists())
+        self.assert_original_bytes()
+
+    def test_missing_exclusive_symbol_refuses_without_fallback(self):
+        with mock.patch.object(s.ctypes, "CDLL", return_value=object()):
+            with mock.patch.object(s.os, "rename", side_effect=AssertionError("rename fallback")):
+                with self.assertRaisesRegex(SystemExit, "EXCLUSIVE_PUBLICATION_UNAVAILABLE"):
+                    self.apply(self.preview())
+        self.assertFalse((self.roots["state"] / s.TRANSACTION).exists())
+        self.assert_original_bytes()
+
+    def test_unsupported_filesystem_preserves_error_and_refuses_without_fallback(self):
+        import errno
+        from types import SimpleNamespace
+        def unsupported(*args):
+            s.ctypes.set_errno(errno.ENOTSUP)
+            return -1
+        operation = mock.Mock(side_effect=unsupported)
+        name = "renameatx_np" if s.sys.platform == "darwin" else "renameat2"
+        library = SimpleNamespace(**{name: operation})
+        with mock.patch.object(s.ctypes, "CDLL", return_value=library):
+            with mock.patch.object(s.os, "rename", side_effect=AssertionError("rename fallback")):
+                with self.assertRaises(OSError) as raised:
+                    self.apply(self.preview())
+        self.assertEqual(raised.exception.errno, errno.ENOTSUP)
+        self.assertFalse((self.roots["state"] / s.TRANSACTION).exists())
+        self.assert_original_bytes()
+
+
+def _torn_preparation_case(artifact):
+    def test(self):
+        plan = self.preview()
+        actual = self.svc._fabric_release_new
+        def torn(path, blob):
+            if path.name == artifact:
+                self.write(path, blob[:1])
+                raise OSError("injected retained artifact write failure")
+            return actual(path, blob)
+        with mock.patch.object(self.svc, "_fabric_release_new", side_effect=torn):
+            with self.assertRaises((OSError, SystemExit)):
+                self.apply(plan)
+        self.assertFalse((self.roots["state"] / s.TRANSACTION).exists(),
+                         "incomplete preparation became an active transaction")
+        self.assertEqual((self.roots["base"] / s.MODULE).read_bytes(), self.old)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.before)
+        self.assertFalse(s.require_start(self.svc, self.account, self.roots))
+    return test
+
+
+for _artifact in ("plan.json", "manifest.before", "module.before",
+                  "manifest.after", "module.after", "intent.json"):
+    setattr(OwnerTransactionTests, "test_torn_preparation_" + _artifact.replace(".", "_"),
+            _torn_preparation_case(_artifact))
+
+
+
+def _foreign_intent_case(kind):
+    def test(self):
+        actual = s._rename_new
+        captured = {}
+        def collision(svc, source, destination):
+            if destination.name == s.TRANSACTION:
+                if kind == "directory":
+                    destination.mkdir(mode=0o700)
+                elif kind == "file":
+                    self.write(destination, b"foreign retained evidence")
+                else:
+                    destination.symlink_to(self.home / "foreign-missing")
+                captured["identity"] = s._identity(destination)
+            return actual(svc, source, destination)
+        with mock.patch.object(s, "_rename_new", side_effect=collision):
+            with mock.patch.object(s.os, "rename", side_effect=AssertionError("rename fallback")):
+                with mock.patch.object(s.os, "replace", side_effect=AssertionError("replace fallback")):
+                    with self.assertRaises((OSError, SystemExit)):
+                        self.apply(self.preview())
+        target = self.roots["state"] / s.TRANSACTION
+        self.assertEqual(s._identity(target), captured["identity"])
+        if kind == "file":
+            self.assertEqual(target.read_bytes(), b"foreign retained evidence")
+        elif kind == "directory":
+            self.assertEqual(list(target.iterdir()), [])
+        else:
+            self.assertTrue(target.is_symlink())
+        self.assert_original_bytes()
+    return test
+
+
+for _kind in ("directory", "file", "symlink"):
+    setattr(OwnerTransactionTests, "test_foreign_intent_at_atomic_boundary_" + _kind,
+            _foreign_intent_case(_kind))
+
+
 class SelectedC4LockTests(unittest.TestCase):
     """No nested native selector when qualifying retained C4 enrollment."""
 
@@ -383,6 +671,7 @@ class SelectedC4LockTests(unittest.TestCase):
         import tempfile
         from contextlib import contextmanager
         from types import SimpleNamespace
+        import private_service_pin_enrollment as accepted_enrollment
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             ep = root / "state" / "native-pool-pin-enrollment"
@@ -417,7 +706,8 @@ class SelectedC4LockTests(unittest.TestCase):
                     nested["active"] = False
 
             @contextmanager
-            def selected_enrollment(svc, roots, operation):
+            def selected_enrollment(svc, roots, operation, profile):
+                self.assertEqual(profile, accepted_enrollment.frozen_profile("chatgpt4"))
                 self.assertFalse(nested["active"], "C4 reentered the live pin selector")
                 nested["checks"].append("enrollment")
                 yield fake_pin, {}, {}
@@ -432,9 +722,12 @@ class SelectedC4LockTests(unittest.TestCase):
             fake_enrollment = SimpleNamespace(
                 TRANSACTION="native-pool-pin-enrollment",
                 TARGET_FILES={},
-                original_pin=selected_enrollment,
+                frozen_profile=accepted_enrollment.frozen_profile,
+                original_pin=mock.create_autospec(
+                    accepted_enrollment.original_pin, side_effect=selected_enrollment),
                 encode=encoded, digest=s.digest,
-                retained=lambda *a: (enrolled_plan, {}),
+                retained=mock.create_autospec(
+                    accepted_enrollment.retained, return_value=(enrolled_plan, {})),
                 result_record=lambda *a: enrolled_result,
             )
             def read(path):
