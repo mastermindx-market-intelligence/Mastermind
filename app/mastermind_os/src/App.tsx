@@ -3261,8 +3261,16 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     key={JSON.stringify([ownerContext?.principalScope,ownerContext?.generation,selection.workRef,selection.rootJobId,commandSelectionRevision])}
     locale={locale} selection={{work_ref:selection.workRef,job_id:selection.rootJobId,attempt_id:null}}
     read={commandReady ? commandBinding?.directNative?.read : undefined}
-    held={heldKind==="consume" || currentReopened?.pointer?.kind==="consume"}
-    recovery={heldKind==="consume" ? checkStatusControl : null}
+    inspectCorrection={commandReady ? commandBinding?.directNative?.inspectCorrection : undefined}
+    onCorrect={(selected,fence,complete)=>{
+      const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const ctx=live ? readOwnerContext(live.port) : null;
+      if(commandSelectionRevision!==selectionSeq.current||!live||live!==commandBinding||!ctx||
+        ctx.principalScope!==ownerContext?.principalScope||ctx.generation!==ownerContext?.generation){complete({status:'refused'});return;}
+      beginCommand('stop',live.directNative?.makeCorrectionIntent?.(selected,fence)??null,complete);
+    }}
+    held={heldKind==="consume" || heldKind==="stop" || currentReopened?.pointer?.kind==="consume" || currentReopened?.pointer?.kind==="stop"}
+    recovery={heldKind==="consume" || heldKind==="stop" ? checkStatusControl : null}
     onConsume={(selected,digest,complete)=>{
       const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
       const ctx=live ? readOwnerContext(live.port) : null;

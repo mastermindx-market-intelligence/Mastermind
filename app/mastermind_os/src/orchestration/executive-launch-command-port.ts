@@ -455,9 +455,9 @@ export function createExecutiveLaunchBinding(
   return {
     port: direct ? {
       context: () => port.context(),
-      prepare: (intent) => (intent.kind === "consume" ? direct.port : port).prepare(intent),
-      submit: (pointer, intent, signal) => (pointer.kind === "consume" ? direct.port : port).submit(pointer, intent, signal),
-      readOperation: (pointer, signal) => (pointer.kind === "consume" ? direct.port : port).readOperation(pointer, signal),
+      prepare: (intent) => ((intent.kind === "consume" || intent.kind === "stop") ? direct.port : port).prepare(intent),
+      submit: (pointer, intent, signal) => ((pointer.kind === "consume" || pointer.kind === "stop") ? direct.port : port).submit(pointer, intent, signal),
+      readOperation: (pointer, signal) => ((pointer.kind === "consume" || pointer.kind === "stop") ? direct.port : port).readOperation(pointer, signal),
     } : port,
     store: viewSource.store,
     getView(): OrchestratorCommandView {

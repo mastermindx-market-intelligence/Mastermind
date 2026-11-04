@@ -80,7 +80,7 @@ class ExecutionPolicyContractTests(unittest.TestCase):
     def test_action_scoped_refusal_does_not_freeze_independent_work(self):
         active = ' '.join(self.read('docs/sol_skills/ACTIVE_EXECUTION.md').split())
         self.assertIn('Action-scoped refusal is not mission-wide refusal.', active)
-        self.assertIn('genuinely separable in authority, target, and intended', active)
+        self.assertIn('genuinely separable in authority, target and effect', active)
         self.assertIn('no replay of the denied effect', active)
         self.assertIn('`EFFECT_UNKNOWN` must be reconciled at the original target', active)
 
