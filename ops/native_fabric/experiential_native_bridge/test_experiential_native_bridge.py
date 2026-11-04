@@ -591,6 +591,30 @@ def test_unqualified_route_constant_refuses(tmp_path):
     assert exc.value.reason == "EXPERIENTIAL_GATEWAY_ROUTE_UNQUALIFIED"
 
 
+@pytest.mark.parametrize("owner_state,expected_reason", [
+    ({"quota_readback": "cached_ui_value"}, "QUOTA_READBACK_UNAUTHENTICATED"),
+    ({"account": "a"}, "ACCOUNT_A_HELD_HTTP403"),
+    ({"entitlement_verified": False}, "ENTITLEMENT_UNVERIFIED"),
+    ({"registry_enabled": False}, "PROVIDER_DISABLED"),
+])
+def test_request_gate_rechecks_owner_before_native_lease(
+    tmp_path, owner_state, expected_reason,
+):
+    """A positive route preview cannot bypass the economic/admission owner."""
+    bridge = sandbox_with_bridge(tmp_path, **owner_state)
+    # This gate is invoked by the composed fabric_task request BEFORE routing,
+    # lease acquisition and any transport call; the exec gate repeats it.
+    with pytest.raises(bridge.ExperientialBridgeRefused) as exc:
+        bridge.request_gate(
+            run_id=RUN_ID, task_class="fix_build", pool="experiential",
+            model="glm-5.3-uncensored", root_id=ROOT_ID,
+            parent_run_id=ROOT_ID, runtime_root=tmp_path,
+            **CONSENT_KWARGS)
+    assert exc.value.reason == expected_reason
+    assert not (tmp_path / "experiential53" / "post_calls.json").exists()
+    assert not (tmp_path / "state").exists()
+
+
 def test_unknown_quota_readback_hard_refusal_with_zero_posts(tmp_path):
     bridge = sandbox_with_bridge(tmp_path, quota_readback="cached_ui_value")
     prompt = tmp_path / "prompt.txt"
