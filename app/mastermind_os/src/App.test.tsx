@@ -1837,7 +1837,7 @@ describe("App command composition", () => {
       .toBe("Unsent launch goal must survive expiry.");
     expect(screen.queryByRole("button", {name:"Launch"})).toBeNull();
     expect(canNavigateForAutomaticSignIn()).toBe(false);
-    await user.click(screen.getByRole("button", {name:"Discard launch goal"}));
+    await user.click(screen.getByRole("button", {name:"Discard goal"}));
     expect(canNavigateForAutomaticSignIn()).toBe(true);
     expect(made.submit).not.toHaveBeenCalled();
   });
@@ -2024,7 +2024,7 @@ describe("App command composition", () => {
     const pointer = await store.read("owner-a");
     if (state === "lost-response") await act(async () => response.reject(new Error("lost response")));
     act(() => made.setView({ projects: [], profiles: [], session: null }));
-    expect(screen.getByText("Launch choices are unavailable. Your draft is retained.")).toBeTruthy();
+    expect(screen.getByText("Work options are unavailable. Your draft is kept.")).toBeTruthy();
     expect(screen.queryByLabelText("Goal")).toBeNull();
     expect(await store.read("owner-a")).toEqual(pointer);
     if (state === "lost-response") expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
@@ -2169,7 +2169,7 @@ describe("App command composition", () => {
     expect(screen.queryByLabelText("Goal")).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Work", level: 1 }));
     expect(window.location.href).toBe(location);
-    await user.click(screen.getByRole("button", { name: "New launch" }));
+    await user.click(screen.getByRole("button", { name: "Write a new goal" }));
     expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("");
     expect((screen.getByLabelText("Project") as HTMLSelectElement).value).toBe("proj-a");
     expect((screen.getByLabelText("Profile") as HTMLSelectElement).value).toBe("prof-a");
@@ -2196,7 +2196,7 @@ describe("App command composition", () => {
     const cancel = screen.getByRole("button", { name: "Cancel" });
     expect(cancel.hasAttribute("disabled")).toBe(true);
     await user.click(cancel);
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
     expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Ship the orchestrator");
     expect(await store.read("owner-a")).toEqual(pointer);
     expect(made.prepare).toHaveBeenCalledTimes(1);
@@ -2220,7 +2220,7 @@ describe("App command composition", () => {
     expect(screen.getByText(COMMAND_ROUTE_UNAVAILABLE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
     cleanup();
 
     window.MastermindMissionHost = {
@@ -2253,7 +2253,7 @@ describe("App command composition", () => {
     expect(incomplete.prepare).not.toHaveBeenCalled();
     expect(incomplete.submit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
     cleanup();
 
     const signedOut = makeCommandBinding();
@@ -2270,7 +2270,7 @@ describe("App command composition", () => {
     expect(signedOut.prepare).not.toHaveBeenCalled();
     expect(signedOut.submit).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "New launch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Write a new goal" })).toBeNull();
   });
 
   it("selects the exact returned mission after an accepted launch", async () => {

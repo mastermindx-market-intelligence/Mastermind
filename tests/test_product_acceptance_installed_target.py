@@ -115,22 +115,22 @@ def test_actual_control_factory_binds_same_installed_owner(tmp_path, monkeypatch
     fixture_root, host_root = tmp_path / 'installed', tmp_path / 'host'
     fixture_root.mkdir(); host_root.mkdir()
     owner, path, _, raw_install = installed(fixture_root, monkeypatch, selected=selected)
-    raw, options, _ = configured(host_root, monkeypatch, False)
+    raw, options, configured_sockets = configured(host_root, monkeypatch, False)
     options['coo_source'] = owner
     captured = {}
     def service(config, **bindings):
+        from control_plane.executive_service import ExecutiveControlService
+        # Nominal offline service shell: no constructor/start or new owner authority.
+        instance = object.__new__(ExecutiveControlService)
+        instance.config, instance.runtime = config, None
         captured.update(bindings)
-        return SimpleNamespace(config=config)
+        return instance
     monkeypatch.setattr(cli, 'ExecutiveControlService', service)
-    from tests.executive_installed_control_fixture import unix_listener
     import shutil
-    room_sockets = []
     def activated(name):
-        # Only the Control Room adopts a real listener; give it a test-owned egid dir.
         if name == 'WorkspaceControlRoom':
-            listener, room_path = unix_listener()
-            room_sockets.append((listener, room_path))
-            raw['workspace_control_room']['socket_path'] = room_path
+            listener = configured_sockets[name]
+            assert listener.getsockname() == raw['workspace_control_room']['socket_path']
             return listener
         return object()
     monkeypatch.setattr(cli, 'activate_launchd_socket', activated)
@@ -138,9 +138,10 @@ def test_actual_control_factory_binds_same_installed_owner(tmp_path, monkeypatch
     try:
         service = cli._service_from_config(raw, **options)
     finally:
-        for listener, room_path in room_sockets:
+        for listener in configured_sockets.values():
+            owned_path = listener.getsockname()
             listener.close()
-            shutil.rmtree(os.path.dirname(room_path), ignore_errors=True)
+            shutil.rmtree(os.path.dirname(owned_path), ignore_errors=True)
     runtime = Runtime.at(tmp_path / 'runtime')
     service.runtime = runtime
     service._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: actual)
