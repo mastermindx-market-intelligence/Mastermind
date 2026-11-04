@@ -24,6 +24,18 @@ def test_project_block_fits_both_real_limits_and_has_exact_unique_rules():
         assert sum(line.startswith(number + " ") for line in block.splitlines()) == 1
 
 
+def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
+    # Protected #1999 added this real source-law rule on master after the
+    # original candidate. A passing standalone 8k check is insufficient:
+    # the integrated Project fence must still fit after the accepted rule.
+    block = _project_block()
+    macro_rule = "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm."
+    if macro_rule in block:
+        assert len(block.encode("utf-8")) <= 8000
+    else:
+        assert len(block.encode("utf-8")) + len(macro_rule.encode("utf-8")) + 1 <= 8000
+
+
 def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
     block = _project_block()
     for phrase in (
