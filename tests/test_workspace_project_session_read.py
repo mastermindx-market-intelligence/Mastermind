@@ -96,3 +96,18 @@ def test_real_source_and_current_broker_receipt_cross_actual_fixed_read(tmp_path
             assert original_service.runtime.events.list_events()==before
         finally:await socket_service.close()
     asyncio.run(run())
+
+
+def test_session_permission_refusal_keeps_plain_integer_http_status_before_source_read():
+    from tests.test_workspace_member_bindings import fixture as bindings_fixture, principal
+    from integrations.mastermind_workspace_app.app import _envelope_response
+    _, bindings = bindings_fixture()
+    frame = {"schema": wire.FRAME_SCHEMA, "operation": wire.OPERATION,
+             "principal": principal(bindings),
+             "selection": {"work_ref": "WS:SYNTHETIC-PROJECT", "root_job_id": "JOB-001"}}
+    provider = object.__new__(WorkspaceReadService)
+    provider.authorize = lambda _: False
+    # This refusal occurs before any cache/source/Runtime owner is accessed.
+    result = asyncio.run(provider._handle_project_session_frame(frame))
+    assert type(result["status"]) is int and result["status"] == 403
+    assert _envelope_response(result).status_code == 403
