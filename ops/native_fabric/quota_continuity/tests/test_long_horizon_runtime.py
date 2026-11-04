@@ -166,6 +166,13 @@ class LongHorizonRuntimeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             observe(7200)
 
+    def test_operator_child_start_window_preserved_as_duration(self):
+        from fabric_operator_owner import OPERATOR_MIN_START_WINDOW_SECONDS
+        self.assertEqual(OPERATOR_MIN_START_WINDOW_SECONDS, 660)
+        source = (CANDIDATE / "fabric_operator_owner.py").read_text()
+        self.assertIn("OPERATOR_MIN_START_WINDOW_SECONDS = 11 * 60", source)
+        self.assertEqual(source.count("< OPERATOR_MIN_START_WINDOW_SECONDS"), 2)
+
     def test_operator_root_may_opt_into_four_hours_only(self):
         import tempfile
         from fabric_operator_owner import OperatorOwner

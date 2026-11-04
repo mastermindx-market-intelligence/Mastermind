@@ -138,9 +138,9 @@
       "source": "source/fabric_operator_issue.py"
     },
     "ext/fabric_operator_owner.py": {
-      "bytes": 24247,
+      "bytes": 24510,
       "installed_preimage_sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
-      "sha256": "3ad724e47e064874e558e0983c9e6cfc92411e741bd5d822d3823da674ddbce9",
+      "sha256": "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675",
       "source": "candidate/fabric_operator_owner.py"
     },
     "ext/fabric_operator_stop.py": {

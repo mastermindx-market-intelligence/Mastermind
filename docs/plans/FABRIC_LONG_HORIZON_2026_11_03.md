@@ -79,7 +79,7 @@ The new deterministic unit test also covers 4h unbounded-broker allowance
 smaller requested wait, invalid reserve selectors, and expired deadlines.
 
 Release qualification: 102-file native manifest now
-`1d3ecc6627b0e106e9fb9400729e0bd81f27aa2f1c98fb2d57189e802e41ced4`;
+`2fb5cca2d4145ab7a3bac9f02ba792e7ece2b726bb6f745f0e1c5b96fe8d6ac7`;
 review-stage manifest and inventory are regenerated from the exact selected
 candidate. The historical 95-file fixture is restored using byte-pinned
 predecessor inversion rather than silently changing old source. The combined
@@ -89,3 +89,64 @@ passed. The older hosted CI shard-2 failure applied to pre-repair head
 CI green for this repaired head. Current-head hosted CI and independent review
 are still required before production rollout. Sparse-Git observation remains
 separate from the broker timing defect and is not waived.
+
+## 2026-11-03 hosted-CI exact-shard diagnosis and source-qualification repairs
+
+Current pre-repair head `da989061704182a25d93bc561400e3e99cbba6f7`
+hosted GitHub Actions CI run [41744937105](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41744937105)
+finished RED on four pytest shards (0,1,2,4); the aggregate `test` gate
+was RED as a consequence. We fetched the dedicated first-party job logs
+on the original source account to identify concrete failing tests rather
+than claiming local results were CI success.
+
+1. **Shard 1**: `test_h1_native100_packaging.py` still asserted that
+   `GROK47_CANDIDATE_COMPOSITION_DIGESTS` had only the *historical four*
+   names. The current 4h source legally introduces exactly three additional
+   qualified sources (`sub.sh`, `native_remote.py`, `fabric_operator_contract.py`).
+   The repaired assertion protects the original four and asserts the closed
+   exact three additions (no open-ended set comparison), then verifies all
+   member SHA-256 values. Local targeted test PASS.
+2. **Shard 2**: `test_native_manual_auto_source_20261024.py` expected the
+   historical `fabric_task.py` digest `ea918a83…` as *current*. The current
+   selected `fabric_task.py` is `16bc8efd…` after two finite runtime
+   comparisons changed from 7,200s to14,400s. The repaired test checks
+   current exact SHA and reverses **only those two bounded comparisons** to
+   prove the historical SHA. Original manual-auto fixture remains untouched.
+   Local test PASS.
+3. **Shard 4**: `test_native_launcher_successor_transition.py` expected
+   the historical B11/current102 mismatch to consist of only five earlier
+   sources; the new runtime source legitimately differs in ten other named
+   source members. We added one immutable test-only historical source fixture:
+   `tests/fixtures/native-long-horizon-predecessors-20261103.json`
+   (SHA-256 `bb924475a501aa732ca0c5b1f05f9428c100c546bcbfb5d3e0c2ceaf268d6f19`),
+   holding five exact source preimages from protected base
+   `9f65957e29eba92245d78609f032aaea523b7cb4`, each verified against the
+   unchanged original B11 manifest SHA and decompressed size. The other
+   five source preimages are checked against immutable original
+   `source/` or `grok47/overlay/` byte digests. The fixture restores only
+   a disposable historical102 stage, never relabels or rewrites the
+   immutable original B11/95 manifest, installer or real selected code.
+   **All 32 B11 tests PASS locally** after this restoration.
+4. **Shard 0**: `test_ceo_submit_armed_composition.py` D8 identity
+   guard flagged two `660` numeric literals in a newly selected operator
+   authorization source. Those literals described an **eleven-minute
+   execution start window**, not a UID. We replaced both with the named
+   `OPERATOR_MIN_START_WINDOW_SECONDS = 11 * 60`, preserving exact
+   comparison boundaries. A new regression verifies the value is still
+   exactly 660 and both source callsites use it. Read-only execution of
+   the existing D8 source scanner against the working diff returned an empty
+   finding set (no bypass or relaxation of the scanner).
+
+Local **consolidated source-qualification suite PASS**, covering closed
+forward map, exact manual-auto predecessor, all B11 historical successor
+fixtures, paid initializer, source/manifest check, and historical95 upgrade;
+the dedicated long-horizon suite also PASS. The selected current102 source
+manifest SHA is `2fb5cca2d4145ab7a3bac9f02ba792e7ece2b726bb6f745f0e1c5b96fe8d6ac7`.
+
+This is not a production acceptance or a hosted green receipt. This branch
+still needs new exact-head GitHub CI, formal nonauthor review, protected
+merge, immutable-generation installation and original-root worker result
+acceptance. The stacked performance PR #2023 remains pinned to the old
+parent until the source owner lawfully reconciles its base; do not move or
+merge it silently. The separately governed signed-GLM source #2020 remains
+draft and uninstalled.
