@@ -162,7 +162,9 @@ elif name == 'ssh':
         raise SystemExit(0)
     if 'mkdir -p ~/lanes/tmp ' in command:
         record('setup')
-        if case == 'slow_setup': time.sleep(10)
+        # Exceed both real setup-expiry commissions (8s and 12s). The
+        # original controller deadline, not host overhead, must end this stall.
+        if case == 'slow_setup': time.sleep(20)
         raise SystemExit(0)
     if 'mkdir ' in command:
         record('support_mkdir'); raise SystemExit(0)
@@ -374,7 +376,7 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_REFUSED rc=75',result['stderr'])
 
     def test_owned_setup_expiry_releases_only_unlaunched_provider_lease(self):
-        # Reach granted-lease setup before its finite ten-second stall.
+        # Reach granted-lease setup before its finite twenty-second stall.
         result=self.run_controller('slow_setup',budget=8)
         self.assertIn('setup',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-setup')
@@ -429,15 +431,12 @@ class ControllerDeadline(unittest.TestCase):
 
     def test_original_twelve_second_controller_expiry_stays_prelaunch(self):
         # Full real-clock setup remains charged to the original12s budget.
-        # Deliberate inert setup delay makes this negative independent of a
-        # fast-host premise; expiry must never be called ambiguous execution.
+        # The inert setup stall exceeds the entire commission even on a fast
+        # host; verify actual owned setup timeout, not a later-stage refusal.
         result=self.run_controller('slow_setup',budget=12,broker_delay=1)
-        self.assertEqual(result['returncode'],75,result['stderr'])
-        stages=[row['stage'] for row in result['events']]
-        self.assertIn('granted',stages);self.assertIn('release',stages)
-        self.assertNotIn('launch',stages)
+        self.check_prelaunch_expiry(result,'commission-setup')
+        self.assertNotIn('scp',[row['stage'] for row in result['events']])
         self.assertNotIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
-        self.assertLess(result['elapsed'],result['budget']+2,result)
         self.assertTrue(result['receipts'])
         for receipt in result['receipts']:
             self.assertTrue(receipt['cleanup']['census_proven'])
