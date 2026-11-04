@@ -194,7 +194,7 @@ class _ForegroundExecution:
     binding: bytes
 
     def __bool__(self):
-        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK"}
+        return self.mode in {"ORDINARY_OPERATOR", "ATTENDED_WORK", "PAID_WORK"}
 
 
 class ServiceError(RuntimeProofError):
@@ -6839,6 +6839,22 @@ class ExecutiveControlService:
                     # dispatched=False and is not execution/result success.
 
             return result
+        if parsed.get('operation') in {'correction-inspect','correct'}:
+            from common import direct_native_correction_contract as correction
+            frame=wire.validate_private_frame(parsed)
+            write=frame['operation']=='correct'
+            body={key:value for key,value in frame.items() if key not in {'schema','operation','principal_scope'}}
+            with runtime.store.read() as connection:
+                rows=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? AND length(CAST(payload_json AS BLOB))<=65536 LIMIT 2",(body['job_id'],)).fetchall()
+                if len(rows)!=1:raise StateConflict('direct correction origin unavailable')
+                intent_id=json.loads(rows[0][0])['provenance']['intent_id']
+            access,_,_=await asyncio.to_thread(self._direct_native_access,principal_scope=frame['principal_scope'],
+                work_ref=body['work_ref'],intent_id=intent_id,app_binding=app_binding)
+            owner=(runtime.request_direct_native_correction if write else runtime.inspect_direct_native_correction)
+            from control_plane.workspace_owned_task import await_owned
+            # Retain an entered write through caller disconnect. Reconciliation
+            # is the exact authenticated inspection, never another dispatch.
+            return await await_owned(asyncio.create_task(asyncio.to_thread(owner,body,access=access)))
         expected={"schema","operation","work_ref","job_id","attempt_id","principal_scope"}
         consume=parsed.get("operation")=="consume"
         if consume: expected|={"result_digest","operation_key"}
@@ -7812,7 +7828,8 @@ class ExecutiveControlService:
         elif not self.config.coo_attended_work_placements and not binding["operator_harness_armed"]:
             mode = "QUEUED_OPERATOR_HARNESS_OFF"
         else:
-            mode = "ATTENDED_WORK" if self.config.coo_attended_work_placements else "ORDINARY_OPERATOR"
+            mode = ("ATTENDED_WORK" if self.config.coo_attended_work_placements else
+                    "PAID_WORK" if self.config.coo_paid_work_placements else "ORDINARY_OPERATOR")
         return _ForegroundExecution(mode, _canonical_json(binding))
 
     def _require_foreground_execution(self, expectation):
@@ -7825,8 +7842,15 @@ class ExecutiveControlService:
                 raise StateConflict("foreground execution is unavailable")
             self._require_current_autonomy()
             self._require_coo_worker_composed()
+            self._require_paid_foreground_placements(binding)
         if self._require_attended_qualification() != qualification:
             raise StateConflict("foreground qualification changed")
+
+    def _require_paid_foreground_placements(self, binding):
+        if self.config.coo_paid_work_placements:
+            from control_plane.paid_fabric_admission import require_registered_paid_placements
+            require_registered_paid_placements(self._require_runtime(),
+                self._paid_worker_binding_source, self.config.coo_paid_work_placements, binding)
 
     def _require_attended_qualification(self):
         from control_plane.fabric_attended_routing import qualification_for
@@ -7955,6 +7979,7 @@ class ExecutiveControlService:
                     "REPAIR_CREATED", "HANDOFF_CREATED", "REQUEUED", "DISPATCHED"}
         for _ in range(128):
             operation.require_root(root_id)
+            self._require_paid_foreground_placements(root_binding)
             outcome = await self._run_coo_cycle(root_id)
             if outcome.root_job_id != root_id:
                 raise StateConflict("foreground cycle returned a foreign root")
@@ -7975,7 +8000,8 @@ class ExecutiveControlService:
                     }
                 if (material is not None and material.job.job_id != root_id
                         and material.job.orchestration_role == "plan"
-                        and not self.config.coo_attended_work_placements):
+                        and not self.config.coo_attended_work_placements
+                        and not self.config.coo_paid_work_placements):
                     # Ordinary Operator bound: the exact validated plan
                     # completion is this call's finite result. No plan
                     # admission, work creation or dispatch may follow here.

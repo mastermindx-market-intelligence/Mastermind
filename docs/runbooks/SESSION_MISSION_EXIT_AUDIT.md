@@ -35,6 +35,81 @@ owners and apply the platform's existing authorization and effect fences. The
 may proceed only if genuinely independent in target, authority and effect, as
 already determined by current protected law.
 
+## Lane and exit-claim discrimination (2026-11-02)
+
+An optional `lanes` snapshot section classifies the **claimed session exit**
+against observed lane state. It exists to separate three outcomes that static
+summaries conflate:
+
+1. lawful **continuation** while a lane-local `WAITING_EXTERNAL` (pending review,
+   CI, capacity, owner reply) blocks only its own lane and a safe independent
+   lane remains (`CONTINUE` claim);
+2. a **premature exit** that ends on a status/checkpoint/CI summary, or ends to
+   wait without a real accepted/started durable executor with a lawful return
+   path (`CHECKPOINT_SUMMARY_STOP` / `WAIT_EXTERNAL_EXECUTOR` claims); and
+3. the lawful **all-lanes stop or safety/effect-unknown fence**
+   (`ALL_LANES_BLOCKED_STOP` claim with every scoped lane evidenced as blocked,
+   including source-attributed `WAITING_EXTERNAL` review/CI dependencies or
+   `BLOCKED_PROVEN`, and `FENCED` holds bound to the exact original effect).
+
+Two support/status-only cycles without a capability delta report
+`no_delta_loop_forces_tactic_change`. The flags are read-only classifications of
+supplied observations; they authorize nothing and are not served-model proof.
+Snapshots without `lanes` keep the exact incumbent output.
+
+### Evidence for lawful exit claims
+
+An enumerated `lanes.items` list alone is not proof of completeness. A
+mission-wide blocked stop or executor-only wait requires `scope_evidence`:
+`source_ref`, `owner_readback_ref`, immutable `source_revision`,
+`source_observed=true`, `all_dependencies_checked=true`, and
+`canonical_lane_ids` equal to the enumerated lane IDs. Operators must verify
+the existing Agent OS/GitHub/Executive owners independently; these fields
+cannot create authority.
+
+A `WAITING_EXTERNAL` lane needs `blocker_ref`, `blocker_owner_ref` and
+`blocker_observed=true`. `BLOCKED_PROVEN` additionally requires a verified
+negative capability, while a `FENCED` lane must match its exact held action
+and original carrier. Independent ready work defeats all-lanes-blocked.
+
+`WAIT_EXTERNAL_EXECUTOR` requires a genuinely started executor with
+`ref`, `return_path_ref`, `owner_observed=true`, and `lane_id` naming an
+existing `WAITING_EXTERNAL` lane. A historical START alone is insufficient:
+`state` must currently be `STARTED` or `RUNNING`, with source-attributed
+`state_ref` and `state_observed=true` from the incumbent owner. Terminal,
+failed, canceled, unknown, queued, or absent current state leaves the worker
+wait unverified; the read-only classifier never assumes a watcher or queue
+is a live executor. The executor `ref` must equal the lane's
+observed `blocker_ref` when that identifies the awaited run. If the blocker
+is a separate receipt, the lane may supply an explicit `executor_ref`,
+`executor_binding_ref` and `executor_binding_observed=true`; the executor
+`ref` must equal that source-attributed bound ID. An unrelated worker
+cannot justify this exit, regardless of START or a valid return path.
+This diagnostic does not itself verify runtime START or owner identity.
+
+`CHECKPOINTED_CONTINUATION` instead needs a canonically persisted,
+read-back cumulative `checkpoint`, with revision, receipt, observed genuine
+continuity risk, next action, resume surface, effect accounting, preserved
+custody and incomplete mission. It does not require a running worker.
+`CHECKPOINT_SUMMARY_STOP` is never continuation just because another
+executor has started. The result is diagnostic, not release authority.
+
+Sanitized realistic sample (November 2026 Prophet A2 settlement-preflight shape:
+142 local test passes, the requested 145-test guard suite not staged, independent
+review unreturned, hosted exact-head CI pending — the observed session exit was a
+checkpoint/status-summary stop):
+
+```sh
+python3 -m scripts.ohf.mission_exit_audit research/fixtures/mission_exit_prophet10289_20261102.json
+```
+
+It must report `premature_exit_detected: true` with `all_lanes_proven_blocked:
+false` — local test passes and a summary do not close the staged guard tests,
+review, or hosted-CI gates. Served-model behavioral evidence for the matching
+evaluator packets (SXA01–SXA07 in `research/fixtures/mission_exit_behavior_cases_20261101.json`)
+remains with the existing fresh-Sol evaluation owner and is a separate, unmet
+adoption gate.
+
 ## Integration sequence and boundaries
 
 1. Source tests + exact-head CI and independent review of this diagnostic.

@@ -90,6 +90,11 @@ REVIEWED_GENERATIONS = {
     "v20": {
         "bridge.py": "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
     },
+    # P00 candidate: requalify the requested call after the guard getter.
+    # Source review/release and same-owner activation remain separate gates.
+    "v21": {
+        "bridge.py": "dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa",
+    },
 }
 
 
