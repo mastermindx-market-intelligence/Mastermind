@@ -72,9 +72,9 @@
       "source": "source/codex_usage.py"
     },
     "ext/commission_deadline.py": {
-      "bytes": 5199,
+      "bytes": 5200,
       "installed_preimage_sha256": null,
-      "sha256": "9ae2b59f51902ae1f8f0cef459fad2b5f2ac10445ccabd17b33f995a26d70097",
+      "sha256": "76d6523f94d9d8a7323766eb957b93bdd37240c7b4c13a4b097555ed53e8829a",
       "source": "candidate/commission_deadline.py"
     },
     "ext/current_failed_artifact_evidence.py": {
@@ -96,9 +96,9 @@
       "source": "source/fabric_client_projection.py"
     },
     "ext/fabric_continuation.py": {
-      "bytes": 16113,
+      "bytes": 16171,
       "installed_preimage_sha256": null,
-      "sha256": "1a3511825ec58a323100cb60c53d483f8e0af7b2e3e9528ea489f4138a12c9c0",
+      "sha256": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
       "source": "candidate/fabric_continuation.py"
     },
     "ext/fabric_cpu_scope.py": {
@@ -120,10 +120,10 @@
       "source": "../grok47/overlay/fabric_operator_client.py"
     },
     "ext/fabric_operator_contract.py": {
-      "bytes": 14380,
+      "bytes": 14381,
       "installed_preimage_sha256": "a2589a23151d75300d89443624ae2ba95ca4af2fbfd222cea50c48575a5b904f",
-      "sha256": "e642e36ef99d2c40b1254975b9ad3cc218fb9ef81c4ce87f3c7b6e7be0808c6a",
-      "source": "../grok47/overlay/fabric_operator_contract.py"
+      "sha256": "e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e",
+      "source": "candidate/fabric_operator_contract.py"
     },
     "ext/fabric_operator_diagnostics.py": {
       "bytes": 4967,
@@ -138,10 +138,10 @@
       "source": "source/fabric_operator_issue.py"
     },
     "ext/fabric_operator_owner.py": {
-      "bytes": 24246,
+      "bytes": 24510,
       "installed_preimage_sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
-      "sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
-      "source": "source/fabric_operator_owner.py"
+      "sha256": "f81b4f053a22ba973b06214f6d06ed2d66e3fc471c781311f074718683cf4675",
+      "source": "candidate/fabric_operator_owner.py"
     },
     "ext/fabric_operator_stop.py": {
       "bytes": 8979,
@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 86604,
+      "bytes": 88555,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "97ce8aa312bb5687397031cecf67665b1bc2aad9e10cdcf9814248218f371006",
+      "sha256": "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -390,10 +390,10 @@
       "source": "candidate/native_prestart_reconcile.py"
     },
     "ext/native_remote.py": {
-      "bytes": 17000,
+      "bytes": 17001,
       "installed_preimage_sha256": "a111878452f2d7ba6ad97af53055d77ed9de13d783653029e5f20311902ff051",
-      "sha256": "388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e",
-      "source": "../grok47/overlay/native_remote.py"
+      "sha256": "2beef7dd4de1dab2908970bed48cfd3fdfd99da2d99bc8de72a92d2a1b2418b6",
+      "source": "candidate/native_remote.py"
     },
     "ext/native_runtime_bindings.py": {
       "bytes": 5346,
@@ -402,10 +402,10 @@
       "source": "candidate/native_runtime_bindings.py"
     },
     "ext/oc_free_exec.sh": {
-      "bytes": 8121,
+      "bytes": 8124,
       "installed_preimage_sha256": "279842e54d6095276b087fd78eae9268026db3079add4b61e474119ce08d3783",
-      "sha256": "279842e54d6095276b087fd78eae9268026db3079add4b61e474119ce08d3783",
-      "source": "source/oc_free_exec.sh"
+      "sha256": "7603f318d941b5e95598088826721b12aa6accaf53b9a43c12b6ae00f2b20f29",
+      "source": "candidate/oc_free_exec.sh"
     },
     "ext/operator_stdout_delivery.py": {
       "bytes": 16734,
@@ -414,9 +414,9 @@
       "source": "source/operator_stdout_delivery.py"
     },
     "ext/original_delivery_collector.py": {
-      "bytes": 72671,
+      "bytes": 94249,
       "installed_preimage_sha256": "c5cc0c5762073a0029c88ef6daa6fb7d073db1c8aa6518b93594a114cb6fe1f8",
-      "sha256": "263ffcd0bebb03b840f4e0cc9b4097d5445b0831026449bde68f760164f96d0a",
+      "sha256": "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
       "source": "candidate/original_delivery_collector.py"
     },
     "ext/original_result_delivery.py": {
@@ -516,9 +516,9 @@
       "source": "candidate/paid_yaml_runtime.py"
     },
     "ext/pick.py": {
-      "bytes": 118474,
+      "bytes": 129395,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b",
+      "sha256": "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
@@ -540,9 +540,9 @@
       "source": "source/pool_status.py"
     },
     "ext/provider_outcome.py": {
-      "bytes": 25120,
+      "bytes": 30786,
       "installed_preimage_sha256": null,
-      "sha256": "aae20d61a9b17dfc7fc5ca1c7507dcf4eca5972f83eaf923379b6e758ab8dd7e",
+      "sha256": "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24",
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {
@@ -570,21 +570,21 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 103957,
+      "bytes": 105676,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0",
+      "sha256": "e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 59042,
+      "bytes": 60654,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d",
+      "sha256": "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1",
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {
-      "bytes": 75868,
+      "bytes": 76361,
       "installed_preimage_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
-      "sha256": "0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556",
+      "sha256": "3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b",
       "source": "candidate/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {
@@ -600,9 +600,9 @@
       "source": "candidate/run_observation_delivery.py"
     },
     "ext/slot.py": {
-      "bytes": 56208,
+      "bytes": 56213,
       "installed_preimage_sha256": "02f779f4c11e7023448cdb22201f66c3041a9675ea403333deee94e3d57fbe4f",
-      "sha256": "4edfed01136259dd45bd5a8d049961161af0953e9f97e30fcddab1ba1164c34f",
+      "sha256": "85c8c2140d314241d8d8e324cf07428672f842ecacfc126570c25400affe406f",
       "source": "candidate/slot.py"
     },
     "ext/studio_mcp_projection.sh": {
@@ -612,10 +612,10 @@
       "source": "source/studio_mcp_projection.sh"
     },
     "ext/sub.sh": {
-      "bytes": 42698,
+      "bytes": 43846,
       "installed_preimage_sha256": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866",
-      "sha256": "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
-      "source": "../grok47/overlay/sub.sh"
+      "sha256": "4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f",
+      "source": "candidate/sub.sh"
     },
     "ext/support_bundle.py": {
       "bytes": 19070,

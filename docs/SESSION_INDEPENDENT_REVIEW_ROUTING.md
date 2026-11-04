@@ -6,6 +6,10 @@
 
 An attended ChatGPT Web, Codex, Claude, Grok or eligible other seat can request **one real, independent source/architecture review**, obtain trustworthy return evidence, and distinguish a technical review from a formal non-author GitHub review. Use Executive OS / Fabric for Jobs, Attempts, admission, provenance and sealed results; GitHub for PR source, CI and submitted review identity; Agent OS for continuity; Slack for message transport. Do **not** build a parallel review registry, queue, authorization, webhook, identity, retry or watcher plane. The automated GitHub-triggered review entrypoint remains the existing `control_plane/github_review_intent.py` / `github_review_intent_ingress.py`, with installation and real-path proof separate from merged source.
 
+## First gate: which review obligation actually applies?
+
+Under protected-accepted and actually loaded attended CEO-Web instructions, FAST, STANDARD and CRITICAL alone do not create a mandatory independent reviewer handoff or additional formal approval. The session still performs source self-check, consequence-appropriate tests, required CI and applicable security/production proof. Native GitHub rules, CODEOWNERS, separately binding security requirements, explicit release holds and authorized independent release controls remain binding. A separately authorized manual or genuinely required independent review uses the existing routes below. The signed AUTOMATIC GitHub/Executive policy remains distinct: FAST0/0, STANDARD1/1, CRITICAL2/1, with its host OFF unless separately authorized and enabled. Source text does not prove installation. Other execution surfaces retain their applicable review requirements.
+
 ## Before dispatch: immutable review identity
 
 1. Fresh-read repo, PR number, **full 40-character head SHA**, protected base/merge ref, all changed paths, original user/machine outcome, builder/commit authors, existing formal reviews/CI and current PR draft state. Bound scope and negative tests; check whether the source owner, existing `independent-review` GitHub ingress or a same-PR/head/scope Fabric reviewer has already been requested or started.
@@ -81,6 +85,8 @@ Fresh-read the original thread and PR head before a substantive ruling. Issue ex
 ## Installation and smoke-test matrix
 
 This document by itself has no ability to enroll a ChatGPT Web plugin, edit shared Project instructions, install a native provider skill, authorize Slack/Repo access or make a Dot run. The existing repo entrypoints and approved Project bootstrap must link to this file; actual Project editors and provider owners must install those instructions and verify fresh-load.
+
+These reviewer START/commission canaries apply only to a separately authorized manual or actually required independent review. An attended-waiver canary instead verifies that no unwanted Fabric/Dot review operation is created. The applicable native, security, formal-approval and recorded-hold negatives remain binding.
 
 - **Web + Fabric:** fresh assigned session finds this guide, proves actual tool list/root and one admitted independent worker START/result; untested enrollment = `NOT_PROVEN`.
 - **Web without Fabric:** fresh assigned session identifies this guide, sends one eligible distinct Dot commission and observes actual ACK/START/RESULT; delivery-only = `NOT_PROVEN`.

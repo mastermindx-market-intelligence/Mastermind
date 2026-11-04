@@ -120,6 +120,77 @@ class PairedLauncherUpgrade(unittest.TestCase):
             if g.digest(pool_preimage) != '85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e' or old['ext/pool_ledger.py'] != g.digest(pool_preimage):
                 raise AssertionError('historical pool ledger preimage differs')
             (cls.built / 'native-code-stage/ext/pool_ledger.py').write_bytes(pool_preimage)
+            # S7 changed two members that the authentic historical95 inverse
+            # previously left untouched. Restore their exact protected bytes;
+            # never repin the immutable95 manifest or its paired-upgrade owner.
+            diagnostic_raw = fixture.with_name('native-diagnostic-predecessors-e5f49cf4.json').read_bytes()
+            if g.digest(diagnostic_raw) != 'fcc3ab7de9a8f517ca59d94cf745c1d894fc14478f399e7d18f198f0679233df':
+                raise AssertionError('diagnostic predecessor fixture changed')
+            diagnostic = json.loads(diagnostic_raw)
+            if (diagnostic['schema'] != 'mastermind.test_native_diagnostic_predecessors/v1'
+                    or diagnostic['source_commit'] != 'e5f49cf4dbe8d06382c1d6f32368e9e9fb51c63d'
+                    or set(diagnostic['files']) != {'ext/original_delivery_collector.py',
+                        'ext/provider_outcome.py', 'ext/remote_sub.sh'}):
+                raise AssertionError('diagnostic predecessor scope differs')
+            for name in ('ext/original_delivery_collector.py','ext/provider_outcome.py'):
+                item=diagnostic['files'][name]
+                payload=zlib.decompress(base64.b64decode(item['zlib_base64'],validate=True))
+                if len(payload)!=item['bytes'] or g.digest(payload)!=item['sha256'] or item['sha256']!=old[name]:
+                    raise AssertionError('historical95 diagnostic preimage differs')
+                (cls.built/'native-code-stage'/name).write_bytes(payload)
+            # Pinned finite long-horizon forward deltas are not historical95
+            # bytes. Restore ONLY these named changed members inside this
+            # disposable historical fixture; retain original SHA checks.
+            native_root = Path(builder.__file__).parent.parent
+            baseline_sources = {
+                'ext/fabric_operator_contract.py': native_root.parent / 'grok47/overlay/fabric_operator_contract.py',
+                'ext/native_remote.py': native_root.parent / 'grok47/overlay/native_remote.py',
+                'ext/sub.sh': native_root.parent / 'grok47/overlay/sub.sh',
+                'ext/oc_free_exec.sh': native_root / 'source/oc_free_exec.sh',
+                'ext/fabric_operator_owner.py': native_root / 'source/fabric_operator_owner.py',
+            }
+            for name, predecessor in baseline_sources.items():
+                original = predecessor.read_bytes()
+                if g.digest(original) != old[name]:
+                    raise AssertionError('long-horizon historical predecessor differs: '+name)
+                (cls.built/'native-code-stage'/name).write_bytes(original)
+            inverse = {
+                'ext/commission_deadline.py': [
+                    ('not 0 <= result <= 14400', 'not 0 <= result <= 7200'),
+                ],
+                'ext/fabric_continuation.py': [
+                    ('if not 1 <= budget <= 14400:', 'if not 1 <= budget <= 7200:'),
+                    ('floor = 14400 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
+                     '        7200 if kwargs.get("task_complexity") == "C2_COMPLEX_BOUNDED" else (\n'
+                     '        3600 if kwargs.get("task_complexity") in (None, "") else 0))',
+                     'floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
+                     '        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)'),
+                ],
+                'ext/remote_sub_helpers.py': [
+                    ("    # Only broker acquisition reserves two seconds for local process cleanup.\n    # Other callers retain the old conservative whole-second deadline. Never\n    # allow a caller-supplied negative reserve or a new deadline authority.\n    selector = sys.argv[2] if len(sys.argv) == 3 else ''\n    if len(sys.argv) > 3 or selector not in ('', 'broker'):\n        raise ValueError('commission_duration_invalid')\n    reserve = 2.0 if selector == 'broker' else 0.0\n    remaining = require_remaining(deadline)\n    # Short admitted attempts retain the immediate-acquire path; with less\n    # than two seconds to spare, the broker may not queue or wait.\n    print(min(int(cap), max(0, int(remaining - reserve))))", '    # Whole seconds are conservative on the Bash/broker/worker wire. The\n    # process owner below retains fractional time for the actual local fuse.\n    print(min(int(cap), int(require_remaining(deadline))))'),
+                    ("r'[1-9][0-9]{0,4}'", "r'[1-9][0-9]{0,3}'"),
+                    ('raw) or int(raw) > 14400:', 'raw) or int(raw) > 7200:'),
+                    ('assert 1 <= timeout <= 14400', 'assert 1 <= timeout <= 7200'),
+                ],
+                'ext/slot.py': [
+                    ('MAX_CHILD_TIMEOUT_S = 14400.0', 'MAX_CHILD_TIMEOUT_S = 7200.0'),
+                    ('not 0.01 <= result.ttl <= 15000', 'not 0.01 <= result.ttl <= 7500'),
+                    ('14400s deadline plus 300s settlement allowance', '7200s deadline plus 300s settlement allowance'),
+                    ('not 0.01 <= ttl <= 15000', 'not 0.01 <= ttl <= 7500'),
+                    ('not 0.01 <= LEASE_TTL_S <= 15000', 'not 0.01 <= LEASE_TTL_S <= 7500'),
+                ],
+            }
+            for name, changes in inverse.items():
+                target = cls.built/'native-code-stage'/name
+                raw = target.read_bytes()
+                for newest, previous in changes:
+                    newer, older = newest.encode(), previous.encode()
+                    if raw.count(newer) != 1:
+                        raise AssertionError('long-horizon inverse changed shape: '+name)
+                    raw = raw.replace(newer, older, 1)
+                if g.digest(raw) != old[name]:
+                    raise AssertionError('long-horizon historical inverse unqualified: '+name)
+                target.write_bytes(raw)
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:

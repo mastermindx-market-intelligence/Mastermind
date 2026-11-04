@@ -116,6 +116,10 @@ class CooHostProvider:
             _refuse()
         self.source, self.workspace = source, workspace
 
+    async def read_workspace_resource_capacity(self, frame):
+        from control_plane.workspace_resource_capacity_read import handle_from_original_coo
+        return await handle_from_original_coo(self.workspace, frame, self.source)
+
     async def read_workspace_retained_activity(self, frame):
         """Delegate one *read-only* original Executive OHF observation.
 

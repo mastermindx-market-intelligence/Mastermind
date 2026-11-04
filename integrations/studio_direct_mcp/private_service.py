@@ -93,6 +93,15 @@ PAPER_APP_REL = Path("Applications/Paper.app")
 # rewrites the v20 directory.
 PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
 PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
+PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
+PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
+FLEET_V20_COHORT_SOURCE_SHA256 = "e4d5bccfec19ee3c88a3c73ed2484f34d119896086d0da9485c0baf5638bc10d"
+# One closed admission set shared by the dispatcher and real lifecycle-lock gate.
+FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
+    "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
+    "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
+    "chatgpt4", "mastermind-os-publication",
+))
 
 # Optional read-only fleet-status consumer. It delegates to the installed
 # Studio Direct control owner instead of letting a model compose shell probes.
@@ -304,6 +313,9 @@ C4_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
     "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
     # Exact native-pool pin postimage; all other C4 profile fields stay sealed.
     "e10730454cd343b8774929b9c6d39f5dfbf1c9b7e83bfdc82636b8e54d0437a0",
+    # Exact v20 Paper-only successor of that native-pin postimage, with the
+    # original 11 module seals, plist, port and non-Paper config unchanged.
+    "f46f1aeec2c5b0baa98f7c655723bbdfbb0a4765f87a98aacb29381750382b1e",
 ))
 C4_PAPER_NON_PAPER_CONFIG_SHA256 = "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894"
 C4_PAPER_RUNTIME_IDENTITY = {
@@ -834,13 +846,35 @@ if current==old:
  i._upgrade_entries(p);phase='PREVIOUS'
 elif current==new:
  i._upgrade_entries(p,complete=True);phase='SELECTED'
+elif (sys.argv[4] in (
+        'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt3',
+        'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4')
+      and p['digest']=='77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7'
+      and new['generation']=='28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce'
+      and new['sequence']==24
+      and isinstance(current,dict)
+      and current.get('schema')==g.POINTER_SCHEMA
+      and type(current.get('sequence')) is int
+      and current['sequence']>new['sequence']
+      and current.get('previous') not in (None,current.get('generation'))):
+ # Each original seven-seat native pin shares this exact completed immutable
+ # sequence-24 successor. Later native releases do not invalidate historical
+ # ingress, but only these seven enrolled accounts may accept the verified
+ # forward selection. No other pin/generation/account gains admission.
+ g.verify(store,new['generation'])
+ g.verify(store,current['generation'])
+ g.verify(store,current['previous'])
+ i._upgrade_entries(p,complete=True)
+ phase='SELECTED'
 else:raise ValueError('selection_refused')
-print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase},sort_keys=True))
+# Include the exact selected pointer in both lock-bound proofs. Without it,
+# a sequence-26 -> sequence-27 change could masquerade as identical SELECTED.
+print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_generation'],'expected_selection':old,'pool_target':e['target'],'pool_previous':e['previous'],'pool_bridge':e['bridge'],'store':p['store'],'phase':phase,'selection':current},sort_keys=True))
 """
     def proof():
         try:
             r = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(rollout),
-                str(args.successor_bundle), args.successor_plan_sha256],
+                str(args.successor_bundle), args.successor_plan_sha256, args.account],
                 capture_output=True, timeout=30)
         except (OSError, subprocess.SubprocessError):
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED") from None
@@ -848,7 +882,7 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
         value = _pin_owner_module().decode(r.stdout)
         if set(value) != {"successor_digest", "target_generation", "expected_selection",
-                "pool_target", "pool_previous", "pool_bridge", "store", "phase"}:
+                "pool_target", "pool_previous", "pool_bridge", "store", "phase", "selection"}:
             raise SystemExit("NATIVE_POOL_PIN_SUCCESSOR_REFUSED")
         return value
     first = proof()
@@ -887,7 +921,7 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
-    if account == "chatgpt4" and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
+    if account in ("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
         _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
     _pin_owner_module().require_start(sys.modules[__name__], account, roots)
@@ -902,7 +936,8 @@ def _c2_lifecycle_mutex(account: str):
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
     if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS
-                       | {"chatgpt2-business", M1_PAPER_V20_ACCOUNT} | NATIVE_POOL_PIN_ACCOUNTS):
+                       | {"chatgpt2-business", M1_PAPER_V20_ACCOUNT, "mastermind-os-publication"}
+                       | NATIVE_POOL_PIN_ACCOUNTS):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
     subject = ("Fabric" if account in FABRIC_BACKEND_ACCOUNTS
                else "M1 Paper" if account == M1_PAPER_V20_ACCOUNT else "C2")
@@ -952,7 +987,12 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if (args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS
+            fleet_selection = getattr(args, "fleet_v20", False) is True
+            if fleet_selection and args.account not in FLEET_V20_ENROLLED_ACCOUNTS:
+                # Let the source owner issue the normal typed refusal before
+                # any unrelated account lifecycle lock inode can be created.
+                return function(args)
+            if ((args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS and not fleet_selection)
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
@@ -1043,10 +1083,13 @@ def _verify_paper_runtime(
         raise SystemExit("Paper runtime conflicting generation selectors")
     runtime_rel = runtime_rel or rel or PAPER_RUNTIME_REL
     if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL,
-                           M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL):
+                           M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL,
+                           PAPER_RUNTIME_V10_REL):
         raise SystemExit("paper runtime generation is not an admitted target")
     if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
         fixed_sha = M1_PAPER_V5_BRIDGE_SHA256
+    elif runtime_rel == PAPER_RUNTIME_V10_REL:
+        fixed_sha = PAPER_V10_BRIDGE_SHA256
     elif runtime_rel in (M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL):
         # These constants are the same approved bridge in source, but individual
         # hermetic tests deliberately mock their owner's expected bridge bytes.
@@ -1058,7 +1101,7 @@ def _verify_paper_runtime(
         fixed_sha = expected_sha
     else:
         fixed_sha = None
-    if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
+    if runtime_rel in (M1_PAPER_V5_RUNTIME_REL, PAPER_RUNTIME_V10_REL):
         if expected_sha not in (None, fixed_sha):
             raise SystemExit("Paper exact runtime bridge SHA mismatch")
         expected_sha = fixed_sha
@@ -2992,8 +3035,12 @@ def cmd_paper_runtime_upgrade(args) -> int:
     """
     account = args.account
     _validate_account_label(account)
+    if getattr(args, "m1_v20", False) is True and getattr(args, "fleet_v20", False) is True:
+        raise SystemExit("Paper v20 conflicting cohort selection flags")
     if getattr(args, "m1_v20", False) is True:
         return _m1_paper_v20_upgrade(args)
+    if getattr(args, "fleet_v20", False) is True:
+        return _upgrade_paper_frozen_fleet_v20(args)
     expected = args.expected_manifest_sha256
     preview = args.preflight_only
     if account == C2_PAPER_ACCOUNT and expected == C2_PAPER_V12_MANIFEST_SHA256:
@@ -3177,6 +3224,99 @@ def _upgrade_paper_c2_personal_v20(args) -> int:
                 expected_sha=PAPER_V20_BRIDGE_SHA256)),
     )
 
+
+
+def _frozen_paper_fleet_module():
+    """Read the approved eight-cohort pure data file beside this installer."""
+    from types import ModuleType
+    path = Path(__file__).with_name("paper_v20_fleet_cohorts.py")
+    # Reuse the original private-service no-follow, owner/mode and inode-stable
+    # bounded reader. Verify exactly the bytes that will execute: re-opening
+    # the file through a Python loader after a hash check creates a swap race.
+    source_bytes = _fabric_release_bytes(path, limit=64 * 1024)
+    if hashlib.sha256(source_bytes).hexdigest() != FLEET_V20_COHORT_SOURCE_SHA256:
+        raise SystemExit("Paper fleet cohort source hash differs from the reviewed release")
+    module = ModuleType("_private_paper_fleet_v20_cohorts")
+    module.__file__ = str(path)
+    exec(compile(source_bytes, str(path), "exec"), module.__dict__)
+    if (frozenset(module.COHORTS) != FLEET_V20_ENROLLED_ACCOUNTS
+            or module.C4_POST_ENROLLMENT["manifest_sha256"]
+               != "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f"
+            or module.TARGET_BRIDGE_SHA256 != PAPER_V20_BRIDGE_SHA256
+            or module.PREDECESSORS != {
+                "v10": PAPER_V10_BRIDGE_SHA256,
+                "v12": PAPER_BRIDGE_SHA256,
+            }):
+        raise SystemExit("Paper fleet source cohort identity drift")
+    return module
+
+
+def _upgrade_paper_frozen_fleet_v20(args) -> int:
+    """Use the sole original manifest-CAS transaction for eight frozen M2 seats."""
+    account, expected, preview = args.account, args.expected_manifest_sha256, args.preflight_only
+    if type(preview) is not bool or not _sha256_hex(expected):
+        raise SystemExit("Paper fleet requires exact CAS and boolean preflight")
+    cohorts = _frozen_paper_fleet_module()
+    if account not in cohorts.COHORTS:
+        raise SystemExit("Paper fleet account not in reviewed cohort")
+    enrolled_c4 = (
+        account == C4_PAPER_ACCOUNT
+        and expected == cohorts.C4_POST_ENROLLMENT["manifest_sha256"]
+    )
+    if (expected != cohorts.COHORTS[account]["manifest_sha256"]
+            and not enrolled_c4):
+        raise SystemExit("Paper fleet original manifest is not frozen predecessor")
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    for path in (roots["config"], roots["manifest"], roots["plist"]):
+        _assert_dest_safe(path)
+    if _stable_regular_file_hash(roots["manifest"], label="fleet manifest") != expected:
+        raise SystemExit("Paper fleet manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    old_config_bytes = roots["config"].read_bytes()
+    old_manifest_bytes = roots["manifest"].read_bytes()
+    plist_bytes = roots["plist"].read_bytes()
+    if (hashlib.sha256(old_manifest_bytes).hexdigest() != expected
+            or hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(plist_bytes).hexdigest() != prior["plistHash"]):
+        raise SystemExit("Paper fleet predecessor changed during inspection")
+    if enrolled_c4:
+        # Read-only qualification of the actual accepted enrollment owner and
+        # original native-pool receipt, not a hash-only assertion. It must be
+        # committed and selected before this second Paper-only CAS can begin.
+        _pin_enrollment_owner_module().require_start(
+            sys.modules[__name__], account, roots)
+    home = _user_root()
+    try:
+        plan = cohorts.plan_selection(
+            account, manifest_bytes=old_manifest_bytes, config_bytes=old_config_bytes,
+            plist_bytes=plist_bytes, home=home)
+    except ValueError as exc:
+        raise SystemExit(f"Paper fleet predecessor refused: {exc}") from exc
+    generation = plan["fromGeneration"]
+    if generation not in ("v10", "v12"):
+        raise SystemExit("Paper fleet generation is not admitted")
+    predecessor_rel = PAPER_RUNTIME_V10_REL if generation == "v10" else PAPER_RUNTIME_REL
+    predecessor_sha = cohorts.PREDECESSORS[generation]
+    def verify_runtimes():
+        _verify_paper_runtime(home, runtime_rel=predecessor_rel, expected_sha=predecessor_sha)
+        _verify_paper_runtime(home, runtime_rel=PAPER_RUNTIME_V20_REL,
+                              expected_sha=PAPER_V20_BRIDGE_SHA256)
+    verify_runtimes()
+    future = {**prior, "configHash": hashlib.sha256(plan["configBytes"]).hexdigest()}
+    if (plan["manifest"] != future
+            or not _valid_manifest(future, account, label)
+            or hashlib.sha256(plan["manifestBytes"]).hexdigest() != plan["targetManifestSha256"]):
+        raise SystemExit("Paper fleet prospective manifest is not the reviewed target")
+    receipt = {key:value for key,value in plan.items()
+               if key not in ("configBytes", "manifestBytes", "manifest")}
+    receipt.update(runtimeSealPreserved=True, sourcePointerPreserved=True)
+    return _apply_paper_selection(
+        account=account, label=label, roots=roots, expected=expected, prior=prior,
+        old_config_bytes=old_config_bytes, old_manifest_bytes=old_manifest_bytes,
+        config_bytes=plan["configBytes"], target_manifest_sha=plan["targetManifestSha256"],
+        receipt=receipt, preview=preview, runtime_verifier=verify_runtimes,
+    )
 
 def _apply_paper_selection(
     *, account: str, label: str, roots: dict, expected: str, prior: dict,
@@ -3734,20 +3874,34 @@ def cmd_stop(args) -> int:
         return 1
 
     deadline = time.monotonic() + 10
-    try:
-        while _lifecycle_inspect(account, label, roots) is not None:
-            if time.monotonic() >= deadline:
-                print(json.dumps({"stopped": False, "reason": "still loaded"}))
-                return 1
+    strict_account = (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+                      or account in FABRIC_BACKEND_ACCOUNTS
+                      or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL)
+    # launchd may transiently report an indeterminate state immediately after a
+    # successful bootout. Continue OBSERVING only, never repeat the bootout.
+    # A strict owner must still see an exact positive ABSENT receipt before
+    # reporting stopped; persistent uncertainty remains EFFECT_UNKNOWN.
+    for poll in range(51):
+        try:
+            remaining = _lifecycle_inspect(account, label, roots)
+        except SystemExit as exc:
+            if not strict_account:
+                raise
+            if time.monotonic() >= deadline or poll == 50:
+                subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+                           else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
+                raise SystemExit(
+                    f"{subject} stop: EFFECT_UNKNOWN after bootout; "
+                    "service absence is unverified"
+                ) from exc
             time.sleep(0.2)
-    except SystemExit as exc:
-        if (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
-                or account in FABRIC_BACKEND_ACCOUNTS
-                or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL):
-            subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
-                       else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
-            raise SystemExit(f"{subject} stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
-        raise
+            continue
+        if remaining is None:
+            break
+        if time.monotonic() >= deadline or poll == 50:
+            print(json.dumps({"stopped": False, "reason": "still loaded"}))
+            return 1
+        time.sleep(0.2)
 
     print(json.dumps({"stopped": True, "account": account}))
     return 0
@@ -3767,7 +3921,7 @@ def build_parser() -> argparse.ArgumentParser:
     pin.set_defaults(func=cmd_native_pool_pin)
 
     enrollment = sub.add_parser("native-pool-pin-enrollment")
-    enrollment.add_argument("--account", choices=("chatgpt4",), required=True)
+    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)
     enrollment.add_argument("--expected-manifest-sha256", required=True)
     enrollment.add_argument("--expected-plan-sha256")
     enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")
@@ -3793,6 +3947,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="read-only Paper selection plan; no service or installation changes")
     paper.add_argument("--m1-v20", action="store_true",
                        help="exact reviewed M1 chrisadmin v5-to-v20 Paper-only selector")
+    paper.add_argument("--fleet-v20", action="store_true",
+                       help="only eight frozen M2 original v10/v12 Paper cohorts, exact predecessor CAS")
     paper.set_defaults(func=cmd_paper_runtime_upgrade)
 
     for name in ("stage", "upgrade"):

@@ -76,6 +76,7 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/status",
     "/os/executive/direct-native/result",
     "/os/executive/direct-native/consume",
+    "/os/executive/direct-native/correction",
 )
 
 #: Three fixed POST routes served by the opt-in selected-session transport.
@@ -422,7 +423,7 @@ def build_personal_read_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
     @server.call_tool(validate_input=False)
     async def call_tool(
         name: str, arguments: dict[str, Any] | None
-    ) -> list[mcp_types.TextContent]:
+    ) -> mcp_types.CallToolResult:
         try:
             request = server.request_context.request
         except LookupError as exc:
@@ -447,11 +448,14 @@ def build_personal_read_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
                     "backend_unavailable",
                     "installed Executive response is unavailable",
                 )
-        return [
-            mcp_types.TextContent(
+        failed = payload.get("ok") is not True
+        return mcp_types.CallToolResult(
+            content=[mcp_types.TextContent(
                 type="text", text=canonical_json(payload).decode("utf-8")
-            )
-        ]
+            )],
+            structuredContent=payload if failed else None,
+            isError=failed,
+        )
 
     manager = StreamableHTTPSessionManager(
         server,
@@ -553,6 +557,25 @@ _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/control-room/refresh-builds",
 )
 
+# Fixed already-owned inner routes. These are transport classifications only;
+# the Workspace App retains each original READ/action principal and grant gate.
+_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
+    "/workspace/project-session/current",
+    "/workspace/project-admission/current",
+    "/workspace/project-admission/operation",
+    "/workspace/fabric/status/current",
+)
+_WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
+    "/workspace/fabric/catalog/current",
+)
+_WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
+    "/workspace/project-admission/pause",
+    "/workspace/project-admission/resume",
+)
+_WORKSPACE_ACTION_ROUTES = (
+    _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES + _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES
+)
+
 
 def _refuse_public_policies(settings: Any, builder: str) -> None:
     """Never admit the public ``/mcp`` audience at an unrestricted outer layer.
@@ -590,7 +613,11 @@ class _ExecutivePathFence:
                 "/workspace/result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
-                "/workspace/operator/activity/current",
+                "/workspace/project-plan/current",
+                "/workspace/project-journal/current",
+                "/workspace/project-direction/current",
+                "/workspace/autonomy/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
             # v2 routes carry a query string; the legacy v1 mission route does too.
             self._query_routes.update((
@@ -600,8 +627,14 @@ class _ExecutivePathFence:
                 "/workspace/result/current",
                 "/workspace/result-references/current",
                 "/workspace/plan/current",
-                "/workspace/operator/activity/current",
+                "/workspace/project-plan/current",
+                "/workspace/project-journal/current",
+                "/workspace/project-direction/current",
+                "/workspace/autonomy/current",
+                "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
+            self._workspace_routes.update(_WORKSPACE_ADDITIONAL_GET_ROUTES)
+            self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
@@ -609,9 +642,9 @@ class _ExecutivePathFence:
         if workspace_app is not None:
             # Fixed actions share the incumbent public credential/host fences
             # but must not be included in the preceding GET method expansion.
-            self._routes.update({path: "POST" for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES})
-            self._workspace_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
-            self._public_routes.update(_WORKSPACE_CONTROL_ROOM_ACTION_ROUTES)
+            self._routes.update({path: "POST" for path in _WORKSPACE_ACTION_ROUTES})
+            self._workspace_routes.update(_WORKSPACE_ACTION_ROUTES)
+            self._public_routes.update(_WORKSPACE_ACTION_ROUTES)
         if os_app is not None:
             if type(os_app) is not OsStaticApp:
                 raise ValueError("fixed OS static owner required")
@@ -1072,6 +1105,7 @@ def _build_profile_mcp_app(
             commission_preparer=os_commission_preparer,
             direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
                 connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
+            foreground_submissions=os_session_bridge_client is not None,
         )
         if os_session_bridge_client is not None:
             # The opt-in selected-session leaf reuses this factory's audited
@@ -1152,6 +1186,9 @@ def _build_profile_mcp_app(
     def result(payload: dict[str, Any], *, challenge: str | None = None) -> mcp_types.CallToolResult:
         return mcp_types.CallToolResult(
             content=[mcp_types.TextContent(type="text", text=canonical_json(payload).decode("utf-8"))],
+            # Preserve the public typed failure and its original recovery identity.
+            # Success payloads stay text-only to avoid duplicating large results.
+            structuredContent=payload if payload.get("ok") is not True else None,
             isError=payload.get("ok") is not True,
             _meta={"mcp/www_authenticate": [challenge]} if challenge else None,
         )
@@ -1400,10 +1437,15 @@ def _build_profile_mcp_app(
                              "/workspace/result/current",
                              "/workspace/result-references/current",
                              "/workspace/plan/current",
-                             "/workspace/operator/activity/current"))
+                             "/workspace/project-plan/current",
+                "/workspace/project-journal/current",
+                "/workspace/project-direction/current",
+                "/workspace/autonomy/current",
+                             "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
+                             + _WORKSPACE_ADDITIONAL_GET_ROUTES)
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])
-            for path in _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES
+            for path in _WORKSPACE_ACTION_ROUTES
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
@@ -1750,7 +1792,8 @@ def build_web_ceo_v3_mcp_app(
         profile_validator=validate_web_ceo_v3_tool_arguments,
         reconcile_tool_name=RECONCILE_TOOL_NAME,
         profile_create_app=lambda configured: create_web_ceo_v3_app(
-            configured, mdm_reader=mdm_reader
+            configured, mdm_reader=mdm_reader,
+            foreground_session_client=(os_session_bridge_client if enable_os_executive_transport else None),
         ),
         workspace_app=workspace_app,
         content_app=content_app,
