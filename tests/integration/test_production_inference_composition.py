@@ -1,9 +1,10 @@
 """Actual Brain -> Macro composition; only the provider SDK/network is replaced.
 
-Run with Macro's engine/lib/config importable (the normal vendor bootstrap, or
-PYTHONPATH). Set MM_REQUIRE_PRODUCTION_MODE_COMPOSITION=1 to make a missing
-Macro owner a failure rather than a reported skip. All credentials are synthetic;
-incumbent ledger writers are redirected to a temporary directory.
+Run with the paired Macro engine/lib/config importable (vendor bootstrap or
+PYTHONPATH) and MM_REQUIRE_PRODUCTION_MODE_COMPOSITION=1. The required CI
+composition job supplies both; ordinary discovery skips this cross-repository
+class rather than using the unrelated legacy Macro pin. All credentials are
+synthetic; incumbent ledgers are redirected to a temporary directory.
 """
 from __future__ import annotations
 
@@ -45,12 +46,12 @@ class DispatcherTests(unittest.TestCase):
 class ProductionModeCompositionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if os.environ.get("MM_REQUIRE_PRODUCTION_MODE_COMPOSITION") != "1":
+            raise unittest.SkipTest("Run in the required paired Macro composition job")
         try:
             from engine import provider_production_modes as owner
         except ImportError as exc:
-            if os.environ.get("MM_REQUIRE_PRODUCTION_MODE_COMPOSITION") == "1":
-                raise AssertionError("Real Macro production-mode owner is required") from exc
-            raise unittest.SkipTest("Real Macro production-mode owner is absent") from exc
+            raise AssertionError("Real paired Macro production-mode owner is required") from exc
         cls.owner = owner
         cls.source_config = json.loads(Path(owner.DEFAULT_PATH).read_text())
 

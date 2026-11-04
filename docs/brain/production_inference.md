@@ -37,7 +37,7 @@ PYTHONPATH=.:/path/to/macro MM_REQUIRE_PRODUCTION_MODE_COMPOSITION=1 \
   -p test_production_inference_composition.py -v
 ```
 
-The required flag turns a missing Macro owner into a failure. Without it, environments that lack the vendored Macro owner report a composition skip; a skipped suite is not cross-repository integration proof.
+The required CI job `production_inference_composition` checks out the exact paired Macro revision (including `engine`, `lib` and `config`) and sets the required flag. A missing owner or configuration fails that job. Ordinary test discovery explicitly skips the cross-repository class so it does not use the unrelated legacy Macro pin; the protected `test` fan-in requires the dedicated job to succeed. A skipped suite is not cross-repository integration proof. The existing global Macro test pin and other CI gates are preserved.
 
 Fourteen tests passed against Mastermind source base `8c417f6baf9ee19e7172efb9fea009e28ccf6769` plus this change, and Macro base `52abe2e183833a216267942a99513e6c9cbe062f` plus the paired retry change. Cases include actual CIO attribution, one usage row, disabled/missing/unknown mode, unqualified GLM before credential resolution, invalid pinned destination, bounded token request, empty output, unavailable owner, logging failure, and timeout after one dispatch without fallback. This proof is local source composition; it is not a live provider, VPS, browser, shared-pool or release receipt.
 

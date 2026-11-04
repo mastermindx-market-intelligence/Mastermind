@@ -320,13 +320,51 @@ jobs:
           retention-days: 3
           compression-level: 0
 
+  # This consumer needs the paired production owner and its configuration.
+  # The ordinary shard checkout intentionally keeps its unrelated legacy Macro
+  # pin. Require the actual composition here; a discovery skip is never proof.
+  production_inference_composition:
+    name: Brain production inference composition
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout exact paired Macro production owner
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 09f0385c2ed3d9060362f3cf20e705bcb7db6043
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install minimal composition dependency
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+      - name: Run actual CIO to production-owner composition
+        env:
+          MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
+          PYTHONPATH: .:vendor/macro_src
+        run: >-
+          python -m unittest discover -s tests/integration
+          -p test_production_inference_composition.py -v
+
   # Branch protection requires one stable context "test", on both PRs and
   # native merge_group candidates. A skipped matrix is accepted ONLY for a
   # verified, completed PR fast lane; merge_group always requires full shards.
   # There is no green fan-in if scope, smoke, or any required shard failed.
   test:
     name: test
-    needs: [pr_scope, pr_fast, pytest_shards]
+    needs: [pr_scope, pr_fast, pytest_shards, production_inference_composition]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -345,8 +383,13 @@ jobs:
           PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
           PR_FAST_STATUS: ${{ needs.pr_fast.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
+          PRODUCTION_COMPOSITION_STATUS: ${{ needs.production_inference_composition.result }}
         run: |
           set -euo pipefail
+          if [ "$PRODUCTION_COMPOSITION_STATUS" != success ]; then
+            echo "paired Brain production composition must pass without skips"
+            exit 1
+          fi
           if [ "$EVENT_TYPE" = "pull_request" ]; then
             if [ "$PR_SCOPE_STATUS" != success ]; then
               echo "trusted PR risk-source qualification unavailable"

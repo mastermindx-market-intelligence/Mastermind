@@ -103,3 +103,12 @@ Macro #10727 now includes the actual Master Brain synthesis consumer at `09f0385
 Fourteen Master Brain integration tests and the fourteen CIO composition tests pass locally against the exact candidate files. The Macro suite is included in its existing packed CI job. This is additional application source coverage, not proof of native shared pools, deployed services or live provider behavior. The original all-products acceptance remains open.
 
 The existing Macro #7142 selector has an explicit release hold, verified from its current source-thread record; its missing release evidence must be resolved on that same carrier. A draft title alone was not used as a blocker. No held branch, arming state or native account/lease was changed.
+
+
+## Source qualification and CI dependency correction
+
+The new Mastermind composition now has an explicit required CI job that checks out paired Macro `09f0385c2ed3d9060362f3cf20e705bcb7db6043` with its configuration. Default discovery skips the cross-repository class; the existing protected fan-in requires the dedicated no-skip composition job. The unrelated legacy Macro pin and all prior gates remain. The hosted whitespace finding in `brain/client.py` was corrected, and the required local 14-test CIO composition still passes.
+
+The existing native selector #7142 received verified non-author source-only review at its unchanged exact head, supported by a fresh isolated 36-test run with blob verification. That review explicitly supersedes the handoff's inaccurate 84-test attribution. The existing Draft/release hold and unproven current-base/runtime binding remain; no native activation or merge was performed. See https://github.com/mastermindx-market-intelligence/macro/pull/7142#pullrequestreview-5766694663 .
+
+Current publication, check and original runtime-effect observations belong to the programme issue. Their projection is not a release receipt, and this plan does not turn pending checks or held components into parent completion.

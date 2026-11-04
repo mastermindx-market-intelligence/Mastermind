@@ -245,4 +245,3 @@ def _record_api_cost(resp, *, role: str | None = None, model: str | None = None,
         )
     except Exception:  # noqa: BLE001
         pass
-
