@@ -48,6 +48,11 @@ export function ResourcesSystemsPanel({ controlRoom, work, locale = "en", onRevi
   const workRows = document ? WORK_GROUP_ORDER.flatMap(group => document.groups[group]) : [];
   const visibleWork = showAllWork ? workRows : workRows.slice(0, 8);
   const unknown = t("Not supplied", "未提供");
+  const capacityLabel = (value: string) => ({
+    WAITING_CAPACITY: t("Waiting for capacity", "等待可用容量"),
+    NOT_APPLICABLE: t("Not applicable to this work state", "不适用于此工作状态"),
+    UNKNOWN: unknown, NOT_PROJECTED: unknown,
+  } as Record<string, string>)[value] ?? unknown;
   return <section className="resources-workspace" aria-labelledby={labelId} aria-busy={controlRoom.state === "PENDING"}>
     <header className="resources-header">
       <div><p className="eyebrow">{t("RESOURCES & SYSTEMS", "资源与系统")}</p>
@@ -95,11 +100,12 @@ export function ResourcesSystemsPanel({ controlRoom, work, locale = "en", onRevi
       <h3>{t("Work capacity evidence", "工作容量证据")}</h3>
       <p className="muted">{t("These observations belong to exact work items. They are not free slots or a fleet utilisation total.", "这些观测对应具体工作，不代表空闲槽位或集群总利用率。")}</p>
       {document ? <>
-        <p>{t("Observed", "观测时间")} <time dateTime={document.generated_at}>{document.generated_at}</time> · {document.coverage.completeness === "COMPLETE" ? t("Complete returned view", "返回视图完整") : t("Partial returned view", "返回视图不完整")}</p>
+        <p>{t("Generated at", "生成时间")} <time dateTime={document.generated_at}>{document.generated_at}</time> · {document.coverage.completeness === "COMPLETE" ? t("Complete returned view", "返回视图完整") : t("Partial returned view", "返回视图不完整")}</p>
         {workRows.length ? <ul className="resources-work-list">{visibleWork.map(row => <li key={row.root_job_id}>
-          <div><strong>{row.root_job_id}</strong><p>{row.capacity.value === "UNKNOWN" || row.capacity.value === "NOT_PROJECTED" ? unknown : row.capacity.value.replaceAll("_", " ").toLowerCase()}</p></div>
+          <div><strong>{row.root_job_id}</strong><p>{capacityLabel(row.capacity.value)}</p></div>
           {onOpenWork && <button type="button" onClick={() => onOpenWork(row.root_job_id)}>{t("Assigned work", "查看工作")}</button>}
           <details><summary>{t("Capacity source", "容量来源")}</summary><dl>
+            <div><dt>{t("Source state", "来源状态")}</dt><dd><code>{row.capacity.value}</code></dd></div>
             <div><dt>{t("Owner", "来源")}</dt><dd>{row.capacity.source ?? unknown}</dd></div>
             <div><dt>{t("Evidence", "证据")}</dt><dd>{row.capacity.evidence_ref ?? unknown}</dd></div>
             <div><dt>{t("Observed", "观测时间")}</dt><dd>{row.capacity.observed_at ?? unknown}</dd></div>

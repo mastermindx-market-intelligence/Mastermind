@@ -52,10 +52,11 @@ it("inspects installed systems without promoting installation or bindings to rea
 it("shows exact-work evidence and retains partial/truncated scope and safe navigation", () => {
   const open = vi.fn();
   render(<ResourcesSystemsPanel controlRoom={control()} work={{ kind: "DOCUMENT", document: work() }} onOpenWork={open} />);
-  expect(screen.getByText("waiting capacity")).toBeTruthy();
+  expect(screen.getByText("Waiting for capacity")).toBeTruthy();
   expect(screen.getByText(/Partial returned view/)).toBeTruthy();
   expect(screen.getByText(/source omitted work items/)).toBeTruthy();
   expect(screen.getByText("capacity-receipt")).toBeTruthy();
+  expect(screen.getByText(/Generated at/)).toBeTruthy();
   expect(screen.queryByText("UNTRUSTED_REASON")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Assigned work" }));
   expect(open).toHaveBeenCalledExactlyOnceWith("root-0");
