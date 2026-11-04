@@ -27,6 +27,7 @@
 .resources-work-list details { grid-column: 1 / -1; margin: 0; }
 .resources-missing { color: var(--muted); }
 .resources-missing h3 { color: var(--text); }
+.resources-telemetry-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
 .resources-workspace button, .resources-workspace summary { touch-action: manipulation; }
 [data-theme="light"] .resources-inventory, [data-theme="light"] .resources-inspector { background: var(--panel); box-shadow: 0 4px 16px color-mix(in srgb, var(--text) 8%, transparent); }
 [data-theme="light"] .resources-row[aria-pressed="true"] { background: var(--raised); border-color: var(--muted); }
@@ -40,4 +41,5 @@
   .resources-row small { margin: 0; }
   .resources-workspace button { min-height: 44px; }
   .resources-work-list > li { grid-template-columns: minmax(0, 1fr); }
+  .resources-telemetry-metrics { grid-template-columns: minmax(0, 1fr); }
 }
