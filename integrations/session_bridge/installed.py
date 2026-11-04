@@ -45,6 +45,21 @@ _PRINCIPAL_KEYS = frozenset({
 _MAX_TARGETS = 256
 
 
+class TransportNotSent(BridgeError):
+    """Private provenance: the trusted transport proved the frame was not sent.
+
+    Issued only inside :class:`InstalledSessionBridgeClient` after an actual
+    trusted transport response reports ``TRANSPORT_NOT_SENT``. It remains a
+    ``BridgeError`` with the incumbent public ``backend_unavailable`` code and
+    message, so existing Session Bridge callers keep their behavior; the
+    foreground admission owner consumes this type, which no wire payload,
+    store or caller-supplied JSON can forge.
+    """
+
+    def __init__(self, message: str = "installed Session Bridge owner is unavailable") -> None:
+        super().__init__("backend_unavailable", message)
+
+
 async def _maybe(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
@@ -89,6 +104,9 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
 
 
 def _validate_arguments(tool, arguments):
+    if tool == "session_summon":
+        from .schemas import validate_installed_summon_arguments
+        return validate_installed_summon_arguments(arguments)
     if tool == "session_reply_read":
         from .return_tools import NativeReplyReadTool
         try:
@@ -262,6 +280,7 @@ def build_runtime_native_reply_writer(runtime: Any, *, dialogue_socket_path: Pat
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  summon_handler: Callable | None = None,
                                  codex_owner_configured: Callable[[], bool] | None = None,
+                                 attention_requester: Callable | None = None,
                                  authorized_policies: Any = None,
                                  reference_cursor_key: bytes | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
@@ -294,18 +313,24 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     def unavailable(*_):
         raise BridgeError("backend_unavailable", "installed native session owner is unavailable")
 
+    if attention_requester is not None and not callable(attention_requester):
+        raise TypeError("attention_requester must be callable when supplied")
+
     # A canonical reply receipt is never promoted into attention/consumption.
-    # The existing Dialogue/Wake loop remains the attention owner; this bridge
-    # cannot inject a raw provider prompt or launch another worker.
-    def coordinator(targets, principal, arguments):
+    # The installed owner may request the existing Dialogue/Wake path using
+    # only opaque references. This bridge never creates a provider or grant.
+    def coordinator(targets, principal, arguments, read_ref):
         # Bind authorization to this invocation; no cached caller or second
         # writer can enter COMMIT without the original request's durable fence.
         writer = AgentDialogueContinueWriter(
             RuntimeExecutiveReplyBindingResolver(targets), socket_path=dialogue_socket_path,
             before_commit=lambda **facts: returns.begin_continuation_commit(
                 principal, arguments, **facts))
-        return CanonicalReplyCoordinator(
-            reply_writer=writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
+        def attention(target_ref, reference):
+            if attention_requester is None:
+                return {"state": "UNAVAILABLE"}
+            return attention_requester(target_ref, reference, read_ref)
+        return CanonicalReplyCoordinator(reply_writer=writer, attention_waker=attention)
 
     def targets(principal, kind):
         values = reader(kind)
@@ -323,8 +348,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                     "carrier": committed, "attention": {"state": "EFFECT_UNKNOWN"},
                     "read_ref": read_ref}
         router = ExactTargetRouter(
-            fabric_reply=coordinator(projector, principal, arguments),
-            codex_reply=coordinator(codex, principal, arguments), claude_reply=unavailable)
+            fabric_reply=coordinator(projector, principal, arguments, read_ref),
+            codex_reply=coordinator(codex, principal, arguments, read_ref), claude_reply=unavailable)
         result = await _maybe(router(
             arguments["target_ref"], arguments["instruction"],
             arguments["stop_condition"], arguments["operation_key"]))
@@ -390,10 +415,9 @@ class InstalledSessionBridgeClient:
         response = await send(self._socket_path, frame)
         transport = getattr(response, "transport", None)
         if transport == TRANSPORT_NOT_SENT:
-            raise BridgeError(
-                "backend_unavailable",
-                "installed Session Bridge owner is unavailable",
-            )
+            # Typed provenance only the trusted transport can issue after it
+            # proved the frame was not sent; the public code is unchanged.
+            raise TransportNotSent("installed Session Bridge owner is unavailable")
         if transport == TRANSPORT_SENT_UNKNOWN:
             raise BridgeError(
                 "effect_unknown" if modifying else "backend_unavailable",

@@ -154,6 +154,27 @@ def test_unknown_installed_skill_refused_before_any_change(tmp_path: Path) -> No
     assert (home / ".codex/hooks.json").read_bytes() == hooks
 
 
+def test_new_macro_cwd_guide_upgrades_exact_current_skill_only(tmp_path: Path) -> None:
+    current = (ROOT / SKILL_PATH).read_bytes()
+    section = b"\n## New Macro sparse-worktree requests\n"
+    assert current.count(section) == 1
+    prior, guidance = current.split(section, 1)
+    prior_blob = hashlib.sha1(b"blob " + str(len(prior)).encode() + b"\0" + prior).hexdigest()
+    assert prior_blob == "1ae788e373c93546ac4990e7ab48c1fa539561e9"
+    assert b"--cwd '~'" in prior
+    assert b'--new-macro-worktree "$MACRO_COMMIT_SHA40" --cwd \'~/lanes/repos/macro\'' in guidance
+    home, doc, config, hooks = _home(tmp_path, with_pointer=True)
+    (home / USER_SKILL).write_bytes(prior)
+    result = policy.apply_codex_fabric_entrypoint(home)
+    assert result["state"] == "READY"
+    assert (home / USER_SKILL).read_bytes() == current
+    assert (home / DOC).read_bytes() == doc
+    assert (home / ".codex/config.toml").read_bytes() == config
+    assert (home / ".codex/hooks.json").read_bytes() == hooks
+    assert not (home / ".claude").exists()
+    assert policy.apply_codex_fabric_entrypoint(home)["state"] == "READY"
+
+
 def test_malformed_codex_pointer_refused_before_install(tmp_path: Path) -> None:
     home, _, config, hooks = _home(tmp_path, with_pointer=False)
     doc = home / DOC
@@ -194,3 +215,24 @@ def test_bounded_operator_source_keeps_plain_leaf_denied() -> None:
              "POOL_TASK_CLASS": "domain_orchestration"},
             "run1", "codex-native", "gpt-6-sol", b"packet",
         )
+
+
+def test_previous_current_codex_skill_is_exact_upgrade_preimage(tmp_path: Path) -> None:
+    """An installed reviewed pre-#1924 skill must upgrade, not be rejected as drift."""
+    current = (ROOT / SKILL_PATH).read_bytes()
+    marker = b"\n## Independent PR review: one portable source contract\n"
+    assert current.count(marker) == 1
+    former = current.split(marker, 1)[0]
+    blob = hashlib.sha1(b"blob " + str(len(former)).encode("ascii") + b"\0" + former).hexdigest()
+    assert blob == policy.CODEX_FABRIC_PREVIOUS_BLOB_SHA
+    home, doc, config, hooks = _home(tmp_path, with_pointer=True)
+    (home / USER_SKILL).write_bytes(former)
+    assert policy.verify_codex_fabric_entrypoint(home)["state"] == "DRIFT"
+    result = policy.apply_codex_fabric_entrypoint(home)
+    assert result["state"] == "READY"
+    assert result["native_capacity_modified"] is False
+    assert result["provider_settings_modified"] is False
+    assert (home / USER_SKILL).read_bytes() == current
+    assert (home / DOC).read_bytes() == doc
+    assert (home / ".codex/config.toml").read_bytes() == config
+    assert (home / ".codex/hooks.json").read_bytes() == hooks

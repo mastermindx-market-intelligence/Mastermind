@@ -1,0 +1,180 @@
+--- a/ext/fabric_task.py
++++ b/ext/fabric_task.py
+@@ -393,10 +393,69 @@
+     if any(not fields.get(key) for key in required):
+         raise FabricTaskError("ROUTE_INCOMPLETE")
+     return fields
+ 
+ 
++
++def _selection_host(value: str | None) -> str:
++    """Only the incumbent picker's explicit host registry can qualify a pinned host."""
++    if value is None or value == "auto":
++        return "auto"
++    if type(value) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", value):
++        raise FabricTaskError("INVALID_HOST_SELECTOR")
++    return value
++
++
++def _selection_auto(value: str | None) -> str | None:
++    """Public auto means no model/pool preference; it grants nothing."""
++    return None if value is None or value == "auto" else value
++
++
++def preview_route(
++    run_id: str,
++    task_class: str,
++    *,
++    host: str | None = None,
++    pool: str | None = None,
++    prefer: str | None = None,
++    subject_pool: str | None = None,
++    task_complexity: str = "",
++    escalation_reason: str = "",
++    requested_model: str | None = None,
++) -> dict[str, object]:
++    """Read-only advisory existing-owner placement. No claim, lease or launch."""
++    rid=validate_run_id(run_id)
++    selected=_parse_route(pick.format_pick(
++        task_class,
++        host=_selection_host(host),
++        pool=_selection_auto(pool),
++        prefer=_selection_auto(prefer),
++        **({"subject_pool": subject_pool} if subject_pool is not None else {}),
++        task_complexity=task_complexity,
++        escalation_reason=escalation_reason,
++        requested_model=_selection_auto(requested_model),
++        route_key=rid,
++    ))
++    policy=pick.launch_policy(
++        selected["MODE"], task_class, selected["MODEL"],
++        escalation_reason=escalation_reason, task_complexity=task_complexity,
++    )
++    if not policy.get("allowed"):
++        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(policy.get("reason")))
++    return {
++        "state": "PREVIEW_ONLY",
++        "reserved": False,
++        "run_id": rid,
++        "pool": selected["POOL"],
++        "model": selected["MODEL"],
++        "host": selected["HOST"],
++        "mode": selected["MODE"],
++        "reason": selected.get("REASON") or "",
++        "selection_rechecked_at_request": True,
++    }
++
++
+ def request(
+     run_id: str,
+     task_class: str,
+     *,
+     cwd: str,
+@@ -411,34 +470,41 @@
+     escalation_reason: str | None = None,
+     requested_model: str | None = None,
+     artifact_names: list[str] | None = None,
+     native_return: bool = False,
+     qualification_host: str | None = None,
++    host: str | None = None,
+ ) -> int:
+     rid = validate_run_id(run_id)
+     if bool(packet) == bool(stdin_bytes is not None):
+         raise ValueError("provide exactly one of packet or stdin")
+     env = os.environ.copy()
+     observed_root = resolve_request_root(root_id, env)
+     # Explicit empty arguments clear inherited values; None uses the existing
+     # economic metadata. Selection and launch see the same exact witness.
+     complexity = task_complexity if task_complexity is not None else env.get("POOL_TASK_COMPLEXITY", "")
+     reason = escalation_reason if escalation_reason is not None else env.get("POOL_ESCALATION_REASON", "")
++    pool = _selection_auto(pool)
++    prefer = _selection_auto(prefer)
++    requested_model = _selection_auto(requested_model)
++    selected_host = _selection_host(host)
+     if artifact_names:
+         import artifact_production
+     if qualification_host:
++        if selected_host != "auto":
++            raise FabricTaskError("HOST_QUALIFICATION_CONFLICT")
+         if pool != "grok" or artifact_names or native_return or requested_model or prefer:
+             raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
+         import fabric_host_qualification
+         route = _parse_route(fabric_host_qualification.qualification_route(
+             qualification_host, task_class=task_class, complexity=complexity,
+             reason=reason, subject_pool=subject_pool,
+             root=observed_root, parent=parent_run_id,
+         ))
+     else:
+         route = _parse_route(pick.format_pick(
+-            task_class, prefer=prefer, host="auto", pool=pool,
++            task_class, prefer=prefer, host=selected_host, pool=pool,
+             **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+             task_complexity=complexity, escalation_reason=reason,
+             requested_model=requested_model, route_key=rid,
+             **({"required_modes": sorted(artifact_production.MODES),
+                 "required_platforms": ["linux"]} if artifact_names else {}),
+@@ -554,20 +620,31 @@
+ 
+ def main(argv: list[str] | None = None) -> int:
+     parser = argparse.ArgumentParser(description=__doc__)
+     sub = parser.add_subparsers(dest="cmd", required=True)
+ 
++    p_preview = sub.add_parser("preview", help="read-only model/pool/host selection")
++    p_preview.add_argument("--id", required=True, help="same stable run id as request")
++    p_preview.add_argument("--class", dest="task_class", required=True)
++    p_preview.add_argument("--host", default="auto")
++    p_preview.add_argument("--pool", default="auto")
++    p_preview.add_argument("--prefer")
++    p_preview.add_argument("--subject-pool")
++    p_preview.add_argument("--model", dest="requested_model", default="auto")
++    p_preview.add_argument("--task-complexity", default="")
++    p_preview.add_argument("--escalation-reason", default="")
+     p_request = sub.add_parser("request")
+     p_request.add_argument("--id", required=True)
+     p_request.add_argument("--class", dest="task_class", required=True)
+     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
+     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
+     p_request.add_argument("--cwd", default=os.getcwd())
+     packet_group = p_request.add_mutually_exclusive_group(required=True)
+     packet_group.add_argument("--packet")
+     packet_group.add_argument("--stdin", action="store_true")
+-    p_request.add_argument("--pool")
++    p_request.add_argument("--pool", help="pool or auto (qualified router)")
++    p_request.add_argument("--host", default="auto", help="auto or an eligible exact host")
+     p_request.add_argument("--qualification-host", choices=("mb", "m1"), help="Explicit first Grok worker on a pending qualified Mac; no enrollment")
+     p_request.add_argument("--prefer")
+     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
+     p_request.add_argument("--root")
+     p_request.add_argument("--parent")
+@@ -712,10 +789,19 @@
+             command.extend(["--" + name, getattr(args, name.replace("-", "_"))])
+         for path in args.path:
+             command.extend(["--path", path])
+         return subprocess.run(command).returncode
+     try:
++        if args.cmd == "preview":
++            _json(preview_route(
++                args.id, args.task_class, host=args.host, pool=args.pool,
++                prefer=args.prefer, subject_pool=args.subject_pool,
++                task_complexity=args.task_complexity,
++                escalation_reason=args.escalation_reason,
++                requested_model=args.requested_model,
++            ))
++            return 0
+         if args.cmd == "reconcile-completed":
+             try:
+                 _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))
+                 return 0
+             except (OSError, ValueError, completion_reconcile.sqlite3.Error) as exc:
+@@ -768,10 +854,11 @@
+                 parent_run_id=args.parent,
+                 task_complexity=args.task_complexity,
+                 escalation_reason=args.escalation_reason,
+                 requested_model=args.requested_model,
+                 qualification_host=args.qualification_host,
++                host=args.host,
+             )
+         if args.cmd == "status":
+             _json(inspect_run(args.run_id))
+             return 0
+         if args.cmd == "wait":

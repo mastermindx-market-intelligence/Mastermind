@@ -204,6 +204,40 @@ def native_slot_from_config(config: Mapping[str, Any]) -> ProviderWorkerSlot:
     """
     enrollment = config.get("native_realm_enrollment")
     slot_id = enrollment.get("slot_id") if isinstance(enrollment, Mapping) else None
+    if config.get("native_provider") == "codex" and slot_id == "codex-pro-04":
+        # An inert fourth Personal Pro definition: all OS principal values
+        # come from the already root-pinned worker config and are verified by
+        # NativeRealmIdentityOwner under its existing UID/GID/HOME/binary gates.
+        # This projection cannot provision a user or make a worker READY.
+        uid, gid = config.get("worker_uid"), config.get("worker_gid")
+        name, control = config.get("worker_user"), config.get("control_uid")
+        existing = all_slots()
+        home = RUNTIME_WORKER_ROOT / slot_id / "provider-home"
+        if (type(uid) is not int or uid <= 0
+                or type(gid) is not int or gid != uid
+                or type(control) is not int or control <= 0 or control == uid
+                or type(name) is not str or _WORKER_USER_RE.fullmatch(name) is None
+                or type(config.get("provider_home")) is not str
+                or config["provider_home"] != str(home)
+                or uid in {s.worker_uid for s in existing}
+                or gid in {s.worker_gid for s in existing}
+                or control in {s.worker_uid for s in existing}
+                or name in {s.worker_user for s in existing}):
+            raise SlotCatalogError("native_codex_additional_principal_invalid")
+        row = ProviderWorkerSlot(
+            slot_id=slot_id, worker_user=name, worker_group=name,
+            worker_uid=uid, worker_gid=gid, provider_home=home,
+            readiness_receipt=SYSTEM_CONFIG_ROOT / (
+                f"provider-readiness-{slot_id}-v2.json"),
+            workspace_binding_class=PERSONAL_PRO_WORKER_BINDING_CLASS,
+            allowed_credential_kinds=("device-auth",),
+            oauth_seat_ref="chatgpt4",
+            provider_family="openai",
+        )
+        for field in ("slot_id", "worker_user", "worker_group", "worker_uid",
+                      "worker_gid", "provider_home", "readiness_receipt"):
+            _unique(existing + (row,), field)
+        return row
     if (config.get("native_provider") != "claude"
             or type(slot_id) is not str or slot_id not in _NATIVE_CLAUDE_SLOT_IDS):
         raise SlotCatalogError("native_slot_inventory_invalid")

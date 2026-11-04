@@ -222,3 +222,19 @@ responding to `--help` are not proof of a usable dispatch path.
 actual Fabric START + terminal retained result + exact returned bytes/digest +
 original-parent adjudication is live proof. `FABRIC_ADAPTER_SANDBOX_DENIED`
 and `NOT_FOUND` are negative canary results, not a completed worker.
+
+## Independent PR review: one portable source contract
+
+When the assigned Codex session needs an independent PR/source reviewer, load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the *same verified protected Mastermind pin* before considering a new child. Use this native adapter only with real original root/parent, reviewer-versus-author separation and no existing same-scope review/uncertain effects. A separate Slack Dot technical assessment is manual transport only when independently eligible, never a fallback for an explicitly denied Fabric review. Neither a paid Fabric PASS nor a Dot verdict is a submitted non-author GitHub PR review. Source skill update does not prove fresh provider-home installation.
+
+## New Macro sparse-worktree requests
+
+When a genuinely new request uses `--new-macro-worktree`, it must supply this exact flag pair:
+
+```sh
+--new-macro-worktree "$MACRO_COMMIT_SHA40" --cwd '~/lanes/repos/macro'
+```
+
+`MACRO_COMMIT_SHA40` names an existing lowercase 40-hex Git commit. Quote the cwd so the caller's Mac shell passes the literal remote path. This is the fixed Macro donor namespace; the controller creates and rebinds the worker's new checkout inside its original host lease. Do not substitute `~`, a Mac `$PWD`, an expanded home path, or the future checkout path. The ordinary `--cwd '~'` example remains valid for requests without this flag, unless another remote workspace is explicitly bound.
+
+The existing scope guard rejects an incompatible cwd before launch. This guidance applies prospectively; it does not authorize retrying, correcting and resubmitting, or replacing an already refused request. Preserve its original identity and receipt.

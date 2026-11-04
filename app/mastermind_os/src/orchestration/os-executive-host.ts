@@ -101,14 +101,14 @@ export function createOsExecutiveHost(
     }
   }
 
-  async function directCall(operation: "read" | "consume", args: DirectSelection | (DirectTerminalSelection & {result_digest:string;operation_key:string}), signal: AbortSignal) {
+  async function directCall(operation: "read" | "consume" | "correction", args: DirectSelection | Record<string,unknown> | (DirectTerminalSelection & {result_digest:string;operation_key:string}), signal: AbortSignal) {
     const owner=context(), capturedEpoch=epoch, authGeneration=transport.authGeneration();
     if(!owner||signal.aborted||!transport.directNative)throw Error("EXECUTIVE_UNAVAILABLE");
     const request=new AbortController(), boundarySignal=boundary.signal;
     const abort=()=>request.abort();signal.addEventListener("abort",abort,{once:true});boundarySignal.addEventListener("abort",abort,{once:true});
     if(signal.aborted||boundarySignal.aborted)abort();
     try {
-      const raw=operation==="read"?await transport.directNative.read(args,request.signal):
+      const raw=operation==="correction"?await transport.directNative.correction?.(args as Record<string,unknown>,request.signal):operation==="read"?await transport.directNative.read(args as DirectSelection,request.signal):
         await transport.directNative.consume(args as DirectTerminalSelection & {result_digest:string;operation_key:string},request.signal);
       const current=context();
       if(request.signal.aborted||capturedEpoch!==epoch||authGeneration!==transport.authGeneration()||!current||
@@ -117,6 +117,7 @@ export function createOsExecutiveHost(
     }finally{signal.removeEventListener("abort",abort);boundarySignal.removeEventListener("abort",abort);}
   }
   const direct = transport.directNative ? new DirectNativeCommandPort({
+    correction:transport.directNative.correction?(args,signal)=>directCall("correction",args,signal):undefined,
     read:(args,signal)=>directCall("read",args,signal),consume:(args,signal)=>directCall("consume",args,signal),
   },context) : null;
   const binding = createExecutiveLaunchBinding(config, {
@@ -158,6 +159,7 @@ export function createOsExecutiveHost(
     getSession: () => null, // LAUNCH has no SEND/STOP session producer.
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   }, direct ? {port:direct,capability:{read:(selection,signal)=>direct.read(selection,signal),
+    inspectCorrection:(selection,signal)=>direct.inspectCorrection(selection,signal),makeCorrectionIntent:(selection,fence)=>direct.makeCorrectionIntent(selection,fence),
     makeConsumeIntent:(selection,digest)=>direct.makeConsumeIntent(selection,digest)}} : undefined);
   const unsubscribe = transport.subscribe(() => { void refresh(); });
   const ready = refresh();
