@@ -152,9 +152,11 @@ def run(store: Path, stage: Path | None) -> dict:
     }
     if stage is not None:
         stage = stage.absolute()
-        if not stage.is_absolute() or stage.exists() or stage.is_symlink():
-            raise ValueError("release_stage_must_be_new")
-        stage.parent.resolve(strict=True)
+        approved_root = Path("/Volumes/Mastermind/agent-workspaces").resolve(strict=True)
+        if (stage.exists() or stage.is_symlink()
+                or stage.parent.resolve(strict=True) != approved_root
+                or not stage.name.startswith("fabric-cursor46-stage-")):
+            raise ValueError("release_stage_must_be_new_and_approved_root")
         stage.mkdir(mode=0o700)
         staged_source = stage / "source"
         (staged_source / "ext").mkdir(parents=True, mode=0o700)

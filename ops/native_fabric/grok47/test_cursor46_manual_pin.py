@@ -120,6 +120,20 @@ class Cursor46ExplicitPin(unittest.TestCase):
                     self.assertFalse(ordinary)
                     self.assertEqual(ordinary_reason, "grok_before_cursor policy")
 
+    def test_current_generation_qualification_requires_exact_sealed_picker(self):
+        qualifier_path = ROOT / "grok47" / "qualify_cursor46_current.py"
+        spec = importlib.util.spec_from_file_location("cursor46_sealed_qualifier", qualifier_path)
+        qualifier = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(qualifier)
+        # Neither an old source copy nor an arbitrary staged payload can be
+        # promoted as generation26 code merely by containing matching hunks.
+        stale = (ROOT / "quota_continuity" / "source" / "pick.py").read_bytes()
+        with self.assertRaisesRegex(ValueError, "native_gen26_picker_preimage_changed"):
+            qualifier.patched(stale)
+        with self.assertRaisesRegex(ValueError, "native_gen26_picker_preimage_changed"):
+            qualifier.patched(b"arbitrary source containing a Grok marker")
+
 
 if __name__ == "__main__":
     unittest.main()
