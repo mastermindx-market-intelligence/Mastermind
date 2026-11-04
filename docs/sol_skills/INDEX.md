@@ -100,6 +100,14 @@ economics, packets, capacity routing or evidence/continuity work. No provider/ac
 Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research or a claimed
 completion. Reviews against original outcome, not merely implementation quality.
 
+### `docs/SESSION_LOCAL_REVIEW_POLICY.md`
+Mandatory first for any PR/source review decision in ChatGPT Web, native Codex,
+Claude and Fabric. The working session owns a self-check and may spawn an
+actually available distinct reviewer subagent **inside that same session**:
+no third-party chat is a default dependency. Assess accepted risk-tier demands,
+technical independence and actual formal GitHub approval separately. This
+source pointer does not install a Project instruction or grant a spawn tool.
+
 ### `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md`
 For a *new independent PR/source review*, load this shared session-side guide from the **same
 verified protected Mastermind commit** before choosing an avenue. It explains when the
