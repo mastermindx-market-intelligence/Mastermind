@@ -1,5 +1,6 @@
 mod auth;
 mod native_client;
+mod native_refresh;
 use sha2::{Digest, Sha256};
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -58,6 +59,7 @@ fn main() {
                     tauri::async_runtime::spawn(auth::callback(app, url.to_string()));
                 }
             });
+            auth::start_restore(app.handle().clone());
             if let Some(urls) = app.deep_link().get_current()? {
                 for url in urls {
                     tauri::async_runtime::spawn(auth::callback(
@@ -77,8 +79,13 @@ fn main() {
             auth::read_work,
             auth::read_mission,
             auth::read_mission_v3,
+            auth::read_project_plan,
+            auth::read_project_journal,
+            auth::read_autonomy_policy,
             auth::read_admitted_plan,
             auth::read_retained_activity,
+            auth::read_fabric_catalog,
+            auth::read_fabric_status,
             auth::read_result,
             auth::read_result_references,
             auth::read_current_window,
@@ -86,6 +93,9 @@ fn main() {
             auth::executive_context,
             auth::executive_submit,
             auth::executive_status,
+            auth::executive_direct_native_result,
+            auth::executive_direct_native_consume,
+            auth::executive_direct_correction,
             auth::executive_session_context,
             auth::executive_session_reply,
             auth::executive_session_references

@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from control_plane.claude_operator_helper_protocol import (
-    INTERFACE_VERSION, security_settings, EXECUTIVE_PLAN_CONTRACT, native_plan_contract,
+    INTERFACE_VERSION, security_settings, EXECUTIVE_PLAN_CONTRACT,
+    EXECUTIVE_PLAN_CONTRACT_V3, EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5, native_plan_contract,
 )
 from control_plane.claude_mcp_client_projection import ClaudeMcpClientProjection
 from control_plane.executive_agent_capabilities import claude_security_config_digest
@@ -103,13 +104,16 @@ class ClaudeReadbackPolicyObserver:
     def launch_config(self) -> dict[str, Any]:
         return json.loads(json.dumps(self._config))
 
-    def observe(self, handshake: Mapping[str, Any]) -> ClaudePolicyObservation:
+    def observe(
+        self, handshake: Mapping[str, Any],
+        *, plan_contract: str = EXECUTIVE_PLAN_CONTRACT,
+    ) -> ClaudePolicyObservation:
         init = handshake.get("initialization", {})
         if (handshake.get("registration_zero_turn") is not True
                 or handshake.get("native_subscription_verified") is not True
                 or handshake.get("sdk_version") != "0.2.160" or handshake.get("cli_version") != "2.1.275"
                 or set(init.get("tools", [])) != {"Read", "Glob", "Grep", "StructuredOutput"}
-                or handshake.get("result_contract") != native_plan_contract()
+                or handshake.get("result_contract") != native_plan_contract(plan_contract)
                 or init.get("skills") != [] or init.get("plugins") != []
                 or init.get("mcp_servers") != [] or handshake.get("mcp_status") != {"servers": []}
                 or init.get("permissionMode") != "dontAsk"):
@@ -408,12 +412,18 @@ class ClaudeOperatorAdapter:
                  sdk_python: Path | None = None, helper_path: Path | None = None,
                  process_identity_observer: Callable = _default_process_identity,
                  base_sha_resolver: Callable = _default_base_sha,
-                 client_factory: Callable | None = None):
+                 client_factory: Callable | None = None,
+                 plan_contract: str = EXECUTIVE_PLAN_CONTRACT):
         self.binary_path = Path(binary_path)
         self.provider_home = Path(provider_home)
         self.workspace_root = Path(workspace_root)
         self.sdk_python = Path(sdk_python or sys.executable)
         self.helper_path = Path(helper_path or Path(__file__).resolve().parents[1] / "scripts/claude_operator_generation_helper.py")
+        if type(plan_contract) is not str or plan_contract not in {
+            EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3, EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5,
+        }:
+            raise ValueError("native plan contract is not qualified")
+        self.plan_contract = plan_contract
         self.worker_id = worker_id
         self.expected_harness_version = expected_harness_version
         self.expected_config_digest = expected_config_digest
@@ -524,10 +534,12 @@ class ClaudeOperatorAdapter:
                 raise ClaudeOperatorError(AdapterFailureClass.PROCESS_CRASH, "native helper lacks a private process group")
             config = {**self.policy_observer.launch_config(), "cli_path": str(self.binary_path),
                       "cwd": str(self.workspace_root), "model": requested.requested_model,
-                      "session_id": session_id, "max_turns": 20, "result_contract": EXECUTIVE_PLAN_CONTRACT}
+                      "session_id": session_id, "max_turns": 20, "result_contract": self.plan_contract}
             handshake = client.request("initialize", {"interface_version": INTERFACE_VERSION,
                 "generation_id": generation.process_generation_id, "config": config}, timeout=30)
-            policy = self.policy_observer.observe(handshake)
+            policy = self.policy_observer.observe(
+                handshake, plan_contract=self.plan_contract
+            )
             init = handshake["initialization"]
             if handshake.get("session_id") != session_id or init.get("cwd") != str(self.workspace_root):
                 raise ClaudeOperatorError(AdapterFailureClass.WORKSPACE_MISMATCH, "native session/workspace echo mismatch")
@@ -664,7 +676,7 @@ class ClaudeOperatorAdapter:
             raise ClaudeOperatorError(failure, "native turn failed; Executive reconciliation required", effect_unknown=True)
         if (result.get("terminal") is not True or result.get("success") is not True
                 or result.get("result_source") != "native-structured-output"
-                or result.get("result_contract") != native_plan_contract()
+                or result.get("result_contract") != native_plan_contract(self.plan_contract)
                 or result.get("session_id") != state.session_id or result.get("turn_id") != turn.turn_id
                 or not isinstance(result.get("summary"), str) or not result.get("native_result_id")):
             raise ClaudeOperatorError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE, "native successful terminal result is missing", effect_unknown=True)

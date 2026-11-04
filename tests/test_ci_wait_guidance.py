@@ -190,11 +190,30 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.replace('\n\n' + installer.guidance(), ''), source)
 
     def test_shared_liveness_contract_has_return_path_and_backoff(self):
-        block = installer.guidance()
-        for phrase in ('not a launched', 'not a\ncompletion-event source',
+        # These are semantic clauses, not a canonical Markdown line-wrap format.
+        block = ' '.join(installer.guidance().split())
+        for phrase in ('not a launched', 'not a completion-event source',
                        '15m -> 30m -> 60m', 'two equivalent no-progress',
                        'elapsed time does not clear', 'original owners, roots, grants'):
             self.assertIn(phrase, block)
+
+    def test_shared_liveness_contract_accepts_equivalent_line_wrapping(self):
+        words = installer.guidance().split()
+        for separator in (' ', '\n', ' \n\t '):
+            with self.subTest(separator=repr(separator)):
+                with patch.object(installer, 'guidance', return_value=separator.join(words)):
+                    self.test_shared_liveness_contract_has_return_path_and_backoff()
+
+    def test_shared_liveness_contract_still_rejects_each_missing_guard(self):
+        block = ' '.join(installer.guidance().split())
+        for phrase in ('not a launched', 'not a completion-event source',
+                       '15m -> 30m -> 60m', 'two equivalent no-progress',
+                       'elapsed time does not clear', 'original owners, roots, grants'):
+            with self.subTest(missing=phrase):
+                self.assertIn(phrase, block)
+                with patch.object(installer, 'guidance', return_value=block.replace(phrase, '')):
+                    with self.assertRaises(AssertionError):
+                        self.test_shared_liveness_contract_has_return_path_and_backoff()
 
 
 if __name__ == '__main__':

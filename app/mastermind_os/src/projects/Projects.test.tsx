@@ -144,3 +144,41 @@ describe("Atelier Projects", () => {
     expect(screen.getAllByRole("article")).toHaveLength(2);
   });
 });
+
+
+describe("rootless catalogue read navigation", () => {
+  it("opens a current canonical project without minting a Mission root", () => {
+    const open = vi.fn(), navigate = vi.fn();
+    render(<Projects programs={read("CURRENT", [{...one, rootJobId:null, rootState:"UNKNOWN", rootCandidates:[]}])}
+      onOpenProject={open} onNavigateMission={navigate}/>);
+    fireEvent.click(screen.getByRole("button", {name:"Open project Shared title"}));
+    expect(open).toHaveBeenCalledExactlyOnceWith("WS:ONE");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+  it.each(["STALE", "UNAVAILABLE", "UNKNOWN"] as const)("never opens a current project from %s", state => {
+    const open = vi.fn();
+    render(<Projects programs={read(state, [{...one, rootJobId:null, rootState:"UNKNOWN", rootCandidates:[]}])} onOpenProject={open}/>);
+    expect(screen.queryByRole("button", {name:/Open project/})).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+  });
+  it("rejects an invalid rootless work reference", () => {
+    const open = vi.fn();
+    render(<Projects programs={read("CURRENT", [{...one,workRef:"../private",rootJobId:null,rootState:"UNKNOWN",rootCandidates:[]}])} onOpenProject={open}/>);
+    expect(screen.queryByRole("button", {name:/Open project/})).toBeNull();
+    expect(open).not.toHaveBeenCalled();
+  });
+});
+
+
+it("localizes current rootless project navigation and retains the search draft across language changes",()=>{
+  const open=vi.fn(),programs=read("CURRENT",[{...one,rootJobId:null,rootState:"UNKNOWN",rootCandidates:[]}]);
+  const view=render(<Projects programs={programs} onOpenProject={open}/>);
+  fireEvent.change(screen.getByRole("searchbox"),{target:{value:"Shared"}});
+  view.rerender(<Projects programs={programs} onOpenProject={open} locale="zh-CN"/>);
+  expect(screen.getByRole("heading",{name:"纵览你的项目。"})).toBeTruthy();
+  expect(screen.getByRole("searchbox",{name:"查找已提供的项目"})).toHaveProperty("value","Shared");
+  expect(screen.getByText("根任务未知；未推断任何任务")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button",{name:"打开项目Shared title"}));
+  expect(open).toHaveBeenCalledExactlyOnceWith("WS:ONE");
+  expect(screen.queryByText("Next step")).toBeNull();
+});

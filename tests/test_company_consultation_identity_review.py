@@ -19,8 +19,10 @@ FRAGMENT = "class ExecutiveControlService:\n"+BLOCK+"\n"
 
 def test_company_review_pins_only_three_mode_sites():
     spans=reviewed_literal_spans(REVIEWED_PATH,SOURCE)
-    assert len(spans)==REVIEWED_LITERAL_COUNT==3
-    assert all(SOURCE.splitlines()[line-1][start:end]=="0o710" for line,start,end,_ in spans)
+    assert len(spans)==REVIEWED_LITERAL_COUNT==6
+    spellings=[SOURCE.splitlines()[line-1][start:end] for line,start,end,_ in spans]
+    assert spellings.count("0o710")==3
+    assert [value for value in spellings if value!="0o710"]==["403","403","503"]
     assert len(reviewed_literal_spans(REVIEWED_PATH,FRAGMENT))==3
     assert _scan(FRAGMENT,REVIEWED_PATH)==[]
 

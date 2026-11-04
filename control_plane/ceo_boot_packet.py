@@ -1143,6 +1143,19 @@ def render_packet(packet: dict[str, Any]) -> str:
         "",
     ]
 
+    # This is a human-readable orientation reminder, not another admission or
+    # authority decision. The JSON schema and Agent OS source stay unchanged.
+    out.append("LEADERSHIP / RECOVERY (source law controls)")
+    for segment in _wrap(
+        "The current assigned session owns the next authorized recovery step; "
+        "archived chats and prior PR authors are not live owners. Reconcile "
+        "an actual writer, lease, or EFFECT_UNKNOWN on the original carrier. "
+        "Independent non-author review and protected release remain required.",
+        _WIDTH - 2,
+    ):
+        out.append("  " + segment)
+    out.append("")
+
     # --- STRATEGY -----------------------------------------------------------
     if strategic is None:
         out.append("STRATEGY")

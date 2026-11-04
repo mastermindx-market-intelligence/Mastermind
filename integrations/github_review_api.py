@@ -8,6 +8,11 @@ ActorPermissionPort and ReviewTransportPort boundaries.
 from __future__ import annotations
 
 import re
+import math
+import time
+from collections.abc import Callable
+from email.utils import parsedate_to_datetime
+from threading import RLock
 from typing import Protocol
 
 import httpx
@@ -18,7 +23,10 @@ from control_plane.github_review_intent_ingress import (
     ExternalGitHubSourceFacts,
     PublishedReviewFacts,
     PublicationEffectUnknown,
+    OpenPullRequestPage,
+    ReviewSourceReadDeferred,
 )
+from integrations.github_review_http import BoundedResponseError, bounded_json
 
 _API = "https://api.github.com"
 _REPO_RE = re.compile(r"\A[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
@@ -26,11 +34,19 @@ _LOGIN_RE = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9-]{0,38}(?:\[bot\])?\Z")
 _SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 _MAX_RESPONSE = 1 << 20
 _MAX_REVIEW_PAGES = 10
+_REQUEST_BUDGET_SECONDS = 3.0
+_READ_ATTEMPTS = 2
+_READ_BACKOFF_SECONDS = 0.1
+_TRANSIENT_READ_STATUSES = frozenset({500, 502, 503, 504})
 _STATE_TO_EVENT = {"COMMENTED": "COMMENT", "CHANGES_REQUESTED": "REQUEST_CHANGES"}
 
 
 class GitHubReviewAPIUnavailable(RuntimeError):
     """Typed refusal with deliberately opaque network/credential details."""
+
+
+class GitHubReviewReadDeferred(ReviewSourceReadDeferred, GitHubReviewAPIUnavailable):
+    """A shared GitHub source limit: the existing owner must defer the scan."""
 
 
 class InstallationTokenSource(Protocol):
@@ -77,6 +93,9 @@ class GitHubReviewAPI:
         publisher_login: str,
         publisher_user_id: int,
         client: httpx.Client | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._repository = _repo_name(repository)
         self._installation_id = _number(installation_id)
@@ -91,6 +110,21 @@ class GitHubReviewAPI:
         self._client = client if client is not None else httpx.Client(
             timeout=httpx.Timeout(3.0), follow_redirects=False
         )
+        self._clock, self._sleep, self._wall_clock = clock, sleep, wall_clock
+        self._defer_lock = RLock()
+        # Transport pacing cache only; no queue, claim or retry authority.
+        self._not_before = 0.0
+        self._defer_code = "REVIEW_SOURCE_RATE_LIMITED"
+
+    @property
+    def repository(self) -> str:
+        """Exact host-enrolled source repository; no credential is exposed."""
+        return self._repository
+
+    @property
+    def installation_id(self) -> int:
+        """Exact installation used for every authenticated source read."""
+        return self._installation_id
 
     @property
     def publisher_login(self) -> str:
@@ -108,52 +142,115 @@ class GitHubReviewAPI:
             user_id=self._publisher_user_id, login=self._publisher_login
         )
 
+    def _check_pacing(self) -> None:
+        with self._defer_lock:
+            remaining = self._not_before - self._clock()
+            if remaining > 0:
+                raise GitHubReviewReadDeferred(
+                    self._defer_code, retry_after_seconds=math.ceil(remaining)
+                )
+
     def _request(self, method: str, path: str, *, payload: dict | None = None) -> object:
         if method not in {"GET", "POST"} or not path.startswith(
             f"/repos/{self._repository}/"
         ):
             raise GitHubReviewAPIUnavailable("GITHUB_ROUTE_NOT_ALLOWLISTED")
-        token = self._token_source.token_for_installation(
-            installation_id=self._installation_id
-        )
-        if not isinstance(token, str) or not token:
-            raise GitHubReviewAPIUnavailable("GITHUB_INSTALLATION_TOKEN_UNAVAILABLE")
+        self._check_pacing()
         try:
-            response = self._client.request(
-                method,
-                _API + path,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                json=payload,
-                follow_redirects=False,
-                timeout=3.0,
+            token = self._token_source.token_for_installation(
+                installation_id=self._installation_id
             )
-        except httpx.RequestError as exc:
-            if method == "POST":
-                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
-            raise GitHubReviewAPIUnavailable("GITHUB_READ_UNAVAILABLE") from None
-        if response.status_code == 404 and method == "GET":
-            raise GitHubReviewAPIUnavailable("GITHUB_READ_NOT_FOUND")
-        if response.status_code >= 300:
-            if method == "POST":
-                # A 5xx may be applied; never blindly retry after ambiguity.
-                if response.status_code >= 500:
-                    raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
-                raise GitHubReviewAPIUnavailable("GITHUB_REVIEW_SUBMIT_REFUSED")
-            raise GitHubReviewAPIUnavailable("GITHUB_READ_REFUSED")
-        if len(response.content) > _MAX_RESPONSE:
-            if method == "POST":
-                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
-            raise GitHubReviewAPIUnavailable("GITHUB_RESPONSE_OVER_BOUND")
-        try:
-            return response.json()
-        except ValueError:
-            if method == "POST":
-                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
-            raise GitHubReviewAPIUnavailable("GITHUB_RESPONSE_INVALID") from None
+        except Exception:
+            raise GitHubReviewReadDeferred("REVIEW_SOURCE_AUTH_UNAVAILABLE") from None
+        if not isinstance(token, str) or not token:
+            raise GitHubReviewReadDeferred("REVIEW_SOURCE_AUTH_UNAVAILABLE")
+        # Token issuance has its own bounded owner. Both GET attempts share this
+        # one operation budget and the same credential/destination.
+        deadline = self._clock() + _REQUEST_BUDGET_SECONDS
+        attempts = _READ_ATTEMPTS if method == "GET" else 1
+        for attempt in range(attempts):
+            # Another in-flight call may have observed a limit during token
+            # acquisition or our short backoff. Do not spend the second GET.
+            self._check_pacing()
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                raise GitHubReviewAPIUnavailable("GITHUB_READ_BUDGET_EXHAUSTED")
+            try:
+                with self._client.stream(
+                    method, _API + path,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github+json",
+                        "Accept-Encoding": "identity",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    json=payload, follow_redirects=False, timeout=remaining,
+                ) as response:
+                    status = response.status_code
+                    # A mutation is never retried, including transient responses.
+                    if method == "POST" and status >= 300:
+                        if status >= 500:
+                            raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
+                        raise GitHubReviewAPIUnavailable("GITHUB_REVIEW_SUBMIT_REFUSED")
+                    if method == "GET":
+                        limited = status == 429 or (status == 403 and (
+                            response.headers.get("x-ratelimit-remaining") == "0"
+                            or "retry-after" in response.headers
+                        ))
+                        if limited or (status in _TRANSIENT_READ_STATUSES
+                                       and "retry-after" in response.headers):
+                            self._defer(response, limited=limited)
+                        if status in {401, 403}:
+                            raise GitHubReviewReadDeferred("REVIEW_SOURCE_AUTH_UNAVAILABLE")
+                        if status == 404:
+                            raise GitHubReviewAPIUnavailable("GITHUB_READ_NOT_FOUND")
+                        if status in _TRANSIENT_READ_STATUSES:
+                            if attempt + 1 >= attempts:
+                                raise GitHubReviewAPIUnavailable("GITHUB_READ_UNAVAILABLE")
+                            # Close without consuming an untrusted error body.
+                        elif status >= 300:
+                            raise GitHubReviewAPIUnavailable("GITHUB_READ_REFUSED")
+                        else:
+                            return bounded_json(response, max_bytes=_MAX_RESPONSE,
+                                                deadline=deadline, clock=self._clock)
+                    else:
+                        return bounded_json(response, max_bytes=_MAX_RESPONSE,
+                                            deadline=deadline, clock=self._clock)
+            except httpx.RequestError:
+                if method == "POST":
+                    raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
+                if attempt + 1 >= attempts:
+                    raise GitHubReviewAPIUnavailable("GITHUB_READ_UNAVAILABLE") from None
+            except BoundedResponseError as exc:
+                if method == "POST":
+                    raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
+                raise GitHubReviewAPIUnavailable(str(exc)) from None
+            if deadline - self._clock() <= _READ_BACKOFF_SECONDS:
+                raise GitHubReviewAPIUnavailable("GITHUB_READ_BUDGET_EXHAUSTED")
+            self._sleep(_READ_BACKOFF_SECONDS)
+        raise GitHubReviewAPIUnavailable("GITHUB_READ_UNAVAILABLE")
+
+    def _defer(self, response: httpx.Response, *, limited: bool) -> None:
+        """Retain server pacing within this enrolled adapter, never sleep a worker."""
+        delay = 60.0
+        retry = response.headers.get("retry-after", "")
+        if retry.isascii() and retry.isdigit() and len(retry) <= 10:
+            delay = max(1.0, float(retry))
+        elif retry:
+            try:
+                delay = max(1.0, parsedate_to_datetime(retry).timestamp() - self._wall_clock())
+            except (ValueError, TypeError, OverflowError):
+                pass
+        reset = response.headers.get("x-ratelimit-reset", "")
+        if (response.headers.get("x-ratelimit-remaining") == "0" and
+                reset.isascii() and reset.isdigit() and len(reset) <= 12):
+            delay = max(delay, float(reset) - self._wall_clock())
+        code = "REVIEW_SOURCE_RATE_LIMITED" if limited else "REVIEW_SOURCE_SERVER_DEFERRED"
+        with self._defer_lock:
+            self._not_before = max(self._not_before, self._clock() + delay)
+            self._defer_code = code
+            seconds = math.ceil(self._not_before - self._clock())
+        raise GitHubReviewReadDeferred(code, retry_after_seconds=max(0, seconds))
 
     def _check(self, repository: str, pull_number: int | None = None) -> str:
         if repository != self._repository:
@@ -189,6 +286,26 @@ class GitHubReviewAPI:
             base_repository=_repo_name(base_repo.get("full_name")),
             base_sha=base_sha, title=title[:16000], body=(body or "")[:16000],
         )
+
+    def list_open_pull_request_numbers(
+        self, *, repository: str, page: int, per_page: int,
+    ) -> OpenPullRequestPage:
+        """Fixed scoped GET, bounded numeric pagination; never follow Link URLs."""
+        route = self._check(repository)
+        if (type(page) is not int or not 1 <= page <= 10000
+                or type(per_page) is not int or not 1 <= per_page <= 100):
+            raise GitHubReviewAPIUnavailable("GITHUB_PULL_PAGE_INVALID")
+        rows = self._request(
+            "GET", f"{route}/pulls?state=open&sort=created&direction=asc&per_page={per_page}&page={page}",
+        )
+        if type(rows) is not list or len(rows) > per_page:
+            raise GitHubReviewAPIUnavailable("GITHUB_PULL_PAGE_INVALID")
+        numbers = tuple(_number(_obj(row).get("number")) for row in rows)
+        if len(set(numbers)) != len(numbers):
+            raise GitHubReviewAPIUnavailable("GITHUB_PULL_PAGE_INVALID")
+        # A full final page intentionally costs one more bounded GET to prove
+        # exhaustion; response Link headers never select an authenticated URL.
+        return OpenPullRequestPage(numbers=numbers, has_more=len(numbers) == per_page)
 
     def read_external_source(
         self, *, repository: str, pull_number: int
@@ -237,8 +354,17 @@ class GitHubReviewAPI:
             obj = _obj(self._request(
                 "GET", f"{route}/collaborators/{login}/permission"
             ))
-        except GitHubReviewAPIUnavailable:
-            return None
+        except GitHubReviewReadDeferred:
+            # A shared source limit is not a collaborator permission verdict.
+            # Preserve it through HTTP so an authorized trigger is visibly
+            # deferred and cannot fall back to static actor association.
+            raise
+        except GitHubReviewAPIUnavailable as exc:
+            if str(exc) == "GITHUB_READ_NOT_FOUND":
+                return None
+            # Transport/schema failures remain unavailable, not evidence that
+            # this actor was observed to have no permission.
+            raise
         user = obj.get("user")
         if not isinstance(user, dict) or not isinstance(user.get("login"), str):
             return None
