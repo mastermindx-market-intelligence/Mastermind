@@ -512,9 +512,9 @@ test('strict manual request cannot dispatch if native pin flag is unavailable',a
 
 
 test('native C2 manual preview refusal explains the policy hold without a worker or replay',async()=>{
-  const native='NONE reason=bounded_complexity_requires_escalation\n';
-  const previewFailed=finished(JSON.stringify({exit_code:75,stdout_base64:Buffer.from(native).toString('base64'),
-    stdout_bytes:Buffer.byteLength(native),stdout_sha256:digest(native)}));
+  const native='bounded_complexity_requires_escalation';
+  const previewFailed=finished(JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,
+    stdout_sha256:digest(''),native_reason:native}));
   const e=engine([manualHelp,capturedJSON(absent),previewFailed]);
   const req={...manualPinned,pool:'glm',model:'auto'};
   const out=unwrap(await facade(e).call('fabric_request',req));
@@ -529,9 +529,9 @@ test('native C2 manual preview refusal explains the policy hold without a worker
 });
 
 test('native manual preview reports a bounded no-host reason without inventing escalation instructions',async()=>{
-  const native='NONE reason=no_eligible_host\n';
-  const refused=finished(JSON.stringify({exit_code:75,stdout_base64:Buffer.from(native).toString('base64'),
-    stdout_bytes:Buffer.byteLength(native),stdout_sha256:digest(native)}));
+  const native='no_eligible_host';
+  const refused=finished(JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,
+    stdout_sha256:digest(''),native_reason:native}));
   const e=engine([manualHelp,capturedJSON(absent),refused]);
   const out=unwrap(await facade(e).call('fabric_request',manualPinned));
   assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
@@ -570,6 +570,53 @@ test('legitimate C2 GLM escalation remains a strict original-route request with 
   assert.match(e.calls[3].arguments.command,/'--strict-manual-pin'/);
   assert.match(e.calls[3].arguments.command,/'--escalation-reason'/);
   assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+
+
+test('real subprocess captures the exact native C2 policy refusal from STDERR, without a worker',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'mmx-fabric-native-stderr-'));
+ try {
+  const fixture=join(dir,'native-preview.py');
+  await writeFile(fixture,[
+   'import json,sys',
+   'cmd=sys.argv[1]',
+   'if cmd=="request" and "--help" in sys.argv: print("usage: request --strict-manual-pin")',
+   'elif cmd=="status": print(json.dumps({"schema":"mastermind.fabric_task_status.v1","run_id":"web-fabric-001","root_id":None,"parent_run_id":None,"state":"NOT_FOUND","result_available":False,"accepted":None}))',
+   'elif cmd=="preview": sys.stderr.write("NONE reason=bounded_complexity_requires_escalation\\n"); sys.exit(75)',
+   'else: sys.exit(66)',
+   ''
+  ].join('\n'));
+  const e=await makeRealSubprocessEngine(dir,fixture);
+  const req={...manualPinned,pool:'glm',model:'auto'};
+  const out=unwrap(await facade(e).call('fabric_request',req));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'bounded_complexity_requires_escalation');
+  assert.equal(out.required_field,'escalation_reason');
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3,'help, NOT_FOUND and one preview only');
+  assert.equal(e.calls.filter(x=>x.arguments.command.includes("'request' '--id'")).length,0);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('extra unverified native refusal fields cannot pass the capture boundary',async()=>{
+ for(const reason of ['bad-hyphen','x'.repeat(81),'<malicious>']){
+  const raw=JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,stdout_sha256:digest(''),native_reason:reason});
+  const e=engine([manualHelp,capturedJSON(absent),finished(raw)]);
+  const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+  assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+  assert.equal(Object.hasOwn(out,'native_reason'),false);
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3);
+ }
+ const raw=JSON.stringify({exit_code:0,stdout_base64:Buffer.from(JSON.stringify(absent)).toString('base64'),
+  stdout_bytes:Buffer.byteLength(JSON.stringify(absent)),stdout_sha256:digest(JSON.stringify(absent)),
+  native_reason:'bounded_complexity_requires_escalation'});
+ const e=engine([finished(raw)]);
+ const out=unwrap(await facade(e).call('fabric_status',id));
+ assert.equal(out.error,'CAPTURE_INVALID');
+ assert.equal(e.calls.length,1);
 });
 
 test('native preview failure or mismatch refuses before controller creation',async()=>{
