@@ -44,6 +44,7 @@
 }
 
 .mm-project-plan__refresh {
+  min-height: 44px;
   flex: none;
 }
 
@@ -203,12 +204,12 @@
   padding: 2px 8px;
 }
 
-/* Details grammar: keyboard/touch disclosures with >=40px targets; long
+/* Details grammar: keyboard/touch disclosures with >=44px targets; long
    identifiers wrap instead of truncating. */
 .mm-project-plan details > summary {
   cursor: pointer;
   color: var(--text);
-  min-height: 40px;
+  min-height: 44px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

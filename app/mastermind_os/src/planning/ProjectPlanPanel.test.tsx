@@ -80,6 +80,9 @@ describe("project plan panel", () => {
     expect(screen.getAllByText("2026-11-03T12:00:00Z")).toHaveLength(2);
     expect(screen.getByText(/does not declare plan adoption/)).toBeTruthy();
     expect(screen.queryByText("Adopted versions")).toBeNull();
+    const adoption = screen.getByText(/does not declare plan adoption/);
+    const facts = screen.getByText("Record status");
+    expect(adoption.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(read).toHaveBeenCalledTimes(1);
     expect(read).toHaveBeenCalledWith(expect.objectContaining({
       work_ref: selection.work_ref, signal: expect.any(AbortSignal) }));
@@ -131,7 +134,7 @@ describe("project plan panel", () => {
   it("does not read without the authorization and source owners", () => {
     const read = vi.fn<ProjectPlanReader>(async () => availableBody());
     mount(read, { canRead: () => false });
-    expect(screen.getByText(/No authorized project-plan reader/)).toBeTruthy();
+    expect(screen.getByText(/This project’s recorded plan is unavailable here/)).toBeTruthy();
     expect(read).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Refresh" })).toHaveProperty("disabled", true);
   });
@@ -143,7 +146,7 @@ describe("project plan panel", () => {
     expect(read).not.toHaveBeenCalled();
     mount(read, { selection: null });
     expect(read).not.toHaveBeenCalled();
-    expect(screen.getAllByText(/No authorized project-plan reader/)).toHaveLength(2);
+    expect(screen.getAllByText(/This project’s recorded plan is unavailable here/)).toHaveLength(2);
   });
 
   it("masks published content on the same render as generation rotation", async () => {
@@ -194,7 +197,7 @@ describe("project plan panel", () => {
     view.rerender(<ProjectPlanPanel {...props} />);
     await act(async () => { release(availableBody()); });
     expect(screen.queryByText("Work visibility baseline")).toBeNull();
-    expect(screen.getByText(/No authorized project-plan reader/)).toBeTruthy();
+    expect(screen.getByText(/This project’s recorded plan is unavailable here/)).toBeTruthy();
   });
 
   it("never publishes a response that arrives after a generation change", async () => {
@@ -209,7 +212,7 @@ describe("project plan panel", () => {
     view.rerender(<ProjectPlanPanel {...props} />);
     await act(async () => { release(availableBody()); });
     expect(screen.queryByText("Work visibility baseline")).toBeNull();
-    expect(screen.getByText(/No project-plan content is currently held/)).toBeTruthy();
+    expect(screen.getByText(/Refresh to view this project’s recorded plan/)).toBeTruthy();
     expect(read).toHaveBeenCalledTimes(1);
   });
 
@@ -302,6 +305,9 @@ describe("project plan panel", () => {
     expect(screen.getByText("Record revision history")).toBeTruthy();
     expect(screen.getByText("Work visibility baseline")).toBeTruthy();
     expect(screen.queryByText("Adopted versions")).toBeNull();
+    const adoption = screen.getByText(/does not declare plan adoption/);
+    const facts = screen.getByText("Record status");
+    expect(adoption.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("localizes the surface for zh-CN", async () => {

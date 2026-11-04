@@ -37,10 +37,10 @@ const COPY = {
     zh: "已记录的目标与推进计划。" },
   refresh: { en: "Refresh", zh: "刷新" },
   reading: { en: "Reading…", zh: "正在读取…" },
-  noReader: { en: "No authorized project-plan reader is available for the current identity.",
-    zh: "当前身份未提供已授权的项目计划读取。" },
-  idle: { en: "No project-plan content is currently held; use Refresh to acquire a fresh read.",
-    zh: "当前未持有任何项目计划内容；请使用“刷新”获取新的读取。" },
+  noReader: { en: "This project’s recorded plan is unavailable here.",
+    zh: "此处无法获取此项目已记录的计划。" },
+  idle: { en: "Refresh to view this project’s recorded plan.",
+    zh: "刷新以查看此项目已记录的计划。" },
   loading: { en: "Reading the project plan…", zh: "正在读取项目计划…" },
   failed: { en: "The project-plan read failed or was refused; nothing was inferred.",
     zh: "项目计划读取失败或被拒绝；未推断任何内容。" },
@@ -179,6 +179,12 @@ function AvailablePlanBody({ plan, source, chinese }: {
     <div className="mm-project-plan__record">
       <h3 className="mm-project-plan__title">{plan.title}</h3>
       <p className="mm-project-plan__objective">{plan.objective}</p>
+    <div className="mm-project-plan__adoption">
+      <h3 className="mm-project-plan__section-title">{text(COPY.adoptionLabel, chinese)}</h3>
+      {plan.adoption.state === "UNAVAILABLE"
+        ? <p className="mm-project-plan__note" role="status">{text(COPY.adoptionUnavailable, chinese)}</p>
+        : null}
+    </div>
       <dl className="mm-project-plan__facts">
         <div><dt>{text(COPY.statusLabel, chinese)}</dt><dd>{plan.status}</dd></div>
         <div><dt>{text(COPY.ownerLabel, chinese)}</dt><dd>{plan.owner}</dd></div>
@@ -200,12 +206,6 @@ function AvailablePlanBody({ plan, source, chinese }: {
           ? `${text(COPY.showFirst, chinese)} ${INITIAL_VISIBLE_WAVES} ${text(COPY.wavesSuffix, chinese)}`
           : `${text(COPY.seeAll, chinese)} ${waves.length} ${text(COPY.wavesSuffix, chinese)}`}
       </button>}
-    </div>
-    <div className="mm-project-plan__adoption">
-      <h3 className="mm-project-plan__section-title">{text(COPY.adoptionLabel, chinese)}</h3>
-      {plan.adoption.state === "UNAVAILABLE"
-        ? <p className="mm-project-plan__note" role="status">{text(COPY.adoptionUnavailable, chinese)}</p>
-        : null}
     </div>
     <RevisionHistory history={plan.version_history} chinese={chinese} />
     {source !== null && <details className="mm-project-plan__source">
@@ -382,11 +382,15 @@ export function ProjectPlanPanel({
       <div className="mm-project-plan__unavailable" role="status">
         <p>{text(COPY.unavailableLead, chinese)}</p>
         <ul className="mm-project-plan__reasons">
-          {displayedPlan.reason_codes.map(code => <li key={code}>
-            <code>{code}</code>
-            {REASON_COPY[code] !== undefined && <span>{text(REASON_COPY[code], chinese)}</span>}
-          </li>)}
+          {displayedPlan.reason_codes.map(code => REASON_COPY[code] !== undefined
+            ? <li key={code}>{text(REASON_COPY[code], chinese)}</li> : null)}
         </ul>
+        <details className="mm-project-plan__source">
+          <summary>{text(COPY.sourceLabel, chinese)}</summary>
+          <ul className="mm-project-plan__reasons">
+            {displayedPlan.reason_codes.map(code => <li key={code}><code>{code}</code></li>)}
+          </ul>
+        </details>
       </div>}
     {displayedPlan !== null && displayedPlan.availability === "AVAILABLE" &&
       displayedPlan.plan !== null &&
