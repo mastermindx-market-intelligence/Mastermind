@@ -33,8 +33,8 @@ W0/W1/W2 records (Mastermind #1664/#1666, macro #9967), not another `P1.T*` wave
 
 Ownership is a role, not a session. Old authors/chats/titles are not live approvers.
 Current assignment owns recovery and records takeover in the source-linked handoff,
-without waiting for orphan ACKs or asking for old chats. Protect live owners/effects
-(A.2); independent non-author review remains required only for the accepted risk tier or native branch controls, never universally for every minor edit. The session never self-approves or self-merges a protected change.
+not orphan ACKs. Protect live owners/effects (A.2). Independent non-author review
+follows accepted risk/native GitHub gates, not every minor edit. Never self-approve/merge.
 
 This contract does not edit `docs/sol_skills/BOOTSTRAP_KERNEL.md` (recorded master
 blob `0cc09227c77068c3997ff0a24bfef58cadeb7f44`; #1846 is the single bootstrap kernel).
