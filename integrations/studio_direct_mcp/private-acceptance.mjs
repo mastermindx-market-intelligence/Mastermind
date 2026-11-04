@@ -66,14 +66,22 @@ try {
   receipt.error = error.message;
   process.exitCode = 1;
 } finally {
+  // Each finalization step is attempted independently: one failing cleanup must not skip the
+  // others, and any cleanup failure must leave the receipt FAIL rather than PASS.
+  const cleanupFailure = (name, error) => {
+    receipt[name] = error instanceof Error ? error.message : String(error);
+    receipt.status = 'FAIL';
+    process.exitCode = 1;
+  };
   if (initialized) {
     try { await transport.terminateSession(); receipt.sessionDeleted = true; }
-    catch (error) { receipt.cleanupError = error.message; process.exitCode = 1; }
+    catch (error) { cleanupFailure('cleanupError', error); }
   }
-  await client.close();
+  try { await client.close(); }
+  catch (error) { cleanupFailure('clientCloseError', error); }
   if (fixtureDir) {
     try { await rm(fixtureDir, { recursive: true, force: true }); receipt.fixtureDeleted = true; }
-    catch (error) { receipt.fixtureCleanupError = error.message; process.exitCode = 1; }
+    catch (error) { cleanupFailure('fixtureCleanupError', error); }
   }
   console.log(JSON.stringify(receipt, null, 2));
 }
