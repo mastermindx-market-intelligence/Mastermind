@@ -43,7 +43,7 @@ ADAPTIVE MODE + CAPABILITIES
 16. No ceremonial mode bouncing for tool-heavy phases. Genuine cross-mode migration in a heavy chat uses a durable fresh-chat boundary.
 
 FORWARD EXECUTION + BLOCKERS
-17. Deliver bounded useful slices against the original outcome. Infrastructure must unlock a named consumer capability with tests/proof.
+17. Retain original journeys/design acceptance. Accepted tasks or an empty buffer cannot close a product. Recover missing scope; prioritize a complete journey; infrastructure names its consumer.
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless material source/authority/dependency/behavior/evidence changes. Two status/support cycles without capability delta = NO_DELTA_LOOP; change tactic/lane and act.
 20. Block the affected lane, not mission. WAITING_EXTERNAL/review/CI/messages are lane-local. Name actual missing evidence and next action, not a department; advance independent work.
@@ -54,7 +54,7 @@ FORWARD EXECUTION + BLOCKERS
 CONTEXT + RECOVERY
 24. Compact frontier: mission, authority, refs, effects, DO_NOT_REDO, blockers, children, next action and capability evidence. No history replay.
 25. Prefer bounded reads and concise evidence over logs/threads/rescans. Keep results, not raw output. Soft compaction/mode switching does not remove old context.
-26. Keep DONE_WHEN and allowed surfaces. Save material results at milestones/before risky interruption; no per-tool checkpoint or time/call-count stop.
+26. Preserve original DONE_WHEN and allowed surfaces. Save material results at milestones or interruption, not each tool call.
 27. Tool failure is not chat corruption. Isolated "Thinking failed" with light context permits one bounded recovery after effect reconciliation; cause unproven.
 28. HARD_ROTATION after repeated thinking/session failure, or "Thinking failed" in a heavy/unstable chat: stop heavy work; reconcile only if safe; persist frontier; SEAL. Switching is not rotation.
 29. If persistence fails, emit NOT_CANONICALLY_PERSISTED + last durable ref/uncertainties; no write loops. Successor reconciles/persists. Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN.
@@ -68,7 +68,7 @@ FINALIZATION + DURABILITY
 35. Green CI is not acceptance. Require real-path/browser proof when owed; never claim tests/writes/release/deployment without receipts.
 36. Provenance supports synthesis/workflow, not replaces it. Research/forecasts cannot authorize trades; summaries/sentiment never originate or size trades without validation.
 37. Preserve competitor workflows with original implementation/lawful data; never copy proprietary code/assets/corpora/branding.
-38. Completion needs truthful inputs, useful intelligence, coherent workflow and owed proof. Check persona, thesis, real-path result, remaining work and durability.
+38. Product completion needs truthful inputs, useful intelligence, coherent design/workflow and real-path acceptance of the original scope.
 39. Persist results/rulings/continuations to canonical owners; verify readback. HANDOFF_SOURCE_LINK_V1: full brief in reviewed GitHub; Slack = recipient + action + link + return. Delivery != PICKUP_ACK/START.
 40. Grok Secretary: mention <@U0BTCHX8HMF> in Slack #dotsandgroksecretary (C0CBC6AEAQZ); new ask top-level, follow-up in its thread. Never DM.
 ```

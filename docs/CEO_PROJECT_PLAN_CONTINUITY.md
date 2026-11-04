@@ -41,6 +41,38 @@ blob `0cc09227c77068c3997ff0a24bfef58cadeb7f44`; #1846 is the single bootstrap k
 A cockpit routes mutations to fact owners, not a second database or `latest` directory.
 Editorial task depth cannot enlarge Runtime's admitted-plan schema/step limits.
 
+## Product scope survives every component completion
+
+Use the existing master plan and latest handoff, not another registry. Retain the
+original customer outcomes and design references as the parent completion boundary.
+For each unfinished outcome, keep its original ID/reference, missing user behavior,
+current evidence layer, next integration action and exact held effect if any. Reuse
+existing acceptance rows; do not create one issue or receipt per field. A component
+can be accepted without accepting its parent. Accepted task counts are not product
+completion percentages. Empty or wholly accepted local buffers do not prove full
+coverage, wave completion or absence of remaining work.
+
+Choose the nearest complete useful journey, joining the existing producer, consumer,
+persistence and return path. Paper/design parity, real data meaning, responsive
+behavior and degraded states remain part of that journey where commissioned. A
+layout test with empty inputs, an uncoupled API, a preview and a local fixture prove
+only their actual layer. Preserve scientific and access limits without hiding
+independent implementation inside a broad blocked task.
+
+On resume and after a material integration or release, compare the remaining
+original outcomes with the buffered tasks. Recover missing outcomes into the same
+plan; preserve IDs, accepted work, live writers and effects. Do not redeclare the
+whole programme complete from a source-only slice. Exporters and resume prompts
+must preserve unresolved acceptance and unrepresented scope, never infer it away.
+A plan change narrows the original outcome only through an explicit scoped decision.
+
+Operations consumes ordinary returns and restores continuation. Astra reviews the
+remaining product gaps and decides cross-project scope or integration conflicts.
+Repeated source, CI or installation milestones without a completed journey require
+a causal intervention, not another broad audit or a generic keep-working message.
+Necessary infrastructure work names its blocked consumer and runs alongside ready
+product work. No new approval, mandatory management layer or scheduler is created.
+
 ## A. Before substantial project execution: acquire or create the plan
 
 1. Pin procedure/operation. Read waves, latest compiler-selected handoff, then tree
