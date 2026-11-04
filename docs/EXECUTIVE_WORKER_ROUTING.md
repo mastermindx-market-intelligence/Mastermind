@@ -71,6 +71,38 @@ The loader fails closed unless:
 - every worker alias belongs to an enabled, autonomous-allowed provider;
 - every route's aliases have the declared task capabilities.
 
+### Explicit logical frontier selection
+
+`ModelRouter.route(..., frontier_model_alias=...)` and `route_work(...)`
+accept an optional logical alias for work that already requires a frontier
+lead: planning, judgment, escalation, critical risk, or high ambiguity.
+`resolve_frontier_model_alias(...)` resolves the same registry used by worker
+routing. The selected entry must be non-worker and declare all three lead
+capabilities: planning, judgment, and escalation. Explicitly requested
+capabilities must also be present. Unknown aliases, worker aliases, and
+insufficient capabilities refuse without substituting the default.
+
+The selected alias and its exact execution-profile and capability-policy
+digests appear in the existing `FRONTIER_LEAD` decision. Its
+`job_constraints()` still refuses: logical cognition selection does not create
+an Executive worker claim. Provider enablement, account availability, capacity,
+and autonomous execution qualification remain with their existing owners.
+A disabled worker provider may therefore have a valid logical lead entry
+without becoming available for execution. The existing included-Chat, metered
+receipt, and Pro-mode receipt requirements still apply.
+
+Omitting the argument preserves the existing `frontier.orchestrator` default.
+An explicit frontier selection on ordinary worker work refuses; it cannot
+convert that work into lead work or be silently ignored. The worker suitability
+tiers, model catalogue, production-arm flags, and admission rules are unchanged.
+
+This API is a source capability for explicit selection. Project launch still
+requires a selected logical reference to be bound into the authenticated
+request, idempotency fingerprint, and immutable root execution binding before
+an app can offer it as an executable CEO choice. Reconciliation must use that
+root's admitted binding. Successful logical resolution alone is not evidence
+that a named model, provider, or app launch path is installed or ready.
+
 ### RF1 — provider-neutral suitability tiers
 
 `config/executive_worker_routes.json` is now
@@ -124,6 +156,62 @@ one first tier per route: implementation/mechanical/tests routine use
 elevated review uses `standard.review`. No provider, model binding, cost class,
 profile, capability, worker eligibility, or production-arm value changes in this
 migration.
+
+The later native-return host-selection catalogue advances both routing and
+capability policy versions to `2026-10-11.native-return-host-selection`. It adds
+only the explicit private host alias `coo.operator.native-return`; default tiers,
+docs selection and production arms are unchanged. Newly run R1 fixtures qualify
+that current version; historical receipts and persisted Job identities are
+unchanged. Existing host, quota, grant and root bindings must qualify the new
+policy identity through their owners before native selection.
+
+For the ordinary native COO route, the existing stopped, disarmed install-input
+builder can explicitly call
+`ops.executive_os.coo_quota_selection.prepare_current_coo_quota_selection` with
+its validated Control/Worker inputs and protected source's `ModelRouter`. This
+pure preparation changes only the three `codex-coo` selectors. Their shared
+suffix binds the routing catalogue, both complete resolved aliases and the
+observed Operator binary digest/version; a proof-source-only upgrade does not
+change it. Historical quota rows remain immutable. The helper neither publishes
+configuration nor arms or registers anything, and does not run by default in
+the installer or arm path. The existing host installer owns publication; service
+registration and Runtime retain current-binding checks and refuse additive
+registration while an Attempt is held. The helper refuses armed, attended,
+subscription-canary, custom and native-return compositions. Prepared selectors
+are not authentication, provider readiness, Capacity evidence or permission to
+submit the original request.
+
+An ordinary native-return planner still stops after its one sealed plan. A
+retained native proof requires the existing deterministic `create-interactive`
+creator and an already sealed native root profile; creation rejects stale
+identity rather than refreshing it. It reuses Runtime's bounded interactive
+turns and the same Operator Harness start, lease, attestation and cleanup.
+The extension-free `operator.appserver.interactive.v1` profile is unchanged.
+
+The installed service's existing COO, dispatch and workspace owners start one
+retained native generation after the first plan seal. Its task stays in the
+existing dispatch occupancy. The existing Wake owner must finish its idle attention turn and
+persist the causal native ACK before a follow-up is admitted. That later turn
+gets the actual instruction from `RuntimeSessionReturn.read_continuation_source`
+and can call only the existing `native.reply` capability. Its original operation
+cannot replay the provider turn. The canonical reply still uses the existing
+atomic current-writer COMMIT fence. The service reads that exact canonical
+commit before ordinary proven-dead/released cleanup. Immutable original
+principal provenance and the canonical COMMIT let the parent read the result
+after cleanup; only actual parent evidence establishes consumption and useful
+action. The disposable root remains queued until the parent acts and uses
+canonical cancellation; this probe never labels a business Mission completed.
+The bounded native profile cannot admit a child plan.
+
+The incumbent root grant publisher has an explicit native mode that publishes
+the same sealed receipt file without changing Control or Worker configuration
+or restarting Control. The selected private profile, full-arm receipt, exact
+installed source, original CONTINUE and live writer remain required. The same
+Control process reads that grant on the existing observation listener, refusing
+an unsettled transaction, changed file or revoked grant without a cached
+fallback. Ordinary grant publication keeps its existing configuration and
+reconciliation behavior. This source composition adds no session registry or
+listener and does not arm production or qualify a GUI-owned conversation.
 
 Current logical aliases:
 
@@ -543,3 +631,26 @@ This interface never accepts a Worker id, numbered account, credential, host,
 native session, executable or provider endpoint. Capacity still chooses the
 concrete receiver, and all existing capability, authority, lease, source,
 readiness, quota and effect-reconciliation gates remain binding.
+
+Native selection uses the existing full autonomy `arm --native-return` transaction
+only after fresh full v5 acceptance at the installed source, Gate B, provider
+readiness, Runtime/service UID quiescence and an unoccupied global transaction.
+Installation must already have qualified the fixed CompanyConsultation listener
+with the readonly alias and `native_return_armed=false`. Native arm observes the
+root-owned Control LaunchDaemon's exact socket identity; it never adds a listener.
+The existing AgentRelay must also have the exact current-release W3C plist; an
+old or W3C-disabled enrollment refuses native arm before effects. The A2 owner
+can explicitly enable it through its existing rebind transaction while disabled
+and unloaded; verification and service activation remain separate host steps.
+Native preselection refuses a retained ordinary dialogue grant rather than
+rebinding it. Native arm changes the three normal arm booleans, the fixed native
+alias/flag, and the operator quota selector. The native selector appends `.native-return` to the
+accepted readonly selector, retaining its distinct immutable Capacity class on
+the same Worker. A readonly selector exceeding 49 characters or already using
+that reserved suffix refuses before effects. The existing receipt seals the
+exact resulting Control/Worker hashes; replay must match the requested mode and
+the same installed listener. Disarm restores the readonly alias and quota and
+clears the native flag, so an ordinary later arm cannot revive native selection.
+No Runtime schema change, credential change or personal desktop enrollment is
+implied. The later native grant publication and actual exact-parent consumption
+remain separate required evidence.

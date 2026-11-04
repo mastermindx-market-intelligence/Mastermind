@@ -137,12 +137,17 @@ function makeStore(
   const data = new Map<string, OperationPointer>(initial);
   return {
     read: (scope) => data.get(scope) ?? null,
-    write: (scope, pointer) => {
-      data.set(scope, pointer);
-    },
-    clear: (scope, pointer) => {
+    reserve: (scope, pointer) => {
       const existing = data.get(scope);
-      if (existing && samePointer(existing, pointer)) data.delete(scope);
+      if (existing) return { reserved: false, pointer: existing };
+      data.set(scope, pointer);
+      return { reserved: true };
+    },
+    clearIfEqual: (scope, pointer) => {
+      const existing = data.get(scope);
+      if (!existing || !samePointer(existing, pointer)) return false;
+      data.delete(scope);
+      return true;
     },
   };
 }
@@ -716,10 +721,10 @@ describe("T5 readOperation", () => {
     );
   });
 
-  it("accepts the source-qualified V3 E1 version and rejects unqualified versions", async () => {
+  it.each(["1.4.0", "1.5.0"])("accepts the source-qualified V3 E1 version %s", async (version) => {
     const key = expectedResearchPayload().operation_key;
     const acceptedV3 = await readWith(
-      e1Envelope("ceo_intent_status", true, acceptedData(key), null, "1.4.0"),
+      e1Envelope("ceo_intent_status", true, acceptedData(key), null, version),
     );
     expect(acceptedV3.receipt).toMatchObject({
       disposition: "accepted",
@@ -727,8 +732,12 @@ describe("T5 readOperation", () => {
       missionSelection: { workRef: WORKSTREAM, rootJobId: JOB_ID },
     });
 
+  });
+
+  it.each(["1.3.1", "1.6.0", "2.0.0"])("rejects unqualified E1 version %s", async (version) => {
+    const key = expectedResearchPayload().operation_key;
     const unsupported = await readWith(
-      e1Envelope("ceo_intent_status", true, acceptedData(key), null, "1.3.1"),
+      e1Envelope("ceo_intent_status", true, acceptedData(key), null, version),
     );
     expect(unsupported.receipt).toMatchObject({
       disposition: "unknown",
@@ -932,7 +941,7 @@ describe("T10 status-read refusal retains the pointer", () => {
       expect(portReceipt.reason).toBe(reason);
       expect(portReceipt.disposition).not.toBe("refused");
 
-      store.write(PRINCIPAL, pointer);
+      store.reserve(PRINCIPAL, pointer);
       const ctrl = new OperationController(binding.port, store);
       const recovered = await ctrl.recover();
       expect(recovered.status).toBe("unknown");
@@ -969,7 +978,7 @@ describe("T11 same-principal A→B reopen reconstructs workRef from the pointer"
     const ctrl = new OperationController(binding.port, store);
     await ctrl.begin(intent);
     expect(store.read(PRINCIPAL)).toEqual(pointer);
-    expect(store.read(PRINCIPAL)?.targetKey).toBe(WORKSTREAM);
+    expect((await store.read(PRINCIPAL))?.targetKey).toBe(WORKSTREAM);
   });
 
   it("T11 recover under WS:B keeps workRef WS:A and selectionMatches is false", async () => {
@@ -1543,5 +1552,44 @@ describe("T14 App-outcome shape matrix", () => {
       disposition: "unknown",
       reason: "MALFORMED_RECEIPT",
     });
+  });
+});
+
+describe("requested CEO custody", () => {
+
+  it("keeps direct native launch valid when planner CEO choices are configured", () => {
+    const idle = makeClient(() => barePreflight("not_found"));
+    const nativeConfig: LaunchBindingConfig = { ...RESEARCH_CONFIG,
+      profiles: [{ ref: "native_research_only", label: "Native research" }], attemptLimit: 1 };
+    const form = { ...RESEARCH_FORM, profileRef: "native_research_only" };
+    const legacy = makeBinding(idle.client, nativeConfig).makeLaunchIntent(form);
+    expect(legacy).not.toBeNull();
+    const binding = makeBinding(idle.client, { ...nativeConfig,
+      frontierModels: [{ ref: "frontier.one", label: "CEO" }] });
+    const direct = binding.makeLaunchIntent(form);
+    expect(direct).not.toBeNull();
+    expect(direct!.payload.operation_key).toBe(legacy!.payload.operation_key);
+    expect(direct!.payload).not.toHaveProperty("frontier_model_alias");
+    expect(binding.makeLaunchIntent({ ...form, frontierModelAlias: "frontier.one" })).toBeNull();
+    expect(idle.log).toEqual([]);
+  });
+  const choices = [{ ref: "frontier.one", label: "One" }, { ref: "frontier.two", label: "Two" }];
+  const idle = makeClient(() => barePreflight("not_found"));
+  it("keeps the selected alias in the payload and exact operation identity", () => {
+    const binding = makeBinding(idle.client, { ...RESEARCH_CONFIG, frontierModels: choices });
+    const first = binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.one" })!;
+    const second = binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.two" })!;
+    expect(first.payload.frontier_model_alias).toBe("frontier.one");
+    expect(first.payload.operation_key).not.toBe(second.payload.operation_key);
+    expect(binding.getView().frontierModels).toEqual(choices);
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)).toBeNull();
+  });
+  it("refuses unknown, unavailable, and unenrolled choices without falling back", () => {
+    const binding = makeBinding(idle.client, { ...RESEARCH_CONFIG,
+      frontierModels: [{ ref: "frontier.one", label: "One", unavailableReason: "Not qualified" }] });
+    for (const frontierModelAlias of ["frontier.one", "frontier.other", " FRONTIER.ONE"]) {
+      expect(binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias })).toBeNull();
+    }
+    expect(makeBinding(idle.client).makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.one" })).toBeNull();
   });
 });

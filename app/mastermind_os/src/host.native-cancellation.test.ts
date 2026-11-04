@@ -23,6 +23,11 @@ const flush = async () => {
 type Read = (client: RawClient, signal: AbortSignal) => Promise<unknown>;
 const reads: [string, Read][] = [
   ["read_programs", (c, signal) => c.readPrograms({ signal })],
+  ["read_work", (c, signal) => c.readWork({ signal })],
+  ["read_fabric_catalog", (c, signal) => c.readAttendedFabricCatalog!({ signal })],
+  ["read_fabric_status", (c, signal) => c.readAttendedFabric!({
+    rootId: "JOB-1", runId: "ATT-11111111111111111111111111111111", signal,
+  })],
   [
     "read_mission",
     (c, signal) =>
@@ -49,7 +54,7 @@ const reads: [string, Read][] = [
 ];
 async function setup(transport: (command: string) => Promise<unknown>) {
   const invoke = vi.fn((command: string) =>
-    command === "auth_status" ? Promise.resolve(signed) : transport(command),
+    command === "auth_status" ? Promise.resolve(signed) : command === "executive_auth_status" ? Promise.resolve({ generation: 0, available: false }) : transport(command),
   );
   let notify = (_payload: unknown) => {};
   const client = await createNativeClient(
@@ -63,6 +68,25 @@ async function setup(transport: (command: string) => Promise<unknown>) {
 }
 
 describe("native read cancellation settlement", () => {
+  it("sends only the exact paid-run selector to the fixed native status command", async () => {
+    const { client, invoke } = await setup(async () => ({}));
+    await client.readAttendedFabric!({ rootId: "JOB-1",
+      runId: "ATT-11111111111111111111111111111111", signal: new AbortController().signal });
+    expect(invoke).toHaveBeenLastCalledWith("read_fabric_status", { selection: {
+      root_id: "JOB-1", run_id: "ATT-11111111111111111111111111111111",
+    } });
+    await client.readAttendedFabricCatalog!({ signal: new AbortController().signal });
+    expect(invoke).toHaveBeenLastCalledWith("read_fabric_catalog", undefined);
+  });
+
+  it("rejects an invalid Fabric selector before a native command", async () => {
+    const { client, invoke } = await setup(async () => ({}));
+    invoke.mockClear();
+    await expect(client.readAttendedFabric!({ rootId: "../foreign", runId: "ATT-1",
+      signal: new AbortController().signal })).rejects.toThrow("FABRIC_SELECTION_INVALID");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it.each(reads)(
     "settles %s immediately even if the native read never returns",
     async (command, read) => {
@@ -83,7 +107,7 @@ describe("native read cancellation settlement", () => {
       try {
         expect(outcome).toBe("READ_CANCELLED");
         expect(invoke.mock.calls.map((call) => call[0])).toEqual([
-          "auth_status",
+          "executive_auth_status", "auth_status",
           command,
         ]);
       } finally {
@@ -102,7 +126,7 @@ describe("native read cancellation settlement", () => {
       await expect(read(client, controller.signal)).rejects.toThrow(
         "READ_CANCELLED",
       );
-      expect(invoke.mock.calls.map((call) => call[0])).toEqual(["auth_status"]);
+      expect(invoke.mock.calls.map((call) => call[0])).toEqual(["executive_auth_status", "auth_status"]);
     },
   );
 
@@ -162,7 +186,7 @@ describe("native read cancellation settlement", () => {
     }
     await flush();
     expect(completions).toBe(1);
-    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenCalledTimes(3);
   });
 
   it("does not cancel or replay a sibling read", async () => {
@@ -201,7 +225,7 @@ describe("native read cancellation settlement", () => {
       await b;
       expect(secondState).toBe("RESOLVED");
       expect(invoke.mock.calls.map((call) => call[0])).toEqual([
-        "auth_status",
+        "executive_auth_status", "auth_status",
         "read_programs",
         "read_programs",
       ]);
@@ -322,7 +346,7 @@ describe("native generation cancellation", () => {
         read_state: { state: "CURRENT" },
       });
       expect(invoke.mock.calls.map((call) => call[0])).toEqual([
-        "auth_status",
+        "executive_auth_status", "auth_status",
         "read_mission",
         "read_mission",
       ]);

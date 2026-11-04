@@ -77,11 +77,20 @@ def test_v2_carry_refuses_broken_chain(monkeypatch, fault):
 
 
 def _terminal_fixture(tmp_path, monkeypatch, *, marker=True):
+    """Create the exact historical schema-v5 terminal-carry baseline."""
+    from control_plane import executive_runtime as rt
+    # Freeze construction before the database exists; never relabel a current store.
+    monkeypatch.setattr(rt, "_MIGRATIONS", rt._MIGRATIONS[:5])
+    monkeypatch.setattr(rt, "SCHEMA_VERSION", 5)
+    monkeypatch.setattr(rt, "_NORMALIZED_V7_SCHEMA_DIGEST", rt._NORMALIZED_V5_SCHEMA_DIGEST)
     runtime, root_id, job_id, _command, attempt_id = _failed_planner(tmp_path, marker=marker)
     root = runtime.jobs.get_job(root_id)
     # Unit projection supplies the host binding; the Runtime fixture owns the claim.
     root = dataclasses.replace(root, constraints={**root.constraints, "base_sha": "a"*40})
     before = m.snapshot(runtime.store.path)
+    assert sorted(row["version"] for row in before["tables"]["schema_migrations"]) == [1, 2, 3, 4, 5]
+    with runtime.store.read() as connection:
+        assert rt._normalized_schema_digest(connection) == rt._NORMALIZED_V5_SCHEMA_DIGEST
     admission = next(e for e in before["tables"]["events"] if e["job_id"] == root_id and e["event_type"] == "JOB_CREATED")
     prior = dict(root_job_id=root_id, root_identity_sha256=m.root_identity(root),
                  root_event_id=admission["event_id"], root_event_sha256=m.digest(admission))
@@ -92,7 +101,7 @@ def _terminal_fixture(tmp_path, monkeypatch, *, marker=True):
                             to_dict=lambda: {"job_id": "JOB-proof", "base_sha": "b"*40})
     original = runtime.jobs.get_job
     monkeypatch.setattr(runtime.jobs, "get_job", lambda job: proof if job == "JOB-proof" else original(job))
-    monkeypatch.setattr(m, "prior_carry_material", lambda sha: (prior, {"success_job_id": "JOB-proof"}, material))
+    monkeypatch.setattr(m, "prior_carry_material", lambda sha, **kwargs: (prior, {"success_job_id": "JOB-proof"}, material))
     monkeypatch.setattr(m, "terminal_assignment", lambda *args: {"assignment_seal_sha256": "4"*64})
     config = {"worker_id": "worker-1", "quota_class": "default"}
     return runtime, root, before, config, prior, material, proof, job_id, attempt_id

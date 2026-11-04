@@ -6,6 +6,18 @@ Operation: `fabric-fallback-pool-accounting-20261005-pro-001`.
 Protected source/procedure: `7eac3ec252475600147ec9a376b8ca16403ac4c5`.
 Mode: user-selected Pro; no platform capacity or compaction inference from that label.
 
+## 2026-11-04 amendment — HISTORICAL_RETENTION source composition
+
+Disposition: **HISTORICAL_RETENTION**, adopted by the assigned parent for this source contribution. This amendment is dated 2026-11-04 and is layered on the 2026-10-05 candidate. It does not delete, rewrite or re-date the October 5 observations, citations, unknowns or denials recorded below.
+
+**Composition.** The October 5 candidate catalog had 19 models. This revision composes the protected `openai.gpt-6-luna` record and its `openai-gpt-6-luna-20261006` source into that candidate, giving 20 model identities. `catalog_version` is carried as 2026-10-06.1 and `verified_at` as 2026-10-06 from the protected composition base. Those two values are existing composition inputs; they are not a claim that every row was re-reviewed on 2026-10-06. The composition is additive only: every candidate model record, source record, rate, burn rule and pool-family field survives unchanged, `production_armed` remains false and the authority map is unchanged. The reviewed pool-family reader `control_plane/provider_model_economics.py` and its owning fallback test remain byte-identical to the candidate.
+
+**Rates stay dated.** All 18 candidate-added rate rows keep their 2026-10-05 source/effective dates. Four rows — Sonnet on `anthropic_api` and on Cursor, and Terra on Cursor standard and Cursor long — are historical-only under the supersession below; the other 14 are dated observations with no renewed currentness claim. Composition is not renewed price verification, the protected catalog date is not renewed verification, and no current price was browsed or refreshed by this amendment. Section 1's pool-family and rate statements, and section 3's source citations, describe retained catalog metadata and recorded October 5 observations; they are not a current routing-eligibility claim.
+
+**Chairman supersession consumed.** PR #1253 comment `5989886082` (2026-10-05) supersedes this report's earlier Sonnet/Terra fallback preference. Sonnet and Terra are excluded from new automatic selection, including idle/expiry overrides; their retained catalog entries are historical economic metadata only, and a price record is not routing eligibility. Native Codex/Claude allowances remain reserved for Astra/Sol/Fable/Opus principal reasoning, qualified orchestration and genuinely difficult work. Economical Luna/Haiku fallbacks require separately funded, already-admitted offers outside those reserved allowances; funding must follow the actual provider/product/realm rather than the executable name, and unknown funding is a hold, not free capacity. The section 4 ranking and the expiring-surplus discussion are amended accordingly below. Nothing here changes a live quota, model selection, native setting, hook or broker cap, and the native-read and #1248 review-auth gates stay as recorded.
+
+**Test evidence.** The 245-pass seven-module result in section 2 is HISTORICAL 2026-10-05 evidence and was not re-run here. The actual 2026-11-04 verification for this composition is recorded separately in section 2 with its own command, module count and exit status. Source success is not merge, deployment, routing installation, native admission or runtime acceptance; the parent owns publication and acceptance.
+
 ## 1. Outcome and consumer
 
 The Chairman requested maximum useful concurrency, inexpensive fallback when GLM/Alibaba/MiniMax are full, frontier preservation, strong expiry-aware preferences, and correct Cursor/Alibaba/OpenCode accounting. This contribution repairs the existing model-economics input to that path. It does not introduce another router, quota ledger, scheduler, observer, account registry or model-selection authority.
@@ -22,7 +34,7 @@ The named consumer is the existing Model Router / Capacity / Provider Control in
 
 ## 2. Evidence and limits
 
-Test-first baseline for Cursor/fallback metadata: **15 failed, 13 passed**. First repaired economics run: 102 passed. Expanded compatibility run: 233 passed. The subsequent OpenCode source increment first produced **12 failed, 28 deselected**; after implementation the combined seven-module run produced **245 passed**.
+HISTORICAL 2026-10-05 source-review evidence, not a fresh rerun: test-first baseline for Cursor/fallback metadata: **15 failed, 13 passed**. First repaired economics run: 102 passed. Expanded compatibility run: 233 passed. The subsequent OpenCode source increment first produced **12 failed, 28 deselected**; after implementation the combined seven-module run produced **245 passed**.
 
 Command used:
 
@@ -37,9 +49,23 @@ python3 -m pytest -o addopts='' -q \
   tests/test_subscription_provider_profiles.py --tb=short
 ```
 
+**2026-11-04 composition verification (this amendment).** The 245-pass figure above is historical 2026-10-05 evidence and was not re-run. This amendment ran the four owning/adjacent pure modules in an isolated minimal source tree — the candidate catalog, the unchanged candidate `control_plane/provider_model_economics.py`, the unchanged candidate `tests/test_fallback_model_pool_accounting.py`, the candidate `tests/test_provider_model_economics.py` with only the expected model count changed from 19 to 20, and the unchanged protected `control_plane/provider_offer_economics.py`, `tests/test_gpt6_model_economics.py` and `tests/test_provider_offer_economics.py` — with pytest plugin autoload disabled, an isolated pytest configuration and no ambient repository conftest:
+
+```text
+python3 -m pytest -o addopts='' -p no:cacheprovider -q \
+  tests/test_fallback_model_pool_accounting.py \
+  tests/test_provider_model_economics.py \
+  tests/test_gpt6_model_economics.py \
+  tests/test_provider_offer_economics.py --tb=short
+```
+
+Result: **120 passed**, 0 failed, 0 errors, exit status 0. Two material mutation controls were executed against separate temporary copies of the composed catalog and both failed for the intended reason: removing `openai.gpt-6-luna` made `tests/test_gpt6_model_economics.py::test_model_limits_and_subscription_measurement_stay_distinct[openai.gpt-6-luna]` fail on the missing model, and setting the Composer Cursor `pool_family` to `unknown` made `tests/test_provider_model_economics.py::test_catalog_loads_reviewed_routing_models_and_stays_inert` fail with `ModelEconomicsError`. Both temporary copies were discarded, the final catalog bytes were restored and re-hashed, and the four-module suite was re-run green. No owned test was changed to bypass a failure.
+
+**Parent integration clarification (2026-11-04).** The final source composition also preserves the already accepted seven-line GPT-6 Luna cash-estimate assertion from protected `5f26bf6073f8c3093320771c715e8e411fe48364` in `tests/test_provider_model_economics.py`, while composing its expected model count from 18 to 20. The 120-pass worker receipt above covers the bounded reconstruction before this existing assertion was restored; it does not claim a separate rerun of the final integrated tree. Final exact-head CI and source acceptance are recorded on PR #1253. This is preservation of accepted test coverage, with no additional production change.
+
 The new cases discriminate missing source data, exact price bands, disjoint cache categories, malformed optional fields, incompatible units/surfaces, legacy unknown-family behavior, absent Haiku-on-Cursor evidence, unsupported Go cache-write prices and absence of live quota fields. In particular, Go Grok remains at its lower rate at 200,000 context tokens, while the separately retained direct xAI card changes at that boundary. The source tests observe that distinction; they do not prove a provider invoice.
 
-The catalog has 19 models. Existing unrelated model records and original source entries are preserved. Compact JSON serialization is retained. The new loader and catalog must release together: the old strict v1 loader rejects the added field rather than silently ignoring it. This is backward read compatibility, not permission to install the new catalog over an old reader.
+The October 5 candidate catalog had 19 models. The composed source in this revision has 20 model identities: the 19 candidate records plus the protected `openai.gpt-6-luna` record and its `openai-gpt-6-luna-20261006` source, with `catalog_version` 2026-10-06.1 and `verified_at` 2026-10-06 carried from the protected composition base. Existing unrelated model records and original source entries are preserved. Compact JSON serialization is retained. The new loader and catalog must release together: the old strict v1 loader rejects the added field rather than silently ignoring it. This is backward read compatibility, not permission to install the new catalog over an old reader.
 
 Quote scope is deliberately narrow. Base model-token value excludes dynamic team fees, regional uplifts, tool charges, unreviewed Fast modes and paid-overage authorization. Anthropic cache-write cards use the published five-minute price, not the one-hour price. A flat price band does not prove a serving harness accepts unbounded context. Context setting, effort, API format and actual served model still require binding by the existing runtime owner. Dates identify this review's applicability, not model launch dates.
 
@@ -87,13 +113,13 @@ For each ready bounded task, preserve the canonical identity and effect state. T
 
 Intersect current account, product, model, provider, host, root/ancestor, reviewer and all quota-window constraints. Capacity is not the sum of labels in a model menu. Two processes using one subscription and two keys for one account can consume the same constraint. A free slot is not a replenished daily/weekly/monthly allowance. A forecast reset is not present spendable balance.
 
-Only then rank the lawful candidates. The preferred order for easy work is qualified GLM Flash/Qwen Flash/MiniMax and comparable economical offers, then qualified Luna/Haiku, then Sonnet/Terra when their whole-task economics or capability makes sense. Preserve Grok/Cursor frontier capacity by default. Medium/hard bounded work and orchestration can use qualified full GLM, Grok/Cursor, Sonnet/Terra or stronger admitted routes as appropriate. These are preferences, not claims that every named model is suitable for every task.
+Only then rank the lawful candidates. The preferred order for easy work is qualified GLM Flash/Qwen Flash/MiniMax and comparable economical offers, then qualified Luna/Haiku where a separately funded, already-admitted offer exists outside the reserved native allowances. Sonnet and Terra are excluded from new automatic selection by the Chairman supersession of 2026-10-05 (PR #1253 comment `5989886082`), including idle/expiry overrides; their retained catalog entries are historical economic metadata only, and a price record is not routing eligibility. Preserve Grok/Cursor frontier capacity by default. Medium/hard bounded work and orchestration can use qualified full GLM, Grok/Cursor or stronger admitted routes as appropriate. Native Codex/Claude allowances remain reserved for Astra/Sol/Fable/Opus principal reasoning, qualified orchestration and genuinely difficult work. Economical Luna/Haiku fallbacks require separately funded, already-admitted offers outside those reserved allowances; funding must follow the actual provider/product/realm rather than the executable name, and unknown funding is a hold, not free capacity. These are preferences, not claims that every named model is suitable for every task.
 
 Cross-product selection must preserve the actual harness/provider identity: Cursor is a delivery product with multiple model families, not synonymous with Grok. Sonnet/Luna/Terra through Cursor can consume a different pool from Grok. The same underlying model through OpenCode, Alibaba or a direct provider can have different economics, windows, tooling and permissions.
 
 ### Expiring surplus can override preference, not capability or authority
 
-The Chairman specifically wants strong use-before-reset priority, even when it promotes an otherwise overpowered model for easy work. The integration should support that explicit preference. An eligible frontier model may do easy work when its allowance would otherwise expire unused; an incapable model must not receive hard work simply to consume its balance.
+The Chairman specifically wants strong use-before-reset priority, even when it promotes an otherwise overpowered model for easy work. The integration should support that explicit preference. An eligible frontier model may do easy work when its allowance would otherwise expire unused; an incapable model must not receive hard work simply to consume its balance. That preference is constrained by the 2026-10-05 Chairman supersession (`5989886082`): Sonnet and Terra remain excluded from new automatic selection, so idle or expiring surplus cannot promote them into an override, and their retained catalog entries remain historical economic metadata only.
 
 Distinguish true expiring monthly/week-long allowance from rolling-window recovery. A five-hour throttle reopening does not imply the monthly pool should be depleted. Account for already reserved completions, pending difficult work, observed task durations, review/repair/return costs and uncertainty before declaring surplus. A task that cannot finish before expiry does not have the same benefit as one that can. Do not run synthetic work merely to burn credits.
 

@@ -3,13 +3,33 @@ import { OperationController } from "./operation-controller";
 import type { CommandIntent, EffectReceipt, FiniteCommandPort, OperationPointer, PendingPointerStore } from "./operation-controller";
 
 const message: CommandIntent = { kind: "message", targetKey: "session-A", payload: { text: "Continue accepted slice" } };
+
+/** Exact match on all three fields, as the real host store is specified to do. */
+function samePointer(a: OperationPointer, b: OperationPointer): boolean {
+  return (
+    a.operationKey === b.operationKey &&
+    a.kind === b.kind &&
+    a.targetKey === b.targetKey
+  );
+}
+
 function fixture() {
   const hints = new Map<string, OperationPointer>();
   const store: PendingPointerStore = {
     read: (scope) => hints.get(scope) ?? null,
-    write: (scope, pointer) => { hints.set(scope, pointer); },
-    clear: (scope, pointer) => {
-      if (hints.get(scope)?.operationKey === pointer.operationKey) hints.delete(scope);
+    reserve: (scope, pointer) => {
+      const existing = hints.get(scope);
+      if (existing) return { reserved: false, pointer: existing };
+      hints.set(scope, pointer);
+      return { reserved: true };
+    },
+    clearIfEqual: (scope, pointer) => {
+      const existing = hints.get(scope);
+      if (existing && samePointer(existing, pointer)) {
+        hints.delete(scope);
+        return true;
+      }
+      return false;
     },
   };
   const echo = (pointer: OperationPointer): EffectReceipt => ({ ...pointer, disposition: "accepted" });
