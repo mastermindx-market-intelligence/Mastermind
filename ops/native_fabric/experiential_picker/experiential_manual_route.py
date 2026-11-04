@@ -68,6 +68,7 @@ _EXPERIENTIAL_CONSENT_FIELDS = (
     "retention_opt_in", "sensitive_data_opt_in",
     "proprietary_code_opt_in", "code_exposure_opt_in",
 )
+_EXPERIENTIAL_ALLOWED_CLASSES = frozenset(("mechanical", "fix_build"))
 
 
 def _experiential_witnesses():
@@ -128,8 +129,8 @@ def _experiential_witnesses():
         return None
     if moment.tzinfo is None:
         return None
-    if (datetime.now(timezone.utc) - moment.astimezone(timezone.utc)
-            ).total_seconds() > float(ttl) * 60.0:
+    age = (datetime.now(timezone.utc) - moment.astimezone(timezone.utc)).total_seconds()
+    if not 0 <= age <= float(ttl) * 60.0:
         return None
     return witness
 
@@ -142,8 +143,8 @@ def _experiential_manual_affinity(task_class: str, doc=None):
     substitution. Witnesses are re-read on every call so a request-time
     strict recheck observes the same freshness the preview reported.
     """
-    if task_class and task_class.lower() in LABOR_CLASSES_R30:
-        return False, "experiential manual route never serves labor classes"
+    if str(task_class or "").strip().lower() not in _EXPERIENTIAL_ALLOWED_CLASSES:
+        return False, "experiential manual route only admits mechanical/fix_build"
     if _experiential_witnesses() is None:
         return False, "experiential owner witnesses unavailable or stale"
     return True, "experiential_manual_witnessed"
@@ -373,6 +374,6 @@ def validate_witness_document(witness: dict, *, now_epoch: float | None = None) 
         return None
     if now_epoch is None:
         now_epoch = _dt.datetime.now(_dt.timezone.utc).timestamp()
-    if now_epoch - moment.timestamp() > float(ttl) * 60.0:
+    if not 0 <= now_epoch - moment.timestamp() <= float(ttl) * 60.0:
         return None
     return "experiential_manual_witnessed"
