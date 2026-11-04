@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Offline-only qualification of one Cursor 4.6 selector edit over sealed native gen26.
+
+This does not publish or select anything in the installed store, run paid
+models, acquire leases, or edit installed source or provider state.
+"""
+from __future__ import annotations
+
+import argparse
+import ast
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+
+HERE = Path(__file__).resolve().parent
+NATIVE = HERE.parent / "quota_continuity" / "rollout" / "native_generation.py"
+spec = importlib.util.spec_from_file_location("cursor46_native_generation", NATIVE)
+generation = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(generation)
+
+EXPECTED_BASE = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"
+EXPECTED_PICK_SHA = "4311200ae485ffd19b2560434e46c0c01899fbb58f0793c198292dba6004503b"
+PICK = "ext/pick.py"
+POST = HERE / "overlay" / "pick.py"
+CHANGES = (
+    (
+        'return (model == "cursor-grok-4.6-high" and _grok_exhausted()\n'
+        '            and policy_allows("grok", task_class, doc)[0])',
+        'return (model == "cursor-grok-4.6-high"\n'
+        '            and policy_allows("grok", task_class, doc)[0])',
+    ),
+    (
+        "    # Chairman's quota-only exception follows this exact Grok model's class\n"
+        "    # capability. Composer and ordinary Cursor routes retain R30 unchanged.",
+        "    # The exact Cursor Grok 4.6-high alias inherits Grok role eligibility.\n"
+        "    # Automatic cross-pool fallback remains restricted to Grok exhaustion;\n"
+        "    # Composer and ordinary Cursor routes retain R30 unchanged.",
+    ),
+    (
+        'return "NONE reason=Cursor Grok alias requires exhausted weekly Grok and eligible Grok task"',
+        'return "NONE reason=Cursor Grok 4.6 alias requires eligible Grok task"',
+    ),
+    (
+        '        # grok_before_cursor: if grok not exhausted and fits, prefer it\n'
+        '        tc = task_class.lower()\n'
+        '        if tc in ("fix_build", "high_level"):\n'
+        '            if not _grok_exhausted() and _slot_concurrent("grok") < _pool_cap("grok"):\n'
+        '                return False, "grok_before_cursor policy"',
+        '        # Grok-first is an AUTO preference, not a veto of the one exact\n'
+        '        # explicitly selected Cursor Grok 4.6 alias. Other Cursor models retain\n'
+        '        # the ordinary Grok-before-Cursor routing policy.\n'
+        '        tc = task_class.lower()\n'
+        '        if tc in ("fix_build", "high_level") and model != "cursor-grok-4.6-high":\n'
+        '            if not _grok_exhausted() and _slot_concurrent("grok") < _pool_cap("grok"):\n'
+        '                return False, "grok_before_cursor policy"',
+    ),
+)
+
+
+def sha(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def patched(raw: bytes) -> bytes:
+    if sha(raw) != EXPECTED_PICK_SHA:
+        raise ValueError("native_gen26_picker_preimage_changed")
+    text = raw.decode("utf-8")
+    reviewed = POST.read_text(encoding="utf-8")
+    for old, new in CHANGES:
+        if text.count(old) != 1 or reviewed.count(new) != 1:
+            raise ValueError("reviewed_selector_hunk_identity_mismatch")
+        text = text.replace(old, new, 1)
+    ast.parse(text, filename="qualified-native-gen26-pick.py")
+    output = text.encode("utf-8")
+    if output == raw:
+        raise ValueError("no_candidate_change")
+    return output
+
+
+def run(store: Path, stage: Path | None) -> dict:
+    store = store.resolve(strict=True)
+    original_pointer = (store / "CURRENT.json").read_bytes()
+    current = generation.current(store)
+    if current is None or current["generation"] != EXPECTED_BASE:
+        raise ValueError("installed_native_predecessor_changed")
+    sealed, incumbent = generation.verify(store, EXPECTED_BASE)
+    originals = {rel: (sealed / rel).read_bytes() for rel in incumbent["files"]}
+    if set(originals) != set(incumbent["files"]):
+        raise ValueError("installed_code_manifest_incomplete")
+    if any(sha(originals[rel]) != expected for rel, expected in incumbent["files"].items()):
+        raise ValueError("installed_code_manifest_drift")
+    successor = dict(originals)
+    successor[PICK] = patched(originals[PICK])
+    hashes = {rel: sha(raw) for rel, raw in successor.items()}
+    changed = sorted(rel for rel in hashes if hashes[rel] != incumbent["files"][rel])
+    if changed != [PICK]:
+        raise ValueError("native_generation_delta_not_single_file")
+    stable_ext = (store.parent / "ext").resolve(strict=True)
+    predicted = generation.digest(generation.canonical(
+        generation.descriptor(hashes, stable_ext)))
+    with tempfile.TemporaryDirectory(prefix="cursor46-qualification-") as tmp:
+        temp = Path(tmp).resolve(strict=True)
+        fake = temp / "fake-owner" / "ext"
+        fake.mkdir(parents=True)
+        def write_source(folder: Path, files: dict[str, bytes]) -> Path:
+            (folder / "ext").mkdir(parents=True)
+            for rel, data in files.items():
+                target = folder / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            return folder
+        prior = generation.publish(write_source(temp / "prior-source", originals),
+                                   fake, incumbent["files"])
+        scratch = fake.parent / "native-code-releases"
+        before = generation.select(scratch, prior.name, None)
+        if before["sequence"] != 1:
+            raise ValueError("scratch_predecessor_not_selected")
+        issued = generation.publish(write_source(temp / "new-source", successor), fake, hashes)
+        _, qualified = generation.verify(scratch, issued.name)
+        if qualified["files"] != hashes:
+            raise ValueError("scratch_manifest_changed")
+        chosen = generation.select(scratch, issued.name, prior.name)
+        if chosen["sequence"] != 2 or chosen["previous"] != prior.name:
+            raise ValueError("scratch_CAS_success_unqualified")
+        try:
+            generation.select(scratch, prior.name, prior.name)
+        except ValueError as exc:
+            if "compare-and-swap" not in str(exc):
+                raise
+        else:
+            raise ValueError("scratch_stale_CAS_not_refused")
+    if ((store / "CURRENT.json").read_bytes() != original_pointer
+            or generation.current(store) != current):
+        raise ValueError("installed_native_selection_moved_during_qualification")
+    result = {
+        "schema": "mastermind.fabric_cursor46_gen26_prepublication.v1",
+        "state": "QUALIFIED_SOURCE_ONLY_NOT_INSTALLED",
+        "installed_predecessor": EXPECTED_BASE,
+        "candidate_generation_expected": predicted,
+        "file_count": len(hashes),
+        "changed_files": changed,
+        "candidate_pick_sha256": hashes[PICK],
+        "manifest_sha256": sha(generation.canonical(hashes)),
+        "scratch_previous_select": "PASS",
+        "scratch_candidate_verify_select": "PASS",
+        "scratch_stale_CAS_refusal": "PASS",
+        "installed_selection_unchanged": True,
+        "protected_merge_review_and_current_CAS_required": True,
+    }
+    if stage is not None:
+        stage = stage.absolute()
+        if not stage.is_absolute() or stage.exists() or stage.is_symlink():
+            raise ValueError("release_stage_must_be_new")
+        stage.parent.resolve(strict=True)
+        stage.mkdir(mode=0o700)
+        staged_source = stage / "source"
+        (staged_source / "ext").mkdir(parents=True, mode=0o700)
+        for rel, data in successor.items():
+            target = staged_source / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        (stage / "manifest.json").write_bytes(generation.canonical(hashes) + b"\n")
+        (stage / "QUALIFICATION.json").write_bytes(
+            generation.canonical(result) + b"\n")
+        result["stage_path"] = str(stage)
+    return result
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--installed-store", type=Path, required=True)
+    parser.add_argument("--release-stage", type=Path)
+    args = parser.parse_args()
+    print(json.dumps(run(args.installed_store, args.release_stage), sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
