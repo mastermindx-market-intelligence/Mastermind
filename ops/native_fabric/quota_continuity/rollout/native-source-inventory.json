@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 85543,
+      "bytes": 87450,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
+      "sha256": "ea918a837484e0e2a8f4223f3ca2ba75a31cdaa9aca550f4008d94a55717e605",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -414,9 +414,9 @@
       "source": "source/operator_stdout_delivery.py"
     },
     "ext/original_delivery_collector.py": {
-      "bytes": 72671,
+      "bytes": 94249,
       "installed_preimage_sha256": "c5cc0c5762073a0029c88ef6daa6fb7d073db1c8aa6518b93594a114cb6fe1f8",
-      "sha256": "263ffcd0bebb03b840f4e0cc9b4097d5445b0831026449bde68f760164f96d0a",
+      "sha256": "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183",
       "source": "candidate/original_delivery_collector.py"
     },
     "ext/original_result_delivery.py": {
@@ -528,10 +528,10 @@
       "source": "source/placement_view.py"
     },
     "ext/pool_ledger.py": {
-      "bytes": 85541,
+      "bytes": 85784,
       "installed_preimage_sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "source": "source/pool_ledger.py"
+      "sha256": "34be52eca114c32f44538254b3675ce2d0a79dc420ebda2f42702c6be56ad6cc",
+      "source": "candidate/pool_ledger.py"
     },
     "ext/pool_status.py": {
       "bytes": 51566,
@@ -540,9 +540,9 @@
       "source": "source/pool_status.py"
     },
     "ext/provider_outcome.py": {
-      "bytes": 25120,
+      "bytes": 30786,
       "installed_preimage_sha256": null,
-      "sha256": "aae20d61a9b17dfc7fc5ca1c7507dcf4eca5972f83eaf923379b6e758ab8dd7e",
+      "sha256": "22b5ae9325118327b8b0734514c6f5711e39ae919f0e04426f7fac182895bf24",
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {
@@ -570,9 +570,9 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 103957,
+      "bytes": 104625,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0",
+      "sha256": "7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {

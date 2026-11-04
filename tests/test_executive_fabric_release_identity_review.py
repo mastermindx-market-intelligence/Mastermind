@@ -12,7 +12,8 @@ from tests.test_executive_a2_identity_review import scan
 def test_only_exact_reviewed_file_and_spelling_qualifies(path):
     text = (Path(__file__).parents[1]/path).read_text()
     spans = reviewed_literal_spans(path, text)
-    assert len(spans) == len(REVIEWED_FILES[path]['sites'])
+    assert len(spans) == (len(REVIEWED_FILES[path]['sites'])
+                          + len(REVIEWED_FILES[path].get('utf8_sites', ())))
     # Full-file scanning still exposes pre-existing topology names/modes;
     # those unchanged lines are outside the branch diff and this review.
     expected = (['_mastermind_exec', '_mastermind_exec', '_mastermind_worker',

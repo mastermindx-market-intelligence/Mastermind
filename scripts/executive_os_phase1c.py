@@ -1832,11 +1832,21 @@ def _service_from_config(
     dialogue_canary_profile: Any | None = None,
     native_dialogue_canary_profile_loader: Callable[[], Any] | None = None,
     remote_worker_binding_source: Callable[..., Any] | None = None,
+    plan_schema_version: str | None = None,
     fabric_worker_binding_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
 ) -> ExecutiveControlService:
+    if "workspace_acquisition" in raw:
+        # Closed unix/launchd stanza only. validate_workspace_control_room
+        # refuses the legacy TCP port stanza and accepts no port or
+        # cache_only shape, so neither a TCP listener, a port config, nor
+        # an alternate store can re-enter service composition. The
+        # explicitly selected bindings store stays the sealed
+        # parent-provided path.
+        validate_workspace_control_room(
+            raw.get("workspace_control_room"), control_uid=int(raw["control_uid"]))
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
         dialogue_canary_profile = DialogueWakeCanaryProfile(None)
@@ -1851,6 +1861,25 @@ def _service_from_config(
             or raw["company_consultation"].get("native_return_armed", False) is not True):
         raise ServiceError("event host requires existing armed App/native Company composition")
     # This is trusted host composition, never a JSON/model-selected factory.
+    from control_plane.executive_orchestration_result import (
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+    )
+    # Legacy omission stays legacy: only an explicit version opts this Control
+    # host into a native planner producer, and that needs an explicitly supplied
+    # trusted claim-bound adapter. The remote transport has not qualified native
+    # contract custody.
+    if plan_schema_version is not None and (
+        type(plan_schema_version) is not str
+        or plan_schema_version not in {
+            PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+        }
+    ):
+        raise ServiceError("trusted planner plan schema is unsupported")
+    if plan_schema_version is not None and (
+        claimed_operator_adapter_factory is None
+        or remote_operator_binding_source is not None
+    ):
+        raise ServiceError("versioned producer needs a trusted claim-bound adapter")
     _validate_fabric_bridge_config(raw)
     from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
     if (type(attended_work_placements) is not tuple
@@ -2290,6 +2319,7 @@ def _service_from_config(
             prompt_source=(sealed_supervisor.primary
                            if type(sealed_supervisor) is MixedExecutionOwnerSupervisor
                            else sealed_supervisor),
+            plan_schema_version=plan_schema_version,
         )
 
     async def verify_operator_identity() -> None:
@@ -2424,7 +2454,10 @@ def _service_from_config(
         workspace_factories = {}
         if "workspace_acquisition" in raw:
             from integrations.business_mcp_auth.contracts import load_resource_policy
-            from integrations.mastermind_workspace_app.contract import workspace_authorizers
+            from integrations.mastermind_workspace_app.contract import (
+                workspace_authorizers, workspace_control_room_authorizers,
+            )
+            from common.workspace_control_room_action_contract import OPERATIONS
             from control_plane.workspace_control_room_lifecycle import HostedControlRoom
             from control_plane.workspace_read_service import workspace_provider_factory
             from scripts.chairman_control_room import ServerConfig
@@ -2434,6 +2467,13 @@ def _service_from_config(
                 raise ServiceError("sealed current workspace acquisition loader is required")
             policy = load_resource_policy(raw["workspace_resource_policy"])
             _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            _, authorize_discovery = workspace_control_room_authorizers(
+                policy=policy, load_bindings=workspace_acquisition_loader, action="discover")
+            authorize_actions = {
+                operation: workspace_control_room_authorizers(
+                    policy=policy, load_bindings=workspace_acquisition_loader, action=operation)[1]
+                for operation in OPERATIONS
+            }
             # Installed source join: the trusted parent builds the composer from
             # the same sealed roots the readers use, never from the public App.
             # The collector is the existing installed one, constructed directly
@@ -2499,6 +2539,7 @@ def _service_from_config(
                             raise ServiceError("installed acceptance target changed")
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
+                authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
                 runtime_identity={"root": None, "db_present": True, "identity": None},
                 # The factory is inert until the actual service has started.
@@ -2652,6 +2693,7 @@ def _service_from_config(
                                 ceo_ingress_armed=binding.armed,
                                 strict_v2_admission=True,
                                 execution_binding_provider=current_execution_binding,
+                                frontier_selection_provider=service._resolve_ceo_frontier_selection,
                                 dialogue_source_provider=commission_source_provider,
                                 admission_guard=require_summon_admission,
                                 fresh_admission_observer=(

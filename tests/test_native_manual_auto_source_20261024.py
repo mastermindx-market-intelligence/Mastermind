@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PATCH = ROOT / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
+HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
+CURRENT_TASK_SHA = "ea918a837484e0e2a8f4223f3ca2ba75a31cdaa9aca550f4008d94a55717e605"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -109,12 +111,17 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     stage = built / "native-code-stage"
     for relative, (name, original_sha) in SOURCE.items():
         source = NATIVE / "candidate" / name
-        # Current 97-member release is ALREADY composed. Do not require
-        # its source to match a historical 95-member preimage.
+        # Current source includes later routing and namespace-bound readers.
+        # Reconstruct the exact historical F1 epoch only in this private stage.
         current = source.read_bytes()
+        assert (stage / relative).read_bytes() == current
         if relative == "ext/pick.py":
             assert sha(source) == COMPOSED_PICK
             current = _inverse_judgment(current)
+        elif relative == "ext/fabric_task.py":
+            assert sha(source) == CURRENT_TASK_SHA
+            assert sha(HISTORICAL_TASK) == AFTER[relative]
+            current = HISTORICAL_TASK.read_bytes()
         else:
             assert sha(source) == AFTER[relative]
         historical = _inverse_manual_member(current, relative)
@@ -139,6 +146,7 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
     assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
+    assert sha(NATIVE / "candidate/fabric_task.py") == CURRENT_TASK_SHA
     assert b'if tc not in {"review", "audit"}' in (
         NATIVE / "candidate/pick.py").read_bytes()
     # Neither stage nor source is published/selected by this test.

@@ -22,13 +22,18 @@ def norm(path: Path) -> str:
 
 def test_index_mandates_same_pin_paper_domain_skill():
     text = norm(INDEX)
-    assert "skills/paper-design-workflow/SKILL.md" in text
-    assert "Mandatory domain companion" in text
-    assert "same pinned repository commit" in text
-    assert "generic Studio filesystem/process tools do not prove Paper unavailable" in text
-    assert "Remote Desktop Commander" in text
-    assert "Studio Direct absence or degradation grants **no** Desktop Commander authority" in text
-    assert "independently authorizes that exact host carrier" in text
+    for clause in (
+        "skills/paper-design-workflow/SKILL.md",
+        "Mandatory for Paper inspection/edit/upgrade/review/migration/extraction",
+        "same pinned repository commit",
+        "Discover exact Paper actions, not generic Studio proxies",
+        "Remote Desktop Commander",
+        "Its absence/degradation grants **no** Desktop Commander authority",
+        "requires independently authorized exact host/action",
+        "observed permission, no denial and no uncertain modifying effect",
+        "`EFFECT_UNKNOWN` never permits cross-carrier replay",
+    ):
+        assert clause in text
 
 
 def test_skill_discovers_exact_paper_family_before_negative_claim():

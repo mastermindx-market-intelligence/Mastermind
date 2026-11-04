@@ -48,6 +48,20 @@ not a claim about the current installed native generation.
 
 ## Executed source checks
 
+### Historical preimage retained during browser-catalog integration
+
+The exact original source is retained in `fabric_task.py.base`, with the same
+`preimage_sha256` recorded in `manifest.json`. The patch, its postimage digest,
+and the original manifest remain unchanged. The manifest's
+`active_candidate_unchanged` records the proposal's original qualification;
+it is not a claim that all later active-reader improvements are prohibited.
+The browser catalog's separate owner-namespace read binding changes the active
+adapter without applying this diagnostic patch. The prospective tests still
+apply and qualify the exact historical patch in a disposable directory, and
+also verify that its diagnostic classifier and status field remain absent from
+the active adapter. Adopting the diagnostic patch later requires qualification
+against that later source; these historical results do not establish it.
+
 Two targeted tests against the unchanged preimage failed on the absent diagnostic
 field/classifier (exit 1). The exact materialized postimage then passed all 31
 focused cases (exit 0), including legacy, malformed, identity/digest mismatch,

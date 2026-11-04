@@ -4,7 +4,8 @@ import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceC
 import "./office.css";
 import { registerUnsavedNavigationHold } from "../auth-navigation-guard";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
-import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
+import type { ResultSelection } from "../result";
+import { AttendedFabricWorkspace } from "../fabric/AttendedFabricWorkspace";
 import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
 import type { PlanSelection } from "../planning/admitted-plan";
 import type { ActivitySelection } from "../planning/retained-activity";
@@ -27,6 +28,8 @@ export interface MetaCeoOfficeProps {
   projection: OfficeProjection;
   draft: OfficeDraft;
   onDraftChange: (text: string) => void;
+  /** Reuse App's exact Result owner reader; this component never acquires content. */
+  onInspectWorkerResult?: (selection: ResultSelection) => void;
   locale?: "en" | "zh-CN";
 }
 
@@ -122,7 +125,7 @@ function SourceBadge({ source }: { source: SourceClaim }) {
   return <span className="office-state" data-state={source.state}>{source.state}</span>;
 }
 
-export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" }: MetaCeoOfficeProps) {
+export function MetaCeoOffice({ projection, draft, onDraftChange, onInspectWorkerResult, locale = "en" }: MetaCeoOfficeProps) {
   const t = (en: keyof typeof OFFICE_ZH): string => locale === "zh-CN" ? OFFICE_ZH[en] : en;
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [preview, setPreview] = useState<DirectionPreview | null>(null);
@@ -204,8 +207,9 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
     <FabricMissionInspector
       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
       mission={mission} locale={locale}
+      onInspectResult={projection.mission.source.state === "CURRENT" ? onInspectWorkerResult : undefined}
     />
-    <AttendedFabricInspector
+    <AttendedFabricWorkspace
       key={`attended:${projection.context.authGeneration}`}
       host={typeof window === "undefined" ? undefined : window.MastermindMissionHost}
       locale={locale}

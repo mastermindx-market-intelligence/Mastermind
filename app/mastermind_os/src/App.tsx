@@ -10,6 +10,8 @@ import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
+import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
@@ -68,6 +70,10 @@ import {
   type Missionv3Document,
   type UnavailableMission,
 } from "./mission";
+import { type ControlRoomState } from "./control-room";
+import { ControlRoomPanel } from "./ControlRoomPanel";
+import { useControlRoomSurfaceControls } from "./useControlRoomSurfaceControls";
+import { ControlRoomSurfaceControls } from "./ControlRoomSurfaceControls";
 import {
   decodeResultEnvelope,
   normalizeResultSelection,
@@ -87,6 +93,7 @@ export const navigation = [
   "Knowledge",
   "Work",
   "Programs",
+  "Control Room",
   "Fleet & Capacity",
   "Mission Workspace",
   "Conversation",
@@ -102,7 +109,7 @@ const primaryNavigation: readonly View[] = [
   "Conversations",
   "Knowledge",
 ];
-type OperationalView = "Work" | "Programs" | "Fleet & Capacity";
+type OperationalView = "Work" | "Programs" | "Control Room" | "Fleet & Capacity";
 function OperationalNavigation({ label, onNavigate }: {
   label: string;
   onNavigate: (view: OperationalView) => void;
@@ -112,6 +119,7 @@ function OperationalNavigation({ label, onNavigate }: {
       <div className="segmented">
         <button type="button" onClick={() => onNavigate("Work")}>Work</button>
         <button type="button" onClick={() => onNavigate("Programs")}>Open Programs</button>
+        <button type="button" onClick={() => onNavigate("Control Room")}>Control Room</button>
         <button type="button" onClick={() => onNavigate("Fleet & Capacity")}>Fleet &amp; Capacity</button>
       </div>
     </nav>
@@ -134,6 +142,7 @@ const navGlyph: Record<View, string> = {
   Knowledge: "□",
   Work: "▤",
   Programs: "◫",
+  "Control Room": "◎",
   "Fleet & Capacity": "◇",
   "Mission Workspace": "◎",
   Conversation: "◌",
@@ -1175,6 +1184,7 @@ function Conversation({
   selection,
   association,
   contentAvailable,
+  locale = "en",
 }: {
   document?: WindowDocument | null;
   pending?: boolean;
@@ -1182,6 +1192,7 @@ function Conversation({
   selection?: MissionSelection | null;
   association?: ObservedMissionAssociation | null;
   contentAvailable?: boolean;
+  locale?: "en" | "zh-CN";
 }) {
   const refreshControl = (
     <button onClick={refresh} disabled={!!pending || !contentAvailable}>
@@ -1268,7 +1279,11 @@ function Conversation({
       </p>
       <Empty>
         {window.MastermindMissionHost?.readCurrentWindow
-          ? "Sign in with permitted conversation access, then open this view again."
+          ? contentAvailable
+            ? locale === "zh-CN"
+              ? "对话来源暂不可用。服务或来源恢复后，请刷新。"
+              : "The conversation source is unavailable. Refresh after the service or source becomes available."
+            : "Sign in with permitted conversation access, then open this view again."
           : "No conversation content is shown until a connected source is installed. Existing owner and effect boundaries remain unchanged."}
       </Empty>
       <details className="reason-details">
@@ -1315,6 +1330,11 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       missionWorkRef: string | null;
       candidates: string;
     } | null>(null),
+    [controlRoom, setControlRoom] = useState<ControlRoomState>({
+      state: "UNAVAILABLE", reason: "NOT_READ", ownerRevision: -1,
+    }),
+    [controlRoomRevision, setControlRoomRevision] = useState(0),
+    controlRoomAuthEpoch = useRef(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
@@ -1425,6 +1445,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  const controlRoomSurfaceControls = useControlRoomSurfaceControls({
+    selection, selectionSeq, authEpoch: controlRoomAuthEpoch, authRevision,
+    active: active === "Control Room",
+  });
   const office = useOfficeProjection(authRevision, selection);
   const observedConversation = useObservedConversation(
     authRevision,
@@ -1844,6 +1868,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         previousAuth.current = serialized;
         previousAuthState.current = state;
         previousHostGeneration.current = generation;
+        // Invalidate old surface presentation at notification time while the
+        // App-owned pending/unknown action continues to retain its own result.
+        controlRoomAuthEpoch.current += 1;
         if (passiveLoss && hasUnsentUserText.current)
           passiveExpiryHold.current = true;
         else if (state.status === "signing_in" || state.acquisition ||
@@ -2147,6 +2174,39 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     selection?.rootJobId,
   ]);
   useEffect(() => {
+    if (active !== "Control Room") return;
+    const host = window.MastermindMissionHost;
+    const read = host?.readControlRoomState;
+    const ownerRevision = authRevision;
+    if (!authState?.acquisition || typeof read !== "function") {
+      setControlRoom({
+        state: "UNAVAILABLE", ownerRevision,
+        reason: !authState?.acquisition ? "AUTHENTICATION_REQUIRED" : "SIGNED_CONTROL_ROOM_READ_UNAVAILABLE",
+      });
+      return;
+    }
+    let attached = true;
+    const controller = new AbortController();
+    setControlRoom({ state: "PENDING", ownerRevision });
+    Promise.resolve()
+      .then(() => read({ signal: controller.signal }))
+      .then((value) => {
+        if (attached && !controller.signal.aborted)
+          setControlRoom({ ...value, ownerRevision });
+      })
+      .catch(() => {
+        if (attached && !controller.signal.aborted)
+          setControlRoom({ state: "UNAVAILABLE", ownerRevision, reason: "SOURCE_UNAVAILABLE" });
+      });
+    return () => { attached = false; controller.abort(); };
+  }, [active, authRevision, authState?.acquisition, controlRoomRevision]);
+  // An old auth epoch's Control Room data may remain in state while another
+  // view is mounted, but must never render for the next signed-in account.
+  const currentControlRoom: ControlRoomState =
+    authState?.acquisition && controlRoom.ownerRevision === authRevision
+      ? controlRoom
+      : { state: "UNAVAILABLE", reason: "AUTHENTICATION_REQUIRED", ownerRevision: authRevision };
+  useEffect(() => {
     let attached = true;
     const current = ++workRequest.current;
     const controller = new AbortController();
@@ -2407,6 +2467,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                 : workState.kind === "DOCUMENT"
                   ? workState.document.availability
                   : "UNAVAILABLE"
+              : active === "Control Room"
+                ? currentControlRoom.state === "PENDING" ? "SOURCE_READ_PENDING" : currentControlRoom.state
               : active === "Fleet & Capacity"
                 ? "NOT_PROJECTED"
                 : (d?.read_state.state ?? "UNAVAILABLE"),
@@ -2450,6 +2512,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
                           ? `${workState.document.coverage.count} Work roots from the bounded Executive observation.`
                           : "Work owner returned a typed unavailable observation; no empty queue is inferred."
                         : "Work source unavailable; no empty queue is inferred."
+                    : active === "Control Room"
+                      ? currentControlRoom.state === "AVAILABLE"
+                        ? `${currentControlRoom.programs.length} programmes observed. Review the next step and its source.`
+                        : currentControlRoom.state === "PENDING"
+                          ? "Reading one authenticated incumbent Control Room cache."
+                          : "Authenticated Control Room source unavailable; no current operation is inferred."
                     : active === "Fleet & Capacity"
                       ? "Fleet health and placement require their canonical Capacity source."
                       : d
@@ -2922,6 +2990,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           ])}
           projects={commandView.projects}
           profiles={commandView.profiles}
+          frontierModels={commandView.frontierModels}
           initialDraft={presentedComposerDrafts.launch}
           onDraftChange={text => {
             const liveBinding = completeOrchestratorCommandBinding(
@@ -3192,8 +3261,16 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     key={JSON.stringify([ownerContext?.principalScope,ownerContext?.generation,selection.workRef,selection.rootJobId,commandSelectionRevision])}
     locale={locale} selection={{work_ref:selection.workRef,job_id:selection.rootJobId,attempt_id:null}}
     read={commandReady ? commandBinding?.directNative?.read : undefined}
-    held={heldKind==="consume" || currentReopened?.pointer?.kind==="consume"}
-    recovery={heldKind==="consume" ? checkStatusControl : null}
+    inspectCorrection={commandReady ? commandBinding?.directNative?.inspectCorrection : undefined}
+    onCorrect={(selected,fence,complete)=>{
+      const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
+      const ctx=live ? readOwnerContext(live.port) : null;
+      if(commandSelectionRevision!==selectionSeq.current||!live||live!==commandBinding||!ctx||
+        ctx.principalScope!==ownerContext?.principalScope||ctx.generation!==ownerContext?.generation){complete({status:'refused'});return;}
+      beginCommand('stop',live.directNative?.makeCorrectionIntent?.(selected,fence)??null,complete);
+    }}
+    held={heldKind==="consume" || heldKind==="stop" || currentReopened?.pointer?.kind==="consume" || currentReopened?.pointer?.kind==="stop"}
+    recovery={heldKind==="consume" || heldKind==="stop" ? checkStatusControl : null}
     onConsume={(selected,digest,complete)=>{
       const live=completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
       const ctx=live ? readOwnerContext(live.port) : null;
@@ -3268,6 +3345,44 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           reason: "RESULT_SOURCE_UNAVAILABLE",
         });
       });
+  };
+  // Open exactly the indexed worker return through the *existing* Result
+  // owner, never by manufacturing a URL, another read path or permission.
+  const workerResultHost = window.MastermindMissionHost;
+  const workerResultEpoch = workerResultHost?.invalidationGeneration?.();
+  const openOfficeWorkerResult = (input: ResultSelection) => {
+    const valid = normalizeResultSelection(input);
+    const host = window.MastermindMissionHost;
+    const user = host?.auth?.getState();
+    const source = office.projection.mission;
+    const indexed = missionV3 && isDocv3(missionV3) ? missionV3 : null;
+    if (!valid || !host?.readResult || host !== workerResultHost ||
+        workerResultEpoch === undefined ||
+        host.invalidationGeneration?.() !== workerResultEpoch ||
+        user?.status !== "signed_in" || !user.acquisition ||
+        authState?.status !== "signed_in" || !authState.acquisition ||
+        source.source.state !== "CURRENT" ||
+        source.value?.schema !== "mastermind.mission_workspace.v3" ||
+        !indexed || !selection ||
+        valid.workRef !== selection.workRef || valid.rootJobId !== selection.rootJobId ||
+        source.value.program.work_ref !== selection.workRef ||
+        source.value.mission.root_job_id !== selection.rootJobId ||
+        indexed.result_refs.snapshot_digest !== source.value.result_refs.snapshot_digest ||
+        JSON.stringify(indexed.result_refs.generation) !== JSON.stringify(source.value.result_refs.generation))
+      return;
+    const c = source.value.children.items.find(row =>
+      row.job_id === valid.jobId && row.latest_attempt?.attempt_id === valid.attemptId);
+    const exact = c ? qualifyWorkerResultRef(source.value, c) : null;
+    const stillIndexed = indexed.result_refs.refs.some(ref =>
+      ref.root_job_id === valid.rootJobId && ref.job_id === valid.jobId &&
+      ref.attempt_id === valid.attemptId && ref.result_envelope_digest === valid.resultEnvelopeDigest);
+    if (!exact || !stillIndexed ||
+        exact.resultEnvelopeDigest !== valid.resultEnvelopeDigest) return;
+    // This user interaction is the explicit permitted read. The Result owner
+    // rechecks identity, source and exact digest during the bounded acquisition.
+    setActive("Projects");
+    setProjectTab("Overview");
+    pickResult(exact);
   };
   const resultRefs =
     d && missionV3 && isDocv3(missionV3) ? (
@@ -3400,6 +3515,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           projection={office.projection}
           draft={office.draft}
           onDraftChange={office.changeDraft}
+          onInspectWorkerResult={workerResultHost?.readResult ? openOfficeWorkerResult : undefined}
         />
         <OperationalNavigation label="Company operations" onNavigate={navigateOperationalView} />
       </>
@@ -3626,6 +3742,21 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         ) : null}
       </section>
     );
+  else if (active === "Control Room")
+    content = (
+      <>
+        <ControlRoomPanel key={authRevision} state={currentControlRoom}
+          canRefresh={Boolean(authState?.acquisition) &&
+            typeof window.MastermindMissionHost?.readControlRoomState === "function"}
+          onRefresh={() => setControlRoomRevision(revision => revision + 1)}
+          onOpen={open} />
+        <ControlRoomSurfaceControls key={"surface-controls:" + authRevision}
+          navigation={currentControlRoom.state === "AVAILABLE"
+            ? currentControlRoom.navigation : null}
+          locale={locale}
+          {...controlRoomSurfaceControls} />
+      </>
+    );
   else if (active === "Work")
     content = (
       <>
@@ -3636,6 +3767,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Fleet & Capacity")
     content = (
+      <>
       <section className="card source-gap">
         <div className="section-title">
           <div>
@@ -3657,6 +3789,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           <code>CAPACITY_SOURCE_NOT_CONNECTED</code>
         </details>
       </section>
+      <AttendedFabricWorkspace
+        key={`fleet:${authRevision}`}
+        host={window.MastermindMissionHost}
+        locale={locale}
+      />
+      </>
     );
   else if (active === "Conversation")
     content = (
@@ -3672,6 +3810,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           selection={selection}
           association={association}
           contentAvailable={!!authState?.content}
+          locale={locale}
         />
       </>
     );
@@ -3791,9 +3930,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   else if (active === "Activity") content = <Activity d={d} />;
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
-  else content = <Conversation />;
+  else content = <Conversation locale={locale} />;
   return (
-    <div className="shell" data-theme={theme} lang={locale}>
+    <div className="shell" data-theme={theme} data-active-route={active} lang={locale}>
       <a className="skip" href="#content" onClick={event => {
         event.preventDefault();
         document.getElementById("content")?.focus();
@@ -3959,9 +4098,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             }}>Discard all unsent work</button>
           </section>
         ) : null}
-        {!directRoute ? <div className="notice" role="status">
-          {visibleNotice}
-        </div> : null}
+        {active !== "Control Room" && !directRoute ? (
+          <div className="notice" role="status">{visibleNotice}</div>
+        ) : null}
         {build ? (
           <details className="build-details">
             <summary>Build details</summary>

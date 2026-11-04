@@ -553,7 +553,9 @@ def worker_result_schema(
     effective_grant_digest: str | None = None,
     orchestration_role: str | None = None,
     root_job_id: str | None = None,
+    plan_schema_version: str = "mastermind.execution_plan/v1",
     aggregation_schema_version: str = "mastermind.aggregation_result/v1",
+    coordinator_job_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
@@ -570,11 +572,17 @@ def worker_result_schema(
             run_id=run_id,
             worker_id=worker_id,
             root_job_id=root_job_id,
+            plan_schema_version=plan_schema_version,
             aggregation_schema_version=aggregation_schema_version,
+            coordinator_job_id=coordinator_job_id,
         )
         result["x-mastermind-effective-grant-digest"] = effective_grant_digest
         return result
 
+    if coordinator_job_id is not None:
+        raise SupervisorError("coordinator binding requires the V5 planner role")
+    if plan_schema_version != "mastermind.execution_plan/v1":
+        raise SupervisorError("versioned plan schema requires the planner role")
     if aggregation_schema_version != "mastermind.aggregation_result/v1":
         raise SupervisorError("aggregation producer schema requires an aggregation role")
     string_list = {"type": "array", "items": {"type": "string"}}
@@ -2788,6 +2796,8 @@ class ExecutiveSupervisor:
     async def _collect_with_heartbeats(self, active: ActiveRun) -> CollectionReceipt:
         task = asyncio.create_task(self.adapter.collect_result(active.process_ref))
         attempt = active.lease.attempt
+        direct=_is_direct_native_job(self._job(attempt.job_id))
+        cancel_entered=False
         try:
             while True:
                 done, _ = await asyncio.wait(
@@ -2797,15 +2807,34 @@ class ExecutiveSupervisor:
                     return task.result()
                 job = self._job(attempt.job_id)
                 if job.status == JobStatus.CANCEL_REQUESTED:
-                    await self.adapter.cancel(active.process_ref, "durable cancellation request")
-                    return await task
+                    if not direct:
+                        await self.adapter.cancel(active.process_ref, "durable cancellation request")
+                        return await task
+                    if not cancel_entered:
+                        cancel_entered=True
+                        first=self.runtime.reserve_direct_native_cancel_call(attempt.attempt_id,
+                            fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token)
+                        if first:
+                            try:
+                                await self.adapter.cancel(active.process_ref,"durable direct cancellation request")
+                            except Exception as exc:
+                                # No fallback kill or second adapter send. Keep the
+                                # original collection and lease until actual exit.
+                                self.runtime.record_direct_native_cancel_unavailable(attempt.attempt_id,
+                                    fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token,
+                                    unsupported=isinstance(exc,NotImplementedError))
                 self.runtime.attempts.heartbeat_attempt(
                     attempt.attempt_id,
                     fence_generation=attempt.fence_generation,
                     lease_token=active.lease.lease_token,
                 )
         except Exception:
-            if not task.done():
+            if not task.done() and direct and cancel_entered:
+                # The original cancel may have executed. Do not use generic
+                # ownership-loss cleanup to issue that same effect a second time.
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
+            elif not task.done():
                 try:
                     await self.adapter.cancel(active.process_ref, "supervisor ownership lost")
                 finally:
@@ -3799,6 +3828,18 @@ class ExecutiveSupervisor:
                 )
             return seal_path
 
+        async def acknowledge_cancel():
+            current=self._job(attempt.job_id)
+            terminal=None
+            if _is_direct_native_job(current):
+                from control_plane.direct_native_correction import build_terminal
+                terminal=build_terminal(current,attempt,
+                    self.runtime.jobs.direct_native_provenance(current.job_id),
+                    self._read_private_receipt(receipt_path,name='direct cancellation collection'),
+                    self._read_private_receipt(await ensure_sealed(),name='direct cancellation assignment'))
+            return self.runtime.attempts.acknowledge_cancel(attempt.attempt_id,
+                fence_generation=fence,lease_token=token,direct_terminal=terminal)
+
         if receipt.result.exit_code is None:
             raise SupervisorError(
                 "recovered local worker has no truthful durable OS exit code; "
@@ -3830,9 +3871,7 @@ class ExecutiveSupervisor:
         if job.status == JobStatus.CANCEL_REQUESTED:
             await self._settle_recovered_terminal_owner(active)
             await ensure_sealed()
-            cancelled = self.runtime.attempts.acknowledge_cancel(
-                attempt.attempt_id, fence_generation=fence, lease_token=token
-            )
+            cancelled = await acknowledge_cancel()
             return cancelled, (), None, await ensure_sealed()
         output = receipt.result.structured_output
         direct = _is_direct_native_job(job)
@@ -3863,11 +3902,7 @@ class ExecutiveSupervisor:
                     job = self._job(attempt.job_id)
                     if job.status == JobStatus.CANCEL_REQUESTED:
                         await ensure_sealed()
-                        cancelled = self.runtime.attempts.acknowledge_cancel(
-                            attempt.attempt_id,
-                            fence_generation=fence,
-                            lease_token=token,
-                        )
+                        cancelled = await acknowledge_cancel()
                         return (
                             cancelled,
                             validation_receipts,
@@ -3915,11 +3950,7 @@ class ExecutiveSupervisor:
                 return failed, validation_receipts, validation_path, await ensure_sealed()
             except _ValidationCancelled:
                 await ensure_sealed()
-                cancelled = self.runtime.attempts.acknowledge_cancel(
-                    attempt.attempt_id,
-                    fence_generation=fence,
-                    lease_token=token,
-                )
+                cancelled = await acknowledge_cancel()
                 return cancelled, validation_receipts, validation_path, await ensure_sealed()
             except TerminalAssignmentSealError:
                 raise
@@ -3930,11 +3961,7 @@ class ExecutiveSupervisor:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
                     await ensure_sealed()
-                    cancelled = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    cancelled = await acknowledge_cancel()
                     return (
                         cancelled,
                         validation_receipts,
@@ -3946,11 +3973,7 @@ class ExecutiveSupervisor:
                 current = self._job(attempt.job_id)
                 if current.status == JobStatus.CANCEL_REQUESTED:
                     await ensure_sealed()
-                    cancelled = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    cancelled = await acknowledge_cancel()
                     return (
                         cancelled,
                         validation_receipts,
@@ -3974,11 +3997,7 @@ class ExecutiveSupervisor:
                     if current.status != JobStatus.CANCEL_REQUESTED:
                         raise
                     await ensure_sealed()
-                    failed = self.runtime.attempts.acknowledge_cancel(
-                        attempt.attempt_id,
-                        fence_generation=fence,
-                        lease_token=token,
-                    )
+                    failed = await acknowledge_cancel()
                 return failed, validation_receipts, validation_path, await ensure_sealed()
         await ensure_sealed()
         failed = self.runtime.attempts.fail_attempt(
