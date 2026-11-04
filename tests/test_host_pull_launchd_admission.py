@@ -22,7 +22,7 @@ MANIFEST_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-manife
 INVENTORY_PATH = ROOT / "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json"
 HOST_PULL_SHA = "b58b4cf4932b801df45d4a70fdd99aaaee800e7e57cc06501aa5c21b20ea8a1c"
 HOST_PULL_PREIMAGE = "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad"
-MANIFEST_SHA256 = "d1e1fe5d741986766d848c1f3cd68480b7d131835378f1d127a1492fd9997875"
+MANIFEST_SHA256 = "0fb2b1d9b4cf27d840b90614235e5e9589f14bc5468ca1adb14c1e233d2c474c"
 PROGRAM_ARGUMENTS = [
     "/usr/bin/lockf", "-t", "0", "__LOCK__", "/bin/bash", "__HOST_PULL__",
     "__COLLECTOR_OPTION__",

@@ -216,3 +216,48 @@ promotion; actual normal routed task; current-head source PR release and host-pu
 rebind. Source testing/CI on the new PR head must be re-proven after publication,
 and an independent non-author GitHub review is not self-granted. No merge,
 enqueuing, Ready/un-draft or label modification was performed by this slice.
+
+
+## 2026-11-04 provider-agnostic Ubuntu4 first-worker source qualification
+
+Chairman clarified that live Ubuntu4 Fabric work need not wait specifically for
+MiniMax; any *actually authorized and qualified* provider can deliver the first
+worker. The existing explicit first-worker qualifier already supported Grok on
+M1/MacBook and MiniMax on M1/Ubuntu4. This in-scope source extension adds only
+`ubuntu4: linux` to **Grok's held-host qualification matrix**, retaining the
+preexisting MiniMax route, refusing GLM/Qwen/Codex/Cursor/oc-free qualification
+without separate reviewed authorization and leaving all seven automatic host
+holds unchanged. The native qualifier still validates current registry platform,
+original root/parent, held provider mode, physically fresh host gates, only a
+transient hold removal and canonical `pick.format_pick` provider identity.
+It cannot directly authenticate a provider, reserve a lease or launch a task.
+
+The existing no-spend qualification suite was augmented with two Ubuntu4 Grok
+security scenarios: one exact positive where only Grok's transient first-worker
+hold is cleared (MiniMax/Cursor retained), and one negative set for wrong
+platform/local host, failed disk gate and provider substitution. It reproduced
+`QUALIFICATION_SCOPE_REFUSED` before the single source change and passed all
+12 qualification tests afterward. The preceding accepted-worktree provenance
+fixture's five tests also remained green. Existing historical native
+predecessor/canary fixtures remain frozen and untouched.
+
+Current source qualifier SHA-256:
+`f50ef3208efe97c933372eada2e26b8870ba9b9590e33766f991e3416b613aa2`.
+Rebuilt canonical native closure remains 102 members; only
+`ext/fabric_host_qualification.py` changed relative to the previous
+regression-fix closure. Current manifest SHA-256:
+`0fb2b1d9b4cf27d840b90614235e5e9589f14bc5468ca1adb14c1e233d2c474c`.
+Current source inventory SHA-256:
+`4b59454d6ac6a61009940be143d19ccd26bbd682c9081abdef4a6efd81035154`.
+
+**No credentials and no paid provider effects:** A direct Ubuntu4 official CLI
+status probe reported Codex `NOT_LOGGED_IN` and Claude
+`loggedIn=false`. Grok CLI is installed but has no non-secret
+authenticated-status subcommand proven here; its enrollment is **UNKNOWN**.
+An executable and source permission do not establish a qualified/available
+Grok worker. This source remains unreleased until exact-head CI, independent
+formal reviewer decision, protected release and original native host-pull
+qualification. Next, an owner-authorized Ubuntu4 Grok or MiniMax login/canary
+must pass one *new* original-root worker with real START, provider lease
+settlement, terminal result and same-parent ACCEPT, then normal route proof.
+No host mode was promoted and no existing refused operation was replayed.

@@ -108,9 +108,9 @@
       "source": "source/fabric_cpu_scope.py"
     },
     "ext/fabric_host_qualification.py": {
-      "bytes": 2268,
+      "bytes": 2367,
       "installed_preimage_sha256": "d2a1c8f589a9758f94e36f947a91a0a4b731c5aa69694ac7258691a85873166a",
-      "sha256": "1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899",
+      "sha256": "f50ef3208efe97c933372eada2e26b8870ba9b9590e33766f991e3416b613aa2",
       "source": "candidate/fabric_host_qualification.py"
     },
     "ext/fabric_operator_client.py": {
