@@ -573,7 +573,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='be7b70d73ef45640777b1677f3ab4dae8caed6d3ece0292aa9c1c6e07615f8fe'
+    assert hashlib.sha256(current_raw).hexdigest()=='862967fe6c8131aa3f85c02a70f833469726f05e30bd8040bc13ac9d5dba5ecd'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==102
     assert set(before)<=set(current)
@@ -595,9 +595,14 @@ def test_native_initializer_extends_only_exact_preimage_members():
     diagnostic_changed={'ext/fabric_task.py','ext/original_delivery_collector.py',
                         'ext/provider_outcome.py','ext/remote_sub.sh'}
     assert set(current)-set(before)==added
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed
-    assert sum(before[p]==current[p] for p in before)==75
-    for name in added|changed|diagnostic_changed:
+    long_horizon_changed={'ext/fabric_operator_owner.py',
+                          'ext/commission_deadline.py','ext/fabric_continuation.py',
+                          'ext/fabric_operator_contract.py','ext/native_remote.py',
+                          'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
+                          'ext/slot.py','ext/sub.sh'}
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed
+    assert sum(before[p]==current[p] for p in before)==len(before)-len((changed|diagnostic_changed|long_horizon_changed)&set(before))
+    for name in added|changed|diagnostic_changed|long_horizon_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
         assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
     # The paired-upgrade target remains historical; only ordinary generation
@@ -919,7 +924,10 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    assert set(value['jobs'])=={'pytest_shards','test'}
+    # PR qualification adds two jobs, but full-mode H1 security checks and
+    # the required fan-in remain enforced by the canonical validator above.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']

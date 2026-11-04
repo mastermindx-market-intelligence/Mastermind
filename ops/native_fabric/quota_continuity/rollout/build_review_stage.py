@@ -59,16 +59,17 @@ GROK47_MERGED_SOURCE_DIGESTS = {
     'sub.sh': '7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2',
 }
 
-# Five exact forward compositions preserve accepted Qwen/Grok fixes and
-# add the locally qualified Grok host-account custody guard. Qualify their accepted
-# Grok bases above as well as the
-# closed composed candidate bytes; neither source may silently replace the other.
+# Seven exact forward compositions retain protected long-horizon runtime,
+# the sparse commit-preflight and the Grok host/account custody guard.
+# Their accepted immutable bases are checked separately; no repinning.
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
-    'native_remote.py': 'da3a0ebd46357036b770aff40f2aab7ee4aa377e9aaebfb0a53d537d5962fa21',
-    'remote_sub_exec.py': '7c7b94a974b85804598c49fc21ea1eb0d5ea55888dc3a6394dde8ab0b4d113e2',
+    'remote_sub_exec.py': 'f365bf7c10eb5b7fcf77aa61141329d5f14e2b1e92f98f88382d3e617b67bcda',
     'pick.py': '747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132',
-    'remote_sub.sh': '7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92',
-    'remote_sub_helpers.py': '0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556',
+    'remote_sub.sh': 'e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05',
+    'remote_sub_helpers.py': '3a4efaefd63244e77cee385d83da0bb4e53b86a0e83a183601f2fa80ec4d602b',
+    'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
+    'native_remote.py': '82e9f94fc0148367a4237cccbf44410240f6f897276dd9a37fc8357c6e55f4df',
+    'fabric_operator_contract.py': 'e6b32fd1547402c1184f826f74c253f34384cb6e32306e55b84449a892d19b5e',
 }
 
 EXTRA_PREIMAGES = {

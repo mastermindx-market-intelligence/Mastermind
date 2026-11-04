@@ -235,3 +235,55 @@ Ubuntu1 denies across all combinations. No production lease or provider
 worker was run by those tests.
 This change requires NEW current-head hosted CI and independent review;
 prior green CI on e142376f does not qualify the successor candidate.
+
+
+## Protected #2019 long-horizon native integration — 2026-11-04
+
+State: INTEGRATED_SOURCE_ONLY / NOT_RELEASED. Original PR #2007 source carrier
+integrated the current protected Mastermind commit
+12506954fad4d5502f878bd2a51b4870fca26658 (accepted long-horizon
+#2019 and subsequent unrelated master updates) under the original
+security-hardened source commit
+0ab0b11e214127726c4acfc727e7e506ff307f2c.
+
+The integration initially had exactly 12 conflicts in the original
+native builder, generated manifest/source inventory and historical/current
+tests. All runtime source paths were auto-composable. The final builder
+qualified seven exact forward runtime members: remote_sub_exec.py, pick.py,
+remote_sub.sh, remote_sub_helpers.py, sub.sh, native_remote.py, and
+fabric_operator_contract.py. The existing native closure generated precisely
+102 members; current manifest SHA256 is:
+
+    862967fe6c8131aa3f85c02a70f833469726f05e30bd8040bc13ac9d5dba5ecd
+
+and source-inventory SHA256:
+
+    17ca6b4f0cc1d5b4c00e521b3b85ac022dae85ae686220f5b4184e3c4ced0e2d
+
+Historical evidence remains immutable. The security-composition
+regression mechanically reversed the original reviewed sparse-preflight
+patch from the combined executor in a disposable fixture; this reproduced
+the protected long-horizon pre-slot predecessor at byte-exact SHA256
+b670196db8f56018e91d73976b926a550318cb94cc566f86fa40f34a5d55de63.
+The older original sparse-preflight source remained separately pinned. No
+historical95/102 manifest, predecessor source, or retained review was repinned
+to manufacture green tests.
+
+At exact combined local source, 271 actual integrated regression cases:
+265 passed, 6 expected Linux skips, 0 errors/failures. JUnit SHA256:
+7e057e32ad22df30bd5b63954c40bc16b242502ebcb8270e60a721fab2147b23.
+The suite included original Grok prelease/host custody security, builder,
+catalog, historic installer transitions, long-horizon worker/slot
+handoff and launch reserve. A separate four-case isolated SQLite check
+against the actual original M2 account/host registry accepted only
+enrolled Ubuntu0 (audit/remote-grok) and refused unbound Ubuntu1
+(audit/remote-grok) with host_account_unavailable; no production lease
+or credentials were read.
+
+Unproven: new exact-head hosted CI and current integrated-base formal
+non-author review, original protected PR merge/native publication/installation,
+real Ubuntu0 served Grok 4.7 and consumed original-parent result, and separate
+Ubuntu4 Draft integration. An active other-owner lease may exist on Ubuntu0;
+do not infer clear provider capacity from an earlier sample. U2 four original
+unknown sparse effects remain held; no retry, worktree reclamation or
+storage cleanup without #1632 RELEASE is authorized by this source result.
