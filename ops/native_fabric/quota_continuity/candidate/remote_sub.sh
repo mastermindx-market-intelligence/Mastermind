@@ -1096,7 +1096,7 @@ if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
 fi
 LEASE_WAIT_SECS="${REMOTE_SUB_LEASE_WAIT:-3600}"
 if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
-  LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS") || {
+  LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS" broker) || {
     RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=broker_acquire"; exit "$RC";
   }
   BROKER_DEADLINE_ARGS=(--deadline-ns "$POOL_COMMISSION_DEADLINE_NS")

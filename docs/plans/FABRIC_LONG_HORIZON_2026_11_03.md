@@ -49,3 +49,43 @@ No new scheduler, watcher, Job/Attempt table, retry engine, provider identity, g
 A follow-on owner census found the signed GLM gateway/issuer (`ops/native_fabric/paid_canonical_glm/candidate/glm_lease_capability.py`, `glm_lease_gateway.py`) still enforces a 7,500-second maximum. The native 15,000-second token-request change was therefore **withdrawn** as unqualified; the GLM client uses the unchanged 7,500-second token constraint. Newly classified C3 work on `glm-codex` and canonical-paid GLM is visibly narrowed to 7,200 seconds *before* provider/worker effects and the existing signed capability TTL remains <=7,500 seconds. Normal qualified routes may use the new 14,400-second window. Operator-root grant authorization is extended to 14,400 seconds for explicit admissible longer windows, but default 7,200-second root grants are not silently expanded. A separately reviewed and installed GLM capability-service update plus end-to-end host proof is required for four-hour GLM-codex support.
 
 The amended 102-member native source manifest is `0df8514fe753aa5d0f912a259cffd3dae285be44d5d0c8455833673a1bcaba4d`. New 9-case no-provider bounds/GLM compatibility suite PASSED; 6 poll-margin cases, 23 historical native-upgrade and 19 historical Grok/Qwen composition cases PASSED. Reviewer request on PR #2019 is only an invitation, not independent approval; exact-head re-review is required after amendments.
+
+## 2026-11-03 inherited broker-wait cleanup reserve — qualification update
+
+The frozen original full-CLI deadline regression was still red on the previous
+candidate: `elapsed_seconds=31.65011379099451` against the unchanged strict
+`31.5`-second upper bound. Its captured real broker fixture consumed
+`30.004829` seconds after being asked to wait 30, then foreground Bash,
+owned-process cleanup and result handling required additional time. No lease
+was granted, and no task or transport was launched. This is a reproduced
+source-bounded timing defect, **not** a justification for extending the
+original 31-second commission clock or relaxing the test's 0.5s allowance.
+
+Repair: keep the existing `deadline-seconds` helper and original monotonic
+clock, but accept one fixed internal `broker` selector only from the existing
+`remote_sub.sh` lease-acquire seam. That selector reserves two seconds from
+the *actual remaining* commission deadline before computing the broker
+`--wait` argument; it uses a zero-second queue wait for short, still-positive deadlines;
+short-path immediate acquisition and inherited deadline enforcement remain intact.
+Other worker/poll/deadline consumers keep the old whole-second behavior.
+The reserve is not a caller-supplied duration or a renewed deadline.
+
+After the source repair the **same frozen original CLI fixture passed**:
+`elapsed_seconds=29.33193345798645` (strict 31.5s limit unchanged),
+`broker_requested_wait=27`, `broker_actual_wait=27.005s`,
+`lease_granted=false`, `task_count=0`, terminal `rc=75`.
+The new deterministic unit test also covers 4h unbounded-broker allowance
+(ordinary 3600-second cap unchanged), short inherited budgets, an explicit
+smaller requested wait, invalid reserve selectors, and expired deadlines.
+
+Release qualification: 102-file native manifest now
+`1d3ecc6627b0e106e9fb9400729e0bd81f27aa2f1c98fb2d57189e802e41ced4`;
+review-stage manifest and inventory are regenerated from the exact selected
+candidate. The historical 95-file fixture is restored using byte-pinned
+predecessor inversion rather than silently changing old source. The combined
+focused native, launch-upgrade, historical Grok/Qwen, and source staging suites
+passed. The older hosted CI shard-2 failure applied to pre-repair head
+`3505ab7785610df347fd6c0ceba6a97f92ad1e15`; it does not establish
+CI green for this repaired head. Current-head hosted CI and independent review
+are still required before production rollout. Sparse-Git observation remains
+separate from the broker timing defect and is not waived.

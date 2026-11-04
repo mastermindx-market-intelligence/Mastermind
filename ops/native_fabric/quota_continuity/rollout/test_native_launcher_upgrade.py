@@ -167,6 +167,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
                      '        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)'),
                 ],
                 'ext/remote_sub_helpers.py': [
+                    ("    # Only broker acquisition reserves two seconds for local process cleanup.\n    # Other callers retain the old conservative whole-second deadline. Never\n    # allow a caller-supplied negative reserve or a new deadline authority.\n    selector = sys.argv[2] if len(sys.argv) == 3 else ''\n    if len(sys.argv) > 3 or selector not in ('', 'broker'):\n        raise ValueError('commission_duration_invalid')\n    reserve = 2.0 if selector == 'broker' else 0.0\n    remaining = require_remaining(deadline)\n    # Short admitted attempts retain the immediate-acquire path; with less\n    # than two seconds to spare, the broker may not queue or wait.\n    print(min(int(cap), max(0, int(remaining - reserve))))", '    # Whole seconds are conservative on the Bash/broker/worker wire. The\n    # process owner below retains fractional time for the actual local fuse.\n    print(min(int(cap), int(require_remaining(deadline))))'),
                     ("r'[1-9][0-9]{0,4}'", "r'[1-9][0-9]{0,3}'"),
                     ('raw) or int(raw) > 14400:', 'raw) or int(raw) > 7200:'),
                     ('assert 1 <= timeout <= 14400', 'assert 1 <= timeout <= 7200'),

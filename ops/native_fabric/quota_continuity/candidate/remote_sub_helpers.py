@@ -32,9 +32,17 @@ def deadline_seconds():
     deadline = read_deadline_ns()
     if deadline is None:
         raise ValueError('commission_deadline_missing')
-    # Whole seconds are conservative on the Bash/broker/worker wire. The
-    # process owner below retains fractional time for the actual local fuse.
-    print(min(int(cap), int(require_remaining(deadline))))
+    # Only broker acquisition reserves two seconds for local process cleanup.
+    # Other callers retain the old conservative whole-second deadline. Never
+    # allow a caller-supplied negative reserve or a new deadline authority.
+    selector = sys.argv[2] if len(sys.argv) == 3 else ''
+    if len(sys.argv) > 3 or selector not in ('', 'broker'):
+        raise ValueError('commission_duration_invalid')
+    reserve = 2.0 if selector == 'broker' else 0.0
+    remaining = require_remaining(deadline)
+    # Short admitted attempts retain the immediate-acquire path; with less
+    # than two seconds to spare, the broker may not queue or wait.
+    print(min(int(cap), max(0, int(remaining - reserve))))
 
 
 def deadline_command():

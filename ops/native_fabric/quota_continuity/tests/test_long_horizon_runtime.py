@@ -48,6 +48,37 @@ class LongHorizonRuntimeTests(unittest.TestCase):
                                 text=True, timeout=3, check=False)
         return result.returncode, result.stdout.strip(), result.stderr
 
+    def test_inherited_broker_wait_reserves_cleanup_without_changing_worker_poll(self):
+        from commission_deadline import CommissionDeadlineExpired
+        source = (CANDIDATE / 'remote_sub.sh').read_text()
+        self.assertIn('deadline-seconds "$LEASE_WAIT_SECS" broker', source)
+        for arguments, remaining, expected in (
+            (['helper','3600'],30.8,30),
+            (['helper','3600','broker'],30.8,28),
+            (['helper','3600','broker'],14000.9,3600),
+            (['helper','3600','broker'],2.4,0),
+            (['helper','5','broker'],30.8,5),
+        ):
+            with self.subTest(args=arguments), mock.patch.object(sys, 'argv', arguments), \
+                 mock.patch('commission_deadline.read_deadline_ns', return_value=4000), \
+                 mock.patch('commission_deadline.require_remaining', return_value=remaining):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    remote_sub_helpers.deadline_seconds()
+                self.assertEqual(out.getvalue().strip(), str(expected))
+        for args in (['helper','30','-1'], ['helper','30','unbounded'],
+                     ['helper','30','broker','ignored']):
+            with self.subTest(args=args), mock.patch.object(sys,'argv',args), \
+                 mock.patch('commission_deadline.read_deadline_ns', return_value=4000):
+                with self.assertRaises(ValueError):
+                    remote_sub_helpers.deadline_seconds()
+        with mock.patch.object(sys,'argv',['helper','3600','broker']), \
+             mock.patch('commission_deadline.read_deadline_ns', return_value=4000), \
+             mock.patch('commission_deadline.require_remaining',
+                        side_effect=CommissionDeadlineExpired('commission_time_exhausted')):
+            with self.assertRaises(CommissionDeadlineExpired):
+                remote_sub_helpers.deadline_seconds()
+
     def test_classified_runtime_floors_and_legacy_short_path(self):
         for complexity, mode, initial, expected in (
             ("C0_MECHANICAL", "glm", 210, "210|0|0"),
