@@ -8,7 +8,7 @@ export interface AcceptedDirectionPanelProps {
   sourceGeneration?: () => number;
   canRead?: () => boolean;
   /** Existing qualified conversation navigation. This panel performs no SEND. */
-  onChangeDirection: (workRef: string) => void;
+  onChangeDirection?: (workRef: string) => void;
   locale?: "en" | "zh-CN";
 }
 
@@ -92,7 +92,7 @@ export function AcceptedDirectionPanel({ selection, read, sourceGeneration, canR
   const reasonCopy = reason && Object.hasOwn(REASONS, reason) ? REASONS[reason as keyof typeof REASONS][zh ? 1 : 0] : zh ? "方向证据不可用。" : "Direction evidence is unavailable.";
   const openConversation = () => {
     try {
-      if (permitted && workRef && canRead?.() === true && sourceGeneration?.() === generation) onChangeDirection(workRef);
+      if (permitted && workRef && canRead?.() === true && sourceGeneration?.() === generation) onChangeDirection?.(workRef);
     } catch { /* The existing navigation owner remains authoritative. */ }
   };
   return <section className="accepted-direction" lang={locale} aria-label={zh ? "已接受的方向与历史" : "Accepted Direction and history"}>
@@ -137,8 +137,8 @@ export function AcceptedDirectionPanel({ selection, read, sourceGeneration, canR
         </div>
       </div>
     </>}
-    {permitted && workRef && <button type="button" className="accepted-direction__conversation" onClick={openConversation}>
+    {permitted && workRef && (onChangeDirection ? <button type="button" className="accepted-direction__conversation" onClick={openConversation}>
       {zh ? "在对话中更改方向" : "Change direction in conversation"}
-    </button>}
+    </button> : <p role="status">{zh ? "此处尚未连接此项目的当前对话。" : "This project's current conversation is not connected here."}</p>)}
   </section>;
 }

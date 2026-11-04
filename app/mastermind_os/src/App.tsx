@@ -17,6 +17,8 @@ import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
 import { Projects } from "./projects/Projects";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { ProjectConversationAssociation } from "./conversations/ProjectConversationAssociation";
+import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
+import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { DiscoveryWorkspace } from "./discovery/DiscoveryWorkspace";
@@ -3605,6 +3607,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       generation: host?.invalidationGeneration ? () => host.invalidationGeneration!() : undefined,
       plan: host?.readProjectPlan ? (request: Parameters<NonNullable<MissionHost["readProjectPlan"]>>[0]) => host.readProjectPlan!(request) : undefined,
       journal: host?.readProjectJournal ? ({workRef, signal}: {workRef: string; signal: AbortSignal}) => host.readProjectJournal!({work_ref: workRef, signal}) : undefined,
+      direction: host?.readProjectDirection ? (request: Parameters<NonNullable<MissionHost["readProjectDirection"]>>[0]) => host.readProjectDirection!(request) : undefined,
       association: host?.readProjectSessionAssociation ? (request: Parameters<NonNullable<MissionHost["readProjectSessionAssociation"]>>[0]) => host.readProjectSessionAssociation!(request) : undefined,
       autonomy: host?.readAutonomyPolicy ? (request: Parameters<NonNullable<MissionHost["readAutonomyPolicy"]>>[0]) => host.readAutonomyPolicy!(request) : undefined,
     };
@@ -3616,6 +3619,24 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.state === "AVAILABLE" && requestedProjectWorkRef
       ? index.programs.filter(card => card.workRef === requestedProjectWorkRef) : [];
   const projectWorkRef = currentProjectCards.length === 1 ? currentProjectCards[0].workRef : null;
+  // Admission gates address the canonical programme, not an inferred Runtime
+  // root. The owner independently brackets its exact Agent OS source and grant.
+  const admissionPorts = useMemo(() => {
+    const host=retainedResultHost;
+    return {
+      read: host?.readProjectAdmissionControl ? (request: Parameters<NonNullable<MissionHost["readProjectAdmissionControl"]>>[0]) => host.readProjectAdmissionControl!(request) : undefined,
+      transport: host?.pauseProjectAdmission && host.resumeProjectAdmission && host.readProjectAdmissionOperation ? {
+        pause: (request: Parameters<NonNullable<MissionHost["pauseProjectAdmission"]>>[0]) => host.pauseProjectAdmission!(request),
+        resume: (request: Parameters<NonNullable<MissionHost["resumeProjectAdmission"]>>[0]) => host.resumeProjectAdmission!(request),
+        status: (request: Parameters<NonNullable<MissionHost["readProjectAdmissionOperation"]>>[0]) => host.readProjectAdmissionOperation!(request),
+      } : undefined,
+    };
+  }, [retainedResultHost,authRevision,projectWorkRef,selectionSeq.current]);
+  const projectAdmissionPanel=useProjectAdmissionWorkspace({
+    selection:projectWorkRef ? {work_ref:projectWorkRef} : null,
+    authGeneration:authRevision,sourceGeneration:projectReaders.generation,canRead:projectReaders.canRead,
+    readCurrent:admissionPorts.read,transport:admissionPorts.transport,store:commandBinding?.store,locale,
+  });
   // Observational association reads use the canonical catalogue pair, independently
   // of the Mission/conversation-send selection. No association grants a send target.
   const projectCard = currentProjectCards.length === 1 ? currentProjectCards[0] : null;
@@ -3623,6 +3644,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     projectCard?.rootState === "RESOLVED" && projectCard.rootJobId &&
     projectCard.rootCandidates.length === 1 && projectCard.rootCandidates[0] === projectCard.rootJobId
       ? {workRef: projectWorkRef, rootJobId: projectCard.rootJobId} : null;
+  const directionConversation = projectConversationActive && projectWorkRef && selection?.workRef === projectWorkRef &&
+    observedConversation.projection.conversation.source.state === "CURRENT" &&
+    observedConversation.projection.context.selection?.workRef === projectWorkRef &&
+    observedConversation.projection.context.selection?.rootJobId === selection.rootJobId;
+  const recordedDirection = <AcceptedDirectionPanel selection={projectWorkRef ? {work_ref:projectWorkRef} : null}
+    read={projectReaders.direction} sourceGeneration={projectReaders.generation} canRead={projectReaders.canRead} locale={locale}
+    onChangeDirection={directionConversation ? workRef => {
+      if (workRef === projectWorkRef && projectReaders.canRead()) setActive("Conversations");
+    } : undefined}/>;
   const projectSessionEvidence = <ProjectConversationAssociation selection={projectAssociationSelection}
     authGeneration={authRevision} hostGeneration={retainedResultHost?.invalidationGeneration?.() ?? null}
     readAssociation={projectReaders.association} locale={locale}/>;
@@ -3868,7 +3898,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
               </details>
             </> : undefined}
             detailsPanel={<>
-              {panel}{projectSessionEvidence}{recordedProjectJournal}
+              {panel}{recordedDirection}{projectAdmissionPanel}{projectSessionEvidence}{recordedProjectJournal}
               {projectConversationActive ? <>
                 <AutonomyPanel selection={selection} read={projectReaders.autonomy}
                   canRead={Boolean(projectReaders.generation) && projectReaders.canRead()}
@@ -4417,7 +4447,9 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </section>
         ) : null}
         {active !== "Control Room" && active !== "Today" && !directRoute ? (
-          <div className="notice" role="status">{visibleNotice}</div>
+          <div className="notice" role="status">{visibleNotice === "Choose a Program with one resolved mission before opening the workspace."
+            ? locale === "zh-CN" ? "选择一个项目，查看其工作。" : "Choose a project to view its work."
+            : visibleNotice}</div>
         ) : null}
         {build ? (
           <details className="build-details">

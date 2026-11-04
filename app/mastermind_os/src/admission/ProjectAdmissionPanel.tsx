@@ -13,6 +13,8 @@ export interface ProjectAdmissionPanelProps {
   onReadCurrent?: () => void;
   /** Existing controller, with its actual durable pending-pointer store. */
   controller?: OperationController;
+  /** Withdraw this read in its App-lifetime owner after an operation settles. */
+  onOperationSettled?: (state:OperationState)=>void;
   locale?: "en" | "zh-CN";
 }
 const COPY = {
@@ -66,14 +68,14 @@ export function ProjectAdmissionPanel(props: ProjectAdmissionPanelProps) {
     setRequest({scope:started,state:controller.getState()});
     try {
       const result=await promise;
-      if(currentScope.current===started){setRequest({scope:started,state:result});setWithheldRead(readKey);}
+      if(currentScope.current===started){setRequest({scope:started,state:result});setWithheldRead(readKey);props.onOperationSettled?.(result);}
     } finally {setBusy(false);}
   }
   async function recover() {
     if(!controller || !canRead || !valid || busy || reading)return;
     const started=scope;setBusy(true);
     const promise=controller.recover();setRequest({scope:started,state:controller.getState()});
-    try {const result=await promise;if(currentScope.current===started){setRequest({scope:started,state:result});if(result.status==="accepted")setWithheldRead(readKey);}}
+    try {const result=await promise;if(currentScope.current===started){setRequest({scope:started,state:result});if(result.status==="accepted"){setWithheldRead(readKey);props.onOperationSettled?.(result);}}}
     finally {setBusy(false);}
   }
   return <section className="project-admission" aria-label={t.title} lang={locale}>

@@ -140,3 +140,13 @@ it("retains a legitimate observed host generation zero without substituting a fa
   const e=environment();render(<Driver {...e.props} sourceGeneration={()=>0}/>);await readCurrent();
   expect(e.read).toHaveBeenCalledTimes(1);expect(e.transport.pause).not.toHaveBeenCalled();
 });
+
+it("does not resurrect the pre-Pause gate when Details remounts after acceptance",async()=>{
+  random();const e=environment();const view=render(<Driver {...e.props}/>);await readCurrent();
+  fireEvent.click(screen.getByRole("button",{name:"Pause new work"}));await screen.findByText(/Request committed/);
+  view.rerender(<Driver {...e.props} show={false}/>);view.rerender(<Driver {...e.props}/>);
+  expect(screen.queryByRole("button",{name:"Pause new work"})).toBeNull();
+  expect(screen.queryByRole("button",{name:"Resume new work"})).toBeNull();
+  expect(screen.queryByText("New work is not paused here. Other limits and permissions still apply.")).toBeNull();
+  expect(e.read).toHaveBeenCalledTimes(1);expect(e.transport.pause).toHaveBeenCalledTimes(1);
+});

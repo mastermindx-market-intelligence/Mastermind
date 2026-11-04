@@ -102,3 +102,9 @@ describe("Accepted Direction AT27 composition", () => {
     expect(read).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled();
   });
 });
+
+it("does not offer an enabled conversation action without an actual navigation owner",()=>{
+  render(<AcceptedDirectionPanel selection={work} read={async()=>document()} sourceGeneration={()=>1} canRead={()=>true}/>);
+  expect(screen.queryByRole("button",{name:"Change direction in conversation"})).toBeNull();
+  expect(screen.getByText("This project's current conversation is not connected here.")).toBeTruthy();
+});

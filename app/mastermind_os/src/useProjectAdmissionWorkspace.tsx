@@ -124,5 +124,11 @@ export function useProjectAdmissionWorkspace(props: ProjectAdmissionWorkspacePro
   return <ProjectAdmissionPanel selection={selection} canRead={canRead}
     sourceGeneration={generation ?? "SOURCE_UNAVAILABLE"} source={source}
     reading={readState?.scope === scope && readState.reading} onReadCurrent={props.readCurrent ? () => void readCurrent() : undefined}
-    controller={scopedController} locale={props.locale}/>;
+    controller={scopedController} locale={props.locale} onOperationSettled={() => {
+      // Panel disclosure/route remounts must not resurrect the pre-action gate.
+      const readVersion=source?.readVersion;
+      if(liveScope.current===scope && readVersion!==undefined)
+        setReadState(value => value?.scope===scope && value.source?.readVersion===readVersion
+          ? {...value,source:null} : value);
+    }}/>;
 }
