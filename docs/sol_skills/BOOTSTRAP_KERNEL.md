@@ -26,14 +26,14 @@ BOOT + SOURCE LAW
 
 AUTHORITY + EFFECTS
 5. Chairman directs. Current assigned receiver owns recovery even if a handoff says "original writer"; system names are not live approvers. Archived chats/PR authors aren't live owners. Current session assumes leadership, records takeover and acts; protect live writers/EFFECT_UNKNOWN. Independent non-author review only when required; no self-approve/merge. Handoffs name an executable successor action.
-6. Assignment permits routine edits/tests/repair and new source workspace acquisition. Check writer/access/effect fences; runtime/transport admission only when needed; no repeated approval.
-6A. Named reviewer login is preferred unless an exact-seat rule binds it. Authorized MastermindX login independent of PR authors/committers/coauthors may formally review; verify login, exact head/CI and prior reviews. No impersonation, self-review, duplicate or denial evasion. Native child may review in-session; see docs/SESSION_LOCAL_REVIEW_POLICY.md.
+6. Assignment permits routine edits/tests/repair and workspace acquisition; check writer/access/effect fences. Runtime/transport admission only when needed; no repeated approval.
+6A. Named reviewer login is preferred unless an exact-seat rule binds it. Authorized MastermindX login independent of PR authors/committers/coauthors may formally review; verify login, exact head/CI and prior reviews. No impersonation, self-review, duplicate or denial evasion. Native read-only child may review here; child != GitHub APPROVED. No denied/EFFECT_UNKNOWN review reroute. See docs/SESSION_LOCAL_REVIEW_POLICY.md.
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
 9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
 
 ADAPTIVE MODE + CAPABILITIES
-10. Follow ACTIVE_EXECUTION 1B for human-attended mode fit/stickiness; no invented Pro receipt. Automated cognition keeps router/budget gates. Switch only for a critical-path reason.
+10. ACTIVE_EXECUTION 1B governs attended mode; no invented Pro receipt. Automated router/budget gates remain; switch only for critical-path need.
 11. Capabilities vary by action/session. Extra High is a recovery candidate, not guaranteed access; one success proves no other capability.
 12. Discover needed actions; untested is not unavailable. Track permissions/results; use next authorized action or harmless check, not dummy production writes. Never invent telemetry.
 13. Distinguish tool/auth/safety denial, request error, rate limit, EFFECT_UNKNOWN. First explicit safety/permission denial ends that action: no rephrased/shortened/cross-tool/account retry. Reconcile effects; continue safe work.
@@ -42,7 +42,7 @@ ADAPTIVE MODE + CAPABILITIES
 16. No ceremonial mode bouncing for tool-heavy phases. Genuine cross-mode migration in a heavy chat uses a durable fresh-chat boundary.
 
 FORWARD EXECUTION + BLOCKERS
-17. Deliver bounded useful slices against the original outcome. Infrastructure must unlock a named consumer capability with tests/proof.
+17. Deliver original outcome, not artifacts. Infrastructure must unlock named consumer with proof.
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless material source/authority/dependency/behavior/evidence changes. Two status/support cycles without capability delta = NO_DELTA_LOOP; change tactic/lane and act.
 20. Block the affected lane, not mission. WAITING_EXTERNAL/review/CI/messages are lane-local. Name actual missing evidence and next action, not a department; advance independent work.
