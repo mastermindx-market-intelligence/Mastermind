@@ -243,7 +243,7 @@ def _write_release(profile: RuntimeProfile, release: Path, bin_path: Path, upstr
     config = render_hermes_config(profile)
     _atomic_write(role_dir / "config.yaml", config.encode("utf-8"), 0o600)
     soul = _soul_bytes(profile.role)
-    _atomic_write(role_dir / "SOUL.md", soul, 0o644)
+    _atomic_write(role_dir / "SOUL.md", soul, 0o600)
     dumped = dump_profile(profile)
     _atomic_write(release / "profile.yaml", dumped.encode("utf-8"), 0o600)
     bin_dir = release / "bin"
@@ -299,7 +299,7 @@ def _install_unit(profile: RuntimeProfile, unit_dir: Path, python_executable: st
     unit_dir.mkdir(parents=True, exist_ok=True)
     text = render_user_unit(profile, python_executable=python_executable, repo_root=repo_root())
     unit = unit_dir / f"{profile.service_name}.service"
-    _atomic_write(unit, text.encode("utf-8"), 0o644)
+    _atomic_write(unit, text.encode("utf-8"), 0o600)
     wants_dir = unit_dir / "default.target.wants"
     wants_dir.mkdir(mode=0o755, exist_ok=True)
     wants = wants_dir / unit.name
