@@ -1,3 +1,4 @@
+import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
 import { validProjectPlanSelection } from "./planning/project-plan";
 import { guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
@@ -1167,6 +1168,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/fabric/status/current?${new URLSearchParams({
         root_id: selected.rootId, run_id: selected.runId,
       })}`, signal, { cap: 16_384, typedUnavailableSchema: null });
+    },
+    readAutonomyPolicy: (request) => {
+      const { signal, ...selected } = request;
+      if (!isAutonomySelection(selected))
+        return Promise.reject(new Error("AUTONOMY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/autonomy/current?${new URLSearchParams({
+        work_ref: selected.work_ref, root_job_id: selected.root_job_id,
+      })}`, signal, { cap: 32_768, typedUnavailableSchema: AUTONOMY_READ_BODY_SCHEMA });
     },
     readProjectPlan: (request) => {
       const { signal, ...selected } = request;

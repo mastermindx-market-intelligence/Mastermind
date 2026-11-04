@@ -139,7 +139,7 @@ function hasExactKeys(value: Recordish, keys: readonly string[]): boolean {
 }
 
 function isPatternMatch(value: unknown, pattern: RegExp): value is string {
-  return typeof value === "string" && pattern.test(value);
+  return typeof value === "string" && pattern.exec(value)?.[0] === value;
 }
 
 function boundedLimit(value: unknown): number | null {

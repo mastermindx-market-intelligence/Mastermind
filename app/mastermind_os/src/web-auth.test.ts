@@ -1458,3 +1458,48 @@ describe("canonical project-journal fixed Web READ", () => {
     await expect(bindMissionHost(e.client).readProjectJournal!(request())).rejects.toThrow();
   });
 });
+
+import autonomyFixture from "./supervision/autonomy-policy.producer-fixture.json";
+describe("selected-root autonomy fixed Web READ", () => {
+ const selection = autonomyFixture.selection;
+ const request = () => ({...selection,signal:new AbortController().signal});
+ it("requires current Acquisition auth and uses only the fixed exact selected-root GET", async () => {
+  const e=setup(),host=bindMissionHost(e.client);
+  await expect(host.readAutonomyPolicy!(request())).rejects.toThrow("AUTONOMY_READ_UNAUTHORIZED");
+  expect(e.fetcher).not.toHaveBeenCalled();
+  await e.login();e.fetcher.mockClear();e.fetcher.mockResolvedValueOnce(response(autonomyFixture));
+  expect(await host.readAutonomyPolicy!(request())).toEqual(autonomyFixture);
+  const [url,options]=e.fetcher.mock.calls[0];
+  expect(new URL(String(url)).origin).toBe(ORIGIN);
+  expect(new URL(String(url)).pathname).toBe("/workspace/autonomy/current");
+  expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(selection);
+  expect(options).toMatchObject({method:"GET",credentials:"omit",redirect:"error",cache:"no-store"});
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it("retains only closed typed503 unavailable and fails old404", async () => {
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  const body={...autonomyFixture,availability:"UNAVAILABLE",policy:null,source_observation:null,reason_codes:["SOURCE_UNAVAILABLE"]};
+  e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(body),{status:503,headers:{"content-type":"application/json"}}));
+  await expect(host.readAutonomyPolicy!(request())).resolves.toMatchObject(body);
+  e.fetcher.mockResolvedValueOnce(new Response("missing",{status:404}));
+  await expect(host.readAutonomyPolicy!(request())).rejects.toThrow();
+ });
+ it("withholds late private data after signout without retry", async () => {
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  const late=deferred<Response>();e.fetcher.mockReturnValueOnce(late.promise);
+  const pending=host.readAutonomyPolicy!(request()),rejected=expect(pending).rejects.toThrow();
+  await host.auth!.signOut();late.resolve(response(autonomyFixture));await rejected;
+  expect(e.fetcher).toHaveBeenCalledTimes(1);
+ });
+ it("rejects foreign-root, unknown fields, malformed selectors and over-cap UTF8 before display", async () => {
+  const e=setup();await e.login();e.fetcher.mockClear();const host=bindMissionHost(e.client);
+  await expect(host.readAutonomyPolicy!({...request(),work_ref:"WS:ONE\n"})).rejects.toThrow("AUTONOMY_SELECTION_INVALID");
+  expect(e.fetcher).not.toHaveBeenCalled();
+  for(const body of [
+   {...autonomyFixture,selection:{...selection,root_job_id:"JOB-2"}},
+   {...autonomyFixture,granted:true},
+   {...autonomyFixture,padding:"漢".repeat(12_000)},
+  ]) {e.fetcher.mockResolvedValueOnce(response(body));await expect(host.readAutonomyPolicy!(request())).rejects.toThrow();}
+  expect(e.fetcher).toHaveBeenCalledTimes(3);
+ });
+});

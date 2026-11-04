@@ -1085,6 +1085,43 @@ pub async fn read_project_journal(app: AppHandle, selection: ProjectPlanSelectio
     Ok(value)
 }
 
+const AUTONOMY_POLICY_PATH: &str = "/workspace/autonomy/current";
+const AUTONOMY_POLICY_SCHEMA: &str = "mastermind.workspace_autonomy_read_result.v1";
+const AUTONOMY_POLICY_RESPONSE_CAP: usize = 32_768;
+fn autonomy_policy_target(selection: &MissionSelection) -> Result<Url> {
+    validate_workspace_pair(&selection.work_ref, &selection.root_job_id)?;
+    let mut url = Url::parse(&format!("{ORIGIN}{AUTONOMY_POLICY_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id);
+    Ok(url)
+}
+#[tauri::command]
+pub async fn read_autonomy_policy(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    let url = autonomy_policy_target(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, AUTONOMY_POLICY_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, AUTONOMY_POLICY_SCHEMA, false))
+    } else {
+        bounded_json(response, AUTONOMY_POLICY_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(AUTONOMY_POLICY_SCHEMA)
+        || value.get("selection").and_then(|s| s.get("work_ref")).and_then(Value::as_str) != Some(selection.work_ref.as_str())
+        || value.get("selection").and_then(|s| s.get("root_job_id")).and_then(Value::as_str) != Some(selection.root_job_id.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Full closed-body validation remains in the existing host before display.
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     // Original Workspace selection grammar is narrower than legacy Mission selection.
@@ -1742,6 +1779,23 @@ mod tests {
         assert!(valid_original_operation_key(&format!("session-continue-{}", "a".repeat(64))));
         assert!(!valid_original_operation_key(&format!("session-continue-{}", "A".repeat(64))));
         assert!(!valid_original_operation_key("session-continue-invalid"));
+    }
+    #[test]
+    fn autonomy_policy_read_is_one_fixed_selected_root_acquisition_target() {
+        let selected: MissionSelection = serde_json::from_value(serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1"})).unwrap();
+        let url = autonomy_policy_target(&selected).unwrap();
+        assert_eq!(url.origin().ascii_serialization(), ORIGIN);
+        assert_eq!(url.path(), "/workspace/autonomy/current");
+        assert_eq!(url.query_pairs().collect::<Vec<_>>(), vec![("work_ref".into(),"WS:ONE".into()),("root_job_id".into(),"JOB-1".into())]);
+        assert_eq!(AUTONOMY_POLICY_RESPONSE_CAP, 32_768);
+        for value in [
+            serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1","path":"/private"}),
+            serde_json::json!({"work_ref":"WS:ONE","root_job_id":"JOB-1","account":"foreign"}),
+            serde_json::json!({"work_ref":"WS:ONE"}),
+        ] { assert!(serde_json::from_value::<MissionSelection>(value).is_err()); }
+        for (work, root) in [("WS:ONE\n","JOB-1"),("WS:ONE","JOB-1\n"),("WS:lower","JOB-1"),("WS:ONE","JOB-latest")] {
+            assert!(autonomy_policy_target(&MissionSelection {work_ref:work.into(),root_job_id:root.into()}).is_err());
+        }
     }
     #[test]
     fn project_plan_read_is_one_fixed_rootless_acquisition_target() {
