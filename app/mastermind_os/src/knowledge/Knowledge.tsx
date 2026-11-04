@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { allEvidence, type EvidenceRef } from "../mission";
 import type { OfficeProjection, SourceState } from "../meta-ceo/projection";
+import { normalizeResultSelection, type ResultSelection } from "../result";
 import { normalizeResultReferencesSelection } from "../result-references";
 import type { MissionHost } from "../host";
 import { KnowledgeSources } from "./KnowledgeSources";
@@ -12,6 +13,8 @@ export interface SourceNavigation {
 }
 export interface KnowledgeProps {
   projection: OfficeProjection;
+  requestedResult?: ResultSelection;
+  onReturnToSearch?: () => void;
   /** Existing source-navigation owner only. This component never resolves a ref
    * into a guessed URL, reads another source, or mutates the original record. */
   onOpenSource?: (source: SourceNavigation) => void;
@@ -31,6 +34,7 @@ export interface KnowledgeProps {
 // Presentation copy only. Identifiers, revisions and observed times stay verbatim.
 const KNOWLEDGE_ZH: Record<string, string> = {
   "Knowledge": "知识",
+  "Back to search results": "返回搜索结果",
   "Knowledge source": "知识来源",
   "A library that grows with you": "与你一同成长的资料库",
   "Keep what matters.": "留住重要的内容。",
@@ -123,7 +127,7 @@ function fnEpoch(fn: unknown): string {
 }
 
 function KnowledgeBody({ projection, onOpenSource, readResultReferences, readResult,
-  locale = "en", hostGeneration, draftPort }: KnowledgeProps) {
+  locale = "en", hostGeneration, draftPort, requestedResult, onReturnToSearch }: KnowledgeProps) {
   const t = (value: string) => (locale === "zh-CN" ? KNOWLEDGE_ZH[value] ?? value : value);
   const [query, setQuery] = useState("");
   const [readerActive, setReaderActive] = useState(false);
@@ -167,6 +171,7 @@ function KnowledgeBody({ projection, onOpenSource, readResultReferences, readRes
         : "Retained result reading is not available here: no host generation was supplied for this view.";
 
   return <section className={`atelier-knowledge${readerActive ? " knowledge-reader-active" : ""}`} lang={locale} aria-label={t("Knowledge")}>
+    {onReturnToSearch && <button type="button" className="button knowledge-return" onClick={onReturnToSearch}>{t("Back to search results")}</button>}
     <header className="knowledge-heading" aria-hidden={readerActive}><p className="knowledge-eyebrow">{t("A library that grows with you")}</p>
       <h1>{t("Keep what matters.")}<br />{t("Build on what you know.")}</h1>
       <p>{t("Useful work, with its sources and qualification intact.")}</p>
@@ -183,7 +188,7 @@ function KnowledgeBody({ projection, onOpenSource, readResultReferences, readRes
     </div>
     <p className="knowledge-muted">{t("Decision, discovery, handoff and contract indexes are unavailable. Evidence references do not supply their record content.")}</p>
     {normalizedSelection && readResultReferences && readResult && hostGen !== null
-      ? <KnowledgeSources selection={normalizedSelection} authGeneration={context.authGeneration}
+      ? <KnowledgeSources selection={normalizedSelection} requestedResult={requestedResult} authGeneration={context.authGeneration}
         hostGeneration={hostGen} locale={locale} missionState={missionState} context={context} draftPort={draftPort} onReaderChange={setReaderActive}
         readResultReferences={readResultReferences} readResult={readResult} />
       : <section className="knowledge-sources knowledge-sources-empty" aria-label={t("Retained result records")}>
@@ -247,6 +252,7 @@ export function Knowledge(props: KnowledgeProps) {
   const epoch = JSON.stringify([context.authGeneration, context.selection, context.sessionRef,
     context.bindingGeneration, context.revisions.mission, mission.source.state,
     props.hostGeneration === undefined ? null : props.hostGeneration,
-    fnEpoch(props.readResultReferences), fnEpoch(props.readResult)]);
+    fnEpoch(props.readResultReferences), fnEpoch(props.readResult),
+    props.requestedResult === undefined ? null : normalizeResultSelection(props.requestedResult) ?? "invalid"]);
   return <KnowledgeBody key={epoch} {...props} />;
 }
