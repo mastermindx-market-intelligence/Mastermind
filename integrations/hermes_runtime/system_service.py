@@ -80,6 +80,10 @@ def render_host_unit(
             or not isinstance(runtime_group, str) or not _ACCOUNT.fullmatch(runtime_group)
             or runtime_group in {"root", "nogroup"}):
         raise RuntimeRefusal("ROOT_UNIT_USER_UNQUALIFIED")
+    from .role_isolation import assert_service_account_names
+    from .tcp_sandbox import role_tcp_ports
+    assert_service_account_names(profile.role, runtime_user, runtime_group)
+    role_tcp_ports(profile)
     exe = _safe_absolute(python_executable)
     root = _safe_absolute(repo_root)
     state = _safe_absolute(profile.state_dir)
@@ -114,7 +118,6 @@ ExecStart={exe} -m integrations.hermes_runtime supervise --profile {state}/curre
 ExecReload={exe} -m integrations.hermes_runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 Environment=PYTHONPATH={root}
 Environment=PYTHONDONTWRITEBYTECODE=1
-EnvironmentFile={secrets}
 Restart=on-failure
 RestartSec={seconds}
 RestartPreventExitStatus={CONFIG_EXIT}
@@ -145,7 +148,7 @@ WantedBy=multi-user.target
 """
     allows = [line for line in unit.splitlines() if line.startswith("IPAddressAllow=")]
     if (allows != [f"IPAddressAllow={role_ip}/32"]
-            or unit.count("EnvironmentFile=") != 1
+            or "EnvironmentFile=" in unit
             or "IPAddressAllow=localhost" in unit
             or "IPAddressAllow=any" in unit
             or unit.count("ExecStart=") != 1

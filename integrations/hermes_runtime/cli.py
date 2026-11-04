@@ -129,6 +129,10 @@ def _canary(profile_path: Path, hermes_bin: Path) -> int:
     assert_role_service_cgroup(profile.role)
     from .system_service import assert_role_network_profile
     assert_role_network_profile(profile)
+    from .role_isolation import assert_role_credential_isolation
+    from .tcp_sandbox import enforce_role_tcp_ports
+    assert_role_credential_isolation(profile)
+    enforce_role_tcp_ports(profile)
     current = state / "current"
     manifest_path = state / "install-manifest.json"
     receipt_path = current / "install-receipt.json"
@@ -198,6 +202,10 @@ def _supervise(args: argparse.Namespace) -> int:
     try:
         assert_root_service_cgroup(profile.role)
         assert_role_network_profile(profile)
+        from .role_isolation import assert_role_credential_isolation
+        from .tcp_sandbox import enforce_role_tcp_ports
+        assert_role_credential_isolation(profile)
+        enforce_role_tcp_ports(profile)
     except RuntimeRefusal as exc:
         print(exc.code, file=sys.stderr)
         return CONFIG_EXIT

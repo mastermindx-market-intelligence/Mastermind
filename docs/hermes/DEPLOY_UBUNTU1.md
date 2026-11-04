@@ -190,7 +190,9 @@ Cursor endpoint defaults to `https://cursor-pool.invalid/v1`. Personal
 Coding Plan `/api/coding` provider URLs are refused.
 
 Each role has a separate **root-managed system unit running as a
-non-root account** and its own mode-0600 secrets file. The old user
+distinct non-root account/group**, named mmsecretary or mmmeta, with
+unequal numeric UIDs/GIDs, private 0700 state/secret directories, and its
+own mode-0600 secrets file. Shared longr/operator ownership is refused. The old user
 units are generated only into an inert staging directory; do not
 enable/start them. Slack bot identities are role-private and not
 shared with Grok Secretary.
@@ -211,10 +213,11 @@ HERMES_SLACK_BOT_TOKEN=<this-agents-bot-token>
 
 `self` is only that unit's `HERMES_SLACK_BOT_USER_ID`. Sibling Hermes ids live
 in `roster.json` under `sibling_hermes_agent_ids` and are not a self loop.
-Each user unit has `EnvironmentFile=` set to that unit's 0600 secrets file, so
-systemd loads `HERMES_SLACK_BOT_USER_ID` into the unit process. The unit text
-contains the path, not the secret bytes. The Hermes child receives that user
-id and does not receive `HERMES_SLACK_BOT_TOKEN` or `HERMES_GATEWAY_TOKEN`.
+Production root units have no `EnvironmentFile=`. After cgroup, OS-identity,
+private-path and Landlock checks, the CLI alone loads the existing private
+secret file. The native child receives its own Slack user id, never the
+Slack bot token or gateway token. Inert legacy user units are not launchable
+production services and must never be activated.
 
 The harness refuses to leave shadow mode when `HERMES_SLACK_BOT_USER_ID` is
 unset or malformed (`SHADOW_ID_REQUIRED`). Shadow mode remains the default
@@ -274,7 +277,15 @@ operator shell key or a different role's config as native readiness.
 
 ## Install
 
-From the repo root, as the operator user on ubuntu1:
+From the approved readable repo root on ubuntu1, run the Secretary block
+under the separately provisioned mmsecretary login and the Meta-CEO block
+under mmmeta. Each has its OWN HOME, private files and pinned executable.
+Never execute both blocks under one operator/shared account. Account
+provisioning is a separate authorized host-owner action, not this installer.
+See ROLE_ISOLATION_REPAIR.md; unsupported Landlock or failed numeric-ID
+isolation blocks service startup before keys are loaded.
+
+Secretary (mmsecretary account):
 
 ```sh
 umask 077
@@ -285,7 +296,8 @@ mkdir -p "$HOME/.config/hermes-runtime/credentials" \
 # Never use $HOME/.config/systemd/user for this staging-only installer.
 # Create the 0600 files above out of band. Do not echo tokens into the shell history.
 
-python3 integrations/hermes_harness/hermesctl doctor
+# Global doctor is not cross-UID credential proof. Inspect each installed
+# role with status --state under its own login; the actual CLI gates qualify it.
 
 # HERMES_BIN is the already-built hermes executable from the ubuntu1
 # pinned checkout. This procedure does not choose that path for you.
@@ -296,7 +308,16 @@ python3 integrations/hermes_harness/hermesctl install \
   --secrets-file "$HOME/.config/hermes-runtime/mmsecretary.secrets.env" \
   --hermes-bin "$HERMES_BIN" \
   --fetch
+```
 
+Meta-CEO (mmmeta account, a DIFFERENT HOME and credential owner):
+
+```sh
+umask 077
+mkdir -p "$HOME/.config/hermes-runtime/credentials" \
+  "$HOME/.local/state" \
+  "$HOME/.local/share/hermes-stage/systemd/user"
+# Provision this account's separate 0600 files and HERMES_BIN out of band.
 python3 integrations/hermes_harness/hermesctl install \
   --role mmmeta \
   --state "$HOME/.local/state/hermes-runtime-mmmeta" \
@@ -323,7 +344,10 @@ All installs are operator-authorized postrelease actions, not CI steps.
   system units from `ROOT_CONFINED_SYSTEM_UNIT.md` after acceptance gates
 - role-local gateway ports `127.0.0.2:8765` (Secretary) and `127.0.0.3:8865` (Meta-CEO); never activate staged user units
 - `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, only\n  role-specific host-prefix `IPAddressAllow` rules (no blanket `localhost` 127/8)
-- `EnvironmentFile=` pointing at that unit's 0600 secrets file, and no secret bytes in the unit
+- legacy staged units may name an EnvironmentFile, but production root units
+  do NOT preload it; the CLI reads private credentials only after isolation
+- mandatory inherited Linux Landlock TCP bind/connect policy in production,
+  using fixed role gateway/backend ports and exact proxy port 18651 or 18652
 - provider overlay `provider-overlay.yaml` and `vision-overlay.yaml` under the role's `hermes-home`
 
 Model order in those overlays:
@@ -554,3 +578,15 @@ python3 -m integrations.hermes_runtime rollback \
 Rollback only exists after a second install. It points `current` at the
 previous release and does not delete secrets. Grok Secretary is not stopped
 by any of these commands.
+
+## Own-alias TCP and numeric-identity release checks
+
+ROLE_ISOLATION_REPAIR.md supersedes all prior shared-UID examples. Require
+distinct actual mmsecretary/mmmeta UIDs/GIDs, private directories, no extra
+shared supplementary group, no preloaded EnvironmentFile, and actual
+Landlock ABI >= 4 attachment before runtime secret loading. Network guards
+reject ephemeral/colliding ports or a proxy port other than 18651/18652.
+From each final service prove an unrelated wildcard TCP listener is denied
+through the role's OWN alias, and synthetic sibling-file reads are denied.
+A skipped Linux test or source-only mock is not host proof. TCP restrictions
+do not claim UDP/Unix IPC containment, TLS, billing, or Slack acceptance.

@@ -39,8 +39,8 @@ class RootManagedUnitTests(unittest.TestCase):
     def render(self, role, **kw):
         return render_host_unit(
             kw.get("profile", self.profile(role)),
-            runtime_user=kw.get("user", "longr"),
-            runtime_group=kw.get("group", "longr"),
+            runtime_user=kw.get("user", role),
+            runtime_group=kw.get("group", role),
             python_executable=kw.get("python", sys.executable),
             repo_root=kw.get("repo", REPO),
         )
@@ -66,7 +66,7 @@ class RootManagedUnitTests(unittest.TestCase):
                 self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET\n", unit)
                 self.assertNotIn("IPAddressAllow=localhost", unit)
                 self.assertNotIn("IPAddressAllow=any", unit)
-                self.assertIn("User=longr\nGroup=longr\n", unit)
+                self.assertIn(f"User={role}\nGroup={role}\n", unit)
                 self.assertIn("WantedBy=multi-user.target\n", unit)
                 self.assertNotIn("WantedBy=default.target", unit)
                 self.assertIn("BindsTo=hermes-egress.service\n", unit)
@@ -80,7 +80,7 @@ class RootManagedUnitTests(unittest.TestCase):
                 self.assertIn("UMask=0077\n", unit)
                 self.assertEqual(unit.count("ExecStart="), 1)
                 self.assertEqual(unit.count("ExecReload="), 1)
-                self.assertEqual(unit.count("EnvironmentFile="), 1)
+                self.assertEqual(unit.count("EnvironmentFile="), 0)
                 self.assertNotIn("synthetic-private-token", unit)
                 self.assertNotIn("127.0.0.0/8", unit)
 
@@ -180,6 +180,31 @@ class RootManagedUnitTests(unittest.TestCase):
         self.assertEqual(error.getvalue().strip(), "ROOT_UNIT_SHARED_LOOPBACK_REFUSED")
         secret.assert_not_called()
         runtime.assert_not_called()
+
+    def test_identity_and_tcp_guards_precede_supervisor_secret_access(self):
+        profile = self.profile("mmsecretary")
+        args = argparse.Namespace(profile=Path("/synthetic/profile.yaml"),
+            state=None, secrets_file=None, hermes_bin=Path("/synthetic/hermes"))
+        for stage, code in (("identity", "ROLE_OS_IDENTITY_COLLISION"),
+                            ("tcp", "ROLE_TCP_LANDLOCK_ABI_UNAVAILABLE")):
+            with (
+                self.subTest(stage=stage),
+                mock.patch.object(cli, "load_profile", return_value=profile),
+                mock.patch("integrations.hermes_runtime.system_service.assert_root_service_cgroup"),
+                mock.patch("integrations.hermes_runtime.role_isolation.assert_role_credential_isolation") as identity,
+                mock.patch("integrations.hermes_runtime.tcp_sandbox.enforce_role_tcp_ports") as tcp,
+                mock.patch.object(cli, "load_secrets") as secret,
+                mock.patch.object(cli, "ServiceRuntime") as runtime,
+                redirect_stderr(io.StringIO()) as error,
+            ):
+                (identity if stage == "identity" else tcp).side_effect = RuntimeRefusal(code)
+                result = cli._supervise(args)
+            self.assertEqual(result, CONFIG_EXIT)
+            self.assertEqual(error.getvalue().strip(), code)
+            if stage == "identity":
+                tcp.assert_not_called()
+            secret.assert_not_called()
+            runtime.assert_not_called()
 
     def test_operator_runbook_avoids_live_user_units_and_unattested_second_role(self):
         doc = (REPO / "docs/hermes/DEPLOY_UBUNTU1.md").read_text(encoding="utf-8")

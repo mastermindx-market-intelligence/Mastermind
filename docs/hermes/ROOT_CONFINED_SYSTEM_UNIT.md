@@ -28,7 +28,9 @@ model key, Hermes process or real provider endpoint was touched.
 
 The system_service.py module generates one **root-owned systemd SYSTEM**
 unit per role, not a user-manager unit. PID1 manages the cgroup firewall
-while User=longr and Group=longr keep the Hermes process unprivileged.
+while each role runs as its own pre-provisioned account/group: mmsecretary
+or mmmeta, with different non-root numeric UIDs/GIDs. The former shared
+longr example is NOT an admissible production configuration.
 Each unit requires the one approved hermes-egress.service proxy and
 allows exactly one role-specific loopback /32: 127.0.0.2 for Secretary,
 127.0.0.3 for Meta-CEO. Its existing gateway, pinned native backend and
@@ -42,8 +44,11 @@ The existing CLI supervise and operator canary entrypoints reject processes outs
 the exact /system.slice/hermes-runtime-ROLE.service cgroup **before**
 loading the role's secret file. This means even a previously generated
 systemd --user unit cannot begin a provider session through the new
-source. Rendered system unit text has exactly one protected EnvironmentFile,
-ExecStart and explicit operator-only ExecReload. Rendering does not
+source. Rendered system unit text has NO EnvironmentFile (no pre-guard secret
+loading), one ExecStart and one explicit operator-only ExecReload. Both
+CLI entrypoints validate distinct numeric OS identities/private paths and
+attach mandatory Linux Landlock TCP-port restrictions before loading secrets.
+See ROLE_ISOLATION_REPAIR.md for exact scope and host acceptance. Rendering does not
 install, enable, start or reload any service.
 
 ## Safe release and installation procedure
@@ -71,8 +76,11 @@ absolute, space-free paths, never model-proposed values):
 
     python3 -m integrations.hermes_runtime.system_service \
       --profile /absolute/state/current/profile.yaml \
-      --user longr --group longr --python /usr/bin/python3 \
+      --user mmsecretary --group mmsecretary --python /usr/bin/python3 \
       --repo /absolute/reviewed/Mastermind
+
+Repeat using the actual mmmeta profile with --user mmmeta --group mmmeta.
+Never render both roles as the same user or run these as root model processes.
 
 Review the complete generated source text; the root operator must install
 it as root:root mode 0644 under /etc/systemd/system/ and run
@@ -81,7 +89,11 @@ Before any charged model canary, prove actual unit-cgroup policy in BOTH
 directions from the **final installed** services: own vendor proxy,
 own gateway and native backend allowed; sibling alias, a confirmed
 listening 127.0.0.1 service, unrelated loopback and direct public 443
-all denied. A missing listener/connection-refused result does not prove
+all denied. Also prove an unrelated wildcard-bound listener is denied when
+addressed through the calling role's OWN alias and an unapproved TCP port,
+and that each role cannot read a sibling-owned synthetic secret file.
+Landlock tests must pass without skips; UDP/Unix IPC are outside the TCP
+restriction's claimed scope. A missing listener/connection-refused result does not prove
 the firewall denied the connection. systemd IPAddressAllow is an
 IP-prefix filter, not a per-port firewall; do not add back
 127.0.0.1/32 to make a gateway/health test pass.

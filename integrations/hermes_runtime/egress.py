@@ -23,6 +23,7 @@ ROLE_PROXY_HOST = {
     "mmsecretary": "127.0.0.2",
     "mmmeta": "127.0.0.3",
 }
+ROLE_PROXY_PORT = {"mmsecretary": 18651, "mmmeta": 18652}
 ROLES = frozenset(ROLE_PROXY_HOST)
 
 
@@ -47,7 +48,7 @@ def native_egress_child_env(role: str, private_values: Mapping[str, str]) -> dic
         raise RuntimeRefusal("NATIVE_EGRESS_PROXY_INVALID") from None
     host = ROLE_PROXY_HOST[role]
     if (url.scheme != "http" or url.hostname != host
-            or not isinstance(port, int) or not 1024 <= port <= 65535
+            or not isinstance(port, int) or port != ROLE_PROXY_PORT[role]
             or raw != f"http://{host}:{port}"):
         raise RuntimeRefusal("NATIVE_EGRESS_PROXY_INVALID")
     # A CONNECT proxy must be locally controlled and allowlisted OUTSIDE this
