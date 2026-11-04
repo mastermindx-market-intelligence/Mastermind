@@ -66,7 +66,10 @@ export function useProjectAdmissionWorkspace(props: ProjectAdmissionWorkspacePro
   const slot = useRef<{store: PendingPointerStore; controller: OperationController} | null>(null);
   if (props.store && props.transport && slot.current?.store !== props.store)
     slot.current = {store:props.store, controller:new OperationController(port.current, props.store)};
-  const controller = slot.current?.controller;
+  // Retain the original slot for same-store recovery, but withdrawal of the
+  // actual binding must immediately withdraw its action/status capability.
+  const controller = props.store && props.transport && slot.current?.store === props.store
+    ? slot.current.controller : undefined;
   const committedScope = useRef(scope), committedController = useRef(controller);
   // Mask old state in this render; invalidate before paint. Durable hints stay.
   const scopedController = committedScope.current === scope && committedController.current === controller && props.transport

@@ -150,3 +150,25 @@ it("does not resurrect the pre-Pause gate when Details remounts after acceptance
   expect(screen.queryByText("New work is not paused here. Other limits and permissions still apply.")).toBeNull();
   expect(e.read).toHaveBeenCalledTimes(1);expect(e.transport.pause).toHaveBeenCalledTimes(1);
 });
+
+
+it("withdraws the old controller when its actual store disappears and restores only original recovery with that same store",async()=>{
+  const e=environment();const view=render(<Driver {...e.props}/>);await readCurrent();
+  await e.store.reserve(scope,pointer);
+  e.transport.status.mockResolvedValue({schema:"mastermind.workspace_project_admission_status_result.v1",selection:fixture.pause_result.selection,state:"NOT_OBSERVED",receipt:null,reason_codes:[]});
+  view.rerender(<Driver {...e.props} store={undefined}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Check pause status"}));
+  await screen.findByText("Project controls are not connected here.");
+  expect((screen.getByRole("button",{name:"Pause new work"}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button",{name:"Pause new work"}));
+  expect(screen.queryByRole("button",{name:"Resume new work"})).toBeNull();
+  expect(e.transport.status).not.toHaveBeenCalled();
+  expect(e.transport.pause).not.toHaveBeenCalled();expect(e.transport.resume).not.toHaveBeenCalled();
+  expect(await e.store.read(scope)).toEqual(pointer);
+  view.rerender(<Driver {...e.props}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Check pause status"}));
+  await screen.findByText(/original request outcome is unresolved/);
+  expect(e.transport.status).toHaveBeenCalledExactlyOnceWith({kind:"project_pause",selection,command_id:pointer.operationKey,signal:expect.any(AbortSignal)});
+  expect(await e.store.read(scope)).toEqual(pointer);
+  expect(e.transport.pause).not.toHaveBeenCalled();expect(e.transport.resume).not.toHaveBeenCalled();
+});
