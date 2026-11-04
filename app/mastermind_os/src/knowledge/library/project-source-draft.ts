@@ -44,6 +44,7 @@
  *   read / complete-after-read lifecycle stay owned by the parent.
  */
 
+import {validateKnowledgeReadMetadata} from './project-data-observation';
 import type { DraftInsertion, DraftSource } from '../../conversations/drafts';
 import type { SavedConversationSourceRead } from '../../discovery/saved-conversations';
 import { KNOWLEDGE_BUDGETS, KNOWLEDGE_REPOSITORY } from './knowledge-library-contract';
@@ -233,7 +234,7 @@ const DRAFT_SOURCE_KEYS = ['identity', 'excerpt', 'label'] as const;
 const WITNESS_KEYS = ['workRef', 'binding', 'revision'] as const;
 const PROJECT_SOURCE_KEYS = ['kind', 'sourceRef', 'result'] as const;
 const SAVED_SOURCE_KEYS = ['kind', 'result'] as const;
-const KNOWLEDGE_RESULT_KEYS = ['availability', 'source', 'document', 'reasonCodes'] as const;
+const KNOWLEDGE_RESULT_KEYS = ['availability', 'source', 'document', 'reasonCodes','codeContext','dataObservation'] as const;
 const POINTER_KEYS = ['repository', 'commit', 'path', 'revision', 'contentSha256', 'committedAt'] as const;
 const DOCUMENT_KEYS = ['title', 'mediaType', 'contentUtf8', 'contentSha256'] as const;
 const SAVED_READ_KEYS = ['state', 'reason', 'reference', 'text', 'sourceTextSha256'] as const;
@@ -370,7 +371,7 @@ function readProjectSnapshot(
   resultRaw: unknown,
 ): SourceSnapshot | null {
   if (typeof sourceRef !== 'string' || !SOURCE_REF_PATTERNS[kind].test(sourceRef)) return null;
-  if (!isPlainObject(resultRaw) || !hasClosedKeys(resultRaw, KNOWLEDGE_RESULT_KEYS)) return null;
+  if (!isPlainObject(resultRaw) || !hasClosedKeys(resultRaw, KNOWLEDGE_RESULT_KEYS,['codeContext','dataObservation'])) return null;
   if (ownRaw(resultRaw, 'availability') !== 'AVAILABLE') return null;
   const reasonCodes = ownRaw(resultRaw, 'reasonCodes');
   if (!Array.isArray(reasonCodes) || reasonCodes.length !== 0) return null;
@@ -392,13 +393,21 @@ function readProjectSnapshot(
   if (text === null || text.length === 0) return null;
   if (ownString(documentRaw, 'contentSha256') !== contentSha256) return null;
   if (utf8ByteLength(text) > KNOWLEDGE_BUDGETS.sourceContent) return null;
+  let sourceWork:string|null=null;
+  if(Object.hasOwn(resultRaw,'codeContext')||Object.hasOwn(resultRaw,'dataObservation')){
+    const code=ownRaw(resultRaw,'codeContext');
+    if(!isPlainObject(code))return null;
+    sourceWork=ownString(code,'work_ref');if(!sourceWork||!isWorkRef(sourceWork))return null;
+    validateKnowledgeReadMetadata({source:{commit},code_context:code,
+      ...(Object.hasOwn(resultRaw,'dataObservation')?{data_observation:ownRaw(resultRaw,'dataObservation')}:{})},sourceWork);
+  }
   return {
     kind,
     identityFields: [kind, sourceRef, repository, commit, path, revision],
     label: `${repository} · ${path} · ${commit} · ${revision}`,
     text,
     declaredTextSha256: contentSha256,
-    savedWorkRef: null,
+    savedWorkRef: sourceWork,
     projectScope:{sourceRef,prefix:kind==='PROJECT_FILE'?'project-file.v1.':'project-record.v1.',repository:kind==='PROJECT_FILE'?'macro':repository,commit,path,revision},
   };
 }

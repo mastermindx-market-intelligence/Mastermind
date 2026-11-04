@@ -21,6 +21,8 @@
  *   persisted state, private-body indices, network, or filesystem access.
  */
 
+import {validateKnowledgeReadMetadata,sameKnowledgeCodeContext,type ProjectKnowledgeCodeContext} from '../knowledge/library/project-data-observation';
+
 export type CanonicalSourceRepository = 'mastermindx-market-intelligence/macro';
 export type FileSearchFileRepository = 'macro' | 'terminal' | 'mastermind';
 export type FileSearchFileState =
@@ -565,6 +567,7 @@ type CatalogueOutcome =
   | { kind: 'UNAVAILABLE' }
   | {
       kind: 'OK';
+      codeContext?:ProjectKnowledgeCodeContext;
       sourceCommit: string;
       files: readonly CatalogueFileEntry[];
       declared: number;
@@ -580,6 +583,7 @@ type CatalogueOutcome =
  */
 function decodeCatalogue(body: unknown, workRef: string): CatalogueOutcome {
   if (!isPlainObject(body)) return { kind: 'MALFORMED' };
+  let metadata;try{metadata=validateKnowledgeReadMetadata(body,workRef);}catch{return {kind:'MALFORMED'};}
   const schema = field(body, 'schema');
   if (schema === null || schema.value !== CATALOGUE_SCHEMA) return { kind: 'MALFORMED' };
   const selection = field(body, 'selection');
@@ -651,6 +655,7 @@ function decodeCatalogue(body: unknown, workRef: string): CatalogueOutcome {
   }
   return {
     kind: 'OK',
+    ...(metadata.codeContext?{codeContext:metadata.codeContext}:{}),
     sourceCommit: commit.value,
     files: Object.freeze(entries),
     declared: declaredValue,
@@ -675,6 +680,7 @@ type SourceOutcome =
     };
 
 interface SourceExpectation {
+  readonly codeContext?:ProjectKnowledgeCodeContext;
   readonly workRef: string;
   readonly sourceRef: string;
   readonly expectedRevision: string;
@@ -693,6 +699,8 @@ interface SourceExpectation {
  */
 function decodeSource(body: unknown, expected: SourceExpectation): SourceOutcome {
   if (!isPlainObject(body)) return { kind: 'MALFORMED' };
+  let metadata;try{metadata=validateKnowledgeReadMetadata(body,expected.workRef);}catch{return {kind:'MALFORMED'};}
+  if(!sameKnowledgeCodeContext(expected.codeContext,metadata.codeContext))return {kind:'IDENTITY_MISMATCH'};
   const schema = field(body, 'schema');
   if (schema === null || schema.value !== SOURCE_SCHEMA) return { kind: 'MALFORMED' };
   const selection = field(body, 'selection');
@@ -1081,6 +1089,7 @@ export async function searchProjectFiles(
     if (signal.aborted) return unavailableResult('OWNER_UNAVAILABLE', workRef, query);
     if (!ownerUnchanged(owner, snap)) return unavailableResult('SOURCE_CHANGED', workRef, query);
     const source = decodeSource(sourceBody, {
+      ...(catalogue.codeContext?{codeContext:catalogue.codeContext}:{}),
       workRef,
       sourceRef: entry.sourceRef,
       expectedRevision: entry.revision,

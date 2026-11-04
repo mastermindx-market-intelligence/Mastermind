@@ -19,6 +19,7 @@ import type { ComponentType, MouseEvent as ReactMouseEvent, ReactNode } from 're
 import './knowledge-library.css';
 import {captureProjectSourceDraftRead, completeProjectSourceDraftRead, type ProjectSourceDraftProof} from './project-source-draft';
 import {ProjectSourceDraftCompanion} from './ProjectSourceDraftCompanion';
+import {sameKnowledgeCodeContext,type ProjectKnowledgeReadMetadata} from './project-data-observation';
 import {readProjectFileMatchSource} from '../../discovery/project-file-open';
 import {
   KnowledgeContractError,
@@ -49,6 +50,12 @@ import type {
   KnowledgeSourceResult,
   ProjectMemoryDocument,
 } from './knowledge-library-contract';
+
+function readMetadataLines(value:ProjectKnowledgeReadMetadata|null|undefined):string[]{
+  if(!value)return [];
+  return [value.codeContext?`code_context: ${JSON.stringify(value.codeContext)}`:null,
+    value.dataObservation?`data_observation: ${JSON.stringify(value.dataObservation)}`:null].filter((line):line is string=>line!==null);
+}
 
 /* ------------------------------------------------------------------ */
 /* Read-family state                                                   */
@@ -380,7 +387,10 @@ function KnowledgeLibraryBody(props: BodyProps) {
     if(!registration)return;
     if(!catalogue||witness?.catalogue!==catalogue){registration(null);return;}
     const bound=Object.freeze({workRef:catalogue.workRef,sourceCommit:catalogue.sourceCommit,baseRevision:catalogue.workstreamSha256});
-    registration(Object.freeze({current(snapshot:KnowledgeLibrarySourceContext){
+    const current=()=>bodyLive.current&&catalogueWitness.current===witness&&witness.current();
+    registration(Object.freeze({codeContext(){
+      try{return current()?catalogueState.result?.codeContext??null:null;}catch{return null;}
+    },current(snapshot:KnowledgeLibrarySourceContext){
       try {
         if(!bodyLive.current||catalogueWitness.current!==witness||!witness.current()||
           snapshot.workRef!==bound.workRef||snapshot.sourceCommit!==bound.sourceCommit||snapshot.baseRevision!==bound.baseRevision)throw Error();
@@ -496,6 +506,10 @@ function KnowledgeLibraryBody(props: BodyProps) {
         const raw = await read({ workRef, signal: handle.controller.signal });
         if (!memoryRead.isCurrent(handle)) return;
         const validated = validate_memory(raw, workRef);
+        if(!sameKnowledgeCodeContext(catalogueState.result?.codeContext,validated.codeContext)||
+          (validated.dataObservation&&validated.dataObservation.canonical_data_commit!==catalogue.sourceCommit)){
+          setMemoryState({phase:'STALE',result:null,detail:['SOURCE_CHANGED']});return;
+        }
         if (!memoryRead.isCurrent(handle)) return;
         if (validated.availability === 'AVAILABLE') {
           const record=catalogue.records.find(row => row.sourceRef === catalogue.memory.sourceRef);
@@ -556,6 +570,9 @@ function KnowledgeLibraryBody(props: BodyProps) {
             setSourceState({ phase: 'UNAVAILABLE', result: validated, detail: validated.reasonCodes });
             return;
           }
+          if(!sameKnowledgeCodeContext(catalogueState.result?.codeContext,validated.codeContext)){
+            setSourceState({phase:'STALE',result:null,detail:['CODE_CONTEXT_CHANGED']});return;
+          }
           const digest = await sha256Hex(validated.document.contentUtf8);
           if (!sourceRead.isCurrent(handle)) return;
           if (digest !== validated.document.contentSha256) {
@@ -586,7 +603,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
         }
       })();
     },
-    [props.readSource, workRef, catalogue, sourceRead, props.fileSearchOwner],
+    [props.readSource, workRef, catalogue, catalogueState.result, sourceRead, props.fileSearchOwner],
   );
 
   const openSourceRow = useCallback(
@@ -628,7 +645,8 @@ function KnowledgeLibraryBody(props: BodyProps) {
       }
       const candidates=catalogue.files.filter(row=>row.sourceRef===reference.sourceRef && row.revision===reference.expectedRevision &&
         row.path===result.source!.path && isRowOpenable(row,props.readSource));
-      if (candidates.length!==1 || catalogue.sourceCommit!==result.source.commit) {
+      if (candidates.length!==1 || catalogue.sourceCommit!==result.source.commit ||
+          !sameKnowledgeCodeContext(catalogueState.result?.codeContext,result.codeContext)) {
         setSourceState({phase:'STALE',result:null,detail:['SOURCE_CHANGED']}); return;
       }
       const proof=ticket&&liveProps.current.draftPort?await completeProjectSourceDraftRead(ticket,
@@ -940,6 +958,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
             )}
           </div>
           <p className="knowledge-library-memory-value">{memoryDocument.value}</p>
+          {readMetadataLines(memoryState.result).length?closedDetails(readMetadataLines(memoryState.result),copy.sourceDetails):null}
         </div>
       )}
       {memoryDocument !== null && !memoryCurrent && (
@@ -1005,6 +1024,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
                   `content_sha256: ${result.source.contentSha256}`,
                   `committed_at: ${result.source.committedAt ?? 'null'}`,
                   `media_type: ${document_.mediaType}`,
+                  ...readMetadataLines(result),
                 ],
                 copy.sourceDetails,
               )}
@@ -1041,6 +1061,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
           <header className="knowledge-library-heading">
             <p className="knowledge-library-eyebrow">{copy.productLabel}</p>
             <h1 className="knowledge-library-title">{title}</h1>
+            {readMetadataLines(catalogueState.result).length?closedDetails(readMetadataLines(catalogueState.result),copy.sourceDetails):null}
           </header>
           <div className="knowledge-library-toolbar" role="tablist" aria-label={title}>
             <button

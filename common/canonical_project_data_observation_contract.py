@@ -1,0 +1,41 @@
+"""Closed DATA observation facts only; no grant, clock acquisition or I/O."""
+from copy import deepcopy
+from datetime import datetime
+import re
+
+SCHEMA='mastermind.canonical_project_data_observation.v1'
+_KEYS={'schema','repository','default_ref','executable_macro_commit','canonical_data_commit','canonical_commit_at','canonical_observed_at_ms','publication_recorded_at_ms','publication_time','source_operation','reader_closure_sha256','code_config_relation','authority'}
+def _fail():raise ValueError('INVALID_CANONICAL_DATA_OBSERVATION')
+def _hex(v,n):
+ if type(v) is not str or re.fullmatch(r'[a-f0-9]{'+str(n)+'}',v) is None:_fail()
+def _integer(v,minimum=0):
+ if type(v) is not int or not minimum<=v<=9007199254740991:_fail()
+def validate(value):
+ try:
+  if type(value) is not dict or set(value)!=_KEYS or value['schema']!=SCHEMA or value['repository']!='mastermindx-market-intelligence/macro' or value['code_config_relation']!='IDENTICAL_READER_CLOSURE' or value['authority']!='OBSERVATION_ONLY' or value['publication_time'] is not None:_fail()
+  if type(value['default_ref']) is not str or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,199}',value['default_ref']) is None or any(part in ('','.','..') for part in value['default_ref'].split('/')):_fail()
+  for k in ('executable_macro_commit','canonical_data_commit'):_hex(value[k],40)
+  _hex(value['reader_closure_sha256'],64);_integer(value['canonical_observed_at_ms'],1)
+  if type(value['canonical_commit_at']) is not str or len(value['canonical_commit_at'])>64 or datetime.fromisoformat(value['canonical_commit_at'].replace('Z','+00:00')).utcoffset() is None:_fail()
+  operation=value['source_operation']
+  if operation is None:
+   if value['publication_recorded_at_ms'] is not None or value['executable_macro_commit']!=value['canonical_data_commit']:_fail()
+  else:
+   expected={'selection','principal_scope','request_sha256','recipe_fingerprint_sha256','event_id','receipt_sha256','recorded_at_ms','sources'}
+   if type(operation) is not dict or set(operation)!=expected:_fail()
+   for k in ('principal_scope','request_sha256','recipe_fingerprint_sha256','receipt_sha256'):_hex(operation[k],64)
+   _integer(operation['event_id'],1);_integer(operation['recorded_at_ms'])
+   if value['publication_recorded_at_ms']!=operation['recorded_at_ms']:_fail()
+   selected=operation['selection']
+   if type(selected) is not dict or set(selected)!={'action','request_id','work_ref'}:_fail()
+   prefixes={'add_project_file':'mmos-project-file-add-','set_project_communication_preference':'mmos-project-preference-set-'}
+   prefix=prefixes.get(selected['action'])
+   if prefix is None or type(selected['request_id']) is not str or re.fullmatch(re.escape(prefix)+r'[a-f0-9]{40}',selected['request_id']) is None or type(selected['work_ref']) is not str or re.fullmatch(r'WS:[A-Z0-9]+(?:-[A-Z0-9]+)*',selected['work_ref']) is None or not 2<=len(selected['work_ref'][3:])<=64:_fail()
+   if type(operation['sources']) is not list or len(operation['sources'])!=2:_fail()
+   for source in operation['sources']:
+    if type(source) is not dict or set(source)!={'repository','commit','path','content_sha256'} or source['repository']!='macro':_fail()
+    _hex(source['commit'],40);_hex(source['content_sha256'],64)
+    if type(source['path']) is not str or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]{0,511}',source['path']) is None or any(part in ('','.','..') for part in source['path'].split('/')):_fail()
+   if len({s['path'] for s in operation['sources']})!=2 or len({s['commit'] for s in operation['sources']})!=1:_fail()
+  return deepcopy(value)
+ except (ValueError,TypeError,KeyError,AttributeError,OverflowError):_fail()

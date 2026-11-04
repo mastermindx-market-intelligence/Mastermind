@@ -11,6 +11,7 @@
  */
 
 import type { ReactNode } from 'react';
+import {knowledgeReadKeys,validateKnowledgeReadMetadata,type ProjectKnowledgeReadMetadata,type ProjectKnowledgeCodeContext} from './project-data-observation';
 import type {ProjectSourceDraftPort} from './project-source-draft';
 import type {ProjectFileMatch,ProjectFileSearchOwner} from '../../discovery/project-file-search';
 
@@ -134,7 +135,7 @@ export interface KnowledgeCatalogue {
   };
 }
 
-export interface KnowledgeCatalogueResult {
+export interface KnowledgeCatalogueResult extends ProjectKnowledgeReadMetadata {
   readonly availability: 'AVAILABLE' | 'UNAVAILABLE';
   readonly catalogue: KnowledgeCatalogue | null;
   readonly reasonCodes: readonly string[];
@@ -157,7 +158,7 @@ export interface KnowledgeSourceDocumentBody {
   readonly contentSha256: string;
 }
 
-export interface KnowledgeSourceResult {
+export interface KnowledgeSourceResult extends ProjectKnowledgeReadMetadata {
   readonly availability: 'AVAILABLE' | 'UNAVAILABLE';
   readonly source: KnowledgeSourcePointer | null;
   readonly document: KnowledgeSourceDocumentBody | null;
@@ -182,7 +183,7 @@ export interface KnowledgeMemoryValue {
   readonly lastEdit: KnowledgePreferenceLastEdit;
 }
 
-export interface KnowledgeMemoryResult {
+export interface KnowledgeMemoryResult extends ProjectKnowledgeReadMetadata {
   readonly availability: 'AVAILABLE' | 'EMPTY' | 'UNAVAILABLE';
   readonly source: KnowledgeSourcePointer | null;
   readonly memory: KnowledgeMemoryValue | null;
@@ -252,6 +253,7 @@ export interface KnowledgeLibraryReadActionsRequest {
 
 /** One currently mounted fixed catalogue owner, not a new read/grant. */
 export interface KnowledgeLibrarySourceOwner {
+  readonly codeContext?:()=>ProjectKnowledgeCodeContext|null;
   current(snapshot:KnowledgeLibrarySourceContext):KnowledgeLibrarySourceContext;
 }
 export interface KnowledgeLibraryProps {
@@ -550,7 +552,8 @@ export function validate_catalogue(raw: unknown, expectedWorkRef: string): Knowl
   if (!isPlainRecord(raw)) fail('MALFORMED_PAYLOAD');
   assertAcyclic(raw, new Set());
   assertWireBudget(raw);
-  exactKeys(raw, ['schema', 'selection', 'availability', 'reason_codes', 'source', 'project']);
+  exactKeys(raw, knowledgeReadKeys(raw, ['schema', 'selection', 'availability', 'reason_codes', 'source', 'project']));
+  const metadata=validateKnowledgeReadMetadata(raw, expectedWorkRef);
   expectExactSchema(raw['schema'], KNOWLEDGE_CATALOGUE_SCHEMA);
   const selection = raw['selection'];
   if (!isPlainRecord(selection)) fail('MALFORMED_PAYLOAD');
@@ -563,7 +566,7 @@ export function validate_catalogue(raw: unknown, expectedWorkRef: string): Knowl
     if (raw['source'] !== null) fail('REASON_PAYLOAD_MISMATCH');
     if (raw['project'] !== null) fail('REASON_PAYLOAD_MISMATCH');
     return cloneFrozen({
-      availability,
+      ...metadata, availability,
       catalogue: null,
       reasonCodes: expectClosedReasons(raw['reason_codes'], false),
     });
@@ -634,7 +637,7 @@ export function validate_catalogue(raw: unknown, expectedWorkRef: string): Knowl
   expectEnum(recordCoverageRaw['state'], ['BOUNDED_SAMPLE'], 'MALFORMED_PAYLOAD');
 
   return cloneFrozen({
-    availability,
+    ...metadata, availability,
     catalogue: {
       workRef,
       availability,
@@ -693,7 +696,8 @@ export function validate_source(
   if (!isPlainRecord(raw)) fail('MALFORMED_PAYLOAD');
   assertAcyclic(raw, new Set());
   assertWireBudget(raw);
-  exactKeys(raw, ['schema', 'selection', 'availability', 'reason_codes', 'source', 'document']);
+  exactKeys(raw, knowledgeReadKeys(raw, ['schema', 'selection', 'availability', 'reason_codes', 'source', 'document']));
+  const metadata=validateKnowledgeReadMetadata(raw, expectedWorkRef);
   expectExactSchema(raw['schema'], KNOWLEDGE_SOURCE_SCHEMA);
   const selection = raw['selection'];
   if (!isPlainRecord(selection)) fail('MALFORMED_PAYLOAD');
@@ -707,7 +711,7 @@ export function validate_source(
   if (availability === 'UNAVAILABLE') {
     if (raw['source'] !== null || raw['document'] !== null) fail('REASON_PAYLOAD_MISMATCH');
     return cloneFrozen({
-      availability,
+      ...metadata, availability,
       source: null,
       document: null,
       reasonCodes: expectClosedReasons(raw['reason_codes'], false),
@@ -728,7 +732,7 @@ export function validate_source(
     contentSha256: expectHex64(documentRaw['content_sha256'], 'MALFORMED_PAYLOAD'),
   });
   if (document.contentSha256 !== source.contentSha256) fail('DIGEST_MISMATCH');
-  return cloneFrozen({ availability, source, document, reasonCodes: Object.freeze([]) });
+  return cloneFrozen({ ...metadata, availability, source, document, reasonCodes: Object.freeze([]) });
 }
 
 /* ------------------------------------------------------------------ */
@@ -740,7 +744,8 @@ export function validate_memory(raw: unknown, expectedWorkRef: string): Knowledg
   if (!isPlainRecord(raw)) fail('MALFORMED_PAYLOAD');
   assertAcyclic(raw, new Set());
   assertWireBudget(raw);
-  exactKeys(raw, ['schema', 'selection', 'availability', 'reason_codes', 'source', 'memory']);
+  exactKeys(raw, knowledgeReadKeys(raw, ['schema', 'selection', 'availability', 'reason_codes', 'source', 'memory']));
+  const metadata=validateKnowledgeReadMetadata(raw, expectedWorkRef);
   expectExactSchema(raw['schema'], KNOWLEDGE_MEMORY_SCHEMA);
   const selection = raw['selection'];
   if (!isPlainRecord(selection)) fail('MALFORMED_PAYLOAD');
@@ -752,7 +757,7 @@ export function validate_memory(raw: unknown, expectedWorkRef: string): Knowledg
   if (availability === 'UNAVAILABLE') {
     if (raw['source'] !== null || raw['memory'] !== null) fail('REASON_PAYLOAD_MISMATCH');
     return cloneFrozen({
-      availability,
+      ...metadata, availability,
       source: null,
       memory: null,
       reasonCodes: expectClosedReasons(raw['reason_codes'], false),
@@ -763,7 +768,7 @@ export function validate_memory(raw: unknown, expectedWorkRef: string): Knowledg
   if (raw['memory'] === null) {
     if (availability !== 'EMPTY') fail('REASON_PAYLOAD_MISMATCH');
     if(raw['source']!==null) fail('REASON_PAYLOAD_MISMATCH');
-    return cloneFrozen({ availability, source:null, memory: null, reasonCodes: Object.freeze([]) });
+    return cloneFrozen({ ...metadata, availability, source:null, memory: null, reasonCodes: Object.freeze([]) });
   }
 
   const memoryRaw = raw['memory'];
@@ -800,7 +805,7 @@ export function validate_memory(raw: unknown, expectedWorkRef: string): Knowledg
       requestSha256: expectHex64(lastEditRaw['request_sha256'], 'MALFORMED_PAYLOAD'),
     },
   });
-  return cloneFrozen({ availability, source, memory, reasonCodes: Object.freeze([]) });
+  return cloneFrozen({ ...metadata, availability, source, memory, reasonCodes: Object.freeze([]) });
 }
 
 /* ------------------------------------------------------------------ */

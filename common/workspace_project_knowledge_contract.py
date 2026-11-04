@@ -497,10 +497,43 @@ def _reason_codes(value, field, *, nonempty):
     return value
 
 
+def _read_context_keys(value, keys, field):
+    _keys(value, tuple(keys) + tuple(k for k in ("code_context", "data_observation") if k in value), field)
+
+
+def _read_context(value):
+    if "data_observation" in value and "code_context" not in value:
+        _fail("data_observation requires independently issued code_context")
+    context = value.get("code_context")
+    if "code_context" in value:
+        _keys(context, ("schema", "work_ref", "executable_macro_commit", "reader_source_commit"), "code_context")
+        if context["schema"] != "mastermind.project_knowledge_code_context.v1" or context["work_ref"] != value["selection"]["work_ref"]:
+            _fail("code_context selection/schema mismatch")
+        _sha(context["executable_macro_commit"], "code_context.executable_macro_commit", 40)
+        _sha(context["reader_source_commit"], "code_context.reader_source_commit", 40)
+    if "data_observation" in value:
+        from common.canonical_project_data_observation_contract import validate
+        try:
+            observation = validate(value["data_observation"])
+        except (ValueError, TypeError, OverflowError):
+            _fail("data_observation invalid")
+        if observation["executable_macro_commit"] != context["executable_macro_commit"]:
+            _fail("data_observation executable CODE mismatch")
+        if value["source"] is not None and observation["canonical_data_commit"] != value["source"]["commit"]:
+            _fail("data_observation canonical DATA mismatch")
+        operation = observation["source_operation"]
+        if operation is not None and operation["selection"]["work_ref"] != value["selection"]["work_ref"]:
+            _fail("data_observation project mismatch")
+        value["data_observation"] = observation
+    elif context is not None and value["source"] is not None and value["source"]["commit"] != context["executable_macro_commit"]:
+        _fail("legacy source must match CODE when no DATA observation exists")
+    return value
+
+
 def validate_catalogue(value):
     """Validate ``mastermind.workspace_project_knowledge.v1``; returns a copy."""
     check = _copy(value)
-    _keys(check, ("availability", "project", "reason_codes", "schema", "selection", "source"), "catalogue")
+    _read_context_keys(check, ("availability", "project", "reason_codes", "schema", "selection", "source"), "catalogue")
     if check["schema"] != CATALOGUE_SCHEMA:
         _fail("catalogue.schema must be " + CATALOGUE_SCHEMA)
     _keys(check["selection"], ("work_ref",), "catalogue.selection")
@@ -520,13 +553,13 @@ def validate_catalogue(value):
             _fail("catalogue must keep source and project null when UNAVAILABLE")
     elif check["source"] is None or check["project"] is None:
         _fail("catalogue must carry source and project when AVAILABLE")
-    return check
+    return _read_context(check)
 
 
 def validate_source(value):
     """Validate ``mastermind.workspace_project_source.v1``; returns a copy."""
     check = _copy(value)
-    _keys(check, ("availability", "document", "reason_codes", "schema", "selection", "source"), "source")
+    _read_context_keys(check, ("availability", "document", "reason_codes", "schema", "selection", "source"), "source")
     if check["schema"] != SOURCE_SCHEMA:
         _fail("source.schema must be " + SOURCE_SCHEMA)
     _keys(check["selection"], ("source_ref", "work_ref"), "source.selection")
@@ -558,7 +591,7 @@ def validate_source(value):
             _fail("source must carry source and document when AVAILABLE")
         if check["source"]["content_sha256"] != check["document"]["content_sha256"]:
             _fail("source.source.content_sha256 must equal source.document.content_sha256")
-    return check
+    return _read_context(check)
 
 
 def _memory_block(value, field):
@@ -572,7 +605,7 @@ def _memory_block(value, field):
 def validate_memory(value):
     """Validate ``mastermind.workspace_project_preference.v1``; returns a copy."""
     check = _copy(value)
-    _keys(check, ("availability", "memory", "reason_codes", "schema", "selection", "source"), "memory")
+    _read_context_keys(check, ("availability", "memory", "reason_codes", "schema", "selection", "source"), "memory")
     if check["schema"] != PREFERENCE_SCHEMA:
         _fail("memory.schema must be " + PREFERENCE_SCHEMA)
     _keys(check["selection"], ("work_ref",), "memory.selection")
@@ -594,7 +627,7 @@ def validate_memory(value):
     else:
         if check["source"] is None or check["memory"] is None:
             _fail("memory must carry source and memory when AVAILABLE")
-    return check
+    return _read_context(check)
 
 
 def unavailable_catalogue(work_ref, *reason_codes):

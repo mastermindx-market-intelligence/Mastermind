@@ -50,6 +50,7 @@
  */
 
 import type { ProjectFileMatch, ProjectFileSearchOwner } from './project-file-search';
+import {sameKnowledgeCodeContext} from '../knowledge/library/project-data-observation';
 import { sha256Hex, validate_catalogue, validate_source } from '../knowledge/library/knowledge-library-contract';
 import type { KnowledgeSourceResult } from '../knowledge/library/knowledge-library-contract';
 
@@ -544,6 +545,7 @@ export async function readProjectFileMatchSource(
   } catch {
     return unavailableRead('INVALID_SOURCE');
   }
+  if(!sameKnowledgeCodeContext(catalogueResult.codeContext,sourceResult.codeContext))return unavailableRead('SOURCE_CHANGED');
   if (sourceResult.availability !== 'AVAILABLE' || sourceResult.source === null || sourceResult.document === null) {
     return unavailableRead(sourceResult.availability === 'UNAVAILABLE' ? null : 'INVALID_SOURCE');
   }
