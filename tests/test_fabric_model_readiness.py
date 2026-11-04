@@ -137,7 +137,7 @@ class TestGrokCliCatalogParser(unittest.TestCase):
     def sample(banner="You are logged in with grok.com."):
         return (banner
                 + "\n\nDefault model: grok-4.7\n\nAvailable models:\n"
-                + " * grok-4.7 (default)\n - grok-4.6\n").encode("ascii")
+                + "  * grok-4.7 (default)\n  - grok-4.6\n").encode("ascii")
 
     def test_exact_catalog_and_default(self):
         parsed = parse_grok_models_output(self.sample())
@@ -179,12 +179,14 @@ class TestGrokCliCatalogParser(unittest.TestCase):
         base = self.sample()
         invalid = (
             base[:-1],
-            base.replace(b" * grok-4.7 (default)", b" - grok-4.7"),
-            base.replace(b" * grok-4.7 (default)", b" * grok-4.6 (default)"),
+            base.replace(b"  * grok-4.7 (default)", b"  - grok-4.7"),
+            base.replace(b"  * grok-4.7 (default)", b"  * grok-4.6 (default)"),
             base + b" - grok-4.6\n",
             base.replace(b"Default model: grok-4.7", b"Default model: grok-5"),
             base.replace(b"Available models:", b"Model list:"),
-            base.replace(b" - grok-4.6", b" - grok-4.6 trailing text"),
+            base.replace(b"  * grok-4.7 (default)", b" * grok-4.7 (default)"),
+            base.replace(b"  - grok-4.6", b" - grok-4.6"),
+            base.replace(b" - grok-4.6", b"  - grok-4.6 trailing text"),
             base + b"\n",
         )
         for raw in invalid:

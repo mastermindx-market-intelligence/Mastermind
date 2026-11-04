@@ -168,13 +168,13 @@ def parse_grok_models_output(output: bytes) -> ParsedGrokCatalog:
     available: list[str] = []
     marked_default = 0
     for line in lines[5:]:
-        if line.startswith(" * ") and line.endswith(" (default)"):
-            value = line[3:-len(" (default)")]
+        if line.startswith("  * ") and line.endswith(" (default)"):
+            value = line[4:-len(" (default)")]
             marked_default += 1
             if value != default:
                 raise ValueError("GROK_CATALOG_MARKER_INVALID")
-        elif line.startswith(" - "):
-            value = line[3:]
+        elif line.startswith("  - "):
+            value = line[4:]
         else:
             raise ValueError("GROK_CATALOG_ROW_INVALID")
         if not _valid_identifier(value, _MODEL) or value in available:
