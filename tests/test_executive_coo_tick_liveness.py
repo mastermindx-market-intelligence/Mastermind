@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from control_plane.executive_service import ExecutiveControlService
+from control_plane.executive_runtime import JobPayload, StateConflict
 from test_executive_service import (
     _FakeSupervisor, _config, _coo_intent, _request, _service,
 )
@@ -137,6 +138,83 @@ def test_disarmed_background_tick_does_not_advance_either_admitted_root(tmp_path
     asyncio.run(exercise())
 
 
+def test_independent_ready_root_is_not_starved_by_unresolved_other_root(tmp_path, monkeypatch):
+    """Persist A's real marker; admit B once, then return to A's exact barrier."""
+    async def exercise():
+        async with _prepared_pair(tmp_path) as (config, seed, ids, _):
+            a, b = ids
+            planner = seed.runtime.jobs.create_cycle_planner(
+                a, command_id=f"coo-cycle:{a}:create-planner:0")
+            exact_command = f"coo-cycle:{a}:dispatch:{planner.job_id}:attempt:1"
+            claimed = seed.runtime.attempts.dispatch_cycle_job(
+                planner.job_id, command_id=exact_command,
+                lease_owner="retained-original-owner")
+            assert claimed is not None and claimed.claimed_now
+            seed.runtime.attempts.fail_attempt(
+                claimed.attempt.attempt_id,
+                fence_generation=claimed.attempt.fence_generation,
+                lease_token=claimed.lease_token,
+                payload=JobPayload(summary="Fixture provider refused before execution"))
+            seed.runtime.jobs.record_cycle_dispatch_effect_unknown(
+                a, selected_job_id=planner.job_id,
+                dispatch_command_id=exact_command)
+            marker = seed.runtime.jobs.pending_cycle_dispatch_effect_unknown(a)
+            assert marker is not None and marker["dispatch_command_id"] == exact_command
+            await seed.close()
+            finish_gate = asyncio.Event()
+            running, _ = _service(tmp_path, config=dataclasses.replace(
+                config, coo_tick_interval_seconds=1.0,
+                shutdown_grace_seconds=3.0), finish_gate=finish_gate)
+            await running.start()
+            try:
+                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(a) == marker
+                assert running._next_bound_coo_root(previous_root_id=a) == b
+                # A remains the very next choice even if B keeps appearing
+                # in the status scan and has not yet done useful work.
+                assert running._next_bound_coo_root(previous_root_id=b) == a
+                # A corrupt B-only marker is a local admission failure, not
+                # a reason to erase A's original reconciliation fallback.
+                reader = running.runtime.jobs.pending_cycle_dispatch_effect_unknown
+
+                def bad_b(root_id):
+                    if root_id == b:
+                        raise StateConflict("B has multiple pending effects")
+                    return reader(root_id)
+
+                with monkeypatch.context() as patch:
+                    patch.setattr(running.runtime.jobs,
+                                  "pending_cycle_dispatch_effect_unknown", bad_b)
+                    assert running._next_bound_coo_root(previous_root_id=a) == a
+                observed = []
+                actual_cycle = running._run_coo_cycle
+
+                async def bounded_cycle(root_id):
+                    observed.append(root_id)
+                    if root_id == a:
+                        # An unsettled same-run outcome cannot be retried here.
+                        raise StateConflict("synthetic original effect still unresolved")
+                    return await actual_cycle(root_id)
+
+                running._run_coo_cycle = bounded_cycle
+                assert await _until(lambda: len(observed) >= 3, timeout=8.0), {
+                    "last_error": running._coo_last_error,
+                    "last_tick": running._coo_last_tick_at,
+                    "selected": observed,
+                }
+                assert observed[:3] == [b, a, b]
+                assert _children(running, b)
+                assert await _until(
+                    lambda: any(child.attempt_count > 0 for child in _children(running, b)),
+                    timeout=4.0,
+                ), "B must progress beyond planner creation on its second tick"
+                assert running.runtime.jobs.pending_cycle_dispatch_effect_unknown(a) == marker
+                assert running.service_state == "READY"
+            finally:
+                finish_gate.set()
+                await running.close()
+    asyncio.run(exercise())
+
+
 def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tmp_path):
     class LostStartReceipt(_FakeSupervisor):
         async def start_cycle_job(self, job_id, *, command_id):
@@ -162,6 +240,11 @@ def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tm
             await running.start()
             try:
                 assert await _until(lambda: running.service_state == "QUARANTINED")
+                # Quarantine is published before the original cycle thread returns.
+                # Observe completion before the fixture's 100 ms shutdown drain.
+                assert await _until(
+                    lambda: not running._physical_workers and not running._coo_action_tasks
+                ), running._coo_last_error
                 assert _children(running, ids[1]) == []
                 attempted = _children(running, ids[0])
                 assert len(attempted) == 1

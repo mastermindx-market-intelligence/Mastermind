@@ -1,5 +1,6 @@
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import { decodeSessionContext, type ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = (event: string, listener: (event: { payload: unknown }) => void) => Promise<() => void>;
@@ -64,7 +65,8 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   })();
 
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
-    "executive_session_context" | "executive_session_reply" | "executive_session_references",
+    "executive_session_context" | "executive_session_reply" | "executive_session_references" |
+    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
     if (!available || signal.aborted) return Promise.reject(new Error("EXECUTIVE_UNAVAILABLE"));
@@ -85,12 +87,56 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       } catch { finish(true, new Error("EXECUTIVE_TRANSPORT_UNAVAILABLE")); }
     });
   }
-  const transport: OsExecutiveTransport = {
+  const transport: OsExecutiveTransport & { directNative: DirectNativeTransport & {
+    correction(request: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
+  } } = {
     authGeneration: () => epoch, available: () => available,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     context: (signal) => call("executive_context", signal),
     submit: (arguments_, signal) => call("executive_submit", signal, { arguments: arguments_ }),
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
+    directNative: {
+      read: (selection, signal) => {
+        const normalized = normalizeDirectSelection(selection);
+        if (!normalized) return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+        return call("executive_direct_native_result", signal, { arguments: normalized });
+      },
+      consume: (request, signal) => {
+        if (!request || typeof request !== "object" || Array.isArray(request) ||
+            ![Object.prototype, null].includes(Object.getPrototypeOf(request)) ||
+            Object.keys(request).sort().join(",") !== "attempt_id,job_id,operation_key,result_digest,work_ref")
+          return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+        const { result_digest, operation_key, ...selection } = request;
+        const normalized = normalizeDirectSelection(selection);
+        if (!normalized || normalized.attempt_id === null ||
+            typeof result_digest !== "string" || !/^[a-f0-9]{64}$/.test(result_digest) ||
+            typeof operation_key !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(operation_key))
+          return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+        return call("executive_direct_native_consume", signal, {
+          arguments: { ...normalized, result_digest, operation_key },
+        });
+      },
+      correction: (request, signal) => {
+        if (!request || typeof request !== "object" || Array.isArray(request) ||
+            ![Object.prototype, null].includes(Object.getPrototypeOf(request)))
+          return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+        const mutation = request.operation === "request";
+        const keys = mutation ? "attempt_id,fence_generation,job_id,operation,operation_key,work_ref"
+          : "attempt_id,job_id,operation,work_ref";
+        if ((!mutation && request.operation !== "inspect") || Object.keys(request).sort().join(",") !== keys)
+          return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+        const selected = normalizeDirectSelection({ work_ref: request.work_ref,
+          job_id: request.job_id, attempt_id: request.attempt_id });
+        if (!selected || (mutation && (selected.attempt_id === null ||
+            !Number.isSafeInteger(request.fence_generation) || Number(request.fence_generation) < 1 ||
+            typeof request.operation_key !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(request.operation_key))))
+          return Promise.reject(new Error("DIRECT_SELECTION_INVALID"));
+        return call("executive_direct_correction", signal, {
+          arguments: { ...selected, operation: request.operation,
+            ...(mutation ? { fence_generation: request.fence_generation, operation_key: request.operation_key } : {}) },
+        });
+      },
+    },
   };
   // Session history reuses the *same* native bearer owner/epoch. It exposes
   // only the preexisting authenticated READ endpoints and cannot submit even

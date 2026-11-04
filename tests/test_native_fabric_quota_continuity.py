@@ -15,13 +15,14 @@ NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 
 
 def _qualify(directory, *, timeout_seconds=240):
-    env = os.environ.copy()
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    result = subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", directory,
-         "-p", "test_*.py", "-v"],
-        cwd=NATIVE, env=env, capture_output=True, text=True, timeout=timeout_seconds,
-    )
+    from scripts.native_unittest_diagnostics import NativeInvocation,bind_facts,run_native
+    invocation=NativeInvocation(directory)
+    result,facts=run_native(directory,timeout_seconds=timeout_seconds,root=ROOT,cwd=NATIVE,invocation=invocation)
+    if result.returncode != 0 and facts is not None:
+        error=AssertionError(result.stdout+result.stderr)
+        case='test_native_quota_continuity_owners' if directory=='tests' else 'test_native_generation_and_ingress_rollout'
+        bind_facts(error,facts,invocation,'tests/test_native_fabric_quota_continuity.py::'+case)
+        raise error
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Ran 0 tests" not in result.stderr, "Native qualification discovered no tests"
 

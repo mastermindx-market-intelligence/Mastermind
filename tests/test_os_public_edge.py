@@ -8,7 +8,10 @@ import subprocess
 import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
-from ops.executive_os.os_public_edge import POST_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, asset_routes, render, stage
+from ops.executive_os.os_public_edge import (
+    GET_ROUTES, LEGACY_POST_ROUTES, MCP_MAX_BODY, MCP_METADATA_ROUTE, MCP_ROUTES, POST_ROUTES,
+    INCUMBENT_POST_ROUTES, asset_routes, render, stage,
+)
 
 
 def manifest(noir=False, notices=False):
@@ -26,23 +29,75 @@ def manifest(noir=False, notices=False):
     ]}
 
 
+def test_authenticated_control_room_routes_are_exact_and_method_scoped():
+    from ops.executive_os.os_public_edge import (
+        GET_ROUTES, INCUMBENT_GET_ROUTES, POST_ROUTES, INCUMBENT_POST_ROUTES,
+    )
+
+    # The client and the MCP source already consume mission/v4. Requiring an
+    # exact allowlist delta catches accidental omission without opening a
+    # wildcard route or silently expanding the legacy installed profile.
+    expected_get = {
+        "/workspace/control-room/state/current",
+        "/workspace/control-room/discover/current",
+        "/workspace/mission/v4/current",
+        "/workspace/fabric/catalog/current",
+        "/workspace/fabric/status/current",
+        "/workspace/project-plan/current",
+        "/workspace/project-journal/current",
+        "/workspace/autonomy/current",
+    }
+    expected_post = {
+        "/workspace/control-room/open",
+        "/workspace/control-room/bind",
+        "/workspace/control-room/unbind",
+        "/workspace/control-room/refresh-builds",
+    }
+    assert set(GET_ROUTES) == set(INCUMBENT_GET_ROUTES) | expected_get
+    assert set(POST_ROUTES) == set(INCUMBENT_POST_ROUTES) | expected_post
+    assert len(GET_ROUTES) == len(set(GET_ROUTES))
+    assert len(POST_ROUTES) == len(set(POST_ROUTES))
+    assert set(GET_ROUTES).isdisjoint(POST_ROUTES)
+    config = render(manifest(), 49152)
+    get_branch, post_branch = config.split("    handle @get {", 1)[0], config.split("    handle @post {", 1)[0]
+    assert get_branch.count("      path ") == 1
+    assert post_branch.count("      path ") == 2
+    # The rendered Caddy contract must match the closed Python route contract,
+    # not merely contain a few exemplar paths. Query strings are not routes.
+    caddy_get = set(get_branch.split("      path ", 1)[1].splitlines()[0].split())
+    caddy_post = set(post_branch.rsplit("      path ", 1)[1].splitlines()[0].split())
+    assert caddy_get == set(GET_ROUTES) | set(asset_routes(manifest()))
+    assert caddy_post == set(POST_ROUTES)
+    for route in expected_get:
+        assert route in get_branch
+    for route in expected_post:
+        assert route not in get_branch
+        assert route in post_branch
+    for route in expected_get:
+        assert route not in post_branch.split("    @post {", 1)[1]
+    assert "      method GET" in get_branch
+    assert "      method POST" in post_branch
+    assert "max_size 64KB" in config
+    assert "    abort" in config
+
+
 @pytest.mark.parametrize("noir,notices,count", [(False, False, 3), (True, False, 9), (True, True, 11)])
 def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
     value = manifest(noir, notices)
     routes = asset_routes(value)
     assert len(routes) == count
     config = render(value, 49152)
-    assert config.count("reverse_proxy 127.0.0.1:49152") == 2
+    # OS GET, OS POST, MCP metadata GET and MCP POST all share the one relay.
+    assert config.count("reverse_proxy 127.0.0.1:49152") == 4
     # All public POSTs are explicit paths. The new session routes are READ
     # only; effectful session/send stays closed until the held F2 gate clears.
     assert "path " + " ".join(POST_ROUTES) + "\n" in config
-    assert POST_ROUTES == LEGACY_POST_ROUTES + (
+    assert INCUMBENT_POST_ROUTES == LEGACY_POST_ROUTES + (
         "/os/executive/session/context", "/os/executive/session/reply",
         "/os/executive/session/references")
     assert "/os/executive/session/send" not in config
-    assert "max_size 64KB" in config
+    assert config.count("max_size 64KB") == 2
     assert config.rstrip().endswith("abort\n  }\n}")
-    assert "/mcp" not in config
     for route in routes:
         assert route in config
     if notices:
@@ -76,6 +131,53 @@ def test_notice_layout_remains_closed(damage):
 def test_legacy_plus_notices_is_not_an_admitted_five_file_layout():
     with pytest.raises(ValueError, match="fixed OS asset set"):
         manifest(False, True)
+
+
+@pytest.mark.parametrize("noir", [False, True])
+def test_public_mcp_entrypoint_is_two_exact_branches_before_abort(noir):
+    config = render(manifest(noir), 49152)
+    # RFC 9728 metadata is GET-only; the Streamable HTTP endpoint is POST-only.
+    assert f"method GET\n      path {MCP_METADATA_ROUTE}\n" in config
+    assert "method POST\n      path /mcp\n" in config
+    assert MCP_METADATA_ROUTE == "/.well-known/oauth-protected-resource/mcp"
+    assert MCP_ROUTES == ("/mcp",)
+    # No wildcard or prefix match can widen the public surface.
+    assert "/mcp*" not in config and "/mcp/" not in config and "/.well-known/*" not in config
+    # The /mcp branch alone presents a loopback Host (the gateway SDK fence admits
+    # only loopback hosts); every other branch keeps the public host.
+    assert config.count("header_up Host 127.0.0.1\n") == 1
+    assert config.count("header_up Host mcp.mastermind-x.com\n") == 3
+    # The /mcp branch caps the body at the gateway's own ceiling; no other
+    # branch gained a larger or unbounded body.
+    mcp_branch = config.split("handle @mcp {")[1]
+    assert mcp_branch.index("max_size 64KB") < mcp_branch.index("reverse_proxy")
+    assert MCP_MAX_BODY == 64000
+    # The Host counts above would also pass if the two values swapped branches, so
+    # pin each Host inside its own branch slice.
+    assert "header_up Host 127.0.0.1\n" in mcp_branch
+    assert "header_up Host mcp.mastermind-x.com\n" not in mcp_branch
+    meta_branch = config.split("handle @mcpmeta {")[1].split("@mcp {")[0]
+    assert "header_up Host mcp.mastermind-x.com\n" in meta_branch
+    assert "header_up Host 127.0.0.1\n" not in meta_branch
+    for marker, following in (("handle @get {", "@post {"), ("handle @post {", "@mcpmeta {")):
+        os_branch = config.split(marker)[1].split(following)[0]
+        assert "header_up Host mcp.mastermind-x.com\n" in os_branch
+        assert "header_up Host 127.0.0.1\n" not in os_branch
+    # Order is part of the contract: both MCP branches precede the terminal abort,
+    # after the original GET and POST OS branches.
+    order = [config.index(marker) for marker in
+             ("handle @get {", "handle @post {", "handle @mcpmeta {", "handle @mcp {", "\n    abort\n")]
+    assert order == sorted(order)
+    # Caddy performs no authentication or token handling on any branch.
+    for forbidden in ("basicauth", "forward_auth", "jwt", "authorization", "Authorization"):
+        assert forbidden not in config
+    # Untrusted forwarding and CDN client-identity headers are stripped on every
+    # branch and forwarding identity is rewritten to loopback/https.
+    for header in ("Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                   "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"):
+        assert config.count(f"header_up -{header}\n") == 4
+    assert config.count("header_up X-Forwarded-Proto https\n") == 4
+    assert config.count("header_up X-Forwarded-For 127.0.0.1\n") == 4
 
 
 @pytest.mark.parametrize("path", [
@@ -123,6 +225,7 @@ def test_staging_is_exclusive_and_receipt_observes_exact_bytes(tmp_path):
     output = tmp_path / "os.caddy"
     receipt = stage(manifest=manifest(True), relay_port=49152, output=output)
     assert receipt["installed"] is False
+    assert receipt["mcp"] == {"get": [MCP_METADATA_ROUTE], "post": list(MCP_ROUTES)}
     assert receipt["sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert output.stat().st_mode & 0o777 == 0o600
     before = output.read_bytes()
@@ -181,11 +284,16 @@ def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir
             for child in node:
                 visit(child)
     visit(servers)
-    assert len(route_matchers) == 2
-    by_method = {tuple(match["method"]): match for match in route_matchers}
-    assert set(by_method) == {("GET",), ("POST",)}
-    assert set(by_method[("POST",)]) == {"method", "path"}
-    assert by_method[("POST",)]["path"] == list(POST_ROUTES)
-    assert "/os/executive/session/send" not in by_method[("POST",)]["path"]
-    assert set(by_method[("GET",)]["path"]) == set(GET_ROUTES) | set(asset_routes(manifest(noir)))
+    # The two OS branches plus the two public-MCP branches (#1656), nothing else.
+    assert len(route_matchers) == 4
+    assert all(set(match) == {"method", "path"} for match in route_matchers)
+    by_paths = {(tuple(match["method"]), tuple(match["path"])): match for match in route_matchers}
+    assert (("POST",), tuple(POST_ROUTES)) in by_paths
+    assert (("GET",), (MCP_METADATA_ROUTE,)) in by_paths
+    assert (("POST",), tuple(MCP_ROUTES)) in by_paths
+    assert "/os/executive/session/send" not in POST_ROUTES
+    os_get = [match for match in route_matchers
+              if match["method"] == ["GET"] and match["path"] != [MCP_METADATA_ROUTE]]
+    assert len(os_get) == 1
+    assert set(os_get[0]["path"]) == set(GET_ROUTES) | set(asset_routes(manifest(noir)))
     assert config["apps"]["http"]["servers"]
