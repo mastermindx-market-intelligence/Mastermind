@@ -107,6 +107,8 @@ class ProjectionTests(unittest.TestCase):
         self.assertIn('EFFECT_UNKNOWN: operation-123 needs reconciliation.', new)
         self.assertIn('historical evidence', new)
         self.assertIn('not live authority', new)
+        self.assertIn('without mandatory independent review', new)
+        self.assertNotIn('one proportionate review', new)
 
     def test_unbalanced_marker_is_not_silently_deleted(self):
         mod = self.module()

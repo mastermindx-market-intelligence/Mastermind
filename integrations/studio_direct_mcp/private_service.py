@@ -95,7 +95,7 @@ PAPER_RUNTIME_V20_REL = Path(".local/share/mastermind-paper/runtime/v20")
 PAPER_V20_BRIDGE_SHA256 = "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced"
 PAPER_RUNTIME_V10_REL = Path(".local/share/mastermind-paper/runtime/v10")
 PAPER_V10_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
-FLEET_V20_COHORT_SOURCE_SHA256 = "a32957f008704cd0cafa69764237c8b69ee6f0dc68ac5a1b48e860ff04e778a9"
+FLEET_V20_COHORT_SOURCE_SHA256 = "e4d5bccfec19ee3c88a3c73ed2484f34d119896086d0da9485c0baf5638bc10d"
 # One closed admission set shared by the dispatcher and real lifecycle-lock gate.
 FLEET_V20_ENROLLED_ACCOUNTS = frozenset((
     "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt3",
@@ -921,7 +921,7 @@ def _pin_reject_generic_restage(account):
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
         return
-    if account == "chatgpt4" and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
+    if account in ("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9") and os.path.lexists(roots["state"] / "native-pool-pin-enrollment"):
         _pin_enrollment_owner_module().require_start(sys.modules[__name__], account, roots)
         return
     _pin_owner_module().require_start(sys.modules[__name__], account, roots)
@@ -3240,6 +3240,8 @@ def _frozen_paper_fleet_module():
     module.__file__ = str(path)
     exec(compile(source_bytes, str(path), "exec"), module.__dict__)
     if (frozenset(module.COHORTS) != FLEET_V20_ENROLLED_ACCOUNTS
+            or module.C4_POST_ENROLLMENT["manifest_sha256"]
+               != "3648a9a8e9711bab7be9fc7a3950f73579ce7d78358a18c15ac7d39adf924a9f"
             or module.TARGET_BRIDGE_SHA256 != PAPER_V20_BRIDGE_SHA256
             or module.PREDECESSORS != {
                 "v10": PAPER_V10_BRIDGE_SHA256,
@@ -3257,7 +3259,12 @@ def _upgrade_paper_frozen_fleet_v20(args) -> int:
     cohorts = _frozen_paper_fleet_module()
     if account not in cohorts.COHORTS:
         raise SystemExit("Paper fleet account not in reviewed cohort")
-    if expected != cohorts.COHORTS[account]["manifest_sha256"]:
+    enrolled_c4 = (
+        account == C4_PAPER_ACCOUNT
+        and expected == cohorts.C4_POST_ENROLLMENT["manifest_sha256"]
+    )
+    if (expected != cohorts.COHORTS[account]["manifest_sha256"]
+            and not enrolled_c4):
         raise SystemExit("Paper fleet original manifest is not frozen predecessor")
     label = f"com.mastermind.studio-direct-private.{account}"
     roots = _build_runtime_roots(account)
@@ -3273,6 +3280,12 @@ def _upgrade_paper_frozen_fleet_v20(args) -> int:
             or hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
             or hashlib.sha256(plist_bytes).hexdigest() != prior["plistHash"]):
         raise SystemExit("Paper fleet predecessor changed during inspection")
+    if enrolled_c4:
+        # Read-only qualification of the actual accepted enrollment owner and
+        # original native-pool receipt, not a hash-only assertion. It must be
+        # committed and selected before this second Paper-only CAS can begin.
+        _pin_enrollment_owner_module().require_start(
+            sys.modules[__name__], account, roots)
     home = _user_root()
     try:
         plan = cohorts.plan_selection(
@@ -3861,20 +3874,34 @@ def cmd_stop(args) -> int:
         return 1
 
     deadline = time.monotonic() + 10
-    try:
-        while _lifecycle_inspect(account, label, roots) is not None:
-            if time.monotonic() >= deadline:
-                print(json.dumps({"stopped": False, "reason": "still loaded"}))
-                return 1
+    strict_account = (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+                      or account in FABRIC_BACKEND_ACCOUNTS
+                      or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL)
+    # launchd may transiently report an indeterminate state immediately after a
+    # successful bootout. Continue OBSERVING only, never repeat the bootout.
+    # A strict owner must still see an exact positive ABSENT receipt before
+    # reporting stopped; persistent uncertainty remains EFFECT_UNKNOWN.
+    for poll in range(51):
+        try:
+            remaining = _lifecycle_inspect(account, label, roots)
+        except SystemExit as exc:
+            if not strict_account:
+                raise
+            if time.monotonic() >= deadline or poll == 50:
+                subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
+                           else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
+                raise SystemExit(
+                    f"{subject} stop: EFFECT_UNKNOWN after bootout; "
+                    "service absence is unverified"
+                ) from exc
             time.sleep(0.2)
-    except SystemExit as exc:
-        if (account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
-                or account in FABRIC_BACKEND_ACCOUNTS
-                or account in _NATIVE_POOL_PIN_TAILNET_CANONICAL):
-            subject = ("Tailnet" if account in _NATIVE_POOL_PIN_TAILNET_CANONICAL
-                       else "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper")
-            raise SystemExit(f"{subject} stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
-        raise
+            continue
+        if remaining is None:
+            break
+        if time.monotonic() >= deadline or poll == 50:
+            print(json.dumps({"stopped": False, "reason": "still loaded"}))
+            return 1
+        time.sleep(0.2)
 
     print(json.dumps({"stopped": True, "account": account}))
     return 0
@@ -3894,7 +3921,7 @@ def build_parser() -> argparse.ArgumentParser:
     pin.set_defaults(func=cmd_native_pool_pin)
 
     enrollment = sub.add_parser("native-pool-pin-enrollment")
-    enrollment.add_argument("--account", choices=("chatgpt4",), required=True)
+    enrollment.add_argument("--account", choices=("chatgpt4", "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"), required=True)
     enrollment.add_argument("--expected-manifest-sha256", required=True)
     enrollment.add_argument("--expected-plan-sha256")
     enrollment.add_argument("--source", help="exact reviewed payload under the installed owner's home; preview/apply only")

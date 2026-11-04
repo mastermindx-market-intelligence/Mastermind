@@ -217,7 +217,8 @@ def test_fable_is_not_a_universal_routing_or_merge_prerequisite(path):
     source = text(path)
     assert "Fable is not a mandatory relay or universal merge approver" in source
     assert "currently authorized role and operation" in source
-    assert "Independent review and source/release protections still apply" in source
+    assert "Independent review is not mandatory for CEO Web work" in source
+    assert "protected source/release controls still apply" in source
     assert "Owns adjudication, routing, and merges" not in source
 
 

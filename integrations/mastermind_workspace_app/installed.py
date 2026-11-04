@@ -52,7 +52,21 @@ class CeoIngressWorkspaceClient:
         )
         from common import executive_workspace_fabric_contract as fabric_wire
         timeout = self.timeout_seconds
-        if isinstance(frame, dict) and frame.get("schema") == fabric_wire.FRAME_SCHEMA:
+        from common import workspace_project_plan_contract as plan_wire
+        from common import workspace_project_journal_contract as journal_wire
+        from common import workspace_autonomy_read_contract as autonomy_wire
+        if isinstance(frame, dict) and frame.get("schema") == autonomy_wire.FRAME_SCHEMA:
+            autonomy_wire.validate_frame(frame)
+            ceiling = autonomy_wire.MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == journal_wire.FRAME_SCHEMA:
+            journal_wire.validate_frame(frame)
+            ceiling = journal_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == plan_wire.FRAME_SCHEMA:
+            plan_wire.validate_frame(frame)
+            ceiling = plan_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == fabric_wire.FRAME_SCHEMA:
             fabric_wire.validate_frame(frame)
             ceiling = fabric_wire.ceiling(frame["operation"])
         elif isinstance(frame, dict) and frame.get("schema") == CCR_READ_FRAME_SCHEMA:
