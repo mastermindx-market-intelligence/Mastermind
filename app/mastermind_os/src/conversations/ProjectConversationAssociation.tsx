@@ -12,18 +12,20 @@ export type ConversationLocale = "en" | "zh-CN";
 
 const STATIC_ZH: Record<string, string> = {
   "Observational read": "观测读取",
-  "Managed session evidence": "托管会话证据",
+  "Session evidence": "会话记录",
   "Work": "工作",
   "Root job": "根作业",
-  "Reading the managed-session association…": "正在读取托管会话关联…",
-  "Managed-session materialization observed.": "已观测到托管会话物化。",
-  "A retained materialization receipt is available after a broker restart; the current association is unproven. Nothing is resumed automatically.": "代理重启后仍有保留的物化凭据；当前关联未得到证明。不会自动恢复。",
-  "The actual project source and runtime root are recorded; no materialization is recorded.": "已记录实际项目源与运行时根；未记录物化。",
-  "The association scoped to this selection is unknown or unavailable.": "作用域内的关联未知或不可用。",
+  "Loading session information…": "正在加载会话信息…",
+  "A managed session was observed.": "已观测到托管会话。",
+  "A saved session record is available. Its current connection is not confirmed. Nothing resumes automatically.": "有保留的会话记录，但尚未确认当前连接。不会自动恢复。",
+  "The project and its work are recorded. No managed session has been recorded yet.": "项目及其工作已记录，尚无托管会话记录。",
+  "Session information is unavailable here.": "此处无法获取会话信息。",
   "Observation only: this view cannot send messages or continue sessions, and it does not assert that a session is working.": "仅观测：此视图无法发送消息或继续会话，也不声称会话正在工作。",
   "Owner-reported reason": "所有者报告的原因",
   "The response could not be decoded as an owner association document. This is a local decoding result, not an owner-reported reason.": "响应无法解码为所有者关联文档。这是本地解码结果，并非所有者报告的原因。",
   "The observation read failed locally before an owner response was decoded. This is not an owner-reported reason.": "观测读取在本地失败，未解码出所有者响应。这并非所有者报告的原因。",
+  "Session information could not be displayed.": "无法显示会话信息。",
+  "Session information could not be loaded.": "无法加载会话信息。",
   "Evidence details": "证据详情",
   "Source publication": "源发布",
   "Runtime creation": "运行时创建",
@@ -42,10 +44,10 @@ const STATIC_ZH: Record<string, string> = {
 function ui(locale: ConversationLocale, text: string) { return locale === "zh-CN" ? STATIC_ZH[text] ?? text : text; }
 
 const STATE_COPY: Record<ProjectAssociationState, string> = {
-  MATERIALIZED_OBSERVATION: "Managed-session materialization observed.",
-  RECORDED_MATERIALIZATION: "A retained materialization receipt is available after a broker restart; the current association is unproven. Nothing is resumed automatically.",
-  PREPARING: "The actual project source and runtime root are recorded; no materialization is recorded.",
-  UNAVAILABLE: "The association scoped to this selection is unknown or unavailable.",
+  MATERIALIZED_OBSERVATION: "A managed session was observed.",
+  RECORDED_MATERIALIZATION: "A saved session record is available. Its current connection is not confirmed. Nothing resumes automatically.",
+  PREPARING: "The project and its work are recorded. No managed session has been recorded yet.",
+  UNAVAILABLE: "Session information is unavailable here.",
 };
 
 type AssociationReadStatus =
@@ -91,7 +93,6 @@ function ProjectAssociationBody(props: ProjectConversationAssociationProps) {
   const [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState<AssociationReadStatus>({ kind: "reading" });
   const ticketRef = useRef(0);
-  const statusRef = useRef<HTMLDivElement | null>(null);
   const busy = status.kind === "reading";
 
   // The private read body is keyed by auth generation, actual host
@@ -137,68 +138,58 @@ function ProjectAssociationBody(props: ProjectConversationAssociationProps) {
     };
   }, [selectionKey, hostKey, authGeneration, readAssociation, attempt]);
 
-  useEffect(() => {
-    if (status.kind === "reading") return;
-    statusRef.current?.focus();
-  }, [status]);
 
   const refresh = useCallback(() => {
     if (selectionKey === "" || hostKey === null || !portReady) return;
     setAttempt(value => value + 1);
   }, [selectionKey, hostKey, portReady]);
 
-  if (normalized === null || hostKey === null || !portReady) {
-    const missing = normalized === null
-      ? ui(locale, "No valid workspace selection is available for this evidence read.")
-      : hostKey === null
-      ? ui(locale, "No current host generation is available for this evidence read.")
-      : ui(locale, "No association observation port is connected for this selection.");
-    return (
-      <section className="conversation-companion" aria-labelledby={headingId}>
-        <p className="conversation-eyebrow">{ui(locale, "Observational read")}</p>
-        <h2 id={headingId}>{ui(locale, "Managed session evidence")}</h2>
-        <p className="muted">{missing}</p>
-      </section>
-    );
-  }
-
-  const document = status.kind === "document" ? status.document : null;
+  const missing = normalized === null || hostKey === null || !portReady;
+  const diagnostic = missing ? normalized === null
+    ? "No valid workspace selection is available for this evidence read."
+    : hostKey === null ? "No current host generation is available for this evidence read."
+    : "No association observation port is connected for this selection."
+    : status.kind === "malformed"
+      ? "The response could not be decoded as an owner association document. This is a local decoding result, not an owner-reported reason."
+      : status.kind === "read-failed"
+        ? "The observation read failed locally before an owner response was decoded. This is not an owner-reported reason."
+        : null;
+  const document = !missing && status.kind === "document" ? status.document : null;
   return (
-    <section className="conversation-companion" aria-labelledby={headingId} aria-busy={busy}>
-      <p className="conversation-eyebrow">{ui(locale, "Observational read")}</p>
-      <h2 id={headingId}>{ui(locale, "Managed session evidence")}</h2>
-      <p className="muted">{ui(locale, "Work")} · <span className="visible-text">{normalized.workRef}</span></p>
-      <p className="muted">{ui(locale, "Root job")} · <span className="visible-text">{normalized.rootJobId}</span></p>
-      <div ref={statusRef} className="card conversation-state" role="status" aria-live="polite" tabIndex={-1}>
-        {status.kind === "reading" && <p>{ui(locale, "Reading the managed-session association…")}</p>}
-        {status.kind === "malformed" && <p>{ui(locale, "The response could not be decoded as an owner association document. This is a local decoding result, not an owner-reported reason.")}</p>}
-        {status.kind === "read-failed" && <p>{ui(locale, "The observation read failed locally before an owner response was decoded. This is not an owner-reported reason.")}</p>}
-        {document && <>
-          <p className="conversation-history"><span className="visible-text">{document.availability}</span> · <span className="visible-text">{document.state}</span></p>
-          <p>{ui(locale, STATE_COPY[document.state])}</p>
-          <p className="muted">{ui(locale, "Observation only: this view cannot send messages or continue sessions, and it does not assert that a session is working.")}</p>
-          {document.availability === "UNAVAILABLE" && (
-            <p className="muted">{ui(locale, "Owner-reported reason")} · <span className="visible-text">{document.reason}</span></p>
-          )}
+    <section className="conversation-companion" lang={locale} aria-labelledby={headingId} aria-busy={!missing && busy}>
+      <h2 id={headingId}>{ui(locale, "Session evidence")}</h2>
+      <div className="card conversation-state" role="status" aria-live="polite">
+        {missing ? <p>{ui(locale, "Session information is unavailable here.")}</p> : <>
+          {status.kind === "reading" && <p>{ui(locale, "Loading session information…")}</p>}
+          {status.kind === "malformed" && <p>{ui(locale, "Session information could not be displayed.")}</p>}
+          {status.kind === "read-failed" && <p>{ui(locale, "Session information could not be loaded.")}</p>}
+          {document && <p>{ui(locale, STATE_COPY[document.state])}</p>}
         </>}
       </div>
-      {document !== null && (document.project_source !== null || document.runtime_creation !== null || document.materialization !== null) ? (
-        <details className="conversation-association">
-          <summary>{ui(locale, "Evidence details")}</summary>
-          {document.project_source !== null && <dl aria-label={ui(locale, "Source publication")}>
+      <details className="conversation-association">
+        <summary>{ui(locale, "Evidence details")}</summary>
+        {normalized && <dl><dt>{ui(locale, "Work")}</dt><dd className="visible-text">{normalized.workRef}</dd>
+          <dt>{ui(locale, "Root job")}</dt><dd className="visible-text">{normalized.rootJobId}</dd></dl>}
+        {diagnostic && <p className="muted">{ui(locale, diagnostic)}</p>}
+        {document && <>
+          <p className="conversation-history"><span className="visible-text">{document.availability}</span> · <span className="visible-text">{document.state}</span></p>
+          {document.reason && <p className="muted">{ui(locale, "Owner-reported reason")} · <span className="visible-text">{document.reason}</span></p>}
+          <p className="muted">{ui(locale, "Observation only: this view cannot send messages or continue sessions, and it does not assert that a session is working.")}</p>
+        </>}
+          {document?.project_source != null && <dl aria-label={ui(locale, "Source publication")}>
             <dt>{ui(locale, "Source publication")}</dt>
             <dd><span className="visible-text">{document.project_source.repository}</span> · <span className="visible-text">{document.project_source.commit}</span></dd>
             <dt>{ui(locale, "Path")}</dt><dd className="visible-text">{document.project_source.path}</dd>
             <dt>content_sha256</dt><dd className="visible-text">{document.project_source.content_sha256}</dd>
             <dt>request_sha256</dt><dd className="visible-text">{document.project_source.request_sha256}</dd>
           </dl>}
-          {document.runtime_creation !== null && <dl aria-label={ui(locale, "Runtime creation")}>
+          {document?.runtime_creation != null && <dl aria-label={ui(locale, "Runtime creation")}>
             <dt>{ui(locale, "Runtime creation")}</dt>
             <dt>intent_id</dt><dd className="visible-text">{document.runtime_creation.intent_id}</dd>
             <dt>fingerprint</dt><dd className="visible-text">{document.runtime_creation.fingerprint}</dd>
             <dt>creation_event_sha256</dt><dd className="visible-text">{document.runtime_creation.creation_event_sha256}</dd>
           </dl>}
-          {document.materialization !== null && <dl aria-label={ui(locale, "Materialization receipt")}>
+          {document?.materialization != null && <dl aria-label={ui(locale, "Materialization receipt")}>
             <dt>{ui(locale, "Materialization receipt")}</dt>
             <dt>receipt_sha256</dt><dd className="visible-text">{document.materialization.receipt_sha256}</dd>
             <dt>{ui(locale, "Operation")}</dt><dd className="visible-text">{document.materialization.operation_kind}</dd>
@@ -208,14 +199,13 @@ function ProjectAssociationBody(props: ProjectConversationAssociationProps) {
             <dt>provider_session_sha256</dt><dd className="visible-text">{document.materialization.provider_session_sha256}</dd>
             <dt>{ui(locale, "Owner receipt recorded at")}</dt><dd className="visible-text">{document.materialization.recorded_at}</dd>
           </dl>}
-          {document.materialization !== null && <p className="muted">{ui(locale, "The receipt time above is recorded by the owner; it is not a locally observed clock.")}</p>}
+          {document?.materialization != null && <p className="muted">{ui(locale, "The receipt time above is recorded by the owner; it is not a locally observed clock.")}</p>}
         </details>
-      ) : null}
-      <div className="conversation-context">
+      {!missing && <div className="conversation-context">
         <button type="button" className="button" onClick={refresh} disabled={busy || !portReady}>
           {ui(locale, "Refresh observation")}
         </button>
-      </div>
+      </div>}
     </section>
   );
 }

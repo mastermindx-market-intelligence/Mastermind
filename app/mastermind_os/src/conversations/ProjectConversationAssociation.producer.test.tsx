@@ -40,5 +40,5 @@ it("removes old evidence during commit before passive effects on an auth replace
   await waitFor(() => expect(view.container.textContent).toContain(producer.materialization.recorded_at));
   view.rerender(<Probe authGeneration={2} />);
   expect(layouts.at(-1)).not.toContain(producer.materialization.recorded_at);
-  expect(layouts.at(-1)).toContain("Reading the managed-session association");
+  expect(layouts.at(-1)).toContain("Loading session information");
 });

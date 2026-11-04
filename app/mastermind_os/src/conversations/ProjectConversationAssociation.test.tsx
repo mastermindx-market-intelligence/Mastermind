@@ -124,7 +124,7 @@ describe("ProjectConversationAssociation observation read", () => {
     expect(request.rootJobId).toBe("JOB-7");
     expect(request.signal instanceof AbortSignal).toBe(true);
     await settle();
-    expect(screen.getByText("Managed-session materialization observed.")).toBeTruthy();
+    expect(screen.getByText("A managed session was observed.")).toBeTruthy();
     await settle();
     expect(port.mock.calls.length).toBe(1);
     expect(decodeFixture("MATERIALIZED_OBSERVATION").state).toBe("MATERIALIZED_OBSERVATION");
@@ -149,7 +149,7 @@ describe("ProjectConversationAssociation observation read", () => {
     const port = vi.fn(() => Promise.resolve(ownerBody("UNAVAILABLE")));
     mount(port);
     await settle();
-    expect(screen.getByText("The association scoped to this selection is unknown or unavailable.")).toBeTruthy();
+    expect(screen.getByText("Session information is unavailable here.")).toBeTruthy();
     expect(screen.getByText("SOURCE_CHANGED")).toBeTruthy();
     expect(screen.getByText(/Observation only:/)).toBeTruthy();
     expect(screen.getAllByRole("button").length).toBe(1);
@@ -164,7 +164,7 @@ describe("ProjectConversationAssociation observation read", () => {
     const port = vi.fn(() => Promise.resolve(ownerBody("PREPARING")));
     mount(port);
     await settle();
-    expect(screen.getByText("The actual project source and runtime root are recorded; no materialization is recorded.")).toBeTruthy();
+    expect(screen.getByText("The project and its work are recorded. No managed session has been recorded yet.")).toBeTruthy();
     expect(screen.queryByText("The receipt time above is recorded by the owner; it is not a locally observed clock.")).toBeNull();
     expect(screen.getByText("agentos/workstreams/WS-ALPHA01.md")).toBeTruthy();
     expect(screen.getByText("runtime-intent-1")).toBeTruthy();
@@ -178,7 +178,7 @@ describe("ProjectConversationAssociation observation read", () => {
     const pending = deferred();
     const port1 = vi.fn((_request: AssociationRequest) => pending.promise);
     const view = mount(port1);
-    expect(screen.getByText("Reading the managed-session association…")).toBeTruthy();
+    expect(screen.getByText("Loading session information…")).toBeTruthy();
     const port2 = vi.fn(() => Promise.resolve(ownerBody("UNAVAILABLE")));
     view.rerender(<ProjectConversationAssociation selection={SELECTION} authGeneration={2}
       hostGeneration="host-gen-1" readAssociation={port2} />);
@@ -187,7 +187,7 @@ describe("ProjectConversationAssociation observation read", () => {
     expect(screen.getByText("SOURCE_CHANGED")).toBeTruthy();
     pending.resolve(ownerBody("MATERIALIZED_OBSERVATION"));
     await settle();
-    expect(screen.queryByText("Managed-session materialization observed.")).toBeNull();
+    expect(screen.queryByText("A managed session was observed.")).toBeNull();
     expect(screen.queryByText("MATERIALIZED_OBSERVATION")).toBeNull();
     expect(port1.mock.calls.length).toBe(1);
   });
@@ -199,11 +199,11 @@ describe("ProjectConversationAssociation observation read", () => {
         : new Promise<unknown>(() => {}));
     const view = mount(port1);
     await settle();
-    expect(screen.getByText("Managed-session materialization observed.")).toBeTruthy();
+    expect(screen.getByText("A managed session was observed.")).toBeTruthy();
     view.rerender(<ProjectConversationAssociation selection={SELECTION} authGeneration={1}
       hostGeneration="host-gen-2" readAssociation={port1} />);
-    expect(screen.getByText("Reading the managed-session association…")).toBeTruthy();
-    expect(screen.queryByText("Managed-session materialization observed.")).toBeNull();
+    expect(screen.getByText("Loading session information…")).toBeTruthy();
+    expect(screen.queryByText("A managed session was observed.")).toBeNull();
     const port2 = vi.fn(() => Promise.resolve(ownerBody("RECORDED_MATERIALIZATION")));
     view.rerender(<ProjectConversationAssociation selection={SELECTION} authGeneration={1}
       hostGeneration="host-gen-2" readAssociation={port2} />);
@@ -212,7 +212,7 @@ describe("ProjectConversationAssociation observation read", () => {
     expect(port2.mock.calls.length).toBe(1);
     expect(screen.getByText("RECORDED_MATERIALIZATION")).toBeTruthy();
     expect(screen.getByText("AVAILABLE")).toBeTruthy();
-    expect(screen.getByText("A retained materialization receipt is available after a broker restart; the current association is unproven. Nothing is resumed automatically.")).toBeTruthy();
+    expect(screen.getByText("A saved session record is available. Its current connection is not confirmed. Nothing resumes automatically.")).toBeTruthy();
   });
 
   it("re-reads every leg of an A-B-A selection change through the fixed port", async () => {
@@ -242,12 +242,12 @@ describe("ProjectConversationAssociation observation read", () => {
     const port = vi.fn(() => Promise.resolve(responses.shift() as unknown));
     mount(port);
     await settle();
-    expect(screen.getByText("Managed-session materialization observed.")).toBeTruthy();
+    expect(screen.getByText("A managed session was observed.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Refresh observation" }));
     await settle();
     expect(port.mock.calls.length).toBe(2);
     expect(screen.getByText("SOURCE_CHANGED")).toBeTruthy();
-    expect(screen.queryByText("Managed-session materialization observed.")).toBeNull();
+    expect(screen.queryByText("A managed session was observed.")).toBeNull();
     await settle();
     expect(port.mock.calls.length).toBe(2);
   });
@@ -257,7 +257,7 @@ describe("ProjectConversationAssociation observation read", () => {
     const strictView = render(<StrictMode><ProjectConversationAssociation selection={SELECTION}
       authGeneration={1} hostGeneration="host-gen-1" readAssociation={port} /></StrictMode>);
     await settle();
-    expect(screen.getByText("Managed-session materialization observed.")).toBeTruthy();
+    expect(screen.getByText("A managed session was observed.")).toBeTruthy();
     const button = screen.getByRole("button", { name: "Refresh observation" }) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
     strictView.unmount();
@@ -291,8 +291,8 @@ describe("ProjectConversationAssociation observation read", () => {
     const port = vi.fn(() => Promise.resolve(JSON.stringify(ownerBody("MATERIALIZED_OBSERVATION"))));
     mount(port, { locale: "zh-CN" });
     await settle();
-    expect(screen.getByText("托管会话证据")).toBeTruthy();
-    expect(screen.getByText("已观测到托管会话物化。")).toBeTruthy();
+    expect(screen.getByText("会话记录")).toBeTruthy();
+    expect(screen.getByText("已观测到托管会话。")).toBeTruthy();
     expect(screen.getByText(/仅观测：/)).toBeTruthy();
     expect(screen.getByText("WS:ALPHA01")).toBeTruthy();
     expect(screen.getByText("JOB-7")).toBeTruthy();
@@ -303,4 +303,35 @@ describe("ProjectConversationAssociation observation read", () => {
     expect(screen.getByText("上方的凭据时间由所有者记录，不是本地观测时钟。")).toBeTruthy();
     expect(screen.getByRole("button", { name: "刷新观测" })).toBeTruthy();
   });
+  it("keeps background and explicit refresh completion from taking keyboard focus", async () => {
+    const initial = deferred(), refreshed = deferred();
+    const port = vi.fn<AssociationPort>()
+      .mockImplementationOnce(() => initial.promise).mockImplementationOnce(() => refreshed.promise);
+    render(<><input aria-label="Other project input" /><ProjectConversationAssociation selection={SELECTION}
+      authGeneration={1} hostGeneration="host-gen-1" readAssociation={port} /></>);
+    const outside = screen.getByRole("textbox", {name: "Other project input"});
+    outside.focus();
+    initial.resolve(ownerBody("MATERIALIZED_OBSERVATION")); await settle();
+    expect(document.activeElement).toBe(outside);
+    const refresh = screen.getByRole("button", {name: "Refresh observation"});
+    refresh.focus(); fireEvent.click(refresh);
+    refreshed.resolve(ownerBody("UNAVAILABLE")); await settle();
+    expect(document.activeElement).toBe(refresh);
+    expect(port).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps plain public states separate from closed raw evidence details", async () => {
+    const port = vi.fn(() => Promise.resolve(ownerBody("MATERIALIZED_OBSERVATION")));
+    mount(port); await settle();
+    expect(screen.getByRole("heading", {level: 2}).textContent).toBe("Session evidence");
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("A managed session was observed.");
+    const details = screen.getByText("Evidence details").closest("details")!;
+    expect(details.open).toBe(false);
+    for (const raw of ["AVAILABLE", "MATERIALIZED_OBSERVATION", SELECTION.workRef, SELECTION.rootJobId]) {
+      expect(screen.getByText(raw).closest("details")).toBe(details);
+      expect(status.textContent).not.toContain(raw);
+    }
+  });
+
 });
