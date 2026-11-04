@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT))
 from codex_accounts import choose_account, relaunch_wake_plan
 from continuity import continuity_action
 from sessions import service_sessions
-from tab_sweep import plan_tabs
+from tab_sweep import plan_tabs, _is_chatgpt_url
 
 
 class SessionRoutine(unittest.TestCase):
@@ -130,6 +130,36 @@ class CodexAndContinuity(unittest.TestCase):
             "tabs": [{"index": 1, "url": "https://chatgpt.com/", "title": "Chat"}],
         })
         self.assertEqual(other["method"], "sweeptabs.scpt")
+
+
+class TabOriginSecurityTests(unittest.TestCase):
+    def test_deceptive_url_never_displaces_the_genuine_chat_tab(self):
+        candidates = (
+            "https://chatgpt.com.evil.invalid/", "https://evilchatgpt.com/",
+            "https://evil.invalid/chatgpt.com", "https://evil.invalid/?next=chatgpt.com",
+            "https://chatgpt.com@evil.invalid/", "https://user:fixture@chatgpt.com/",
+            "https://chatgpt%2ecom/", "https://chatgpt.com./", "//chatgpt.com/",
+            "ftp://chatgpt.com/", "data:text/plain,chatgpt.com",
+            "https://chatgpt.com:bad/", "https://chatgpt.com:444/", "https://[chatgpt.com/",
+            " https://chatgpt.com/", "https://chatgpt.com/\n", "https://chatgpt.com/\t",
+        )
+        for candidate in candidates:
+            with self.subTest(candidate=candidate):
+                plan = plan_tabs({"name": "ModernLuxe", "tabs": [
+                    {"index": 1, "url": candidate, "title": "Not trusted"},
+                    {"index": 2, "url": "https://chatgpt.com/c/real", "title": "Actual chat"},
+                ]})
+                self.assertEqual(plan["keep"], [2])
+                self.assertEqual(plan["close"], [1])
+
+    def test_supported_origin_and_default_ports_remain_supported(self):
+        for candidate in ("https://chatgpt.com/", "HTTPS://CHATGPT.COM/c/1",
+                          "https://chatgpt.com:443/c/1", "http://chatgpt.com/",
+                          "http://chatgpt.com:80/c/1"):
+            with self.subTest(candidate=candidate):
+                self.assertTrue(_is_chatgpt_url(candidate))
+        for candidate in (None, 3, {}, ""):
+            self.assertFalse(_is_chatgpt_url(candidate))
 
 
 if __name__ == "__main__":

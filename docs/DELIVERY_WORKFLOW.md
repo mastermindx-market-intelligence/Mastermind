@@ -35,9 +35,13 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
-1. Run the smallest relevant local test set while iterating. Publish a truthful candidate
-   and request review with those results while hosted checks are pending; full required CI
-   remains a merge/release gate, not a prerequisite to handing off a reviewable candidate.
+1. Run the smallest relevant local test set while iterating. Publish a truthful
+   candidate once its scoped source is stable and the relevant local qualification passes.
+   For an ordinary non-author GitHub review, mark a qualified Draft PR **Ready for Review
+   before asking the reviewer**. Hosted CI may still be queued or running: full required
+   CI is a merge/release gate, not a prerequisite for review readiness. Keep unfinished
+   or locally failing work in Draft; do not imply a reviewer is working just because
+   a request exists.
 2. Review `git diff --check`, `git status`, and the staged diff. Never stage
    `.env*`, credentials, logs, caches, runtime `data/`, or backup archives.
 3. Commit a scoped change, push the branch, and open a PR:
@@ -47,11 +51,17 @@ worktree and move only the task's deliberate edits there.
    gh pr create --fill
    ```
 
-4. CI blocks merge/release, not independent useful work. If checks fail or work is
-   incomplete, keep the PR draft and release held; diagnose the failure and repair it within
-   the assigned scope. While checks are queued/running, continue the highest-leverage safe
-   independent implementation, tests, review or integration preparation. Do not duplicate an
-   incumbent worker or mutate its frozen review candidate merely to appear busy.
+4. CI blocks merge/release, not independent useful work. Incomplete scope, failed
+   local qualification, or a known failing hosted check keeps release held; diagnose the failure and repair it within the assigned scope. A **pending** hosted check alone is not a reason
+   to keep an otherwise qualified, reviewable PR in Draft. The incumbent
+   `control_plane/github_review_intent.py` explicitly refuses `review_requested`
+   events while Draft (`PULL_REQUEST_DRAFT`); leaving a PR Draft while waiting for
+   that same review creates a liveness deadlock. Mark the stable candidate Ready
+   before initiating the eligible GitHub review-request path. Do not infer that
+   a prior draft-time request will automatically be re-admitted when the PR
+   becomes Ready. Continue path-disjoint tests, integration and repair while CI
+   and the real non-author reviewer advance; never duplicate a refused Fabric
+   review or move an unreconciled worker effect to another carrier.
 5. Offload the wait to one existing Class-E or Class-T observer through the current
    process/CI owner. Bind repository, PR, exact head SHA and workflow run IDs; retain the
    process/run handle and return location in the existing checkpoint. Reuse an observer rather
@@ -88,6 +98,42 @@ The deploy wrapper archives `origin/master` into a temporary clean release
 directory. Local uncommitted files cannot enter the release. The VPS deploy
 creates a rolling snapshot, restarts `mastermind.service`, checks
 `http://127.0.0.1:8001/health`, and rolls back on failure.
+
+## Review-readiness liveness (no implicit reviewer execution)
+
+This is sequencing guidance for the existing GitHub/Executive owners, **not** a
+fourth review-intent channel, an approval bypass, an automatic review dispatcher,
+a new watcher, or permission to retry an explicitly refused effect.
+
+1. Re-read the exact repository, PR/head, Draft state, changed-path custody,
+   local qualification, hosted checks and existing non-author review requests
+   before the next metadata mutation. If the candidate is locally qualified
+   and stable, transition it to **Ready for Review** even when hosted checks
+   are still running; preserve any failed required CI as a merge blocker.
+2. Request the genuine non-author GitHub reviewer only on an eligible reviewable
+   candidate. A `review_requested` event observed while Draft is refused by
+   the existing review-intent admission and a later `ready_for_review` event
+   does **not** replay it. If a reviewer is already requested, inspect and
+   consume that **same formal request**; do not send a duplicate technical
+   Fabric/Dot job or manufacture a new review-intent event to evade a refusal.
+   Any genuinely distinct authorized review needs its own admission and
+   independent identity.
+3. Distinguish `REVIEW_REQUESTED`, reviewer acknowledgement, actual independent
+   review submission and `APPROVED`; none follows automatically from the
+   preceding state. Reviewers may be unavailable. Record the **specific**
+   missing external action and its existing exact carrier; do not call a
+   notification, Slack mention or reviewer request an active worker.
+4. At the next useful integration boundary, consume exact-head hosted CI and
+   actual non-author review readback once. If either is still pending, continue
+   source/test work on a path-disjoint dependency. After two support-only cycles
+   with no new evidence, classify a no-delta loop and change tactic instead of
+   polling or filing another handoff. This follows the protected
+   `docs/sol_skills/ACTIVE_EXECUTION.md`, not a new lifecycle policy.
+5. Keep the branch-protected release gate: required exact-head CI, genuine
+   non-author approval, relevant source-law compatibility and native merge
+   queue. After merge, verify any owed installed instructions, provider skills
+   and real user-path behavior separately. `Ready` never means `merged`,
+   `installed`, or `PROVEN_LIVE`.
 
 ## Recovery and concurrency rules
 
