@@ -84,10 +84,13 @@ Source evidence is persisted in this repository and #983; Agent OS remains the o
 - Mastermind protected movement to `0a2768613c280102617c92c8e4d16e7585384293` changes only SOL_CEO_ACCOUNT_INSTRUCTIONS and BOOTSTRAP_KERNEL. The exact law delta was read; application code and original pin remain compatible. Routine project authority does not override actual denials, holds or unknown effects.
 - Related writers preserved: Mastermind #1918/#1946; Macro #7179. This branch does not mutate their branches or lift their holds.
 
-### Exact runtime boundaries
 
-- Original Fabric census `fabric-app-census-macro-terminal-20261104-01`, controller 50741, MiniMax/ubuntu0: terminal remote rc=1, missing usage receipt, `remote_cleanup_unproven`, retained lease `8e7c215e79d6`. Canonical status `EFFECT_UNKNOWN`, root null, consumption not authorized. No acceptance or retry.
-- Original Fabric census `fabric-app-census-mastermind-20261104-01`, controller 52049, MiniMax/ubuntu0: terminal remote rc=1, missing usage receipt, `remote_cleanup_unproven`, retained lease `cd90045928be`. Canonical status `EFFECT_UNKNOWN`, root null, consumption not authorized. No acceptance or retry.
-- Original typed Mastermind workspace acquisition: `REPOSITORY_SOURCE_UNAVAILABLE`, `NOT_APPLIED`; one bounded local source diagnostic timed out. GitHub is this operation's source publication carrier.
-- Read-only VPS service check through provisioned Studio SSH to `root@146.190.142.17` was denied `Permission denied (publickey)`. No alternate account/tool/SSH retry. Deployment is blocked on restored intended authentication; this source work makes no deployment claim.
-- Exact next source action: finish the bounded pinned census and route/migration matrix, publish the coupled source PRs, verify current-head checks, then continue safe consumer work only through owner-qualified interfaces. Exact runtime actions: reconcile the original two Fabric attempts through their existing owner, restore the intended VPS authentication, and prove a qualified canary before broader cutover.
+## P1 source census and unresolved original outcomes
+
+The bounded static inventory is complete at its stated source scope: 173 exact blobs, 254 relevant AST calls in 73 files, two Terminal proxy paths, oversized-module checks and routing-owner evidence. This is not a live VPS census. See `docs/reports/fabric-application-integration-census-20261104.md`, its JSON evidence and `scripts/census_application_ai.py`. Counts are evidence coverage, not product-completion percentages.
+
+Original acceptance remains open for shared native Fabric capacity, Macro Brain streaming/tools, Neural Web, upstream AI Brief producers, Admin chat, Terminal authenticated browser proof and the VPS deployment. The new CIO composition is one accepted local source proof, not parent acceptance. OpenCode Go owner-contract review establishes that its merged transport still depends on production-inert Macro #7142/#7143; no app-qualified account/admission binding has been proven.
+
+Original runtime effect observations, exact original handles, source-carrier boundaries and current continuation are recorded on the existing programme issue: https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6627496975 . Native owners retain actual effects/leases; the editorial plan does not rewrite them.
+
+Material source-law changes through protected `12506954fad4d5502f878bd2a51b4870fca26658` were read, including the original-product-scope continuity rule. The application source is unchanged by those protected law commits. Macro protected movement to `7dd6ff7061063b36588954475c519fd26abb4994` was data-only and disjoint from this candidate's source/dependencies. Required exact-head/integrated CI and actual release gates remain separate.
