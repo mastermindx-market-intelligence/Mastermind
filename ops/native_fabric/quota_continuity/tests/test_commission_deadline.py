@@ -277,7 +277,7 @@ class DeadlineValues(unittest.TestCase):
         for value in ('', '0', '01', '+1', ' 1', '1.0', True, 1.0, -1, 2**63):
             with self.subTest(value=value), self.assertRaises(deadline.CommissionDeadlineInvalid):
                 deadline.validate_deadline_ns(value)
-        for value in (-1, math.inf, math.nan, True, '1', 7201):
+        for value in (-1, math.inf, math.nan, True, '1', 14401):
             with self.subTest(value=value), self.assertRaises(deadline.CommissionDeadlineInvalid):
                 deadline.narrow_deadline_ns(None,value,now_ns=1_000_000_000)
 

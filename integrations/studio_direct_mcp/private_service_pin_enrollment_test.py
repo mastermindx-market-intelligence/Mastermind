@@ -48,17 +48,74 @@ class EnrollmentContractTests(unittest.TestCase):
         self.assertEqual(after["preserved"], before["preserved"])
         self.assertNotIn("repositoryWorkspaces", before)
 
-    def test_cli_selects_only_c4_and_no_repository_or_lifecycle_arguments(self):
+    def test_cli_selects_only_frozen_accounts_and_no_repository_or_lifecycle_arguments(self):
         args = svc.build_parser().parse_args([
             "native-pool-pin-enrollment", "--account", "chatgpt4", "--operation", "preview",
             "--expected-manifest-sha256", owner.BEFORE_MANIFEST, "--source", "/fixture"])
         self.assertEqual(args.func, svc.cmd_native_pool_pin_enrollment)
         self.assertFalse(hasattr(args, "repository"))
+        admin = svc.build_parser().parse_args([
+            "native-pool-pin-enrollment", "--account", "admin-business",
+            "--operation", "preview",
+            "--expected-manifest-sha256", owner.PROFILES["admin-business"]["before_manifest"],
+            "--source", "/fixture"])
+        self.assertEqual(admin.func, svc.cmd_native_pool_pin_enrollment)
+        self.assertFalse(hasattr(admin, "repository"))
         with redirect_stdout(io.StringIO()), mock.patch("sys.stderr", new=io.StringIO()):
             with self.assertRaises(SystemExit):
                 svc.build_parser().parse_args([
                     "native-pool-pin-enrollment", "--account", "chatgpt2-business",
                     "--operation", "status", "--expected-manifest-sha256", owner.BEFORE_MANIFEST])
+
+
+class AdminBusinessProfileTests(unittest.TestCase):
+    """Frozen admin account transformation; live owner preflight is a separate proof."""
+
+    def test_original_pin_identity_and_config_are_exact(self):
+        profile = owner.frozen_profile("admin-business")
+        self.assertEqual(profile["generation"], "admin-business-closed-repositories-20261104-v1")
+        self.assertEqual(profile["port"], 45030)
+        self.assertEqual(profile["before_manifest"],
+                         "35903622d2e10b3ba56aedbf64cc2484d8b53bdb67ab71a8e0f9b0b7ebacc148")
+        self.assertEqual(profile["before_config"],
+                         "2f0fd933062a0168093caa6a675dc27c91746837701fd28d74b7baf5ff3f4863")
+        self.assertEqual(profile["original_plan"],
+                         "25870fe238760b16ccc41b005c3a4289b8327dbe5a4d8b10015c00faaac15bac")
+
+    def test_admin_config_preserves_unrelated_bytes_and_closes_repos(self):
+        home = Path("/Users/admin-fixture")
+        before = {"accountLabel": "admin-business", "gitPublish": svc._typed_git_config(home),
+                  "preserved": {"opaque": True}}
+        after = owner.target_config(home, before, owner.frozen_profile("admin-business"))
+        self.assertEqual(after["preserved"], before["preserved"])
+        self.assertEqual([r["repository"] for r in after["gitPublish"]["repositories"]],
+                         ["mastermind", "macro", "terminal"])
+        self.assertEqual(after["repositoryWorkspaces"]["allowedRepositories"],
+                         ["mastermind", "macro", "terminal"])
+        self.assertEqual(after["gitPublish"]["commandTimeoutMs"], 45000)
+        self.assertEqual(after["gitPublish"]["pushTimeoutMs"], 60000)
+        self.assertNotIn("repositoryWorkspaces", before)
+
+    def test_account_mismatch_refuses_closed_config(self):
+        home = Path("/Users/admin-fixture")
+        before = {"accountLabel": "chatgpt4", "gitPublish": svc._typed_git_config(home)}
+        with self.assertRaisesRegex(SystemExit, "PROFILE_REFUSED"):
+            owner.target_config(home, before, owner.frozen_profile("admin-business"))
+
+    def test_no_other_account_can_consume_this_enrollment(self):
+        for account in ("chatgpt1", "chatgpt2-business", "chatgpt2-personal",
+                        "chatgpt3", "fabric-read", "admin-business-2"):
+            with self.subTest(account=account), self.assertRaisesRegex(
+                SystemExit, "INPUT_REFUSED"
+            ):
+                owner.frozen_profile(account)
+
+    def test_c4_original_profile_stays_pinned(self):
+        profile = owner.frozen_profile("chatgpt4")
+        self.assertEqual(profile["generation"], owner.GENERATION)
+        self.assertEqual(profile["before_manifest"], owner.BEFORE_MANIFEST)
+        self.assertEqual(profile["before_config"], owner.BEFORE_CONFIG)
+        self.assertEqual(profile["original_plan"], owner.ORIGINAL_PLAN)
 
 
 class EnrollmentTests(unittest.TestCase):
@@ -501,8 +558,8 @@ class EnrollmentTests(unittest.TestCase):
         self.prepare()
         original = owner.original_pin
         @contextmanager
-        def fail_after(svc_arg, roots, operation):
-            with original(svc_arg, roots, operation) as value:
+        def fail_after(svc_arg, roots, operation, profile):
+            with original(svc_arg, roots, operation, profile) as value:
                 yield value
             raise SystemExit("PRIVATE-CANARY")
         with mock.patch.object(owner, "original_pin", fail_after):

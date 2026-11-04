@@ -121,3 +121,65 @@ def test_source_only_prevents_false_installed_and_live_claims():
     assert "not a live" in guide or "no ability to enroll" in guide
     assert "NOT_PROVEN" in guide
     assert "fresh" in guide.lower()
+
+
+def test_session_local_review_separates_attended_and_signed_machine_policy():
+    policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
+    agents = _read("AGENTS.md")
+    claude = _read("CLAUDE.md")
+    for required in (
+        "protected-accepted and actually loaded",
+        "FAST0/0, STANDARD1/1 and CRITICAL2/1",
+        "Review-host enrollment is not a prerequisite for the attended instruction waiver",
+        "its host remains OFF unless separately authorized and enabled",
+        "Explicit review requests, native rules, CODEOWNERS",
+        "recorded holds and release controls remain binding",
+        "Repository source is not proof of installed instructions",
+        "SELF_REVIEWED",
+        "a second prompt in the builder's own context is SELF_REVIEWED",
+        "On " + chr(96) + "EFFECT_UNKNOWN" + chr(96),
+        "original",
+    ):
+        assert required in policy, f"attended waiver must preserve machine and effect boundaries: {required}"
+    assert "This does not depend on #2018 or automatic-review-host enrollment" in agents
+    assert "Signed machine policy and actually binding review" in agents
+    assert "Other execution surfaces retain their applicable review requirements" in claude
+    assert "proves neither instruction installation nor host enrollment" in claude
+    assert "docs/SESSION_LOCAL_REVIEW_POLICY.md" in claude
+    assert GUIDE in claude, "external avenue remains discoverable when genuinely needed"
+    guide = _read(GUIDE)
+    assert "## First gate: which review obligation actually applies?" in guide
+    assert "FAST0/0, STANDARD1/1, CRITICAL2/1" in guide
+    assert "These reviewer START/commission canaries apply only" in guide
+    assert "no unwanted Fabric/Dot review operation is created" in guide
+    assert "Source text does not prove installation" in guide
+
+
+
+def test_project_installed_fence_separates_native_review_from_formal_approval():
+    block = _project_instructions(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
+    for guard in (
+        "Native read-only child may review here",
+        "child != GitHub APPROVED",
+        "No denied/EFFECT_UNKNOWN review reroute",
+        "Independent non-author review only when required",
+        "No impersonation, self-review, duplicate or denial evasion",
+        "Review: load " + GUIDE + " at pin.",
+        "docs/SESSION_LOCAL_REVIEW_POLICY.md",
+    ):
+        assert guard in block, f"uninstalled outside-fence safeguard: {guard}"
+    assert len(block.encode("utf-8")) <= 8000
+
+
+def test_session_finishes_original_pr_not_draft_or_ci_handoff():
+    policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
+    agents = _read("AGENTS.md")
+    for required in (
+        "Finish-to-release ownership",
+        "A draft, comment, reviewer request, CI observation, checkpoint",
+        "existing",
+        "no self-merge",
+    ):
+        assert required.lower() in policy.lower()
+    assert "Finish the actual PR, not its draft" in agents
+    assert "do not" in policy.lower() and "EFFECT_UNKNOWN" in policy

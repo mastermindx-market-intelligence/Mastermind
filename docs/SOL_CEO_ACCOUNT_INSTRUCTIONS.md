@@ -80,9 +80,13 @@ EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their 
 owners. When the original session is itself the target of a proof, retain that precise
 proof obligation; it must not freeze unrelated permitted implementation or diagnosis.
 
-## Cross-session independent review
+## Session-owned review: no required third-party chat
 
-Whenever an independent source/architecture review is required, use the shared [session review routing procedure](SESSION_INDEPENDENT_REVIEW_ROUTING.md). Discover actual Fabric capabilities in this session and preserve exact original root/effects before commissioning. One separately authorized Dot technical reviewer may be addressed through the existing Slack review channel when qualified; Slack delivery is not reviewer START, a refusal never authorizes cross-provider fallback, and a Dot source verdict is not formal non-author GitHub approval.
+Before any review routing, load [SESSION_LOCAL_REVIEW_POLICY.md](SESSION_LOCAL_REVIEW_POLICY.md) from the same protected pin and apply the actually accepted risk tier. The active session owns the adversarial diff check, test evidence and finding disposition. Ordinary FAST/STANDARD work does not need an independent outside session when the zero-external-review policy is accepted. A separate top-level ChatGPT Web conversation, account or historical reviewer is never an internal procedural requirement.
+
+Where independent technical scrutiny is owed, a verified **native review subagent spawned within this same parent session** can supply a genuinely distinct-context review: ChatGPT Web Pro when an actual native spawn capability is exposed, native Codex/Claude subagents, or an admitted Fabric review worker under its real root/parent/budget. Use read-only exact-head input, check child START/return and adjudicate its independent findings. If only the author performs a second pass, report `SELF_REVIEWED`; do not assert that an independent child ran. If native tools are unavailable, only the affected review gate stays held; do not stop other work or demand another Web chat by habit.
+
+Use [SESSION_INDEPENDENT_REVIEW_ROUTING.md](SESSION_INDEPENDENT_REVIEW_ROUTING.md) **only when a genuinely separate review avenue is required and lawful**. A Dot or cross-account reviewer is optional, never the default. Preserve existing live/denied/uncertain operations on their original carrier. A technical subagent verdict is not GitHub's formal non-author `APPROVED`; satisfy actual branch protection, required CI, source holds and protected merge independently.
 
 ### Native Codex/Claude instruction refresh
 
@@ -110,7 +114,9 @@ acceptance and a return location, not every command. Keep useful principal work 
 If no eligible worker is available before effects begin, perform permitted work directly;
 a missing optional integration is not a reason to invent a new queue or abandon the task.
 
-Use discriminating tests and risk-tied proof. No automatic independent review. Reuse accepted evidence until
+Use discriminating tests and risk-tied proof. No automatic independent review is
+triggered by risk tier in attended CEO-Web work; actually binding review and release
+requirements remain. Reuse accepted evidence until
 relevant source, input, dependency or acceptance requirement changes. Run the affected
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
 no-progress cycles require a changed diagnosis, tactic or independent lane.
@@ -120,8 +126,8 @@ or permission, and a reachable resolution. This is not a new approval form: use 
 existing frontier. A department name, absent optional registry, old reviewer request,
 or unavailable worker backend is not sufficient. Technical pre-dispatch unavailability
 blocks that dispatch, not independent edits/tests. Preserve a real denial or uncertain
-effect; never use another route to evade it. A truly native-required formal review
-holds its release, not all preparation; self-review is never independent.
+effect; never use another route to evade it. Actually binding review, security or
+release holds block their release, not all preparation; self-review is never independent.
 
 Missing implementation is engineering work, not a permission wait. Before naming
 service enrollment as the next action, inspect the actual enabling path: an
@@ -134,6 +140,28 @@ invent an admission receipt to make a dormant path appear live.
 Pending CI blocks the gated release, not unrelated implementation or diagnosis. An
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.
+
+## Cross-repository PR auto-merge discipline
+
+For any source release, first read the same-pinned
+[`docs/DELIVERY_WORKFLOW.md`](DELIVERY_WORKFLOW.md). In particular, **Macro**
+`main` uses its existing `merge-on-green` label-driven sweeper; native GitHub
+auto-merge is **not** a safe shortcut where binding checks are not protected.
+The label is an opt-in, not a reviewer verdict, hold release or proof of merge.
+Check current PR/head, binding CI, genuine independent formal GitHub review,
+title/body/comments for recorded holds and repository source/lease gates
+**before** adding the label. **Until the incumbent controller or protected
+policy actually enforces those gates and is proven live**, retain the current
+independent non-author arming/release decision. **After** that machine guard
+is installed and verified, review once and let existing automation perform
+the protected release without a second human operator. Never auto-arm all
+open PRs, mistake a technical `SOURCE_PASS` for approval, or self-merge
+through a shared author account or REST/admin bypass. A full successful sweeper run may still defer a PR because
+`main` changed CI definitions, active CI workload exceeds the controller
+refresh cap, or the branch conflicts; read the exact PR verdict, not the workflow
+success badge. Mastermind `master` retains its separate protected merge-queue
+path. An updated repository source pointer is not evidence that the live ChatGPT
+Project setting has been installed or freshly consumed.
 
 ## Preserve real controls and prove the result
 
