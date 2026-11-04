@@ -42,7 +42,9 @@ from control_plane.operator_harness_contract import (
     TurnStartObservation,
 )
 from control_plane.operator_harness_wire import (
+    CONTINUATION_OPERATION_PREFIX,
     OperatorHarnessWireError,
+    RetainedPlainInputEvidence,
     attention_turn_observation,
     candidate_result,
     event_cursor,
@@ -53,6 +55,7 @@ from control_plane.operator_harness_wire import (
     provider_home_observation,
     raw_role_result_observation,
     reconcile_observation,
+    retained_plain_input_evidence,
     session_start_observation,
     to_wire,
     turn_start_observation,
@@ -136,6 +139,16 @@ class RemoteOperatorHarnessAdapter:
         self._capabilities = capabilities
         self._start_receipts: dict[str, dict[str, Any]] = {}
         self._turn_results: dict[str, dict[str, Any]] = {}
+        # Transient marks from this proxy's own successful ohf-begin-turn calls
+        # whose existing operation id uses the continuation prefix, bound to
+        # the generation each begin-turn accepted.  Observation selection only:
+        # the prefix grants no ACK authority and adds no request field.
+        self._retained_plain_turns: dict[
+            TurnRef, tuple[ProcessGenerationRef, TurnStartObservation]
+        ] = {}
+        # Strictly decoded collect evidence, keyed by the full immutable
+        # TurnRef; ``None`` is the explicit unavailable answer.
+        self._turn_evidence: dict[TurnRef, RetainedPlainInputEvidence | None] = {}
         self._artifact_receipts: dict[str, BrowserReviewReceipt | None] = {}
 
     def bind_fresh_effect_guard(self, guard, *, attempt_id):
@@ -384,9 +397,20 @@ class RemoteOperatorHarnessAdapter:
         result = self.client.request_sync("ohf-begin-turn", payload, timeout_seconds=90,
             **self._fresh_write_options("ohf-begin-turn", payload))
         try:
-            return turn_start_observation(result.get("observation"))
+            observation = turn_start_observation(result.get("observation"))
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError("remote OHF turn-start receipt is invalid") from exc
+        if (operation_id.command_id.startswith(CONTINUATION_OPERATION_PREFIX)
+                and observation.acknowledged is True
+                and type(observation.provider_native_turn_id) is str
+                and bool(observation.provider_native_turn_id)):
+            if (generation.process_generation_id != turn.process_generation_id
+                    or generation.session_epoch_id != turn.session_epoch_id):
+                raise BrokerProtocolError(
+                    "remote OHF retained turn identity is inconsistent"
+                )
+            self._retained_plain_turns[turn] = (generation, observation)
+        return observation
 
     def deliver_attention(
         self,
@@ -455,10 +479,42 @@ class RemoteOperatorHarnessAdapter:
                     result.get("raw_role_result")
                 ),
             }
+            evidence = self._decoded_retained_plain_input_evidence(result, turn)
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError("remote OHF turn receipt is invalid") from exc
         self._turn_results[turn.turn_id] = cached
+        self._turn_evidence[turn] = evidence
         return events, next_cursor
+
+    def _decoded_retained_plain_input_evidence(
+        self, result: Mapping[str, Any], turn: TurnRef
+    ) -> RetainedPlainInputEvidence | None:
+        """Decode the optional collect field without ever fabricating evidence.
+
+        ``None`` is the explicit absent/unavailable answer and is all an
+        ordinary (unmarked) turn can ever produce.  A positive claim must be a
+        closed digest-only object that this proxy actually requested through
+        the continuation prefix for this exact immutable TurnRef; any other
+        positive value is a transport refusal, never a substituted truth.
+        """
+
+        raw = result.get("retained_plain_input_evidence")
+        if raw is None:
+            return None
+        if not isinstance(raw, Mapping):
+            raise BrokerProtocolError(
+                "remote OHF retained input evidence must be an object"
+            )
+        if turn not in self._retained_plain_turns:
+            raise BrokerProtocolError(
+                "remote OHF retained input evidence was not requested for this turn"
+            )
+        try:
+            return retained_plain_input_evidence(raw)
+        except OperatorHarnessWireError as exc:
+            raise BrokerProtocolError(
+                "remote OHF retained input evidence is invalid"
+            ) from exc
 
     def _turn_result(self, turn: TurnRef, field: str) -> Any:
         try:
@@ -473,6 +529,48 @@ class RemoteOperatorHarnessAdapter:
 
     def observe_raw_role_result(self, turn: TurnRef) -> RawRoleResultObservation:
         return self._turn_result(turn, "raw_role_result")
+
+    def collect_retained_plain_text_evidence(
+        self, turn: TurnRef
+    ) -> RetainedPlainInputEvidence | None:
+        """Read one retained plain-input digest from the cached collect.
+
+        ``None`` is the explicit unavailable answer: an ordinary turn, a
+        no-supported-method worker adapter, or a refused extraction.  A
+        positive answer is the strictly decoded evidence bound to this exact
+        immutable TurnRef; a stale or spliced Attempt/epoch/generation binding
+        is refused instead of returned.
+        """
+
+        try:
+            evidence = self._turn_evidence[turn]
+        except KeyError as exc:
+            raise BrokerProtocolError(
+                "remote OHF retained turn evidence was not collected in protocol order"
+            ) from exc
+        if evidence is None:
+            return None
+        marked = self._retained_plain_turns.get(turn)
+        raw = self._turn_results.get(turn.turn_id, {}).get("raw_role_result")
+        if (
+            marked is None
+            or marked[0].process_generation_id != turn.process_generation_id
+            or marked[0].session_epoch_id != turn.session_epoch_id
+            or evidence.provider_native_turn_id != marked[1].provider_native_turn_id
+            or raw is None
+            or evidence.provider_session_id != raw.provider_session_id
+            or evidence.provider_native_turn_id != raw.provider_native_turn_id
+            or evidence.attempt_id != turn.attempt_id
+            or evidence.session_epoch_id != turn.session_epoch_id
+            or evidence.process_generation_id != turn.process_generation_id
+            or evidence.turn_id != turn.turn_id
+            or not evidence.provider_session_id
+            or not evidence.provider_native_turn_id
+        ):
+            raise BrokerProtocolError(
+                "remote OHF retained input evidence is bound to a different turn"
+            )
+        return evidence
 
     def interrupt_turn(self, turn: TurnRef, *, operation_id: OperationId) -> None:
         result = self.client.request_sync(

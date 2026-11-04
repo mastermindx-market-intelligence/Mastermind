@@ -77,6 +77,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import copy
 import http.server
 import ipaddress
 import json
@@ -622,7 +623,13 @@ class ServerConfig:
     #: gather — the failure propagates to the existing refresh-error path and
     #: the last good composition (or explicit unavailability) stands. The
     #: default ``None`` keeps the exact standalone legacy behavior.
-    compose_inputs: Callable[[str], dict[str, Any]] | None = None
+    #: A supplied live snapshot is a detached keyword input for that attempt;
+    #: omission preserves the one-argument installed callback contract.
+    compose_inputs: Callable[..., dict[str, Any]] | None = None
+    #: Serializes binding read/modify/save transactions sharing this owner.
+    #: Separate from publication; never held across provider work or responses.
+    #: This is not a cross-process lock for independent file writers.
+    bindings_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -630,7 +637,8 @@ class ServerConfig:
 # ---------------------------------------------------------------------------
 
 def _compose_state_doc(
-    config: ServerConfig, *, timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT
+    config: ServerConfig, *, timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
 ) -> dict[str, Any]:
     """Fresh ``mastermind.chairman_control_room.v1`` document for ``/api/state``.
 
@@ -659,8 +667,15 @@ def _compose_state_doc(
     document is never substituted for a configured source.
     """
     generated_at = config.now_fn()
+    snapshot_kwargs: dict[str, Any] = {}
+    with config.state_lock:
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            if "active_builds" in config.live_cache:
+                snapshot_kwargs["active_builds_snapshot"] = copy.deepcopy(config.live_cache["active_builds"])
+        else:
+            snapshot_kwargs["active_builds_snapshot"] = copy.deepcopy(active_builds_snapshot)
     if config.compose_inputs is not None:
-        doc = config.compose_inputs(generated_at)
+        doc = config.compose_inputs(generated_at, **snapshot_kwargs)
         if (not isinstance(doc, dict)
                 or doc.get("schema") != ccr.SCHEMA):
             raise ValueError("configured compose_inputs returned a non-canonical document")
@@ -678,8 +693,7 @@ def _compose_state_doc(
     # present cache key, including an explicitly unavailable/malformed value,
     # is a supplied source state and must reach the canonical builder without
     # a second artifact read.
-    if "active_builds" in config.live_cache:
-        build_kwargs["active_builds_snapshot"] = config.live_cache["active_builds"]
+    build_kwargs.update(snapshot_kwargs)
     return ccr.build_control_room(**build_kwargs)
 
 
@@ -692,7 +706,10 @@ def _compose_state_doc(
 # calls them, through the existing ``_compose_state_doc`` seam.
 # ---------------------------------------------------------------------------
 
-def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int:
+def _reserve_composition(
+    config: ServerConfig, *, explicit: bool = False,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> int:
     """Reserve the next composition generation, under ``state_lock``, and
     count one more composition as in flight (H1 repair, Sol review
     5000983751 Blocker 2).
@@ -707,9 +724,15 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
     the floor a background composition may never publish (or record an
     error) below.
     """
+    if active_builds_snapshot is not ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED and not explicit:
+        raise ValueError("live snapshot requires an explicit composition")
     with config.state_lock:
         if config.state_stopping:
             raise RuntimeError("control room owner is stopping")
+        if active_builds_snapshot is not ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            # Retained input and its explicit floor advance atomically. Failed
+            # publication keeps this input, but never reports a successful refresh.
+            config.live_cache["active_builds"] = copy.deepcopy(active_builds_snapshot)
         config.state_compose_seq += 1
         gen = config.state_compose_seq
         if explicit:
@@ -719,8 +742,9 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
 
 
 def _refresh_state_cache(
-    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
-) -> None:
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> bool:
     thread = threading.current_thread()
     with config.state_lock:
         config.state_refresh_threads.add(thread)
@@ -729,19 +753,26 @@ def _refresh_state_cache(
             config.state_refreshes_in_flight -= 1
     try:
         if not stopping:
-            _refresh_state_cache_impl(config, timeout=timeout, generation=generation,
-                                      include_capabilities=include_capabilities)
+            return _refresh_state_cache_impl(
+                config, timeout=timeout, generation=generation,
+                include_capabilities=include_capabilities,
+                active_builds_snapshot=active_builds_snapshot,
+            )
+        return False
     finally:
         with config.state_lock:
             config.state_refresh_threads.discard(thread)
 
 
 def _refresh_state_cache_impl(
-    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
-) -> None:
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> bool:
     """Compose a fresh doc (+ capability census, when requested) for
     ``generation`` and, unless a newer generation has already published,
-    atomically swap the cache.
+    atomically swap the cache. Return True only when this exact generation
+    publishes; failure, supersession and owner retirement cannot report success.
+    An explicit snapshot remains attached to this attempt through composition.
 
     Never raises into the caller (startup pre-compose runs this inline on
     the main thread; every other call runs on a daemon background thread or
@@ -754,7 +785,7 @@ def _refresh_state_cache_impl(
     calling this; this function always decrements it on the way out.
 
     Superseded gating (H1 repair, Sol review 5000983751 Blocker 2): a
-    generation is superseded when it is strictly below
+    generation is superseded when the owner is stopping or it is strictly below
     :attr:`ServerConfig.state_explicit_floor` (an explicit recompose was
     reserved after this one started) OR at/below
     :attr:`ServerConfig.state_published_seq` (a newer generation — explicit
@@ -773,14 +804,20 @@ def _refresh_state_cache_impl(
     # Anchor before _compose_state_doc captures its source reference or gathers.
     qualification_anchor = _sample_source_clock(config)
     try:
-        doc = _compose_state_doc(config, timeout=timeout)
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            doc = _compose_state_doc(config, timeout=timeout)
+        else:
+            doc = _compose_state_doc(
+                config, timeout=timeout, active_builds_snapshot=active_builds_snapshot,
+            )
         capabilities = capability.census(runner=config.runner) if include_capabilities else None
     except Exception as exc:  # noqa: BLE001 — never raise into a serving thread
         detail = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
         with config.state_lock:
             config.state_refreshes_in_flight -= 1
             superseded = (
-                generation < config.state_explicit_floor or generation <= config.state_published_seq
+                config.state_stopping or generation < config.state_explicit_floor
+                or generation <= config.state_published_seq
             )
             if not superseded:
                 config.state_refresh_error = "state refresh failed; serving last good composition"
@@ -794,12 +831,13 @@ def _refresh_state_cache_impl(
             )
         else:
             print(f"state refresh failed: {detail}", flush=True)
-        return
+        return False
 
     composed_at = config.now_fn()
     with config.state_lock:
         config.state_refreshes_in_flight -= 1
-        superseded = generation < config.state_explicit_floor or generation <= config.state_published_seq
+        superseded = (config.state_stopping or generation < config.state_explicit_floor
+                      or generation <= config.state_published_seq)
         published = config.state_published_seq
         floor = config.state_explicit_floor
         if not superseded:
@@ -817,6 +855,7 @@ def _refresh_state_cache_impl(
             f"explicit_floor={floor})",
             flush=True,
         )
+    return not superseded
 
 
 def _precompose_initial_state(config: ServerConfig) -> None:
@@ -1014,6 +1053,265 @@ def _codex_sessions() -> list[dict[str, Any]]:
         if len(entries) >= _DISCOVER_CAP:
             break
     return entries[:_DISCOVER_CAP]
+
+
+@dataclass(frozen=True)
+class OpenBindingResult:
+    """Separate owner preconditions from an actual provider's outcome."""
+    outcome: dict[str, Any]
+    source_precondition_failed: bool = False
+
+
+_NO_OWED_CONTEXT = object()
+
+
+def _owed_open_refusal_result() -> OpenBindingResult:
+    return OpenBindingResult(
+        {"ok": False, "verified": False, "failure_kind": "source_precondition_failed",
+         "detail": "The owed action needs a current read; its source or exact target changed.",
+         "next_action": "read_current_state"},
+        source_precondition_failed=True,
+    )
+
+
+def open_surface(config: ServerConfig, *, binding_id: str,
+                 target_surface: str | None = None,
+                 owed_context: Any = _NO_OWED_CONTEXT,
+                 before_effect: Callable[[], None] | None = None) -> OpenBindingResult:
+    """Open the checked target through this exact existing Control Room owner.
+
+    The trusted caller owns admission. Provider work runs outside owner locks;
+    only unchanged original rows receive later verification metadata. Explicit
+    malformed owed context never falls back to ordinary Open. A provider's
+    exception or outcome is not reclassified as a pre-dispatch refusal.
+    before_effect is a trusted transport callback, never a request field. It
+    rechecks admission after source reads. Owed validity is sampled again
+    after that callback, before the provider. Once admitted, ordinary
+    verification metadata stays part of the same work.
+    """
+    if not isinstance(binding_id, str) or not binding_id:
+        raise ValueError("binding_id: required (non-empty string)")
+    if target_surface is not None and (
+        type(target_surface) is not str or target_surface not in {"default", "desktop"}
+    ):
+        raise ValueError("target_surface: must be 'default' or 'desktop'")
+    owed_route = owed_context is not _NO_OWED_CONTEXT
+    if owed_route and not _owed_context_shape(owed_context):
+        return _owed_open_refusal_result()
+
+    open_fn = config.open_binding_fn
+    provider_runner = config.runner
+    provider_options = dict(claude_projects_dir=config.claude_projects_dir,
+                            claude_desktop_cli=config.claude_desktop_cli,
+                            claude_desktop_handoff_runner=config.claude_desktop_handoff_runner,
+                            target_surface=target_surface,
+                            codex_sessions_dir=config.codex_sessions_dir,
+                            mlx_profiles_root=config.mlx_profiles_root,
+                            gologin_profiles_root=config.gologin_profiles_root)
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        doc, problems = sb.load_bindings(bindings_path)
+        binding = next(
+            (row for row in (doc or {}).get("bindings", [])
+             if isinstance(row, dict) and row.get("binding_id") == binding_id),
+            None,
+        )
+        binding_preimage = copy.deepcopy(binding)
+    if doc is None:
+        if owed_route:
+            return _owed_open_refusal_result()
+        if problems:
+            outcome = contract.refused(
+                "unknown", binding_id, "invalid_binding", "the bindings file failed validation"
+            )
+        else:
+            outcome = contract.refused(
+                "unknown", binding_id, "not_found", "no bindings file is present"
+            )
+        return OpenBindingResult(outcome)
+
+    if binding is None:
+        if owed_route:
+            return _owed_open_refusal_result()
+        outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
+        return OpenBindingResult(outcome)
+
+    binding = _freeze_target(binding)
+    if owed_route:
+        if not _owed_handoff_current(config, owed_context, binding, doc["bindings"]):
+            return _owed_open_refusal_result()
+    if before_effect is not None:
+        before_effect()
+        # Admission may perform blocking permission work. Its successful
+        # return cannot renew an owed source's finite validity or publication.
+        if owed_route and not _owed_handoff_current(config, owed_context, binding, doc["bindings"]):
+            return _owed_open_refusal_result()
+    outcome = open_fn(binding, provider_runner, **provider_options)
+    # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
+    # blocker 2): a mere Terminal-launch ACK must never advance this —
+    # only an outcome that PROVED the provider-native session/tab exists
+    # (contract.OpenOutcome.verified=True) may. `ok=True, verified=False`
+    # (chatgpt / claude_desktop / cursor_agent — no proven local read
+    # surface) stays BOUND_UNVERIFIED and leaves the bindings file
+    # byte-unchanged.
+    if not owed_route and outcome.get("ok") and outcome.get("verified"):
+        try:
+            with config.bindings_lock:
+                if config.bindings_path == bindings_path:
+                    current_doc, _problems = sb.load_bindings(bindings_path)
+                    if current_doc is not None:
+                        matches = [
+                            row for row in current_doc["bindings"]
+                            if isinstance(row, dict) and row.get("binding_id") == binding_id
+                        ]
+                        # A changed/removed/restamped row receives no evidence
+                        # for the old target. Preserve all concurrent siblings.
+                        if len(matches) == 1 and matches[0] == binding_preimage:
+                            matches[0]["last_verified_at"] = config.now_fn()
+                            sb.save_bindings(current_doc, bindings_path)
+        except Exception:
+            # Navigation already returned success. Metadata failure must not
+            # conceal that effect, leak a locator or invite a second Open.
+            outcome = dict(outcome, detail=(
+                "Open completed; the verification timestamp update could not be confirmed. "
+                "Do not repeat Open solely to update this timestamp."
+            ))
+    return OpenBindingResult(outcome)
+
+
+def bind_surface(config: ServerConfig, *, work_ref: str, role: str, provider: str,
+                 locator: dict[str, Any], seat_ref: str | None = None,
+                 before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Apply one complete binding transaction on the existing file owner.
+
+    A trusted before_effect callback runs inside that transaction immediately
+    before the write. It may refuse admission without splitting the lock.
+    """
+    if not isinstance(work_ref, str) or not isinstance(role, str) or not isinstance(provider, str):
+        raise ValueError("work_ref, role, and provider must be strings")
+    if not isinstance(locator, dict):
+        raise ValueError("locator must be an object")
+    if seat_ref is not None and not isinstance(seat_ref, str):
+        raise ValueError("seat_ref must be a string or null")
+
+    # sb._PROVIDER_LOCATOR_KIND is the same module's own provider->kind
+    # map — reused, not re-derived, so a new provider added there never
+    # needs a matching edit here. An unknown provider maps to itself,
+    # which validate_bindings_document then names as a "must be one of"
+    # problem — never a crash.
+    locator_kind = sb._PROVIDER_LOCATOR_KIND.get(provider, provider)
+    binding = sb.new_binding(
+        work_ref=work_ref, role=role, provider=provider, locator_kind=locator_kind,
+        locator=locator, observed_at=config.now_fn(), seat_ref=seat_ref,
+    )
+
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        existing_doc, load_problems = sb.load_bindings(bindings_path)
+        if existing_doc is None and load_problems:
+            outcome = {"ok": False, "problems": load_problems}
+        else:
+            if existing_doc is None:
+                existing_doc = {"schema": sb.SCHEMA, "bindings": []}
+            new_doc = {
+                "schema": existing_doc.get("schema", sb.SCHEMA),
+                "bindings": list(existing_doc.get("bindings", [])) + [binding],
+            }
+            problems = sb.validate_bindings_document(new_doc)
+            if problems:
+                outcome = {"ok": False, "problems": problems}
+            else:
+                if before_effect is not None:
+                    before_effect()
+                sb.save_bindings(new_doc, bindings_path)
+                outcome = {"ok": True, "binding_id": binding["binding_id"]}
+    return outcome
+
+
+def unbind_surface(config: ServerConfig, *, binding_id: str,
+                   before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Remove a binding through the same complete read/modify/write transaction.
+
+    The trusted before_effect callback runs immediately before the write.
+    """
+    if not isinstance(binding_id, str) or not binding_id:
+        raise ValueError("binding_id: required (non-empty string)")
+
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        doc, _problems = sb.load_bindings(bindings_path)
+        outcome = {"ok": False}
+        if doc is not None:
+            rows = doc.get("bindings", [])
+            remaining = [
+                row for row in rows
+                if not (isinstance(row, dict) and row.get("binding_id") == binding_id)
+            ]
+            if len(remaining) != len(rows):
+                new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
+                if before_effect is not None:
+                    before_effect()
+                sb.save_bindings(new_doc, bindings_path)
+                outcome = {"ok": True}
+    return outcome
+
+
+def refresh_builds(config: ServerConfig, *,
+                   before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Run the existing active-build refresh on this exact Control Room owner.
+
+    The calling transport owns authentication and request validation. This
+    operation accepts no caller-selected root, command or replacement cache.
+    A false publication result may still retain the accepted live input; it
+    must not be interpreted as a no-effect receipt or automatic retry advice.
+    A trusted before_effect callback runs once before the compiler; admission
+    is not repeated halfway through accepted input and publication work.
+    """
+    macro_root = config.macro_root
+    if not macro_root:
+        return {"ok": False, "detail": "no macro root resolved"}
+
+    script_path = Path(macro_root) / "scripts" / "build_project_active_build_map.py"
+    if not script_path.is_file():
+        return {"ok": False, "detail": "--json-stdout seam not present at macro root"}
+
+    argv = [sys.executable, str(script_path), "--json-stdout"]
+    # Preserve the existing compiler's explicit 4 MiB JSON-output budget.
+    if before_effect is not None:
+        before_effect()
+    result = config.runner(
+        argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root,
+        max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES,
+    )
+    if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
+        stderr_tail = ""
+        if isinstance(result, dict):
+            stderr_tail = (result.get("stderr") or "")[-2000:]
+        detail = f"build_project_active_build_map.py failed: {stderr_tail}".rstrip(": ")
+        return {"ok": False, "detail": detail}
+
+    stdout = result.get("stdout") or ""
+    try:
+        parsed = json.loads(stdout)
+    except ValueError:
+        return {"ok": False, "detail": "stdout was not valid JSON"}
+    if not isinstance(parsed, dict) or parsed.get("schema") != "project_active_builds.v1":
+        return {"ok": False, "detail": "stdout schema was not project_active_builds.v1"}
+
+    # Retain the detached input and reserve its explicit floor atomically.
+    # Recompose synchronously so success describes this exact publication,
+    # while old background work cannot overwrite the accepted generation.
+    try:
+        gen = _reserve_composition(config, explicit=True, active_builds_snapshot=parsed)
+    except RuntimeError:
+        return {"ok": False, "detail": "control room is stopping"}
+    published = _refresh_state_cache(
+        config, timeout=config.compose_timeout, generation=gen,
+        include_capabilities=True, active_builds_snapshot=parsed,
+    )
+    if not published:
+        return {"ok": False, "detail": "refreshed builds were not published by this request"}
+    return {"ok": True, "collected_at": parsed.get("collected_at")}
 
 
 def _discover_document(config: ServerConfig) -> dict[str, Any]:
@@ -1298,64 +1596,15 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._owed_open_refused()
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        open_fn = config.open_binding_fn
-        provider_runner = config.runner
-        provider_options = dict(claude_projects_dir=config.claude_projects_dir,
-                                claude_desktop_cli=config.claude_desktop_cli,
-                                claude_desktop_handoff_runner=config.claude_desktop_handoff_runner,
-                                target_surface=target_surface,
-                                codex_sessions_dir=config.codex_sessions_dir,
-                                mlx_profiles_root=config.mlx_profiles_root,
-                                gologin_profiles_root=config.gologin_profiles_root)
-        doc, problems = sb.load_bindings(config.bindings_path)
-        if doc is None:
-            if owed_route:
-                return self._owed_open_refused()
-            if problems:
-                outcome = contract.refused(
-                    "unknown", binding_id, "invalid_binding", "the bindings file failed validation"
-                )
-            else:
-                outcome = contract.refused(
-                    "unknown", binding_id, "not_found", "no bindings file is present"
-                )
-            return self._send_json(200, outcome, no_store=True)
-
-        binding = next(
-            (row for row in doc.get("bindings", []) if isinstance(row, dict) and row.get("binding_id") == binding_id),
-            None,
+        result = open_surface(
+            config, binding_id=binding_id, target_surface=target_surface,
+            owed_context=data["owed_context"] if owed_route else _NO_OWED_CONTEXT,
         )
-        if binding is None:
-            if owed_route:
-                return self._owed_open_refused()
-            outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
-            return self._send_json(200, outcome, no_store=True)
-
-        if owed_route:
-            binding = _freeze_target(binding)
-            if not _owed_handoff_current(config, data["owed_context"], binding, doc["bindings"]):
-                return self._owed_open_refused()
-        outcome = open_fn(binding, provider_runner, **provider_options)
-        # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
-        # blocker 2): a mere Terminal-launch ACK must never advance this —
-        # only an outcome that PROVED the provider-native session/tab exists
-        # (contract.OpenOutcome.verified=True) may. `ok=True, verified=False`
-        # (chatgpt / claude_desktop / cursor_agent — no proven local read
-        # surface) stays BOUND_UNVERIFIED and leaves the bindings file
-        # byte-unchanged.
-        if not owed_route and outcome.get("ok") and outcome.get("verified"):
-            now = config.now_fn()
-            for row in doc["bindings"]:
-                if isinstance(row, dict) and row.get("binding_id") == binding_id:
-                    row["last_verified_at"] = now
-            sb.save_bindings(doc, config.bindings_path)
-        self._send_json(200, outcome, no_store=True)
+        self._send_json(409 if result.source_precondition_failed else 200,
+                        result.outcome, no_store=True)
 
     def _owed_open_refused(self) -> None:
-        self._send_json(409, {"ok": False, "verified": False,
-                             "failure_kind": "source_precondition_failed",
-                             "detail": "The owed action needs a current read; its source or exact target changed.",
-                             "next_action": "read_current_state"}, no_store=True)
+        self._send_json(409, _owed_open_refusal_result().outcome, no_store=True)
 
     _BIND_ALLOWED_KEYS = frozenset({"work_ref", "role", "provider", "seat_ref", "locator"})
 
@@ -1381,33 +1630,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request("seat_ref must be a string or null")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        # sb._PROVIDER_LOCATOR_KIND is the same module's own provider->kind
-        # map — reused, not re-derived, so a new provider added there never
-        # needs a matching edit here. An unknown provider maps to itself,
-        # which validate_bindings_document then names as a "must be one of"
-        # problem — never a crash.
-        locator_kind = sb._PROVIDER_LOCATOR_KIND.get(provider, provider)
-        binding = sb.new_binding(
-            work_ref=work_ref, role=role, provider=provider, locator_kind=locator_kind,
-            locator=locator, observed_at=config.now_fn(), seat_ref=seat_ref,
-        )
-
-        existing_doc, load_problems = sb.load_bindings(config.bindings_path)
-        if existing_doc is None and load_problems:
-            return self._send_json(200, {"ok": False, "problems": load_problems}, no_store=True)
-        if existing_doc is None:
-            existing_doc = {"schema": sb.SCHEMA, "bindings": []}
-
-        new_doc = {
-            "schema": existing_doc.get("schema", sb.SCHEMA),
-            "bindings": list(existing_doc.get("bindings", [])) + [binding],
-        }
-        problems = sb.validate_bindings_document(new_doc)
-        if problems:
-            return self._send_json(200, {"ok": False, "problems": problems}, no_store=True)
-
-        sb.save_bindings(new_doc, config.bindings_path)
-        self._send_json(200, {"ok": True, "binding_id": binding["binding_id"]}, no_store=True)
+        outcome = bind_surface(config, work_ref=work_ref, role=role, provider=provider,
+                               locator=locator, seat_ref=seat_ref)
+        self._send_json(200, outcome, no_store=True)
 
     def _handle_unbind(self) -> None:
         data, err = self._read_json_body()
@@ -1421,18 +1646,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request("binding_id: required (non-empty string)")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        doc, _problems = sb.load_bindings(config.bindings_path)
-        if doc is None:
-            return self._send_json(200, {"ok": False}, no_store=True)
-
-        rows = doc.get("bindings", [])
-        remaining = [r for r in rows if not (isinstance(r, dict) and r.get("binding_id") == binding_id)]
-        if len(remaining) == len(rows):
-            return self._send_json(200, {"ok": False}, no_store=True)
-
-        new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
-        sb.save_bindings(new_doc, config.bindings_path)
-        self._send_json(200, {"ok": True}, no_store=True)
+        self._send_json(200, unbind_surface(config, binding_id=binding_id), no_store=True)
 
     def _handle_refresh_builds(self) -> None:
         data, err = self._read_json_body()
@@ -1443,61 +1657,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request(f"unknown key: {unknown!r}")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        macro_root = config.macro_root
-        if not macro_root:
-            return self._send_json(200, {"ok": False, "detail": "no macro root resolved"}, no_store=True)
-
-        script_path = Path(macro_root) / "scripts" / "build_project_active_build_map.py"
-        if not script_path.is_file():
-            return self._send_json(
-                200,
-                {"ok": False, "detail": "--json-stdout seam not present at macro root"},
-                no_store=True,
-            )
-
-        argv = [sys.executable, str(script_path), "--json-stdout"]
-        # 4 MiB, not the runner's default 64 KiB — the real project_active_
-        # builds.v1 document is real organizational data (Wave D live proof:
-        # 112,569 bytes) and must never be silently truncated below valid
-        # JSON. See _REFRESH_BUILDS_MAX_OUTPUT_BYTES's docstring.
-        result = config.runner(
-            argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root, max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES
-        )
-
-        if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
-            stderr_tail = ""
-            if isinstance(result, dict):
-                stderr_tail = (result.get("stderr") or "")[-2000:]
-            detail = f"build_project_active_build_map.py failed: {stderr_tail}".rstrip(": ")
-            return self._send_json(200, {"ok": False, "detail": detail}, no_store=True)
-
-        stdout = result.get("stdout") or ""
-        try:
-            parsed = json.loads(stdout)
-        except ValueError:
-            return self._send_json(200, {"ok": False, "detail": "stdout was not valid JSON"}, no_store=True)
-        if not isinstance(parsed, dict) or parsed.get("schema") != "project_active_builds.v1":
-            return self._send_json(
-                200, {"ok": False, "detail": "stdout schema was not project_active_builds.v1"}, no_store=True
-            )
-
-        config.live_cache["active_builds"] = parsed
-        # H0 hardening (2026-08-22): GET /api/state now serves a cache, not
-        # a fresh composition per request — but this ONE write path (a live
-        # active-builds refresh) must still be visible on the very next GET,
-        # not eventually-consistent up to state_ttl. Recompose synchronously
-        # here, once, rather than leaving the cache stamped with whatever
-        # was true before this refresh. refresh-builds is already an
-        # explicit, infrequent, user-initiated action with its own 180s
-        # subprocess timeout; this costs the same gather-layer time GET
-        # /api/state used to pay on every request, but only for this action.
-        # H1 repair (Sol review 5000983751 Blocker 2): reserve this as an
-        # EXPLICIT generation — it raises state_explicit_floor, so an older
-        # background recompose that finishes after this one may never
-        # overwrite it.
-        gen = _reserve_composition(config, explicit=True)
-        _refresh_state_cache(config, timeout=config.compose_timeout, generation=gen, include_capabilities=True)
-        self._send_json(200, {"ok": True, "collected_at": parsed.get("collected_at")}, no_store=True)
+        self._send_json(200, refresh_builds(config), no_store=True)
 
 
 class ControlRoomServer(http.server.ThreadingHTTPServer):

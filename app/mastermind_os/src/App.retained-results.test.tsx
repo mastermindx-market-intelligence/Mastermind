@@ -83,6 +83,7 @@ it("opens exact retained content without a CURRENT Mission or Mission result lin
   await user.click(screen.getByRole("button", { name: "Projects" }));
   const project = await screen.findByRole("button", { name: /Retained-result project/ });
   await user.click(project);
+  await user.click(await screen.findByRole("button",{name:"Files"}));
   const title = await screen.findByText("Retained results", { exact: true });
   const section = title.closest("section") ?? title.parentElement!;
   const trigger = title.closest("button,summary");
