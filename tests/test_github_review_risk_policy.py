@@ -46,6 +46,14 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
     ("docs/DELIVERY_WORKFLOW.md",),
     ("docs/REVIEW_RISK_POLICY.md",),
     ("config/authority_map.yml",),
+    ("control_plane/packet_gate.py",),
+    ("control_plane/governance.py",),
+    ("control_plane/strategic_state.py",),
+    ("config/strategic_state.yml",),
+    ("config/contracts.yml",),
+    ("research/MASTERMIND_CHARTER_V2.md",),
+    ("DOCTRINE.md",),
+    ("doctrine.md",),
     ("control_plane/github_review_intent.py",),
     ("integrations/github_review_api.py",),
     ("app/security/token.py",),
@@ -84,7 +92,7 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
     ("package-lock.json",),
     ("backend/schema/price.ts",),
 ])
-def test_consequential_code_gets_one_review(paths):
+def test_consequential_code_keeps_standard_tier_without_external_review_by_default(paths):
     decision = assess_review_risk(facts(paths))
     assert decision.tier is ReviewTier.STANDARD
     assert decision.minimum_independent_assessments == 0
