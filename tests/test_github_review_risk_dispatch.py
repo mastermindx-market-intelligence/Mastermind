@@ -132,10 +132,10 @@ def test_caller_text_is_not_verified_origin(bad_origin):
         decide_risk_dispatch(origin=bad_origin, assessment=risk())
 
 
-def test_auto_bounded_app_source_skips_review_job():
+def test_auto_bounded_app_source_keeps_signed_machine_review_when_host_enabled():
     result = auto(risk(("app/src/component.tsx",)))
-    assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
-    assert result.source_tier is ReviewTier.FAST
+    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+    assert result.source_tier is ReviewTier.STANDARD
 
 
 def test_forged_zero_assessment_counts_cannot_skip_signed_critical_machine_risk():

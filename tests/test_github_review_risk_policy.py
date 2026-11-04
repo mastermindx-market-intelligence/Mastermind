@@ -105,8 +105,8 @@ def test_test_only_large_deletion_gets_one_review():
     assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=51)).tier is ReviewTier.STANDARD
 
 
-def test_smaller_test_cleanup_uses_fast_lane():
-    assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=49)).tier is ReviewTier.FAST
+def test_smaller_test_cleanup_keeps_smoke_ci():
+    assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=49)).tier is ReviewTier.STANDARD
 
 
 @pytest.mark.parametrize("hint,expected", [
@@ -187,7 +187,7 @@ def test_previous_rename_path_is_accounted_for_in_verified_metrics():
     assert assess_review_risk(source).tier is ReviewTier.CRITICAL
 
 
-def test_bounded_ui_executable_change_fast_with_large_verification_evidence():
+def test_bounded_ui_executable_change_keeps_smoke_with_large_verification_evidence():
     source = replace(
         facts(("terminal/components/ChartPanel.tsx", "terminal/docs/verification/replay.log"),
               additions=900, deletions=3),
@@ -196,7 +196,7 @@ def test_bounded_ui_executable_change_fast_with_large_verification_evidence():
             ReviewFileStat(path="terminal/docs/verification/replay.log", additions=880, deletions=0),
         ),
     )
-    assert assess_review_risk(source).tier is ReviewTier.FAST
+    assert assess_review_risk(source).tier is ReviewTier.STANDARD
 
 
 @pytest.mark.parametrize("protected_path", [
@@ -231,14 +231,14 @@ def test_inert_evidence_only_stays_fast_with_full_verified_metrics():
     assert assess_review_risk(source).tier is ReviewTier.FAST
 
 
-def test_test_only_one_line_addition_is_fast_without_sensitive_paths():
+def test_test_only_one_line_addition_is_smoke_even_without_sensitive_paths():
     source = replace(
         facts(("tests/test_behavior.py",), additions=1, deletions=0),
         file_metrics=(ReviewFileStat(
             path="tests/test_behavior.py", additions=1, deletions=0
         ),),
     )
-    assert assess_review_risk(source).tier is ReviewTier.FAST
+    assert assess_review_risk(source).tier is ReviewTier.STANDARD
 
 
 def test_real_managed_workspace_identity_change_is_critical_with_verified_metrics():
@@ -271,11 +271,11 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     "tests/test_model.py",
     "scripts/helpers.py",
 ])
-def test_chairman_broadened_fast_lane_for_bounded_routine_code(path):
+def test_attended_web_waiver_keeps_signed_machine_code_smoke(path):
     result = assess_review_risk(facts((path,), additions=90, deletions=20))
-    assert result.tier is ReviewTier.FAST
-    assert result.minimum_independent_assessments == 0
-    assert result.minimum_formal_non_author_approvals == 0
+    assert result.tier is ReviewTier.STANDARD
+    assert result.minimum_independent_assessments == 1
+    assert result.minimum_formal_non_author_approvals == 1
 
 
 @pytest.mark.parametrize("path", [
@@ -329,3 +329,23 @@ def test_sensitive_previous_rename_path_remains_critical():
         ),),
     )
     assert assess_review_risk(source).tier is ReviewTier.CRITICAL
+
+
+@pytest.mark.parametrize("path", [
+    "app/mastermind_os/src/components/Widget.tsx",
+    "app/src/component.jsx", "app/static/layout.css",
+    "app/src/index.js", "tests/test_component.py",
+    "frontend/views/card.vue", "frontend/views/card.svelte",
+    "frontend/views/card.html",
+])
+def test_ci_2016_static_only_fast_never_classifies_active_source(path):
+    verdict = assess_review_risk(facts(("docs/user-guide.md", path),
+                                       additions=2, deletions=0))
+    assert verdict.tier is ReviewTier.STANDARD
+    assert not verdict.fast_lane_candidate
+    assert verdict.minimum_independent_assessments == 1
+
+
+def test_ci_2016_still_allows_static_only_fast_for_passive_docs():
+    assert assess_review_risk(facts(("docs/user-guide.md",),
+                                    additions=2, deletions=0)).tier is ReviewTier.FAST

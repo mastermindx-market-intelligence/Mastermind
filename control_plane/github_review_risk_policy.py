@@ -102,9 +102,9 @@ _CRITICAL_SEGMENTS = frozenset({
     "execution", "deployment", "workflow", "policy_authority",
 })
 _STANDARD_PREFIXES = (
-    # Reserved platform/integration and financial source requires a reviewer.
-    # Ordinary application, backend, UI and test code is not made STANDARD
-    # merely because of its directory name.
+    # Reserved platform/integration and financial source is machine-elevated.
+    # Ordinary executable/test source is also at least STANDARD so #2016's
+    # CI qualifier retains its required smoke checks.
     "control_plane/", "integrations/", "finance/", "engine/risk_",
     "ops/", "config/",
 )
@@ -315,13 +315,10 @@ def _is_test_path(path: str) -> bool:
     )
 
 
-# Eligible routine code is bounded by an authenticated complete diff, explicit
-# trust-boundary exclusions, and a conservative scope budget. This is a review
-# risk policy, not semantic proof or a permission to self-merge.
-_FAST_CODE_SUFFIXES = (
-    ".py", ".js", ".jsx", ".ts", ".tsx", ".css", ".scss",
-    ".vue", ".svelte", ".html",
-)
+# FAST is shared with the accepted #2016 CI qualifier: FAST selects static-only
+# checks; STANDARD selects executable smoke checks. Even a tiny code/test diff
+# must never use FAST to waive a smoke test. Attended CEO Web's no-review
+# decision is separate from this signed machine/CI risk classification.
 
 
 _SUPPORTING_PREFIXES = (
@@ -393,10 +390,7 @@ def assess_review_risk(facts: ReviewChangeFacts) -> ReviewRiskAssessment:
         return _result(facts, ReviewTier.FAST, "ROUTINE_DOCUMENTATION_TESTS_OR_EVIDENCE")
     if total > _FAST_MAX_LINES or material_count > _FAST_MAX_FILES:
         return _result(facts, ReviewTier.STANDARD, "SCOPE_EXCEEDS_FAST_LIMIT")
-    # Broaden automatic review relief to bounded routine application and test
-    # code. Never downgrade unknown formats, protected paths or trusted risk
-    # hints based only on small diff size.
-    if all(_is_supporting_change(p) or p.lower().endswith(_FAST_CODE_SUFFIXES)
-           for p in facts.changed_paths):
-        return _result(facts, ReviewTier.FAST, "BOUNDED_ROUTINE_SOURCE")
-    return _result(facts, ReviewTier.STANDARD, "SOURCE_FORMAT_NOT_QUALIFIED_FOR_FAST")
+    # Under #2016, risk tier FAST also selects CI mode=fast (static-only).
+    # Active code and tests stay STANDARD even when a Web CEO session needs no
+    # additional independent reviewer; their smoke checks must remain enabled.
+    return _result(facts, ReviewTier.STANDARD, "ACTIVE_SOURCE_REQUIRES_CI_SMOKE")

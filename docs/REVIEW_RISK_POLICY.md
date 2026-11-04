@@ -1,6 +1,6 @@
 # Risk-tiered PR review — lower friction without removing real safeguards
 
-**Status:** The baseline was accepted in protected Mastermind #1989. This November 3 Chairman-directed expansion of routine-code eligibility remains a **source candidate** until separately protected-accepted and installed. Neither version alone is an installed GitHub rule or approval/merge bypass. This document has no separate source of runtime authority.
+**Status:** The baseline was accepted in protected Mastermind #1989. This Chairman-directed attended-Web all-tier review waiver and its safe CI-risk composition remain a **source candidate** until protected-accepted and installed. No source candidate grants a GitHub rule, approval or merge bypass. This document has no separate runtime authority.
 
 **Owner:** Existing GitHub release workflow + `control_plane/github_release_assessment.py` (approval adjudication), Executive/Fabric (admission and independent results), and native branch rules/merge queue (enforcement). The pure `control_plane/github_review_risk_policy.py` only supplies a reproducible advisory risk tier. No new webhook, queue, reviewer registry, auth store, code owner, worker budget, retry process or release engine.
 
@@ -10,8 +10,8 @@ Independent review is **not** a mandatory prerequisite for attended CEO Web sour
 
 | Tier | Source signals | Signed automatic technical assessments (when host enabled) | Signed automatic formal approvals (advisory) | Machine handling; attended CEO Web has zero additional review |
 | --- | --- | ---: | ---: | --- |
-| **FAST** | Verified bounded routine application, UI or test code (up to 2,400 material changed lines / 40 material files), passive guides, historical evidence and non-authoritative plans or visual evidence; excludes protected paths, privileged changes, trusted escalations and substantial test removals | **0** | **0** | Self-check + focused tests + required CI. Let existing authorized sweeper/native queue progress; no mandatory Fabric request or Dot ACK |
-| **STANDARD** | Explicit platform/integration and risk-related source, dependencies/schema/contract changes, unqualified code formats or above-FAST scope | **1** | **1** | Optional signed machine host uses one existing review Job; CEO Web uses focused integration tests and CI without automatic reviewer |
+| **FAST** | Verified passive guides, historical evidence, non-authoritative plans and visual evidence only; executable application/test changes are excluded, even for a one-line diff | **0** | **0** | Static-only CI eligibility for passive source. No mandatory attended-Web Fabric review or Dot ACK |
+| **STANDARD** | Ordinary app/UI/backend/test code, dependencies, schema/contract changes, other active source or above-FAST scope; CI smoke remains required | **1** | **1** | Optional signed machine host uses original review Job; attended CEO Web self-checks and runs smoke/CI without an automatic reviewer |
 | **CRITICAL** | Auth, security, permissions, secrets, authority/source-law, review/merge automation, privileged CI, release/deployment, trade or financial execution, irreversible state changes | **2** | **1** | Machine auto ingress retains critical review; CEO Web gets targeted security/adversarial and real-path tests plus native holds without routine reviewer handoff |
 | **HOLD** | Complete exact-head source not proven, changed-path coverage missing, inconsistent metadata, identity/effect uncertainty | **Not inferred** | **Not inferred** | Reconcile the source or effect through its incumbent owner. No auto-exemption, duplicate reviews, merge or safety fallback |
 
@@ -25,11 +25,11 @@ The pure `control_plane/github_review_risk_dispatch.py` is the integration seam:
 
 ## Risk classification evidence and adversarial rules
 
-The owner supplies complete changed filenames, additions/deletions and a verified exact current GitHub PR head. Diff coverage must include renames/deletions, not only visible excerpts. Agent PR descriptions, labels, comments, Markdown risk declarations, branch names and model claims **cannot lower** the tier. Allowed trusted source-owner hints can only escalate. Invalid paths, case aliases, stale heads, partial pagination or unverified files produce HOLD, not FAST. Small one-line edits to auth, release controls or protected rules remain CRITICAL. Ordinary backend/frontend/test files are not made STANDARD merely by directory or programming-language suffix; privileged path and risk exclusions have priority.
+The owner supplies complete changed filenames, additions/deletions and a verified exact current GitHub PR head. Diff coverage must include renames/deletions, not only visible excerpts. Agent PR descriptions, labels, comments, Markdown risk declarations, branch names and model claims **cannot lower** the tier. Allowed trusted source-owner hints can only escalate. Invalid paths, case aliases, stale heads, partial pagination or unverified files produce HOLD, not FAST. Small one-line edits to auth, release controls or protected rules remain CRITICAL. Ordinary backend/frontend/test changes are at least STANDARD even for tiny patches, because the accepted #2016 CI scope maps FAST to static-only mode and STANDARD to executable smoke. This CI decision is separate from the no-mandatory-review policy for attended CEO Web work. Privileged paths and risk exclusions still elevate.
 
 Deterministic path patterns are conservative, not exhaustive semantic proof. A file ending in `.md` does not itself qualify as passive evidence; canonical operator/source-law documents in `docs/sol_*`, `docs/session_*`, `docs/executive_*`, `docs/agent_*`, `docs/github_*`, `docs/review_*`, installable `skills/` and `plugins/`, and test/CI control paths are CRITICAL. Unknown operational documentation remains STANDARD unless it qualifies under the bounded ordinary source rule; canonical governance and installable instructions remain CRITICAL. Read-only user guides and verified visual evidence retain FAST eligibility. Existing CI security scans, test suites and source-code ownership constraints remain. Before a FAST release, the responsible builder must confirm that the diff really is reversible/routine and does not covertly alter a trust boundary, product decision, money/trading operation, external interface, migration or production data. Any actual contradictory evidence escalates the tier; lack of certainty means HOLD. The pure classifier cannot establish code semantics: path and size heuristics can misclassify risk, so sample defects, escalate contradictory evidence and never infer production acceptance from FAST. It **must not be connected directly to a privileged auto-merge endpoint as an authorization oracle**.
 
-**Evidence-aware scope budget:** Authenticated per-file stats distinguish executable changes from accompanying screenshots, documentation and verification logs. Executable tests are **not inert supporting evidence**, but bounded ordinary tests may qualify for FAST under the same complete-source rules. Pytest/CI enforcement and installable agent skills remain protected even for one-line edits. Large test removal over the separate 50-deletion budget is STANDARD. Ordinary bounded UI/code and tests need not be escalated merely because a PR carries large inert proof artifacts; the source collector requires complete pagination and matching additions/deletions, and its file metrics must cover every current and renamed prior path. Missing metrics revert to conservative aggregate counting. File deletions and high-risk security/source-law paths still escalate even when surrounded by evidence. This is not an author-controlled `skip-review` label or a semantic safety guarantee.
+**Evidence-aware scope budget:** Authenticated per-file stats distinguish executable changes from accompanying screenshots, documentation and verification logs. Executable tests are **not inert supporting evidence** and never qualify for static-only FAST, even if they add one line. Pytest/CI enforcement and installable agent skills remain protected even for one-line edits. Large test removal over the separate 50-deletion budget is STANDARD. Ordinary bounded UI/code and tests remain at least STANDARD, not CRITICAL merely because a PR carries large inert proof artifacts. The source collector requires complete pagination and matching additions/deletions, and its file metrics must cover every current and renamed prior path. Missing metrics revert to conservative aggregate counting. File deletions and high-risk security/source-law paths still escalate even when surrounded by evidence. This is not an author-controlled `skip-review` label or a semantic safety guarantee.
 
 An attended CEO Web session requests a review **only** for an explicit eligible manual request or a separately binding native/security approval requirement; risk tier alone never requires an attendee to create a reviewer operation. The distinct, default-OFF signed AUTOMATIC host may admit STANDARD/CRITICAL reviews under its own authenticated policy if separately activated. Manual `independent-review` requests retain the existing signed GitHub ingress and source/identity controls. For a *new* review, preserve original builder/reviewer separation and one PR-head/scope operation: never spawn a new Fabric, Slack Dot or Cursor reviewer just because the first is queued, unconsumed, declined, uncertain or already reviewed. A changed head invalidates only review evidence that no longer covers the changed source; whether a formal approval remains valid follows GitHub's actual branch rules. Do not fabricate exact-head reviewer coverage.
 
@@ -52,16 +52,19 @@ An attended CEO Web session requests a review **only** for an explicit eligible 
 - Prove the no-review release path with protected CI, native rule readback, approved instructions loaded in real CEO sessions and one genuine PR reaching protected merge without a fabricated reviewer. The automatic-review host remains OFF, so it owes **no production webhook canary** for this waiver. If optional ingress is separately activated later, it must first prove signed FAST => zero Jobs, STANDARD/CRITICAL => one existing authorized Job when admitted, HOLD refusal, manual ingress and rollback. Never claim optional review-host production proof from source tests.
 
 
-## Chairman-directed broad FAST expansion — source candidate, 2026-11-03
+## Chairman-directed attended-Web waiver, composed with #2016 CI — source candidate, 2026-11-03
 
-The prior conservative classifier qualified almost none of a 20-PR recent Mastermind
-path-only sample because it excluded executable code and tests. The new candidate
-qualifies bounded ordinary source and tests using a complete authenticated
-same-head diff, up to 40 material files and 2,400 material changed lines,
-while retaining exact trust-boundary exclusions and test-deletion limits.
-This removes mandatory *CEO Web author review handoffs*, not risk-tier
-source verification, separate signed machine-admission policy, GitHub checks,
-merge-queue rules or production acceptance. The sample was a path-only diagnostic, not a proven cohort KPI.
+A prior 20-PR path-only sample showed that the legacy FAST classifier excluded
+most executable source. That motivated removing blanket attended-Web reviewer
+handoffs across **all** tiers rather than using FAST as a false exemption.
+The accepted #2016 CI qualifier consumes the same risk tiers: FAST selects
+static-only checks; STANDARD preserves executable smoke tests. Therefore this
+source candidate restricts FAST to verified passive files and keeps even tiny
+ordinary code and test changes at least STANDARD, preserving stronger CRITICAL
+trust-boundary classification. The signed automatic review host is separate
+and default OFF. Only attended-Web review handoffs are waived by this policy;
+source verification, CI, release controls, holds and production proof remain.
+The original path sample was diagnostic, not a measured production KPI.
 
 There is no universal reviewer handoff after each patch, commit, fix, test,
 or CEO task. Review occurs only on an explicit authorized request or actually binding native requirement.
