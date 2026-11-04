@@ -91,3 +91,60 @@ A shell-based source-location diagnostic earlier in this repair session was expl
 Fabric source request `c4-publisher-source-20261103-01`, root `c4-macro-publisher-enrollment-20261103`, was ultimately recorded `REQUEST_REFUSED_BEFORE_LAUNCH`, with execution absence proven by the native status and `same_run_replay_allowed=false`. Controller 37602 exited with adapter code 75; no worker START or source result occurred. No replacement implementation worker was launched. The parent performed permitted direct source work, which still requires an independent non-author review. The earlier optional-turn-preflight observation was reconciled separately before the one same-run request; it is not permission to replay this later refusal.
 
 No installed C4 files, original native-pin files, app grants, sibling gateways, credential stores or original website effects were changed in this source phase. Delivery, source qualification, review, merge, installation, client adoption and website acceptance remain distinct.
+
+
+## Native selection moved forward after the original C4 preview (2026-11-03)
+
+The accepted R3 preview remains the *same C4 source/manifest target*, but a
+subsequent independent M2 release preflight returned
+`NATIVE_PIN_ENROLLMENT_OWNER_REFUSED` / underlying
+`NATIVE_POOL_PIN_SUCCESSOR_REFUSED` **before any installed write**. The
+canonical native-code selection was already at sequence **26** while the
+original immutable C4 pin was selected at sequence **24**. Installed C4 stayed
+running with original 11-file manifest `168bb25a...`, config `f02e385e...`,
+and no enrollment transaction. This is a real upstream native pointer change,
+not a source authorization to restage, stop or apply a stale plan.
+
+A *distinct source candidate* under the same `private_service._pin_native_context`
+owner now admits forward selected generations **only** for the exact C4
+historical successor digest
+`77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7`,
+the frozen generation `28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce`,
+and original selected sequence **24**. A later current selection must have
+higher sequence, a distinct prior generation, two genuinely verifiable current
+and predecessor published native generations, and unchanged original bridged
+launcher ingresses. It retains the original native pin transaction and all
+bytes, source/manifest expectations, native publication lock and selected
+generation **readback** across the existing two proof calls. An existing
+`PREVIOUS` or exactly `SELECTED` state retains its original behavior.
+
+**Scope honesty:** the native owner's `CURRENT.json` exposes only its
+immediate previous pointer, not a verifiable full chronological chain back to
+the old C4 selected generation. This candidate therefore verifies the actual
+native owner's *current published selection*, its immediately previous
+published generation, and the intact original historical pin/bridge; it does
+**not** claim an archival proof of every intermediate native generation.
+The distinct authenticated selected-generation owner remains authoritative.
+Any unknown account, mismatched original successor, rollback, invalid
+generation, foreign bridge, or selection that moves between the two proofs
+refuses closed. No generic native pool selector, retry mechanism, publisher,
+application privilege or installed runtime was introduced.
+
+The source-only candidate ran the same installed C4 read-only
+`native-pool-pin-enrollment --operation preview` after this change and
+returned `PREVIEW / NOT_APPLIED`, zero writes, **the same exact planned hash**
+`ed70c31ad3942a1d803dd3584ed09e8b9b3c9799793a67346e90ef7cbd843a6f`
+against the now-current sequence 26 selection. Hermetic subprocess
+negative-case tests cover account, digest/target, rollback, unverified
+current/previous, self-pointer, foreign bridge and pointer changes; the
+full `private_service*test.py` suite passed **369/369**. These are qualification
+facts, **not approval to install the new source candidate**.
+
+**Release order remains mandatory:** independent nonauthor review on the
+actual source commit, hosted CI, normal protected merge, accepted owner source
+readback, fresh live C4 preview and current native pointer proof, exclusive
+C4 idle/stopped-service maintenance, single original transaction CAS apply,
+same-transaction reconciliation, start, installed tool catalog and actual
+ChatGPT4 app snapshot refresh. Re-run the preview at installation time; do
+not blindly reuse the earlier plan, relax pin policy or replay any denied
+legacy Macro/C2 publication.
