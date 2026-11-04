@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT / "ops/native_fabric/catalog_readiness"))
 
 from native_catalog_guard import (  # noqa: E402
     GrokCatalogRefused, GrokCatalogUnsettled,
-    qualify_owned_grok_worker,
+    qualify_owned_grok_worker, qualify_custodied_grok_worker,
 )
 from ops.native_fabric.catalog_readiness.qualify_current import (  # noqa: E402
     apply_native_remote, apply_remote_executor,
@@ -196,6 +196,132 @@ class NativeCatalogGuardTest(unittest.TestCase):
         self.fail_before_receipt = True
         with self.assertRaisesRegex(GrokCatalogUnsettled, "EFFECT_UNKNOWN"):
             self.qualify()
+
+
+    @staticmethod
+    def lease_stub():
+        class OriginalLeaseStub:
+            def __init__(self):
+                self.holds = []
+
+            def hold_for_reconciliation(self, reason):
+                self.holds.append(reason)
+        return OriginalLeaseStub()
+
+    def test_custody_clean_proof_allows_worker_command(self):
+        lease = self.lease_stub()
+        state = {"started": False}
+        command = qualify_custodied_grok_worker(
+            state=state, lease=lease,
+            key=self.run_id, model="grok-4.7", here=self.here,
+            cwd=str(self.root), env=self.env, command=self.command,
+            timeout=60, nice=0, runner=self.runner,
+        )
+        self.assertEqual(command[0], str(self.grok.resolve()))
+        self.assertEqual(state["catalog_unsettled"], False)
+        self.assertEqual(lease.holds, [])
+
+    def test_custody_proved_nonstart_clears_before_refusal(self):
+        lease = self.lease_stub()
+        state = {"started": False}
+        self.env["POOL_ACCOUNT"] = "unqualified"
+        with self.assertRaisesRegex(GrokCatalogRefused, "SCOPE_UNQUALIFIED"):
+            qualify_custodied_grok_worker(
+                state=state, lease=lease,
+                key=self.run_id, model="grok-4.7", here=self.here,
+                cwd=str(self.root), env=self.env, command=self.command,
+                timeout=60, nice=0, runner=self.runner,
+            )
+        self.assertFalse(state["catalog_unsettled"])
+        self.assertFalse(lease.holds)
+        self.assertFalse(self.calls)
+
+    def test_custody_unproven_utility_retains_original_lease(self):
+        lease = self.lease_stub()
+        state = {"started": False}
+        self.cleanup_proven = False
+        with self.assertRaisesRegex(GrokCatalogUnsettled, "CLEANUP_UNPROVEN"):
+            qualify_custodied_grok_worker(
+                state=state, lease=lease,
+                key=self.run_id, model="grok-4.7", here=self.here,
+                cwd=str(self.root), env=self.env, command=self.command,
+                timeout=60, nice=0, runner=self.runner,
+            )
+        self.assertTrue(state["catalog_unsettled"])
+        self.assertEqual(lease.holds, ["grok_catalog_utility_unsettled"])
+        self.assertFalse(state["started"])
+
+    def _assert_interrupted_original_custody(self, interruption, *, signal_callback):
+        """Simulate a catalog process START with unproven original receipt."""
+        lease = self.lease_stub()
+        state = {"started": False}
+        marker = self.lanes / (self.run_id + ".model-catalog.process.jsonl")
+        def interrupted_runner(argv, *, receipt_path, **kwargs):
+            self.calls.append(tuple(argv))
+            receipt_path.write_text(json.dumps({
+                "schema": "mastermind.local_owned_process_receipt.v1",
+                "label": self.run_id + "-models",
+                "returncode": None,
+                "cleanup": {
+                    "census_proven": False, "identity_verified": False,
+                    "residual_count": None, "status": "process_census_unproven",
+                },
+            }) + "\n")
+            if signal_callback:
+                # The incumbent signal handler holds the same LaneLease.
+                lease.hold_for_reconciliation("synthetic_signal_unproven")
+            raise interruption
+        with self.assertRaises(type(interruption)) as caught:
+            qualify_custodied_grok_worker(
+                state=state, lease=lease,
+                key=self.run_id, model="grok-4.7", here=self.here,
+                cwd=str(self.root), env=self.env, command=self.command,
+                timeout=60, nice=0, runner=interrupted_runner,
+            )
+        self.assertIs(caught.exception, interruption)
+        self.assertEqual(state, {"started": False, "catalog_unsettled": True})
+        self.assertTrue(lease.holds)
+        self.assertEqual(lease.holds[-1], "grok_catalog_utility_unsettled")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.calls[0], (str(self.grok.resolve()), "models"))
+        self.assertTrue(marker.exists())
+        # Run the exact terminal patch against a temporary per-run directory,
+        # not installed code, and verify no false cleanup or workspace removal.
+        source = ROOT / "ops/native_fabric/grok47/overlay/native_remote.py"
+        patched = apply_native_remote(source.read_bytes())
+        namespace = {"__name__": "native_catalog_terminal_fixture",
+                     "__file__": str(source)}
+        exec(compile(patched, str(source), "exec"), namespace)
+        namespace["terminal"](
+            self.here, self.run_id, "grok", "grok-4.7", self.env,
+            False, 78, catalog_unsettled=state["catalog_unsettled"],
+        )
+        terminal = json.loads(
+            (self.lanes / (self.run_id + ".native-terminal.json")).read_text()
+        )
+        self.assertIs(terminal["catalog_utility_unsettled"], True)
+        self.assertIs(terminal["cleanup_proven"], False)
+        self.assertTrue(self.key_home.is_dir())
+
+    def test_systemexit_after_catalog_start_never_reports_clean(self):
+        self._assert_interrupted_original_custody(
+            SystemExit(143), signal_callback=False,
+        )
+
+    def test_keyboard_interrupt_after_catalog_start_never_reports_clean(self):
+        self._assert_interrupted_original_custody(
+            KeyboardInterrupt(), signal_callback=False,
+        )
+
+    def test_signal_callback_and_systemexit_preserve_original_receipt(self):
+        self._assert_interrupted_original_custody(
+            SystemExit(143), signal_callback=True,
+        )
+
+    def test_signal_callback_and_keyboard_interrupt_preserve_original_receipt(self):
+        self._assert_interrupted_original_custody(
+            KeyboardInterrupt(), signal_callback=True,
+        )
 
 
 class NativePatchContractTest(unittest.TestCase):

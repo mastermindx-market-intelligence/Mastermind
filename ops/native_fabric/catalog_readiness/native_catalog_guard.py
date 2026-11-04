@@ -194,3 +194,29 @@ def qualify_owned_grok_worker(
     if decision.dispatch_authorized or decision.retry_authorized:
         raise GrokCatalogRefused("GROK_CATALOG_UNEXPECTED_AUTHORITY")
     return [str(binary), *command[1:]]
+
+
+def qualify_custodied_grok_worker(*, state: dict, lease, **worker_scope) -> list[str]:
+    """Bind one pre-worker catalog utility to the incumbent LaneLease.
+
+    Mark uncertainty BEFORE invoking the effect-bearing process. Any
+    BaseException (including SystemExit, KeyboardInterrupt and signal-handler
+    interruption) retains original lease custody and propagates unchanged.
+    Only a qualified result or normal refusal with proven no-start/cleanup
+    clears the flag. This is not a second admission, lease or retry owner.
+    """
+    state["catalog_unsettled"] = True
+    try:
+        qualified = qualify_owned_grok_worker(**worker_scope)
+    except GrokCatalogRefused:
+        # This refusal is reachable only before process START, after a
+        # proven OwnedProcessStartError, or after a proven utility cleanup.
+        state["catalog_unsettled"] = False
+        raise
+    except BaseException:
+        # Sticky original-process custody. Never turn an interruption into
+        # a fabricated "not started" cleanup_proven terminal outcome.
+        lease.hold_for_reconciliation("grok_catalog_utility_unsettled")
+        raise
+    state["catalog_unsettled"] = False
+    return qualified
