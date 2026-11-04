@@ -1014,3 +1014,15 @@ main .launch-orchestrator-composer .launch-goal textarea { min-height: 72px; res
 main .launch-orchestrator-composer select { min-height: 44px; width: 100%; }
 main .launch-orchestrator-composer .form-actions { justify-content: flex-end; margin: 0; }
 @media (max-width: 600px) { .launch-orchestrator-composer form { grid-template-columns: 1fr; } }
+
+/* Existing sidebar search utility shares the shell material in both themes. */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 44px;
+  padding: var(--sp-2) var(--sp-3);
+  text-align: start;
+  flex-shrink: 0;
+}

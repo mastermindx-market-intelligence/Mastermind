@@ -46,6 +46,8 @@ import re
 from collections.abc import Mapping
 
 BODY_SCHEMA = "mastermind.workspace_project_plan.v1"
+BODY_SCHEMA_V2 = "mastermind.workspace_project_plan.v2"
+BODY_SCHEMAS = (BODY_SCHEMA, BODY_SCHEMA_V2)
 FRAME_SCHEMA = "mastermind.workspace_project_plan_read.v1"
 OPERATION = "project_plan"
 MAX_RESPONSE_BYTES = 131072
@@ -270,6 +272,9 @@ def validate_frame(value):
 
 def validate_body(value):
     """Validate the closed owner projection before any public transport publishes it."""
+    if type(value) is dict and value.get("schema") == BODY_SCHEMA_V2:
+        from common.project_plan_continuity_contract import validate_body_v2
+        return validate_body_v2(value)
     from datetime import datetime
     from common.executive_workspace_contract import bounded_canonical
     from control_plane.workspace_project_plan import project_workstream_plan

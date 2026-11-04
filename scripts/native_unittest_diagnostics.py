@@ -25,8 +25,11 @@ COUNTS = frozenset({'tests_run','failures','errors','skipped','expected_failures
 SCHEMA = 'ci.native-unittest-facts.v1'
 FIELDS = frozenset({'module','case','function','phase','line','kind'})
 PREFIX = 'ops/native_fabric/quota_continuity/'
+COMMISSION_ARGS = ['discover','-s',PREFIX+'tests','-p','test_commission_deadline.py']
+COMMISSION_SELECTION = ('tests', 'test_commission_deadline.py')
 
-# These are the four existing-repository qualification routes, not caller argv.
+# Three owner partitions, the rollout and the existing dedicated commission route.
+# These are closed repository qualification routes, not caller argv.
 # Each process keeps ordinary unittest discovery within its selected modules.
 WRAPPER_SELECTIONS = MappingProxyType({
     'tests/test_native_fabric_quota_continuity_a_f.py::test_native_quota_continuity_owners_a_f':
@@ -37,8 +40,12 @@ WRAPPER_SELECTIONS = MappingProxyType({
         ('tests', 'test_[p-z]*.py'),
     'tests/test_native_fabric_quota_continuity.py::test_native_generation_and_ingress_rollout':
         ('rollout', 'test_*.py'),
+    'tests/test_fabric_request_turn_budget.py::test_existing_commission_deadlines_remain_binding':
+        COMMISSION_SELECTION,
 })
-OWNER_SELECTIONS = tuple(value for value in WRAPPER_SELECTIONS.values() if value[0] == 'tests')
+# The separate commission consumer intentionally overlaps a_f; it is not a fourth partition.
+OWNER_SELECTIONS = tuple(value for value in WRAPPER_SELECTIONS.values()
+    if value[0] == 'tests' and value != COMMISSION_SELECTION)
 
 
 def checked_selection(directory, selection):
@@ -184,11 +191,19 @@ def records_for_error(error, nodeid, root, head):
         return [],True
 
 
-def run_native(directory, *, selection, timeout_seconds, root, cwd, invocation=None):
+def _discovery_args(selection):
+    if selection == COMMISSION_SELECTION:
+        return COMMISSION_ARGS.copy()
+    return ['discover','-s',selection[0],'-p',selection[1],'-v']
+
+
+def run_native(directory, *, selection, timeout_seconds, root, cwd, invocation=None, env=None):
     """Same CLI discovery and private output; opt-in diagnostics are incidental."""
     selection=checked_selection(directory,selection)
-    env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1'
-    args=['discover','-s',directory,'-p',selection[1],'-v']
+    if selection == COMMISSION_SELECTION and Path(cwd) != Path(root):
+        raise ValueError('native_diagnostic_profile_invalid')
+    env=os.environ.copy() if env is None else env.copy();env['PYTHONDONTWRITEBYTECODE']='1'
+    args=_discovery_args(selection)
     ordinary=[sys.executable,'-m','unittest',*args]
     head=None
     if env.get('MMX_CI_FIXED_DIAGNOSTICS_DIR'):
@@ -313,7 +328,7 @@ def qualify_wrapper(nodeid, *, timeout_seconds, root, cwd):
         raise ValueError("native_selection_unavailable")
     selection = WRAPPER_SELECTIONS[nodeid]
     directory = selection[0]
-    if directory == "tests":
+    if selection in OWNER_SELECTIONS:
         verify_owner_partitions(owner_inventory(Path(cwd) / "tests"), OWNER_SELECTIONS)
     invocation = NativeInvocation(directory, selection)
     result,facts = run_native(directory, selection=selection, timeout_seconds=timeout_seconds,
@@ -328,15 +343,15 @@ def qualify_wrapper(nodeid, *, timeout_seconds, root, cwd):
 
 def main(argv=None):
     argv=sys.argv[1:] if argv is None else argv
-    if (len(argv)!=12 or argv[0]!='--result-fd' or not argv[1].isdigit()
+    if (len(argv) not in (11,12) or argv[0]!='--result-fd' or not argv[1].isdigit()
             or argv[2]!='--head' or not re.fullmatch(r'[a-f0-9]{40}',argv[3])
             or argv[4]!='--invocation' or not re.fullmatch(r'[a-f0-9]{32}',argv[5])
-            or argv[6:] not in [
-                ['discover','-s',directory,'-p',pattern,'-v']
-                for directory,pattern in WRAPPER_SELECTIONS.values()]):
+            or argv[6:] not in [_discovery_args(selection) for selection in WRAPPER_SELECTIONS.values()]):
         return 2
-    descriptor=int(argv[1]);head=argv[3];invocation=argv[5];directory=argv[8]
-    selection=checked_selection(directory,(directory,argv[10]))
+    descriptor=int(argv[1]);head=argv[3];invocation=argv[5]
+    selection=next(selection for selection in WRAPPER_SELECTIONS.values()
+        if argv[6:] == _discovery_args(selection))
+    directory=selection[0]
     root=Path(__file__).resolve().parents[1]
     try:catalog=_fixed().PublicCatalog(root,native=True)
     except Exception:

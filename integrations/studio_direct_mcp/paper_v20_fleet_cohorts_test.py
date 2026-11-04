@@ -85,12 +85,15 @@ class TestPaperV20SealedFleet(unittest.TestCase):
                     int(pin[k], 16)
                 self.assertTrue(10 <= pin["file_count"] <= 13)
 
-    def test_publication_service_requalified_after_protected_runtime_release(self):
-        """Only the source-manifest identity changed in the current M2 census.
+    def test_publication_service_requalified_after_protected_publisher_rollout(self):
+        """The actual Nov 4 M2 publication gateway has a newer sealed profile.
 
-        M2: 2026-11-03 04:56 UTC, prior protected Executive release b4a5a892;
-        13/13 installed modules match the new manifest, while old config, plist,
-        non-Paper hash, and the Paper v12 bridge remain unchanged.
+        The installed original M2 owner has 13/13 file hashes, node/backend
+        and plist digests matching the current installed manifest. Its
+        gitPublish/repositoryWorkspaces/fleetStatus non-Paper selection changed
+        since the earlier accepted publication cohort; it remains untouched by
+        the Paper-only v20 selector. Preserve the earlier manifest as a stale
+        predecessor that can never be used for a CAS write.
         """
         publication = cohorts.COHORTS["mastermind-os-publication"]
         self.assertEqual(
@@ -99,7 +102,7 @@ class TestPaperV20SealedFleet(unittest.TestCase):
         )
         self.assertNotEqual(
             publication["manifest_sha256"],
-            "ede2189924ce7a0f98cbae6136cdf831be7a021e71bfaecce896ce7ff31524f4",
+            "aba7a5755ae71a12b9359890cb5d8cda7bd179b176fcb77d6119edd802809983",
         )
         self.assertEqual(
             publication["config_sha256"],
@@ -111,6 +114,10 @@ class TestPaperV20SealedFleet(unittest.TestCase):
         )
         self.assertEqual(publication["file_count"], 13)
         self.assertEqual(publication["generation"], "v12")
+        self.assertEqual(
+            publication["nonpaper_sha256"],
+            "c0faa52703c8e670b47427bb66a74adbf24cb55ef0586164a70c9975e8234b8b",
+        )
 
     def test_success_preserves_nonpaper_and_plist_and_original_bytes(self):
         for generation in ("v10", "v12"):

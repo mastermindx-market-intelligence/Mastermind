@@ -49,10 +49,12 @@ def tracked(tmp_path, source=LEAF, module=MODULE):
 def run_child(root, invocation='a'*32, directory='tests', selection=G_O):
     with tempfile.TemporaryFile() as channel:
         head=fixed.PublicCatalog(root).head
+        args=(['discover','-s',native.PREFIX+'tests','-p','test_commission_deadline.py']
+            if selection==native.COMMISSION_SELECTION else ['discover','-s',directory,'-p',selection[1],'-v'])
+        cwd=root if selection==native.COMMISSION_SELECTION else root/'ops/native_fabric/quota_continuity'
         command=[sys.executable,str(root/'scripts/native_unittest_diagnostics.py'),
-            '--result-fd',str(channel.fileno()),'--head',head,'--invocation',invocation,
-            'discover','-s',directory,'-p',selection[1],'-v']
-        result=subprocess.run(command,cwd=root/'ops/native_fabric/quota_continuity',
+            '--result-fd',str(channel.fileno()),'--head',head,'--invocation',invocation,*args]
+        result=subprocess.run(command,cwd=cwd,
             stdout=subprocess.PIPE,stderr=subprocess.PIPE,pass_fds=(channel.fileno(),),timeout=10)
         channel.seek(0);raw=channel.read(native.MAX_CHANNEL+1)
     return head,result,raw
@@ -320,6 +322,7 @@ SELECTION_MODULES = {
     ('tests', 'test_[g-o]*.py'): MODULE,
     ('tests', 'test_[p-z]*.py'): 'ops/native_fabric/quota_continuity/tests/test_zulu.py',
     ('rollout', 'test_*.py'): 'ops/native_fabric/quota_continuity/rollout/test_leaf.py',
+    native.COMMISSION_SELECTION: 'ops/native_fabric/quota_continuity/tests/test_commission_deadline.py',
 }
 
 
@@ -337,12 +340,15 @@ def test_selected_cli_matches_ordinary_exit_order_and_private_skip(selection, tm
     module = SELECTION_MODULES[selection]
     root = tracked(tmp_path, source, module)
     head,result,raw = run_child(root, directory=selection[0], selection=selection)
-    ordinary = subprocess.run([sys.executable,'-m','unittest','discover','-s',selection[0],
-        '-p',selection[1],'-v'], cwd=root/'ops/native_fabric/quota_continuity',
+    args=(['discover','-s',native.PREFIX+'tests','-p','test_commission_deadline.py']
+        if selection==native.COMMISSION_SELECTION else ['discover','-s',selection[0],'-p',selection[1],'-v'])
+    cwd=root if selection==native.COMMISSION_SELECTION else root/'ops/native_fabric/quota_continuity'
+    ordinary = subprocess.run([sys.executable,'-m','unittest',*args], cwd=cwd,
         capture_output=True, timeout=10)
     assert result.returncode == ordinary.returncode == 1
     for stream in (result.stderr, ordinary.stderr):
-        assert stream.index(b'test_error') < stream.index(b'test_failure') < stream.index(b'test_ok') < stream.index(b'test_skip')
+        if selection != native.COMMISSION_SELECTION:
+            assert stream.index(b'test_error') < stream.index(b'test_failure') < stream.index(b'test_ok') < stream.index(b'test_skip')
         assert b'Ran 4 tests' in stream and b'skipped=1' in stream
     value = native.decode(raw, head=head, invocation='a'*32, directory=selection[0],
         selection=selection, catalog=fixed.PublicCatalog(root,native=True), returncode=1)
@@ -379,11 +385,11 @@ def test_every_route_binds_immutable_selection_and_rejects_relabel_replay(select
     monkeypatch.setenv('MMX_CI_FIXED_DIAGNOSTICS_DIR', str(directory))
     invocation = native.NativeInvocation(selection[0], selection)
     result,facts = native.run_native(selection[0], selection=selection, timeout_seconds=10,
-        root=root, cwd=root/'ops/native_fabric/quota_continuity', invocation=invocation)
+        root=root, cwd=root if selection==native.COMMISSION_SELECTION else root/'ops/native_fabric/quota_continuity', invocation=invocation)
     assert result.returncode == 1 and facts.selection == invocation.selection == selection
     with pytest.raises(FrozenInstanceError):
         facts.selection = G_O
-    other = next(value for value in SELECTION_MODULES if value != selection)
+    other = ('tests','test_[a-f]*.py') if selection==G_O else G_O
     error = AssertionError('PRIVATE wrapper')
     assert not native.bind_facts(error, facts, invocation, selection_node(other))
     assert native.bind_facts(error, facts, invocation, selection_node(selection))
@@ -416,13 +422,15 @@ def test_selected_empty_suite_cannot_pass_wrapper(selection, tmp_path, monkeypat
     root = tracked(tmp_path, 'import unittest\n', SELECTION_MODULES[selection])
     monkeypatch.delenv('MMX_CI_FIXED_DIAGNOSTICS_DIR', raising=False)
     head,result,raw = run_child(root, directory=selection[0], selection=selection)
-    ordinary = subprocess.run([sys.executable,'-m','unittest','discover','-s',selection[0],
-        '-p',selection[1],'-v'], cwd=root/'ops/native_fabric/quota_continuity',
+    args=(['discover','-s',native.PREFIX+'tests','-p','test_commission_deadline.py']
+        if selection==native.COMMISSION_SELECTION else ['discover','-s',selection[0],'-p',selection[1],'-v'])
+    cwd=root if selection==native.COMMISSION_SELECTION else root/'ops/native_fabric/quota_continuity'
+    ordinary = subprocess.run([sys.executable,'-m','unittest',*args], cwd=cwd,
         capture_output=True, timeout=10)
     assert result.returncode == ordinary.returncode
     with pytest.raises(AssertionError):
         native.qualify_wrapper(selection_node(selection), timeout_seconds=10,
-            root=root, cwd=root/'ops/native_fabric/quota_continuity')
+            root=root, cwd=root if selection==native.COMMISSION_SELECTION else root/'ops/native_fabric/quota_continuity')
 
 
 @pytest.mark.parametrize('selection', [
@@ -450,3 +458,125 @@ def test_public_out_of_group_node_and_import_holder_are_not_projected(tmp_path):
         assert native._holder(failed, catalog, 'tests', G_O) is None
         holder = unittest.suite._ErrorHolder('setUpClass (test_alpha.Sentinel)')
         assert native._holder(holder, catalog, 'tests', G_O) is None
+
+
+def test_exact_commission_profile_publishes_live_leaf_without_broadening_discovery(tmp_path,monkeypatch):
+    root=tracked(tmp_path, 'import unittest\nclass PrivateOther(unittest.TestCase):\n def test_not_selected(self):raise RuntimeError("PRIVATE other file")\n')
+    leaf=root/native.PREFIX/'tests/test_commission_deadline.py';leaf.write_text(LEAF)
+    subprocess.run(['git','-C',str(root),'add','.'],check=True,capture_output=True)
+    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','profile'],check=True,capture_output=True)
+    spec=importlib.util.spec_from_file_location('commission_wrapper',root/'tests/test_fabric_request_turn_budget.py')
+    wrapper=importlib.util.module_from_spec(spec);spec.loader.exec_module(wrapper)
+    monkeypatch.setenv('MMX_CI_FIXED_DIAGNOSTICS_DIR',str(tmp_path/'unused'))
+    args=[sys.executable,'-m','unittest',*native.COMMISSION_ARGS]
+    ordinary=subprocess.run(args,cwd=root,capture_output=True,text=True,timeout=10)
+    with pytest.raises(AssertionError) as error:wrapper._run(args,timeout=240)
+    assert str(error.value).endswith('FAILED (failures=1, errors=1)\n')
+    directory=tmp_path/'fixed';directory.mkdir(mode=0o700)
+    diagnostics=fixed.FixedDiagnostics(fixed.PublicCatalog(root),directory)
+    diagnostics.failure_record('tests/test_fabric_request_turn_budget.py::test_existing_commission_deadlines_remain_binding','call',error=error.value)
+    raw=(directory/'ci-fixed-diagnostics.json').read_bytes();value=json.loads(raw)
+    rows=[row for row in value['failures'] if row['module'].startswith(native.PREFIX)]
+    assert value['head']==fixed.PublicCatalog(root).head and not value['truncated']
+    assert len(value['failures'])==3 and b'PRIVATE' not in raw
+    assert all(row['native_wrapper']=='test_existing_commission_deadlines_remain_binding' for row in rows)
+    assert ordinary.returncode==1 and len(rows)==2
+    assert {row['case'] for row in rows}=={'Leaf.test_failure','Leaf.test_error'}
+    assert all(row['module']==native.PREFIX+'tests/test_commission_deadline.py' for row in rows)
+    assert 'PRIVATE' not in json.dumps(rows)
+    assert native.records_for_error(error.value,'tests/test_fabric_request_turn_budget.py::test_existing_commission_deadlines_remain_binding',root,fixed.PublicCatalog(root).head)[0]==[]
+
+
+def test_commission_profile_original_command_environment_and_limit_are_exact(tmp_path,monkeypatch):
+    monkeypatch.delenv('MMX_CI_FIXED_DIAGNOSTICS_DIR',raising=False)
+    env={'PRIVATE_ENV':'unchanged','PYTHONDONTWRITEBYTECODE':'1'}
+    with mock.patch.object(native.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'ordinary','OK')) as run:
+        result,facts=native.run_native('tests',timeout_seconds=240,root=tmp_path,cwd=tmp_path,
+            selection=native.COMMISSION_SELECTION,env=env)
+    assert result.returncode==0 and facts is None
+    assert run.call_args.args[0]==[sys.executable,'-m','unittest',*native.COMMISSION_ARGS]
+    assert run.call_args.kwargs==dict(cwd=tmp_path,env=env,capture_output=True,text=True,timeout=240)
+    assert native.COMMISSION_ARGS==['discover','-s','ops/native_fabric/quota_continuity/tests','-p','test_commission_deadline.py']
+    for directory,selection,cwd in [
+        ('rollout',native.COMMISSION_SELECTION,tmp_path),
+        ('tests',('tests','test_private.py'),tmp_path),
+        ('tests',('tests','../private'),tmp_path),
+        ('tests',native.COMMISSION_SELECTION,tmp_path/'wrong')]:
+        with mock.patch.object(native.subprocess,'run') as child:
+            with pytest.raises(ValueError):native.run_native(directory,selection=selection,
+                timeout_seconds=240,root=tmp_path,cwd=cwd)
+            child.assert_not_called()
+
+
+def test_timeout_kind_is_exact_stdlib_type_not_attacker_name_or_output():
+    error=subprocess.TimeoutExpired(['PRIVATE command'],300,output='PRIVATE stdout',stderr='PRIVATE stderr')
+    assert fixed.KINDS.get(type(error))=='TimeoutExpired'
+    impostor=type('TimeoutExpired',(Exception,),{})('PRIVATE message')
+    subclass=type('PrivateTimeout',(subprocess.TimeoutExpired,),{})('PRIVATE',300)
+    assert type(impostor) not in fixed.KINDS and type(subclass) not in fixed.KINDS
+
+
+def test_partitioned_owners_preserve_rollout_and_dedicated_commission_limits(tmp_path):
+    root=tracked(tmp_path)
+    for node,selection in native.WRAPPER_SELECTIONS.items():
+        path,name=node.split('::')
+        spec=importlib.util.spec_from_file_location('closed_wrapper_'+name,root/path)
+        wrapper=importlib.util.module_from_spec(spec);spec.loader.exec_module(wrapper)
+        if selection==native.COMMISSION_SELECTION:
+            with mock.patch.object(wrapper,'_run',return_value='Ran 1 test\nOK\n') as run:
+                getattr(wrapper,name)()
+            assert run.call_args.args[0]==[sys.executable,'-m','unittest',
+                'discover','-s','ops/native_fabric/quota_continuity/tests','-p','test_commission_deadline.py']
+            assert run.call_args.kwargs['timeout']==240
+            assert set(run.call_args.kwargs['extra_env'])=={'NATIVE_ROLLOUT_TEST_ROOT'}
+        else:
+            target=native if selection[0]=='rollout' else wrapper
+            with mock.patch.object(target,'qualify_wrapper') as qualify:
+                getattr(wrapper,name)()
+            assert qualify.call_args==mock.call(node,
+                timeout_seconds=240 if selection[0]=='rollout' else 300,
+                root=root,cwd=root/'ops/native_fabric/quota_continuity')
+
+
+@pytest.mark.parametrize('mutation', [
+    'commission-to-af','af-to-commission','borrow-origin','swap-origins',
+    'replace-copy','borrow-row-object','repeat-row','swap-row-objects','drop-row',
+])
+def test_overlapping_commission_and_partition_keep_admitted_row_provenance(tmp_path,monkeypatch,mutation):
+    root=tracked(tmp_path,LEAF,native.PREFIX+'tests/test_commission_deadline.py')
+    directory=tmp_path/'fixed';directory.mkdir(mode=0o700)
+    monkeypatch.setenv('MMX_CI_FIXED_DIAGNOSTICS_DIR',str(directory))
+    commission=selection_node(native.COMMISSION_SELECTION)
+    af=selection_node(('tests','test_[a-f]*.py'))
+    errors=[]
+    for node,cwd in ((commission,root),(af,root/'ops/native_fabric/quota_continuity')):
+        with pytest.raises(AssertionError) as caught:
+            native.qualify_wrapper(node,timeout_seconds=10,root=root,cwd=cwd)
+        errors.append(caught.value)
+    diagnostics=fixed.FixedDiagnostics(fixed.PublicCatalog(root),directory)
+    for node,error in zip((commission,af),errors):
+        diagnostics.failure_record(node,'call',error=error)
+    assert diagnostics._closed()
+    rows=[(i,row) for i,row in enumerate(diagnostics.failures)
+        if row['module']==native.PREFIX+'tests/test_commission_deadline.py']
+    assert len(rows)==4
+    ci,c=next((i,row) for i,row in rows
+        if row['native_wrapper']==commission.split('::')[1] and row['case']=='Leaf.test_failure')
+    ai,a=next((i,row) for i,row in rows
+        if row['native_wrapper']==af.split('::')[1] and row['case']=='Leaf.test_failure')
+    assert c['native_invocation']!=a['native_invocation']
+    destination=directory/'ci-fixed-diagnostics.json';before=destination.read_bytes()
+    if mutation=='commission-to-af':c['native_wrapper']=a['native_wrapper']
+    elif mutation=='af-to-commission':a['native_wrapper']=c['native_wrapper']
+    elif mutation=='borrow-origin':
+        for key in ('native_invocation','native_wrapper'):c[key]=a[key]
+    elif mutation=='swap-origins':
+        for key in ('native_invocation','native_wrapper'):c[key],a[key]=a[key],c[key]
+    elif mutation=='replace-copy':diagnostics.failures[ci]=c.copy()
+    elif mutation=='borrow-row-object':diagnostics.failures[ci]=a
+    elif mutation=='repeat-row':diagnostics.failures.append(c)
+    elif mutation=='swap-row-objects':diagnostics.failures[ci],diagnostics.failures[ai]=a,c
+    elif mutation=='drop-row':del diagnostics.failures[ci]
+    assert not diagnostics._closed()
+    diagnostics.flush()
+    assert destination.read_bytes()==before

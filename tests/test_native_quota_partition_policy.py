@@ -66,5 +66,8 @@ def test_repository_collects_each_closed_wrapper_once_without_old_monolith():
         module = ast.parse((ROOT / path).read_text())
         found.extend(path + "::" + item.name for item in module.body
             if isinstance(item, ast.FunctionDef) and item.name.startswith("test_"))
-    assert sorted(found) == sorted(native.WRAPPER_SELECTIONS)
+    assert all(found.count(node)==1 for node in native.WRAPPER_SELECTIONS)
+    owner_wrappers=[node for node in found if node.split('::')[0].startswith('tests/test_native_fabric_quota_continuity')]
+    assert sorted(owner_wrappers)==sorted(node for node in native.WRAPPER_SELECTIONS
+        if node.split('::')[0].startswith('tests/test_native_fabric_quota_continuity'))
     assert "tests/test_native_fabric_quota_continuity.py::test_native_quota_continuity_owners" not in found
