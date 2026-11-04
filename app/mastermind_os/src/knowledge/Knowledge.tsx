@@ -167,7 +167,7 @@ function KnowledgeBody({ projection, onOpenSource, readResultReferences, readRes
         : "Retained result reading is not available here: no host generation was supplied for this view.";
 
   return <section className={`atelier-knowledge${readerActive ? " knowledge-reader-active" : ""}`} lang={locale} aria-label={t("Knowledge")}>
-    <header className="knowledge-heading"><p className="knowledge-eyebrow">{t("A library that grows with you")}</p>
+    <header className="knowledge-heading" aria-hidden={readerActive}><p className="knowledge-eyebrow">{t("A library that grows with you")}</p>
       <h1>{t("Keep what matters.")}<br />{t("Build on what you know.")}</h1>
       <p>{t("Useful work, with its sources and qualification intact.")}</p>
       <div className="knowledge-search"><label htmlFor={searchId}>{t("Search supplied knowledge")}</label>

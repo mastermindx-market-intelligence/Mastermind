@@ -20,6 +20,7 @@ export interface ProjectWorkspaceProps {
   scopeKey: string;
   locale: ProjectWorkspaceLocale;
   title: string | null;
+  headingLevel?: 1 | 2;
   goal: string | null;
   conversationPanel: ReactNode;
   composerPanel: ReactNode;
@@ -82,6 +83,7 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
     detailsPanel,
   } = props;
   const copy = COPY[locale];
+  const Heading = props.headingLevel === 1 ? "h1" : "h2";
 
   const [disclosure, setDisclosure] = useState<DisclosureName | null>(null);
   const [disclosureScopeKey, setDisclosureScopeKey] = useState(scopeKey);
@@ -172,7 +174,7 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
   return (
     <div className="mm-project-workspace" lang={locale} data-workspace-root="true">
       <header className="mm-project-workspace__header">
-        <h2 className="mm-project-workspace__title">{title ?? copy.fallbackTitle}</h2>
+        <Heading className="mm-project-workspace__title">{title ?? copy.fallbackTitle}</Heading>
         <div className="mm-project-workspace__goal-block">
           <p className="mm-project-workspace__sr-only">{copy.goalLabel}</p>
           {goal === null ? (

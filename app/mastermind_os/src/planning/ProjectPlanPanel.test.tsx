@@ -342,3 +342,18 @@ it("rejects a trailing-newline selector through the sole authoritative selector 
   expect(read).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Refresh" })).toHaveProperty("disabled", true);
 });
+
+
+it("composes the objective from the same fenced reader without a second read or stale header",async()=>{
+  const read=vi.fn(async()=>availableBody()), generation=()=>1;
+  let allowed=true;const canRead=()=>allowed;
+  const renderWorkspace=({objective,panel}:{objective:string|null;panel:React.ReactNode})=><><h1>{objective??"Objective unavailable"}</h1>{panel}</>;
+  const view=render(<ProjectPlanPanel selection={selection} read={read} canRead={canRead} sourceGeneration={generation} renderWorkspace={renderWorkspace}/>);
+  expect(await screen.findByRole("heading",{level:1,name:"Finish current work, then confirm the session can resume."})).toBeTruthy();
+  expect(read).toHaveBeenCalledTimes(1);
+  allowed=false;
+  view.rerender(<ProjectPlanPanel selection={selection} read={read} canRead={canRead} sourceGeneration={generation} renderWorkspace={renderWorkspace}/>);
+  expect(screen.getByRole("heading",{level:1,name:"Objective unavailable"})).toBeTruthy();
+  expect(screen.queryByText("Work visibility baseline")).toBeNull();
+  expect(read).toHaveBeenCalledTimes(1);
+});

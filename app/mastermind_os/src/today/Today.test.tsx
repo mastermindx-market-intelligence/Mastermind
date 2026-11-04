@@ -176,7 +176,7 @@ describe("Atelier Today", () => {
       expect(screen.getByText("Decision summary unavailable")).toBeTruthy();
       expect(screen.queryByText("Nothing needs your decision")).toBeNull();
       expect(screen.queryByRole("button", { name: "Open project" })).toBeNull();
-      expect(screen.getByText("An unavailable source is never an all-clear.")).toBeTruthy();
+      expect(screen.getByText("Missing information doesn’t mean there are no decisions.")).toBeTruthy();
       rendered.view.unmount();
     }
   });
@@ -231,14 +231,14 @@ describe("Atelier Today", () => {
     state.receipts.effect = "EFFECT_UNKNOWN";
     renderToday({projection:state});
     expect(screen.getByRole("heading",{name:"Needs your decision"})).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toContain("EFFECT_UNKNOWN");
+    expect(screen.getByRole("alert").textContent).toContain("Don’t send it again");
     expect(screen.queryByText("Nothing needs your decision")).toBeNull();
   });
 
   it("states the bounded all-clear only with current, complete coverage", () => {
     const { onOpenMission } = renderToday();
     expect(screen.getByText("Nothing needs your decision")).toBeTruthy();
-    expect(screen.getByText("This holds only within the selected mission's supplied scope.")).toBeTruthy();
+    expect(screen.getByText("This applies to this task only. Other project decisions may still be open.")).toBeTruthy();
     expect(onOpenMission).not.toHaveBeenCalled();
   });
 
@@ -297,7 +297,7 @@ describe("Atelier Today", () => {
       onOpenInbox={vi.fn()} onOpenProjects={vi.fn()} onOpenMission={vi.fn()} />);
     expect(screen.queryByText("Chairman request · Alpha program")).toBeNull();
     expect(screen.queryByText("Selected project")).toBeNull();
-    expect(screen.getByText("No resolved mission root is established, so no project lifecycle is inferred.")).toBeTruthy();
+    expect(screen.getByText("Work status is unavailable until a task can be identified.")).toBeTruthy();
   });
 
   it("summarizes work only from a decoded AVAILABLE document observed SAME, per exact root", () => {
@@ -319,20 +319,20 @@ describe("Atelier Today", () => {
     const { rerender } = render(<Today projection={projection({ programs: programsRead([card]) })} work={{ kind: "PENDING" }}
       composer={<button type="button">Send direction</button>}
       onOpenInbox={vi.fn()} onOpenProjects={vi.fn()} onOpenMission={vi.fn()} />);
-    expect(screen.getByText("Work summary is not yet held by this interface.")).toBeTruthy();
+    expect(screen.getByText("Work details are not available yet.")).toBeTruthy();
     rerender(<Today projection={projection({ programs: programsRead([card]) })} work={{ kind: "UNAVAILABLE", reason: "WORK_PENDING_CUSTODY" }}
       composer={<button type="button">Send direction</button>}
       onOpenInbox={vi.fn()} onOpenProjects={vi.fn()} onOpenMission={vi.fn()} />);
-    expect(screen.getByText("Work summary is unavailable.")).toBeTruthy();
+    expect(screen.getByText("Work details are unavailable for this task.")).toBeTruthy();
     rerender(<Today projection={projection({ programs: programsRead([card]) })} work={workState({ availability: "UNAVAILABLE" })}
       composer={<button type="button">Send direction</button>}
       onOpenInbox={vi.fn()} onOpenProjects={vi.fn()} onOpenMission={vi.fn()} />);
-    expect(screen.getByText("Work summary is unavailable.")).toBeTruthy();
+    expect(screen.getByText("Work details are unavailable for this task.")).toBeTruthy();
     expect(screen.getByText("source_unavailable")).toBeTruthy();
     rerender(<Today projection={projection({ programs: programsRead([card]) })} work={workState({ observation: "UNKNOWN" })}
       composer={<button type="button">Send direction</button>}
       onOpenInbox={vi.fn()} onOpenProjects={vi.fn()} onOpenMission={vi.fn()} />);
-    expect(screen.getByText("Work summary is unavailable.")).toBeTruthy();
+    expect(screen.getByText("Work details are unavailable for this task.")).toBeTruthy();
     expect(screen.queryByText("COMPLETED")).toBeNull();
     expect(screen.queryByText(/0 work roots/)).toBeNull();
   });
@@ -344,7 +344,7 @@ describe("Atelier Today", () => {
     expect(details.querySelector("h2")?.closest("details")).toBe(details);
     fireEvent.click(screen.getByText("Work and source details"));
     expect(details.open).toBe(true);
-    const clock = details.querySelector(".today-work-clock")!;
+    const clock = within(details).getByText("Generated at").closest("dl")!;
     expect(clock.textContent).toContain("Generated at");
     expect(clock.textContent).toContain("2026-09-20T10:01:00Z");
     const observed = within(details).getByText("Observed");
@@ -355,9 +355,22 @@ describe("Atelier Today", () => {
     const work = workState(); work.document.effect_exception.value = "EFFECT_UNKNOWN";
     const {view} = renderToday({work});
     const warning = view.container.querySelector(".today-side > [role='alert']");
-    expect(warning?.textContent).toContain("EFFECT_UNKNOWN");
+    expect(warning?.textContent).toContain("Don’t send it again");
     expect(warning?.closest("details")).toBeNull();
     expect((view.container.querySelector(".today-work-details") as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("keeps work-source and selected-row effect enums distinct behind the plain warning", () => {
+    const work = workState();
+    const row = work.document.groups.COMPLETED_NOT_ACCEPTED.pop()!;
+    row.effect.value = "EFFECT_UNKNOWN"; row.group = "EFFECT_EXCEPTION";
+    work.document.groups.EFFECT_EXCEPTION.push(row);
+    const {view} = renderToday({work});
+    const warning = view.container.querySelector(".today-side > [role='alert']");
+    expect(warning?.textContent).toContain("Don’t send it again");
+    const details = view.container.querySelector(".today-work-details")!;
+    expect(within(details as HTMLElement).getByText("Work source exception").nextElementSibling?.textContent).toBe("NONE");
+    expect(within(details as HTMLElement).getByText("Selected task effect").nextElementSibling?.textContent).toBe("EFFECT_UNKNOWN");
   });
 
   it("limits Today to three projects in supplied order without losing View all", () => {

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { validProjectPlanSelection, type ProjectPlanRead, type ProjectPlanSelection } from "./project-plan";
 import "./project-plan-panel.css";
 
@@ -20,6 +20,8 @@ export interface ProjectPlanPanelProps {
   sourceGeneration?: () => number;
   canRead?: () => boolean;
   locale?: "en" | "zh-CN";
+  /** Compose a workspace from this same qualified read, without another cache or read. */
+  renderWorkspace?: (view: {objective: string | null; panel: ReactNode}) => ReactNode;
 }
 
 // PR links may only derive from the fixed canonical repository and a positive
@@ -223,7 +225,7 @@ function AvailablePlanBody({ plan, source, chinese }: {
 }
 
 export function ProjectPlanPanel({
-  selection, read, sourceGeneration, canRead, locale = "en",
+  selection, read, sourceGeneration, canRead, locale = "en", renderWorkspace,
 }: ProjectPlanPanelProps) {
   const chinese = locale === "zh-CN";
   const [document, setDocument] = useState<ProjectPlanRead | null>(null);
@@ -362,7 +364,7 @@ export function ProjectPlanPanel({
     displayedPlan = document;
   }
 
-  return <section className="mm-project-plan" aria-label={text(COPY.ariaLabel, chinese)}
+  const panel = <section className="mm-project-plan" aria-label={text(COPY.ariaLabel, chinese)}
     aria-busy={state === "loading"}>
     <div className="mm-project-plan__heading">
       <div>
@@ -399,4 +401,8 @@ export function ProjectPlanPanel({
         <AvailablePlanBody plan={displayedPlan.plan} source={displayedPlan.source} chinese={chinese} />
       </div>}
   </section>;
+  return renderWorkspace ? renderWorkspace({
+    objective: displayedPlan?.availability === "AVAILABLE" ? displayedPlan.plan?.objective ?? null : null,
+    panel,
+  }) : panel;
 }
