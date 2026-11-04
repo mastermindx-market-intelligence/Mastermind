@@ -1,0 +1,363 @@
+{
+  "kind": "OBSERVED_READ_ONLY_PAPER_RESOURCE_TREE",
+  "observed_at_utc": "2026-11-04T06:35:12.943Z",
+  "carrier": "Mastermind Paper direct app",
+  "arguments": {
+    "limit": 200,
+    "includeArchived": true
+  },
+  "server": {
+    "name": "paper-desktop",
+    "version": "0.5.18"
+  },
+  "catalog_sha256": "03cb81e960dab705b21b0695f3886d39c4792df629a6419163efef52338182e4",
+  "response": {
+    "teamId": "team_01M2VVZT0Y25MV1STVB69SXZT9",
+    "teamName": "MastermindX's Team",
+    "resources": [
+      {
+        "id": "01M2WGNCX9475G79JRKJTCM08P",
+        "name": "MASTERMIND PAGES",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793765889784,
+        "createdAt": 1789810881455,
+        "open": true
+      },
+      {
+        "id": "01M5J3GC90GAKHK8B6SAPRV3JQ",
+        "name": "Archived · GMI Round 2 · merged into Product system",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793765876925,
+        "createdAt": 1792682766692,
+        "open": true
+      },
+      {
+        "id": "01M38EVF74SJWG1GANN5VP380Z",
+        "name": "Mastermind · Market Dashboard Popups · Redesign",
+        "type": "file",
+        "parentId": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+        "updatedAt": 1791863669874,
+        "createdAt": 1790211636518,
+        "open": true
+      },
+      {
+        "id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+        "name": "Refined vase",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793665472531,
+        "createdAt": 1789789837397,
+        "open": true
+      },
+      {
+        "id": "01M5JRN1HWF62YK527NKCY7WD5",
+        "name": "Paper E2E acceptance — file+page+order verified",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792889590789,
+        "createdAt": 1792704939654,
+        "open": true
+      },
+      {
+        "id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+        "name": "PROPHET",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793765892379,
+        "createdAt": 1790659721339,
+        "open": true,
+        "active": true
+      },
+      {
+        "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "name": "Terminal",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793766289777,
+        "createdAt": 1790659510736,
+        "open": true
+      },
+      {
+        "id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+        "name": "News Intelligence · Decision Rail · R2 · 2026-10-21",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793588598742,
+        "createdAt": 1792576017219,
+        "open": true
+      },
+      {
+        "id": "01M5K0V5AGPSDXKA2K1PH1ABNE",
+        "name": "Paper visual row guard canary 2026-10-22 (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792886402532,
+        "createdAt": 1792713528722,
+        "open": true
+      },
+      {
+        "id": "01M5JV8SY6WP21H72WKK7GJ5R6",
+        "name": "Paper reviewed deletion regression 2026-10-22 (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792880555379,
+        "createdAt": 1792707684365,
+        "open": true
+      },
+      {
+        "id": "01M5K3WQXMD1QKXM2SBD7VABW1",
+        "name": "Paper exact Copy link canary 2026-10-22 (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792889596290,
+        "createdAt": 1792716726268,
+        "open": true
+      },
+      {
+        "id": "01M5JKR6H0JNN07BA3YKQDXBNC",
+        "name": "Young harmony (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792799770513,
+        "createdAt": 1792699800170,
+        "open": true
+      },
+      {
+        "id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+        "name": "Terminal · Options R1 · Design Upgrade · 2026-10-21",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792774355265,
+        "createdAt": 1792568689955,
+        "open": true
+      },
+      {
+        "id": "01M5HDPF3HSZFJJAFMARVQSHZR",
+        "name": "Jolly vase",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792832772859,
+        "createdAt": 1792659897531,
+        "open": true
+      },
+      {
+        "id": "01M5JS8TNZKQ01SJS4D0S9VQFC",
+        "name": "Paper E2E acceptance — file+page+order verified (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792878471220,
+        "createdAt": 1792705588017,
+        "open": true
+      },
+      {
+        "id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+        "name": "GMI Explorer · Product system",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793766286203,
+        "createdAt": 1792652290902,
+        "open": true
+      },
+      {
+        "id": "01M5HVW84WZFE62DREB6QB9ZDJ",
+        "name": "MASTERMIND PAGES (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792875845354,
+        "createdAt": 1792674768914,
+        "open": true
+      },
+      {
+        "id": "01M3P1X4FR6BRTB13KA736Y1HT",
+        "name": "MarketOntology",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792233720204,
+        "createdAt": 1790667821633,
+        "open": true
+      },
+      {
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "name": "Mastermind · Market Guide · Re-envisioning",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1791863677279,
+        "createdAt": 1790026150345,
+        "open": true
+      },
+      {
+        "id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+        "name": "Terminal · Options R1 · Design Upgrade · W3 mobile · 2026-10-21",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792621008360,
+        "createdAt": 1792600853914,
+        "open": true
+      },
+      {
+        "id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+        "name": "International Markets · R10 · Current Build",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792731753555,
+        "createdAt": 1790667747592,
+        "open": true
+      },
+      {
+        "id": "01M3P1QEHS5XXQY85BJT6QR2E1",
+        "name": "Mastermind AI",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1791863674834,
+        "createdAt": 1790667635324,
+        "open": true
+      },
+      {
+        "id": "01M5EX8RTPR7YEZD2A144XED2S",
+        "name": "Expectation Surface · R1 · 2026-10-21",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792755635669,
+        "createdAt": 1792575562658,
+        "open": true
+      },
+      {
+        "id": "01M3NRCX55B452A12819WNE1RH",
+        "name": "Mastermind OS",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1791863677850,
+        "createdAt": 1790657852654,
+        "open": true
+      },
+      {
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "name": "Sector Intelligence · R4 · Astra Pro · 2026-11-02",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793766285245,
+        "createdAt": 1793663609128,
+        "open": true
+      },
+      {
+        "id": "01M312VSDSZFVT45674GDVJVZN",
+        "name": "Mastermind Product Design System — Canonical",
+        "type": "file",
+        "parentId": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+        "updatedAt": 1793765889212,
+        "createdAt": 1789964182975,
+        "open": true
+      },
+      {
+        "id": "01M6JA41WWACWMRRVMVX1NQP9K",
+        "name": "Mastermind Paper v20 Scratch Acceptance 2026-11-04",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1793765878722,
+        "createdAt": 1793763444710,
+        "open": true
+      },
+      {
+        "id": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
+        "name": "DUPLICATE DO NOT EDIT",
+        "type": "file",
+        "parentId": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+        "updatedAt": 1793741325460,
+        "createdAt": 1790657141927,
+        "archived": true
+      },
+      {
+        "id": "01M5HPWFPQ2Z5X79A9H8MJFKK0",
+        "name": "Young harmony",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792877804029,
+        "createdAt": 1792669531934
+      },
+      {
+        "id": "01M5HQ8VMMY87NVDENZAGJNYKM",
+        "name": "Young harmony (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792872141489,
+        "createdAt": 1792669937374
+      },
+      {
+        "id": "01M5HRAG5659SFE58D3PTA7D0V",
+        "name": "Young harmony (copy)",
+        "type": "file",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1792865522692,
+        "createdAt": 1792671039726
+      },
+      {
+        "id": "01M3NSTSZ248TQSMQQR62DC06J",
+        "name": "Untitled project",
+        "type": "folder",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1790659440157,
+        "createdAt": 1790659356642,
+        "archived": true
+      },
+      {
+        "id": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+        "name": "Others",
+        "type": "folder",
+        "parentId": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "updatedAt": 1790659428220,
+        "createdAt": 1790659425497
+      },
+      {
+        "id": "01M2VVZT0YA4WK46WT5VD72YTQ",
+        "name": "Projects",
+        "type": "folder",
+        "updatedAt": 1789789202462,
+        "createdAt": 1789789202462
+      }
+    ],
+    "count": 34
+  },
+  "child_arguments": {
+    "limit": 200,
+    "includeArchived": true,
+    "parentId": "01M3NSWX6SGTY4Z5DKBN4YP60M"
+  },
+  "child_response": {
+    "teamId": "team_01M2VVZT0Y25MV1STVB69SXZT9",
+    "teamName": "MastermindX's Team",
+    "resources": [
+      {
+        "id": "01M38EVF74SJWG1GANN5VP380Z",
+        "name": "Mastermind · Market Dashboard Popups · Redesign",
+        "type": "file",
+        "parentId": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+        "updatedAt": 1791863669874,
+        "createdAt": 1790211636518,
+        "open": true
+      },
+      {
+        "id": "01M312VSDSZFVT45674GDVJVZN",
+        "name": "Mastermind Product Design System — Canonical",
+        "type": "file",
+        "parentId": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+        "updatedAt": 1793765889212,
+        "createdAt": 1789964182975,
+        "open": true
+      },
+      {
+        "id": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
+        "name": "DUPLICATE DO NOT EDIT",
+        "type": "file",
+        "parentId": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+        "updatedAt": 1793741325460,
+        "createdAt": 1790657141927,
+        "archived": true
+      }
+    ],
+    "count": 3
+  },
+  "mutations": 0,
+  "qualification": "Actual resource read shape only. No folder/create/move response or preservation acceptance."
+}
