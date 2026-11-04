@@ -34,6 +34,11 @@ _PATCHLESS_EVIDENCE_SUFFIXES = (".log", ".json", ".yml", ".yaml", ".md", ".txt",
 class RiskSourceUnavailable(RuntimeError):
     """The snapshot is untrusted, inconsistent, truncated or no longer current."""
 
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        # Structured producer code, never arbitrary upstream exception text.
+        self.code = code if type(code) is str else None
+
 
 @dataclass(frozen=True)
 class SourcePR:

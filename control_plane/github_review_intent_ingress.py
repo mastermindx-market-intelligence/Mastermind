@@ -102,7 +102,9 @@ from control_plane.github_review_intent import (
 )
 
 
-from control_plane.github_review_risk_dispatch import ReviewDispatch, RiskDispatchAdvice
+from control_plane.github_review_risk_dispatch import (
+    PR_LOCAL_RISK_HOLD_REASONS, ReviewDispatch, RiskDispatchAdvice,
+)
 
 
 SCHEMA = "mastermind.github_review_intent_ingress.v1"
@@ -166,6 +168,12 @@ class ReviewAdmissionPreflightExpired(ReviewIngressUnavailable):
 
 class ReviewRiskSourceUnqualified(ReviewIngressUnavailable):
     """Automatic review risk facts failed closed before any admission effect."""
+
+    def __init__(self, message: str, *, source_reason: str | None = None) -> None:
+        super().__init__(message)
+        self.pr_local = (
+            type(source_reason) is str and source_reason in PR_LOCAL_RISK_HOLD_REASONS
+        )
 
 
 class ExistingReviewDecisionUnavailable(ReviewIngressUnavailable):
@@ -1280,18 +1288,19 @@ def admit_review_intent(
     )
 
 
-def admit_decided_review(
+def _preflight_review_risk(
     *, decision: ReviewIntentDecision, pull_request: PullRequestFacts,
-    fabric: FabricJobAdmissionPort, visibility: VisibilityPort | None = None,
+    fabric: FabricJobAdmissionPort,
     before_admission: Callable[[], None] | None = None,
     review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
-) -> ReviewIngressOutcome:
-    """Common commit boundary for authenticated origins, with first-winner joins."""
+) -> ReviewIngressOutcome | None:
+    """Read risk and existing command status without invoking admission.
+
+    A backlog scan may isolate a proven PR-local source failure only around
+    this preflight. The same exception after an admission call stays uncertain.
+    """
     if not decision.admitted:
-        return ReviewIngressOutcome(
-            state=(AdmissionState.ALREADY_ADMITTED if decision.already_admitted else AdmissionState.REFUSED),
-            decision=decision,
-        )
+        return None
     if review_risk_gate is not None:
         if not callable(review_risk_gate):
             raise ReviewIngressUnavailable("REVIEW_RISK_CONSUMER_UNBOUND")
@@ -1306,7 +1315,9 @@ def admit_decided_review(
         }
         if automatic:
             if advice.action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE:
-                raise ReviewRiskSourceUnqualified("REVIEW_RISK_SOURCE_UNQUALIFIED")
+                raise ReviewRiskSourceUnqualified(
+                    "REVIEW_RISK_SOURCE_UNQUALIFIED", source_reason=advice.reason,
+                )
             if (advice.repository != decision.repository
                     or advice.pull_number != decision.pull_number
                     or advice.head_sha != decision.frozen_head_sha):
@@ -1335,6 +1346,27 @@ def admit_decided_review(
                 raise ReviewIngressUnavailable("REVIEW_RISK_ADVICE_INVALID")
         elif advice.action is not ReviewDispatch.USE_EXISTING_MANUAL_INGRESS:
             raise ReviewIngressUnavailable("REVIEW_MANUAL_INTENT_RISK_ROUTE_MISMATCH")
+    return None
+
+
+def admit_decided_review(
+    *, decision: ReviewIntentDecision, pull_request: PullRequestFacts,
+    fabric: FabricJobAdmissionPort, visibility: VisibilityPort | None = None,
+    before_admission: Callable[[], None] | None = None,
+    review_risk_gate: Callable[..., RiskDispatchAdvice] | None = None,
+) -> ReviewIngressOutcome:
+    """Common commit boundary for authenticated origins, with first-winner joins."""
+    if not decision.admitted:
+        return ReviewIngressOutcome(
+            state=(AdmissionState.ALREADY_ADMITTED if decision.already_admitted else AdmissionState.REFUSED),
+            decision=decision,
+        )
+    preflight = _preflight_review_risk(
+        decision=decision, pull_request=pull_request, fabric=fabric,
+        before_admission=before_admission, review_risk_gate=review_risk_gate,
+    )
+    if preflight is not None:
+        return preflight
     objective = build_review_job_objective(
         pull_request=pull_request, intent_source=decision.intent_source
     )
@@ -1588,17 +1620,40 @@ def reconcile_open_pull_requests(
                         "REVIEW_RECONCILIATION_BUDGET_EXHAUSTED"
                     )
             try:
-                outcome = admit_decided_review(
-                    decision=decision, pull_request=current, fabric=fabric, visibility=visibility,
+                preflight = _preflight_review_risk(
+                    decision=decision, pull_request=current, fabric=fabric,
                     review_risk_gate=review_risk_gate, before_admission=scan_admission_guard,
                 )
-            except ReviewRiskSourceUnqualified:
+            except ReviewRiskSourceUnqualified as exc:
+                if type(exc) is ReviewRiskSourceUnqualified and exc.pr_local:
+                    # Only this read-only boundary proves no admission effect
+                    # was attempted. Retain the gap without starving other PRs.
+                    failures.append(ReviewReconciliationReadFailure(
+                        page=page, pull_number=number,
+                        code="REVIEW_RECONCILIATION_RISK_HOLD",
+                    ))
+                    continue
                 return receipt(page=page, code="REVIEW_RECONCILIATION_RISK_HOLD",
                                number=number, command=decision.command_id)
             except ReviewAdmissionPreflightExpired:
                 return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
                                number=number, command=decision.command_id)
             except Exception:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_ADMISSION_UNRECONCILED",
+                               number=number, command=decision.command_id)
+            if preflight is not None:
+                outcomes.append(preflight)
+                continue
+            try:
+                outcome = admit_decided_review(
+                    decision=decision, pull_request=current, fabric=fabric, visibility=visibility,
+                    before_admission=scan_admission_guard,
+                )
+            except ReviewAdmissionPreflightExpired:
+                return receipt(page=page, code="REVIEW_RECONCILIATION_BUDGET_EXHAUSTED",
+                               number=number, command=decision.command_id)
+            except Exception:
+                # No exception from the effect port is a PR-local source gap.
                 return receipt(page=page, code="REVIEW_RECONCILIATION_ADMISSION_UNRECONCILED",
                                number=number, command=decision.command_id)
             outcomes.append(outcome)

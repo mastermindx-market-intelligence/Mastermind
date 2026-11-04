@@ -27,6 +27,21 @@ from control_plane.github_review_risk_source import (
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
+# Only bounded, read-only failures of this already-bound PR are local.
+# Authentication, transport, reader/policy binding and unknown failures stay
+# global. These codes never authorize a review of the held PR or a retry.
+PR_LOCAL_RISK_HOLD_REASONS = frozenset({
+    "PR_NOT_REVIEWABLE",
+    "PR_FILES_OUT_OF_SCOPE",
+    "PR_CODE_PATCH_MISSING",
+    "PR_SOURCE_PAGINATION_INCOMPLETE",
+    "PR_SOURCE_FILES_INCOMPLETE",
+    "PR_SOURCE_MOVED_DURING_CENSUS",
+    "PR_SOURCE_STATS_INCONSISTENT",
+    "PR_SOURCE_HEAD_MOVED",
+    "CURRENT_SOURCE_INCOMPLETE",
+})
+
 
 class ReviewRiskDispatchError(ValueError):
     """A caller provided an invalid authority-independent input shape."""
@@ -95,16 +110,17 @@ def decide_risk_dispatch(
         assessment.schema != SCHEMA
         or assessment.repository != expected_repository
         or assessment.pull_number != expected_pull_number
-        or assessment.head_sha != expected_head_sha
         or current_source.repository != expected_repository
         or current_source.pull_number != expected_pull_number
-        or current_source.head_sha != expected_head_sha
         or current_source.head_repository != expected_repository
         or current_source.base_repository != expected_repository
-        or current_source.open is not True
-        or current_source.draft is not False
     ):
         return _hold("SIGNED_EXACT_HEAD_OR_PR_IDENTITY_MISMATCH")
+    if current_source.open is not True or current_source.draft is not False:
+        return _hold("PR_NOT_REVIEWABLE")
+    if (assessment.head_sha != expected_head_sha
+            or current_source.head_sha != expected_head_sha):
+        return _hold("PR_SOURCE_HEAD_MOVED")
     if assessment.tier is ReviewTier.HOLD:
         return _hold("CURRENT_SOURCE_INCOMPLETE", ReviewTier.HOLD)
     bound = {
@@ -151,8 +167,15 @@ def advise_current_pr_review(
         latest = reader.read_pr_risk_source(
             repository=repository, pull_number=pull_number,
         )
+    except RiskSourceUnavailable as exc:
+        if (type(exc) is RiskSourceUnavailable
+                and type(exc.code) is str
+                and exc.code in PR_LOCAL_RISK_HOLD_REASONS):
+            return _hold(exc.code)
+        return _hold("CURRENT_AUTHENTICATED_SOURCE_UNAVAILABLE")
     except Exception:
-        # A bounded upstream source failure is no permission to skip or admit.
+        # Permission/rate/transport failures are never downgraded to local
+        # source gaps, even if their human-readable text resembles a code.
         return _hold("CURRENT_AUTHENTICATED_SOURCE_UNAVAILABLE")
     return decide_risk_dispatch(
         origin=origin, assessment=assessment,
