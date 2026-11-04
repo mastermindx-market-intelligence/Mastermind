@@ -17,7 +17,12 @@ import tempfile
 
 from ops.native_fabric.quota_continuity.rollout import native_generation as gen
 
-BASE = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"
+PREVIOUS = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"
+BASE = "8cefc4b27b2036f86bcec1d626e864f45f792e2c290ab8de56fbde89f78ac94a"
+ACCEPTED_DELTA = {
+    "ext/fabric_task.py": "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88",
+    "ext/pick.py": "747a55a50fb1ae579d18ae4decc6e3b077eb4b927a3968b61abaeeeb6292f132",
+}
 REVIEWED_PREIMAGES = {
     "ext/native_remote.py": "388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e",
     "ext/remote_sub_exec.py": "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d",
@@ -102,6 +107,15 @@ def apply_remote_executor(original: bytes) -> bytes:
     return value.encode("utf-8")
 
 
+def verify_accepted_delta(previous: dict[str, str], current: dict[str, str]) -> None:
+    """Preserve the incumbent diagnostics and refuse unknown source movement."""
+    if set(previous) != set(current):
+        raise ValueError("NATIVE_CATALOG_INCUMBENT_CLOSURE_CHANGED")
+    observed = {path: current[path] for path in current if current[path] != previous[path]}
+    if observed != ACCEPTED_DELTA:
+        raise ValueError("NATIVE_CATALOG_INCUMBENT_DELTA_UNREVIEWED")
+
+
 def qualify(store: Path, release_stage: Path | None = None) -> dict:
     store = store.resolve(strict=True)
     pointer_before = (store / "CURRENT.json").read_bytes()
@@ -109,6 +123,8 @@ def qualify(store: Path, release_stage: Path | None = None) -> dict:
     if pointer is None or pointer.get("generation") != BASE:
         raise ValueError("NATIVE_CATALOG_CURRENT_GENERATION_DRIFT")
     source_root, manifest = gen.verify(store, BASE)
+    _, previous = gen.verify(store, PREVIOUS)
+    verify_accepted_delta(previous["files"], manifest["files"])
     if any(manifest["files"].get(path) != hash_ for path, hash_ in REVIEWED_PREIMAGES.items()):
         raise ValueError("NATIVE_CATALOG_REVIEWED_PREIMAGE_DRIFT")
     if ADDED.intersection(manifest["files"]):
@@ -190,6 +206,8 @@ def qualify(store: Path, release_stage: Path | None = None) -> dict:
         report = {
             "state": "QUALIFIED_ISOLATED_NOT_INSTALLED",
             "base_generation": BASE,
+            "previous_accepted_generation": PREVIOUS,
+            "accepted_incumbent_diagnostics": sorted(ACCEPTED_DELTA),
             "source_files": len(new_hashes),
             "patches": sorted(REVIEWED_PREIMAGES),
             "new_files": sorted(ADDED),

@@ -21,6 +21,7 @@ from native_catalog_guard import (  # noqa: E402
 )
 from ops.native_fabric.catalog_readiness.qualify_current import (  # noqa: E402
     apply_native_remote, apply_remote_executor,
+    verify_accepted_delta, ACCEPTED_DELTA,
 )
 
 
@@ -197,6 +198,22 @@ class NativeCatalogGuardTest(unittest.TestCase):
 
 
 class NativePatchContractTest(unittest.TestCase):
+    def test_accepted_gen27_delta_keeps_new_diagnostics_without_overlay(self):
+        previous = {"ext/fabric_task.py": "previous-task",
+                    "ext/pick.py": "previous-pick",
+                    "ext/remote_sub_exec.py": "unchanged-executor",
+                    "ext/native_remote.py": "unchanged-remote"}
+        current = dict(previous, **ACCEPTED_DELTA)
+        verify_accepted_delta(previous, current)
+        for mutated in (
+            dict(current, **{"ext/remote_sub_exec.py": "changed"}),
+            dict(current, **{"ext/pick.py": "unreviewed"}),
+            {k: v for k, v in current.items() if k != "ext/native_remote.py"},
+        ):
+            with self.subTest(mutated=mutated):
+                with self.assertRaisesRegex(ValueError, "INCUMBENT_"):
+                    verify_accepted_delta(previous, mutated)
+
     def test_remote_preimage_requires_exact_native_anchor(self):
         with self.assertRaisesRegex(ValueError, "PREIMAGE_MISMATCH"):
             apply_native_remote(b"tampered native terminal code")
