@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -239,7 +239,7 @@ test('typed commit stays closed-world and does not require remote observation', 
       message: 'test: local-only typed commit',
     });
     assert.equal(remoteObservationAttempted, false);
-    assert.equal(result.status, 'OK');
+    assert.equal(result.status, 'OK', JSON.stringify(result));
     assert.equal(result.effect_state, 'APPLIED');
     assert.equal(result.code, 'APPLIED');
     assert.equal('remote_head_sha' in result, false);
@@ -453,6 +453,65 @@ test('lost push response reconciles to APPLIED when exact remote head proves the
     assert.equal(result.effect_state, 'APPLIED');
     assert.equal(result.code, 'APPLIED_AFTER_AMBIGUOUS_PUSH_RETURN');
     assert.equal(result.remote_head_sha, f.head);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('explicit server-side one-ref rejection is diagnosed without treating its ref as unknown', async () => {
+  const f = await fixture();
+  try {
+    const hook = path.join(f.remote, 'hooks', 'pre-receive');
+    await writeFile(hook, '#!/bin/sh\nprintf "test-only remote rejection\\n" >&2\nexit 1\n');
+    await chmod(hook, 0o700);
+    let pushCount = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && gitCommand(args) === 'push') pushCount += 1;
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.push({ operation_id: f.operationId, expected_head_sha: f.head });
+    assert.equal(pushCount, 1, 'a rejection must never initiate another write');
+    assert.equal(result.status, 'REFUSED', JSON.stringify(result));
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal(result.code, 'REMOTE_REF_REJECTED_UNCHANGED');
+    assert.equal(result.push_attempted, true);
+    assert.equal(result.retry_allowed, false);
+    assert.equal(result.ready_to_push, false);
+    assert.equal(result.diagnostic_scope, 'SAME_CARRIER_READ_ONLY');
+    assert.equal(result.rejection_reason, 'UNDETERMINED');
+    assert.equal(result.local_head_sha, f.head);
+    assert.equal(result.remote_head_sha, null);
+    assert.equal((await git(f.workspace, 'ls-remote', '--heads', 'origin',
+      `refs/heads/${f.branch}`)).stdout.trim(), '');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('an unrelated porcelain ref cannot clear an ambiguous admitted push', async () => {
+  const f = await fixture();
+  try {
+    let pushCount = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && gitCommand(args) === 'push') {
+          pushCount += 1;
+          const error = new Error('test-only wrong-ref remote rejection');
+          error.code = 1;
+          error.stdout = ['!', `${f.head}:refs/heads/unrelated`, '[remote rejected] (failed)'].join(String.fromCharCode(9)) + String.fromCharCode(10);
+          error.stderr = '';
+          throw error;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.push({ operation_id: f.operationId, expected_head_sha: f.head });
+    assert.equal(pushCount, 1);
+    assert.equal(result.status, 'UNKNOWN');
+    assert.equal(result.effect_state, 'EFFECT_UNKNOWN');
+    assert.equal(result.code, 'PUSH_RESULT_UNCERTAIN');
   } finally {
     await f.cleanup();
   }
@@ -1049,6 +1108,99 @@ test('sparse typed commit seeds its private index from the linked worktree index
   } finally { await f.cleanup(); }
 });
 
+test('typed commit captures a same-size unstaged edit after copying a racily clean index', async () => {
+  const f = await fixture();
+  try {
+    await git(f.workspace, 'config', 'core.checkStat', 'minimal');
+    await git(f.workspace, 'config', 'core.trustctime', 'false');
+    await git(f.workspace, 'config', 'core.fsmonitor', 'false');
+
+    const proofPath = path.join(f.workspace, 'proof.txt');
+    const timestamp = 1_700_000_000;
+    await utimes(proofPath, timestamp, timestamp);
+    await git(f.workspace, 'add', '--', 'proof.txt');
+    const { stdout: indexOut } = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const realIndexPath = path.resolve(f.workspace, indexOut.trim());
+    await utimes(realIndexPath, timestamp, timestamp);
+
+    const originalIndex = await readFile(realIndexPath);
+    const originalIndexMtime = (await stat(realIndexPath, { bigint: true })).mtimeNs;
+    const assertRealIndexUnchanged = async () => {
+      assert.deepEqual(await readFile(realIndexPath), originalIndex,
+        'pre-commit preparation must not rewrite the real index');
+      assert.equal((await stat(realIndexPath, { bigint: true })).mtimeNs, originalIndexMtime,
+        'pre-commit preparation must not retimestamp the real index');
+    };
+
+    // Keep v2 entirely unstaged with the same size and compared timestamp.
+    await writeFile(proofPath, 'v2\n');
+    await utimes(proofPath, timestamp, timestamp);
+    assert.equal((await stat(proofPath)).size, 3);
+    const diffNames = async (indexPath) => {
+      const { stdout } = await run(GIT, ['diff-files', '--name-only', '--', 'proof.txt'], {
+        cwd: f.workspace,
+        env: { ...process.env, GIT_INDEX_FILE: indexPath, GIT_OPTIONAL_LOCKS: '0' },
+      });
+      return stdout;
+    };
+
+    // Identical index bytes lose Git's racy-clean guard if the copy is newer.
+    const newerCopy = path.join(f.root, 'newer-index-control');
+    await writeFile(newerCopy, originalIndex);
+    await utimes(newerCopy, timestamp + 60, timestamp + 60);
+    assert.deepEqual(await readFile(newerCopy), originalIndex);
+    assert.equal(await diffNames(realIndexPath), 'proof.txt\n');
+    assert.equal(await diffNames(newerCopy), '');
+    await assertRealIndexUnchanged();
+
+    let candidateChecks = 0;
+    let refChecks = 0;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && args[0] === 'commit-tree') {
+          await assertRealIndexUnchanged();
+          const { stdout } = await git(f.workspace, 'show', args[1] + ':proof.txt');
+          assert.equal(stdout, 'v2\n',
+            'the actual candidate tree must contain the unstaged edit');
+          candidateChecks++;
+        }
+        if (file === GIT && args[0] === 'update-ref') {
+          await assertRealIndexUnchanged();
+          const { stdout: oldHead } = await git(f.workspace, 'rev-parse', 'HEAD');
+          assert.equal(oldHead.trim(), f.head,
+            'the branch must remain unchanged before its fenced update');
+          const { stdout: candidateContent } = await git(
+            f.workspace, 'show', args[2] + ':proof.txt');
+          assert.equal(candidateContent, 'v2\n',
+            'the commit admitted to update-ref must contain the edit');
+          refChecks++;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId,
+      expected_head_sha: f.head,
+      message: 'test: preserve racily clean index semantics',
+    });
+    assert.equal(result.code, 'APPLIED', JSON.stringify(result));
+    assert.equal(result.status, 'OK');
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.index_synced, true);
+    assert.equal(candidateChecks, 1);
+    assert.equal(refChecks, 1);
+    assert.notEqual(result.commit_head_sha, f.head);
+    const { stdout: committed } = await git(
+      f.workspace, 'show', result.commit_head_sha + ':proof.txt');
+    assert.equal(committed, 'v2\n');
+    const { stdout: staged } = await git(f.workspace, 'show', ':proof.txt');
+    assert.equal(staged, 'v2\n',
+      'post-commit synchronization must install the committed content');
+  } finally {
+    await f.cleanup();
+  }
+});
+
 test('private-index preparation refuses concurrent real-index mutation before ref update', async () => {
   const f = await fixture();
   try {
@@ -1114,4 +1266,166 @@ test('foreign index lock is preserved after the fenced ref update', async () => 
     const {stdout: headOut} = await git(f.workspace, 'rev-parse', 'HEAD');
     assert.equal(headOut.trim(), result.commit_head_sha);
   } finally {await f.cleanup();}
+});
+
+
+async function preparedMergeFixture() {
+  const f = await fixture();
+  await git(f.workspace, 'checkout', '-b', 'fixture-protected', f.head);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'protected runtime\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: protected successor');
+  f.protectedBase = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', f.protectedBase);
+  await git(f.workspace, 'checkout', f.branch);
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'requested CEO selection\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  await git(f.workspace, 'commit', '-m', 'test: original source');
+  f.head = (await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim();
+  await assert.rejects(git(f.workspace, 'merge-tree', '--write-tree', f.head, f.protectedBase),
+    (error) => error.code === 1 && error.stdout.includes('CONFLICT'));
+  await writeFile(path.join(f.workspace, 'proof.txt'), 'protected runtime\nrequested CEO selection\n');
+  await git(f.workspace, 'add', 'proof.txt');
+  f.tree = (await git(f.workspace, 'write-tree')).stdout.trim();
+  f.args = { operation_id: f.operationId, expected_head_sha: f.head,
+    message: 'test: preserve reviewed integration ancestry',
+    merge: { expected_protected_base_sha: f.protectedBase, expected_tree_sha: f.tree } };
+  return f;
+}
+
+test('merge schema accepts only optional exact parent and tree fences', () => {
+  const schema = STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL.inputSchema;
+  assert.equal(schema.required.includes('merge'), false);
+  assert.equal(schema.properties.merge.additionalProperties, false);
+  assert.deepEqual(schema.properties.merge.required, ['expected_protected_base_sha', 'expected_tree_sha']);
+  assert.deepEqual(Object.keys(schema.properties.merge.properties), schema.properties.merge.required);
+});
+
+test('typed merge preserves reviewed conflict resolution and actual protected ancestry without network', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    const commands = [];
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      if (file === GIT) {
+        const command = gitCommand(args);
+        commands.push(command);
+        assert.ok(!['fetch', 'push', 'ls-remote', 'clone'].includes(command), 'commit must remain local-only');
+      }
+      return execFile(file, args, options);
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.status, 'OK');
+    const record = (await git(f.workspace, 'show', '-s', '--format=%T%n%P', result.commit_head_sha)).stdout.trim().split('\n');
+    assert.deepEqual(record, [f.tree, `${f.head} ${f.protectedBase}`]);
+    assert.equal((await git(f.workspace, 'status', '--porcelain')).stdout, '');
+    await git(f.workspace, 'merge-base', '--is-ancestor', f.protectedBase, result.commit_head_sha);
+    await git(f.workspace, 'merge-tree', '--write-tree', result.commit_head_sha, f.protectedBase);
+    assert.equal((await readFile(path.join(f.workspace, 'proof.txt'), 'utf8')), 'protected runtime\nrequested CEO selection\n');
+    assert.equal(commands.filter((command) => command === 'commit-tree').length, 1);
+    assert.equal((await git(f.workspace, 'ls-remote', '--heads', 'origin')).stdout, '');
+  } finally { await f.cleanup(); }
+});
+
+test('merge can record missing ancestry with an unchanged reviewed tree and binds its second parent in the action reference', async () => {
+  const f = await fixture();
+  try {
+    const tree = (await git(f.workspace, 'rev-parse', 'HEAD^{tree}')).stdout.trim();
+    const refs = [];
+    for (const message of ['protected one', 'protected two']) {
+      const base = (await git(f.workspace, 'commit-tree', tree, '-p', f.head, '-m', message)).stdout.trim();
+      await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', base);
+      const result = await createGitPublisher(f.config).commit({ operation_id: f.operationId,
+        expected_head_sha: f.head, message: 'test: same reviewed tree',
+        merge: { expected_protected_base_sha: base, expected_tree_sha: tree } });
+      assert.equal(result.effect_state, 'APPLIED');
+      assert.equal((await git(f.workspace, 'show', '-s', '--format=%P', result.commit_head_sha)).stdout.trim(), `${f.head} ${base}`);
+      refs.push(result.action_ref);
+      await git(f.workspace, 'reset', '--hard', f.head);
+    }
+    assert.notEqual(refs[0], refs[1]);
+    const ordinary = await createGitPublisher(f.config).commit({ operation_id: f.operationId,
+      expected_head_sha: f.head, message: 'test: unchanged ordinary commit' });
+    assert.equal(ordinary.code, 'NO_COMMITTABLE_CHANGES');
+  } finally { await f.cleanup(); }
+});
+
+for (const merge of [null, [], {}, { expected_protected_base_sha: 'a'.repeat(40) },
+  { expected_protected_base_sha: 'A'.repeat(40), expected_tree_sha: 'b'.repeat(40) },
+  { expected_protected_base_sha: 'a'.repeat(40), expected_tree_sha: 'b'.repeat(40), ref: 'refs/heads/foreign' }]) {
+  test(`malformed merge object is rejected before owner or Git effects: ${JSON.stringify(merge)}`, async () => {
+    const f = await fixture();
+    try {
+      let calls = 0;
+      const publisher = createGitPublisher(f.config, { execFile: async () => { calls++; throw new Error('unexpected effect'); } });
+      await assert.rejects(publisher.commit({ operation_id: f.operationId,
+        expected_head_sha: f.head, message: 'test: invalid merge', merge }), /merge requires/);
+      assert.equal(calls, 0);
+      assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+    } finally { await f.cleanup(); }
+  });
+}
+
+for (const mismatch of ['protected', 'missing_protected', 'tree', 'head', 'duplicate', 'already_contained']) {
+  test(`merge ${mismatch} fence refuses without moving the owned ref or real index`, async () => {
+    const f = await preparedMergeFixture();
+    try {
+      const args = structuredClone(f.args);
+      const codes = { protected: 'PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE', missing_protected: 'PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE',
+        tree: 'EXPECTED_TREE_MISMATCH', head: 'EXPECTED_HEAD_MISMATCH', duplicate: 'DUPLICATE_MERGE_PARENT',
+        already_contained: 'PROTECTED_BASE_ALREADY_CONTAINED' };
+      if (mismatch === 'protected') args.merge.expected_protected_base_sha = 'b'.repeat(40);
+      if (mismatch === 'missing_protected') await git(f.workspace, 'update-ref', '-d', 'refs/remotes/origin/master');
+      if (mismatch === 'tree') args.merge.expected_tree_sha = 'c'.repeat(40);
+      if (mismatch === 'head') args.expected_head_sha = 'd'.repeat(40);
+      if (mismatch === 'duplicate' || mismatch === 'already_contained') {
+        const base = mismatch === 'duplicate' ? f.head : (await git(f.workspace, 'rev-parse', `${f.head}^`)).stdout.trim();
+        await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', base);
+        args.merge.expected_protected_base_sha = base;
+      }
+      const indexPath = (await git(f.workspace, 'rev-parse', '--git-path', 'index')).stdout.trim();
+      const index = await readFile(path.resolve(f.workspace, indexPath));
+      const result = await createGitPublisher(f.config).commit(args);
+      assert.equal(result.effect_state, 'NOT_APPLIED');
+      assert.equal(result.code, codes[mismatch]);
+      assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+      assert.deepEqual(await readFile(path.resolve(f.workspace, indexPath)), index);
+    } finally { await f.cleanup(); }
+  });
+}
+
+test('changed protected snapshot during preparation is refused before branch mutation', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    let changed = false;
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      const result = await execFile(file, args, options);
+      if (file === GIT && gitCommand(args) === 'commit-tree' && !changed) {
+        changed = true;
+        await git(f.workspace, 'update-ref', 'refs/remotes/origin/master', f.head);
+      }
+      return result;
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.code, 'PROTECTED_BASE_CHANGED_DURING_PREPARATION');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+  } finally { await f.cleanup(); }
+});
+
+test('merge readback rejects a commit with the wrong parent before updating the owned branch', async () => {
+  const f = await preparedMergeFixture();
+  try {
+    const publisher = createGitPublisher(f.config, { execFile: async (file, args, options) => {
+      const result = await execFile(file, args, options);
+      if (file === GIT && gitCommand(args) === 'show' && args.includes('--format=%T%n%P')) {
+        return { ...result, stdout: `${f.tree}\n${f.head}\n` };
+      }
+      return result;
+    } });
+    const result = await publisher.commit(f.args);
+    assert.equal(result.code, 'MERGE_COMMIT_IDENTITY_MISMATCH');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal((await git(f.workspace, 'rev-parse', 'HEAD')).stdout.trim(), f.head);
+  } finally { await f.cleanup(); }
 });

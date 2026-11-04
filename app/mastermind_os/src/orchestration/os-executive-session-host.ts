@@ -2,11 +2,13 @@ import {
   createExecutiveSessionBinding,
   type ExecutiveSessionBinding,
   type ExecutiveSessionTransport,
+  type QualifiedSessionAnswerRead,
 } from "./executive-session-command-port";
 import type { MissionSelection } from "../mission";
 import type {
   FiniteCommandPort,
   PendingPointerStore,
+  OperationPointer,
 } from "./operation-controller";
 
 /**
@@ -26,9 +28,14 @@ import type {
  */
 export type SessionCommandPort = FiniteCommandPort & {
   readonly currentTargetRef: () => string | null;
+  readonly readOriginalReferences?: (selection: MissionSelection, signal: AbortSignal,
+                                     cursor?: string) => Promise<unknown>;
+  /** Existing native READ operation; optional only for older injected hosts. */
+  readonly readQualifiedAnswer?: (pointer: OperationPointer, signal: AbortSignal) =>
+    Promise<QualifiedSessionAnswerRead>;
 };
 
-export type MountedExecutiveSessionBinding = ExecutiveSessionBinding & {
+export type MountedExecutiveSessionBinding = Omit<ExecutiveSessionBinding, "port"> & {
   readonly port: SessionCommandPort;
 };
 
@@ -62,6 +69,37 @@ export function createOsExecutiveSessionHost(
       prepare: (intent) => original.prepare(intent),
       submit: (pointer, intent, signal) => original.submit(pointer, intent, signal),
       readOperation: (pointer, signal) => original.readOperation(pointer, signal),
+      readQualifiedAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
+      readOriginalReferences: transport.references ? async (selected, signal, cursor) => {
+        // This READ lives under the *same* verified Session owner as the
+        // qualified native reply. A stale/unverified or foreign selection
+        // must never start an HTTP call merely because a UI closure survives.
+        const state = handle.sessionState();
+        const owner = original.context();
+        const authGeneration = transport.authGeneration();
+        if (!state || !owner || signal.aborted ||
+            selected.workRef !== state.selection.workRef ||
+            selected.rootJobId !== state.selection.rootJobId) {
+          throw new Error("session_references_unavailable");
+        }
+        const args = { work_ref: state.selection.workRef,
+                       root_job_id: state.selection.rootJobId,
+                       page_size: 16, ...(cursor ? { cursor } : {}) };
+        const raw = await transport.references!(args, signal);
+        // An auth, expiry, selection, or host refresh during the await must
+        // withhold the old frame, even if the HTTP response itself succeeded.
+        const current = handle.sessionState();
+        const afterOwner = original.context();
+        if (signal.aborted || !current || !afterOwner ||
+            transport.authGeneration() !== authGeneration ||
+            afterOwner.principalScope !== owner.principalScope ||
+            afterOwner.generation !== owner.generation ||
+            current.selection.workRef !== state.selection.workRef ||
+            current.selection.rootJobId !== state.selection.rootJobId) {
+          throw new Error("session_references_unavailable");
+        }
+        return raw;
+      } : undefined,
       currentTargetRef: () => {
         const state = handle.sessionState();
         return state?.capabilities.send ? state.target?.target_ref ?? null : null;
@@ -124,6 +162,8 @@ export function completeExecutiveSessionBinding(
     !isFn(store.clearIfEqual)
   )
     return null;
+  if (port.readQualifiedAnswer !== undefined && !isFn(port.readQualifiedAnswer)) return null;
+  if (port.readOriginalReferences !== undefined && !isFn(port.readOriginalReferences)) return null;
   if (isFn((store as Record<string, unknown>).write)) return null;
   if (isFn((store as Record<string, unknown>).clear)) return null;
   if (

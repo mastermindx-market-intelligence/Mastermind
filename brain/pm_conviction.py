@@ -23,6 +23,7 @@ Model-agnostic via ``role="deep"`` (Opus/Fable resolved by config/agents.yml).
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,9 +66,12 @@ def _read_market_view(*, now: datetime | None = None) -> dict | None:
     try:
         from brain import market_view
 
-        d = json.loads(_MARKET_VIEW_PATH.read_text())
+        payload = _MARKET_VIEW_PATH.read_bytes()
+        d = json.loads(payload)
         if isinstance(d, dict):
-            return market_view.serving_view(d, now=now)
+            projected = market_view.serving_view(d, now=now)
+            projected["serving_freshness"]["source_artifact_sha256"] = hashlib.sha256(payload).hexdigest()
+            return projected
     except Exception:  # noqa: BLE001
         pass
     published = d if isinstance(d, dict) else {}
@@ -188,6 +192,12 @@ def _market_view_enrichment(view: dict | None) -> dict:
     out["label_vs_planes_line"] = label_vs_planes_line
     if isinstance(view.get("serving_freshness"), dict):
         out["publication"] = {key: view.get(key) for key in ("asof", "built_at", "seq")}
+        source_hash = view["serving_freshness"].get("source_artifact_sha256")
+        if source_hash:
+            out["publication"]["artifact_sha256"] = source_hash
+        if isinstance(view.get("publication"), dict):
+            out["publication"]["publication_id"] = view["publication"].get("publication_id")
+            out["publication"]["source_identity"] = view["publication"].get("source_identity")
         out["serving_freshness"] = view["serving_freshness"]
     return out
 

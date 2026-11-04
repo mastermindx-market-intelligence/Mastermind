@@ -1,5 +1,10 @@
 # Plain packet same-path retention repair
 
+This document retains successive source qualifications, including the original
+PR #1665 physical publisher-owner correction. The final section records the
+acquisition-tag correction in composed PR #1674. Earlier source identities and
+test results remain historical evidence for their named bytes.
+
 ## Named consumer and observed defect
 
 Macro News Dashboard PR #9612 requires independent review of immutable source
@@ -115,3 +120,513 @@ return was reconciled through the original owner's status: clean expected base
 No replacement acquisition, raw clone/worktree or source-binding override was
 used. That acquisition uncertainty is reconciled; the failed News reviewer
 request remains terminal and is not retried by this source repair.
+
+
+## Combined provenance and transport correction — 21 October 2026
+
+The later release hold in PR #1661 comments 6311037384, 6311165775 and
+6311299356 superseded the first candidate's merge eligibility. Emergency selected
+generation `4f0f6055f8c03321acbbfad41675135ea6e4ac50012f8d13435acbb4c52d4fbe`
+(sequence 11) contained positive request/launch provenance and a private
+transport-observation path that the original PR did not. The source integration
+uses its observed helper SHA-256
+`d3a019db361fcebb7d92b40d65c4624d2baad0868f1d33e1570885fee7e9a1c0`
+as a comparison input, not protected release authority.
+
+The combined candidate retains the original packet inode/content protections
+and exclusive distinct-destination creation. Same-path reuse now also requires
+the original request and launch reservation, exact run/root/parent identities,
+packet name/length/digest, request digest, and reserved launch state. Root and
+parent must be nonempty identifiers matching the incumbent grammar. Both JSON
+records must have unique keys; packet length must be an integer, not a boolean.
+Metadata files must be same-user private single-link regular files. Descriptor
+and visible-path identity are compared immediately after each read and again
+after the complete joint provenance and packet validation, including mode,
+owner, links, inode, size, mtime and ctime.
+
+The transport-observation temporary file moves from the ambient temporary
+directory into the original controller run-state directory. Unique creation,
+controller cleanup and the unchanged strict transport reader remain in force.
+No lease, route, provider, deadline, executor or acceptance behavior is relaxed.
+
+Focused qualification includes the original 13 custody cases plus 35
+provenance falsifiers, actual Bash refusal before acquisition without original
+reservations, valid same-path preservation, and a replaced transport-observation
+refusal before launch. The external-volume test root exposed its existing
+group-writable ancestor rejection. With the existing private-home test-root
+option, the four negative/matrix tests passed; two successful-controller cases
+reached verified transport but exhausted their unchanged eight-second deadlines
+on this host. The repository deadline assertions were not changed.
+
+A separate, explicitly labeled 20-second functional control passed the ordinary
+plain controller, same-path retained controller and replaced-observation
+refusal. A first supplemental assertion incorrectly assumed the inert SSH
+process's stdout was the observation file; the owned runner actually captures
+a pipe and forwards its output. That test-only assumption was corrected. The
+successful retained path verifies its original inode/mtime/hash, one inert
+acquire and launch, a mode-0600 observation under the original state directory,
+strict transport verification and temporary-file cleanup. These controls do
+not turn the eight-second local run green; hosted exact-head CI remains owed.
+
+The canonical stage builder verified all 83 declared files. Only
+`ext/remote_sub.sh` differs from the original PR generation; the other 82
+identities and installed preimages remain unchanged.
+
+- Helper SHA-256: `737744a8f04d6d6331d9aa541dfa2d0b40bf6360a8d36ef53dea958527d36767`.
+- Manifest SHA-256: `ac2b2272980341788f51ea3d374a9b1bd4a69a92f63690de994babfc48d30933`.
+- Inventory SHA-256: `0354255324bf0a238fd761e5a3d28376c479df26941045134dce8f9f51a91ccc`.
+
+### Source carrier after concurrent landing
+
+Fresh GitHub evidence reports original PR #1661 merged at 09:29:50 UTC as
+`2151a89f7ea3a340ec04932cbcfdf6a838df79b1`, retaining old head `9188c6ab...`;
+its remote branch was then deleted. That landing does not contain this combined
+delta. The original local operation, workspace and branch preserve the new
+source for a follow-up protected PR; no source re-homing is needed.
+
+This candidate still needs independent source/security review, hosted checks,
+protected merge and canonical immutable rollout. The selected generation was
+not modified. Original News reviewer `news-9612-exact-3a663-release-review-20261021`
+remains terminal with no accepted result and no retry authority. No supported
+historical reconciliation edge has yet been qualified for that failure; this
+source repair grants neither same-run replay nor a replacement News review.
+
+## Physical publisher-owner binding — final follow-up in PR #1665
+
+### Original transport evidence and scope
+
+The paid review of immutable head
+`73eefe48d3ca0acf56fbcf6a015c90ba54492ac2`,
+run `news-1665-73eefe48-source-review-20261021` under the original News root,
+failed with `TRANSPORT_READBACK_REFUSED rc=1 before_launch=1`.
+Its original controller receipts show successful setup, packet/support uploads
+and support publication, then a strict directory-reader failure:
+`NotADirectoryError: lanes`. There is no launch-binding or launch process row.
+This does not by itself prove complete effect absence or lease settlement.
+
+The unchanged publisher already returns a resolved physical release path. Its
+observed stdout named
+`/Volumes/STORAGE/Offloaded/m1-20260917/lanes/support-releases/3d98030cf7f7b11336b43105591e618e9bfc8c39272b978a03b4d5e7029a56a7/ext`.
+The old controller discarded that return and reconstructed the readback path
+through the home-directory `lanes` alias, which the strict reader correctly
+refused. The source correction belongs to that controller path binding.
+
+Original evidence remains immutable: packet SHA-256
+`e589b278572636d78d4c1cee4549beece5fe20636dea048e8db10a9bf2999733`
+(15,367 bytes); controller-process SHA-256
+`60f5ecd886cd9d49ceb188899593d687723789bbebe417d1e230f65a11adc086`;
+log SHA-256
+`3ffa9683a4995b01e3f6361103b09081a8ef16f04a364811b32ba55ed4dc5bbc`.
+The observed launch bound installed helper `d3a019db...`, not the new candidate.
+The broker acquire return was not retained, and its exact lease settlement is
+unestablished. The failed review stays frozen with no result or retry authority.
+
+### Forward source correction
+
+For a newly admitted, parented ordinary plain GLM/Qwen run, the controller now
+captures the complete publisher return in an original-state-directory private
+temporary file. The helper requires one bounded UTF-8 newline-terminated
+absolute normalized path, the exact support digest and final `ext` component.
+Traversal, duplicate/noisy/truncated output, controls, a root owner and colon
+spellings are refused. Colon cannot be a literal single entry in the required
+PATH prefix. This parser supplies path data, never executable shell input or
+admission authority.
+
+The physical owner is quoted once and fixed through strict readback, executor
+selection, host environment, launch cwd, retained packet/control paths, polling,
+collection and cleanup. Requested task `REMOTE_CWD` is unchanged. The existing
+`DirectoryChain`, receipt v1 schemas, lease/account and launch-binding gates
+remain unchanged. There is no generic symlink-following exception or alias
+fallback after binding.
+
+Qwen previously replaced its release-relative provider configuration with the
+home alias on every leased call. Only the new bound Qwen route now retains
+`$HERE/../codex_bailian`; the incumbent publisher already binds and verifies
+that link. A literal controller-owned scalar distinguishes this route, is
+explicitly zero on other paths, and is consumed/unset before the provider child.
+The exact leased account, credential owner and private per-run config/session
+copy remain unchanged. GLM's existing release-relative configuration home is
+unchanged.
+
+Collection uses `--rsync-path` to enter the same fixed quoted physical owner
+with `cd ... && exec rsync`, then requests ordinary relative artifact names.
+Default rsync argument and sender checks stay enabled. Actual local protocol
+tests found that upstream rsync 3.2.7 preserves the command text while Studio's
+openrsync (protocol 29, 2.6.9 compatible) removes an extra quotation layer.
+The same local rsync executable therefore supplies bounded private whole-output
+version evidence through the existing commission deadline. Exactly one known
+identity on the first line selects the tested quoting convention; openrsync
+receives one additional quote around the complete command. Unknown, empty,
+ambiguous, malformed or failed version observations refuse before launch.
+This is dialect selection, not binary authentication. No alternative executable,
+network probe or `--old-args` downgrade is used.
+
+Legacy modes retain their existing paths. Every optional array expansion uses
+the existing Bash 3.2/`set -u` compatible guarded convention.
+
+### Qualification and limitations
+
+- Exact old `73eefe48` controller bytes
+  (`737744a8f04d6d6331d9aa541dfa2d0b40bf6360a8d36ef53dea958527d36767`)
+  reproduce strict readback refusal with zero worker launches in the private
+  fixture.
+- **13 new tests pass**. The actual controller and strict reader exercise flat
+  owners, symlinked home aliases, alias retargeting after publication and before
+  launch, unsafe packet/parent/code evidence, malformed publication, and
+  unqualified rsync versions. Transfer uses the actual installed rsync protocol
+  through an inert local remote shell. Paths include spaces, apostrophe and
+  shell-substitution-looking text; decoy artifacts remain untouched.
+- The actual Qwen selection and private copy path consumes owner A's harmless
+  configuration after the legacy alias points at B. Marker absent/zero preserves
+  legacy B selection. Its private file is mode 0600, exact fixture account is
+  preserved, and the marker does not enter the provider child.
+- Separate actual openrsync and rsync 3.2.7 protocol controls pass literal
+  apostrophe/space/`$()`/backtick owner paths and refuse a missing owner without
+  creating a destination. No real SSH host, model, provider or lease is used.
+- **12 existing controller/retention tests pass** on the final source, including
+  the unchanged original timing budgets. The 13 custody and 35 provenance
+  falsifiers remain included. **17 existing credential-custody tests pass** with
+  the final unchanged Qwen wrapper bytes.
+- All **83** staged files match their declarations. Relative to `73eefe48`,
+  only `remote_sub.sh`, `remote_sub_helpers.py` and `qwen_exec.sh` change executable
+  identity; the other 80 files and installed preimages are unchanged. Bash
+  syntax, Python syntax and diff-whitespace checks pass.
+
+Failed interim controls are retained. Before the final corrections, two real
+openrsync cases failed at collection because the first implementation lost a
+quotation layer. A concurrent 29-test existing-regression run had three failures:
+legacy empty-array collection plus two host timing/admission failures. The final
+guarded array and sequential 12-test run pass without relaxing timing or custody.
+Earlier wider local qualification failures documented above remain historical;
+this focused result does not assert that every wider local suite has passed.
+
+The physical binding defeats home-alias retargeting. It does not claim protection
+against a trusted owner replacing the physical ancestor between phases.
+Host-owned `HOST_ENV`, legitimate credential-config overrides and executable
+resolution still require bounded nonsecret qualification during the actual
+rollout. No `HOME`, `GLM_CONFIG`, credential or profile owner is remapped here.
+
+### Frozen source identities and release obligations
+
+- Controller SHA-256:
+  `2cb93138d446c5fe7cfaf42cfa8f8e731882eb726108a0eacf2ddd6fcbef9f7f`.
+- Helper SHA-256:
+  `81fff3ccc471c972d29926b2a10020ef4856d2c6585d4dc30e41633ed65a25df`.
+- Qwen wrapper SHA-256:
+  `033bf388c4b3ea4cd5e4161c3c558b39a3a9d9bc80a5d7bce85b8b85a29ec1dd`.
+- Manifest SHA-256:
+  `1ac452a986ba33f1d238d8874956451b6a9fc04fe0cbcc1da1db70110498bb2d`.
+- Inventory SHA-256:
+  `a59c69e88dc537213e3f80bfcbcdb3c5f662f5513401db96ec39ddc92804a32a`.
+
+Principal architecture/security review found no remaining concrete must-fix in
+these final bytes. It is source advice, not a replacement result from the held
+paid reviewer and not a formal GitHub approval. New-head CI and applicable
+independent review remain required before protected merge.
+
+This PR stays on operation `news-review-packet-retention-20261021` and its
+original managed workspace/branch. Do not use the concurrently published
+standalone transport branch as a replacement carrier for this combined source.
+No native generation was installed or selected by this qualification.
+
+Recovery PR #1674 separately proposes the exact original News failure's
+supported reconciliation owner. Its generation must compose with this protected
+repair before any rollout; neither standalone review stage is install authority.
+Neither held review is replayed, renamed, re-homed or declared accepted here.
+News PR #9612's exact integrated head and actual signed-in production acceptance
+remain separate release obligations.
+
+## Acquisition-tag correction in the composed PR #1674 source
+
+The independent combined-source review and the Harness2 consumer report identified
+a deterministic mismatch in `5f9fa661`, `d15190f6` and `b30168a8`: the actual
+controller selects `glm-frontier` for an eligible `glm-5.3` request, but downstream
+checks require the logical `glm` tag. Those earlier source approvals are superseded
+by **REQUEST_REPAIR** for this finding. The current correction requires its own
+published-head review and CI; earlier green CI does not qualify these changed bytes.
+
+### Selection ownership and versioned evidence
+
+The controller passes its already frozen `LEASE_POOL` into both producer helpers.
+New records use `mastermind.transport_verification.v2`,
+`mastermind.fabric_plain_launch_binding.v2` and
+`mastermind.fabric_launch_binding.v2`, with explicit `acquisition_pool`.
+A missing helper argument refuses; readers do not recompute the original selection
+from current capabilities or infer a missing tag from the requested model.
+
+| Mode and otherwise-admitted model | Permitted acquisition tag | Logical binding and ledger pool |
+| --- | --- | --- |
+| `glm`, exact `glm-5.3` | `glm-frontier` or `glm` | `glm` |
+| `glm`, another admitted GLM model | `glm` | `glm` |
+| `qwen`, an admitted Qwen model | `bailian` | `bailian` |
+
+These tuple checks grant no routing or model admission. Existing routing, economic
+policy and lineage checks still run before acquisition. The broker response still
+contains only `LEASE` and `ACCOUNT`; the acquisition tag is controller correlation,
+not an attestation of the canonical broker pool. Runtime provider aliases are
+configuration-owned, so source alone does not guarantee their canonical result.
+
+`binding.pool`, ledger accounting and broker wire bytes remain unchanged.
+Artifact observation still requires exact equality with the actual retained
+broker row's pool. A valid frontier tag does not make a broker row with pool
+`glm-frontier` equivalent to the logical `glm` binding.
+
+The new tag is bound to the unique original acquisition event, original
+lease/account response digest and applicable packet/support identities. Plain
+records cross-bind their nested transport view. The artifact collector now uses
+a frontier tag only after strict v2 original-binding validation; it does not use
+a generic allow-list to relax the old common launch check. Unknown schemas,
+wrong closed field sets, contradictory tags, malformed records and reordered,
+duplicated, truncated or failed control evidence refuse.
+
+Valid v1 evidence keeps its exact original event rules. It is not rewritten,
+upgraded or supplied with inferred fields; an old frontier-mismatched v1 record
+does not gain qualification. The remote
+`mastermind.transport_observation.v1` and outer collection receipt stay at their
+existing versions. Artifact active-lineage remains recorded controller provenance
+with `is_authentication: false`; it is not plain active-lineage support.
+
+### Acquisition-follow-up identities at 1860b91 and qualification
+
+The canonical builder reproduces **85** entries with the same path set as b301.
+Only these four production members change in this follow-up:
+
+| Member under `ext/` | SHA-256 |
+| --- | --- |
+| `fabric_task.py` | `24fea6ca2c3d73b976c517d05aa1a07698f4320778616170d5a599d8f4bca1e3` |
+| `original_delivery_collector.py` | `9aa8eb37180f9ec54d4bb7f2d617327122ae7dfb3a3cd14933c2b412345b9ba7` |
+| `remote_sub.sh` | `fb83c14c846f0346f7838761e26c2095c4dd2b9b6af9b8c79f7f097b49412460` |
+| `remote_sub_helpers.py` | `16e34b0cc00c61e63ee862bd3608807e2c8756315f0660a34a80feae9a886c6f` |
+
+- Native manifest SHA-256:
+  `99796b477384551ad013cd245abbe0f9fac91a21d1c163636e705325e6922bc8`.
+- Native source inventory SHA-256:
+  `944cef119671b4ba84064f3b29976941794763dcd7e766002882068548527f17`.
+- Actual-controller frontier, no-frontier fallback, Flash and Qwen controls:
+  **4 passed**, 47.011 seconds. Each exercises the real controller/helper path
+  through one inert launch and preserves the logical ledger pool. The red
+  frontier control first reproduced `transport_verification_log_not_prelaunch`
+  after supplying the existing required bounded-complexity policy witness.
+- `python3 -m unittest test_plain_original_delivery -v` from `rollout/`:
+  **42 passed**, 18.567 seconds. This includes actual plain and artifact producer
+  emission, plain collection/readback, exact v1 compatibility, and independently
+  changed tag, model, account, lease, field-set and event-order refusals.
+- `python3 -m pytest -o addopts= -q tests/test_fabric_native_artifact_observation.py`:
+  **1 wrapper passed**, 1.91 seconds. It builds the current stage and runs artifact
+  lineage/observation plus the original collector compatibility script. The v2
+  controls keep the broker pool `glm` and reject incompatible broker rows.
+- Reconciliation acknowledgment and historical-proof suite:
+  **30 passed**; details are in
+  `ORIGINAL_NEWS_RETENTION_RECONCILIATION_20261021.md`.
+- All 85 stage hashes, Python syntax, Bash syntax and diff whitespace pass.
+  The exact published commit, independent verdict and CI association are recorded
+  in the PR checkpoint after source publication.
+
+Evidence files on the source owner include
+`/tmp/news-1674-acquisition-controller-20261021.{json,log}`,
+`/tmp/news-1674-acquisition-targets-final-20261021.json` and
+`/tmp/news-1674-acquisition-final-stage-proof-20261021.json`.
+
+The wider local three-module run remains **not green**: 35 passed and 35 failed
+in 326.58 seconds. Its full rollout gate passed. The native-owner aggregate hit
+the unchanged 240-second wrapper timeout; 33 composition cases met the already
+documented strict Git stderr refusal. A direct read-only probe reproduced the
+sparse-index-expansion advisory on both installed Git binaries. Neither Git
+custody nor application deadlines were relaxed. The remaining failure was a
+historical collector fixture whose expected raw `OSError` predated the current
+`LocalBindingRefused` wrapper. That fixture now uses private physical ancestry
+and asserts the typed refusal with its original `OSError` cause; the final staged
+wrapper above passes. The failed broad-run log is retained at
+`/tmp/news-1674-acquisition-final-gate-20261021.log`. Required exact-head CI remains
+a separate gate.
+
+### Inherited collection and release limits
+
+The foreground controller uses the qualified physical publication owner.
+The separate later `--collect-existing` reader still derives its remote paths
+from account home and `lanes`, using strict `DirectoryChain` checks; it does not
+consume the controller's earlier physical-owner variable. A symlink component can
+therefore still cause later collection to refuse. This correction neither relaxes
+that check nor qualifies that recovery route on such a host.
+
+This section records source qualification only. Protected inclusion, immutable
+runtime publication/selection, bounded host readiness, the installed original
+check and explicit reconciliation, a fresh current-head News review and actual
+signed-in News acceptance remain outstanding. Neither frozen reviewer nor the
+reported Harness2 run is replayed, reconciled or declared settled by this repair.
+
+### Complete acknowledgment-branch follow-up
+
+A subsequent independent review of `1860b91dcad7344152ee02d554a397355550e454`
+source-resolved the acquisition-tag P1 and the successful-operation output path,
+but found that the publication-exception response still bypassed flush/disarm.
+The next bounded revision changes only `fabric_task.py` in the production closure.
+All acquisition, collection, broker-observation and physical-owner bytes above
+remain identical.
+
+The complete response contract and six real-child controls are recorded in
+`ORIGINAL_NEWS_RETENTION_RECONCILIATION_20261021.md`. Current declarations are:
+
+- Adapter SHA-256:
+  `fd37c749d59d17c564cf4886b2184c853d1e120c5d7e3587b5c68f7267f3acdf`.
+- Manifest SHA-256:
+  `330d781f701eada35e5bf999d36e7cf46c9a0981d40023695697be4a91a250fa`.
+- Inventory SHA-256:
+  `be2266fb450b95fc82482f6e8b80e5e86705d10690fa0c25417495de891de117`.
+
+The canonical builder still verifies all 85 entries. The preceding identities
+and tests remain historical qualification for the first acquisition follow-up;
+new-head review and CI must qualify this final response revision before release.
+
+## Integration with protected physical-root release 0962f948
+
+Protected master advanced to 0962f948a48957df15bb7be93bda84b4b4c6ba33
+(PR #1675) after the independent APPROVE_SOURCE verdict for
+2d25a583207322d0a4bc23313d4751f6d34c640b. This real two-parent source
+integration preserves both histories. The prior approval does not approve
+the integration.
+
+The protocol collision is resolved with new strict
+mastermind.transport_verification.v3 and
+mastermind.fabric_plain_launch_binding.v3 producers. Both acquisition evidence
+and an explicit nullable layout are required. Historical v1 and protected
+physical-v2 meanings remain closed and unchanged; the uninstalled acquisition-only
+v2 candidate is not admitted as another historical v2 shape. Artifact v1/v2 and
+plain result-contract v1/v2 keep their separate meanings. The README records the
+complete matrix. New producers require their v3 receipt instead of promoting old
+records by inference.
+
+Configured registry roots retain every protected layout, original-registry,
+exclusive packet/output, published-state-map, executor, one-attempt and
+collection boundary. Publisher output must agree with that frozen configured
+owner. No configured failure selects fallback. When the registry field is absent,
+the previously reviewed ordinary-plain publisher-owner path remains available
+with explicit null layout and its original limits. Physical result-contract v2,
+empty reserved RC semantics, and the 38-file remote closure are selected only by
+a validated non-null layout; default remote support remains 37 files.
+Qwen's frozen provider-configuration selection remains enabled on both eligible
+ordinary branches.
+
+The transport helper now requires separate acquisition-tag and layout arguments
+with exact arity. The generated readback requires separate layout and owner
+arguments, checks absolute owner spelling, and requires equality with the
+configured layout. Raw metadata paths, shell-encoded fragments and rsync filename
+handling stay separate. Canonical accounting pools and broker-observation checks
+are unchanged.
+
+### Integrated source qualification
+
+The actual integrated production bytes passed these focused qualifications;
+the controller and physical-root rows combine named passes across focused runs,
+rather than asserting one new broad aggregate pass:
+
+| Scope | Qualified result |
+| --- | --- |
+| Plain production, historical compatibility and closed v3 schemas | 44 tests passed |
+| Physical layout, protected-v2 compatibility and strict generated-reader arguments | 35-test suite passed, then the added reader-argument case passed |
+| Actual inert controller, publisher-owner and configuration paths | 17 original cases passed, followed by all 3 added configured-root cases |
+| Existing prelaunch/deadline ordering control with current v3 producer | 1 passed |
+| Historical proof, reconciliation and six-cell real-output matrix | 30 passed in 2.191 seconds |
+| Canonical staged artifact-observation/collector compatibility wrapper | 1 passed in 1.88 seconds |
+
+Configured controls execute the actual protected publisher and its 38-file
+state-link map. Their inert child fixture needed a valid original/stable routing
+policy and an explicit path to the runner's PyYAML dependency because child user
+site loading is disabled. Its GLM readiness fixture also distinguishes the actual
+publisher's regular lock leaf from release directories. These were fixture
+corrections, not weakened production checks. Positive controls now reach and
+prove the intended launch/refusal boundaries. Earlier failing outputs remain
+retained; they were not counted as custody qualifications.
+
+The canonical stage builder regenerated the unchanged 85-path native union.
+All member digests and byte counts match. Three inherited production members
+are exact protected 0962 bytes: artifact_delivery.py, remote_sub_exec.py and
+support_bundle.py. The checker, reconciler, adapter and Qwen wrapper remain exact
+independently reviewed 2d25 bytes.
+
+| Current stage identity | SHA-256 |
+| --- | --- |
+| Manifest | 1c04fa2e6381a51abd1297330df77c4c26d3c3d889de20f4f9c618b8dc44dc78 |
+| Source inventory | 87a9cb97c88ac841327fff9216229bf698add81ed13b6f89b3fb53e1c6bde8c1 |
+| Controller | ddd33aa64286899461d4c8e659729de3d48a05ba50e8ba4a8dcdc53eef8b7267 |
+| Helper | 5fcc80143adb8a5f547462a77a6d32d22192a6843bf6f9c5300356e1b54994d2 |
+| Collector | 263ffcd0bebb03b840f4e0cc9b4097d5445b0831026449bde68f760164f96d0a |
+| Recovery adapter | fd37c749d59d17c564cf4886b2184c853d1e120c5d7e3587b5c68f7267f3acdf |
+
+Evidence resides in the operation's private source-qualification records:
+
+- /tmp/news-1674-root-integration-stage-proof-20261021.json
+- /tmp/news-1674-integration-qualification-20261021.json
+- /tmp/news-1674-integration-targeted-qualification-20261021.json
+- /tmp/news-1674-integration-configured-qualification-20261021.json
+- /tmp/news-1674-integration-frontier-qualification-20261021.json
+- /tmp/news-1674-integration-final-wrappers-20261021.json
+
+Each records actual subprocess status and retained logs. Earlier broad local
+native/composition failures remain disclosed historical results; the unchanged
+host-local Git refusal and aggregate deadline were not converted into passes.
+
+This source integration still requires independent review of its immutable head,
+exact-head hosted CI, applicable protected merge, canonical merged-stage rebuild
+and fresh runtime/host qualification. No review stage is installable. No live
+host registry was enrolled, generation selected, reconciliation receipt written,
+provider worker started, held review replayed or News production acceptance
+established by this work.
+
+## Host initialization and physical interpreter precedence
+
+Independent review of c93859e4d00d7b96e2f2d0599a458ab3d759fd0f returned
+REQUEST_REPAIR for one P2 after read-only host preflight exposed the actual
+HOST_ENV PATH prepend. Both observed hosts prepend home and host interpreter
+locations after the controller's initial physical-owner path setup. A following
+bare python3 could therefore select a different interpreter. The same ordering
+exists in 2d25; its previous whole-head source approval is invalidated for
+release reuse on this point. The independently reviewed unchanged recovery,
+acquisition, schema, physical-root and collection conclusions remain applicable.
+
+The repair uses the existing eligible ordinary-plain predicate. Its shared
+HOST_ENV fragment prepends only the frozen owner's venv/bin after sourcing the
+host file, before both GLM account readiness and launch. The existing pre-source
+setup and other host PATH entries retain their relative order. Configured roots
+and unconfigured publisher owners both receive the repair; legacy/nonplain
+ordering is unchanged. This repairs interpreter-selection precedence. It does
+not authenticate virtual-environment bytes, arbitrary host initialization,
+provider identity or task acceptance.
+
+The actual-shell fixture now uses the observed PATH statement and an inert
+remote HOME. Wrong-interpreter tripwires exist in the first prepended fixture
+directory and both retargeted alias directories. They cannot invoke a provider.
+GLM account readiness now traverses the actual shell selection and a bounded
+inert interpreter spy, instead of returning a synthetic readiness value before
+shell execution. Positive assertions bind readiness and launch interpreter
+paths, account, lease, packet, physical owner, host marker and preserved PATH
+ordering.
+
+The frontier control first reproduced the defect on unchanged c938 production:
+the wrong interpreter returned 125 and readiness refused with 78 before launch.
+After the repair, seven of the eight selected actual controller cases passed.
+The last case hit the unchanged 20-second harness limit during support staging,
+before the modified HOST_ENV boundary. It passed once in isolation in 14.053
+seconds with identical source and time limits. That failed aggregate sample is
+retained, not relabeled as a green eight-case run. Across those focused results,
+both configured GLM/Qwen cases, fallback frontier/ordinary/Flash GLM, alias
+retargeting, literal special-character ownership and flat ownership qualify.
+
+The canonical builder regenerated all 85 members. Only remote_sub.sh differs
+from c938's production manifest; all 84 other production members are exact prior
+bytes. Source hashes, byte counts, Python syntax and Bash syntax were verified.
+
+| Current identity | SHA-256 |
+| --- | --- |
+| Controller | a3769da90fa3832ee5f6d2efcc98640b57b56788f2486e286d0296ebe3eaa2d7 |
+| Manifest | 05ae02e5dffcb625bee7ff1d64068afb85917cefce5c63b0544e4ff60123247d |
+| Source inventory | 88aacda4793ff650b48856323bb5d8502f8d5f53911ebecd0a6c22a6f9e927ae |
+
+Evidence: /tmp/news-1674-host-env-before-proof-20261021.json,
+ /tmp/news-1674-host-env-qualification-20261021.json,
+ /tmp/news-1674-host-env-isolated-qualification-20261021.json, and
+ /tmp/news-1674-host-env-stage-proof-20261021.json.
+Host observation read only structure and declared dependency custody; no
+credential values were returned, no host file was sourced and no provider was
+started. The review stage is not an installation. This successor still requires
+its own immutable-source review and hosted CI before protected release.

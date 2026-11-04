@@ -34,10 +34,14 @@ export function useOfficeProjection(authGeneration: number, selection: MissionSe
     projection: projectOffice(input, context),
     draft: { context, text: readDraft(drafts, context) },
     changeDraft: (text: string) => setDrafts(previous => writeDraft(previous, context, text)),
-    invalidateAuth: () => {
-      const next = current.current.authGeneration + 1;
+    invalidateAuth: (preserveUnsentOnPassiveExpiry = false) => {
+      const old = current.current.authGeneration, next = old + 1;
       clear(); current.current = { ...current.current, authGeneration: next };
-      setDrafts(previous => alignDrafts(previous, next));
+      // A passive credential expiry is not a new principal: keep only
+      // ephemeral unsent USER text in this page. All qualified source data
+      // remains cleared. Login, logout and any new credential always erase.
+      setDrafts(previous => preserveUnsentOnPassiveExpiry && previous.authGeneration === old
+        ? { ...previous, authGeneration: next } : alignDrafts(previous, next));
     },
     clearSelection: (next: MissionSelection | null) => {
       if (current.current.selection?.workRef !== next?.workRef || current.current.selection?.rootJobId !== next?.rootJobId) clear();

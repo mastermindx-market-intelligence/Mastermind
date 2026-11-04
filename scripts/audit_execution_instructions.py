@@ -164,8 +164,32 @@ def codex_chain(
     }
 
 
+def completeness_evidence(report: dict, *, expected_requested: bool = False) -> dict:
+    """Summarize missing static evidence without deciding runtime permissions.
+
+    The optional CLI check is a caller-selected diagnostic, never a startup hook,
+    admission decision, instruction rewrite, or proof that a model loaded a file.
+    """
+    findings = []
+    for item in report['chain']:
+        if item['truncated_by_project_budget']:
+            findings.append({'code': 'PROJECT_BUDGET_TRUNCATION', 'path': item['path'],
+                             'omitted_bytes': item['bytes'] - item['eligible_bytes']})
+        if item['eligible_bytes'] and item['content_scan_truncated']:
+            findings.append({'code': 'CONTENT_SCAN_INCOMPLETE', 'path': item['path']})
+        if item['eligible_bytes'] and item['execution_brief']['state'] == 'MALFORMED':
+            findings.append({'code': 'MANAGED_BRIEF_MALFORMED', 'path': item['path']})
+        if item['execution_brief_fully_eligible'] and item['execution_brief']['state'] == 'CONTENT_MISMATCH':
+            findings.append({'code': 'EXPECTED_BRIEF_CONTENT_MISMATCH', 'path': item['path']})
+    if expected_requested and not report['expected_brief_selected']:
+        findings.append({'code': 'EXPECTED_BRIEF_NOT_ELIGIBLE'})
+    return {'scope': 'STATIC_FILE_EVIDENCE_ONLY', 'complete': not findings, 'findings': findings}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check', action='store_true',
+                        help='Return 1 for incomplete static instruction evidence; does not gate or inspect runtime execution')
     parser.add_argument('--codex-home', type=Path, required=True)
     parser.add_argument('--repo-root', type=Path, required=True)
     parser.add_argument('--cwd', type=Path)
@@ -192,10 +216,11 @@ def main() -> int:
             expected_brief=expected,
         )
         report['additional_markdown'] = [inspect_markdown(p, expected_brief=expected) for p in args.additional_markdown]
+        report['completeness'] = completeness_evidence(report, expected_requested=expected is not None)
     except (OSError, ValueError, TypeError) as exc:
         parser.error(str(exc))
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0
+    return 1 if args.check and not report['completeness']['complete'] else 0
 
 
 if __name__ == '__main__':
