@@ -40,6 +40,8 @@ The **assigned session remains responsible for the original useful outcome**, no
 
 **Session-end decision:** first inspect the exact current PR/head/checks/reviews and required remaining consumer. If a safe in-scope action exists, **execute it in this turn**. After every successful repair/CI/review/save, reassess and do the next eligible release/consumer step; a phase boundary is not a stop. If a real external wait exists, set one owned existing CI/worker/merge observer with proven return where supported; meanwhile advance nonconflicting work. If all lanes are genuinely blocked, preserve the exact original PR/operation, held effect, missing gate, accountable reachable actor and next lawful action in the existing Agent OS handoff; do not claim merge/completion, create another queue or rely on a discontinued chat. A published draft is a recoverable work-in-progress **failure to finish**, not a success metric.
 
+**No self-merge:** the source author cannot approve or merge their own protected change; an authorized independent release actor and real native checks remain required.
+
 **Backlog reduction:** work **existing** live PRs before authoring new duplicates. Prioritize (a) green and release-eligible, (b) fixable failing CI, (c) needed review/Ready, (d) genuinely conflicted/obsolete, while preserving active writers, explicit holds, required review, finite host budgets and unrelated scope. Do not indiscriminately mark Ready/merge/relabel 900 PRs, auto-dismiss critical findings, or weaken true CI/security checks to improve a count. Track actual merged, closed-as-superseded, and production-accepted outcomes independently. Optimize completed user journeys per release, not PR creation.
 
 ## Rollout without duplicate policy planes
