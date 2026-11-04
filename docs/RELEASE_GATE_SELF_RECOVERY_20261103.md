@@ -42,7 +42,7 @@ The new host-side guard is invoked only by the original native executor after th
 
 ### Verification and withheld effects
 
-- `python3 -m pytest -q tests/test_native_catalog_readiness.py tests/test_fabric_model_readiness.py tests/test_native_fabric_grok47.py` **31 focused test entrypoints passed**. Test runners use fake binaries and synthetic model-list data only.
+- `python3 -m pytest -q tests/test_native_catalog_readiness.py tests/test_fabric_model_readiness.py tests/test_native_fabric_grok47.py` **32 focused test entrypoints passed**. Test runners use fake binaries and synthetic model-list data only. One test now exercises the real existing owned-process subprocess/receipt/cleanup path using a local fake Grok executable with deterministic output; it does not execute any installed provider CLI or access credentials.
 - `python3 -m ops.native_fabric.catalog_readiness.qualify_current --installed-store <exact incumbent>` returned `QUALIFIED_ISOLATED_NOT_INSTALLED`, source file count **104**, isolated CAS/pass, exact manifest digest `479f9ff1c5ccc8f42637cc42b46c99566b5583002360765a3ba930313b42f4ba`. The disposable-stage native-terminal negative canary verified that uncertain catalog cleanup prevents cleanup-proven claims and retains its original workspace.
 - All original AMZN effects remain fenced under their existing run/root. Read-only on-host cleanup and broker `released` proof settle only the process/lease, not possible provider/tool effects.
 - Chairman waived optional independent technical review for this assignment; this does not change mandatory GitHub rules, release-owner identity restrictions, security holds or installed-generation permissions. Do not self-approve, self-merge, bypass merge queue or fabricate production acceptance.

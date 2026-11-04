@@ -117,6 +117,32 @@ class NativeCatalogGuardTest(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
         self.assertTrue((self.lanes / (self.run_id + ".model-catalog.process.jsonl")).exists())
 
+    def test_real_owned_process_uses_fake_catalog_utility_only(self):
+        """Exercise actual process-group receipt with a fake local executable."""
+        from lane_runtime import run_owned_process
+
+        self.grok.write_text(
+            "#!/bin/sh\n"
+            "test \"$1\" = models || exit 2\n"
+            "printf '%s\\n' 'You are logged in with grok.com.' '' "
+            "'Default model: grok-4.7' '' 'Available models:' "
+            "'  * grok-4.7 (default)' '  - grok-4.6'\n"
+        )
+        self.grok.chmod(0o700)
+        command = qualify_owned_grok_worker(
+            key=self.run_id, model="grok-4.7",
+            here=self.here, cwd=str(self.root),
+            env=self.env, command=self.command,
+            timeout=60, nice=0, runner=run_owned_process,
+        )
+        self.assertEqual(command[0], str(self.grok.resolve()))
+        record = json.loads(
+            (self.lanes / (self.run_id + ".model-catalog.process.jsonl")).read_text()
+        )
+        self.assertEqual(record["returncode"], 0)
+        self.assertTrue(record["cleanup"]["census_proven"])
+        self.assertEqual(record["cleanup"]["residual_count"], 0)
+
     def test_unavailable_model_fails_before_worker(self):
         self.output = model_list(models=("grok-4.6",), default="grok-4.6")
         with self.assertRaisesRegex(GrokCatalogRefused, "MODEL_UNAVAILABLE"):
