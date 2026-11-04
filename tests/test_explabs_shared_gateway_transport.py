@@ -154,3 +154,57 @@ def test_direct_mode_remains_the_existing_default(monkeypatch):
     assert a[0].api_origin == "https://api.experientiallabs.ai"
     assert a[0].shared_gateway is False
     assert a[0].key == "fixture-direct-provider-key"
+
+
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+def test_success_shaped_redirect_is_not_an_account_pool_completion(monkeypatch, status):
+    _set_b_only(monkeypatch)
+    seen = []
+    normal = _handler(seen)
+
+    def redirect(request):
+        response = normal(request)
+        if request.method == "POST":
+            return httpx.Response(
+                status, headers={"location": "https://never-contacted.invalid/PRIVATE_SENTINEL"},
+                json=response.json(),
+            )
+        return response
+
+    with httpx.Client(transport=httpx.MockTransport(redirect),
+                      follow_redirects=False, trust_env=False) as client:
+        pool = explabs_pool.AccountPool(http_client=client)
+        with pytest.raises(explabs_client.ExperientialError,
+                           match="explabs_upstream_redirect_refused") as exc:
+            pool.complete("", "B-only fixture", max_tokens=200)
+    assert exc.value.status == status
+    assert "PRIVATE_SENTINEL" not in str(exc.value)
+    assert len([row for row in seen if row[0] == "POST"]) == 1
+    assert seen[-1][1] == "/v1/chat/completions"
+
+
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+@pytest.mark.parametrize("shared", [False, True])
+def test_redirect_refuses_before_decoding_or_following(status, shared):
+    seen = []
+
+    def fixture(request):
+        seen.append((request.method, str(request.url)))
+        return httpx.Response(
+            status, headers={"location": "https://never-contacted.invalid/PRIVATE_SENTINEL"},
+            content=b"not a completion or JSON document",
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(fixture),
+                      follow_redirects=False, trust_env=False) as client:
+        with pytest.raises(explabs_client.ExperientialError,
+                           match="explabs_upstream_redirect_refused") as exc:
+            explabs_client.chat_completion(
+                [{"role": "user", "content": "fixture"}], client=client,
+                api_key=PROXY, shared_gateway_origin=LOCAL_ORIGIN if shared else None,
+                max_tokens=8,
+            )
+    expected = LOCAL_ORIGIN + "/v1/chat/completions" if shared else explabs_client.BASE_URL + "/chat/completions"
+    assert seen == [("POST", expected)]
+    assert exc.value.status == status
+    assert "PRIVATE_SENTINEL" not in str(exc.value)

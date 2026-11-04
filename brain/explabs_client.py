@@ -136,6 +136,10 @@ def chat_completion(
         )
     except httpx.HTTPError:
         raise ExperientialError("explabs_transport_error") from None
+    if 300 <= response.status_code < 400:
+        raise ExperientialError(
+            "explabs_upstream_redirect_refused", status=response.status_code,
+        )
     if response.status_code >= 400:
         # Branch on the documented machine code, never raw provider prose.
         try:
