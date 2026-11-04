@@ -27,6 +27,15 @@ REVIEWED_PREIMAGES = {
     "ext/native_remote.py": "388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e",
     "ext/remote_sub_exec.py": "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d",
 }
+CRITICAL_CONTRACT = {
+    "ext/lane_runtime.py": "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329",
+    "ext/remote_sub.sh": "7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92",
+    "ext/fabric_client_projection.py": "39a138f88f6a3e4fb9b60f4365620ca05903e9f15783f95495627a54a13402e6",
+    "ext/fabric_operator_client.py": "fcb79e9dc4b873832e18e1fde16f0ba900374a08d62d0fc8b9b624a40ec1cd17",
+    "ext/fabric_operator_contract.py": "e642e36ef99d2c40b1254975b9ad3cc218fb9ef81c4ce87f3c7b6e7be0808c6a",
+    "ext/commission_deadline.py": "9ae2b59f51902ae1f8f0cef459fad2b5f2ac10445ccabd17b33f995a26d70097",
+    **REVIEWED_PREIMAGES,
+}
 ADDED = {"ext/fabric_model_readiness.py", "ext/native_catalog_guard.py"}
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -116,15 +125,27 @@ def verify_accepted_delta(previous: dict[str, str], current: dict[str, str]) -> 
         raise ValueError("NATIVE_CATALOG_INCUMBENT_DELTA_UNREVIEWED")
 
 
+def verify_compatible_selected(reference: dict[str, str], selected: dict[str, str]) -> None:
+    """Allow unrelated newer native generation movement, never contract drift."""
+    if set(reference) != set(selected):
+        raise ValueError("NATIVE_CATALOG_NEW_GENERATION_FILESET_CHANGED")
+    for path, wanted in CRITICAL_CONTRACT.items():
+        if reference.get(path) != wanted or selected.get(path) != wanted:
+            raise ValueError("NATIVE_CATALOG_NEW_GENERATION_CONTRACT_DRIFT")
+
+
 def qualify(store: Path, release_stage: Path | None = None) -> dict:
     store = store.resolve(strict=True)
     pointer_before = (store / "CURRENT.json").read_bytes()
     pointer = gen.current(store)
-    if pointer is None or pointer.get("generation") != BASE:
-        raise ValueError("NATIVE_CATALOG_CURRENT_GENERATION_DRIFT")
-    source_root, manifest = gen.verify(store, BASE)
+    if (pointer is None or type(pointer.get("sequence")) is not int
+            or pointer["sequence"] < 27):
+        raise ValueError("NATIVE_CATALOG_CURRENT_GENERATION_UNQUALIFIED")
+    source_root, manifest = gen.verify(store, pointer["generation"])
+    _, baseline = gen.verify(store, BASE)
     _, previous = gen.verify(store, PREVIOUS)
-    verify_accepted_delta(previous["files"], manifest["files"])
+    verify_accepted_delta(previous["files"], baseline["files"])
+    verify_compatible_selected(baseline["files"], manifest["files"])
     if any(manifest["files"].get(path) != hash_ for path, hash_ in REVIEWED_PREIMAGES.items()):
         raise ValueError("NATIVE_CATALOG_REVIEWED_PREIMAGE_DRIFT")
     if ADDED.intersection(manifest["files"]):
@@ -205,7 +226,9 @@ def qualify(store: Path, release_stage: Path | None = None) -> dict:
             raise ValueError("NATIVE_CATALOG_ISOLATED_IMPORT_REFUSED " + process.stderr[-500:])
         report = {
             "state": "QUALIFIED_ISOLATED_NOT_INSTALLED",
-            "base_generation": BASE,
+            "base_generation": pointer["generation"],
+            "base_sequence": pointer["sequence"],
+            "verified_minimum_generation": BASE,
             "previous_accepted_generation": PREVIOUS,
             "accepted_incumbent_diagnostics": sorted(ACCEPTED_DELTA),
             "source_files": len(new_hashes),

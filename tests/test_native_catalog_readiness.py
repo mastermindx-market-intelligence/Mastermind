@@ -21,7 +21,8 @@ from native_catalog_guard import (  # noqa: E402
 )
 from ops.native_fabric.catalog_readiness.qualify_current import (  # noqa: E402
     apply_native_remote, apply_remote_executor,
-    verify_accepted_delta, ACCEPTED_DELTA,
+    verify_accepted_delta, verify_compatible_selected,
+    ACCEPTED_DELTA, CRITICAL_CONTRACT,
 )
 
 
@@ -213,6 +214,26 @@ class NativePatchContractTest(unittest.TestCase):
             with self.subTest(mutated=mutated):
                 with self.assertRaisesRegex(ValueError, "INCUMBENT_"):
                     verify_accepted_delta(previous, mutated)
+
+    def test_forward_compatible_native_generation_requires_stable_contract(self):
+        baseline = dict(CRITICAL_CONTRACT, **{
+            "ext/pick.py": "gen27-selector",
+            "ext/fabric_task.py": "gen27-admission",
+        })
+        newer = dict(baseline, **{
+            "ext/pick.py": "gen28-selector",
+            "ext/fabric_task.py": "gen28-diagnostics",
+        })
+        verify_compatible_selected(baseline, newer)
+        for altered in (
+            dict(newer, **{"ext/lane_runtime.py": "changed-cleanup"}),
+            dict(newer, **{"ext/native_remote.py": "changed-auth"}),
+            dict(newer, **{"ext/remote_sub_exec.py": "changed-executor"}),
+            dict(newer, **{"ext/unreviewed_new.py": "unexpected"}),
+        ):
+            with self.subTest(altered=altered):
+                with self.assertRaisesRegex(ValueError, "NEW_GENERATION_"):
+                    verify_compatible_selected(baseline, altered)
 
     def test_remote_preimage_requires_exact_native_anchor(self):
         with self.assertRaisesRegex(ValueError, "PREIMAGE_MISMATCH"):
