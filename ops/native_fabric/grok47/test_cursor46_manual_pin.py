@@ -137,6 +137,43 @@ class Cursor46ExplicitPin(unittest.TestCase):
                             self.assertTrue(pick.policy_allows(
                                 "cursor", task, policy, model=ALIAS)[0])
 
+    def test_signed_role_reclassification_cannot_disable_r30_hard_boundary(self):
+        # Role-class YAML can change independently. It is not permission to
+        # reinterpret fixed labor roles as Cursor monthly judgment capacity.
+        for source in PICKERS:
+            with self.subTest(source=str(source)):
+                pick = load(source)
+                for registered_execute in (["review", "audit", "execute", "fix_build"],
+                                           ["review", "audit"]):
+                    with self.subTest(source=str(source), execute=registered_execute):
+                        policy = {
+                            "pools": {pool: {"task_classes": [
+                                "review", "audit", "high_level", "execute", "fix_build"]}
+                                for pool in ("grok", "cursor")},
+                            "routing": {
+                                "execute_classes": registered_execute,
+                                "operator_classes": ["high_level", "fix_build", "execute"],
+                            },
+                        }
+                        with patch.object(pick, "_grok_exhausted", return_value=False):
+                            for task in ("execute", "fix_build"):
+                                # Signed YAML can independently reclassify the
+                                # generic execute role. The *strict alias*
+                                # must still fail both source admission gates.
+                                self.assertFalse(pick._cursor_grok_quota_affinity(
+                                    ALIAS, task, policy),
+                                    f"{source} reclassified {task} bypassed R30")
+                                self.assertFalse(pick.launch_policy(
+                                    "cursor", task, ALIAS, doc=policy)["allowed"])
+                                with patch.object(pick, "load_pools", return_value=policy):
+                                    route = pick._format_pick(
+                                        task, pool="cursor", requested_model=ALIAS)
+                                self.assertTrue(route.startswith("NONE reason="), route)
+                            self.assertTrue(pick.policy_allows(
+                                "cursor", "review", policy, model=ALIAS)[0])
+                            self.assertTrue(pick.policy_allows(
+                                "cursor", "high_level", policy, model=ALIAS)[0])
+
     def test_high_level_manual_pin_does_not_inherit_auto_preference_veto(self):
         # The production quota/broker check is not skipped. This test supplies
         # a qualified healthy broker response and isolates only the preference.

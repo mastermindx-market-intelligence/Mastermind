@@ -33,13 +33,21 @@ CHANGES = (
     (
         'return (model == "cursor-grok-4.6-high" and _grok_exhausted()\n'
         '            and policy_allows("grok", task_class, doc)[0])',
-        'return (model == "cursor-grok-4.6-high"\n'
-        '            and policy_allows("grok", task_class, doc)[0]\n'
-        '            and (_grok_exhausted()\n'
-        '                 or (task_class.lower() not in LABOR_CLASSES_R30\n'
-        '                     and (task_class.lower() == "review"\n'
-        '                          or is_judgment_class(task_class, doc)\n'
-        '                          or task_class.lower() in operator_classes(doc)))))',
+        '''if model != "cursor-grok-4.6-high":
+        return False
+    if not policy_allows("grok", task_class, doc)[0]:
+        return False
+    if _grok_exhausted():
+        return True
+    tc = task_class.lower()
+    # R30's fixed labor boundary must not be reclassified away by YAML.
+    if tc in LABOR_CLASSES_R30:
+        return False
+    if tc not in ("review", "audit") and (
+            tc in EXECUTE_CLASSES_DEFAULT or is_execute_class(tc, doc)):
+        return False
+    return (tc == "review" or is_judgment_class(tc, doc)
+            or tc in operator_classes(doc))''',
     ),
     (
         "    # Chairman's quota-only exception follows this exact Grok model's class\n"
