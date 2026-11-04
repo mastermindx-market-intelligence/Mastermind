@@ -107,6 +107,8 @@ import {
   WORK_GROUP_ORDER,
   type WorkDocument,
 } from "./work";
+import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
+import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
 export const navigation = [
   "Today",
   "Projects",
@@ -1415,6 +1417,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     }),
     [programRevision, setProgramRevision] = useState(0),
     [programIndexEpoch, setProgramIndexEpoch] = useState(0),
+    // Observer-only Programs read phase for the diagnostic disclosures. It
+    // never gates a read and no read effect depends on it.
+    [programsReadPhase, setProgramsReadPhase] = useState<DiagnosticPhase>("unknown"),
+    [programsReadReason, setProgramsReadReason] = useState<DiagnosticReadReason>("UNKNOWN"),
+    // Pure disclosure tick: one re-render when a Technical details disclosure
+    // opens, so the observer snapshot is fresh. It starts no read.
+    [, setDiagnosticTick] = useState(0),
     [catalogueProject, setCatalogueProject] = useState<{workRef: string; authRevision: number; epoch: number} | null>(null),
     [retainedRoot, setRetainedRoot] = useState<{
       pair: MissionSelection;
@@ -2072,6 +2081,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         setWindowDocument(null);
         setAssociation(null);
         setMissionV3(null);
+        // Diagnostic side-state resets with the same source epoch; the
+        // Programs effect refines it on its immediate re-run.
+        setProgramsReadPhase("not_requested");
+        setProgramsReadReason("NONE");
         setResultState({ kind: "IDLE" });
       }),
     [],
@@ -2218,6 +2231,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       !window.MastermindMissionHost?.readPrograms &&
       !window.MastermindMissionHost?.readProgramsObservation
     ) {
+      setProgramsReadPhase("not_requested");
+      setProgramsReadReason("NONE");
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -2231,6 +2246,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // A refused owner read emits auth state. Re-reading on that notification
     // without acquisition authority creates a feedback loop while signed out.
     if (authState && !authState.acquisition) {
+      setProgramsReadPhase("auth_unavailable");
+      setProgramsReadReason("AUTHENTICATION_REQUIRED");
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -2245,6 +2262,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     const readObservation =
       window.MastermindMissionHost?.readProgramsObservation;
     if (typeof read !== "function" && typeof readObservation !== "function") {
+      setProgramsReadPhase("not_requested");
+      setProgramsReadReason("NONE");
       setIndex({
         programs: [],
         state: "UNAVAILABLE",
@@ -2260,6 +2279,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       state: "PENDING",
       reason: "SOURCE_READ_PENDING",
     });
+    setProgramsReadPhase("pending");
+    setProgramsReadReason("UNKNOWN");
     Promise.resolve()
       .then(async () => {
         if (readObservation) {
@@ -2281,20 +2302,27 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         ) {
           setIndex(programsFromControlRoom(raw));
           setProgramIndexEpoch(current);
+          setProgramsReadPhase("ready");
+          setProgramsReadReason("NONE");
           office.acceptPrograms(officeRead, observation);
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (
           attached &&
           programRequest.current === current &&
           !controller.signal.aborted
-        )
+        ) {
+          // The rendered reason stays SOURCE_UNAVAILABLE; the closed
+          // diagnostic phase records the failure class only.
+          setProgramsReadPhase(closedReadFailurePhase(error));
+          setProgramsReadReason(closedReadFailureReason(error));
           setIndex({
             programs: [],
             state: "UNAVAILABLE",
             reason: "SOURCE_UNAVAILABLE",
           });
+        }
       });
     return () => {
       attached = false;
@@ -3097,6 +3125,16 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     commandSlot.current.principalScope === ownerContext.principalScope &&
     commandSlot.current.generation === ownerContext.generation
       ? commandSlot.current.controller.getState() : null;
+  // Observer-only snapshot for the fallback disclosures. A throwing or
+  // absent getter degrades to null, which the fields render as unknown
+  // values; reading it triggers no request, refresh or subscription change.
+  const missionDiagnostics = (): unknown => {
+    try {
+      return window.MastermindMissionHost?.diagnostics?.() ?? null;
+    } catch {
+      return null;
+    }
+  };
   const previewLaunchRequest = useMemo(() => (form: LaunchForm) => {
     const binding = completeOrchestratorCommandBinding(window.MastermindMissionHost?.commandBinding);
     const auth = window.MastermindMissionHost?.auth?.getState();
@@ -3211,9 +3249,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           <span className="state state-unavailable">{copy.unavailable}</span>
         </div>
         <p className="muted">{copy.workUnavailable}</p>
-        <details className="reason-details">
+        <details
+          className="reason-details"
+          onToggle={(event) => {
+            if ((event.currentTarget as HTMLDetailsElement).open) setDiagnosticTick((n) => n + 1);
+          }}
+        >
           <summary>{copy.technicalDetails}</summary>
           <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
+          <TransportDiagnosticFields
+            snapshot={missionDiagnostics()}
+            programsPhase={programsReadPhase}
+            programsReason={programsReadReason}
+            locale={locale}
+          />
         </details>
         {heldKind === "launch" ? checkStatusControl : null}
       </section>
@@ -3241,9 +3290,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       <p className="muted">
         Session is unavailable for the exact selected mission.
       </p>
-      <details className="reason-details">
+      <details
+        className="reason-details"
+        onToggle={(event) => {
+          if ((event.currentTarget as HTMLDetailsElement).open) setDiagnosticTick((n) => n + 1);
+        }}
+      >
         <summary>Technical details</summary>
         <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
+        <TransportDiagnosticFields
+          snapshot={missionDiagnostics()}
+          programsPhase={programsReadPhase}
+            programsReason={programsReadReason}
+          locale={locale}
+        />
       </details>
     </section>
   );

@@ -13,6 +13,7 @@ import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type A
 import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
 import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
+import type { MissionDiagnosticSnapshot } from "./diagnostic-state";
 import { createTerminalBriefsNavigationPort, type TerminalBriefsNavigationPort } from "./terminal/terminal-navigation";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
@@ -191,6 +192,8 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
   commandBinding?: OrchestratorCommandBinding;
+  /** Observer-only composition diagnostics; a zero-effect snapshot, never a grant. */
+  diagnostics?: () => MissionDiagnosticSnapshot;
   /** Separately mounted session binding; never the launch route. */
   sessionCommandBinding?: unknown;
   /** Pushes the exact selection on every transition and registers the explicit condition provider. */

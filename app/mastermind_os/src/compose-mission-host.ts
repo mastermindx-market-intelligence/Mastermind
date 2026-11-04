@@ -4,8 +4,48 @@ import type { MissionSelection } from "./mission";
 import type { LaunchBindingConfig } from "./orchestration/executive-launch-command-port";
 import { createIndexedDbPendingPointerStore } from "./orchestration/indexeddb-pending-pointer-store";
 import { createIndexedDbSessionPendingPointerStore } from "./orchestration/indexeddb-session-pending-pointer-store";
+import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import { createOsExecutiveHost } from "./orchestration/os-executive-host";
 import { createOsExecutiveSessionHost } from "./orchestration/os-executive-session-host";
+import { validateExecutiveResource } from "./public-config";
+import { isDiagnosticReadReason } from "./diagnostic-state";
+import type {
+  DiagnosticHostKind,
+  DiagnosticReadReason,
+  DiagnosticPhase,
+  MissionDiagnosticSnapshot,
+} from "./diagnostic-state";
+
+// Closed phase vocabulary from the frozen diagnostic contract. A value
+// outside it degrades to "unknown" instead of being trusted.
+const DIAGNOSTIC_PHASES: readonly DiagnosticPhase[] = [
+  "unknown",
+  "not_requested",
+  "pending",
+  "auth_unavailable",
+  "transport_failure",
+  "invalid_response",
+  "expired",
+  "ready",
+];
+
+function closedPhase(value: unknown): DiagnosticPhase {
+  return DIAGNOSTIC_PHASES.includes(value as DiagnosticPhase)
+    ? (value as DiagnosticPhase)
+    : "unknown";
+}
+
+/** Transport-reported Executive availability; never inferred from auth state. */
+function executiveObservation(transport: OsExecutiveTransport | undefined): {
+  authAvailable: boolean | null; phase: DiagnosticPhase; readReason: DiagnosticReadReason;
+} {
+  try {
+    const value = transport?.diagnostics?.();
+    return { authAvailable: typeof value?.authAvailable === "boolean" ? value.authAvailable : null,
+      phase: closedPhase(value?.phase),
+      readReason: isDiagnosticReadReason(value?.contextReadReason) ? value.contextReadReason : "UNKNOWN" };
+  } catch { return { authAvailable: null, phase: "unknown", readReason: "UNKNOWN" }; }
+}
 
 /**
  * One app instance composes the existing read/auth owner with the fixed
@@ -19,6 +59,7 @@ export function composeMissionHost(
   client: RawClient,
   config: LaunchBindingConfig | null = readLaunchBindingConfig(),
   indexedDB: IDBFactory | undefined = globalThis.indexedDB,
+  hostKind: DiagnosticHostKind = "unknown",
 ) {
   // Mount while signed out: the existing auth owner later qualifies this binding.
   const executive = config && client.executive
@@ -39,8 +80,40 @@ export function composeMissionHost(
         setStopCondition: (provider) => session.setStopCondition(provider),
       }
     : undefined;
+  // Observer-only composition snapshot. Reading it performs no request, no
+  // subscription change and no context refresh: it only reports facts the
+  // existing auth owner and transports already hold.
+  const diagnostics = (): MissionDiagnosticSnapshot => {
+    let contextPhase: DiagnosticPhase = "not_requested";
+    if (executive) {
+      try {
+        contextPhase = closedPhase(executive.diagnostics().contextPhase);
+      } catch {
+        contextPhase = "unknown";
+      }
+    }
+    const auth = client.getState();
+    const executiveState = executiveObservation(client.executive);
+    return {
+      hostKind,
+      launchConfigured: config !== null,
+      frontendResourceConfigured:
+        validateExecutiveResource(import.meta.env?.VITE_MM_EXECUTIVE_RESOURCE) !== null,
+      // The current wire exposes no native resource configuration; it is
+      // never inferred from grants, config objects or auth outcomes.
+      nativeResourceConfigured: null,
+      acquisitionAvailable: typeof auth.acquisition === "boolean" ? auth.acquisition : null,
+      contentAvailable: typeof auth.content === "boolean" ? auth.content : null,
+      executiveAvailable: executiveState.authAvailable,
+      executiveTransportPhase: executiveState.phase,
+      executiveReadReason: executiveState.readReason,
+      executiveContextPhase: contextPhase,
+    };
+  };
+  const host = bindMissionHost(client, executive?.binding, sessionAttachment);
+  host.diagnostics = diagnostics;
   return {
-    host: bindMissionHost(client, executive?.binding, sessionAttachment),
+    host,
     ready: executive?.ready ?? Promise.resolve(),
     sessionReady: session?.ready ?? Promise.resolve(),
     dispose: () => {

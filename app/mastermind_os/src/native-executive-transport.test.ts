@@ -209,4 +209,105 @@ describe("native fixed Executive bridge", () => {
     await expect(f.transport.context(new AbortController().signal)).rejects.toThrow("EXECUTIVE_UNAVAILABLE");
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+  it("reports the observed auth outcome as closed diagnostics without any additional native call", async () => {
+    const f = await fixture();
+    expect(f.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: true, phase: "ready", contextReadReason: "UNKNOWN" });
+    const before = f.invoke.mock.calls.length;
+    for (let round = 0; round < 3; round++) expect(f.transport.diagnostics?.().phase).toBe("ready");
+    expect(f.invoke.mock.calls.length).toBe(before);
+    expect(f.invoke.mock.calls.map(([command]) => command)).toEqual(["executive_auth_status"]);
+    f.notify({ generation: 4, available: false });
+    expect(f.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: false, phase: "auth_unavailable", contextReadReason: "UNKNOWN" });
+    expect(f.invoke.mock.calls.length).toBe(before);
+  });
+  it("records invalid_response for malformed auth status and never echoes the private payload", async () => {
+    const f = await fixture();
+    f.notify({ generation: 4, available: true, token: "private" });
+    expect(f.transport.available()).toBe(false);
+    expect(f.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "invalid_response", contextReadReason: "UNKNOWN" });
+    f.notify({ generation: 4, available: true });
+    expect(f.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: true, phase: "ready", contextReadReason: "UNKNOWN" });
+  });
+  it("resets diagnostics on local sign-out and stale replies cannot resurrect an older phase", async () => {
+    const f = await fixture();
+    expect(f.transport.diagnostics?.().phase).toBe("ready");
+    f.invalidate();
+    expect(f.transport.available()).toBe(false);
+    expect(f.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "not_requested", contextReadReason: "UNKNOWN" });
+    f.notify({ generation: 3, available: true }); // regressing generation stays ignored
+    expect(f.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "not_requested", contextReadReason: "UNKNOWN" });
+    f.notify({ generation: 4, available: false });
+    expect(f.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: false, phase: "auth_unavailable", contextReadReason: "UNKNOWN" });
+    expect(f.transport.available()).toBe(false);
+  });
+  it("a pending initial status that loses the epoch race leaves the reset diagnostics untouched", async () => {
+    const late = deferred();
+    let notify = (_raw: unknown) => {};
+    const invoke = vi.fn(async (command: string): Promise<unknown> =>
+      command === "executive_auth_status" ? late.promise : { ok: true });
+    const created = await createNativeExecutiveTransport(invoke as never, async (event, callback) => {
+      expect(event).toBe("mastermind-executive-auth-state"); notify = (raw) => callback({ payload: raw }); return () => {};
+    });
+    expect(created.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "pending", contextReadReason: "UNKNOWN" });
+    created.invalidate();
+    expect(created.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "not_requested", contextReadReason: "UNKNOWN" });
+    late.resolve({ generation: 7, available: true });
+    await created.ready;
+    expect(created.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "not_requested", contextReadReason: "UNKNOWN" });
+    expect(created.transport.available()).toBe(false);
+    notify({ generation: 7, available: true });
+    expect(created.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: true, phase: "ready", contextReadReason: "UNKNOWN" });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+  it("records transport_failure when the auth listener cannot be established, with no status request", async () => {
+    const invoke = vi.fn(async (): Promise<unknown> => ({ generation: 3, available: true }));
+    const created = await createNativeExecutiveTransport(invoke as never, async () => {
+      throw new Error("listener refused");
+    });
+    await created.ready;
+    expect(created.transport.available()).toBe(false);
+    expect(created.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "transport_failure", contextReadReason: "UNKNOWN" });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+  it("records transport_failure with unknown auth when the initial status command is missing", async () => {
+    const invoke = vi.fn(async () => { throw new Error("native missing"); });
+    const created = await createNativeExecutiveTransport(invoke as never, async () => () => {});
+    await created.ready;
+    expect(created.transport.available()).toBe(false);
+    expect(created.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: null, phase: "transport_failure", contextReadReason: "UNKNOWN" });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+it("settles a repeated native status without changing the existing auth generation", async () => {
+  const status = { generation: 4, available: true };
+  const invoke = vi.fn(async () => status);
+  const native = await createNativeExecutiveTransport(invoke as never, async (_event, listener) => {
+    listener({ payload: status }); // existing event arrives before the initial status reply
+    return () => {};
+  });
+  await native.ready;
+  expect(native.transport.diagnostics?.()).toEqual({ kind: "native", authAvailable: true, phase: "ready", contextReadReason: "UNKNOWN" });
+  expect(native.transport.authGeneration()).toBe(1);
+  expect(invoke).toHaveBeenCalledExactlyOnceWith("executive_auth_status");
+});
+
+
+it("retains only the context READ refusal code and preserves every public rejection", async () => {
+  const f = await fixture(), signal = new AbortController().signal;
+  f.invoke.mockRejectedValueOnce("ACCESS_REFUSED");
+  await expect(f.transport.context(signal)).rejects.toThrow("EXECUTIVE_TRANSPORT_UNAVAILABLE");
+  expect(f.transport.diagnostics?.().contextReadReason).toBe("ACCESS_REFUSED");
+  const calls = f.invoke.mock.calls.length;
+  f.transport.diagnostics?.(); f.transport.diagnostics?.();
+  expect(f.invoke).toHaveBeenCalledTimes(calls);
+  f.invoke.mockRejectedValueOnce("AUTHENTICATION_REQUIRED");
+  await expect(f.transport.submit({ goal: "fixture" }, signal)).rejects.toThrow("EXECUTIVE_TRANSPORT_UNAVAILABLE");
+  expect(f.transport.diagnostics?.().contextReadReason).toBe("ACCESS_REFUSED"); // mutation is not observed
+  f.invoke.mockRejectedValueOnce(new Error("PRIVATE account credential"));
+  await expect(f.transport.context(signal)).rejects.toThrow("EXECUTIVE_TRANSPORT_UNAVAILABLE");
+  expect(f.transport.diagnostics?.().contextReadReason).toBe("UNKNOWN");
+  f.invoke.mockResolvedValueOnce({ ok: true });
+  await f.transport.context(signal);
+  expect(f.transport.diagnostics?.().contextReadReason).toBe("NONE");
 });
