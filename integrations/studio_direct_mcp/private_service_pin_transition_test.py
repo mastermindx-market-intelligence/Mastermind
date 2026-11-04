@@ -458,15 +458,17 @@ class PinTransitionTests(unittest.TestCase):
     def native_proof_response(self, phase="PREVIOUS"):
         store = self.home / "native-code-releases"
         store.mkdir(mode=0o700, exist_ok=True)
-        # The selected native proof now returns its exact pointer as part of
-        # the immutable lock-bound receipt; emulate that contract here rather
-        # than the older seven-field response with no selection identity.
+        previous = self.binding["expected_selection"]
         selection = {
             "schema": "native-code-selection.v1",
-            "generation": self.binding["expected_selection"]["generation"],
-            "previous": "4" * 64,
-            "sequence": self.binding["expected_selection"]["sequence"],
+            "generation": previous["generation"] if phase == "PREVIOUS"
+                          else self.binding["target_generation"],
+            "previous": None if phase == "PREVIOUS" else previous["generation"],
+            "sequence": previous["sequence"] if phase == "PREVIOUS"
+                        else previous["sequence"] + 1,
         }
+        # The native pin source now binds first/second proofs to exact CURRENT
+        # pointer identity, not merely the coarse PREVIOUS/SELECTED phase.
         value = dict(self.binding, store=str(store), phase=phase, selection=selection)
         return SimpleNamespace(
             returncode=0, stdout=json.dumps(value).encode(), stderr=b""

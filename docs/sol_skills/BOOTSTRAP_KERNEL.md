@@ -31,6 +31,7 @@ AUTHORITY + EFFECTS
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
 9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
+9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm.
 
 ADAPTIVE MODE + CAPABILITIES
 10. Follow ACTIVE_EXECUTION 1B for human-attended mode fit/stickiness; no invented Pro receipt. Automated cognition keeps router/budget gates. Switch only for a critical-path reason.
@@ -75,6 +76,18 @@ FINALIZATION + DURABILITY
 ## Cross-session review discoverability
 
 The approved Project bootstrap remains compact. Assigned Web/Codex/Claude/Grok sessions needing an independent PR or source review must load `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md` from the same accepted protected repository revision, discover their actual Fabric tools, and preserve existing review/effect identity before deciding a route. Where independently authorized and eligible, a separate read-only Dot reviewer can be addressed through the existing Slack channel, but delivery is not START and Slack technical findings are not formal GitHub approval. An explicit refused/uncertain effect cannot be rerouted via another provider, host, account or Dot. This source pointer is not proof the live shared ChatGPT Project instructions have been edited or freshly loaded.
+
+## Cross-session PR release and auto-merge discoverability
+
+Assigned Web/Codex/Claude/Grok sessions delivering PRs must read
+`docs/DELIVERY_WORKFLOW.md` at the same verified protected commit before
+a release-enabling label, native auto-merge or merge action. It distinguishes
+Macro's opted-in `merge-on-green` from Mastermind's protected queue and
+documents the independent review, recorded-hold, CI and head-freshness gates.
+A successful sweeper workflow does not prove a specific PR merged. Never
+bulk-arm unreviewed PRs or override workload-capacity safety to clear a backlog.
+This GitHub change alone does **not** install live Shared ChatGPT Project
+instructions; separately verify their published configuration.
 
 ## Compatibility safety invariants
 
