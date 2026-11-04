@@ -143,10 +143,13 @@ class NativeSelectionForwardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr[-250:])
         self.assertEqual(json.loads(result.stdout)["phase"], "PREVIOUS")
 
-    def test_only_exact_c4_and_admin_original_accounts_admit_forward_exception(self):
-        self.assertEqual(self.run_proof("chatgpt4").returncode, 0)
-        self.assertEqual(self.run_proof("admin-business").returncode, 0)
-        for excluded in ("chatgpt1", "chatgpt2-business", "chatgpt3", "fabric-read"):
+    def test_only_exact_four_frozen_original_accounts_admit_forward_exception(self):
+        for permitted in ("chatgpt4", "admin-business",
+                          "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9"):
+            with self.subTest(permitted=permitted):
+                self.assertEqual(self.run_proof(permitted).returncode, 0)
+        for excluded in ("chatgpt1", "chatgpt2-business", "chatgpt3",
+                         "chatgpt3-other", "fabric-read"):
             with self.subTest(excluded=excluded):
                 self.assertNotEqual(self.run_proof(excluded).returncode, 0)
 
