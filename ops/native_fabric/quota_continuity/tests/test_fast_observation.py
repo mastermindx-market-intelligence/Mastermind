@@ -56,6 +56,36 @@ def first_observation(points, ready):
 
 
 class AdaptiveResultPollingTests(unittest.TestCase):
+    def test_numeric_preflight_rejects_zero_overflow_and_oversized_poll(self):
+        source = (CANDIDATE / "remote_sub.sh").read_text()
+        start = source.index('case "$POLL_SECS" in')
+        stop = source.index('if [ "$MAX_SECS" -lt "$POLL_SECS" ]; then', start)
+        guard = source[start:stop]
+        examples = (
+            ("10", "14400", True),
+            ("00010", "07200", True),
+            ("1", "1", True),
+            ("00", "14400", False),
+            ("00000", "14400", False),
+            ("999999999999999999", "14400", False),
+            ("30", "00000", False),
+            ("30", "999999999999999999", False),
+            ("30", "14401", False),
+        )
+        for poll, maximum, valid in examples:
+            with self.subTest(poll=poll, maximum=maximum):
+                script = ('POLL_SECS=' + poll + '; MAX_SECS=' + maximum
+                          + '; RC=0; ' + guard + '\nprintf "ACCEPTED\n"')
+                p = subprocess.run(['/bin/bash', '-c', script],
+                                   text=True, capture_output=True,
+                                   check=False, timeout=3)
+                if valid:
+                    self.assertEqual(p.returncode, 0, p.stderr)
+                    self.assertIn("ACCEPTED", p.stdout)
+                else:
+                    self.assertEqual(p.returncode, 2, p.stderr)
+                    self.assertNotIn("ACCEPTED", p.stdout)
+
     def test_result_ready_early_is_observed_far_faster_than_30s_static_poll(self):
         times = schedule(14400, 30)
         self.assertEqual(times[:15], list(range(0, 30, 2)))

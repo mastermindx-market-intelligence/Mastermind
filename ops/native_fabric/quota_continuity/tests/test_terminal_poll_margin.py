@@ -119,7 +119,7 @@ class TerminalPollBudgetTests(unittest.TestCase):
         # binds S7 same-operation private-diagnostic proof retention.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         'e12c764d8978c2aeb536945e12f5e14cb89c3a98cdbab5802905dc014acdb73d')
+                         '6dcf9da5ad3fd72babfcb593e0a81d2370c7a0f11236d8a6d571d9310637b4fc')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),

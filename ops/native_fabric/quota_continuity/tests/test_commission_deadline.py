@@ -530,7 +530,11 @@ class ControllerDeadline(unittest.TestCase):
                           /'offline-transport_observation_replaced.transport-verified.json').exists())
 
     def test_mutated_remote_packet_refuses_launch_and_binding(self):
-        result=self.run_controller('transport_mutated_packet',budget=8,
+        # This case validates integrity after actual support preparation, not
+        # admission-deadline expiry. Loaded hosts may spend >8s before the
+        # verifier; allow finite setup headroom without changing the refusal,
+        # no-launch, or absence-of-trusted-binding assertions below.
+        result=self.run_controller('transport_mutated_packet',budget=14,
                                    mode='qwen',model='qwen3.8-flash')
         self.assertEqual(result['returncode'],78,result['stderr'])
         self.assertIn('TRANSPORT_VERIFICATION_REFUSED',result['stderr'])

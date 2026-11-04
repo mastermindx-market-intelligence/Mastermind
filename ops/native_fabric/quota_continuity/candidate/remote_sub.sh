@@ -923,6 +923,18 @@ else
 fi
 case "$POLL_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_POLL_SECS" >&2; RC=2; exit "$RC";; esac
 case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2; exit "$RC";; esac
+# Validate before numeric arithmetic: 00 is also zero, and unbounded
+# decimal input can overflow Bash/test and silently bypass a guard.
+# This changes no valid 1..14400 second configured observation/runtime.
+if [ "${#POLL_SECS}" -gt 5 ] || [ "$POLL_SECS" -eq 0 ] ||
+   [ "$POLL_SECS" -gt 14400 ]; then
+  echo "invalid REMOTE_SUB_POLL_SECS" >&2
+  RC=2; exit "$RC"
+fi
+if [ "${#MAX_SECS}" -gt 5 ] || [ "$MAX_SECS" -eq 0 ]; then
+  echo "invalid REMOTE_SUB_MAX_SECS" >&2
+  RC=2; exit "$RC"
+fi
 # Completion visibility is fastest just after launch, with a hard bounded
 # number of additional SSH observations per job. A transport/protocol failure
 # uses backoff; it never triggers a second launch, provider switch or lease loss.
