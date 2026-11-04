@@ -18,7 +18,7 @@ MAX_FAILURES = 2 ** 7
 PHASES = frozenset(('collect', 'setup', 'call', 'teardown'))
 KINDS = {kind: kind.__name__ for kind in (AssertionError, ValueError, TypeError,
     KeyError, IndexError, RuntimeError, OSError, PermissionError, FileNotFoundError,
-    NotADirectoryError, IsADirectoryError, TimeoutError, ImportError, ModuleNotFoundError, SyntaxError)}
+    NotADirectoryError, IsADirectoryError, TimeoutError, subprocess.TimeoutExpired, ImportError, ModuleNotFoundError, SyntaxError)}
 PUBLIC_PATH = re.compile(r'tests/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+[.]py\Z')
 NATIVE_PUBLIC_PATH = re.compile(r'ops/native_fabric/quota_continuity/(?:tests|rollout)/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+[.]py\Z')
 IDENTIFIER = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,127}\Z')
@@ -227,7 +227,7 @@ class FixedDiagnostics:
                 self.failures.append(value.copy())
             else:
                 self.truncated = True
-            # Only the actual two wrapper exceptions carry a live, validated
+            # Only the exact allowlisted wrapper exceptions carry a live, validated
             # private channel. Raw child output is never a diagnostic input.
             try:
                 from scripts.native_unittest_diagnostics import records_for_error
@@ -273,7 +273,8 @@ class FixedDiagnostics:
             if set(value)!=fields:return False
             if native:
                 wrappers={'test_native_quota_continuity_owners':'tests',
-                    'test_native_generation_and_ingress_rollout':'rollout'}
+                    'test_native_generation_and_ingress_rollout':'rollout',
+                    'test_existing_commission_deadlines_remain_binding':'tests'}
                 wrapper=value['native_wrapper']
                 if (type(wrapper) is not str or wrapper not in wrappers
                         or not module.startswith('ops/native_fabric/quota_continuity/'+wrappers[wrapper]+'/')

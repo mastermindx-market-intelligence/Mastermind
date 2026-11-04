@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "./App";
+import userEvent from "@testing-library/user-event";
 import knowledgeCss from "./knowledge/knowledge.css?raw";
 import { bindMissionHost, createNativeClient } from "./host";
 import { controlRoomFixture } from "./test-fixtures";
@@ -223,16 +224,19 @@ it("withdraws the actual Search source and draft when its auth owner changes dur
 
 
 async function selectActualReturnedWork(f:Awaited<ReturnType<typeof fixture>>) {
+  const user=userEvent.setup();
   window.MastermindMissionHost=f.host;render(<App/>);
-  fireEvent.click(screen.getByRole("button",{name:"Meta-CEO"}));
-  fireEvent.click(await screen.findByText("Subagent Fabric · inspect execution"));
-  const inside=within(screen.getByRole("region",{name:"Inside this mission"}));
-  fireEvent.click(await inside.findByRole("button",{name:new RegExp("^"+f.exact.jobId+" ·")}));
-  fireEvent.click(inside.getByRole("button",{name:"Inspect indexed result"}));
+  await user.click(screen.getByRole("button",{name:"Meta-CEO"}));
+  await user.click(await screen.findByText("Subagent Fabric · inspect execution"));
+  await user.click(await screen.findByRole("button",{name:new RegExp("^"+f.exact.jobId+" ·")}));
+  // The Office is auth/selection-keyed. Reacquire its current mounted region
+  // after the awaited interaction instead of retaining a replaceable DOM node.
+  await user.click(await within(screen.getByRole("region",{name:"Inside this mission"})).findByRole("button",{name:"Inspect indexed result"}));
   await waitFor(()=>expect(f.read).toHaveBeenCalledTimes(1));
   await screen.findByText("Result detail");
-  fireEvent.click(screen.getByRole("button",{name:"Fleet & Capacity workspace"}));
+  await user.click(screen.getByRole("button",{name:"Fleet & Capacity workspace"}));
 }
+
 it("reads historical capacity only after explicit activation for the current independently indexed child Attempt",async()=>{
   const f=await fixture(false,true,true);const read=vi.spyOn(f.host,"readResourceCapacity");
   await selectActualReturnedWork(f);
@@ -252,4 +256,22 @@ it("does not turn a returned older Attempt into the selected current capacity re
   await selectActualReturnedWork(f);
   expect((screen.getByRole("button",{name:"Read original claim"}) as HTMLButtonElement).disabled).toBe(true);
   expect(read).not.toHaveBeenCalled();
+});
+
+it("cannot inspect through a detached Office worker control after host invalidation",async()=>{
+  const f=await fixture(false,true,true),user=userEvent.setup();window.MastermindMissionHost=f.host;render(<App/>);
+  await user.click(screen.getByRole("button",{name:"Meta-CEO"}));
+  await user.click(await screen.findByText("Subagent Fabric · inspect execution"));
+  const oldRegion=screen.getByRole("region",{name:"Inside this mission"});
+  const oldWorker=await within(oldRegion).findByRole("button",{name:new RegExp("^"+f.exact.jobId+" ·")});
+  act(()=>f.notify({payload:signed}));
+  await screen.findByRole("button",{name:new RegExp("^"+f.exact.jobId+" ·")});
+  expect(oldRegion.isConnected).toBe(false);fireEvent.click(oldWorker);
+  expect(f.read).not.toHaveBeenCalled();
+  const current=screen.getByRole("region",{name:"Inside this mission"});
+  expect(current).not.toBe(oldRegion);
+  await user.click(within(current).getByRole("button",{name:new RegExp("^"+f.exact.jobId+" ·")}));
+  await user.click(await within(current).findByRole("button",{name:"Inspect indexed result"}));
+  await waitFor(()=>expect(f.read).toHaveBeenCalledTimes(1));
+  expect(f.invoke.mock.calls.some(([name])=>/submit|prepare|send/.test(name))).toBe(false);
 });
