@@ -117,6 +117,9 @@ describe("Research evidence sign-in presentation over the actual private auth ow
   it("does not let a replaced transport's pending completion change the current item view", async () => {
     const old = fixture(), current = fixture(); const r = render(view(old)); await start();
     r.rerender(view(current)); await start(); await authorize(current);
+    // Reject only the obsolete popup. Calling the old auth owner's signOut()
+    // would intentionally broadcast a global logout to both clients sharing
+    // the same OAuth client ID; that is not a stale-presentation completion.
     await act(async () => { old.callback("AUTHORIZATION_DENIED"); await flush(); });
     expect(status()).toBe("This citation contains one complete item from the source.");
     expect(document.querySelector("pre")?.textContent).toBe(payload.text);
@@ -124,9 +127,22 @@ describe("Research evidence sign-in presentation over the actual private auth ow
     expect(current.fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps explicit shared-client logout revocation distinct from stale popup rejection", async () => {
+    const old = fixture(), current = fixture(); const r = render(view(old)); await start();
+    r.rerender(view(current)); await start(); await authorize(current);
+    expect(current.client.research!.available()).toBe(true);
+    // Both owners have the same public OAuth client ID. Explicit logout is
+    // global by design; only an obsolete sign-in rejection is presentation-local.
+    await act(async () => { await old.client.signOut(); await flush(); });
+    expect(current.client.research!.available()).toBe(false);
+  });
+
   it("does not let an unmounted sign-in rejection change a newly mounted view", async () => {
     const old = fixture(), current = fixture(); const r = render(view(old)); await start();
     r.unmount(); render(view(current)); await start();
+    // Reject only the obsolete popup. Calling the old auth owner's signOut()
+    // would intentionally broadcast a global logout to both clients sharing
+    // the same OAuth client ID; that is not a stale-presentation completion.
     await act(async () => { old.callback("AUTHORIZATION_DENIED"); await flush(); });
     expect(status()).toBe("Loading authorized evidence…");
     expect(signIn().disabled).toBe(true);

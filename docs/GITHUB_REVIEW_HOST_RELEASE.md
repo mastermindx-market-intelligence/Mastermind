@@ -150,9 +150,12 @@ ACK is not permission for a second parent. It does not enumerate Executive jobs,
 run a worker, retry a lost POST, hold a credential, or select a model. The
 `ExecutiveGitHubReviewSocketOwner` can apply those frames to the incumbent
 JobRegistry/EventStore **only when an authorized control host invokes it**.
-Its source_guard remains an explicitly injected trusted source-authorization
-dependency, not satisfied production proof. Only the trusted Executive host
-may supply the existing `eligible_quota_classes` worker route; the public
+Its source authorization is explicitly host-bound. R15 supplies the concrete
+`GitHubReviewSourcePreflight` factory and exact repository/install policy map;
+the host must still bind its authenticated GitHub readers and current local
+enrollment fences. Exactly one of `source_preflight` or the legacy `source_guard`
+is required. Source construction is not satisfied production proof. Only the
+trusted Executive host may supply the existing `eligible_quota_classes` worker route; the public
 webhook host rejects worker constraints entirely. An unbound/default route
 cannot be treated as actual worker-START eligibility.
 
@@ -202,8 +205,14 @@ Before rollout, the authorized incumbent control-service maintainer must bind
 this typed frame on the existing peer-authenticated Unix listener, without
 altering existing C1/CEO/Session Bridge semantics. Both the peer UID and
 separate disabled-by-default review arm must be checked before parsing or
-committing. The host source_guard must reverify current PR identity/head and
-actor authority **at the mutation boundary**. If disconnected after submit,
+committing. With `source_preflight`, authenticated PR/head and actor or standing-
+policy checks occur once before Runtime admission. The original observation is
+limited to three seconds, including network and lock waits; the host arm,
+current local enrollment, exact policy and that unrenewed deadline are rechecked
+at both Runtime commit fences. The local fence must perform no network,
+credential or database work. This bounds observation age, not instantaneous
+remote revocation. Legacy `source_guard` remains compatible and still requires
+a trusted bounded implementation. If disconnected after submit,
 the caller performs read-only exact command reconciliation and never blindly
 re-submits an uncertain effect. Qualify with the real existing Executive socket
 service test fixture, not a substitute server; only then compose and enroll the
@@ -476,3 +485,49 @@ than force-pushed to #1741. The protected master ALLGREEN/SQUASH merge queue
 and current-master merge group checks are distinct from branch-head green
 checks. No PR merge, mark-ready, production activation, or privilege
 escalation follows from this source improvement.
+
+
+## Multi-repository mount and Executive source binding — R14/R15
+
+The source pieces now support one shared webhook endpoint for multiple
+explicitly enrolled repositories. The incumbent host constructs each receiver
+with its own exact settings, credential custodian, authenticated API and the
+existing socket client, then wraps its existing ASGI app:
+
+```python
+mounted_app = GitHubReviewASGIMount(
+    existing_app=existing_app,
+    receiver_map={
+        (mastermind_settings.installation_id,
+         "mastermindx-market-intelligence/Mastermind"): mastermind_receiver,
+        (macro_settings.installation_id,
+         "mastermindx-market-intelligence/macro"): macro_receiver,
+        (terminal_settings.installation_id,
+         "mastermindx-market-intelligence/mastermind-terminal"): terminal_receiver,
+    },
+)
+```
+
+These names denote previously authenticated host bindings, not discoverable
+credentials or new enrollment. Construction is pure; it starts no listener,
+worker or callback. Values must be exact receivers with immutable singleton
+repository settings, matching active-installation policies and identical
+host/TLS/body-size envelopes. The map is bounded to 32 entries; the single
+`receiver` form remains compatible but cannot be combined with `receiver_map`.
+
+Inside the separate incumbent Executive process, construct the concrete
+`GitHubReviewSourcePreflight` from its own authenticated API/settings bindings
+and current local enrollment-generation fences. Pass BOTH
+`source_preflight=preflight` and
+`automatic_policies=preflight.automatic_policies` to the same
+`ExecutiveGitHubReviewSocketOwner`, alongside the existing admission arm and
+reconciliation execution-reference guard. Use one active reader per repository
+because manual v1 decisions lack installation provenance. The prepared check
+is created inside that process and never trusted from a socket frame.
+
+The original Executive handler-edit platform hold is unchanged. None of this
+source composition installs that handler, publishes an HTTPS route, enrolls an
+App, qualifies a provider or dispatches a Dot. Installed acceptance still needs
+the original owner's authorized release and real GitHub/worker/GitHub/Slack
+receipts. Default-off rollback remains the incumbent host's configuration arm;
+active or unknown effects retain their original reconciliation owner.
