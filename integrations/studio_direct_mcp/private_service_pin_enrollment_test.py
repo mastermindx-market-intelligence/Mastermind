@@ -118,6 +118,67 @@ class AdminBusinessProfileTests(unittest.TestCase):
         self.assertEqual(profile["original_plan"], owner.ORIGINAL_PLAN)
 
 
+WORKSPACE_PREIMAGES = {'chatgpt3-w570f6f34': (45032, 'aa24bddbad7e989cedf566f4fbf4288fa333ee8fac8d2585cdcd9c954736eab3', '6e527360ba76034d0bde30943cb1025f82489525445bcac2ab86c8b190df8fbc', '1239d26202ea93279e356578910fd6ca326006cf39db41b82aefd3fb16213051'), 'chatgpt3-wa2a9e6f9': (45034, '38d5427f418f9f3f7aa1ff671befa55555f276cd4b639a6312e24fa0672965a3', '4e9aad915c1ea46e5de79c158d233d911e5aef7832d2016a2616a2996fa8fa68', 'bf798b50b2c25df035c6ddd7d4e9a09db8246423a2176c1983fdde56f8c2da45')}
+
+class ChatGPT3WorkspaceBatchProfilesTests(unittest.TestCase):
+    """Frozen, exact-account enrollment profiles; no account or repo globbing."""
+
+    def test_two_exact_installed_preimages(self):
+        for account, expected in WORKSPACE_PREIMAGES.items():
+            with self.subTest(account=account):
+                p=owner.frozen_profile(account)
+                self.assertEqual((p["port"], p["before_manifest"],
+                                  p["before_config"],p["original_plan"]), expected)
+                self.assertEqual(p["account"], account)
+                self.assertEqual(p["generation"],
+                                 "chatgpt3-workspaces-closed-repositories-20261104-v1")
+
+    def test_both_keep_immutable_three_repositories_and_timeouts(self):
+        home=Path("/Users/fixture")
+        original={"gitPublish":svc._typed_git_config(home), "survives":{"opaque":True}}
+        for account in WORKSPACE_PREIMAGES:
+            with self.subTest(account=account):
+                p=owner.frozen_profile(account)
+                before={**original,"accountLabel":account}
+                after=owner.target_config(home,before,p)
+                self.assertEqual(after["survives"],before["survives"])
+                self.assertEqual([r["repository"] for r in after["gitPublish"]["repositories"]],
+                                 ["mastermind","macro","terminal"])
+                self.assertEqual(after["repositoryWorkspaces"]["allowedRepositories"],
+                                 ["mastermind","macro","terminal"])
+                self.assertEqual(after["gitPublish"]["commandTimeoutMs"],45000)
+                self.assertEqual(after["gitPublish"]["pushTimeoutMs"],60000)
+                self.assertNotIn("repositoryWorkspaces",before)
+
+    def test_wrong_account_label_refused_even_with_matching_legacy_git(self):
+        home=Path("/Users/fixture")
+        for account in WORKSPACE_PREIMAGES:
+            with self.subTest(account=account):
+                other=next(x for x in WORKSPACE_PREIMAGES if x!=account)
+                before={"accountLabel":other,"gitPublish":svc._typed_git_config(home)}
+                with self.assertRaisesRegex(SystemExit, "PROFILE_REFUSED"):
+                    owner.target_config(home,before,owner.frozen_profile(account))
+
+    def test_only_exact_four_owner_profiles_not_glob_or_other_seats(self):
+        self.assertEqual(set(owner.PROFILES),
+                         {"chatgpt4","admin-business",*WORKSPACE_PREIMAGES})
+        for excluded in ("chatgpt1", "chatgpt2-business", "chatgpt2-personal",
+                         "chatgpt3","chatgpt3-unknown","fabric-read","admin-business-2"):
+            with self.subTest(account=excluded),self.assertRaisesRegex(
+                    SystemExit,"INPUT_REFUSED"):
+                owner.frozen_profile(excluded)
+
+    def test_cli_has_two_frozen_workspace_accounts_not_repository_input(self):
+        for account in WORKSPACE_PREIMAGES:
+            with self.subTest(account=account):
+                a=svc.build_parser().parse_args([
+                    "native-pool-pin-enrollment","--account",account,
+                    "--operation","preview","--expected-manifest-sha256",
+                    owner.frozen_profile(account)["before_manifest"],"--source","/fixture"])
+                self.assertEqual(a.func,svc.cmd_native_pool_pin_enrollment)
+                self.assertFalse(hasattr(a,"repository"))
+
+
 class EnrollmentTests(unittest.TestCase):
     def patch(self, target, attribute, value):
         patcher = mock.patch.object(target, attribute, value)
