@@ -123,11 +123,19 @@ def test_source_only_prevents_false_installed_and_live_claims():
     assert "fresh" in guide.lower()
 
 
-def test_session_local_review_separates_attended_and_signed_machine_policy():
+def test_session_local_review_all_tiers_preserves_actual_native_gates():
     policy = _read("docs/SESSION_LOCAL_REVIEW_POLICY.md")
     agents = _read("AGENTS.md")
     claude = _read("CLAUDE.md")
     for required in (
+        "Attended CEO Web FAST / STANDARD / CRITICAL",
+        "Zero blanket independent technical reviewers",
+        "CRITICAL classification by itself does",
+        "signed AUTOMATIC GitHub/Executive",
+        "native GitHub/CODEOWNERS",
+        "SELF_REVIEWED",
+        "EFFECT_UNKNOWN",
+        "original",
         "protected-accepted and actually loaded",
         "FAST0/0, STANDARD1/1 and CRITICAL2/1",
         "Review-host enrollment is not a prerequisite for the attended instruction waiver",
@@ -135,25 +143,24 @@ def test_session_local_review_separates_attended_and_signed_machine_policy():
         "Explicit review requests, native rules, CODEOWNERS",
         "recorded holds and release controls remain binding",
         "Repository source is not proof of installed instructions",
-        "SELF_REVIEWED",
         "a second prompt in the builder's own context is SELF_REVIEWED",
-        "On " + chr(96) + "EFFECT_UNKNOWN" + chr(96),
-        "original",
+        "On `EFFECT_UNKNOWN`",
     ):
-        assert required in policy, f"attended waiver must preserve machine and effect boundaries: {required}"
+        assert required in policy, f"missing all-tier attended waiver or gate: {required}"
+    assert "Before #2018 is protected" not in policy
+    assert "CRITICAL's two technical perspectives must show" not in policy
+    assert "docs/SESSION_LOCAL_REVIEW_POLICY.md" in claude
+    assert GUIDE in claude, "optional lawful external review remains discoverable"
     assert "This does not depend on #2018 or automatic-review-host enrollment" in agents
     assert "Signed machine policy and actually binding review" in agents
     assert "Other execution surfaces retain their applicable review requirements" in claude
     assert "proves neither instruction installation nor host enrollment" in claude
-    assert "docs/SESSION_LOCAL_REVIEW_POLICY.md" in claude
-    assert GUIDE in claude, "external avenue remains discoverable when genuinely needed"
     guide = _read(GUIDE)
     assert "## First gate: which review obligation actually applies?" in guide
     assert "FAST0/0, STANDARD1/1, CRITICAL2/1" in guide
     assert "These reviewer START/commission canaries apply only" in guide
     assert "no unwanted Fabric/Dot review operation is created" in guide
     assert "Source text does not prove installation" in guide
-
 
 
 def test_project_installed_fence_separates_native_review_from_formal_approval():

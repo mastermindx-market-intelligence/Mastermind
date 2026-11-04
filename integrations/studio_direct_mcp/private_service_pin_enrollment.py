@@ -1,4 +1,4 @@
-"""Exact C4 and admin-business enrollment, owned by the private-service installer.
+"""Closed C4/admin and two ChatGPT3 workspaces enrollment via existing private-service owner.
 
 This extends the completed native-pool-pin chain; it never restages that chain,
 controls service lifetime, publishes Git, selects a native generation, or grants
@@ -37,6 +37,22 @@ PROFILES = {
         "before_manifest": "35903622d2e10b3ba56aedbf64cc2484d8b53bdb67ab71a8e0f9b0b7ebacc148",
         "before_config": "2f0fd933062a0168093caa6a675dc27c91746837701fd28d74b7baf5ff3f4863",
         "original_plan": "25870fe238760b16ccc41b005c3a4289b8327dbe5a4d8b10015c00faaac15bac",
+    },
+    "chatgpt3-w570f6f34": {
+        "account": "chatgpt3-w570f6f34",
+        "generation": "chatgpt3-workspaces-closed-repositories-20261104-v1",
+        "port": 45032,
+        "before_manifest": "aa24bddbad7e989cedf566f4fbf4288fa333ee8fac8d2585cdcd9c954736eab3",
+        "before_config": "6e527360ba76034d0bde30943cb1025f82489525445bcac2ab86c8b190df8fbc",
+        "original_plan": "1239d26202ea93279e356578910fd6ca326006cf39db41b82aefd3fb16213051",
+    },
+    "chatgpt3-wa2a9e6f9": {
+        "account": "chatgpt3-wa2a9e6f9",
+        "generation": "chatgpt3-workspaces-closed-repositories-20261104-v1",
+        "port": 45034,
+        "before_manifest": "38d5427f418f9f3f7aa1ff671befa55555f276cd4b639a6312e24fa0672965a3",
+        "before_config": "4e9aad915c1ea46e5de79c158d233d911e5aef7832d2016a2616a2996fa8fa68",
+        "original_plan": "bf798b50b2c25df035c6ddd7d4e9a09db8246423a2176c1983fdde56f8c2da45",
     },
 }
 # Immutable generation, deliberately independent of all generic upgrade targets.

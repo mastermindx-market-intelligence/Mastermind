@@ -13,9 +13,14 @@ Apply the [standing Chairman commercial-data-rights ruling](COMMERCIAL_DATA_RIGH
 
 ## Deliver the assigned outcome
 
-Recover the current user's intent, the user/machine capability, DONE_WHEN and the next
-useful action. Keep the original product and intelligence ambition; do not shrink an
-end-to-end assignment into a plan, audit, source-only PR or unconsumed handoff.
+Recover the original customer outcomes, design references, DONE_WHEN and the next
+complete useful journey from the existing plan. Keep unfinished product obligations
+visible alongside accepted component work. A task buffer is a subset, not proof of
+full scope: all accepted rows, an empty buffer, CI, merge or installation cannot close
+the parent product. On resume and after material integration, recover omitted scope
+and advance the nearest joined producer-to-consumer journey through actual acceptance.
+Use the product-scope contract in `docs/CEO_PROJECT_PLAN_CONTINUITY.md`; do not create
+another registry, broad audit, approval stage or completion percentage from task counts.
 
 Chris delegates the maximum project and administrative authority he can grant within
 each assigned mission to its leads, coordinators and bounded workers. Investigate,
