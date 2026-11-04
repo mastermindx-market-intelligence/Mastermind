@@ -174,8 +174,10 @@ function decodeCapturedEnvelope(envelopeText, allowPreviewReason=false) {
   // Validate ONE complete capture envelope produced by the fixed CAPTURE_PROGRAM
   // wrapper. The envelope carries the original child adapter exit code and the
   // exact verified stdout bytes (base64 + byte count + sha256 + canonical
-  // base64 round-trip + strict UTF-8). Returns null on any malformed,
-  // truncated, oversized or mismatched framing. capture_error is surfaced via
+  // base64 round-trip + strict UTF-8). A bounded native stderr reason is
+  // admitted only for explicit read-only preview with nonzero exit and empty stdout.
+  // Returns null on malformed, truncated, oversized or mismatched framing.
+  // capture_error is surfaced via
   // the sole fixed captureError variant; strict UTF-8 retains its existing
   // result diagnostic. No transport-selected error code is reflected.
   let envelope;
@@ -568,7 +570,7 @@ export function createFabricFacade(engine, options={}) {
             }
             route=JSON.parse(preview.stdout);
           } catch(error) {
-            if(error instanceof Refusal) throw error;
+            if(error instanceof Refusal && error.code==='MANUAL_ROUTE_PREFLIGHT_REFUSED') throw error;
             fail('MANUAL_ROUTE_UNAVAILABLE');
           }
           if(route?.state!=='PREVIEW_ONLY' || route.reserved!==false
