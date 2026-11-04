@@ -1201,7 +1201,7 @@ def plan_accepted_macro_worktree_release(
     pattern = re.compile(
         r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
         r"\[remote_sub id=" + re.escape(rid) +
-        r" host=(?P<host>ubuntu[0-3])\] "
+        r" host=(?P<host>ubuntu[0-4])\] "
         r"FABRIC_NEW_MACRO_WORKTREE run=" + re.escape(rid) +
         r" commit=(?P<sha>[0-9a-f]{40}) "
         r"root=(?P<root>[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}) "

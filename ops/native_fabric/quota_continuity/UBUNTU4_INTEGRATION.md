@@ -172,3 +172,47 @@ The sparse-donor security suite produced 35 passing and 32 failing cases. A sepa
 The controller remains c7b078c07f4403d6263462650990fceffeb99ca9dd3359b147e8fddb2eeaf678. Its existing historical fixture inverse remains eb7ae5e3288a9f3a49eb5eab14a5481501cced21f72b646f9891fc5b83981bc0. The historical fixture and its two-member difference assertion are unchanged; the earlier unrelated-controller-byte negative remains prior evidence, not a newly rerun case.
 
 The original managed operation workspace remains at 5bab743fc8f99e2e2af42619a6975a5778f4ef62 with tracked files clean; existing untracked/ignored content was retained. All generated qualification data is outside that source workspace. This is source qualification only: no native generation was selected or installed, no host/provider was activated and no denied worker operation was replayed. The integration is published as draft pending fresh hosted qualification. Independent review of the eventual current head and ordinary protected merge gates remain required.
+
+
+## 2026-11-04 Ubuntu4 accepted-worktree provenance and donor acceptance
+
+On the existing PR source branch, repaired the retained read-only
+`plan_accepted_macro_worktree_release` launch-log provenance regex from
+`ubuntu[0-3]` to `ubuntu[0-4]`. The broader Ubuntu4 sparse request/controller
+admission is already in this branch; the original retained GC proof reader was
+the overlooked downstream lifecycle seam. This narrowly recognizes Ubuntu4's
+original launch evidence **after** real terminal result and original-parent
+acceptance. It does not perform cleanup, mint a worktree, add a provider mode,
+bypass any host qualification hold or grant lease authority.
+
+A new isolated regression `tests/test_ubuntu4_reclaim_plan.py` first reproduced
+the original Ubuntu4 refusal. The one-line source repair then passed five
+test cases covering successful U4 read-only provenance, unchanged Ubuntu0-3
+compatibility, unknown/Mac host refusals, duplicate/mismatched immutable
+launch evidence and unaccepted result denial.
+
+The unchanged canonical 102-file stage builder output was recreated outside
+the source tree. Only `ext/fabric_task.py` differs from the original declared
+runtime closure. New candidate SHA256:
+`0b0484312e5824ab53215bf052c70ac0708dc1c524f51e1247b73614c2c02ae4`.
+Manifest SHA256:
+`d1e1fe5d741986766d848c1f3cd68480b7d131835378f1d127a1492fd9997875`.
+Inventory SHA256:
+`660003989b12ea0c77e82c1eab68e4ee180e8fb7c8a488a702518011acd49f7c`.
+The six current-reader test pins were updated to match exact new bytes; previous
+head hashes in the historical checkpoints above remain unmodified as history.
+
+U4.6 host prerequisite has advanced independently: on the actual Ubuntu4 uid1000
+host, installed `~/lanes/repos/macro` at exact public Macro commit
+`4a2291747fd2d8d364a3838e1ed2263636bc64a6`, via a bounded sparse
+partial checkout and atomic no-replace install. Installed native donor verifier
+passed before and after placement, with source helper/policy Git blob identities
+matching the retained release pins. This **does not** establish a paid provider.
+
+Still blocked as separate gates: credential-owner approval or a genuinely
+owner-authorized alternate provider; U4 provider qualification with real lease
+and completed worker; existing capacity owner's MiniMax-only/qualified-mode
+promotion; actual normal routed task; current-head source PR release and host-pull
+rebind. Source testing/CI on the new PR head must be re-proven after publication,
+and an independent non-author GitHub review is not self-granted. No merge,
+enqueuing, Ready/un-draft or label modification was performed by this slice.

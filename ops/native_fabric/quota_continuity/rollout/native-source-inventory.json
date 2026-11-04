@@ -164,7 +164,7 @@
     "ext/fabric_task.py": {
       "bytes": 86702,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "c159d2b716b9674ca1bc97357a1eac073c42080d9d4f8ffdbe0e7c5464545236",
+      "sha256": "0b0484312e5824ab53215bf052c70ac0708dc1c524f51e1247b73614c2c02ae4",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
