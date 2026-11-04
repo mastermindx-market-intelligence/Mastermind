@@ -556,6 +556,11 @@ _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/control-room/unbind",
     "/workspace/control-room/refresh-builds",
 )
+_WORKSPACE_SOURCE_OPERATION_POST_ROUTES: tuple[str, ...] = (
+    "/workspace/source-operation/prepare", "/workspace/source-operation/submit",
+    "/workspace/source-operation/reconcile", "/workspace/source-operation/advance",
+)
+
 
 # Fixed already-owned inner routes. These are transport classifications only;
 # the Workspace App retains each original READ/action principal and grant gate.
@@ -620,6 +625,8 @@ class _ExecutivePathFence:
                 "/workspace/project-knowledge/current",
                 "/workspace/project-memory/current",
                 "/workspace/project-source/current",
+                "/workspace/source-operation/context",
+                "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
                 "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
@@ -638,6 +645,8 @@ class _ExecutivePathFence:
                 "/workspace/project-knowledge/current",
                 "/workspace/project-memory/current",
                 "/workspace/project-source/current",
+                "/workspace/source-operation/context",
+                "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
                 "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
@@ -650,9 +659,9 @@ class _ExecutivePathFence:
         if workspace_app is not None:
             # Fixed actions share the incumbent public credential/host fences
             # but must not be included in the preceding GET method expansion.
-            self._routes.update({path: "POST" for path in _WORKSPACE_ACTION_ROUTES})
-            self._workspace_routes.update(_WORKSPACE_ACTION_ROUTES)
-            self._public_routes.update(_WORKSPACE_ACTION_ROUTES)
+            self._routes.update({path: "POST" for path in (_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)})
+            self._workspace_routes.update(_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)
+            self._public_routes.update(_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)
         if os_app is not None:
             if type(os_app) is not OsStaticApp:
                 raise ValueError("fixed OS static owner required")
@@ -1452,12 +1461,14 @@ def _build_profile_mcp_app(
                 "/workspace/project-knowledge/current",
                 "/workspace/project-memory/current",
                 "/workspace/project-source/current",
+                "/workspace/source-operation/context",
+                "/workspace/source-operation/operation",
                 "/workspace/autonomy/current",
                              "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
                              + _WORKSPACE_ADDITIONAL_GET_ROUTES)
         outer_routes.extend(
             Route(path, workspace_app, methods=["POST"])
-            for path in _WORKSPACE_ACTION_ROUTES
+            for path in (_WORKSPACE_ACTION_ROUTES + _WORKSPACE_SOURCE_OPERATION_POST_ROUTES)
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))

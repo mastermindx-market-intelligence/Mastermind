@@ -226,9 +226,13 @@ class _CapturedRecord:
 
 
 class _Session:
-    """One bounded, immutable Git read session against the sealed Macro root."""
+    """One bounded Git read against a sealed root or issued canonical DATA view.
 
-    def __init__(self, macro_root, expected_macro_sha, work_ref, runner, timeout):
+    DATA and executable code refs stay explicit; the view re-observes the fixed
+    canonical default and grants instead of claiming a different filesystem HEAD.
+    """
+
+    def __init__(self, macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view=None, code_root=None, code_commit=None):
         validate_selection(work_ref)
         if (
             not isinstance(macro_root, (str, Path))
@@ -243,6 +247,24 @@ class _Session:
             raise _CaptureFailure("SOURCE_UNAVAILABLE")
         self.root = Path(macro_root)
         self.commit = expected_macro_sha
+        self._data_view = canonical_data_view
+        self.code_commit, self.code_root = self.commit, self.root
+        if code_root is not None or code_commit is not None:
+            if (canonical_data_view is not None or not isinstance(code_root, (str, Path))
+                    or not Path(code_root).is_absolute() or type(code_commit) is not str
+                    or _SHA40.fullmatch(code_commit) is None):
+                raise _CaptureFailure("SOURCE_UNAVAILABLE")
+            # Trusted fixed child capture parameters are DATA, never a grant.
+            # The installed parent owns code/source seals and principal fences.
+            self.code_root, self.code_commit = Path(code_root), code_commit
+        if canonical_data_view is not None:
+            from control_plane.project_canonical_data import CanonicalProjectDataView
+            if (type(canonical_data_view) is not CanonicalProjectDataView
+                    or canonical_data_view._root != self.root
+                    or canonical_data_view.data_commit != self.commit):
+                raise _CaptureFailure("SOURCE_UNAVAILABLE")
+            canonical_data_view.check()
+            self.code_commit, self.code_root = canonical_data_view.code_commit, canonical_data_view._code_root
         self.work_ref = work_ref
         self.key = work_ref[3:]
         self.ws_path = "agentos/workstreams/WS-" + self.key + ".md"
@@ -253,7 +275,7 @@ class _Session:
         self._runner = runner
         self.commands = []
 
-    def git(self, *args, limit=_DEFAULT_LIMIT, soft=False):
+    def git(self, *args, limit=_DEFAULT_LIMIT, soft=False, _code=False):
         """One bounded immutable Git read; ``soft`` turns an output-limit trip
         into a None the caller counts, instead of failing the whole capture."""
         remaining = self.deadline - time.monotonic()
@@ -262,6 +284,7 @@ class _Session:
         if self._runner is None:
             self._runner = _default_runner()
         self.commands.append(list(args))
+        from control_plane.project_canonical_data import local_git_environment
         try:
             result = self._runner(
                 [
@@ -269,13 +292,13 @@ class _Session:
                     "--no-optional-locks",
                     "--no-replace-objects",
                     "-C",
-                    str(self.root),
+                    str(self.code_root if _code else self.root),
                     *args,
                 ],
-                cwd=self.root,
+                cwd=self.code_root if _code else self.root,
                 timeout=remaining,
                 max_bytes=limit,
-                env=dict(os.environ, GIT_NO_LAZY_FETCH="1"),
+                env=local_git_environment(),
             )
         except (OSError, ValueError, TypeError) as exc:
             raise _CaptureFailure("SOURCE_UNAVAILABLE") from exc
@@ -298,10 +321,16 @@ class _Session:
         return value
 
     def head(self):
+        if (self.code_root != self.root or self.code_commit != self.commit) and self.git("rev-parse", "HEAD", limit=128, _code=True).strip() != self.code_commit:
+            raise _CaptureFailure("SOURCE_CHANGED")
+        if self._data_view is not None:
+            self._data_view.check()
+            return self._data_view.data_commit
         return self.git("rev-parse", "HEAD", limit=128).strip()
 
     def captured(self, path, limit=_DEFAULT_LIMIT, soft=False):
-        return self.git("show", self.commit + ":" + path, limit=limit, soft=soft)
+        commit = self.code_commit if path == "scripts/agentos.py" else self.commit
+        return self.git("show", commit + ":" + path, limit=limit, soft=soft, _code=path == "scripts/agentos.py")
 
     def member(self, path):
         """Tree-entry check: None when absent, _IRREGULAR when not a plain blob."""
@@ -337,7 +366,7 @@ class _Session:
 def _parser_session(session, parser_text):
     """Run the captured Macro parser under an isolated, restored module id."""
     module = types.ModuleType("agentos_bound_project_knowledge_owner")
-    module.__file__ = str(session.root / "scripts" / "agentos.py")
+    module.__file__ = str(session.code_root / "scripts" / "agentos.py")
     name = module.__name__
     prior = sys.modules.get(name)
     original_path = list(sys.path)
@@ -775,7 +804,7 @@ def _preference(session, module, workstream, key, pref_hits):
     }
 
 
-def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout):
+def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view=None, code_root=None, code_commit=None):
     """Regenerate the exact current catalogue metadata and member index.
 
     No file or record body is read here beyond the records the bounded sample
@@ -783,7 +812,7 @@ def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout):
     blob SHA-1 only.  HEAD is verified before the first and after the last Git
     read, so a source change mid-capture fails closed with no private payload.
     """
-    session = _Session(macro_root, expected_macro_sha, work_ref, runner, timeout)
+    session = _Session(macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view, code_root, code_commit)
     if session.head() != session.commit:
         raise _CaptureFailure("SOURCE_CHANGED")
     parser_text = session.captured("scripts/agentos.py", limit=_PARSER_LIMIT, soft=True)
@@ -867,10 +896,10 @@ def _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout):
     }
 
 
-def _capture(macro_root, expected_macro_sha, work_ref, runner, timeout, unavailable):
+def _capture(macro_root, expected_macro_sha, work_ref, runner, timeout, unavailable, canonical_data_view=None, code_root=None, code_commit=None):
     """Shared wrapper: closed-reason mapping, never a partial success."""
     try:
-        return _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout), None
+        return _capture_index(macro_root, expected_macro_sha, work_ref, runner, timeout, canonical_data_view, code_root, code_commit), None
     except _CaptureFailure as failure:
         return None, unavailable(work_ref, _reason(failure))
     except (ImportError, SystemExit):
@@ -907,10 +936,13 @@ def read_project_knowledge_catalogue(
     work_ref: str,
     runner=None,
     timeout: float = 10,
+    _canonical_data_view=None,
+    code_root=None,
+    code_commit=None,
 ) -> dict:
     """Read the bounded project-knowledge catalogue for one workstream."""
     index, failed = _capture(
-        macro_root, expected_macro_sha, work_ref, runner, timeout, unavailable_catalogue
+        macro_root, expected_macro_sha, work_ref, runner, timeout, unavailable_catalogue, _canonical_data_view, code_root, code_commit
     )
     if index is None:
         return failed
@@ -953,6 +985,9 @@ def read_project_knowledge_source(
     expected_revision: str,
     runner=None,
     timeout: float = 10,
+    _canonical_data_view=None,
+    code_root=None,
+    code_commit=None,
 ) -> dict:
     """Open exactly one catalogue member by source_ref and pinned blob revision.
 
@@ -970,7 +1005,7 @@ def read_project_knowledge_source(
         raise ContractInvalid("expected_revision must be a 40-hex blob revision")
     index, failed = _capture(
         macro_root, expected_macro_sha, work_ref, runner, timeout,
-        lambda selection_ref, *reason_codes: unavailable_source(selection_ref, source_ref, *reason_codes),
+        lambda selection_ref, *reason_codes: unavailable_source(selection_ref, source_ref, *reason_codes), _canonical_data_view, code_root, code_commit,
     )
     if index is None:
         return failed
@@ -1043,10 +1078,13 @@ def read_project_communication_preference(
     work_ref: str,
     runner=None,
     timeout: float = 10,
+    _canonical_data_view=None,
+    code_root=None,
+    code_commit=None,
 ) -> dict:
     """Read the project communication preference; EMPTY only when genuinely absent."""
     index, failed = _capture(
-        macro_root, expected_macro_sha, work_ref, runner, timeout, unavailable_memory
+        macro_root, expected_macro_sha, work_ref, runner, timeout, unavailable_memory, _canonical_data_view, code_root, code_commit
     )
     if index is None:
         return failed

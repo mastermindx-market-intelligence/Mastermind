@@ -498,6 +498,7 @@ class WorkspaceReadService:
                  product_acceptance_observe=None, activity_membership=None,
                  project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None, project_archive_reader=None,
                  project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
+                 canonical_project_data=None,
                  control_room_presenter=None,
                  control_room_actions=None, project_admission_permissions=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
@@ -601,6 +602,12 @@ class WorkspaceReadService:
         self._project_knowledge_catalogue_reader = project_knowledge_catalogue_reader
         self._project_knowledge_memory_reader = project_knowledge_memory_reader
         self._project_knowledge_source_reader = project_knowledge_source_reader
+        if canonical_project_data is not None:
+            from control_plane.installed_canonical_project_data_binding import _ProjectDataReadBinding
+            if type(canonical_project_data) is not _ProjectDataReadBinding or canonical_project_data.store is not runtime.store:
+                raise ValueError("installed canonical project DATA binding required")
+        self._canonical_project_data = canonical_project_data
+
         if project_session_source is not None:
             from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
             if type(project_session_source) is not ExistingManagedProjectSessionSource:
@@ -763,7 +770,7 @@ class WorkspaceReadService:
             return error("access_denied", 403)
         return result
 
-    def _read_project_knowledge(self, operation, selected):
+    def _read_project_knowledge(self, operation, selected, principal):
         from common import workspace_project_knowledge_read_contract as wire
         selected = wire.selection(selected, operation=operation)
         before = self.cache.snapshot()
@@ -780,7 +787,11 @@ class WorkspaceReadService:
         }
         reader = readers[operation]
         if reader is None: return wire.unavailable(selected, operation=operation)
-        body = wire.validate_body(reader.read(**selected), operation=operation)
+        data = None
+        if self._canonical_project_data is not None:
+            from control_plane.installed_canonical_project_data_binding import read_installed_project_data
+            data = read_installed_project_data(self._canonical_project_data,principal,operation=operation,selection=selected)
+        body = wire.validate_body(reader.read(**selected) if data is None else data[0], operation=operation)
         expected = {key: item for key, item in selected.items() if key != "expected_revision"}
         if body["selection"] != expected:
             return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
@@ -793,10 +804,17 @@ class WorkspaceReadService:
             return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
         if body.get("source") is not None:
             source = body["source"]
-            if (before.document.get("sources", {}).get("macro_sha") != source["commit"]
+            expected_code = before.document.get("sources", {}).get("macro_sha")
+            if data is not None:
+                data[1].check()
+                if expected_code != data[1].code_commit:
+                    return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+            if ((expected_code if data is None else data[1].data_commit) != source["commit"]
                     or (operation == "project_knowledge_source"
                         and source["revision"] != selected["expected_revision"])):
                 return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+        if data is not None:
+            data[1].check()
         bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
         return body
 
@@ -810,7 +828,7 @@ class WorkspaceReadService:
             stamp = permission_stamp(self.authorize, frame["principal"])
         except Exception: return error("access_denied", int(HTTPStatus.FORBIDDEN))
         task = asyncio.create_task(asyncio.to_thread(self._read_project_knowledge,
-            frame["operation"], frame["selection"]))
+            frame["operation"], frame["selection"], frame["principal"]))
         try:
             body = await await_owned(task)
             result = {"ok": True, "result": body}
@@ -1987,6 +2005,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_observe=None, activity_membership=None,
                                project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None, project_archive_reader=None,
                                project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
+                               canonical_project_data_factory=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
                                project_admission_permissions=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
@@ -2054,6 +2073,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_knowledge_catalogue_reader=project_knowledge_catalogue_reader,
                                     project_knowledge_memory_reader=project_knowledge_memory_reader,
                                     project_knowledge_source_reader=project_knowledge_source_reader,
+                                    canonical_project_data=(None if canonical_project_data_factory is None else canonical_project_data_factory(runtime)),
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
                                     project_archive_reader=project_archive_reader,

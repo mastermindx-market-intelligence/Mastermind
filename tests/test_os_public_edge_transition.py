@@ -13,6 +13,7 @@ from ops.executive_os.os_public_edge import (
     MCP_ROUTES, POST_ROUTES, asset_routes,
     INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_LEGACY_GET_ROUTES,
     CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES, COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES,
+    SOURCE_CONTEXT_GET_ROUTES, SOURCE_POST_ROUTES,
 )
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
@@ -59,6 +60,21 @@ def host_route(get_paths, port=49152, hosts=None):
     }
 
 
+def source_branch(port=49152, group=None):
+    # Independent expected dedicated branch; do not use the production builder.
+    handler = proxy(port)
+    handler.pop("transport")  # Caddy's default HTTP proxy representation.
+    value = {"match": [{"method": ["POST"], "path": list(SOURCE_POST_ROUTES)}],
+             "handle": [{"handler": "request_body", "max_size": 98304}, handler]}
+    if group is not None:
+        value["group"] = group
+    return value
+
+
+def expect_source_upgrade(branches):
+    branches.insert(2, source_branch(group=branches[1].get("group")))
+
+
 def other_site(host="workspace.mastermind-x.com"):
     return {"match": [{"host": [host]}],
             "handle": [{"handler": "subroute", "routes": [
@@ -67,7 +83,7 @@ def other_site(host="workspace.mastermind-x.com"):
 
 
 def fullconfig(old=OLD, port=49152, site=None, routes=None):
-    get_paths = sorted(list(GET_ROUTES) + list(asset_routes(old)))
+    get_paths = sorted(list(SOURCE_CONTEXT_GET_ROUTES) + list(asset_routes(old)))
     site = host_route(get_paths, port) if site is None else site
     servers = {"srv0": {"listen": [":443"],
                         "routes": [site, other_site()] if routes is None else routes}}
@@ -110,6 +126,7 @@ ADMITTED_ROUTE_PAIRS = (
     (CONTROL_ROOM_LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
     (CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES),
     (COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
+    (SOURCE_CONTEXT_GET_ROUTES, POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 
@@ -117,12 +134,14 @@ ADMITTED_ROUTE_PAIRS = (
 @pytest.mark.parametrize("fixed,posts", ADMITTED_ROUTE_PAIRS)
 @pytest.mark.parametrize("index_overlap", [False, True])
 @pytest.mark.parametrize("with_mcp", [False, True])
-def test_complete_get_profiles_upgrade_only_os_path_lists(fixed, index_overlap, posts, with_mcp):
+def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fixed, index_overlap, posts, with_mcp):
     paths = (sorted(list(fixed) + list(asset_routes(OLD))) if index_overlap
              else sorted(set(fixed) | set(asset_routes(OLD))))
     live = mcp_fullconfig() if with_mcp else fullconfig()
     get_paths_of(live)[:] = paths
     post_paths_of(live)[:] = list(posts)
+    if fixed == GET_ROUTES:
+        expect_source_upgrade(inner_of(live))
     before = copy.deepcopy(live)
     planned, prepared, final = transition_values(live)
     assert live == before
@@ -133,9 +152,11 @@ def test_complete_get_profiles_upgrade_only_os_path_lists(fixed, index_overlap, 
         expected = copy.deepcopy(before)
         get_paths_of(expected)[:] = expected_get
         post_paths_of(expected)[:] = list(POST_ROUTES)
+        if fixed != GET_ROUTES:
+            expect_source_upgrade(inner_of(expected))
         assert value == expected
-        assert len(inner_of(value)) == (5 if with_mcp else 3)
-        assert inner_of(value)[2:] == inner_of(before)[2:]
+        assert len(inner_of(value)) == (6 if with_mcp else 4)
+        assert inner_of(value)[3:] == inner_of(before)[3 if fixed == GET_ROUTES else 2:]
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
     assert planned["bindings"]["observed_fullconfig_sha256"] == module._sha256(before)
 
@@ -206,6 +227,7 @@ def test_retained_legacy_get_wrappers_upgrade_without_masking_the_profile():
         target = site_of(expected)["handle"][0]["routes"][0]["handle"][0]["routes"]
         target[0]["match"][0]["path"] = expected_get
         target[1]["match"][0]["path"] = list(POST_ROUTES)
+        expect_source_upgrade(target)
         assert value == expected
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
 
@@ -242,6 +264,7 @@ def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
         expected = copy.deepcopy(before)
         get_paths_of(expected)[:] = expected_get
         post_paths_of(expected)[:] = list(POST_ROUTES)
+        expect_source_upgrade(inner_of(expected))
         assert value == expected
 
 
@@ -324,7 +347,8 @@ def test_exact_incumbent_edge_gains_only_qualified_control_room_routes():
     assert receipt["get_routes"]["fixed"] == list(GET_ROUTES)
     assert receipt["post_routes"] == list(POST_ROUTES)
     for config in (prepared, finished):
-        get, post, terminal = inner_of(config)
+        get, post, source, terminal = inner_of(config)
+        assert source == source_branch()
         paths = get["match"][0]["path"]
         assert set(GET_ROUTES) <= set(paths)
         assert post["match"][0] == {"method": ["POST"], "path": list(POST_ROUTES)}
@@ -464,17 +488,18 @@ def test_prepare_covers_both_and_final_removes_only_retired():
 
 
 @pytest.mark.parametrize("maker", [prepare_config, final_config])
-def test_only_the_get_path_list_differs(maker):
+def test_only_get_paths_and_dedicated_source_branch_differ(maker):
     live = fullconfig()
     changed = maker(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
                     relay_port=49152)
     stripped = copy.deepcopy(changed)
+    assert inner_of(stripped).pop(2) == source_branch()
     stripped["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = None
     original = copy.deepcopy(live)
     original["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = None
     assert stripped == original
     assert inner_of(changed)[1] == inner_of(live)[1]
-    assert inner_of(changed)[2] == inner_of(live)[2]
+    assert inner_of(changed)[3] == inner_of(live)[2]
     assert changed["apps"]["tls"] == live["apps"]["tls"]
     assert changed["admin"] == live["admin"]
     assert site_of(changed, index=1) == site_of(live, index=1)
@@ -829,24 +854,25 @@ def mcp_branches(port=49152):
 
 
 def mcp_fullconfig(old=OLD, port=49152):
-    get_paths = sorted(list(GET_ROUTES) + list(asset_routes(old)))
+    get_paths = sorted(list(SOURCE_CONTEXT_GET_ROUTES) + list(asset_routes(old)))
     site = host_route(get_paths, port)
     site["handle"][0]["routes"][2:2] = mcp_branches(port)
     return fullconfig(old=old, port=port, site=site)
 
 
 @pytest.mark.parametrize("maker", [prepare_config, final_config])
-def test_mcp_shape_changes_only_the_get_path_list(maker):
+def test_mcp_shape_changes_only_get_paths_and_dedicated_source_branch(maker):
     live = mcp_fullconfig()
     changed = maker(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
-    assert len(inner_of(changed)) == 5
+    assert len(inner_of(changed)) == 6
     stripped = copy.deepcopy(changed)
+    assert inner_of(stripped).pop(2) == source_branch()
     inner_of(stripped)[0]["match"][0]["path"] = None
     original = copy.deepcopy(live)
     inner_of(original)[0]["match"][0]["path"] = None
     assert stripped == original
-    for index in (1, 2, 3, 4):
-        assert inner_of(changed)[index] == inner_of(live)[index]
+    assert inner_of(changed)[1] == inner_of(live)[1]
+    assert inner_of(changed)[3:] == inner_of(live)[2:]
     assert changed["apps"]["tls"] == live["apps"]["tls"]
     assert site_of(changed, index=1) == site_of(live, index=1)
 
@@ -915,7 +941,7 @@ def test_mcp_shape_mutations_refuse(mangle):
 
 
 @pytest.mark.parametrize("count", [1, 2, 4, 6, 7])
-def test_only_three_or_five_inner_routes_are_accepted(count):
+def test_wrong_counts_or_unrecognized_extra_branches_refuse(count):
     live = fullconfig()
     routes = inner_of(live)
     abort = routes[-1]
@@ -952,14 +978,14 @@ def test_retained_caddy_adapter_topology_with_mcp_is_accepted():
     assert preparation_complete(observed=planned, prepared=copy.deepcopy(planned))["prepared_observed_exactly"]
     finalized = final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
     final_wrapper = site_of(finalized)["handle"][0]["routes"][0]["handle"][0]["routes"]
-    # The retained fixture predates the three session routes: the transition
-    # widens only the OS POST path list to the current POST_ROUTES and keeps the
-    # branch's group, handlers, body limit and proxy exactly as retained.
+    # Preserve the retained OS POST group, handlers, body cap and proxy while
+    # updating its exact path list and inserting only the dedicated source branch.
     expected_post = copy.deepcopy(wrapper[1])
     assert expected_post["match"][0]["path"] == list(LEGACY_POST_ROUTES)
     expected_post["match"][0]["path"] = list(POST_ROUTES)
     assert final_wrapper[1] == expected_post
-    assert final_wrapper[2:] == wrapper[2:]
+    assert final_wrapper[2] == source_branch(group="group4")
+    assert final_wrapper[3:] == wrapper[2:]
     assert final_wrapper[0]["match"][0]["path"] == sorted(set(GET_ROUTES) | set(asset_routes(NEW)))
 
 
@@ -994,10 +1020,14 @@ PROXY_MUTATIONS = {
 
 @pytest.mark.parametrize("shape,index", [
     ("legacy", 0), ("legacy", 1), ("mcp", 0), ("mcp", 1), ("mcp", 2), ("mcp", 3),
+    ("source", 2),
 ])
 @pytest.mark.parametrize("mutation", sorted(PROXY_MUTATIONS))
 def test_every_branch_proxy_must_equal_the_rendered_handler(shape, index, mutation):
-    live = fullconfig() if shape == "legacy" else mcp_fullconfig()
+    live = mcp_fullconfig() if shape == "mcp" else fullconfig()
+    if shape == "source":
+        get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+        expect_source_upgrade(inner_of(live))
     PROXY_MUTATIONS[mutation](branch_proxy(live, index))
     with pytest.raises(ValueError):
         plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,

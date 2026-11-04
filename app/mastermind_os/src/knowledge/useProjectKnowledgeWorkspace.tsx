@@ -33,6 +33,7 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
   const identities = useRef({read:props.readContext, transport:props.transport, store:props.store, epoch:0});
   if (identities.current.read !== props.readContext || identities.current.transport !== props.transport || identities.current.store !== props.store)
     identities.current = {read:props.readContext, transport:props.transport, store:props.store, epoch:identities.current.epoch+1};
+  const alive=useRef(true);
   const scope = JSON.stringify([props.workRef,props.authGeneration,props.hostGeneration,identities.current.epoch]);
   const live = useRef({props,scope}); live.current = {props,scope};
   const sourceOwner = useRef<{scope:string;value:KnowledgeLibrarySourceOwner}|null>(null);
@@ -47,7 +48,7 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
   const setPhase = (value:KnowledgeEditPhase) => {phaseRef.current={scope:live.current.scope,value};repaint(n=>n+1);};
   function current(started=scope) {
     const now=live.current;
-    try {return now.scope===started && now.props.workRef!==null && now.props.hostGeneration!==null && now.props.canRead()===true;}
+    try {return alive.current && now.scope===started && now.props.workRef!==null && now.props.hostGeneration!==null && now.props.canRead()===true;}
     catch {return false;}
   }
   const codeContext = (snapshot:ProjectKnowledgeSourceContext) => {
@@ -102,7 +103,7 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
       committed.current={scope,controller}; repaint(n=>n+1);
     }
   },[scope,controller]);
-  useEffect(()=>()=>{pendingPrepare.current?.abort();committed.current.controller?.invalidate();},[]);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;pendingPrepare.current?.abort();committed.current.controller?.invalidate();};},[]);
   const registerSourceOwner=useCallback((value:KnowledgeLibrarySourceOwner|null)=>{sourceOwner.current=value?{scope:live.current.scope,value}:null;},[]);
 
   async function readContexts(signal:AbortSignal) {

@@ -19,8 +19,12 @@ def main():
     parser.add_argument("--work-ref", required=True)
     parser.add_argument("--source-ref")
     parser.add_argument("--expected-revision")
+    parser.add_argument("--code-root")
+    parser.add_argument("--code-commit")
     parser.add_argument("--timeout", type=float, default=10)
     args = parser.parse_args()
+    if (args.code_root is None) != (args.code_commit is None):
+        raise ValueError("SOURCE_UNAVAILABLE")
     selected = {"work_ref": args.work_ref}
     if args.source_ref is not None: selected["source_ref"] = args.source_ref
     if args.expected_revision is not None: selected["expected_revision"] = args.expected_revision
@@ -31,6 +35,8 @@ def main():
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         kwargs = dict(macro_root=Path(args.macro_root), expected_macro_sha=args.expected_macro_sha,
             timeout=args.timeout, **selected)
+        if args.code_root is not None:
+            kwargs.update(code_root=Path(args.code_root), code_commit=args.code_commit)
         if args.operation == "project_knowledge_catalogue": value = read_project_knowledge_catalogue(**kwargs)
         elif args.operation == "project_knowledge_memory": value = read_project_communication_preference(**kwargs)
         else: value = read_project_knowledge_source(**kwargs)

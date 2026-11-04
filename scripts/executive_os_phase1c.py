@@ -295,6 +295,7 @@ _CONFIG_OPTIONAL = frozenset(
         "company_consultation",
         "reply_events",
         "workspace_acquisition",
+        "workspace_source_publication",
         "workspace_resource_policy",
         "workspace_control_room",
         "coo_principal_armed",
@@ -1170,6 +1171,14 @@ def load_control_config(
             config["workspace_acquisition"] = validate_project_bindings(config["workspace_acquisition"], workspace_policy)
         except Exception:
             raise ServiceError("workspace acquisition policy or binding refused") from None
+    if "workspace_source_publication" in config:
+        if not workspace_keys <= keys:
+            raise ServiceError("source publication requires installed Workspace owners")
+        from integrations.mastermind_workspace_app.project_git_identity import validate_publisher_selection
+        try:
+            config["workspace_source_publication"] = validate_publisher_selection(config["workspace_source_publication"])
+        except ValueError:
+            raise ServiceError("source publisher selection refused") from None
     if content_sources:
         if not app_present:
             raise ServiceError("content observer requires installed App peer")
@@ -1824,6 +1833,7 @@ def _service_from_config(
     initial_canary: Mapping[str, Any] | None = None,
     content_profile_loader: Callable[[], Any] | None = None,
     workspace_acquisition_loader: Callable[[], Any] | None = None,
+    source_git_identity: Any | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
     workspace_bindings_path: Path | None = None,
     coo_source: Any | None = None,
@@ -2452,6 +2462,7 @@ def _service_from_config(
                     now=lambda: datetime.now(timezone.utc)),
             }
         workspace_factories = {}
+        source_factories = {}
         if "workspace_acquisition" in raw:
             from integrations.business_mcp_auth.contracts import load_resource_policy
             from integrations.mastermind_workspace_app.contract import (
@@ -2497,6 +2508,29 @@ def _service_from_config(
                     Path(raw["ceo_ingress_app_boot_python"])),
                 expected_source_sha=str(raw["proof_base_sha"]),
             )
+            canonical_project_data_factory = None
+            if "workspace_source_publication" in raw:
+                from integrations.mastermind_workspace_app.project_git_identity import InstalledProjectGitIdentity
+                from integrations.mastermind_workspace_app.installed_source_operations import InstalledWorkspaceSourceOperations
+                if (type(source_git_identity) is not InstalledProjectGitIdentity
+                        or source_git_identity._selection != raw["workspace_source_publication"]):
+                    raise ServiceError("source publication requires the actual sealed Git identity owner")
+                def source_runtime_guard(runtime):
+                    if service._require_runtime() is not runtime:
+                        raise ServiceError("source publisher Runtime differs")
+                    service._namespace_custody.bound_runtime(runtime)
+                    return True
+                source_factories["source_operation_provider_factory"] = InstalledWorkspaceSourceOperations(
+                    collector=packet_collector, policy=policy, load_bindings=workspace_acquisition_loader,
+                    git_identity=source_git_identity, runtime_guard=source_runtime_guard)
+                def canonical_project_data_factory(runtime):
+                    from integrations.mastermind_workspace_app.canonical_project_data import InstalledCanonicalProjectData
+                    from control_plane.workspace_source_operations import SourceOperationEvents
+                    source_runtime_guard(runtime)
+                    owner = InstalledCanonicalProjectData(collector=packet_collector,policy=policy,
+                        load_bindings=workspace_acquisition_loader,git_identity=source_git_identity,
+                        events=SourceOperationEvents(runtime.store),runtime_guard=lambda:source_runtime_guard(runtime))
+                    return owner.installed_binding()
             if product_acceptance_macro_root is not None:
                 product_acceptance_context_owner = packet_collector
             compose_inputs = build_workspace_composer(
@@ -2570,6 +2604,7 @@ def _service_from_config(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
                 project_knowledge_source_reader=packet_collector.project_knowledge_source_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                canonical_project_data_factory=canonical_project_data_factory,
                 project_session_source_factory=managed_project_session_source,
                 project_archive_reader=packet_collector.project_archive_reader(
                     macro_root=Path(raw["ceo_ingress_app_macro_root"])),
@@ -2799,7 +2834,7 @@ def _service_from_config(
             armed=raw["ceo_ingress_app_armed"],
             grounding_provider=readers, read_provider=readers,
             read_schema=app_read_schema,
-            **content_factories, **workspace_factories, **coo_factories, **session_factories,
+            **content_factories, **workspace_factories, **coo_factories, **session_factories, **source_factories,
         )
         ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
             commission_source_provider
@@ -3231,6 +3266,11 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         return value
     from control_plane.fabric_attended_canary import AttendedControlProbeSource
 
+    source_git_identity = None
+    if "workspace_source_publication" in raw:
+        from integrations.mastermind_workspace_app.project_git_identity import InstalledProjectGitIdentity
+        source_git_identity = InstalledProjectGitIdentity(config_path=config_path,
+            expected_config_sha256=hashlib.sha256(config_path.read_bytes()).hexdigest())
     service = _service_from_config(
         raw,
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
@@ -3248,6 +3288,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
+        source_git_identity=source_git_identity,
         **({"coo_source": coo_source} if coo_source is not None else {}),
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )

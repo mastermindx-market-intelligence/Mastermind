@@ -163,61 +163,14 @@ it('refuses a stale Library append when actual Content permission disappears wit
  expect(e.invoke.mock.calls.some(([name])=>/submit|prepare|send|create|source_operation/.test(name))).toBe(false);
 });
 
-it('publishes from the real editor once, then observes the original and opens the actual refreshed source',async()=>{
+it('keeps a legacy Library read-only even with fixed command methods and the actual durable store',async()=>{
  const e=await setup(false,undefined,false,true),journey=publicationOwner.journeys[0]!;
- vi.spyOn(globalThis.crypto,'getRandomValues').mockImplementation(array=>{(array as Uint8Array).fill(0xaa);return array;});
  fireEvent.click(screen.getByRole('button',{name:'Knowledge'}));
- const addFiles=await screen.findByRole('button',{name:'Add files'});
- await waitFor(()=>expect((addFiles as HTMLButtonElement).disabled).toBe(false));fireEvent.click(addFiles);
- const bytes=new TextEncoder().encode(journey.request.file!.content_utf8);
- const selected=new File([bytes],journey.request.file!.display_name,{type:journey.request.file!.media_type});
- Object.defineProperty(selected,'arrayBuffer',{value:async()=>bytes.buffer});
- fireEvent.change(screen.getByLabelText('Choose a file'),{target:{files:[selected]}});
- fireEvent.click(screen.getByRole('button',{name:'Add file'}));
- const publish=await screen.findByRole('button',{name:'Publish changes'});
+ await screen.findByRole('heading',{level:1,name:journey.before_catalogue.project.title});
+ await act(async()=>{});
+ const add=screen.getByRole('button',{name:'Add files'});expect((add as HTMLButtonElement).disabled).toBe(true);fireEvent.click(add);
+ expect(screen.queryByLabelText('Choose a file')).toBeNull();
+ expect(e.invoke.mock.calls.filter(([name])=>name==='read_source_operation_context')).toHaveLength(0);
+ expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_prepare'||name==='source_operation_submit')).toHaveLength(0);
  expect(await e.store!.read(journey.context.owner_context.principal_scope)).toBeNull();
- expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_submit')).toHaveLength(0);
- fireEvent.click(publish);
- await screen.findByText('The project source has not confirmed this save. Check the original publication; do not submit it again.');
- expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_submit')).toHaveLength(1);
- e.land();fireEvent.click(screen.getByRole('button',{name:'Check publication status'}));
- await screen.findByText('Saved to the project source.');
- await waitFor(async()=>expect(await e.store!.read(journey.context.owner_context.principal_scope)).toBeNull());
- const row=(await screen.findByRole('heading',{level:3,name:'Notes.md'})).closest('.knowledge-library-row')!;
- fireEvent.click(within(row as HTMLElement).getByRole('button',{name:'Open'}));
- await within(await screen.findByRole('article')).findByText('Keep literal 中文 line two.',{exact:false});
- fireEvent.click(screen.getByRole('button',{name:'Back'}));
- fireEvent.click(screen.getByRole('button',{name:'Close editor'}));
- fireEvent.click(screen.getByRole('button',{name:'Search'}));
- const query=await screen.findByLabelText('Search this project');fireEvent.change(query,{target:{value:'literal'}});fireEvent.submit(query.closest('form')!);
- const open=await screen.findByRole('button',{name:'Open'});fireEvent.click(open);
- const readerBack=await screen.findByRole('button',{name:'Back'});
- await within(await screen.findByRole('article')).findByText('Keep literal 中文 line two.',{exact:false});fireEvent.click(readerBack);
- expect((screen.getByLabelText('Search this project') as HTMLInputElement).value).toBe('literal');
- fireEvent.click(await screen.findByRole('button',{name:'Open'}));await within(await screen.findByRole('article')).findByText('Keep literal 中文 line two.',{exact:false});
- e.mounted.unmount();render(<App/>);
- fireEvent.click(screen.getByRole('button',{name:'Projects'}));fireEvent.click(await screen.findByRole('button',{name:'Open project Qualified library project'}));
- fireEvent.click(screen.getByRole('button',{name:'Knowledge'}));
- await screen.findByRole('heading',{level:3,name:'Notes.md'});
- expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_prepare')).toHaveLength(1);
- expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_submit')).toHaveLength(1);
- expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_reconcile')).toHaveLength(1);
-});
-
-it('withdraws a prepared original on actual App auth change and refuses its detached Publish control',async()=>{
- const e=await setup(false,undefined,false,true),journey=publicationOwner.journeys[0]!;
- vi.spyOn(globalThis.crypto,'getRandomValues').mockImplementation(array=>{(array as Uint8Array).fill(0xaa);return array;});
- fireEvent.click(screen.getByRole('button',{name:'Knowledge'}));
- const addFiles=await screen.findByRole('button',{name:'Add files'});
- await waitFor(()=>expect((addFiles as HTMLButtonElement).disabled).toBe(false));fireEvent.click(addFiles);
- const bytes=new TextEncoder().encode(journey.request.file!.content_utf8);
- const selected=new File([bytes],journey.request.file!.display_name,{type:journey.request.file!.media_type});
- Object.defineProperty(selected,'arrayBuffer',{value:async()=>bytes.buffer});
- fireEvent.change(screen.getByLabelText('Choose a file'),{target:{files:[selected]}});fireEvent.click(screen.getByRole('button',{name:'Add file'}));
- const stale=await screen.findByRole('button',{name:'Publish changes'});
- await act(async()=>e.notify({payload:{status:'signed_out',reason:null,acquisition:false,content:false}}));
- expect(screen.queryByRole('button',{name:'Publish changes'})).toBeNull();
- fireEvent.click(stale);expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_submit')).toHaveLength(0);
- expect(await e.store!.read(journey.context.owner_context.principal_scope)).toBeNull();
- expect(e.invoke.mock.calls.filter(([name])=>name==='source_operation_prepare')).toHaveLength(1);
 });

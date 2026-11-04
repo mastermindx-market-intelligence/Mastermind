@@ -411,10 +411,16 @@ class WorkspaceAppConfig:
     project_admission_load_bindings: Callable[[], Any] | None = None
     authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
     authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
+    source_operation_context: Any = None
 
     def __post_init__(self) -> None:
         if self.project_admission_load_bindings is not None and not callable(self.project_admission_load_bindings):
             raise ValueError("sealed current project membership loader required")
+        if self.source_operation_context is not None:
+            from integrations.mastermind_workspace_app.source_operation_context import WorkspaceSourceOperationContextFactory
+            if (type(self.source_operation_context) is not WorkspaceSourceOperationContextFactory
+                    or self.source_operation_context.policy != self.authenticator.policy):
+                raise ValueError("source operation context must bind the same installed Workspace policy")
         if self.authorize_discovery is not None and not callable(self.authorize_discovery):
             raise ValueError("authorize_discovery must be callable or absent")
         if self.authorize_actions is not None:
@@ -994,6 +1000,16 @@ async def _dispatch_v2(
     try:
         permission_before = contract.permission_stamp(config.authorize_principal, principal)
         principal_frame = contract.principal_frame(principal)
+        latest_gate = None
+        latest_before = None
+        if operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"}:
+            context = config.source_operation_context
+            if context is not None and context.policy == config.authenticator.policy:
+                from integrations.mastermind_workspace_app.project_authoring_grant import workspace_project_authorizers
+                latest_gate, _ = workspace_project_authorizers(policy=context.policy,
+                    load_bindings=context._load_bindings,action="read_latest_project_data")
+                if latest_gate(principal) is True:
+                    latest_before = latest_gate.binding_digest(principal)
     except ValueError:
         return _refuse_json(403, "access_denied")
 
@@ -1084,6 +1100,13 @@ async def _dispatch_v2(
 
     try:
         if contract.permission_stamp(config.authorize_principal, principal) != permission_before:
+            return _refuse_json(403, "access_denied")
+        if latest_before is not None and (latest_gate(principal) is not True
+                or latest_gate.binding_digest(principal) != latest_before):
+            return _refuse_json(403, "access_denied")
+        if (operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"}
+                and type(envelope) is dict and type(envelope.get("result")) is dict
+                and envelope["result"].get("data_observation") is not None and latest_before is None):
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
@@ -1579,6 +1602,43 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def programs_endpoint(request: Request) -> JSONResponse:
         return await programs_current(request, config=config)
 
+    async def source_operation_context_endpoint(request: Request) -> JSONResponse:
+        principal = await _authenticate(request, config.authenticator, clock=config.now)
+        if isinstance(principal, JSONResponse):
+            return _with_no_store(principal)
+        refused = await _reject_any_body(request)
+        if refused is not None:
+            return refused
+        query = _decode_v2_query(request.scope.get("query_string", b""),
+            required_keys=frozenset({"action"} if b"work_ref=" not in request.scope.get("query_string", b"")
+                                    else {"action", "work_ref"}))
+        if set(query) not in ({"action"}, {"action", "work_ref"}):
+            return _refuse_json(400, "invalid_input")
+        if "work_ref" not in query and query["action"] != "publish_project_proposal":
+            return _refuse_json(400, "invalid_input")
+        if (config.source_operation_context is None
+                or config.source_operation_context.policy != config.authenticator.policy):
+            return _refuse_json(503, "source_unavailable")
+        try:
+            permission = config.source_operation_context.bind(principal,
+                action=query["action"], work_ref=query.get("work_ref"))
+            result = permission.public_context()
+            if principal.expires_at <= config.now() or not permission.check():
+                return _refuse_json(403, "access_denied")
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except PermissionError:
+            return _refuse_json(403, "access_denied")
+        except ValueError:
+            return _refuse_json(400, "invalid_input")
+        except Exception:
+            return _refuse_json(503, "source_unavailable")
+
+    def source_operation_endpoint(operation):
+        async def endpoint(request):
+            from integrations.mastermind_workspace_app.source_operation_http import source_operation_http
+            return await source_operation_http(request, config=config, operation=operation)
+        return endpoint
+
     async def work_endpoint(request: Request) -> JSONResponse:
         return await work_current(request, config=config)
 
@@ -1655,6 +1715,12 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         return await control_room_current(request, config=config, operation="discover")
 
     routes = [
+        Route("/workspace/source-operation/context", source_operation_context_endpoint, methods=["GET"]),
+        Route("/workspace/source-operation/operation", source_operation_endpoint("read"), methods=["GET"]),
+        Route("/workspace/source-operation/prepare", source_operation_endpoint("prepare"), methods=["POST"]),
+        Route("/workspace/source-operation/submit", source_operation_endpoint("submit"), methods=["POST"]),
+        Route("/workspace/source-operation/reconcile", source_operation_endpoint("reconcile"), methods=["POST"]),
+        Route("/workspace/source-operation/advance", source_operation_endpoint("advance"), methods=["POST"]),
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
         Route(_MISSION_ROUTE, mission_endpoint, methods=["GET"]),

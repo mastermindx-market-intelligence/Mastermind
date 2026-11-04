@@ -510,6 +510,7 @@ def build_optional_apps(raw, source, config_path, sink):
         def legacy_workspace_loader(current_loader=workspace_project_bindings_loader, project_policy=policies['workspace']):
             return legacy_workspace_document(current_loader(), project_policy)
         gate, _ = workspace_authorizers(policy=policies['workspace'], load_bindings=legacy_workspace_loader)
+        from integrations.mastermind_workspace_app.source_operation_context import WorkspaceSourceOperationContextFactory
         discovery_gate, _ = workspace_control_room_authorizers(
             policy=policies['workspace'], load_bindings=legacy_workspace_loader, action='discover')
         action_gates = {
@@ -521,6 +522,8 @@ def build_optional_apps(raw, source, config_path, sink):
             now=lambda: int(time.time()), authorize_principal=gate,
             authorize_discovery=discovery_gate, authorize_actions=action_gates,
             project_admission_load_bindings=workspace_project_bindings_loader,
+            source_operation_context=WorkspaceSourceOperationContextFactory(
+                policy=policies['workspace'], load_bindings=workspace_project_bindings_loader),
             client=CeoIngressWorkspaceClient(raw['ceo_ingress_socket_path'])))
         mounts['workspace_app'] = AuditedWorkspaceApp(app, verifiers['workspace'])
     if 'steward' in raw:

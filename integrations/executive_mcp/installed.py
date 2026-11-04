@@ -41,6 +41,8 @@ PacketRunner = Callable[..., Mapping[str, Any]]
 
 
 _default_packet_runner = ceo_boot_packet.bounded_subprocess_runner
+_CANONICAL_PROJECT_DATA = contextvars.ContextVar("installed_canonical_project_data", default=None)
+_CANONICAL_PROJECT_COMPILATION = contextvars.ContextVar("installed_canonical_project_compilation", default=None)
 _PACKET_SETTLEMENT_MARGIN_SECONDS = 0.75
 _INSTALLED_PACKET_TOTAL_TIMEOUT_SECONDS = READ_TIMEOUT_SECONDS - 2.0
 # Bound each independent input below the observed 48k-object timeout case.
@@ -609,6 +611,7 @@ _MACRO_BRIEF_FIXED_CONTENT = frozenset({
     "scripts/agentos_direction.py",
     "scripts/agentos_project_archive.py",
     "scripts/agentos_project_plan_contract.py",
+    "scripts/project_knowledge_recipes.py",
     "scripts/audit_stranded_work.py",
     "config/mastermind_programs.yml",
     "data/governance/active_builds.json",
@@ -2058,6 +2061,39 @@ class InstalledBootPacketCollector:
             tuple[tuple[str | None, float], _PacketCollection] | None
         ] = contextvars.ContextVar("installed_packet_request", default=None)
 
+    @contextmanager
+    def canonical_project_compilation_scope(self, view, *, work_ref):
+        """Select DATA for physical compiler captures, never for publication.
+
+        Each fixed compiler call below enters its own full READ bracket. This
+        enclosing source-action scope deliberately cannot extend the issued
+        view's deadline across Git publication or a human Review.
+        """
+        from control_plane.project_canonical_data import CanonicalProjectDataView
+        if type(view) is not CanonicalProjectDataView or view._code_root != self._macro_root:
+            raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+        view._require_work(work_ref)
+        token = _CANONICAL_PROJECT_COMPILATION.set((self, view, work_ref))
+        try:yield
+        finally:_CANONICAL_PROJECT_COMPILATION.reset(token)
+
+    @contextmanager
+    def canonical_project_data_scope(self, view, *, work_ref):
+        """Private installed composition; no serialized view can enter here."""
+        from control_plane.project_canonical_data import CanonicalProjectDataView
+        from common.workspace_project_journal_contract import validate_selection
+        validate_selection({"work_ref": work_ref})
+        if type(view) is not CanonicalProjectDataView or view._code_root != self._macro_root:
+            raise ValueError("CANONICAL_DATA_UNAVAILABLE")
+        view._require_work(work_ref)
+        view.check()
+        token = _CANONICAL_PROJECT_DATA.set((self, view, work_ref))
+        try:
+            yield
+            view.check()
+        finally:
+            _CANONICAL_PROJECT_DATA.reset(token)
+
     def _discard_unused_collection(self, key, collection):
         if (not collection.started and collection.subscribers == 0
                 and collection.physical == 0 and self._collections.get(key) is collection):
@@ -2527,6 +2563,59 @@ class InstalledBootPacketCollector:
             raise ValueError(packet["reason"].lower())
         return packet["source"]
 
+    def project_knowledge_recipe_reader(self, *, macro_root: Path):
+        from control_plane.installed_project_knowledge_compiler import InstalledProjectKnowledgeCompiler, _SOURCE_ROOT
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        if (not root.is_absolute() or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != _SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project knowledge compiler unavailable")
+        reader = InstalledProjectKnowledgeCompiler(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(reader, owner=self,
+            kind="project_knowledge_recipe", qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector)
+        return reader
+
+    def read_project_knowledge_recipe(self, *, mode, request, actor_ref,
+            permission_binding_digest, decision_date, initial_snapshot=None, source_binding=None, timeout=15.0):
+        import math
+        from datetime import date
+        if (type(mode) is not str or mode not in {"prepare", "restore"}
+                or type(request) is not dict or type(actor_ref) is not str
+                or re.fullmatch(r"workspace:[0-9a-f]{64}", actor_ref) is None
+                or type(permission_binding_digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", permission_binding_digest) is None
+                or type(decision_date) is not str
+                or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", decision_date) is None
+                or type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None
+                or (mode == "prepare" and (initial_snapshot is not None or source_binding is not None))
+                or (mode == "restore" and (type(initial_snapshot) is not dict or type(source_binding) is not dict))):
+            raise ValueError("installed project knowledge compiler unavailable")
+        date.fromisoformat(decision_date)
+        body = {"schema": "mastermind.project_knowledge_recipe_capture_request.v1", "request": request,
+                "trusted": {"actor_ref": actor_ref, "permission_binding_digest": permission_binding_digest,
+                            "decision_date": decision_date}}
+        if mode == "restore":
+            body.update(initial_snapshot=initial_snapshot, source_binding=source_binding)
+        try:
+            encoded = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8") + b"\n"
+            if len(encoded) > 524288:
+                raise ValueError()
+        except (ValueError, TypeError, RecursionError, UnicodeError):
+            raise ValueError("installed project knowledge compiler unavailable") from None
+        bound = _CANONICAL_PROJECT_COMPILATION.get()
+        if bound is not None:
+            if bound[0] is not self or bound[2] != request['work_ref']:
+                raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+            with self.canonical_project_data_scope(bound[1], work_ref=bound[2]):
+                return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                    project_knowledge_recipe_request=(mode, body, encoded))
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+                                    project_knowledge_recipe_request=(mode, body, encoded))
+
     def _collect_packet(self, *, repo: Path, now: str | None,
                         timeout: float, acceptance_request: tuple | None = None,
                         project_plan_request: str | None = None,
@@ -2534,9 +2623,23 @@ class InstalledBootPacketCollector:
                         project_creation_request: tuple | None = None,
                         project_direction_request: str | None = None,
                         project_archive_request: tuple | None = None,
+                        project_knowledge_recipe_request: tuple | None = None,
                         project_knowledge_request: tuple | None = None) -> Any:
-        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_request)) > 1:
+        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_recipe_request, project_knowledge_request)) > 1:
             raise ValueError("ambiguous installed source read")
+        bound_data = _CANONICAL_PROJECT_DATA.get()
+        data_view = None
+        if bound_data is not None:
+            if (bound_data[0] is not self or self._allow_synthetic_fixture
+                    or (project_knowledge_request is None and project_knowledge_recipe_request is None)):
+                raise ValueError("CANONICAL_DATA_UNAVAILABLE")
+            selected_work = (project_knowledge_request[1]["work_ref"] if project_knowledge_request is not None
+                             else project_knowledge_recipe_request[1]["request"].get("work_ref"))
+            if selected_work != bound_data[2]:
+                raise ValueError("CANONICAL_DATA_UNAVAILABLE")
+            data_view = bound_data[1]
+            data_view._require_work(selected_work)
+            data_view.check()
         deadline = time.monotonic() + timeout
 
         def remaining() -> float:
@@ -2566,6 +2669,9 @@ class InstalledBootPacketCollector:
             raise GatewayError("backend_unavailable", "project catalogue source changed")
         if project_archive_request is not None and pre_macro_sha != project_archive_request[1]:
             raise GatewayError("backend_unavailable", "project catalogue source changed")
+        if (project_knowledge_recipe_request is not None and project_knowledge_recipe_request[0] == "prepare"
+                and project_knowledge_recipe_request[1]["request"].get("source_commit") != (pre_macro_sha if data_view is None else data_view.data_commit)):
+            raise GatewayError("backend_unavailable", "project knowledge source changed")
         materialization_plan = None
         if not self._allow_synthetic_fixture:
             if len(macro_snapshots) != 1:
@@ -2585,25 +2691,35 @@ class InstalledBootPacketCollector:
                 self._macro_root, plan=materialization_plan, runner=self._runner,
                 env=live_env, deadline=deadline,
             )
-        with _materialized_macro_root(
-            self._macro_root, timeout=remaining(), plan=materialization_plan,
-            _allow_synthetic_fixture=self._allow_synthetic_fixture,
-        ) as packet_macro_root:
+        if data_view is not None and data_view.code_commit != pre_macro_sha:
+            raise GatewayError("backend_unavailable", "configured CODE source changed")
+        expected_packet_macro_sha = pre_macro_sha if data_view is None else data_view.data_commit
+        @contextmanager
+        def materialization():
+            if data_view is None:
+                with _materialized_macro_root(self._macro_root, timeout=remaining(), plan=materialization_plan,
+                        _allow_synthetic_fixture=self._allow_synthetic_fixture) as root:
+                    yield root, materialization_plan
+            else:
+                from integrations.executive_mcp.project_data_materialization import materialized_project_data
+                with materialized_project_data(data_view, pinned_macro_root=self._macro_root, deadline=deadline) as pair:
+                    yield pair
+        with materialization() as (packet_macro_root, packet_plan):
             child_env = _installed_child_env(
                 code_root=self._code_root, macro_root=packet_macro_root,
             )
             materialized_observation: tuple[str, str] | None = None
             if packet_macro_root != self._macro_root:
-                if materialization_plan is None:
+                if packet_plan is None:
                     raise GatewayError(
                         "backend_unavailable",
                         "installed Macro materialization plan is unavailable",
                     )
                 materialized_observation = _verify_materialized_macro_root(
-                    packet_macro_root, plan=materialization_plan,
+                    packet_macro_root, plan=packet_plan,
                     runner=self._runner, env=child_env, deadline=deadline,
                 )
-                if materialized_observation[0] != pre_macro_sha:
+                if materialized_observation[0] != expected_packet_macro_sha:
                     raise GatewayError(
                         "backend_unavailable", "installed Macro materialization SHA differs"
                     )
@@ -2617,12 +2733,12 @@ class InstalledBootPacketCollector:
                 argv.extend(["--now", now])
             if acceptance_request is not None:
                 argv.extend(["--workstream", acceptance_request[0][3:],
-                             "--expected-macro-sha", pre_macro_sha])
+                             "--expected-macro-sha", expected_packet_macro_sha])
             if project_plan_request is not None:
                 argv = [os.fspath(self._python), "-I", "-B",
                         os.fspath(self._code_root / "scripts" / "agentos_project_plan_entry.py"),
                         "--macro-root", os.fspath(packet_macro_root),
-                        "--expected-macro-sha", pre_macro_sha,
+                        "--expected-macro-sha", expected_packet_macro_sha,
                         "--work-ref", project_plan_request,
                         "--continuity",
                         "--timeout", f"{inner_timeout:g}"]
@@ -2630,13 +2746,13 @@ class InstalledBootPacketCollector:
                 argv = [os.fspath(self._python), "-I", "-B",
                         os.fspath(self._code_root / "scripts" / "agentos_project_journal_entry.py"),
                         "--macro-root", os.fspath(packet_macro_root),
-                        "--expected-macro-sha", pre_macro_sha,
+                        "--expected-macro-sha", expected_packet_macro_sha,
                         "--work-ref", project_journal_request,
                         "--timeout", f"{inner_timeout:g}"]
             if project_creation_request is not None:
                 argv = [os.fspath(self._python), "-I", "-B",
                     os.fspath(self._code_root / "scripts" / "agentos_project_creation_source_entry.py"),
-                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", expected_packet_macro_sha,
                     "--work-ref", project_creation_request[0], "--record-commit", project_creation_request[1],
                     "--timeout", f"{inner_timeout:g}"]
             if project_direction_request is not None:
@@ -2652,18 +2768,25 @@ class InstalledBootPacketCollector:
                     "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
                     "--work-refs-json", json.dumps(project_archive_request[0], separators=(",", ":")),
                     "--timeout", f"{inner_timeout:g}"]
+            if project_knowledge_recipe_request is not None:
+                argv = [os.fspath(self._python), "-I", "-B",
+                    os.fspath(self._code_root / "scripts" / "agentos_project_knowledge_recipe_entry.py"),
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", expected_packet_macro_sha,
+                    "--mode", project_knowledge_recipe_request[0], "--timeout", f"{inner_timeout:g}"]
             if project_knowledge_request is not None:
                 operation, selected = project_knowledge_request
                 from common.workspace_project_knowledge_read_contract import selection
                 selection(selected, operation=operation)
                 argv = [os.fspath(self._python), "-I", "-B",
                     os.fspath(self._code_root / "scripts" / "agentos_project_knowledge_entry.py"),
-                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", expected_packet_macro_sha,
                     "--operation", operation, "--work-ref", selected["work_ref"],
                     "--timeout", f"{inner_timeout:g}"]
                 if operation == "project_knowledge_source":
                     argv.extend(["--source-ref", selected["source_ref"],
                                  "--expected-revision", selected["expected_revision"]])
+            if data_view is not None:
+                argv.extend(["--code-root", os.fspath(self._macro_root), "--code-commit", data_view.code_commit])
             output_limit = (131072 if project_archive_request is not None else
                             65536 if project_direction_request is not None else
                             262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None
@@ -2672,10 +2795,13 @@ class InstalledBootPacketCollector:
                 output_limit = 4096
             if project_knowledge_request is not None:
                 output_limit = 131072
+            if project_knowledge_recipe_request is not None:
+                output_limit = 524288
             try:
+                extra = {} if project_knowledge_recipe_request is None else {"input_bytes": project_knowledge_recipe_request[2]}
                 result = self._runner(
                     argv, cwd=self._code_root, timeout=remaining(),
-                    max_bytes=output_limit, env=child_env,
+                    max_bytes=output_limit, env=child_env, **extra,
                 )
             except Exception as exc:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed") from exc
@@ -2686,7 +2812,24 @@ class InstalledBootPacketCollector:
             stdout = result.get("stdout")
             if type(stdout) is not str:
                 raise GatewayError("backend_unavailable", "installed boot-packet collector failed")
-            if project_creation_request is not None:
+            if project_knowledge_recipe_request is not None:
+                try:
+                    def unique_recipe_object(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value: raise ValueError()
+                            value[key] = item
+                        return value
+                    def nonfinite_recipe(_value):
+                        raise ValueError()
+                    packet = json.loads(stdout, object_pairs_hook=unique_recipe_object, parse_constant=nonfinite_recipe)
+                    if (type(packet) is not dict or set(packet) != {"schema", "recipe", "initial_snapshot", "source_binding"}
+                            or packet["schema"] != "mastermind.project_knowledge_recipe_capture.v1"
+                            or any(type(packet[key]) is not dict for key in ("recipe", "initial_snapshot", "source_binding"))):
+                        raise ValueError()
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project knowledge compiler unavailable") from None
+            elif project_creation_request is not None:
                 from common.workspace_project_session_contract import validate_source_observation
                 try:
                     def unique_creation_object(pairs):
@@ -2742,7 +2885,7 @@ class InstalledBootPacketCollector:
                     expected_selection = {key: item for key, item in selected.items() if key != "expected_revision"}
                     if packet["selection"] != expected_selection:
                         raise ValueError("knowledge selection changed")
-                    if packet.get("source") is not None and packet["source"]["commit"] != pre_macro_sha:
+                    if packet.get("source") is not None and packet["source"]["commit"] != expected_packet_macro_sha:
                         raise ValueError("knowledge source changed")
                     if (operation == "project_knowledge_source" and packet["availability"] == "AVAILABLE"
                             and packet["source"]["revision"] != selected["expected_revision"]):
@@ -2765,7 +2908,7 @@ class InstalledBootPacketCollector:
                         raise ValueError("project journal response invalid")
                     if packet.get("availability") == "AVAILABLE":
                         source = packet["source"]
-                        if source["commit"] != pre_macro_sha:
+                        if source["commit"] != expected_packet_macro_sha:
                             raise ValueError("project journal source changed")
                     elif packet.get("availability") != "UNAVAILABLE":
                         raise ValueError("project journal availability invalid")
@@ -2787,7 +2930,7 @@ class InstalledBootPacketCollector:
                         raise ValueError("project plan response invalid")
                     if packet.get("availability") == "AVAILABLE":
                         source = validate_source(packet.get("source"), project_plan_request)
-                        if source["commit"] != pre_macro_sha:
+                        if source["commit"] != expected_packet_macro_sha:
                             raise ValueError("project plan source changed")
                     elif packet.get("availability") != "UNAVAILABLE":
                         raise ValueError("project plan availability invalid")
@@ -2815,7 +2958,7 @@ class InstalledBootPacketCollector:
                                         parse_constant=nonfinite)
                     work_ref, execution_ref, root_objective = acceptance_request
                     packet = AgentOsProductAcceptanceBasisReader._select(
-                        bundle, expected_sha=pre_macro_sha, work_ref=work_ref,
+                        bundle, expected_sha=expected_packet_macro_sha, work_ref=work_ref,
                         execution_ref=execution_ref, root_objective=root_objective,
                     )
                     source = normalize_commission_ref(packet.entry["source_record_ref"])
@@ -2857,13 +3000,13 @@ class InstalledBootPacketCollector:
                         if isinstance(macro_doc, Mapping) else None
                     )
                     packet_source_sha = mastermind.get("sha") if isinstance(mastermind, Mapping) else None
-                    packet_macro_sha = macro_doc.get("sha") if isinstance(macro_doc, Mapping) else None
+                    observed_packet_macro_sha = macro_doc.get("sha") if isinstance(macro_doc, Mapping) else None
                 except (KeyError, TypeError, OSError):
                     packet_repo = packet_macro = None
-                    packet_source_sha = packet_macro_sha = None
+                    packet_source_sha = observed_packet_macro_sha = None
                 if packet_repo != self._source_root or packet_macro != packet_macro_root:
                     raise GatewayError("backend_unavailable", "installed boot-packet roots differ")
-                if packet_source_sha != pre_source_sha or packet_macro_sha != pre_macro_sha:
+                if packet_source_sha != pre_source_sha or observed_packet_macro_sha != expected_packet_macro_sha:
                     raise GatewayError("backend_unavailable", "installed boot-packet SHA binding differs")
             if materialized_observation is not None:
                 try:
@@ -2917,10 +3060,18 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_request is None:
+            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_recipe_request is None and project_knowledge_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )
+        if project_knowledge_request is not None:
+            packet = dict(packet, code_context={"schema": "mastermind.project_knowledge_code_context.v1",
+                "work_ref": project_knowledge_request[1]["work_ref"],
+                "executable_macro_commit": pre_macro_sha, "reader_source_commit": pre_source_sha})
+        if data_view is not None:
+            data_view.check()
+            if project_knowledge_request is not None:
+                packet = dict(packet, data_observation=data_view.witness())
         remaining()
         return packet
 

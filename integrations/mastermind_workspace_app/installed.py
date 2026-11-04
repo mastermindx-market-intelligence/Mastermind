@@ -71,6 +71,15 @@ class CeoIngressWorkspaceClient:
         elif isinstance(frame, dict) and frame.get("schema") == direction_wire.FRAME_SCHEMA:
             direction_wire.validate_frame(frame)
             ceiling = direction_wire.MAX_RESPONSE_BYTES
+        from common import workspace_source_operation_wire as source_wire
+        if type(frame) is dict and frame.get("schema") == source_wire.FRAME_SCHEMA:
+            frame = source_wire.validate_frame(frame)
+            ceiling = source_wire.MAX_RESPONSE_BYTES
+            timeout = self.timeout_seconds if frame["operation"] == "read" else self.action_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == knowledge_wire.FRAME_SCHEMA:
+            knowledge_wire.validate_frame(frame)
+            ceiling = knowledge_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
         elif isinstance(frame, dict) and frame.get("schema") == capacity_wire.FRAME_SCHEMA:
             capacity_wire.validate_frame(frame)
             ceiling = capacity_wire.MAX_RESPONSE_BYTES

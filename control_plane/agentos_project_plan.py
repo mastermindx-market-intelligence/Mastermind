@@ -136,7 +136,7 @@ class AgentOsProjectPlanReader:
 
 def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
                           work_ref: str, timeout: float = 10.0, runner=None,
-                          include_continuity: bool = False):
+                          include_continuity: bool = False, _canonical_data_view=None):
     """Fixed child entry used inside the collector's pre/post seal bracket.
 
     Macro's actual parser and validator consume bounded captured bytes. No
@@ -153,6 +153,21 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
             or type(timeout) not in (int, float) or not 0 < timeout <= 15):
         raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
     root = Path(macro_root)
+    code_sha, code_root = expected_macro_sha, root
+    if _canonical_data_view is not None:
+        from control_plane.project_canonical_data import CanonicalProjectDataView
+        if (type(_canonical_data_view) is not CanonicalProjectDataView
+                or _canonical_data_view._root != root
+                or _canonical_data_view.data_commit != expected_macro_sha):
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        _canonical_data_view.check()
+        code_sha, code_root = _canonical_data_view.code_commit, _canonical_data_view._code_root
+
+    def current():
+        if _canonical_data_view is not None:
+            _canonical_data_view.check()
+            return True
+        return git("rev-parse", "HEAD").strip() == expected_macro_sha
     path = "agentos/workstreams/WS-" + work_ref[3:] + ".md"
     deadline = time.monotonic() + timeout
     run = runner or bounded_subprocess_runner
@@ -162,21 +177,23 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
         if remaining <= 0:
             raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
         options = {} if input_bytes is None else {"input_bytes": input_bytes}
+        from control_plane.project_canonical_data import local_git_environment
         value = run(["git", "--no-optional-locks", "--no-replace-objects", "-C", str(root), *args],
-                    cwd=root, timeout=remaining, max_bytes=limit, **options)
+                    cwd=root, timeout=remaining, max_bytes=limit, env=local_git_environment(), **options)
         if (not isinstance(value, dict) or value.get("code") != 0
                 or type(value.get("stdout")) is not str
                 or any(value.get(flag) is True for flag in ("timed_out", "limit_exceeded", "invalid_utf8"))):
             raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
         return value["stdout"]
 
-    def captured(relative, limit):
+    def captured(relative, limit, *, executable=False):
         # Parent collector established the immutable source root. This fixed
         # Git-object read avoids following mutable filesystem names in a parser.
-        return git("show", expected_macro_sha + ":" + relative, limit=limit)
+        commit = code_sha if executable else expected_macro_sha
+        return git("show", commit + ":" + relative, limit=limit)
 
     try:
-        if git("rev-parse", "HEAD").strip() != expected_macro_sha:
+        if not current():
             return unavailable(work_ref, "SOURCE_CHANGED")
         membership = git("ls-tree", "-z", expected_macro_sha, "--", path)
         if not membership:
@@ -184,9 +201,9 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
         if re.fullmatch(r"100644 blob [0-9a-f]{40}\t" + re.escape(path) + "\x00", membership) is None:
             return unavailable(work_ref, "RECORD_INVALID")
         text = captured(path, _RECORD_BYTES)
-        parser_text = captured("scripts/agentos.py", _OWNER_BYTES)
+        parser_text = captured("scripts/agentos.py", _OWNER_BYTES, executable=True)
         owner = types.ModuleType("agentos_bound_plan_source")
-        owner.__file__ = str(root / "scripts/agentos.py")
+        owner.__file__ = str(code_root / "scripts/agentos.py")
         prior = sys.modules.get(owner.__name__)
         sys.modules[owner.__name__] = owner
         original_path = list(sys.path)
@@ -231,15 +248,16 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
                 # Missing history never fabricates adoption or makes available
                 # current authored plan content disappear.
                 value["plan"]["version_history"] = {"state": "UNAVAILABLE", "reason": "SOURCE_UNAVAILABLE"}
-        if git("rev-parse", "HEAD").strip() != expected_macro_sha:
+        if not current():
             return unavailable(work_ref, "SOURCE_CHANGED")
         if include_continuity and value.get("availability") == "AVAILABLE":
             from control_plane.agentos_plan_continuity_capture import capture_plan_continuity
             from common.project_plan_continuity_contract import compose_body_v2
             continuity = capture_plan_continuity(owner=owner, git=git, work_ref=work_ref,
-                macro_sha=expected_macro_sha, workstream_source=source, workstream_bytes=text.encode("utf-8"))
+                macro_sha=expected_macro_sha, workstream_source=source, workstream_bytes=text.encode("utf-8"),
+                executable_macro_sha=code_sha)
             value = compose_body_v2(value, continuity, authored_bytes=text.encode("utf-8"))
-            if git("rev-parse", "HEAD").strip() != expected_macro_sha:
+            if not current():
                 return unavailable(work_ref, "SOURCE_CHANGED")
         from common.executive_workspace_contract import bounded_canonical
         from common.workspace_project_plan_contract import MAX_RESPONSE_BYTES

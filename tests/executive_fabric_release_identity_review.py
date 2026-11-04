@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'e38de1b59330da57e6d017f56f0a841358e50489f3fb8128d19c4977f773d684', 'sites': ((865, 71, 74, 'int', '400'), (876, 71, 74, 'int', '403'), (884, 71, 74, 'int', '400'), (890, 79, 82, 'int', '400'), (899, 71, 74, 'int', '400'), (909, 71, 74, 'int', '403'), (914, 76, 79, 'int', '503'), (920, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'dfb287e7a5439f8766d7966e25480b12c63045c55705dd8ee4b237272490c598', 'sites': ((871, 71, 74, 'int', '400'), (882, 71, 74, 'int', '403'), (890, 71, 74, 'int', '400'), (896, 79, 82, 'int', '400'), (905, 71, 74, 'int', '400'), (915, 71, 74, 'int', '403'), (920, 76, 79, 'int', '503'), (926, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -538,3 +538,10 @@ REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.t
 
 # Exact reviewed archive catalogue cardinality bound; never a host UID or grant.
 REVIEWED_FILES['app/mastermind_os/src/projects/archive/project-archive-continuation.ts'] = {'sha256': '22dc5ee85b1ca02464e20cd77b52cdc6cc9ea5e8f19161cf78f81e734934d84d', 'sites': ((29, 78, 81, 'int', '500'),)}
+
+# Exact Knowledge path/generation bounds and inert synthetic PR fixture numbers.
+# These are not OS identities; full-source drift exposes every token again.
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-data-observation.ts'] = {'sha256': 'a37c6ee216bb52b81800ac43e045d208e0578988bf78075d776bf6e94e145df8', 'sites': ((59, 97, 100, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/knowledge/library/project-knowledge-port.ts'] = {'sha256': '9a41d0f5bafef2ab8168509aaf3ff7e37369b619230c2c380bedb2b586d7eaf2', 'sites': ((46, 64, 67, 'int', '512'),)}
+REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-data-observation-owner.json'] = {'sha256': 'd12878bdff07fcdb6bfa05ba2c1694c7600416c7407a9e84e87e20dcc116f118', 'sites': ((119, 16, 19, 'int', '401'),)}
+REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-write-owner.json'] = {'sha256': 'cb6d4c43fc821993f664a9bc75ccf3f38d76bbaff58e36363c6e700b7e3b6856', 'sites': ((97, 22, 25, 'int', '401'), (413, 22, 25, 'int', '402'))}

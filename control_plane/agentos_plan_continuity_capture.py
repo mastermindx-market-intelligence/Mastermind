@@ -28,15 +28,16 @@ def _missing(work_ref):
 
 
 def capture_plan_continuity(*, owner, git, work_ref, macro_sha,
-                            workstream_source, workstream_bytes):
+                            workstream_source, workstream_bytes, executable_macro_sha=None):
     """Use the parent's bounded Git runner and existing cumulative deadline."""
+    code_sha = macro_sha if executable_macro_sha is None else executable_macro_sha
     if not callable(getattr(owner, "select_project_plan_adoption", None)):
         return _missing(work_ref)  # Older canonical owner: retain truthful missingness.
     try:
-        membership = git("ls-tree", "-z", macro_sha, "--", _HELPER)
+        membership = git("ls-tree", "-z", code_sha, "--", _HELPER)
         if re.fullmatch(r"100644 blob [0-9a-f]{40}\t" + re.escape(_HELPER) + "\x00", membership) is None:
             return _missing(work_ref)
-        helper_text = git("show", macro_sha + ":" + _HELPER, limit=1048576)
+        helper_text = git("show", code_sha + ":" + _HELPER, limit=1048576)
         helper = types.ModuleType("_captured_agentos_plan_content_contract")
         helper.__file__ = "scripts/agentos_project_plan_contract.py"
         exec(compile(helper_text, helper.__file__, "exec"), helper.__dict__)

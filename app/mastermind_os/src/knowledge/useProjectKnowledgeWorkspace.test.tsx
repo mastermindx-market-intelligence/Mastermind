@@ -125,3 +125,10 @@ it('consumes the rendered publication gesture once even when an immediate termin
   expect(await f.store.read(f.journey.context.owner_context.principal_scope)).toBeNull();
   await act(async()=>{await retained();});expect(f.transport.submitSourceOperation).toHaveBeenCalledTimes(1);
 });
+
+it('retires retained original-status callbacks on unmount without erasing the durable pointer',async()=>{
+  const f=setup();await f.ready();await act(async()=>{await f.result.current.prepare(f.request);});
+  await act(async()=>{await f.result.current.publish();});const check=f.result.current.checkOriginal;
+  const scope=f.journey.context.owner_context.principal_scope,original=await f.store.read(scope);f.unmount();
+  await check();expect(f.transport.reconcileSourceOperation).not.toHaveBeenCalled();expect(await f.store.read(scope)).toEqual(original);
+});

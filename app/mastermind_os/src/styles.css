@@ -794,6 +794,13 @@ a:focus-visible {
 /* Ordinary desktop keeps full labels; compact widths use the full drawer. */
 .navigation-toggle, .navigation-close, .navigation-backdrop { display: none; }
 .workspace-route { min-width: 0; }
+.workspace-header { flex-wrap: wrap; }
+.workspace-header .workspace-route { flex: 0 0 auto; max-width: 100%; }
+.workspace-header .workspace-route h1, .workspace-header .workspace-route h2 { overflow-wrap: normal; word-break: normal; white-space: nowrap; }
+.workspace-header .facts { min-width: 0; flex: 1 1 360px; flex-wrap: wrap; justify-content: flex-end; }
+.workspace-header .facts > div { flex-wrap: wrap; min-width: 0; }
+.workspace-header .facts button { flex-shrink: 0; white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+.workspace-header .facts p { flex: 1 1 240px; min-width: 0; }
 .shell > main { max-width: none; }
 .workspace-header-quiet { min-height: 64px; align-items: center; margin: -28px -28px 0; padding: 0 36px; gap: 16px; }
 .workspace-header-quiet .workspace-route { display: flex; align-items: center; gap: 12px; }
