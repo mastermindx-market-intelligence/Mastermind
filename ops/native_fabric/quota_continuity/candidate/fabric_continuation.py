@@ -127,10 +127,11 @@ def foreground(api, run_id, task_class, **kwargs):
     here = api.HERE
     # The native transport's existing total fuse is conserved across attempts.
     budget = int(os.environ.get("REMOTE_SUB_MAX_SECS", "7200"))
-    if not 1 <= budget <= 7200:
+    if not 1 <= budget <= 14400:
         raise ValueError("continuation_budget_invalid")
-    floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (
-        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)
+    floor = 14400 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (
+        7200 if kwargs.get("task_complexity") == "C2_COMPLEX_BOUNDED" else (
+        3600 if kwargs.get("task_complexity") in (None, "") else 0))
     budget = max(budget, floor)
     deadline_ns = time.monotonic_ns() + budget * 1_000_000_000
     request_path = _path(here, run_id, ".continuation-request.json")

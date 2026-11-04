@@ -31,6 +31,8 @@ def facts(paths=("app/src/component.tsx",), *, additions=12, deletions=4,
 @pytest.mark.parametrize("paths", [
     ("docs/user-guide.md",),
     ("README.md", "docs/screenshots/welcome.png"),
+    ("docs/evidence/2026-11-02-github-release-triage.md",),
+    ("docs/superpowers/plans/2026-10-22-reconciliation.md",),
 ])
 def test_bounded_routine_changes_need_no_independent_review(paths):
     decision = assess_review_risk(facts(paths))
@@ -67,7 +69,7 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
     ("plugins/mastermind-sol/skills/review-pull-request/SKILL.md",),
     ("pytest.ini",),
 ])
-def test_small_sensitive_changes_never_use_fast_lane(paths):
+def test_small_sensitive_changes_keep_machine_critical_risk(paths):
     decision = assess_review_risk(facts(paths, additions=1, deletions=0))
     assert decision.tier is ReviewTier.CRITICAL
     assert decision.minimum_independent_assessments == 2
@@ -76,15 +78,15 @@ def test_small_sensitive_changes_never_use_fast_lane(paths):
 
 
 @pytest.mark.parametrize("paths", [
-    ("brain/macro_models.py",),
-    ("server/handler.py",),
-    ("app/src/business_logic.ts",),
-    ("tests/test_model.py",),
-    ("tests/test_component.py",),
+    ("brain/risk/macro_models.py",),
+    ("server/schema/handler.py",),
+    ("app/src/portfolio/position.ts",),
     ("package-lock.json",),
     ("backend/schema/price.ts",),
+    ("control_plane/ordinary_worker.py",),
+    ("integrations/external_client.py",),
 ])
-def test_consequential_code_gets_one_review(paths):
+def test_consequential_code_keeps_machine_standard_risk(paths):
     decision = assess_review_risk(facts(paths))
     assert decision.tier is ReviewTier.STANDARD
     assert decision.minimum_independent_assessments == 1
@@ -92,18 +94,18 @@ def test_consequential_code_gets_one_review(paths):
 
 
 def test_large_unremarkable_diff_gets_one_review():
-    assert assess_review_risk(facts(additions=201, deletions=0)).tier is ReviewTier.STANDARD
+    assert assess_review_risk(facts(additions=2401, deletions=0)).tier is ReviewTier.STANDARD
 
 
 def test_many_small_paths_get_one_review():
-    assert assess_review_risk(facts(tuple(f"ui/panel{i}.tsx" for i in range(9)))).tier is ReviewTier.STANDARD
+    assert assess_review_risk(facts(tuple(f"ui/panel{i}.tsx" for i in range(41)))).tier is ReviewTier.STANDARD
 
 
 def test_test_only_large_deletion_gets_one_review():
     assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=51)).tier is ReviewTier.STANDARD
 
 
-def test_smaller_test_cleanup_requires_standard_review():
+def test_smaller_test_cleanup_keeps_smoke_ci():
     assert assess_review_risk(facts(("tests/test_component.py",), additions=1, deletions=49)).tier is ReviewTier.STANDARD
 
 
@@ -185,7 +187,7 @@ def test_previous_rename_path_is_accounted_for_in_verified_metrics():
     assert assess_review_risk(source).tier is ReviewTier.CRITICAL
 
 
-def test_ui_executable_change_requires_standard_even_with_large_verification_evidence():
+def test_bounded_ui_executable_change_keeps_smoke_with_large_verification_evidence():
     source = replace(
         facts(("terminal/components/ChartPanel.tsx", "terminal/docs/verification/replay.log"),
               additions=900, deletions=3),
@@ -229,7 +231,7 @@ def test_inert_evidence_only_stays_fast_with_full_verified_metrics():
     assert assess_review_risk(source).tier is ReviewTier.FAST
 
 
-def test_test_only_one_line_addition_is_standard_until_semantics_qualified():
+def test_test_only_one_line_addition_is_smoke_even_without_sensitive_paths():
     source = replace(
         facts(("tests/test_behavior.py",), additions=1, deletions=0),
         file_metrics=(ReviewFileStat(
@@ -258,3 +260,92 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     assert verdict.tier is ReviewTier.CRITICAL
     assert verdict.minimum_independent_assessments == 2
     assert verdict.minimum_formal_non_author_approvals == 1
+
+
+@pytest.mark.parametrize("path", [
+    "app/src/components/PriceChart.tsx",
+    "app/static/landing.css",
+    "server/handler.py",
+    "backend/formatters.py",
+    "tests/test_component.py",
+    "tests/test_model.py",
+    "scripts/helpers.py",
+])
+def test_attended_web_waiver_keeps_signed_machine_code_smoke(path):
+    result = assess_review_risk(facts((path,), additions=90, deletions=20))
+    assert result.tier is ReviewTier.STANDARD
+    assert result.minimum_independent_assessments == 1
+    assert result.minimum_formal_non_author_approvals == 1
+
+
+@pytest.mark.parametrize("path", [
+    "backend/auth/session.py",
+    "server/payment/charge.py",
+    "app/src/trade_execution/order.ts",
+    ".github/workflows/ci.yml",
+    "tests/test_security_gateway.py",
+    "integrations/github_review_risk_reader.py",
+    "docs/sol_skills/ACTIVE_EXECUTION.md",
+    "config/ci_checks.yml",
+])
+def test_broadening_never_downgrades_privileged_changes(path):
+    assert assess_review_risk(facts((path,), additions=1, deletions=0)).tier is ReviewTier.CRITICAL
+
+
+def test_broad_fast_lane_does_not_accept_unknown_executable_format():
+    assert assess_review_risk(facts(("app/native/main.rs",))).tier is ReviewTier.STANDARD
+
+
+_CONSTITUTIONAL_CRITICAL_PATHS = (
+    "control_plane/packet_gate.py",
+    "control_plane/governance.py",
+    "control_plane/strategic_state.py",
+    "config/strategic_state.yml",
+    "config/contracts.yml",
+    "research/MASTERMIND_CHARTER_V2.md",
+    "DOCTRINE.md",
+)
+
+
+@pytest.mark.parametrize("path", _CONSTITUTIONAL_CRITICAL_PATHS)
+def test_one_line_authority_source_remains_critical_in_machine_risk(path):
+    for candidate in (path, path.upper()):
+        decision = assess_review_risk(
+            facts((candidate,), additions=1, deletions=0)
+        )
+        assert decision.tier is ReviewTier.CRITICAL, candidate
+        assert decision.minimum_independent_assessments == 2
+        assert decision.minimum_formal_non_author_approvals == 1
+
+
+def test_sensitive_previous_rename_path_remains_critical():
+    source = replace(
+        facts(("docs/screenshots/new.webp", "control_plane/packet_gate.py"),
+              additions=1, deletions=0),
+        file_metrics=(ReviewFileStat(
+            path="docs/screenshots/new.webp",
+            previous_path="control_plane/packet_gate.py",
+            additions=1, deletions=0,
+        ),),
+    )
+    assert assess_review_risk(source).tier is ReviewTier.CRITICAL
+
+
+@pytest.mark.parametrize("path", [
+    "app/mastermind_os/src/components/Widget.tsx",
+    "app/src/component.jsx", "app/static/layout.css",
+    "app/src/index.js", "tests/test_component.py",
+    "frontend/views/card.vue", "frontend/views/card.svelte",
+    "frontend/views/card.html",
+])
+def test_ci_2016_static_only_fast_never_classifies_active_source(path):
+    verdict = assess_review_risk(facts(("docs/user-guide.md", path),
+                                       additions=2, deletions=0))
+    assert verdict.tier is ReviewTier.STANDARD
+    assert not verdict.fast_lane_candidate
+    assert verdict.minimum_independent_assessments == 1
+
+
+def test_ci_2016_still_allows_static_only_fast_for_passive_docs():
+    assert assess_review_risk(facts(("docs/user-guide.md",),
+                                    additions=2, deletions=0)).tier is ReviewTier.FAST
