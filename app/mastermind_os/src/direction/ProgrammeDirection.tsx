@@ -35,6 +35,9 @@ interface CopyTable {
   ownerLabel: string;
   nextActionLabel: string;
   adoptionLabel: string;
+  adoptionRecorded: string;
+  authoredMatches: string;
+  authoredDiffers: string;
   notDeclared: string;
   wavesLabel: string;
   dependsOnLabel: string;
@@ -66,6 +69,9 @@ const COPY: Record<Locale, CopyTable> = {
     ownerLabel: 'Owner',
     nextActionLabel: 'Next action',
     adoptionLabel: 'Adoption declaration',
+    adoptionRecorded: 'Adoption recorded by source',
+    authoredMatches: 'The authored record matches the recorded adopted source.',
+    authoredDiffers: 'The authored record differs from the recorded adopted source.',
     notDeclared: 'Not declared',
     wavesLabel: 'Waves',
     dependsOnLabel: 'Depends on',
@@ -95,6 +101,9 @@ const COPY: Record<Locale, CopyTable> = {
     ownerLabel: '负责人',
     nextActionLabel: '下一步行动',
     adoptionLabel: '采纳声明',
+    adoptionRecorded: '来源已记录采纳决定',
+    authoredMatches: '编写记录与已记录的采纳来源一致。',
+    authoredDiffers: '编写记录与已记录的采纳来源不同。',
     notDeclared: '未声明',
     wavesLabel: '工作波次',
     dependsOnLabel: '依赖',
@@ -334,9 +343,12 @@ export function ProgrammeDirection({
           <dd>{plan.next_action ?? copy.notDeclared}</dd>
           <dt>{copy.adoptionLabel}</dt>
           <dd>
-            {plan.adoption.reason === 'NOT_DECLARED'
-              ? copy.notDeclared
-              : `${plan.adoption.state} · ${plan.adoption.reason}`}
+            {plan.adoption.state === 'AVAILABLE'
+              ? <>{copy.adoptionRecorded} · {plan.adoption.decision_ref}
+                  <p>{plan.adoption.matches_authored_record ? copy.authoredMatches : copy.authoredDiffers}</p></>
+              : plan.adoption.reason === 'NOT_DECLARED'
+                ? copy.notDeclared
+                : `${plan.adoption.state} · ${plan.adoption.reason}`}
           </dd>
         </dl>
         <details><summary className="office-section-label">{copy.wavesLabel}</summary>
