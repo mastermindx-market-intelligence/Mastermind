@@ -6,6 +6,8 @@ xhigh) first, then Macro Dashboard's shared Claude OAuth pool.  Direct
 ``api`` as the metered Anthropic Messages API fallback. Explicit
 ``production_mode`` delegates no-tools completions to Macro's Shared AI
 Provider Control production API modes; it does not reserve Fabric capacity.
+Explicit ``fabric`` uses that owner's shared application binding and the native
+shared inference wrapper. Selection is exclusive, including binding failures.
 
 Every mode is exclusive: a configured shared-waterfall outage never falls through to a
 separate metered credential.  ``call_model()`` returns (text|None, degraded_reason|None) — the same contract as
@@ -67,6 +69,9 @@ def available() -> bool:
     if selected == "production_mode":
         from brain import production_inference
         return production_inference.available()
+    if selected == "fabric":
+        from brain import fabric_inference
+        return fabric_inference.available()
     return False
 
 
@@ -78,6 +83,13 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     backend — seat names the ledger seat (default = role), record_book overrides the
     _ROLE_BOOK default book. Attribution-only; never changes routing or behaviour."""
     selected = backend()
+
+    if selected == "fabric":
+        from brain import fabric_inference
+        return fabric_inference.call_model(
+            system, user, role=role, max_tokens=max_tokens,
+            seat=seat, record_book=record_book,
+        )
 
     if selected == "production_mode":
         from brain import production_inference

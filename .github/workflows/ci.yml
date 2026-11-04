@@ -285,12 +285,12 @@ jobs:
 
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
-      - name: Checkout paired Brain production owner fixture
+      - name: Checkout paired Brain inference owner fixture
         if: matrix.index == 0
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: 09f0385c2ed3d9060362f3cf20e705bcb7db6043
+          ref: d02f741f258e6f84485f65bf8755a60117ca530d
           path: .ci-production-macro
           sparse-checkout: |
             engine
@@ -298,21 +298,29 @@ jobs:
             config
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
-      - name: Verify actual Brain production inference composition
+      - name: Verify actual Brain Fabric and production inference composition
         if: matrix.index == 0
         env:
           MM_REQUIRE_PRODUCTION_MODE_COMPOSITION: "1"
+          MM_REQUIRE_FABRIC_COMPOSITION: "1"
         run: |
           set -euo pipefail
           brain_composition_root="$(mktemp -d "${RUNNER_TEMP}/brain-production-composition.XXXXXX")"
           trap 'rm -rf "$brain_composition_root" "$GITHUB_WORKSPACE/.ci-production-macro"' EXIT
-          git archive HEAD brain bot common tests/integration/test_production_inference_composition.py |
+          git archive HEAD brain bot common tests/integration/test_production_inference_composition.py \
+            tests/integration/test_fabric_inference_composition.py \
+            ops/native_fabric/experiential_proxy/gateway.py |
             tar -x -C "$brain_composition_root"
-          mkdir -p "$brain_composition_root/vendor"
-          ln -s "$GITHUB_WORKSPACE/.ci-production-macro" "$brain_composition_root/vendor/macro"
+          mkdir -p "$brain_composition_root/vendor/macro"
+          # Isolate synthetic owner configuration in a copy of the exact source.
+          cp -R "$GITHUB_WORKSPACE/.ci-production-macro/engine" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/lib" \
+            "$GITHUB_WORKSPACE/.ci-production-macro/config" "$brain_composition_root/vendor/macro/"
+          touch "$brain_composition_root/vendor/macro/.fabric-composition-fixture"
+          export MM_FABRIC_FIXTURE_ROOT="$brain_composition_root/vendor/macro"
           cd "$brain_composition_root"
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
-            -p test_production_inference_composition.py -v
+            -p 'test_*inference_composition.py' -v
 
       - name: Prepare fixed test diagnostics
         run: |
