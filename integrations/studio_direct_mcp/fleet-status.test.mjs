@@ -98,12 +98,74 @@ test('config is opt-in and closed', () => {
   }), /unknown key/);
 });
 
+test('installed Fabric-launcher configuration is retained and fenced', () => {
+  const root = '/private/qualified-launcher';
+  const hash = 'a'.repeat(64);
+  const base = {enabled:true, launcherPath:root, launcherSha256:hash, timeoutMs:15000};
+  const value = resolveFleetStatusConfig({
+    ...base,
+    fabricLauncherPath:'/private/qualified-pool', fabricLauncherSha256:'b'.repeat(64), fabricTimeoutMs:8000,
+  });
+  assert.equal(value.fabricLauncherPath, '/private/qualified-pool');
+  assert.equal(value.fabricLauncherSha256, 'b'.repeat(64));
+  assert.equal(value.fabricTimeoutMs, 8000);
+  assert.throws(() => resolveFleetStatusConfig({...base, fabricLauncherPath:'/private/missing-pool'}),
+    /fabricLauncherSha256/);
+  assert.throws(() => resolveFleetStatusConfig({...base, fabricLauncherPath:'/private/pool',
+    fabricLauncherSha256:'b'.repeat(64), fabricTimeoutMs:8000, extraCapability:'surprise'}),
+  /unknown key/);
+});
+
+test('signed Fabric placement view retains v2 physical fleet fields without exposing owner internals', async t => {
+  const owner = ownerFor([statusRow('chatgpt1', true)]);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const fabricLauncher = join(fx.dir, 'fabric-launcher');
+  const script = `#!/bin/sh
+printf '{"schema":"placement-view.private-candidate.v1","mode":"%s","host_eligibility":{"hosts":[]}}\n' "$3"
+`;
+  await writeFile(fabricLauncher, script);
+  await chmod(fabricLauncher, 0o700);
+  const sha = createHash('sha256').update(script).digest('hex');
+  const cfg = {...fx.config, fabricLauncherPath:fabricLauncher,
+    fabricLauncherSha256:sha, fabricTimeoutMs:5000};
+  const result = await createFleetStatus(cfg).status();
+  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v2');
+  assert.equal(result.state, 'READY');
+  assert.equal(result.accountCount, 1);
+  assert.deepEqual(result.issues, []);
+  assert.deepEqual(result.physicalFleet, {
+    schema:'mastermind.studio_fleet_hosts.v1',
+    scope:'subagent-fabric-registered-hosts',hostCount:0,hosts:[],
+    advisoryOnly:true,placementAuthority:false,executionAuthority:false,
+  });
+  const surface = JSON.stringify(fleetStatusToolResult(result));
+  assert.equal(surface.includes('fabric-launcher'), false);
+  assert.equal(surface.includes(fabricLauncher), false);
+});
+
+test('Fabric launcher drift degrades physical view but preserves validated public seats', async t => {
+  const owner = ownerFor([statusRow('chatgpt1', true)]);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus({...fx.config,
+    fabricLauncherPath:fx.launcher, fabricLauncherSha256:'f'.repeat(64),
+    fabricTimeoutMs:5000}).status();
+  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v2');
+  assert.equal(result.state, 'DEGRADED');
+  assert.equal(result.allReady, true);
+  assert.equal(result.accountCount, 1);
+  assert.equal(result.readyCount, 1);
+  assert.equal(result.physicalFleet, null);
+  assert.deepEqual(result.issues, ['FLEET_STATUS_FABRIC_LAUNCHER_DRIFT']);
+});
+
 test('status returns only the bounded public fleet projection', async t => {
   const owner = ownerFor([statusRow('chatgpt1', true)]);
   const fx = await fixture(JSON.stringify(owner));
   t.after(() => rm(fx.dir, {recursive:true, force:true}));
   const result = await createFleetStatus(fx.config).status();
-  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v2');
   assert.equal(result.state, 'READY');
   assert.equal(result.accountCount, 1);
   assert.equal(result.readyCount, 1);
