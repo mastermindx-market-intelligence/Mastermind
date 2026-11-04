@@ -174,7 +174,7 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
       <header className="mm-project-workspace__header">
         <h2 className="mm-project-workspace__title">{title ?? copy.fallbackTitle}</h2>
         <div className="mm-project-workspace__goal-block">
-          <p className="mm-project-workspace__section-title">{copy.goalLabel}</p>
+          <p className="mm-project-workspace__sr-only">{copy.goalLabel}</p>
           {goal === null ? (
             <p className="mm-project-workspace__goal-text mm-project-workspace__muted">
               {copy.goalEmpty}

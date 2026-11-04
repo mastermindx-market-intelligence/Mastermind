@@ -2,15 +2,16 @@
  * ProjectWorkspace — bounded presentation composition.
  * Prefix: mm-project-workspace. Every color, font, spacing and radius value
  * comes from the app shell tokens; no palette or :root declarations here.
- * The app shell owns the outer gutters and the single h1, so this frame adds
- * no horizontal gutter and renders its title as an h2.
+ * The shell owns outer gutters and h1. The project header spans its content
+ * row; conversation, status and composer retain an 880px reading measure.
  */
 
 .mm-project-workspace {
   display: flex;
   flex-direction: column;
   gap: var(--sp-6);
-  max-width: 880px;
+  width: 100%;
+  max-width: 1272px;
   margin-inline: auto;
   padding-block-start: var(--sp-4);
   color: var(--text);
@@ -24,22 +25,26 @@
 }
 
 .mm-project-workspace__header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: var(--sp-3) var(--sp-6);
   min-width: 0;
 }
 
 .mm-project-workspace__title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 28px;
-  line-height: 36px;
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 40px;
+  line-height: 48px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .mm-project-workspace__goal-block {
+  grid-column: 1;
+  grid-row: 2;
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
@@ -56,7 +61,7 @@
 
 .mm-project-workspace__goal-text {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 24px;
   overflow-wrap: anywhere;
 }
@@ -66,6 +71,9 @@
 }
 
 .mm-project-workspace__controls {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  justify-content: flex-end;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -122,6 +130,9 @@
 /* Quiet 44px strip for the owner status panel and pause control. No
    animation, pulsing or synthetic badge is added here. */
 .mm-project-workspace__status-strip {
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -145,12 +156,18 @@
    never wrapped in another heavy card. */
 .mm-project-workspace__conversation,
 .mm-project-workspace__composer {
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
 .mm-project-workspace__disclosures {
+  width: 100%;
+  max-width: 880px;
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
@@ -224,6 +241,8 @@
 }
 
 @media (max-width: 640px) {
+  .mm-project-workspace__header { grid-template-columns: minmax(0,1fr); }
+  .mm-project-workspace__controls { grid-column: 1; grid-row: 3; justify-content: flex-start; }
   .mm-project-workspace {
     gap: var(--sp-5);
     padding-block-start: var(--sp-3);

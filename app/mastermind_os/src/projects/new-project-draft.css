@@ -6,7 +6,7 @@
 .mm-new-project-heading > p:last-child { color:var(--muted); font-size:16px; line-height:24px; }
 .mm-new-project-goal { padding:var(--sp-5); border:1px solid var(--border); border-radius:16px; background:var(--panel); display:grid; gap:var(--sp-4); min-width:0; }
 .mm-new-project-goal label { font-size:14px; color:var(--muted); }
-.mm-new-project-goal textarea { width:100%; min-height:180px; resize:vertical; font:18px/28px var(--font-ui); color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:var(--r-ctl); padding:var(--sp-3); }
+.mm-new-project-goal textarea { width:100%; min-height:180px; resize:vertical; font:18px/28px var(--font-ui); color:var(--text); background:transparent; border:0; border-radius:var(--r-ctl); padding:0; }
 .mm-new-project-tools { display:flex; gap:var(--sp-2); flex-wrap:wrap; }
 .mm-new-project button { min-height:44px; font:inherit; border-radius:var(--r-btn); padding:var(--sp-2) var(--sp-4); }
 .mm-new-project button:disabled { color:var(--faint); cursor:not-allowed; }
