@@ -94,3 +94,12 @@ Original acceptance remains open for shared native Fabric capacity, Macro Brain 
 Original runtime effect observations, exact original handles, source-carrier boundaries and current continuation are recorded on the existing programme issue: https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6627496975 . Native owners retain actual effects/leases; the editorial plan does not rewrite them.
 
 Material source-law changes through protected `12506954fad4d5502f878bd2a51b4870fca26658` were read, including the original-product-scope continuity rule. The application source is unchanged by those protected law commits. Macro protected movement to `7dd6ff7061063b36588954475c519fd26abb4994` was data-only and disjoint from this candidate's source/dependencies. Required exact-head/integrated CI and actual release gates remain separate.
+
+
+## Second consumer source milestone: upstream Master Brain synthesis
+
+Macro #10727 now includes the actual Master Brain synthesis consumer at `09f0385c2ed3d9060362f3cf20e705bcb7db6043`. Explicit `master_brain.production_mode` uses the existing production API owner before the legacy ladder/custom endpoint and its retries. Production cache identity includes mode, actual pinned provider/model and output budget; eligibility precedes cache lookup, and a post-dispatch TypeError cannot invoke the old compatibility retry. Existing JSON/style processing remains, with accounted intentional rewrites and no duplicate usage writer.
+
+Fourteen Master Brain integration tests and the fourteen CIO composition tests pass locally against the exact candidate files. The Macro suite is included in its existing packed CI job. This is additional application source coverage, not proof of native shared pools, deployed services or live provider behavior. The original all-products acceptance remains open.
+
+The existing Macro #7142 selector has an explicit release hold, verified from its current source-thread record; its missing release evidence must be resolved on that same carrier. A draft title alone was not used as a blocker. No held branch, arming state or native account/lease was changed.
