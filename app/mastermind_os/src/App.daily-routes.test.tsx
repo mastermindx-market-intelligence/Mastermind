@@ -112,6 +112,7 @@ describe("owner-backed daily routes in App", () => {
     window.MastermindMissionHost = e.host;
     const user = userEvent.setup();
     render(<App />);
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await waitFor(() =>
       expect(
         screen.getByRole("region", { name: "Meta-CEO answer" }).textContent,
@@ -161,7 +162,7 @@ describe("owner-backed daily routes in App", () => {
       screen.queryByRole("button", { name: "Send message" }),
     ).toBeNull();
     expect(screen.getByText("No recipient is qualified by this window. Send is unavailable.")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     expect(
       screen.getByRole<HTMLTextAreaElement>("textbox", {
         name: "Direction to Meta-CEO",

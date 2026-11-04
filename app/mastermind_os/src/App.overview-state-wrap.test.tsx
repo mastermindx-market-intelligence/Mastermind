@@ -140,7 +140,7 @@ it('the selector matches only the seven shared Mission badges across actual App 
     await click(route); expect(count(), route).toBe(0);
   }
   for (const route of ['Work', 'Open Programs', 'Fleet & Capacity']) {
-    await click('Today'); await click(route); expect(count(), route).toBe(0);
+    await click('Meta-CEO'); await click(route); expect(count(), route).toBe(0);
   }
   expect(location.search).toBe('?work_ref=WS%3ABETA&root_job_id=JOB-B');
   expect(readers.readProgramsObservation).toHaveBeenCalledTimes(2);

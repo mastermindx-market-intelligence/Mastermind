@@ -36,7 +36,7 @@ async function click(label: string) {
 async function mountWork() {
   root = createRoot(container);
   await act(async () => { root!.render(<App />); });
-  await click("Work");
+  await click("Work queue");
 }
 function expectPending(control: HTMLButtonElement) {
   // This is the discriminator that the old jsdom focus assertion lacked.
