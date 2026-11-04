@@ -802,14 +802,14 @@ def request(
     if request_capacity_preflight is True:
         env["POOL_CAPACITY_PREFLIGHT"]="1"
     if request_remaining_seconds is not None:
-        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 7200:
+        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 14400:
             raise FabricTaskError("REQUEST_REMAINING_TIME_INVALID")
         env["POOL_COMMISSION_REMAINING_SECONDS"] = str(request_remaining_seconds)
     if request_deadline_ns is not None:
         from commission_deadline import (DEADLINE_ENV, CommissionDeadlineExpired,
                                          require_remaining, validate_deadline_ns)
         request_deadline_ns = validate_deadline_ns(request_deadline_ns)
-        if request_deadline_ns > time.monotonic_ns() + 7200 * 1_000_000_000:
+        if request_deadline_ns > time.monotonic_ns() + 14400 * 1_000_000_000:
             raise FabricTaskError("REQUEST_DEADLINE_INVALID")
         env[DEADLINE_ENV] = str(request_deadline_ns)
     def check_deadline():
