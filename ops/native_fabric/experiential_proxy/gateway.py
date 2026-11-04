@@ -28,6 +28,7 @@ UPSTREAM = "https://api.experientiallabs.ai/v1"
 ALLOWED = {
     ("POST", "chat/completions"),
     ("POST", "responses"),
+    ("POST", "systemone"),
     ("POST", "embeddings"),
     ("GET", "models"),
 }
