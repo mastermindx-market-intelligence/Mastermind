@@ -98,6 +98,7 @@ class QuotaBillingTests(unittest.TestCase):
         for value in variants:
             with self.subTest(value=value):
                 self.assertEqual(module.parse_grok_billing_payload(value, NOW), [])
+        self.assertEqual(module.parse_grok_billing_payload(billing(12.0), END), [])
 
     def test_grok_reader_never_reads_or_writes_cached_positive(self):
         module = load("overlay")
@@ -123,6 +124,7 @@ class QuotaBillingTests(unittest.TestCase):
 
     def test_acp_performs_only_initialize_and_billing_no_model_prompt(self):
         module = load("overlay")
+        frozen_now = module.datetime.fromisoformat(NOW.replace("Z", "+00:00"))
         read_fd, write_fd = os.pipe()
         sent = []
         class Writer:
@@ -155,7 +157,8 @@ class QuotaBillingTests(unittest.TestCase):
         try:
             with patch.object(module.shutil, "which", return_value="/fake/grok"), \
                  patch.object(module.subprocess, "Popen", return_value=fake) as launched, \
-                 patch.object(module.os, "killpg", return_value=None) as killed:
+                 patch.object(module.os, "killpg", return_value=None) as killed, \
+                 patch.object(module, "_utc_now", return_value=frozen_now):
                 rows = module._live_grok()
             self.assertEqual(fake.wait_calls, 2, "SIGKILL escalation must reap subprocess")
             self.assertEqual(killed.call_count, 2)
@@ -165,6 +168,7 @@ class QuotaBillingTests(unittest.TestCase):
             self.assertFalse(sent[0]["params"]["clientCapabilities"]["fs"]["writeTextFile"])
             self.assertEqual(len(rows), 1)
             self.assertAlmostEqual(rows[0].remaining_pct, 88.0)
+            self.assertEqual(rows[0].observed_at, NOW)
         finally:
             fake.stdout.close()
             os.close(write_fd)
