@@ -590,8 +590,10 @@ export function createFabricFacade(engine, options={}) {
             fail('MANUAL_ROUTE_UNAVAILABLE');
           // The experiential slug is checked exactly, not case-insensitively:
           // the native recheck must witness the identical uncensored model.
-          if(args.pool===EXPERIENTIAL_POOL && route.model!==EXPERIENTIAL_MODEL)
-            fail('MANUAL_ROUTE_UNAVAILABLE');
+          if(args.pool===EXPERIENTIAL_POOL && (
+            route.model!==EXPERIENTIAL_MODEL || route.mode!==EXPERIENTIAL_POOL
+            || typeof route.host!=='string' || !/^[A-Za-z0-9_.:-]+$/.test(route.host)
+          )) fail('MANUAL_ROUTE_UNAVAILABLE');
         }
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
         if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
