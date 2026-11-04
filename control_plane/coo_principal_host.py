@@ -126,6 +126,11 @@ class CooHostProvider:
         validate_frame(frame)
         return await self.workspace.handle_activity_from_original_coo(frame, self.source)
 
+    async def read_workspace_fabric(self, frame, paid_source):
+        """Join this actual installed COO source to the original paid owner."""
+        from control_plane.workspace_fabric_read import handle_fabric_frame
+        return await handle_fabric_frame(self.workspace, frame, self.source, paid_source)
+
     def facts(self, frame):
         validate_facts_frame(frame)
         before = self.source.for_principal(frame["principal"], frame["work_ref"])

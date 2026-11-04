@@ -39,10 +39,15 @@ import runtime_stage as paper_runtime_stage  # noqa: E402
 
 PAPER_BRIDGE_FIXTURE = b"fixture-paper-bridge\n"
 PAPER_BRIDGE_FIXTURE_SHA = hashlib.sha256(PAPER_BRIDGE_FIXTURE).hexdigest()
+PAPER_BRIDGE_V20_FIXTURE = b"fixture-paper-bridge-v20\n"
+PAPER_BRIDGE_V20_FIXTURE_SHA = hashlib.sha256(PAPER_BRIDGE_V20_FIXTURE).hexdigest()
 
 
-def _seed_paper_runtime(home: Path) -> str:
-    runtime = home / svc.PAPER_RUNTIME_REL
+def _seed_paper_runtime(home: Path, rel: Path | None = None,
+                        data: bytes | None = None) -> str:
+    runtime = home / (svc.PAPER_RUNTIME_REL if rel is None else rel)
+    payload = PAPER_BRIDGE_FIXTURE if data is None else data
+    digest = hashlib.sha256(payload).hexdigest()
     source = runtime / "source"
     python_dir = runtime / "venv" / "bin"
     source.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -50,16 +55,16 @@ def _seed_paper_runtime(home: Path) -> str:
     source.chmod(0o700)
     python_dir.mkdir(parents=True, exist_ok=True)
     bridge = source / "bridge.py"
-    bridge.write_bytes(PAPER_BRIDGE_FIXTURE)
+    bridge.write_bytes(payload)
     bridge.chmod(0o600)
     python = python_dir / "python"
     python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     python.chmod(0o700)
     receipt = {
         "schema": svc.PAPER_RUNTIME_SCHEMA,
-        "generation": svc.PAPER_RUNTIME_REL.name,
-        "source_sha256": {"bridge.py": PAPER_BRIDGE_FIXTURE_SHA},
-        "bridge_sha256": PAPER_BRIDGE_FIXTURE_SHA,
+        "generation": runtime.name,
+        "source_sha256": {"bridge.py": digest},
+        "bridge_sha256": digest,
         "python_source": "/usr/bin/python3",
         "python_version": "fixture",
         "network_install_performed": False,
@@ -68,7 +73,7 @@ def _seed_paper_runtime(home: Path) -> str:
     receipt_path = runtime / "RUNTIME.json"
     receipt_path.write_text(json.dumps(receipt, sort_keys=True), encoding="utf-8")
     receipt_path.chmod(0o600)
-    return PAPER_BRIDGE_FIXTURE_SHA
+    return digest
 
 
 def _label_for(account: str) -> str:
@@ -436,6 +441,35 @@ class TestIdentity(unittest.TestCase):
             "821e37a4e10011f3335984416edaac92899c6bc27526c0f017b3d75130950d84",
             "d477cd952b86d76c07a2554a94a1ce5dc8c5e42bda544a5603caf0f54e17c9b7",
         )))
+
+    def test_c2_personal_v12_pins_match_observed_cohort_and_reviewed_v20(self):
+        # The global selection stays v12; v20 is only the staged one-seat target.
+        self.assertEqual(svc.PAPER_RUNTIME_REL.name, "v12")
+        self.assertEqual(svc.PAPER_RUNTIME_V20_REL.name, "v20")
+        self.assertNotEqual(svc.PAPER_RUNTIME_V20_REL, svc.PAPER_RUNTIME_REL)
+        self.assertEqual(
+            svc.PAPER_V20_BRIDGE_SHA256,
+            paper_runtime_stage.REVIEWED_GENERATIONS["v20"]["bridge.py"],
+        )
+        # Fresh read-only observed C2 Personal M2 cohort, 2026-11-02.
+        self.assertEqual(
+            svc.C2_PAPER_V12_MANIFEST_SHA256,
+            "c5cdba867972f547aaefa7dbfc5840467d2961c7f4d346e8de1f1ba575686ef6")
+        self.assertEqual(
+            svc.C2_PAPER_V12_NON_PAPER_CONFIG_SHA256,
+            "201288e64eadeb25e16306e737831fb828ce638a54b0e41c16945bd1c737eb08")
+        # The installed 12-file cohort is exactly the sealed closed-publisher
+        # patch plus the unchanged fleet modules; no byte identity is invented.
+        self.assertEqual(
+            frozenset(svc.C2_PAPER_V12_FILES_SHA256),
+            frozenset(svc.C2_PAPER_FILES_SHA256)
+            | frozenset(svc.C2_PERSONAL_TARGET_PATCH_SHA256))
+        for name, digest in svc.C2_PERSONAL_TARGET_PATCH_SHA256.items():
+            self.assertEqual(svc.C2_PAPER_V12_FILES_SHA256[name], digest)
+        for name, digest in svc.C2_PAPER_FILES_SHA256.items():
+            if name in svc.C2_PERSONAL_TARGET_PATCH_SHA256:
+                continue
+            self.assertEqual(svc.C2_PAPER_V12_FILES_SHA256[name], digest)
 
 
 # -------------------------------------------------------------------
@@ -1759,7 +1793,7 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "native-pool-pin", "native-pool-pin-enrollment", "seal-runtime", "start", "status", "stop"},
         )
 
     def test_stage_requires_all_args(self):
@@ -2245,6 +2279,85 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
                 svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256[name],
                 svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name])
 
+    def test_rejection_diagnostics_generation_preserves_exact_old_install_identity(self):
+        # The predecessor is the historically sealed merge-capable publisher,
+        # not a wildcard for arbitrary files or a rewrite of index-sync law.
+        self.assertEqual(svc.FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256, {
+            "git-publish.mjs": "badd8a554ae8230808d18a1943aa49edb7ced51391ed2cbadb358cd015d62c3a",
+            "workspace-access.mjs": "e4f74c201d177e6af1c3e113cc180430542cfd08a25591b81fb6d04c8a575db5",
+        })
+        self.assertEqual(
+            svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
+            "f67119198a0e63c34ae148633402a7ec3ab351ecf7f40a24bdc355b9890f8a2c",
+        )
+        self.assertNotEqual(
+            svc.FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256["git-publish.mjs"],
+            svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256["git-publish.mjs"],
+        )
+
+    def test_post_merge_publisher_preflight_and_apply_keep_sealed_host_config(self):
+        # An installed merge-capable pair can receive the narrow publisher
+        # diagnosis patch through the incumbent exact-CAS stopped service path.
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots), roots["plist"].read_bytes())
+            previous_pair = {
+                name: svc._sha256_file(roots["base"] / name)
+                for name in ("git-publish.mjs", "workspace-access.mjs")
+            }
+            not_original = {name: "0" * 64 for name in previous_pair}
+            with mock.patch.object(svc, "FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256", not_original), \
+                 mock.patch.object(svc, "FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256", previous_pair):
+                args.publisher_preflight_only = True
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+                self.assertEqual(before, (roots["manifest"].read_bytes(),
+                                          roots["config"].read_bytes(),
+                                          self._all_files(roots), roots["plist"].read_bytes()))
+                args.publisher_preflight_only = False
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+                self.assertEqual(before[1], roots["config"].read_bytes())
+                self.assertEqual(before[3], roots["plist"].read_bytes())
+                after_files = self._all_files(roots)
+                self.assertEqual(
+                    {name for name in before[2] if before[2][name] != after_files[name]},
+                    {"git-publish.mjs", "workspace-access.mjs"},
+                )
+                svc._verify_staged_install("chatgpt1", _label_for("chatgpt1"), roots,
+                                           require_runtime_seal=True)
+
+    def test_post_merge_predecessor_refuses_mixed_or_foreign_source(self):
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            expected_pair = {
+                name: svc._sha256_file(roots["base"] / name)
+                for name in ("git-publish.mjs", "workspace-access.mjs")
+            }
+            rejected = {name: "0" * 64 for name in expected_pair}
+            # Manifest is re-sealed around one foreign module, and the exact
+            # predecessor pair must nevertheless refuse without any writes.
+            (roots["base"] / "git-publish.mjs").write_bytes(b"foreign-publisher\\n")
+            manifest = json.loads(roots["manifest"].read_text())
+            manifest["files"]["git-publish.mjs"] = svc._sha256_file(
+                roots["base"] / "git-publish.mjs")
+            roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True))
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots))
+            with mock.patch.object(svc, "FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256", rejected), \
+                 mock.patch.object(svc, "FLEET_V10_POST_MERGE_PUBLISHER_PREDECESSOR_SHA256", expected_pair), \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "unrecognized prior publisher identity"):
+                    svc.cmd_upgrade(args)
+                write.assert_not_called()
+            self.assertEqual(before, (roots["manifest"].read_bytes(),
+                                      roots["config"].read_bytes(),
+                                      self._all_files(roots)))
+
     def test_merge_transition_preflight_and_stopped_apply_preserve_exact_config(self):
         for account in ("chatgpt1", "chatgpt3"):
             with self.subTest(account=account), self._installed_merge_predecessor_fixture(account) as (args, roots, _cfg):
@@ -2460,6 +2573,66 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                         "--expected-manifest-sha256", original_sha,
                     ])
                     args._fixture_target_manifest = future
+                    yield args, roots, cfg
+
+    @contextmanager
+    def _installed_c2_v12_fixture(self):
+        """The same sealed C2 Personal seat already selecting exact v12.
+
+        The staged seat keeps its v12 paperDesign (fixture bridge bytes), the
+        accepted immutable v20 generation is staged beside it, and only fixture
+        identity data replace the observed cohort pins. All admission, runtime,
+        hash, config, transaction and rollback checks execute unchanged.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            home = tmp / "home"
+            home.mkdir()
+            (home / "Library" / "LaunchAgents").mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                account = svc.C2_PAPER_ACCOUNT
+                _do_stage(tmp, home, account=account, port=45026)
+                roots = svc._build_runtime_roots(account)
+                _seed_node_modules(roots)
+                names = frozenset(svc.C2_PAPER_V12_FILES_SHA256)
+                for name in set(svc.STAGE_FILES) - names:
+                    (roots["base"] / name).unlink()
+                for name in names - set(svc.STAGE_FILES):
+                    path = roots["base"] / name
+                    path.write_text(f"// fixture C2 fleet {name}\n", encoding="utf-8")
+                    path.chmod(svc.FILE_MODE)
+                _seed_paper_runtime(home, rel=svc.PAPER_RUNTIME_V20_REL,
+                                    data=PAPER_BRIDGE_V20_FIXTURE)
+                cfg = json.loads(roots["config"].read_text())
+                prior = json.loads(roots["manifest"].read_text())
+                prior["files"] = {
+                    name: svc._sha256_file(roots["base"] / name) for name in sorted(names)
+                }
+                prior["configHash"] = svc._sha256_file(roots["config"])
+                prior["dependencyTreeHash"] = svc._dependency_tree_hash(roots["node_modules"])
+                roots["manifest"].write_text(json.dumps(prior, indent=2, sort_keys=True))
+                original_sha = svc._sha256_file(roots["manifest"])
+                non_paper_sha = hashlib.sha256(json.dumps(
+                    {k: v for k, v in cfg.items() if k != "paperDesign"},
+                    sort_keys=True, separators=(",", ":"),
+                ).encode()).hexdigest()
+                identity = {key: prior[key] for key in svc.C2_PAPER_RUNTIME_IDENTITY}
+                with mock.patch.multiple(
+                    svc,
+                    C2_PAPER_V12_MANIFEST_SHA256=original_sha,
+                    C2_PAPER_V12_NON_PAPER_CONFIG_SHA256=non_paper_sha,
+                    C2_PAPER_V12_FILES_SHA256=prior["files"],
+                    C2_PAPER_RUNTIME_IDENTITY=identity,
+                    PAPER_BRIDGE_SHA256=PAPER_BRIDGE_FIXTURE_SHA,
+                    PAPER_V20_BRIDGE_SHA256=PAPER_BRIDGE_V20_FIXTURE_SHA,
+                ):
+                    with svc._c2_lifecycle_mutex(account):
+                        pass
+                    svc._verify_staged_install(account, _label_for(account), roots)
+                    args = svc.build_parser().parse_args([
+                        "paper-runtime-upgrade", "--account", account,
+                        "--expected-manifest-sha256", original_sha,
+                    ])
                     yield args, roots, cfg
 
     @staticmethod
@@ -3183,7 +3356,10 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     return FakeResult(113, "", "unexpected diagnostic")
                 return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
             recorder = CmdRecorder(handler=handle)
-            with mock.patch.object(svc, "_run", recorder):
+            # Persistently indeterminate launchd must remain EFFECT_UNKNOWN;
+            # advance only this synthetic clock to the bounded settle deadline.
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc.time, "monotonic", side_effect=[100.0, 111.0]):
                 with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
                     svc.cmd_stop(args)
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
@@ -3392,10 +3568,249 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     return FakeResult(113, "", "unexpected diagnostic")
                 return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
             recorder = CmdRecorder(handler=handle)
-            with mock.patch.object(svc, "_run", recorder):
+            # Persistently indeterminate launchd must remain EFFECT_UNKNOWN;
+            # advance only this synthetic clock to the bounded settle deadline.
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc.time, "monotonic", side_effect=[100.0, 111.0]):
                 with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
                     svc.cmd_stop(args)
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
+
+    # ------------------------------------------------------------------
+    # Sealed C2 Personal v12 cohort -> accepted immutable v20 selection
+    # ------------------------------------------------------------------
+
+    def test_v20_preflight_is_readonly_and_reports_the_planned_selection(self):
+        with self._installed_c2_v12_fixture() as (args, roots, cfg):
+            args.preflight_only = True
+            before = self._snapshot(roots)
+            recorder = self._unloaded_recorder(account=args.account)
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write, \
+                 mock.patch.object(svc, "_c2_lifecycle_mutex") as mutex:
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                write.assert_not_called()
+                mutex.assert_not_called()
+            receipt = json.loads(output)
+            self.assertEqual((rc, receipt["effect"], receipt["preflight"]),
+                             (0, "NOT_APPLIED", True))
+            self.assertEqual(receipt["account"], svc.C2_PAPER_ACCOUNT)
+            self.assertEqual(receipt["fromGeneration"], "v12")
+            self.assertEqual(receipt["toGeneration"], "v20")
+            self.assertEqual(receipt["bridgeSha256"], PAPER_BRIDGE_V20_FIXTURE_SHA)
+            self.assertEqual(receipt["preservedGatewayFiles"], 12)
+            self.assertTrue(receipt["runtimeSealPreserved"])
+            self.assertTrue(receipt["sourcePointerPreserved"])
+            self.assertFalse(receipt["serviceStarted"])
+            self.assertEqual(before, self._snapshot(roots))
+            self.assertEqual(recorder.calls, [])
+
+    def test_v20_stopped_upgrade_swaps_only_the_runtime_selection(self):
+        with self._installed_c2_v12_fixture() as (args, roots, cfg):
+            before = self._snapshot(roots)
+            prior = json.loads(roots["manifest"].read_text())
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(account=args.account)):
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+            receipt = json.loads(output)
+            self.assertEqual((rc, receipt["effect"]), (0, "APPLIED"))
+            self.assertFalse(receipt["serviceStarted"])
+            after = self._snapshot(roots)
+            self.assertEqual(set(before), set(after))
+            self.assertEqual({name for name in before if before[name] != after[name]},
+                             {"config.json", "manifest.json"})
+            current = json.loads(roots["config"].read_text())
+            self.assertEqual({k: v for k, v in current.items() if k != "paperDesign"},
+                             {k: v for k, v in cfg.items() if k != "paperDesign"})
+            self.assertEqual({k for k in cfg["paperDesign"]
+                              if cfg["paperDesign"][k] != current["paperDesign"][k]},
+                             {"pythonPath", "bridgePath", "bridgeSha256"})
+            v20 = svc._user_root() / svc.PAPER_RUNTIME_V20_REL
+            self.assertEqual(current["paperDesign"]["pythonPath"], str(v20 / "venv/bin/python"))
+            self.assertEqual(current["paperDesign"]["bridgePath"], str(v20 / "source/bridge.py"))
+            self.assertEqual(current["paperDesign"]["bridgeSha256"], PAPER_BRIDGE_V20_FIXTURE_SHA)
+            self.assertIs(current["paperDesign"]["enabled"], True)
+            self.assertEqual(current["paperDesign"]["commandTimeoutMs"],
+                             svc.PAPER_COMMAND_TIMEOUT_MS)
+            self.assertEqual(current["paperDesign"]["appPath"], cfg["paperDesign"]["appPath"])
+            installed = json.loads(roots["manifest"].read_text())
+            self.assertEqual({k: v for k, v in installed.items() if k != "configHash"},
+                             {k: v for k, v in prior.items() if k != "configHash"})
+            self.assertEqual(svc._sha256_file(roots["manifest"]),
+                             receipt["targetManifestSha256"])
+            svc._verify_staged_install(args.account, _label_for(args.account), roots)
+
+    def test_v20_wrong_account_and_unreviewed_cas_cannot_enter_any_selection(self):
+        with self._installed_c2_v12_fixture() as (args, roots, _):
+            args.account = "chatgpt1"
+            self._assert_no_writes(args, roots, "exact enrolled Paper")
+            args.account = svc.C2_PAPER_ACCOUNT
+            # A non-predecessor CAS never admits this seat; the historical
+            # v10 -> v12 admission cannot fire on the v12 cohort either.
+            for value in ("", "garbage", "b" * 64):
+                with self.subTest(value=value):
+                    args.expected_manifest_sha256 = value
+                    self._assert_no_writes(args, roots, "manifest CAS|reviewed predecessor")
+
+    def test_v20_self_consistent_cohort_identity_or_profile_changes_are_still_refused(self):
+        for change, message in (
+                ("cohort", "sealed identity does not match"),
+                ("identity", "sealed identity does not match"),
+                ("nonPaper", "non-Paper profile changed"),
+                ("paperSelection", "not exact v12")):
+            with self.subTest(change=change), self._installed_c2_v12_fixture() as (args, roots, cfg):
+                manifest = json.loads(roots["manifest"].read_text())
+                pins = {}
+                if change == "cohort":
+                    pins["C2_PAPER_V12_FILES_SHA256"] = {
+                        name: digest for name, digest in manifest["files"].items()
+                        if name != "workspace-access.mjs"}
+                elif change == "identity":
+                    pins["C2_PAPER_RUNTIME_IDENTITY"] = {
+                        **{key: manifest[key] for key in svc.C2_PAPER_RUNTIME_IDENTITY},
+                        "port": 45099}
+                else:
+                    if change == "nonPaper":
+                        cfg["requestTimeoutMs"] += 1
+                    else:
+                        cfg["paperDesign"]["commandTimeoutMs"] += 1
+                    roots["config"].write_text(json.dumps(cfg, indent=2, sort_keys=True))
+                    manifest["configHash"] = svc._sha256_file(roots["config"])
+                    roots["manifest"].write_text(json.dumps(manifest, indent=2, sort_keys=True))
+                    args.expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+                    pins["C2_PAPER_V12_MANIFEST_SHA256"] = args.expected_manifest_sha256
+                # Isolate the additional semantic pin beyond the snapshot CAS.
+                with mock.patch.multiple(svc, **pins):
+                    self._assert_no_writes(args, roots, message)
+
+    def test_v20_target_runtime_receipt_bridge_and_python_are_verified(self):
+        for fault in ("missing bridge", "changed bridge", "wrong receipt", "symlink python"):
+            with self.subTest(fault=fault), self._installed_c2_v12_fixture() as (args, roots, _):
+                runtime = svc._user_root() / svc.PAPER_RUNTIME_V20_REL
+                bridge = runtime / "source/bridge.py"
+                if fault == "missing bridge":
+                    bridge.unlink()
+                elif fault == "changed bridge":
+                    bridge.write_bytes(b"different bridge\n")
+                elif fault == "wrong receipt":
+                    receipt_path = runtime / "RUNTIME.json"
+                    receipt = json.loads(receipt_path.read_text())
+                    receipt["generation"] = "v12"
+                    receipt_path.write_text(json.dumps(receipt))
+                else:
+                    python = runtime / "venv/bin/python"
+                    python.unlink()
+                    python.symlink_to(sys.executable)
+                self._assert_no_writes(args, roots, "paper .*missing or unsafe|paper bridge hash|receipt")
+
+    def test_v20_running_or_crashed_loaded_service_refuses_without_writes(self):
+        for state in (_print_running, _print_crashed):
+            with self.subTest(state=state.__name__), self._installed_c2_v12_fixture() as (args, roots, _):
+                before = self._snapshot(roots)
+                rec = CmdRecorder(default=FakeResult(0, state(
+                    str(roots["plist"]), _label_for(args.account))))
+                with mock.patch.object(svc, "_run", rec), \
+                     mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    with self.assertRaisesRegex(SystemExit, "while service is loaded"):
+                        svc.cmd_paper_runtime_upgrade(args)
+                    write.assert_not_called()
+                self.assertEqual(before, self._snapshot(roots))
+                self.assertTrue(all(c[:2] == ["launchctl", "print"] for c in rec.calls))
+
+    def test_v20_preflight_bypasses_contended_mutex_without_writes(self):
+        with self._installed_c2_v12_fixture() as (args, roots, _):
+            args.preflight_only = True
+            before = self._snapshot(roots)
+            with svc._c2_lifecycle_mutex(args.account), \
+                 mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                run.assert_not_called()
+                write.assert_not_called()
+            self.assertEqual((rc, json.loads(output)["effect"]), (0, "NOT_APPLIED"))
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_v20_manifest_cas_drift_after_final_runtime_check_refuses_before_write(self):
+        with self._installed_c2_v12_fixture() as (args, roots, _):
+            before = roots["manifest"].read_bytes()
+            verify = svc._verify_paper_runtime
+            calls = []
+            def inject(*pos, **kw):
+                result = verify(*pos, **kw)
+                calls.append(1)
+                # Both generations are rechecked immediately before the first
+                # write; concurrent drift after that point must refuse closed.
+                if len(calls) == 4:
+                    roots["manifest"].write_bytes(before + b"\n")
+                return result
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(account=args.account)), \
+                 mock.patch.object(svc, "_verify_paper_runtime", inject), \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "snapshot CAS mismatch"):
+                    svc.cmd_paper_runtime_upgrade(args)
+                write.assert_not_called()
+            self.assertEqual(roots["manifest"].read_bytes(), before + b"\n")
+
+    def test_v20_failures_before_or_after_atomic_replace_restore_exact_original_bytes(self):
+        for filename in ("config.json", "manifest.json"):
+            for after_replace in (False, True):
+                with self.subTest(filename=filename, after_replace=after_replace), \
+                     self._installed_c2_v12_fixture() as (args, roots, _):
+                    before = self._snapshot(roots)
+                    real = svc._atomic_write_bytes
+                    fired = []
+                    def inject(path, data, mode=svc.FILE_MODE):
+                        if Path(path).name == filename and not fired:
+                            fired.append(1)
+                            if after_replace:
+                                real(path, data, mode)
+                            raise OSError("fixture atomic write failure")
+                        return real(path, data, mode)
+                    with mock.patch.object(svc, "_run", self._unloaded_recorder(account=args.account)), \
+                         mock.patch.object(svc, "_atomic_write_bytes", inject):
+                        with self.assertRaisesRegex(SystemExit, "NOT_APPLIED; original state restored"):
+                            svc.cmd_paper_runtime_upgrade(args)
+                    self.assertTrue(fired)
+                    self.assertEqual(before, self._snapshot(roots))
+                    svc._verify_staged_install(args.account, _label_for(args.account), roots)
+
+    def test_v20_postcommit_verification_failure_never_claims_no_effect_or_rolls_back(self):
+        with self._installed_c2_v12_fixture() as (args, roots, _):
+            before_manifest = roots["manifest"].read_bytes()
+            real_verify = svc._verify_staged_install
+            real_write = svc._atomic_write_bytes
+            reads, writes = [], []
+            def verify(*pos, **kw):
+                reads.append(1)
+                if len(reads) == 3:
+                    raise SystemExit("fixture postcommit verification failure")
+                return real_verify(*pos, **kw)
+            def write(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(account=args.account)), \
+                 mock.patch.object(svc, "_verify_staged_install", verify), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after manifest commit"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json", "manifest.json"])
+            self.assertNotEqual(roots["manifest"].read_bytes(), before_manifest)
+
+    def test_v20_rollback_failure_keeps_unknown_and_never_replays(self):
+        with self._installed_c2_v12_fixture() as (args, roots, _):
+            before_manifest = roots["manifest"].read_bytes()
+            real = svc._atomic_write_bytes
+            writes = []
+            def inject(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                if len(writes) > 1:
+                    raise OSError("fixture manifest and rollback writes refused")
+                return real(path, data, mode)
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(account=args.account)), \
+                 mock.patch.object(svc, "_atomic_write_bytes", inject):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json", "manifest.json", "config.json"])
+            self.assertEqual(roots["manifest"].read_bytes(), before_manifest)
 
 
 class TestC2BusinessHistoricalCompatibility(unittest.TestCase):

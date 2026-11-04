@@ -1,4 +1,5 @@
 import type { OperationPointer } from "./operation-controller";
+import { parseDirectConsumeTarget } from "../direct-native-result";
 
 export interface DurablePendingPointerStore {
   read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null>;
@@ -34,7 +35,7 @@ export const PENDING_POINTER_ERRORS = {
 interface ClosedRecord {
   readonly v: 1;
   readonly operationKey: string;
-  readonly kind: "launch";
+  readonly kind: "launch" | "consume";
   readonly targetKey: string;
 }
 
@@ -45,6 +46,7 @@ type DurableReservation =
 
 const SCOPE_RE = /^[0-9a-f]{64}$/;
 const LAUNCH_KEY_RE = /^mmos-launch-[0-9a-f]{40}$/;
+const CONSUME_KEY_RE = /^mmos-consume-[0-9a-f]{40}$/;
 const TARGET_KEY_RE = /^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/;
 const POINTER_INPUT_KEYS: ReadonlySet<string> = new Set(["operationKey", "kind", "targetKey"]);
 const RECORD_KEYS: ReadonlyArray<string> = ["v", "operationKey", "kind", "targetKey"];
@@ -80,17 +82,17 @@ function parsePointer(pointer: unknown): ClosedRecord {
   for (const key of keys) {
     if (!POINTER_INPUT_KEYS.has(key)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
   }
-  if (raw.kind !== "launch") fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  if (typeof raw.operationKey !== "string" || !LAUNCH_KEY_RE.test(raw.operationKey)) {
+  if (raw.kind !== "launch" && raw.kind !== "consume") fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+  if (typeof raw.operationKey !== "string" || !(raw.kind === "consume" ? CONSUME_KEY_RE : LAUNCH_KEY_RE).test(raw.operationKey)) {
     fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
   }
-  if (typeof raw.targetKey !== "string" || !TARGET_KEY_RE.test(raw.targetKey)) {
+  if (typeof raw.targetKey !== "string" || !(raw.kind === "consume" ? parseDirectConsumeTarget(raw.targetKey) : TARGET_KEY_RE.test(raw.targetKey))) {
     fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
   }
   return {
     v: 1,
     operationKey: raw.operationKey,
-    kind: "launch",
+    kind: raw.kind,
     targetKey: raw.targetKey,
   };
 }
@@ -109,16 +111,16 @@ function decodeRecord(value: unknown): OperationPointer {
     if (!RECORD_KEYS.includes(key)) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
   }
   if (raw.v !== 1) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  if (raw.kind !== "launch") fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  if (typeof raw.operationKey !== "string" || !LAUNCH_KEY_RE.test(raw.operationKey)) {
+  if (raw.kind !== "launch" && raw.kind !== "consume") fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
+  if (typeof raw.operationKey !== "string" || !(raw.kind === "consume" ? CONSUME_KEY_RE : LAUNCH_KEY_RE).test(raw.operationKey)) {
     fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
   }
-  if (typeof raw.targetKey !== "string" || !TARGET_KEY_RE.test(raw.targetKey)) {
+  if (typeof raw.targetKey !== "string" || !(raw.kind === "consume" ? parseDirectConsumeTarget(raw.targetKey) : TARGET_KEY_RE.test(raw.targetKey))) {
     fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
   }
   return {
     operationKey: raw.operationKey,
-    kind: "launch",
+    kind: raw.kind,
     targetKey: raw.targetKey,
   };
 }

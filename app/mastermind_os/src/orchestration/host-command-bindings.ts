@@ -1,4 +1,5 @@
 import { normalizeSelection, type MissionSelection } from "../mission";
+import type { DirectSelection, DirectTerminalSelection } from "../direct-native-result";
 import type {
   CommandIntent,
   FiniteCommandPort,
@@ -36,6 +37,7 @@ export interface OrchestratorSessionPresentation {
 export interface OrchestratorCommandView {
   readonly projects: readonly LaunchChoice[];
   readonly profiles: readonly LaunchChoice[];
+  readonly frontierModels?: readonly LaunchChoice[];
   readonly session: OrchestratorSessionPresentation | null;
 }
 
@@ -57,6 +59,14 @@ export interface OrchestratorCommandBinding {
   makeLaunchIntent(form: LaunchForm): CommandIntent | null;
   makeMessageIntent(sessionKey: string, text: string): CommandIntent | null;
   makeStopIntent(sessionKey: string): CommandIntent | null;
+  /** Distinct direct terminal view; no role-envelope or product acceptance fallback. */
+  readonly directNative?: {
+    read(selection: DirectSelection, signal: AbortSignal): Promise<unknown>;
+    inspectCorrection?(selection:DirectSelection,signal:AbortSignal):Promise<unknown>;
+    makeCorrectionIntent?(selection:DirectTerminalSelection,fence:number):CommandIntent|null;
+    makeConsumeIntent(selection: DirectTerminalSelection, digest: string): CommandIntent | null;
+    isDirectSelection(selection: MissionSelection): boolean;
+  };
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -212,12 +222,22 @@ export function readCommandView(
       if (!choice) return EMPTY_VIEW;
       profiles.push(choice);
     }
+    let frontierModels: LaunchChoice[] | undefined;
+    if (raw.frontierModels !== undefined) {
+      if (!Array.isArray(raw.frontierModels) || raw.frontierModels.length > 16) return EMPTY_VIEW;
+      frontierModels = [];
+      for (const item of raw.frontierModels) {
+        const choice = asChoice(item);
+        if (!choice) return EMPTY_VIEW;
+        frontierModels.push(choice);
+      }
+    }
     const session =
       raw.session === null || raw.session === undefined
         ? null
         : asSession(raw.session);
     if (raw.session != null && session === null) return EMPTY_VIEW;
-    return { projects, profiles, session };
+    return { projects, profiles, session, ...(frontierModels !== undefined ? { frontierModels } : {}) };
   } catch {
     return EMPTY_VIEW;
   }

@@ -1538,22 +1538,26 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 355)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # PR #1805 A2 rollback consumer requalification: disarmed legacy A2
-    # read-side selection changed this module; the installed event-loop AST
+    # H2 direct-native host composition: the qualified current-config/source
+    # generation callback changes this module; the installed event-loop AST
     # remains exactly the independently reviewed 060525... anchor below.
     # Keep a pinned full-source digest. Never derive it during this test.
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
+    # Return plus attention composition changes the module; the installed entry
+    # AST below remains identical to protected d65414e. This static literal
+    # freezes the combined candidate, not independent review or release authority.
     from tests.executive_identity_review import _reviewed_ast_dump
+    reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
-            or hashlib.sha256(source.encode()).hexdigest() !=
-            'f756da398e5d50516bd236290d2f1b9eb86421aecc55f28a6f09198203609e9c'):
+            or reviewed_source_sha !=
+            '7657c30e04c73c440777ebe86887890ea47a67444774a9ff04634a4077225f42'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

@@ -862,6 +862,15 @@ class _EvidenceGuard:
         self.backup_databases: set[Path] = set()
         self.host_roots: tuple[Path, Path] | None = None
         self.system_alias_identity: tuple[Any, ...] | None = None
+        self.current_volume = None
+        self.historical_device: int | None = None
+
+    def persistent_match(self, expected: dict, observed: dict) -> bool:
+        if self.current_volume is None:
+            return expected == observed
+        from ops.executive_os.persistent_origin import persistent_record_matches
+        return persistent_record_matches(expected, observed,
+            volume=self.current_volume, historical_device=self.historical_device)
 
     def temp_directory(self) -> Path:
         self._temp_counter += 1
@@ -876,10 +885,14 @@ class _EvidenceGuard:
 
     def hold(self, item: _HeldFile) -> _HeldFile:
         self.files.append(item)
+        if self.current_volume is not None:
+            self.current_volume.require_path_device(item.path, item.held)
         return item
 
     def check(self) -> list[dict[str, Any]]:
         """Revalidate every retained FD, name, namespace, and hash."""
+        if self.current_volume is not None:
+            self.current_volume.check()
         if self.host_roots is not None:
             if (_host_layout() != self.host_roots
                     or _system_alias_identity(self.host_roots[0]) != self.system_alias_identity):
@@ -927,11 +940,15 @@ class _EvidenceGuard:
             _require_no_sidecars(database, label="retained backup custody")
         for path in self.initial_paths_absent:
             _require_absent(path, label=f"retained custody artifact {path.name}")
+        if self.current_volume is not None:
+            self.current_volume.check()
         return records
 
     def _check_file(self, item: _HeldFile) -> dict[str, Any]:
         held = os.fstat(item.descriptor)
         named = os.lstat(item.path)
+        if self.current_volume is not None:
+            self.current_volume.require_path_device(item.path, held)
         if (
             not stat.S_ISREG(held.st_mode)
             or item.identity() != _identity_tuple(held)
@@ -954,6 +971,9 @@ class _EvidenceGuard:
         return item.origin_record()
 
     def close(self) -> None:
+        # Retain the closed object's identity: a disposed persistent opening
+        # must refuse, never silently fall back to the generic strict reader.
+        volume = self.current_volume
         for item in self.files:
             try:
                 os.close(item.descriptor)
@@ -969,6 +989,8 @@ class _EvidenceGuard:
         if self.temp_root is not None:
             shutil.rmtree(self.temp_root, ignore_errors=True)
             self.temp_root = None
+        if volume is not None:
+            volume.close()
 
 
 def _limit_for(item: _HeldFile) -> int:
@@ -1250,9 +1272,11 @@ def _load_spent_ctime_reconciliation(guard, preflight, state_directory):
         held = dataclasses.replace(held, payload=value, payload_digest=backup._upgrade_digest(value))
         guard.files[-1] = held
         identity = _artifact_reference(held, value)
-        if refs[ref] != identity:
+        if not guard.persistent_match(refs[ref], identity):
             raise RetainedChainInvalid("spent ctime preflight origin differs")
-        identities[ref] = identity
+        # Stored-to-stored joins retain original observations. Current physical
+        # facts stay separately owned by the held guard.
+        identities[ref] = dict(refs[ref])
         records.append(held.origin_record()); payloads.append(value)
     qualification, spent, reconciliation, continuation = payloads
     original = qualification.get("original_barrier", {})
@@ -1904,9 +1928,9 @@ def _verify_current_initial(
         "size": int(held_database.held.st_size),
         "sha256": held_database.sha256,
     }
-    if identity != {key: authoritative[key] for key in (
+    if not guard.persistent_match({key: authoritative[key] for key in (
         "path", "device", "inode", "size", "sha256"
-    )}:
+    )}, identity):
         raise RetainedChainInvalid(
             "INITIAL live v7 database differs from the retained completion identity"
         )
@@ -2062,8 +2086,10 @@ class RetainedV5ToV7Evidence:
         control_config_identity: dict[str, Any],
         backup_root: Path,
         pre_census_qualification: dict[str, Any] | None = None,
+        prepared_reader_record: dict[str, str] | None = None,
     ) -> None:
         self.phase = phase
+        self._prepared_reader_record = dict(prepared_reader_record) if prepared_reader_record is not None else None
         self.pre_census_qualification = (json.loads(json.dumps(pre_census_qualification))
                                          if pre_census_qualification is not None else None)
         self.material = material
@@ -2089,6 +2115,35 @@ class RetainedV5ToV7Evidence:
             "held_files": len(records),
             "held_directories": len(self._guard.dirs),
         }
+
+    def _persistent_record_matches(self, expected: dict, observed: dict) -> bool:
+        """Compare a Maintenance-owned reobservation under this held opening.
+
+        Later acceptance artifacts can have a different historical observation
+        from the migration cohort. This reuses only the independent current
+        anchor, never an assertion about historical volume continuity.
+        """
+        if self._guard.current_volume is None:
+            return expected == observed
+        from ops.executive_os.persistent_origin import persistent_record_matches
+        return persistent_record_matches(expected, observed,
+            volume=self._guard.current_volume, historical_device=expected.get("device"))
+
+    def _require_current_path(self, path: Path, info=None) -> None:
+        if self._guard.current_volume is not None:
+            self._guard.current_volume.require_path_device(path, info)
+
+    def check_prepared_sources(self) -> None:
+        """Re-pin the actual reader and original executor at a new-mode write edge."""
+        if self._prepared_reader_record is None:
+            raise RetainedChainInvalid("prepared successor source proof is unavailable")
+        if _prove_current_release(self._prepared_reader_record["release_sha"]) != self._prepared_reader_record:
+            raise RetainedChainInvalid("prepared successor reader source changed")
+        tool = self.material["chain"]["tool_release"]
+        seal = _verify_pinned_release(Path(tool["root"]), tool["sha"], tool["tree_sha"])
+        if any(seal.get(key) != tool[field] for key, field in (
+                ("commit_sha", "sha"), ("tree_sha", "tree_sha"), ("manifest_sha256", "manifest_sha256"))):
+            raise RetainedChainInvalid("prepared successor migration source changed")
 
     def verify_v7_acceptance_backup(
         self,
@@ -2201,7 +2256,9 @@ def _validate_acceptance_name(database_name: str) -> str:
 
 
 def _open_chain_evidence(
-    runtime_root: Path, expected_release_sha: str, pinned_material: Mapping[str, Any] | None
+    runtime_root: Path, expected_release_sha: str, pinned_material: Mapping[str, Any] | None,
+    *, _prepared_reader_sha: str | None = None,
+    _prepared_material: Mapping[str, Any] | None = None,
 ) -> RetainedV5ToV7Evidence:
     if not isinstance(expected_release_sha, str) or _SHA_RE.fullmatch(
         expected_release_sha
@@ -2219,13 +2276,34 @@ def _open_chain_evidence(
         if pinned_material is not None
         else None
     )
+    if (_prepared_reader_sha is None) != (_prepared_material is None):
+        raise RetainedChainInvalid("prepared successor inputs must be complete")
+    prepared = _validate_pinned_material(_prepared_material) if _prepared_material is not None else None
+    if prepared is not None and (pinned_material is not None
+            or prepared["schema_version"] != SPENT_CTIME_MATERIAL_SCHEMA_VERSION
+            or prepared["chain"]["tool_release"]["sha"] != expected_release_sha
+            or _prepared_reader_sha == expected_release_sha):
+        raise RetainedChainInvalid("prepared successor requires distinct INITIAL sixteen-origin provenance")
     _root_darwin_gate()
     control_uid, control_gid = _control_identity()
     guard = _EvidenceGuard(control_uid, control_gid)
     # Every failure from here on must release every already-held descriptor
     # and private temporary copy before the error reaches the caller.
     try:
+        original = prepared if prepared is not None else pinned
+        if (original is not None
+                and original["schema_version"] == SPENT_CTIME_MATERIAL_SCHEMA_VERSION):
+            from ops.executive_os.persistent_origin import CurrentDataVolumeGuard
+            devices = {record["device"] for record in original["origin_records"]}
+            if (len(devices) != 1 or any(type(record["device"]) is not int
+                    or record["device"] <= 0 for record in original["origin_records"])):
+                raise RetainedChainInvalid("sixteen-origin historical device cohort differs")
+            guard.historical_device = next(iter(devices))
+            guard.current_volume = CurrentDataVolumeGuard()
         runtime_physical, backup_physical = _host_layout()
+        if guard.current_volume is not None:
+            for root in (runtime_physical, backup_physical, _control_config_path().parent):
+                guard.current_volume.require_path_device(root)
         guard.host_roots = (runtime_physical, backup_physical)
         guard.system_alias_identity = _system_alias_identity(runtime_physical)
         _resolve_runtime_root_argument(
@@ -2275,8 +2353,23 @@ def _open_chain_evidence(
             raise EvidenceCustodyError("qualified control config changed during opening")
 
         expected_release: dict[str, str] | None = None
+        prepared_reader_record = None
         if phase == EVIDENCE_PHASE_INITIAL:
-            expected_release = _prove_current_release(expected_release_sha)
+            if prepared is None:
+                expected_release = _prove_current_release(expected_release_sha)
+            else:
+                # Reader identity is an independent actual running-code proof.
+                # The immutable migration executor is neither rewritten nor
+                # substituted for this source-origin check.
+                prepared_reader_record = _prove_current_release(_prepared_reader_sha)
+                tool = prepared["chain"]["tool_release"]
+                seal = _verify_pinned_release(Path(tool["root"]), tool["sha"], tool["tree_sha"])
+                if any(seal.get(key) != tool[field] for key, field in (
+                        ("commit_sha", "sha"), ("tree_sha", "tree_sha"),
+                        ("manifest_sha256", "manifest_sha256"))):
+                    raise RetainedChainInvalid("prepared migration executor seal differs")
+                expected_release = dict(release_root=tool["root"], release_sha=tool["sha"],
+                    release_tree_sha=tool["tree_sha"], release_manifest_sha256=tool["manifest_sha256"])
 
         db_path = runtime_physical / _DB_RELATIVE_PATH
         state_directory = db_path.parent
@@ -2442,10 +2535,26 @@ def _open_chain_evidence(
             "origin_records": origin_records,
             "chain": chain,
         }
+        original = prepared if prepared is not None else pinned
+        if guard.current_volume is not None:
+            # Only the finite top-level origin records are observations across
+            # time. Host/chain/role joins retain the exact historical wire.
+            if (set(material) != set(original)
+                    or any(material[key] != original[key]
+                           for key in material if key != "origin_records")
+                    or len(origin_records) != len(original["origin_records"])):
+                raise RetainedChainInvalid("persistent original material shape or chain differs")
+            for expected, observed in zip(original["origin_records"], origin_records):
+                if not guard.persistent_match(expected, observed):
+                    raise RetainedChainInvalid("persistent original nondevice identity differs")
+            material = json.loads(json.dumps(original))
         if pinned is not None and material != dict(pinned):
             raise RetainedChainInvalid(
                 "retained evidence does not match the exact pinned material"
             )
+
+        if prepared is not None and material != prepared:
+            raise RetainedChainInvalid("prepared successor INITIAL evidence differs from the sealed preparation")
 
         # Later verification may have raced an earlier retained origin.  Never
         # expose qualified DATA before the full held-custody recheck succeeds.
@@ -2462,6 +2571,7 @@ def _open_chain_evidence(
             control_config_identity=held_config.identity_record(),
             backup_root=backup_physical,
             pre_census_qualification=(recovery["qualification"] if recovery is not None else None),
+            prepared_reader_record=prepared_reader_record,
         )
     except BaseException:
         guard.close()
@@ -2531,4 +2641,34 @@ __all__ = [
     "V7AcceptanceBackupEvidence",
     "open_retained_v5_to_v7_evidence",
     "open_v5_to_v7_evidence",
+    "open_prepared_successor_v5_to_v7_evidence",
 ]
+
+
+@contextmanager
+def open_prepared_successor_v5_to_v7_evidence(
+    runtime_root: Path, expected_reader_release_sha: str,
+    prepared_material: Mapping[str, Any],
+) -> Iterator[RetainedV5ToV7Evidence]:
+    """Strict current INITIAL evidence under a separately sealed successor reader.
+
+    The material is expected DATA, never historical authority or a skip flag.
+    This finite entry admits only the existing sixteen-origin preparation;
+    all current target checks run and the returned material is identical.
+    The maintenance owner separately authenticates the actual unstarted
+    preparation bundle and its selected-source lineage.
+    """
+    prepared = _validate_pinned_material(prepared_material)
+    if prepared["schema_version"] != SPENT_CTIME_MATERIAL_SCHEMA_VERSION:
+        raise RetainedChainInvalid("prepared successor requires the closed sixteen-origin variant")
+    evidence = None
+    try:
+        evidence = _open_chain_evidence(runtime_root, prepared["chain"]["tool_release"]["sha"], None,
+            _prepared_reader_sha=expected_reader_release_sha, _prepared_material=prepared)
+        evidence.check_prepared_sources()
+        yield evidence
+        evidence.check_prepared_sources()
+        evidence.check()
+    finally:
+        if evidence is not None:
+            evidence._guard.close()

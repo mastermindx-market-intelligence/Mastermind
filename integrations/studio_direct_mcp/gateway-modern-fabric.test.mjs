@@ -86,6 +86,34 @@ test('pinned modern client lists/calls through real HTTP and retains the existin
   } finally { await first?.close(); await second?.close(); await legacy?.close(); await gw.close(); }
 });
 
+test('modern Fabric permits only an actually exposed optional result page and preserves backend owner', async () => {
+  // Distinct read-only synthetic fixture: no real Fabric result or provider.
+  const gw = await startPrivateGateway({ ...profile, childEnv: { FIXTURE_PAGED: 'true' } });
+  let first, second;
+  try {
+    first = await connect(gw);
+    const catalog = (await first.listTools()).tools.map(t => t.name);
+    assert.equal(catalog.length, 10); // eight Fabric methods + gateway ping/page.
+    assert.ok(catalog.includes('fabric_result_page'));
+    assert.ok(!catalog.includes('start_process'));
+    const args = { run_id: 'synthetic-paged', root_id: 'synthetic-root', offset: 0, max_bytes: 4096 };
+    const firstPage = value(await first.callTool({ name: 'fabric_result_page', arguments: args }));
+    assert.equal(firstPage.name, 'fabric_result_page');
+    assert.deepEqual(firstPage.args, args);
+    const pid = firstPage.pid;
+    await first.close();
+    second = await connect(gw);
+    const following = value(await second.callTool({ name: 'fabric_result_page',
+      arguments: { ...args, offset: 4096 } }));
+    assert.equal(following.name, 'fabric_result_page');
+    assert.equal(following.pid, pid);
+    assert.equal(gw.stats().backend.spawns, 1);
+    assert.equal(gw.stats().sessions.active, 0);
+    await assert.rejects(second.callTool({ name: 'start_process', arguments: {} }),
+      /Fabric-only boundary/);
+  } finally { await first?.close(); await second?.close(); await gw.close(); }
+});
+
 test('malformed modern claims are rejected before backend acquisition; metadata cannot grant identity', async () => {
   const gw = await startPrivateGateway(profile);
   try {

@@ -113,10 +113,11 @@ class TerminalPollBudgetTests(unittest.TestCase):
         original = ROOT / 'source/remote_sub.sh'
         # The closed, hash-pinned forward candidate preserves both reviewed
         # Grok behavior and caller UTC narrowing. Both distinct launchers keep
-        # their real runtime-margin checks above; this asserts the actual source.
+        # their real runtime-margin checks above; this current pin additionally
+        # binds S7 same-operation private-diagnostic proof retention.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         '09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7')
+                         '7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
