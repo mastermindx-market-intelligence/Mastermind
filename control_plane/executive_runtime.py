@@ -24131,9 +24131,18 @@ class ResourceBroker:
                     "demands": self._physical_demands(connection, row)} for row in headers]}
 
     def _physical_event(self, connection, reservation, aggregate_id, action, command_fingerprint,
-                        receipt, timestamp, *, original_event_id=None):
+                        receipt, timestamp, *, original_event_id=None, _capacity_capture=None):
         payload = {"action": action, "command_fingerprint": command_fingerprint, "receipt": receipt,
                    "original_event_id": original_event_id}
+        if _capacity_capture is not None:
+            from .physical_capacity_capture_owner import capture_for_event
+            payload["capacity_capture"] = capture_for_event(
+                _capacity_capture, store=self.store, reservation=reservation,
+                action=action, original_event_id=original_event_id, timestamp=timestamp,
+            )
+            if len(_json_dumps(payload).encode("utf-8")) > 65_536:
+                from .executive_physical_resources import PhysicalResourceRefusal
+                raise PhysicalResourceRefusal("CAPACITY_CAPTURE_EVENT_OVER_BUDGET", "capacity capture exceeds original Event budget")
         self.store.append_event(connection, aggregate_type="physical_resource_operation", aggregate_id=aggregate_id,
                                 event_type="PHYSICAL_RESOURCE_" + action.upper(), actor=reservation["owner_id"],
                                 payload=payload, command_id=reservation["command_id"], timestamp_ms=timestamp)
@@ -24171,6 +24180,7 @@ class ResourceBroker:
         evaluation: Mapping[str, Any],
         timestamp: int,
         progress: Callable[[str], None] | None = None,
+        _capacity_capture: object | None = None,
     ) -> dict[str, Any]:
         """One physical reservation persistence implementation.
 
@@ -24260,6 +24270,7 @@ class ResourceBroker:
             command_fingerprint,
             receipt,
             timestamp,
+            _capacity_capture=_capacity_capture,
         )
         if event.sequence != generation:
             raise physical.PhysicalResourceRefusal(
@@ -24493,6 +24504,11 @@ class ResourceBroker:
                         self._physical_guard(request, caller_context, connection, "after_event", epoch)
                         code = refusal.code
                     else:
+                        from .physical_capacity_capture_owner import mint_capacity_capture
+                        capacity_capture = mint_capacity_capture(
+                            self, caller_context, reservation, evaluation,
+                            connection=connection, timestamp=timestamp,
+                        )
                         receipt = self._persist_prevalidated_physical_reservation(
                             connection,
                             reservation,
@@ -24501,6 +24517,7 @@ class ResourceBroker:
                             progress=lambda point: self._physical_guard(
                                 request, caller_context, connection, point, epoch
                             ),
+                            _capacity_capture=capacity_capture,
                         )
                         code = "RESERVED"
                 else:
@@ -24559,7 +24576,7 @@ class ResourceBroker:
                                     raise physical.PhysicalResourceRefusal("OWN_DEMAND_MISMATCH", "exact own reservation rows do not cover BEGIN")
                             # Own-phase identity and pristine charge are proven
                             # above; global pool rows only supply additive capacity.
-                            physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
+                            evaluation = physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
                                                     observations=context["observations"], decision_time_ms=timestamp,
                                                     production=production)
                         planned = []
@@ -24592,7 +24609,15 @@ class ResourceBroker:
                             planned.append({"commitment_id": row["commitment_id"], "allocation_generation": row["allocation_generation"],
                                             "revision": row["revision"] + 1, "phase_key": row["phase_key"], "state": state, "demands": demands})
                         receipt = {"operation_key": reservation["operation_key"], "request_fingerprint": fingerprint, "commitments": planned}
-                        event = self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint, receipt, timestamp)
+                        capacity_capture = None
+                        if action == "begin":
+                            from .physical_capacity_capture_owner import mint_capacity_capture
+                            capacity_capture = mint_capacity_capture(
+                                self, caller_context, reservation, evaluation,
+                                connection=connection, timestamp=timestamp,
+                            )
+                        event = self._physical_event(connection, reservation, aggregate_id, action, command_fingerprint, receipt, timestamp,
+                                                     _capacity_capture=capacity_capture)
                         self._physical_guard(request, caller_context, connection, "after_event", epoch)
                         for row, plan in zip(headers, planned):
                             cursor = connection.execute("""UPDATE physical_resource_commitments SET state=?,revision=revision+1,updated_at_ms=?,
