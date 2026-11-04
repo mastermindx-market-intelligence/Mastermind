@@ -52,33 +52,13 @@ Record observable mode/model, timestamp and error when material. Selected mode i
 **CI is a release dependency.** Pending checks do not stop independent work. Retain exact head, one cheap existing observer and its real return; apply `docs/DELIVERY_WORKFLOW.md` before gated release. No bypass, empty push, duplicate assigned work or unchanged status turns. Necessary source movement invalidates only affected evidence and rebinds observation.
 
 <!-- mastermind-ci-observation-liveness-v1 -->
-**CI observation liveness.** A checkpoint records the last observation; it is not a completion-event source. A watcher request or PreToolUse admission is not a launched observer: before relying on it, verify the successful tool return, exact repository, PR/head/run, retained handle and supported result-consumption path. If no idle wake is supported, consume that same handle at a useful foreground boundary; do not wait for an event that cannot arrive. Never duplicate a live or uncertain observer.
+**CI observation liveness.** A checkpoint is not a completion-event source; PreToolUse admission is not a launched observer. Require successful tool return, exact repository, PR, head and run, retained handle and supported result-consumption path. Without idle wake, consume in foreground. Never duplicate live/uncertain observers.
 
-The installed CI guard's `REDUNDANT POLL` is a finite read-frequency cooldown, not a permanent permission denial. Do not sleep/retry, reset its state, switch readers or mutate a PR merely to clear it; continue useful work. At the next real integration boundary or existing scheduled wake after expiry, one bounded same-carrier read is eligible when no verified observer supplies completion. Permission, safety, custody and effect-unknown refusals remain binding; elapsed time does not clear them.
+**Short attended validation.** For evidenced seconds to minutes, stay in the same healthy session: a pending fast check is not a reason to checkpoint and end. Do useful independent work or a bounded wait on the original observer; consume the terminal result and take the next authorized step. No new watcher or duplicate run; this is not a background Web turn. A genuine session boundary (health/context, user stop, no permitted return) retains stop/continuation rules. Reassess long/stalled runs; save without ending.
 
-After two equivalent no-progress wakes, diagnose the missing external observation or return path once and change tactic; re-reading a self-written receipt is not progress and cannot prove the dependency remains pending. Reuse the existing observer and Class-M backoff (15m -> 30m -> 60m; default 60m) in `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`; do not create another watcher or lifecycle ledger. If a human action is the only remaining path, name it once and keep its answer pending — do not repeatedly ask, manufacture busywork, or imply completion. Keep aggregate mission attention only under its existing lifetime rule; a blocked child does not authorize stopping it. Notify only on a material result or required action, and preserve original owners, roots, grants and unresolved effects.
+`REDUNDANT POLL` is a finite read-frequency cooldown, not a permanent permission denial. No sleep/retry, state reset, alternate reader or PR mutation to bypass it. At the next real integration boundary or scheduled wake after expiry, one same-carrier read is eligible absent verified completion. Permission, safety, custody and effect-unknown refusals remain binding; elapsed time does not clear them.
 
-**Short attended validation.** When the exact run or an accepted fast-lane contract
-supports completion in seconds to minutes, remain in the same healthy session:
-a pending fast check is not a reason to checkpoint and end. Bind the exact repository, PR, head and run;
-reuse the verified observation handle and its actual return path. Continue useful,
-path-disjoint work while CI executes. When no useful independent work is ready,
-use a bounded wait through that same process/CI owner, then consume the terminal result
-and perform the next authorized repair, integration or release step in this turn.
-No new watcher, duplicate run, empty push or fabricated asynchronous wake is needed.
-
-This is attended result consumption, not a background Web turn or a promise of
-unlimited runtime. Keep the existing cooldown and observation budget unchanged;
-do not busy-poll, sleep-and-read around a guard, switch readers after a refusal,
-or treat queued, skipped, missing or stale-head checks as success. The Class-M
-backoff above is for genuinely long or unattended dependencies, not a default
-15-minute handoff for a seconds-long fast check. If the run is actually long or
-stalled, diagnose that evidence and choose the next useful action; do not retain
-a fictional fast estimate. Save progress without ending the session. A genuine session boundary
-(actual health/context pressure, user stop, unavailable permitted return path,
-or all useful lanes blocked) still requires the existing exact continuation or
-stop classification. Passing CI does not itself authorize merge or deployment.
-
+After two equivalent no-progress wakes, diagnose once and change tactic; self-written receipts prove no progress. Keep Class-M (15m -> 30m -> 60m; default 60m) under `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` for long/unattended dependencies, not short checks. Name human-only controls once. Preserve original owners, roots, grants, effects and aggregate attention's lifetime; blocked children do not end it. Notify only material deltas. Queued/skipped/stale checks are not success; CI green authorizes no merge/deployment.
 <!-- /mastermind-ci-observation-liveness-v1 -->
 
 **Problem-solve before escalating.** Use checkpoint/minimum source, inspect exact failure and perform lawful bounded repair or change lane. Two unchanged failures require new evidence/hypothesis. Ask only precise reserved human controls; keep action/evidence/resolver/return facts in the existing checkpoint, not a new ledger.

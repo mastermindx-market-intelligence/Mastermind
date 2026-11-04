@@ -220,6 +220,9 @@ class AttendedValidationTests(unittest.TestCase):
     def previous(self):
         return (installer.ROOT / 'tests/fixtures/ci_wait_guidance_v1.md').read_text()
 
+    def test_attended_guidance_fits_existing_source_budget(self):
+        self.assertLessEqual(len(installer.guidance().encode()), len(self.previous().encode()))
+
     def test_previous_fixture_is_exact_accepted_migration(self):
         self.assertIn(installer.digest(self.previous().encode()), installer.PREVIOUS_GUIDANCE_SHA256)
 
