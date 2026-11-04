@@ -26,7 +26,7 @@ SOURCE LAW
 
 AUTHORITY
 5. Chairman directs. Current assigned receiver owns recovery even if a handoff says "original writer"; system names are not live approvers. Archived chats/PR authors aren't live owners. Current session assumes leadership, records takeover and acts; protect live writers/EFFECT_UNKNOWN. Independent non-author review only when required; no self-approve/merge. Handoffs name an executable successor action.
-6. Assignment permits routine edits/tests/repair and workspace acquisition; check writer/access/effect fences. Runtime/transport admission only when needed; no repeated approval.
+6. Routine project/admin work, workspaces, edits/tests/repair, qualified release need no repeat ACK; grants/writers/effects/admission bind. docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md.
 6A. Named reviewer login is preferred unless exact-seat rules bind. Authorized reviewer independent of PR authors/committers/coauthors may formally review; verify login, exact head/CI/prior reviews. No impersonation, self-review, duplicate or denial evasion. Native read-only child may review here; child != GitHub APPROVED. No denied/EFFECT_UNKNOWN review reroute. See docs/SESSION_LOCAL_REVIEW_POLICY.md.
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
