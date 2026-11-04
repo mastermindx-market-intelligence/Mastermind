@@ -359,7 +359,23 @@ def _build_request_frame(prompt: str, system: Any) -> bytes:
     if isinstance(system, str) and system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    frame = {"model": MODEL, "messages": messages, "stream": False}
+    # Vendor-owned retries and waterfall fallbacks occur *inside* one HTTP POST.
+    # Disabling HTTP SDK retries alone would still permit up to eight generation
+    # dispatches. Pin one attempt and forbid internal provider-rung fallback.
+    # These are documented Experiential gateway controls, not provider fields.
+    frame = {
+        "model": MODEL,
+        "messages": messages,
+        "stream": False,
+        "gateway": {
+            "retry": {
+                "max_attempts_per_route": 1,
+                "max_total_attempts": 1,
+                "backoff": {"type": "none"},
+            },
+            "routing": {"allow_fallbacks": False},
+        },
+    }
     body = json.dumps(frame, ensure_ascii=False).encode("utf-8")
     if len(body) > MAX_REQUEST_BYTES:
         raise ExperientialTransportRefused(

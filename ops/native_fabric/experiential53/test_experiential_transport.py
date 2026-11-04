@@ -232,6 +232,18 @@ class HappyPathTests(unittest.TestCase):
         self.assertEqual(frame["model"], "glm-5.3-uncensored")
         self.assertIs(frame["stream"], False)
         self.assertEqual(frame["messages"], [{"role": "user", "content": PROMPT}])
+        self.assertEqual(set(frame), {"model", "messages", "stream", "gateway"})
+        # Experiential's default waterfall can perform multiple generation
+        # dispatches inside one HTTP request. Pin both budgets to one and
+        # disable internal provider-rung fallback, not just SDK retries.
+        self.assertEqual(frame["gateway"], {
+            "retry": {
+                "max_attempts_per_route": 1,
+                "max_total_attempts": 1,
+                "backoff": {"type": "none"},
+            },
+            "routing": {"allow_fallbacks": False},
+        })
         self.assertEqual(headers.get("Authorization"), f"Bearer {PROXY_TOKEN}")
         self.assertEqual(headers.get("Idempotency-Key"), RUN_ID)
         self.assertTrue(headers.get("Content-Type", "").startswith("application/json"))

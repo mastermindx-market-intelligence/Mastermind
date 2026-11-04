@@ -82,7 +82,12 @@ inference transport behind the manual pin — not a second status scaffold:
   ambient `http(s)_proxy`/`all_proxy`/`trust_env` value is consulted; any 3xx
   refused and never followed; exactly one POST — no retry, no key rotation,
   no cross-account or cross-route fallback, and `Retry-After` observed but
-  never obeyed; bounded prompt/system chars, 1 MiB encoded request cap,
+  never obeyed. The vendor's *internal* waterfall is also restricted by an
+  exact `gateway.retry` one-dispatch total/per-route budget and
+  `gateway.routing.allow_fallbacks=false` in the JSON request body. SDK
+  no-retry alone would not prevent hidden vendor generation retries. No
+  unverified `route_id` or alternate org is invented; original provider
+  eligibility remains binding. Bounded prompt/system chars, 1 MiB encoded request cap,
   8 MiB response cap, bounded timeouts; every non-200 refused with a status
   class (401/403 auth, 413 body, 429 rate limit, 503/504 local queue, other
   4xx/5xx, and 204 never silently accepted as empty success); a 200 must be
