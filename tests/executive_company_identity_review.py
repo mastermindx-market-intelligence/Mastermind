@@ -32,16 +32,16 @@ REVIEWED_ANCHORS = {
         "node_type": "AsyncFunctionDef",
         # Existing section-sign/em-dash prose needs an exact full-source pin
         # in addition to the method AST; all three literal lines are ASCII.
-        # f950 fixed READ additions change the enclosing ingress AST.
+        # Qualified session/direction/capacity READ and admission additions change the enclosing ingress AST.
         # The original CCR branch and listener remain structurally unchanged.
-        "source_sha256": "b90a91a064e05531f86fbfab8ac9fa8960fda0dcfd7fb731bbd5f9c99f99255c",
-        "ast_sha256": "9f79a19cd2518e8a964f4fb20ad0f019088e52f5290f7f51ab0951827555b599",
+        "source_sha256": "e43df430e5652ffd9aff5114572bccb5438616e615f7edd065239f018493ef96",
+        "ast_sha256": "6735cd4807ae1d203599d8210f141ea9b49b5d3487deaaa169789d6fd4565c72",
         "sites": (
-            (("body", 3, "body", 30, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
               "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 30, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 30, "body", 3, "orelse", 0, "body", 2,
+            (("body", 3, "body", 35, "body", 3, "orelse", 0, "body", 2,
               "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
         ),
     },

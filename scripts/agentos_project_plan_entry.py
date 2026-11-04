@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--expected-macro-sha", required=True)
     parser.add_argument("--work-ref", required=True)
     parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--continuity", action="store_true")
     args = parser.parse_args()
     class ClosedDiagnostics:
         # The owner may print a missing-dependency diagnostic before refusing.
@@ -30,7 +31,7 @@ def main():
     with redirect_stdout(sink), redirect_stderr(sink):
         value = read_from_macro_owner(macro_root=Path(args.macro_root),
             expected_macro_sha=args.expected_macro_sha, work_ref=args.work_ref,
-            timeout=args.timeout)
+            timeout=args.timeout, include_continuity=args.continuity)
     print(json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
     return 0
 

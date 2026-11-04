@@ -75,8 +75,8 @@ Choose the shallowest capable route; CEO -> native coordinator -> Fabric operato
 | Fabric operator | Own execution or separable child within its grant |
 | Fabric worker | Leaf execution; decomposition returns to its parent |
 
-Omitting a manager skips no deterministic admission, capacity, independent review,
-plan provenance, cleanup or retained-result owner. Titles/native depth are not
+Omitting a manager skips no deterministic admission, capacity, genuinely binding
+review, plan provenance, cleanup or retained-result owner. Titles/native depth are not
 Runtime roles/depth. Shell tasks need no fictional planner Attempt; Runtime tasks
 still need valid owner plan/revision provenance.
 

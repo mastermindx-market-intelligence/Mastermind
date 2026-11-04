@@ -3,6 +3,7 @@ import { afterEach, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { decodeRetainedProviderCapacity } from "./retained-provider-capacity";
 import { RetainedProviderCapacityPanel } from "./RetainedProviderCapacityPanel";
+import ownerProjection from "./fixtures/retained-provider-owner-projection.json";
 afterEach(cleanup);
 const selection = { workRef: "WS:ONE", rootJobId: "JOB-1", jobId: "JOB-2", attemptId: "ATT-1" };
 const document = () => ({
@@ -15,6 +16,17 @@ const document = () => ({
   cooling: { active: null, kind: null, reset_at: null },
   quota_horizons: [{ name: "hourly", remaining: 3, limit: 20, reset_at: "2026-11-04T10:00:00Z" }],
   current_eligibility: "NOT_EVALUATED", can_place_work: false, observation_kind: "RETAINED_CLAIM",
+});
+it("consumes the actual inert Runtime claim/SAME-receipt projection across Python and TypeScript", () => {
+  const read = decodeRetainedProviderCapacity(ownerProjection, {
+    workRef: "WS:ONE", rootJobId: ownerProjection.root_job_id,
+    jobId: ownerProjection.job_id, attemptId: ownerProjection.attempt_id,
+  });
+  expect(typeof read.claim_event_id).toBe("number");
+  expect(typeof read.begin_event_id).toBe("number");
+  expect(read.observation_kind).toBe("RETAINED_CLAIM");
+  expect(read.current_eligibility).toBe("NOT_EVALUATED");
+  expect(read.can_place_work).toBe(false);
 });
 it("keeps original receipt age/auth/quota separate from present eligibility in EN and ZH", () => {
   const value = decodeRetainedProviderCapacity(document(), selection);

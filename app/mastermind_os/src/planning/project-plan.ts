@@ -46,7 +46,11 @@
  * accepted.
  */
 
+import { decodeProjectPlanContinuity, type ProjectPlanContinuityRead,
+  type ProjectPlanSourceRef, type ProjectPlanAdoptionUnavailableReason } from "./project-plan-continuity";
+
 export const BODY_SCHEMA = "mastermind.workspace_project_plan.v1";
+export const BODY_SCHEMA_V2 = "mastermind.workspace_project_plan.v2";
 export const FRAME_SCHEMA = "mastermind.workspace_project_plan_read.v1";
 export const OPERATION = "project_plan";
 export const MAX_RESPONSE_BYTES = 131072;
@@ -190,8 +194,18 @@ export interface ProjectPlanReadUnavailable {
   reason_codes: [ProjectPlanReasonCode];
 }
 
+export type ProjectPlanAdoptionSummary =
+  | { state: "UNAVAILABLE"; reason: ProjectPlanAdoptionUnavailableReason }
+  | { state: "AVAILABLE"; decision_ref: string; adopted_source: ProjectPlanSourceRef;
+      display_revision: string | null; matches_authored_record: boolean };
+export interface ProjectPlanReadAvailableV2 extends Omit<ProjectPlanReadAvailable, "schema" | "plan"> {
+  schema: typeof BODY_SCHEMA_V2;
+  plan: Omit<ProjectPlan, "adoption"> & { adoption: ProjectPlanAdoptionSummary };
+  continuity: ProjectPlanContinuityRead;
+}
+
 /** The closed read body for one workstream plan projection. */
-export type ProjectPlanRead = ProjectPlanReadAvailable | ProjectPlanReadUnavailable;
+export type ProjectPlanRead = ProjectPlanReadAvailable | ProjectPlanReadAvailableV2 | ProjectPlanReadUnavailable;
 
 const INVALID_MESSAGE = "PROJECT_PLAN_INVALID";
 
@@ -662,6 +676,33 @@ export function decodeProjectPlan(value: unknown, expected: ProjectPlanSelection
   }
   if (UTF8_ENCODER.encode(canonical).length + 1 > MAX_RESPONSE_BYTES) fail();
   const body = value;
+  if (body.schema === BODY_SCHEMA_V2) {
+    if (!hasExactKeys(body, [...BODY_KEYS, "continuity"]) || body.availability !== "AVAILABLE" || !isPlainObject(body.plan)) fail();
+    const { continuity: rawContinuity, ...baseFields } = body;
+    const base = decodeProjectPlan({ ...baseFields, schema: BODY_SCHEMA,
+      plan: { ...body.plan, adoption: { state: "UNAVAILABLE", reason: "NOT_DECLARED" } } }, expected);
+    if (base.availability !== "AVAILABLE" || base.schema !== BODY_SCHEMA) fail();
+    let continuity: ProjectPlanContinuityRead;
+    try { continuity = decodeProjectPlanContinuity(rawContinuity, expectedWorkRef); } catch { fail(); }
+    const adoption = continuity.adoption;
+    const summary: ProjectPlanAdoptionSummary = adoption.state === "AVAILABLE"
+      ? { state: "AVAILABLE", decision_ref: adoption.decision_ref,
+          adopted_source: adoption.adoption.adopted_source,
+          display_revision: adoption.adoption.display_revision,
+          // This only checks wire consistency. The sealed owner compared both
+          // captured bodies; source hashes never authorize an adoption here.
+          matches_authored_record: adoption.adoption.adopted_source.content_sha256 === base.source.content_sha256 }
+      : { state: "UNAVAILABLE", reason: adoption.reason };
+    if (!deepEqual(body.plan.adoption, summary)) fail();
+    const declaration = adoption.state === "AVAILABLE" ? adoption
+      : "declared_decision" in adoption ? adoption.declared_decision : undefined;
+    if (declaration && declaration.decision_source.commit !== base.source.commit) fail();
+    if (continuity.proposals.state === "AVAILABLE") for (const item of continuity.proposals.items) {
+      if (item.proposal_source.repository === CANONICAL_REPOSITORY && item.proposal_source.commit !== base.source.commit &&
+          (declaration === undefined || !deepEqual(declaration.adoption.proposal_source, item.proposal_source))) fail();
+    }
+    return { ...base, schema: BODY_SCHEMA_V2, plan: { ...base.plan, adoption: summary }, continuity };
+  }
   if (!isPlainObject(body) || !hasExactKeys(body, BODY_KEYS)) fail();
   if (body.schema !== BODY_SCHEMA) fail();
   const workRef = requireBodySelection(body.selection, expectedWorkRef);

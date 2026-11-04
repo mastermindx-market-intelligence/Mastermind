@@ -1,0 +1,55 @@
+// @vitest-environment jsdom
+import {cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {afterEach, beforeEach, expect, it, vi} from "vitest";
+import {App} from "./App";
+import {createFixtureCommandBinding} from "./browser-proof-command-fixture";
+import type {PendingPointerStore} from "./orchestration/operation-controller";
+const readiness = vi.hoisted(() => ({version:"test-version",source_revision:"raw-source-revision",build_identity:"raw-build-identity",transport:"raw-transport",state:"raw-state",native_client_ref:"raw-client"}));
+vi.mock("@tauri-apps/api/core",()=>({invoke:vi.fn(async()=>readiness)}));
+beforeEach(()=>{localStorage.clear();delete window.MastermindMissionHost;delete (window as Window & {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__;});
+afterEach(()=>{cleanup();localStorage.clear();delete window.MastermindMissionHost;delete (window as Window & {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__;});
+it("shows plain Chinese unavailable work, selection and footer without changing raw diagnostics",()=>{
+ render(<App locale="zh-CN" theme="light"/>);
+ expect(screen.getByRole("heading",{name:"开始工作"})).toBeTruthy();
+ expect(screen.getByText("此处暂时无法开始工作。")).toBeTruthy();
+ expect(screen.getByText("尚未选择工作项")).toBeTruthy();
+ expect(screen.getByRole("navigation",{name:"工作导航"})).toBeTruthy();
+ expect(screen.getByText("状态与来源")).toBeTruthy();
+ const summary=screen.getByText("技术详情");
+ expect(summary.closest("details")?.open).toBe(false);
+ expect(summary.closest("details")?.textContent).toContain("COMMAND_ROUTE_UNAVAILABLE");
+ expect(screen.queryByText("Launch Orchestrator")).toBeNull();
+ expect(screen.queryByText("No exact mission selected")).toBeNull();
+});
+it("localizes real signed-in status and leaves the sign-out callback intact",()=>{
+ const signOut=vi.fn(async()=>{});
+ window.MastermindMissionHost={auth:{getState:()=>({status:"signed_in",reason:null,acquisition:false,content:true}),subscribe:()=>()=>{},signIn:async()=>{},signOut}};
+ render(<App locale="zh-CN"/>);
+ expect(screen.getByText("已登录")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button",{name:"退出登录"}));
+ expect(signOut).toHaveBeenCalledTimes(1);
+});
+it("localizes native build labels while keeping the exact receipt values in closed details",async()=>{
+ Object.defineProperty(window,"__TAURI_INTERNALS__",{configurable:true,value:{}});
+ render(<App locale="zh-CN"/>);
+ const summary=await screen.findByText("构建详情");
+ const details=summary.closest("details")!;
+ expect(details.open).toBe(false);
+ for(const label of ["版本","来源修订","构建标识","原生客户端引用","传输"]) expect(details.textContent).toContain(label);
+ for(const value of Object.values(readiness)) expect(details.textContent).toContain(value);
+});
+it("changes language in the real ready composer without remounting or sending its unsent draft",async()=>{
+ const store:PendingPointerStore={read:()=>null,reserve:()=>({reserved:true}),clearIfEqual:()=>true};
+ const binding=createFixtureCommandBinding(store);
+ const submit=vi.spyOn(binding.port,"submit");
+ window.MastermindMissionHost={commandBinding:binding,auth:{getState:()=>({status:"signed_in",reason:null,acquisition:false,content:false}),subscribe:()=>()=>{},signIn:async()=>{},signOut:async()=>{}}};
+ const view=render(<App locale="en"/>);
+ const goal=screen.getByLabelText("Goal") as HTMLTextAreaElement;
+ fireEvent.change(goal,{target:{value:"Keep this exact unsent goal"}});
+ await waitFor(()=>expect(goal.value).toBe("Keep this exact unsent goal"));
+ view.rerender(<App locale="zh-CN"/>);
+ expect(screen.getByRole("heading",{name:"开始工作"})).toBeTruthy();
+ expect(screen.getByLabelText("目标")).toBe(goal);
+ expect(goal.value).toBe("Keep this exact unsent goal");
+ expect(submit).not.toHaveBeenCalled();
+});

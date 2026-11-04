@@ -57,6 +57,7 @@ const SOURCES_ZH: Record<string, string> = {
 
 export interface KnowledgeSourcesProps {
   selection: ResultReferencesSelection;
+  requestedResult?: ResultSelection;
   authGeneration: string | number;
   hostGeneration: string | number;
   locale: "en" | "zh-CN";
@@ -157,7 +158,7 @@ export function KnowledgeSources(props: KnowledgeSourcesProps) {
   }, []);
   const t = (value: string) => props.locale === "zh-CN" ? SOURCES_ZH[value] ?? value : value;
   return <section className="knowledge-sources" aria-label={t("Retained result records")}>
-    <RetainedResults selection={props.selection} authGeneration={props.authGeneration}
+    <RetainedResults selection={props.selection} requestedResult={props.requestedResult} authGeneration={props.authGeneration}
       hostGeneration={props.hostGeneration} locale={props.locale} missionState={props.missionState}
       readReferences={props.readResultReferences} readResult={guardedRead}
       renderResult={(selection, decoded) => <KnowledgeResult key={sourceKey(selection)}

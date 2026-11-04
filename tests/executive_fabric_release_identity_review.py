@@ -500,7 +500,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Journal source-only read composition: exact unchanged action-handler AST and
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '89ae236897aa2a8150fdae59f77a9fc073f76a201726c0d474cce63c6568cdaf', 'sites': ((835, 71, 74, 'int', '400'), (846, 71, 74, 'int', '403'), (854, 71, 74, 'int', '400'), (860, 79, 82, 'int', '400'), (869, 71, 74, 'int', '400'), (879, 71, 74, 'int', '403'), (884, 76, 79, 'int', '503'), (890, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5f6e043f3f8f525670f51c7f27a9e6ea7f17e7508489e13f661ea69007e840ff', 'sites': ((857, 71, 74, 'int', '400'), (868, 71, 74, 'int', '403'), (876, 71, 74, 'int', '400'), (882, 79, 82, 'int', '400'), (891, 71, 74, 'int', '400'), (901, 71, 74, 'int', '403'), (906, 76, 79, 'int', '503'), (912, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -531,3 +531,7 @@ REVIEWED_FILES['integrations/session_bridge/mmtask_restore/preimage/mmtask'] = {
     'sha256': '9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336',
     'sites': ((556, 93, 96, 'int', '400'),),
 }
+
+# Exact unchanged JSON traversal node budget, never an OS identity or grant.
+# Any changed source byte/site returns this numeric token to the ordinary D8 guard.
+REVIEWED_FILES['app/mastermind_os/src/admission/project-admission-command-port.ts'] = {'sha256': 'bc14696fce184ce0d186431f044a79d93c61ca07b8c4eaf718e4ed19b3af2571', 'sites': ((37, 87, 90, 'int', '400'),)}

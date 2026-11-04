@@ -27,7 +27,7 @@ SOURCE
 AUTHORITY
 5. Chairman directs. Current assigned receiver owns recovery even if a handoff says "original writer"; system names are not live approvers. Archived chats/PR authors aren't live owners. Current session assumes leadership, records takeover and acts; protect live writers/EFFECT_UNKNOWN. Independent non-author review only when required; no self-approve/merge. Handoffs name an executable successor action.
 6. Routine project/admin work, workspaces, edits/tests/repair, qualified release need no repeat ACK; grants/writers/effects/admission bind. docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md.
-6A. Named reviewer login is preferred unless an exact-seat rule binds it. Authorized MastermindX login independent of PR authors/committers/coauthors may formally review; verify login, exact head/CI and prior reviews. No impersonation, self-review, duplicate or denial evasion. Native read-only child may review here; child != GitHub APPROVED. No denied/EFFECT_UNKNOWN review reroute. See docs/SESSION_LOCAL_REVIEW_POLICY.md.
+6A. Named reviewer login is preferred unless exact-seat rules bind. Authorized reviewer independent of PR authors/committers/coauthors may formally review; verify login, exact head/CI/prior reviews. No impersonation, self-review, duplicate or denial evasion. Native read-only child may review here; child != GitHub APPROVED. No denied/EFFECT_UNKNOWN review reroute. See docs/SESSION_LOCAL_REVIEW_POLICY.md.
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
 9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
@@ -47,7 +47,7 @@ WORK/BLOCKERS
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work unless material source/authority/dependency/behavior/evidence changes. Two status/support cycles without capability delta = NO_DELTA_LOOP; change tactic/lane and act.
 20. Block the affected lane, not mission. WAITING_EXTERNAL/review/CI/messages are lane-local. Name actual missing evidence and next action, not a department; advance independent work.
-21. Eligible bounded labor: paid Fabric; native Sol for reasoning/coordinators (WEB_CEO_DELEGATION §4). Fabric block: do permitted work or name exact blocker, never native Sol labor. Preserve root/grants. Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin.
+21. Eligible bounded labor: paid Fabric; native Sol for reasoning/coordinators (WEB_CEO_DELEGATION §4). Fabric block: do permitted work or name exact blocker, never native Sol labor. Preserve root/grants. Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin. Only if required.
 22. Request only exact human controls: credentials/auth/physical ceremony, unavailable mode selector or fresh chat. Do not hand back routine work; request critical-path switch promptly.
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 
