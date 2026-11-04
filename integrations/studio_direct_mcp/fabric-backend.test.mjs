@@ -590,7 +590,7 @@ test('real subprocess captures the exact native C2 policy refusal from STDERR, w
   ].join('\n'));
   const e=await makeRealSubprocessEngine(dir,fixture);
   const req={...manualPinned,pool:'glm',model:'auto'};
-  const out=unwrap(await facade(e).call('fabric_request',req));
+  const out=unwrap(await api.createFabricFacade(e,{adapterPath:fixture,python:'python3',workerCwd:'~'}).call('fabric_request',req));
   assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
   assert.equal(out.native_reason,'bounded_complexity_requires_escalation');
   assert.equal(out.required_field,'escalation_reason');
