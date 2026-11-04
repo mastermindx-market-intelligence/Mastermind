@@ -28,9 +28,7 @@ function makeAvailable(
   options?: {
     workRef?: string;
     title?: string;
-    history?:
-      | { state: 'AVAILABLE'; kind: 'GIT_RECORD_REVISIONS'; revisions: Revision[] }
-      | { state: 'UNAVAILABLE'; reason: string };
+    history?: Extract<ProjectPlanRead, { availability: 'AVAILABLE' }>['plan']['version_history'];
   },
 ): ProjectPlanRead {
   const workRef = options?.workRef ?? 'WS:ALPHA';
@@ -74,7 +72,7 @@ function makeAvailable(
 
 function makeUnavailable(
   workRef = 'WS:ALPHA',
-  reasonCodes: string[] = ['RECORD_NOT_FOUND'],
+  reasonCodes: Extract<ProjectPlanRead, { availability: 'UNAVAILABLE' }>['reason_codes'] = ['RECORD_NOT_FOUND'],
 ): ProjectPlanRead {
   return {
     schema: 'mastermind.workspace_project_plan.v1',
@@ -241,13 +239,13 @@ describe('ProgrammeDirection', () => {
     await act(async () => {
       deferreds[0].resolve(
         makeAvailable({
-          history: { state: 'UNAVAILABLE', reason: 'HISTORY_WITHHELD_BY_SOURCE' },
+          history: { state: 'UNAVAILABLE', reason: 'NOT_SUPPLIED_BY_OWNER' },
         }),
       );
     });
 
     assertText(/Source record revisions are not available/);
-    assertText(/HISTORY_WITHHELD_BY_SOURCE/);
+    assertText(/NOT_SUPPLIED_BY_OWNER/);
     expect(screen.queryByText(new RegExp(makeRevision(0).commit))).toBeNull();
     expect(screen.queryByText(/^0 revisions$/)).toBeNull();
     expect(screen.queryByText(/Show all/)).toBeNull();
