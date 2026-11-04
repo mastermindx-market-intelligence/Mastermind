@@ -2547,9 +2547,10 @@ def _service_from_config(
                 if service._require_runtime() is not runtime:
                     raise ServiceError("project session source Runtime differs")
                 return ExistingManagedProjectSessionSource(service, creation_source_reader)
+            from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
-                project_admission_policy=policy, project_admission_load_bindings=workspace_acquisition_loader,
+                project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
                 runtime_identity={"root": None, "db_present": True, "identity": None},

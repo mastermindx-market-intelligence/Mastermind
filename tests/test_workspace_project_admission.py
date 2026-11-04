@@ -10,6 +10,7 @@ from control_plane.workspace_project_admission import project_admission_request,
 from control_plane.workspace_read_service import WorkspaceReadService
 from integrations.mastermind_workspace_app.contract import workspace_authorizers
 from integrations.mastermind_workspace_app.project_authoring_grant import legacy_workspace_document
+from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions
 from tests.test_workspace_project_suspend_grant import fixture as grant_fixture
 from tests.test_workspace_member_bindings import principal
 from tests.test_workspace_read_service import cache_fixture
@@ -37,7 +38,8 @@ def setup(tmp_path,*,runtime_work=WORK):
     owners[0].state_cache.pop("source_validity_bounds",None)
     with owners[0].state_lock: ccr._publish_source_validity(owners[0],doc,tuple(clock),tuple(clock))
     read_authorize=workspace_authorizers(policy=policy,load_bindings=lambda:legacy_workspace_document(bindings,policy))[1]
-    service=WorkspaceReadService(cache=cache,runtime=runtime,authorize=read_authorize,armed={},runtime_identity={"db_present":True})
+    service=WorkspaceReadService(cache=cache,runtime=runtime,authorize=read_authorize,armed={},runtime_identity={"db_present":True},
+        project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=lambda:bindings))
     frame={"schema":wire.FRAME_SCHEMA,"operation":wire.OPERATION,
         "selection":{"work_ref":WORK,"root_job_id":root.job_id,"command_id":"project-pause-original"},
         "principal":principal(bindings),"admission_expires_at":1000}
@@ -47,9 +49,9 @@ def setup(tmp_path,*,runtime_work=WORK):
             from common import workspace_project_admission_state_contract as state_wire
             request.update(schema=state_wire.FRAME_SCHEMA,operation=state_wire.OPERATION)
             request["selection"]={key:request["selection"][key] for key in ("work_ref","root_job_id")}
-            return read_project_admission_state(service,request,policy=policy,load_bindings=lambda:bindings,host_ready=host_ready,now=lambda:500)
+            return read_project_admission_state(service,request,permissions=service._project_admission_permissions,host_ready=host_ready,now=lambda:500)
         if status: request.update(schema=wire.STATUS_FRAME_SCHEMA,operation=wire.STATUS_OPERATION)
-        return project_admission_request(service,request,policy=policy,load_bindings=lambda:bindings,host_ready=host_ready,now=lambda:500,status=status)
+        return project_admission_request(service,request,permissions=service._project_admission_permissions,host_ready=host_ready,now=lambda:500,status=status)
     return runtime,service,bindings,frame,call
 
 def count(runtime):

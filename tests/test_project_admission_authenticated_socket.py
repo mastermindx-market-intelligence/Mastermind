@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import time
+from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions
 from pathlib import Path
 import httpx
 import pytest
@@ -57,7 +58,7 @@ def test_fixed_admission_actual_authenticated_socket_join(tmp_path,monkeypatch,r
         with owners[0].state_lock:ccr._publish_source_validity(owners[0],doc,tuple(clock),tuple(clock))
         def provider(runtime):
             return WorkspaceReadService(cache=cache,runtime=runtime,authorize=frame_auth,armed={},runtime_identity={},
-                project_plan_reader=reader,project_admission_policy=auth.policy,project_admission_load_bindings=lambda:bindings)
+                project_plan_reader=reader,project_admission_permissions=project_admission_permissions(policy=auth.policy,load_bindings=lambda:bindings))
         svc=control(tmp_path/'service',short_socket_root,provider);await svc.start()
         runtime=svc._require_runtime();selected={'work_ref':WORK}
         if not rootless:

@@ -11,7 +11,9 @@ import time
 
 from common import executive_workspace_contract as workspace
 from common import workspace_project_admission_contract as wire
-from integrations.mastermind_workspace_app.project_authoring_grant import PROJECT_SUSPEND_ACTION, PROJECT_RESUME_ACTION, workspace_project_authorizers
+from common.workspace_project_admission_contract import OPERATION as PROJECT_SUSPEND_ACTION
+from common.workspace_project_resumption_contract import OPERATION as PROJECT_RESUME_ACTION
+from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
 
 
 class _AdmissionRefused(Exception):
@@ -19,7 +21,7 @@ class _AdmissionRefused(Exception):
         self.reason = reason
 
 
-def _project_context(service, checked, *, policy, load_bindings, host_ready, now, action=PROJECT_SUSPEND_ACTION):
+def _project_context(service, checked, *, permissions, host_ready, now, action=PROJECT_SUSPEND_ACTION):
     from control_plane.executive_runtime import Runtime, JobRegistry
     from control_plane.workspace_read_service import WorkspaceReadService, _retained_root_join, _qualified_retained_root, _plan_validity_identity
     from control_plane.workspace_autonomy_policy_adapter import _same_source
@@ -32,7 +34,8 @@ def _project_context(service, checked, *, policy, load_bindings, host_ready, now
         raise _AdmissionRefused("OWNER_NOT_READY")
     jobs, store = runtime.jobs, runtime.store
     if (type(jobs) is not JobRegistry or jobs.store is not store
-            or not all(callable(value) for value in (host_ready, now, load_bindings))):
+            or not all(callable(value) for value in (host_ready, now))
+            or type(permissions) is not ProjectAdmissionPermissions):
         raise _AdmissionRefused("OWNER_NOT_READY")
     # A current READ shares source qualification across its two independent
     # grants. Each action keeps its own authorizer and permission stamp.
@@ -43,13 +46,13 @@ def _project_context(service, checked, *, policy, load_bindings, host_ready, now
     else:
         raise _AdmissionRefused("ACCESS_DENIED")
     try:
-        action_authorizers = {name: workspace_project_authorizers(policy=policy, load_bindings=load_bindings,
-            action=name, work_ref=selected["work_ref"])[1] for name in actions}
+        action_authorizers = {name: permissions.authorizer(action=name, work_ref=selected["work_ref"]) for name in actions}
     except Exception:
         raise _AdmissionRefused("ACCESS_DENIED") from None
 
     def permission():
         try:
+            permissions.check()
             if service.authorize is not read_authorize or read_authorize(principal) is not True:
                 raise _AdmissionRefused("ACCESS_DENIED")
             first = workspace.permission_stamp(read_authorize, principal)
@@ -62,6 +65,7 @@ def _project_context(service, checked, *, policy, load_bindings, host_ready, now
                 stamps.append((name, stamp))
             if first is None or not any(stamp is not None for _, stamp in stamps):
                 raise _AdmissionRefused("ACCESS_DENIED")
+            permissions.check()
             return first, tuple(stamps)
         except _AdmissionRefused:
             raise
@@ -88,7 +92,7 @@ def _project_context(service, checked, *, policy, load_bindings, host_ready, now
     def identity_guard():
         if (service.cache is not cache or service.runtime is not runtime or runtime.jobs is not jobs
                 or runtime.store is not store or jobs.store is not store or service.runtime_identity is not identity
-                or workspace.digest(identity) != expected_identity):
+                or workspace.digest(identity) != expected_identity or service._project_admission_permissions is not permissions):
             raise _AdmissionRefused("SOURCE_CHANGED")
 
     def guard(*, recheck_project=True):
@@ -145,7 +149,7 @@ def _project_context(service, checked, *, policy, load_bindings, host_ready, now
     return jobs, actor, target, guard, granted_actions
 
 
-def project_admission_request(service, frame, *, policy, load_bindings,
+def project_admission_request(service, frame, *, permissions,
                               host_ready, now=time.time, status=False, resume=False):
     """Action or exact original-command status; no automatic retry or replacement."""
     from common import workspace_project_resumption_contract as resume_wire
@@ -170,8 +174,8 @@ def project_admission_request(service, frame, *, policy, load_bindings,
         return {"ok": True, "result": action_wire.validate_action_result(body, selected)}
 
     try:
-        jobs, actor, _target, guard, _grants = _project_context(service, checked, policy=policy,
-            load_bindings=load_bindings, host_ready=host_ready, now=now,
+        jobs, actor, _target, guard, _grants = _project_context(service, checked, permissions=permissions,
+            host_ready=host_ready, now=now,
             action=PROJECT_RESUME_ACTION if resume else PROJECT_SUSPEND_ACTION)
         if status:
             reader = jobs.read_workstream_admission_resume_command if resume else jobs.read_workstream_admission_pause_command
@@ -198,7 +202,7 @@ def project_admission_request(service, frame, *, policy, load_bindings,
         return result("SOURCE_UNAVAILABLE")
 
 
-def read_project_admission_state(service, frame, *, policy, load_bindings, host_ready, now=time.time):
+def read_project_admission_state(service, frame, *, permissions, host_ready, now=time.time):
     """Qualified current gate/capability read; it never reconciles an action."""
     from common import workspace_project_admission_state_contract as state_wire
     try:
@@ -221,8 +225,8 @@ def read_project_admission_state(service, frame, *, policy, load_bindings, host_
         return {"ok": True, "result": body}
 
     try:
-        jobs, _actor, target, guard, _grants = _project_context(service, checked, policy=policy,
-            load_bindings=load_bindings, host_ready=host_ready, now=now)
+        jobs, _actor, target, guard, _grants = _project_context(service, checked, permissions=permissions,
+            host_ready=host_ready, now=now)
         first = jobs.read_workstream_admission_suspension(selected["work_ref"])
         guard()
         second = jobs.read_workstream_admission_suspension(selected["work_ref"])
@@ -236,7 +240,7 @@ def read_project_admission_state(service, frame, *, policy, load_bindings, host_
         return result("SOURCE_UNAVAILABLE")
 
 
-def read_project_admission_control(service, frame, *, policy, load_bindings, host_ready, now=time.time):
+def read_project_admission_control(service, frame, *, permissions, host_ready, now=time.time):
     """Independently qualified Pause/Resume grants and actual current gate.
 
     One grant cannot promote its sibling. Rootless requests require the actual
@@ -261,8 +265,8 @@ def read_project_admission_control(service, frame, *, policy, load_bindings, hos
             "reason_codes": [] if reason is None else [reason]}
         return {"ok": True, "result": control.validate_body(body, selected)}
     try:
-        jobs, actor, _target, guard, grants = _project_context(service, checked, policy=policy,
-            load_bindings=load_bindings, host_ready=host_ready, now=now,
+        jobs, actor, _target, guard, grants = _project_context(service, checked, permissions=permissions,
+            host_ready=host_ready, now=now,
             action=(PROJECT_SUSPEND_ACTION, PROJECT_RESUME_ACTION))
         guard(recheck_project=False)
         first = jobs.read_workstream_admission_transition(selected["work_ref"])

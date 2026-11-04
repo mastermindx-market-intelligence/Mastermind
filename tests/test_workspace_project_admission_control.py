@@ -39,7 +39,7 @@ def fixture(tmp_path, monkeypatch, *, source_git=None, rootless=False, resume_gr
         service._project_plan_reader = reader
     def read_control():
         policy = __import__('tests.test_workspace_project_suspend_grant', fromlist=['fixture']).fixture()[0]
-        return read_project_admission_control(service,frame,policy=policy,load_bindings=lambda:bindings,host_ready=lambda:True,now=lambda:500)
+        return read_project_admission_control(service,frame,permissions=service._project_admission_permissions,host_ready=lambda:True,now=lambda:500)
     return runtime,service,bindings,action,call,frame,read_control
 
 
@@ -121,7 +121,7 @@ def resume_call(service,bindings,action,pause_token,*,status=False):
                  operation=resume.STATUS_OPERATION if status else resume.OPERATION)
     frame["selection"]["command_id"]="project-resume-original"
     if not status:frame["pause_token"]=pause_token
-    return project_admission_request(service,frame,policy=grant_fixture()[0],load_bindings=lambda:bindings,
+    return project_admission_request(service,frame,permissions=service._project_admission_permissions,
         host_ready=lambda:True,now=lambda:500,status=status,resume=True)
 
 @pytest.mark.parametrize("rootless",[False,True])

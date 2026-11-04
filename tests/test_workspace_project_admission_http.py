@@ -4,6 +4,7 @@ JWT verifier is unchanged and covered by its incumbent suite; this file does
 not label injection as authenticated live or signed-socket installation proof.
 """
 import copy
+from integrations.mastermind_workspace_app.project_admission_permissions import project_admission_permissions
 import json
 from starlette.applications import Starlette
 from starlette.routing import Route
@@ -48,12 +49,13 @@ def endpoint(tmp_path,monkeypatch,rsa_key,*,real_jwt=False):
         bindings["profiles"]["member-0"]["binding"].update(principal_frame(who))
         service.authorize=workspace_authorizers(policy=policy,load_bindings=lambda:legacy_workspace_document(bindings,policy))[1]
         instant=NOW;headers={"Authorization":"Bearer "+encoded}
+    service._project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=lambda:bindings)
     async def authenticate(*args,**kwargs):return who
     if not real_jwt:monkeypatch.setattr(owner,"_authenticate",authenticate)
     class Client:
         async def request(self,frame):
             seen.append(copy.deepcopy(frame))
-            kwargs=dict(policy=policy,load_bindings=lambda:bindings,host_ready=lambda:True,now=lambda:instant)
+            kwargs=dict(permissions=service._project_admission_permissions,host_ready=lambda:True,now=lambda:instant)
             if frame["schema"]==control.FRAME_SCHEMA:value=read_project_admission_control(service,frame,**kwargs)
             else:value=project_admission_request(service,frame,**kwargs,status=frame["operation"].startswith("read_"),resume="resumption" in frame["schema"])
             if after[0]:after[0](value)

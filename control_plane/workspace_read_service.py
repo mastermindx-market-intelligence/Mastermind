@@ -498,13 +498,13 @@ class WorkspaceReadService:
                  product_acceptance_observe=None, activity_membership=None,
                  project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None,
                  control_room_presenter=None,
-                 control_room_actions=None, project_admission_policy=None, project_admission_load_bindings=None):
-        if (project_admission_policy is None) != (project_admission_load_bindings is None):
-            raise ValueError("complete project admission permission source required")
-        if project_admission_load_bindings is not None and not callable(project_admission_load_bindings):
-            raise ValueError("current sealed project membership loader required")
-        self._project_admission_policy = project_admission_policy
-        self._project_admission_load_bindings = project_admission_load_bindings
+                 control_room_actions=None, project_admission_permissions=None):
+        from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
+        if project_admission_permissions is not None:
+            if type(project_admission_permissions) is not ProjectAdmissionPermissions:
+                raise ValueError("nominal installed project permission source required")
+            project_admission_permissions.check()
+        self._project_admission_permissions = project_admission_permissions
         self.cache = cache
         self.runtime = runtime
         self.authorize = authorize
@@ -1637,16 +1637,16 @@ class WorkspaceReadService:
                 checked = admission_wire.validate_frame(frame)
             except (TypeError, ValueError):
                 return error("invalid_input", 400)
-            if self._project_admission_policy is None or self._project_admission_load_bindings is None:
+            if self._project_admission_permissions is None:
                 return admission_wire.withheld(checked, reason="OWNER_NOT_READY")
             from control_plane.workspace_project_admission import project_admission_request, read_project_admission_control
             wire, mode = admission_wire.classify(checked)
-            policy, loader = self._project_admission_policy, self._project_admission_load_bindings
+            permissions = self._project_admission_permissions
             def ready():
-                return (self._project_admission_policy is policy and self._project_admission_load_bindings is loader
+                return (self._project_admission_permissions is permissions
                     and callable(action_host_ready) and action_host_ready() is True)
             def owned():
-                options = dict(policy=policy, load_bindings=loader, host_ready=ready)
+                options = dict(permissions=permissions, host_ready=ready)
                 if mode == "current":
                     return read_project_admission_control(self, checked, **options)
                 return project_admission_request(self, checked, status=mode == "status",
@@ -1900,7 +1900,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_observe=None, activity_membership=None,
                                project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
-                               project_admission_policy=None, project_admission_load_bindings=None):
+                               project_admission_permissions=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1966,6 +1966,5 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
                                     activity_membership=activity_membership,
-                                    project_admission_policy=project_admission_policy,
-                                    project_admission_load_bindings=project_admission_load_bindings)
+                                    project_admission_permissions=project_admission_permissions)
     return provide
