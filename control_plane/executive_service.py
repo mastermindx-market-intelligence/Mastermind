@@ -5533,6 +5533,7 @@ class ExecutiveControlService:
                 return
             from common import workspace_project_plan_contract as project_plan_wire
             from common import workspace_project_journal_contract as project_journal_wire
+            from common import workspace_project_knowledge_read_contract as knowledge_wire
             from common import workspace_project_session_contract as project_session_wire
             from common import workspace_project_direction_contract as project_direction_wire
             from common import workspace_project_archive_contract as project_archive_wire
@@ -5541,7 +5542,7 @@ class ExecutiveControlService:
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
@@ -5581,6 +5582,14 @@ class ExecutiveControlService:
                         project_session_wire.validate_frame(parsed)
                     except (TypeError, ValueError):
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == knowledge_wire.FRAME_SCHEMA:
+                    ceiling = knowledge_wire.MAX_RESPONSE_BYTES
+                    try:
+                        knowledge_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == project_journal_wire.FRAME_SCHEMA:
                     ceiling = project_journal_wire.MAX_RESPONSE_BYTES

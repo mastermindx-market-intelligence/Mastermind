@@ -2438,6 +2438,65 @@ class InstalledBootPacketCollector:
         return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
                                     project_journal_request=work_ref)
 
+    def _project_knowledge_reader(self, *, macro_root, reader_type, kind):
+        from control_plane import installed_project_knowledge_readers as readers
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        root = Path(macro_root)
+        allowed = {
+            "project_knowledge_catalogue": readers.AgentOsProjectKnowledgeCatalogueReader,
+            "project_knowledge_memory": readers.AgentOsProjectKnowledgeMemoryReader,
+            "project_knowledge_source": readers.AgentOsProjectKnowledgeSourceReader,
+        }
+        if (allowed.get(kind) is not reader_type or not root.is_absolute()
+                or type(self) is not InstalledBootPacketCollector
+                or self._macro_root != root.resolve() or self._code_root != readers._SOURCE_ROOT.resolve()
+                or self._expected_source_sha is None or self._allow_synthetic_fixture):
+            raise ValueError("installed project knowledge source is unavailable")
+        reader = reader_type(macro_root=root)
+        reader._installed_context_owner = self
+        reader._installed_context_binding = reader._context_binding(self)
+        reader._installed_reader_binding = _issue_installed_project_read(reader, owner=self,
+            kind=kind, qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector)
+        return reader
+
+    def project_knowledge_catalogue_reader(self, *, macro_root):
+        from control_plane.installed_project_knowledge_readers import AgentOsProjectKnowledgeCatalogueReader
+        return self._project_knowledge_reader(macro_root=macro_root,
+            reader_type=AgentOsProjectKnowledgeCatalogueReader, kind="project_knowledge_catalogue")
+
+    def project_knowledge_memory_reader(self, *, macro_root):
+        from control_plane.installed_project_knowledge_readers import AgentOsProjectKnowledgeMemoryReader
+        return self._project_knowledge_reader(macro_root=macro_root,
+            reader_type=AgentOsProjectKnowledgeMemoryReader, kind="project_knowledge_memory")
+
+    def project_knowledge_source_reader(self, *, macro_root):
+        from control_plane.installed_project_knowledge_readers import AgentOsProjectKnowledgeSourceReader
+        return self._project_knowledge_reader(macro_root=macro_root,
+            reader_type=AgentOsProjectKnowledgeSourceReader, kind="project_knowledge_source")
+
+    def _read_project_knowledge(self, *, operation, selected, timeout):
+        import math
+        from common.workspace_project_knowledge_read_contract import selection
+        selected = selection(selected, operation=operation)
+        if (type(timeout) not in (int, float) or not math.isfinite(timeout)
+                or not 0 < timeout <= 15 or self._expected_source_sha is None):
+            raise ValueError("installed project knowledge source is unavailable")
+        return self._collect_packet(repo=self._source_root, now=None, timeout=float(timeout),
+            project_knowledge_request=(operation, selected))
+
+    def read_project_knowledge_catalogue(self, *, work_ref, timeout=15.0):
+        return self._read_project_knowledge(operation="project_knowledge_catalogue",
+            selected={"work_ref": work_ref}, timeout=timeout)
+
+    def read_project_knowledge_memory(self, *, work_ref, timeout=15.0):
+        return self._read_project_knowledge(operation="project_knowledge_memory",
+            selected={"work_ref": work_ref}, timeout=timeout)
+
+    def read_project_knowledge_source(self, *, work_ref, source_ref, expected_revision, timeout=15.0):
+        return self._read_project_knowledge(operation="project_knowledge_source",
+            selected={"work_ref": work_ref, "source_ref": source_ref,
+                      "expected_revision": expected_revision}, timeout=timeout)
+
     def project_creation_source_reader(self, *, macro_root: Path):
         from control_plane.agentos_project_creation_source import AgentOsProjectCreationReader, _SOURCE_ROOT
         from control_plane.installed_project_read_binding import _issue_installed_project_read
@@ -2474,8 +2533,9 @@ class InstalledBootPacketCollector:
                         project_journal_request: str | None = None,
                         project_creation_request: tuple | None = None,
                         project_direction_request: str | None = None,
-                        project_archive_request: tuple | None = None) -> Any:
-        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request)) > 1:
+                        project_archive_request: tuple | None = None,
+                        project_knowledge_request: tuple | None = None) -> Any:
+        if sum(x is not None for x in (acceptance_request, project_plan_request, project_journal_request, project_creation_request, project_direction_request, project_archive_request, project_knowledge_request)) > 1:
             raise ValueError("ambiguous installed source read")
         deadline = time.monotonic() + timeout
 
@@ -2592,12 +2652,26 @@ class InstalledBootPacketCollector:
                     "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
                     "--work-refs-json", json.dumps(project_archive_request[0], separators=(",", ":")),
                     "--timeout", f"{inner_timeout:g}"]
+            if project_knowledge_request is not None:
+                operation, selected = project_knowledge_request
+                from common.workspace_project_knowledge_read_contract import selection
+                selection(selected, operation=operation)
+                argv = [os.fspath(self._python), "-I", "-B",
+                    os.fspath(self._code_root / "scripts" / "agentos_project_knowledge_entry.py"),
+                    "--macro-root", os.fspath(packet_macro_root), "--expected-macro-sha", pre_macro_sha,
+                    "--operation", operation, "--work-ref", selected["work_ref"],
+                    "--timeout", f"{inner_timeout:g}"]
+                if operation == "project_knowledge_source":
+                    argv.extend(["--source-ref", selected["source_ref"],
+                                 "--expected-revision", selected["expected_revision"]])
             output_limit = (131072 if project_archive_request is not None else
                             65536 if project_direction_request is not None else
                             262144 if acceptance_request is not None or project_plan_request is not None or project_journal_request is not None
                             else ceo_boot_packet.DEFAULT_MAX_OUTPUT_BYTES)
             if project_creation_request is not None:
                 output_limit = 4096
+            if project_knowledge_request is not None:
+                output_limit = 131072
             try:
                 result = self._runner(
                     argv, cwd=self._code_root, timeout=remaining(),
@@ -2654,6 +2728,27 @@ class InstalledBootPacketCollector:
                         raise ValueError("SOURCE_UNAVAILABLE")
                 except (ValueError, TypeError, KeyError, RecursionError):
                     raise GatewayError("backend_unavailable", "installed Direction source unavailable") from None
+            elif project_knowledge_request is not None:
+                from common.workspace_project_knowledge_read_contract import validate_body
+                operation, selected = project_knowledge_request
+                try:
+                    def unique_knowledge_object(pairs):
+                        result = {}
+                        for key, item in pairs:
+                            if key in result: raise ValueError("duplicate knowledge field")
+                            result[key] = item
+                        return result
+                    packet = validate_body(json.loads(stdout, object_pairs_hook=unique_knowledge_object), operation=operation)
+                    expected_selection = {key: item for key, item in selected.items() if key != "expected_revision"}
+                    if packet["selection"] != expected_selection:
+                        raise ValueError("knowledge selection changed")
+                    if packet.get("source") is not None and packet["source"]["commit"] != pre_macro_sha:
+                        raise ValueError("knowledge source changed")
+                    if (operation == "project_knowledge_source" and packet["availability"] == "AVAILABLE"
+                            and packet["source"]["revision"] != selected["expected_revision"]):
+                        raise ValueError("knowledge revision changed")
+                except (ValueError, TypeError, KeyError, RecursionError):
+                    raise GatewayError("backend_unavailable", "installed project knowledge source unavailable") from None
             elif project_journal_request is not None:
                 from common.workspace_project_journal_contract import BODY_SCHEMA, validate_body
                 try:
@@ -2822,7 +2917,7 @@ class InstalledBootPacketCollector:
                 or post_macro_seal != pre_macro_seal
             ):
                 raise GatewayError("backend_unavailable", "installed source changed during boot-packet read")
-            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None:
+            if acceptance_request is None and project_plan_request is None and project_journal_request is None and project_creation_request is None and project_direction_request is None and project_archive_request is None and project_knowledge_request is None:
                 packet = _project_macro_identity(
                     packet, materialized_root=packet_macro_root, canonical_root=self._macro_root,
                 )

@@ -57,7 +57,9 @@ PRE_PROJECT_ADMISSION_POST_ROUTES = POST_ROUTES
 PROJECT_ADMISSION_GET_ROUTES = ("/workspace/project-admission/current", "/workspace/project-admission/operation")
 PROJECT_ADMISSION_POST_ROUTES = ("/workspace/project-admission/pause", "/workspace/project-admission/resume")
 PRE_ARCHIVE_GET_ROUTES = PRE_PROJECT_ADMISSION_GET_ROUTES + PROJECT_ADMISSION_GET_ROUTES
-GET_ROUTES = PRE_ARCHIVE_GET_ROUTES + ("/workspace/projects/archive/current",)
+PRE_PROJECT_KNOWLEDGE_GET_ROUTES = PRE_ARCHIVE_GET_ROUTES + ("/workspace/projects/archive/current",)
+PROJECT_KNOWLEDGE_GET_ROUTES = ("/workspace/project-knowledge/current", "/workspace/project-memory/current", "/workspace/project-source/current")
+GET_ROUTES = PRE_PROJECT_KNOWLEDGE_GET_ROUTES + PROJECT_KNOWLEDGE_GET_ROUTES
 POST_ROUTES = PRE_PROJECT_ADMISSION_POST_ROUTES + PROJECT_ADMISSION_POST_ROUTES
 # Preserve exactly the profiles admitted by the two predecessor contracts.
 # Both publication phases emit GET_ROUTES/POST_ROUTES; arbitrary mixtures,
@@ -77,6 +79,7 @@ TRANSITION_ROUTE_PROFILES = (
     (PRE_DIRECTION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (PRE_PROJECT_ADMISSION_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
     (PRE_ARCHIVE_GET_ROUTES, POST_ROUTES),
+    (PRE_PROJECT_KNOWLEDGE_GET_ROUTES, POST_ROUTES),
     (GET_ROUTES, POST_ROUTES),
 )
 

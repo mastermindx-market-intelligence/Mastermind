@@ -1,3 +1,4 @@
+import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import { decodeSessionContext, type ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
@@ -87,6 +88,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
 
   function call(command: "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_reply" | "executive_session_references" |
+    "executive_project_session_references" |
     "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
@@ -187,6 +189,13 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     reply: (args, signal) => OPERATION.test(args.operation_key)
       ? call("executive_session_reply", signal, { operationKey: args.operation_key })
       : Promise.reject(new Error("SESSION_OPERATION_INVALID")),
+    projectReferences: (args, signal) => {
+      const closed = projectHistoryArguments(args);
+      if (!closed) return Promise.reject(new Error("SESSION_REFERENCES_INVALID"));
+      return call("executive_project_session_references", signal, {
+        workRef: closed.work_ref, ...(closed.cursor !== undefined ? { cursor: closed.cursor } : {}),
+      });
+    },
     references: (args, signal) => {
       if (!WORK.test(args.work_ref) || !ROOT.test(args.root_job_id) ||
           (args.page_size !== undefined && (!Number.isSafeInteger(args.page_size) ||

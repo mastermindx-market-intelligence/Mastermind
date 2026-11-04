@@ -23,6 +23,10 @@ import { AcceptedDirectionPanel } from "./direction/AcceptedDirectionPanel";
 import { useProjectAdmissionWorkspace } from "./useProjectAdmissionWorkspace";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
+import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
+import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
+import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
+import { SavedConversationReader, createSavedConversationNavigation, type SavedConversationNavigation } from "./discovery/SavedConversationReader";
 import { DiscoveryWorkspace } from "./discovery/DiscoveryWorkspace";
 import { projectDiscovery } from "./discovery/projection";
 import { ProjectWorkDetail, ProjectEvidence, ProjectJournal } from "./workJourney";
@@ -3683,6 +3687,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) archiveHostGeneration = value;
   } catch { /* Missing current owner cannot qualify an archive read. */ }
   const archiveScopeKey = JSON.stringify([authRevision, archiveHostGeneration]);
+  const [knowledgeMode, setKnowledgeMode] = useState<"project" | "retained">("project");
+  const [projectSearchSelected, setProjectSearchSelected] = useState(true);
+  const [requestedProjectFile, setRequestedProjectFile] = useState<KnowledgeLibraryProps["requestedFile"]>();
+  const [savedConversationNavigation, setSavedConversationNavigation] = useState<SavedConversationNavigation | null>(null);
+  const projectHistoryOwner = sessionBinding?.port.projectHistory;
+  const hasProjectLibrary = Boolean(retainedResultHost?.readProjectKnowledgeCatalogue);
+  const hasProjectSearch = Boolean(retainedResultHost?.projectFilesSearch || projectHistoryOwner);
   const catalogueWorkRef = catalogueProject?.authRevision === authRevision &&
     catalogueProject.epoch === programIndexEpoch ? catalogueProject.workRef : null;
   const requestedProjectWorkRef = catalogueProject ? catalogueWorkRef : selection?.workRef ?? null;
@@ -3891,7 +3902,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     );
   else if (active === "Conversations")
     content = currentConversationPanel;
-  else if (active === "Search" || active === "Sources" || active === "Tools")
+  else if ((active === "Search" && (!hasProjectSearch || !projectSearchSelected)) || active === "Sources" || active === "Tools")
     content = <DiscoveryWorkspace view={discoveryView} projection={office.projection}
       mode={active} locale={locale} theme={theme}
       sourceProps={{readResultReferences: retainedResultHost?.readResultReferences,
@@ -3917,6 +3928,16 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       onOpenPreferences={hasPreferencesNavigation ? openDisplayPreferences : undefined}
       onRefreshSources={authState?.acquisition && typeof retainedResultHost?.readControlRoomState === "function"
         ? () => setControlRoomRevision(revision => revision + 1) : undefined}/>
+  else if (active === "Search")
+    content = savedConversationNavigation ? <SavedConversationReader
+      selection={savedConversationNavigation} workRef={projectWorkRef} authGeneration={authRevision}
+      hostGeneration={archiveHostGeneration} owner={projectHistoryOwner} locale={locale} theme={theme}
+      onBack={() => setSavedConversationNavigation(null)}/> : null;
+  else if (active === "Knowledge" && hasProjectLibrary && knowledgeMode === "project")
+    content = <ProjectKnowledgeLibrary host={retainedResultHost} workRef={projectWorkRef}
+      authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
+      requestedFile={requestedProjectFile}
+      onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}
       readResultReferences={retainedResultHost?.readResultReferences}
@@ -4565,6 +4586,30 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </details>
         ) : null}
         {reopenedOperationControl}
+        {active === "Search" && hasProjectSearch && !savedConversationNavigation && <div role="group" aria-label={locale === "zh-CN" ? "搜索范围" : "Search scope"}>
+          <button type="button" aria-pressed={projectSearchSelected} onClick={() => setProjectSearchSelected(true)}>{locale === "zh-CN" ? "项目来源" : "Project sources"}</button>
+          <button type="button" aria-pressed={!projectSearchSelected} onClick={() => setProjectSearchSelected(false)}>{locale === "zh-CN" ? "公司引用" : "Company references"}</button>
+        </div>}
+        {active === "Knowledge" && hasProjectLibrary && <div role="group" aria-label={locale === "zh-CN" ? "知识来源" : "Knowledge sources"}>
+          <button type="button" aria-pressed={knowledgeMode === "project"} onClick={() => { setRequestedProjectFile(undefined); setKnowledgeMode("project"); }}>{locale === "zh-CN" ? "项目资料库" : "Project library"}</button>
+          <button type="button" aria-pressed={knowledgeMode === "retained"} onClick={() => setKnowledgeMode("retained")}>{locale === "zh-CN" ? "已保留的任务来源" : "Retained task sources"}</button>
+        </div>}
+        {hasProjectSearch && <section hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)} aria-hidden={active !== "Search" || !projectSearchSelected || Boolean(savedConversationNavigation)}>
+          <ProjectSearchWorkspace workRef={projectWorkRef} authGeneration={authRevision}
+            hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
+            sessionHistory={projectHistoryOwner} projectFiles={retainedResultHost?.projectFilesSearch}
+            onOpenFile={match => {
+              if (!projectWorkRef || archiveHostGeneration === null || !projectReaders.canRead()) return;
+              setRequestedProjectFile(Object.freeze({match, workRef: projectWorkRef, authGeneration: authRevision, hostGeneration: archiveHostGeneration}));
+              setKnowledgeMode("project"); setActive("Knowledge");
+            }}
+            onOpenSaved={(match, page) => {
+              if (!projectWorkRef || archiveHostGeneration === null) return;
+              const navigation = createSavedConversationNavigation({workRef: projectWorkRef, authGeneration: authRevision,
+                hostGeneration: archiveHostGeneration, match, ...page}, projectHistoryOwner);
+              if (navigation) setSavedConversationNavigation(navigation);
+            }}/>
+        </section>}
         {content}
         {d && missionNavigation.includes(active) && !conversationActive && (
           <section className="card">

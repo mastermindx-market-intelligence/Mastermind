@@ -84,6 +84,9 @@ fn main() {
             auth::read_mission_v3,
             auth::read_project_plan,
             auth::read_project_journal,
+            auth::read_project_knowledge_catalogue,
+            auth::read_project_knowledge_memory,
+            auth::read_project_knowledge_source,
             auth::read_project_session,
             auth::read_project_direction,
             auth::read_project_admission_control,
@@ -110,7 +113,8 @@ fn main() {
             auth::executive_direct_correction,
             auth::executive_session_context,
             auth::executive_session_reply,
-            auth::executive_session_references
+            auth::executive_session_references,
+            auth::executive_project_session_references
         ])
         .run(tauri::generate_context!())
         .expect("tauri runtime error");

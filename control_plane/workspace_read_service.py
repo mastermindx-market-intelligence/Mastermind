@@ -497,6 +497,7 @@ class WorkspaceReadService:
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
                  product_acceptance_observe=None, activity_membership=None,
                  project_plan_reader=None, project_journal_reader=None, project_session_source=None, project_direction_reader=None, project_archive_reader=None,
+                 project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
                  control_room_presenter=None,
                  control_room_actions=None, project_admission_permissions=None):
         from control_plane.workspace_project_permission_binding import ProjectAdmissionPermissions
@@ -588,6 +589,18 @@ class WorkspaceReadService:
         if project_direction_reader is not None:
             from control_plane.workspace_project_direction_read import ProjectDirectionReadAdapter
             self._direction_read_adapter = ProjectDirectionReadAdapter(workspace=self, reader=project_direction_reader)
+        from control_plane.installed_project_knowledge_readers import (
+            AgentOsProjectKnowledgeCatalogueReader, AgentOsProjectKnowledgeMemoryReader,
+            AgentOsProjectKnowledgeSourceReader)
+        for reader, reader_type in (
+                (project_knowledge_catalogue_reader, AgentOsProjectKnowledgeCatalogueReader),
+                (project_knowledge_memory_reader, AgentOsProjectKnowledgeMemoryReader),
+                (project_knowledge_source_reader, AgentOsProjectKnowledgeSourceReader)):
+            if reader is not None and type(reader) is not reader_type:
+                raise ValueError("installed project knowledge reader required")
+        self._project_knowledge_catalogue_reader = project_knowledge_catalogue_reader
+        self._project_knowledge_memory_reader = project_knowledge_memory_reader
+        self._project_knowledge_source_reader = project_knowledge_source_reader
         if project_session_source is not None:
             from control_plane.workspace_managed_project_session_source import ExistingManagedProjectSessionSource
             if type(project_session_source) is not ExistingManagedProjectSessionSource:
@@ -748,6 +761,67 @@ class WorkspaceReadService:
                 return error("access_denied", 403)
         except Exception:
             return error("access_denied", 403)
+        return result
+
+    def _read_project_knowledge(self, operation, selected):
+        from common import workspace_project_knowledge_read_contract as wire
+        selected = wire.selection(selected, operation=operation)
+        before = self.cache.snapshot()
+        work_ref = selected["work_ref"]
+        def member(snapshot):
+            if not _qualified(snapshot): raise ValueError("source_unavailable")
+            rows = [row for row in snapshot.document["work"] if row.get("work_ref") == work_ref]
+            if len(rows) != 1: raise LookupError("selection_not_found")
+        member(before)
+        readers = {
+            "project_knowledge_catalogue": self._project_knowledge_catalogue_reader,
+            "project_knowledge_memory": self._project_knowledge_memory_reader,
+            "project_knowledge_source": self._project_knowledge_source_reader,
+        }
+        reader = readers[operation]
+        if reader is None: return wire.unavailable(selected, operation=operation)
+        body = wire.validate_body(reader.read(**selected), operation=operation)
+        expected = {key: item for key, item in selected.items() if key != "expected_revision"}
+        if body["selection"] != expected:
+            return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+        after = self.cache.snapshot()
+        member(after)
+        if (before.owner is not after.owner or before.instance != after.instance
+                or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or _plan_validity_identity(before.validity) != _plan_validity_identity(after.validity)):
+            return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+        if body.get("source") is not None:
+            source = body["source"]
+            if (before.document.get("sources", {}).get("macro_sha") != source["commit"]
+                    or (operation == "project_knowledge_source"
+                        and source["revision"] != selected["expected_revision"])):
+                return wire.unavailable(selected, operation=operation, reason="SOURCE_CHANGED")
+        bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
+        return body
+
+    async def _handle_project_knowledge_frame(self, frame):
+        from common import workspace_project_knowledge_read_contract as wire
+        try:
+            frame = wire.validate_frame(frame)
+        except (TypeError, ValueError): return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True: return error("access_denied", 403)
+            stamp = permission_stamp(self.authorize, frame["principal"])
+        except Exception: return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_project_knowledge,
+            frame["operation"], frame["selection"]))
+        try:
+            body = await await_owned(task)
+            result = {"ok": True, "result": body}
+        except LookupError: result = error("selection_not_found", 404)
+        except Exception:
+            result = {"ok": True, "result": wire.unavailable(frame["selection"], operation=frame["operation"])}
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != stamp):
+                return error("access_denied", 403)
+        except Exception: return error("access_denied", 403)
         return result
 
     async def _handle_original_acceptance_frame(self, frame):
@@ -1672,6 +1746,9 @@ class WorkspaceReadService:
         from common.workspace_project_session_contract import FRAME_SCHEMA as PROJECT_SESSION_FRAME_SCHEMA
         if isinstance(frame, dict) and frame.get("schema") == PROJECT_SESSION_FRAME_SCHEMA:
             return await self._handle_project_session_frame(frame)
+        from common.workspace_project_knowledge_read_contract import FRAME_SCHEMA as PROJECT_KNOWLEDGE_FRAME_SCHEMA
+        if type(frame) is dict and frame.get("schema") == PROJECT_KNOWLEDGE_FRAME_SCHEMA:
+            return await self._handle_project_knowledge_frame(frame)
         from common.workspace_project_journal_contract import FRAME_SCHEMA as PROJECT_JOURNAL_FRAME_SCHEMA
         if type(frame) is dict and frame.get("schema") == PROJECT_JOURNAL_FRAME_SCHEMA:
             return await self._handle_project_journal_frame(frame)
@@ -1909,6 +1986,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None, activity_membership=None,
                                project_plan_reader=None, project_journal_reader=None, project_session_source_factory=None, project_direction_reader=None, project_archive_reader=None,
+                               project_knowledge_catalogue_reader=None, project_knowledge_memory_reader=None, project_knowledge_source_reader=None,
                                cross_plane_context=None, cross_plane_enrollment=None,
                                project_admission_permissions=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
@@ -1973,6 +2051,9 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     product_acceptance_observe=product_acceptance_observe,
                                     project_plan_reader=project_plan_reader,
                                     project_journal_reader=project_journal_reader,
+                                    project_knowledge_catalogue_reader=project_knowledge_catalogue_reader,
+                                    project_knowledge_memory_reader=project_knowledge_memory_reader,
+                                    project_knowledge_source_reader=project_knowledge_source_reader,
                                     project_session_source=session_source,
                                     project_direction_reader=project_direction_reader,
                                     project_archive_reader=project_archive_reader,

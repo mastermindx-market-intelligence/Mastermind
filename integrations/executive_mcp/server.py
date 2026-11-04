@@ -617,6 +617,9 @@ class _ExecutivePathFence:
                 "/workspace/project-journal/current",
                 "/workspace/project-direction/current",
                 "/workspace/projects/archive/current",
+                "/workspace/project-knowledge/current",
+                "/workspace/project-memory/current",
+                "/workspace/project-source/current",
                 "/workspace/autonomy/current",
                 "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
@@ -632,6 +635,9 @@ class _ExecutivePathFence:
                 "/workspace/project-journal/current",
                 "/workspace/project-direction/current",
                 "/workspace/projects/archive/current",
+                "/workspace/project-knowledge/current",
+                "/workspace/project-memory/current",
+                "/workspace/project-source/current",
                 "/workspace/autonomy/current",
                 "/workspace/operator/activity/current", "/workspace/resources/capacity/current",
             ))
@@ -1443,6 +1449,9 @@ def _build_profile_mcp_app(
                 "/workspace/project-journal/current",
                 "/workspace/project-direction/current",
                 "/workspace/projects/archive/current",
+                "/workspace/project-knowledge/current",
+                "/workspace/project-memory/current",
+                "/workspace/project-source/current",
                 "/workspace/autonomy/current",
                              "/workspace/operator/activity/current", "/workspace/resources/capacity/current")
                              + _WORKSPACE_ADDITIONAL_GET_ROUTES)

@@ -6,6 +6,7 @@ Public selectors never choose a repository, path, interpreter, or source revisio
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 import time
 import types
@@ -16,10 +17,93 @@ from control_plane.ceo_boot_packet import bounded_subprocess_runner
 _SOURCE_ROOT = Path(__file__).resolve().parents[1]
 _RECORD_BYTES = 262144
 _OWNER_BYTES = 1048576
+_HISTORY_LOG_BYTES = 8192
+_HISTORY_BATCH_BYTES = 8 * _RECORD_BYTES + _HISTORY_LOG_BYTES
 
 
 class ProjectPlanSourceUnavailable(ValueError):
     pass
+
+
+def _parse_history_log(log):
+    """Validated (commit, committed_at) selectors from one bounded log capture.
+
+    Order is the log order, newest first; repeated exact refs are collapsed to
+    their first occurrence so one batch request carries each selector once.
+    Conflicting dates for one immutable commit are unavailable source evidence.
+    """
+    from datetime import datetime
+    selectors = []
+    lines = log.splitlines()
+    if len(lines) > 8:
+        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+    observed_dates = {}
+    for line in lines:
+        fields = line.split("\x00")
+        if len(fields) != 3 or fields[2] != "" or re.fullmatch(r"[0-9a-f]{40}", fields[0]) is None:
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        try:
+            stamp = datetime.fromisoformat(fields[1].replace("Z", "+00:00"))
+        except (ValueError, OverflowError):
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE") from None
+        if stamp.utcoffset() is None:
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        if fields[0] in observed_dates:
+            if observed_dates[fields[0]] != fields[1]:
+                raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+            continue
+        observed_dates[fields[0]] = fields[1]
+        selectors.append((fields[0], fields[1]))
+    return selectors
+
+
+def _history_request(selectors, path):
+    """One fixed batch request line per selector, <commit>:<path>, in order."""
+    if (len(selectors) > 8 or re.fullmatch(
+            r"agentos/workstreams/WS-[A-Z0-9]+(?:-[A-Z0-9]+)*\.md", path) is None):
+        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+    return "".join(commit + ":" + path + "\n" for commit, _ in selectors).encode("utf-8")
+
+
+def _parse_history_batch(selectors, stream):
+    """Strictly decode one request-local git cat-file --batch response.
+
+    The stream must be exactly one blob per selector, in request order: a
+    40-hex object header, the "blob" type, a decimal byte size within the
+    per-record bound, the object bytes, one newline, and nothing else. The
+    echoed object id must be the actual SHA-1 identity of the delivered bytes.
+    Any other shape -- missing, wrong type, truncated, oversized, extra
+    output, non-UTF-8 -- raises, so history never becomes partial.
+    """
+    try:
+        buffer = stream.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE") from None
+    if len(selectors) > 8:
+        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+    revisions = []
+    offset = 0
+    for commit, committed_at in selectors:
+        newline = buffer.find(b"\n", offset)
+        if newline < 0:
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        header = buffer[offset:newline]
+        offset = newline + 1
+        match = re.fullmatch(rb"([0-9a-f]{40}) blob (0|[1-9][0-9]*)", header)
+        if match is None:
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        size = int(match.group(2))
+        if size > _RECORD_BYTES or offset + size >= len(buffer) or buffer[offset + size] != 0x0A:
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        raw = buffer[offset:offset + size]
+        offset += size + 1
+        if hashlib.sha1(b"blob " + match.group(2) + b"\0" + raw).hexdigest() != match.group(1).decode("ascii"):
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+        revisions.append({"commit": commit, "committed_at": committed_at,
+            "content_sha256": hashlib.sha256(raw).hexdigest()})
+    if offset != len(buffer):
+        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
+    return revisions
 
 
 class AgentOsProjectPlanReader:
@@ -130,23 +214,19 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
             "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}, work_ref)
         value = project_workstream_plan(record, work_ref=work_ref, source=source)
         if value.get("availability") == "AVAILABLE":
-            from datetime import datetime
             try:
-                log = git("log", "--max-count=8", "--format=%H%x00%cI%x00",
-                          expected_macro_sha, "--", path, limit=8192)
-                revisions = []
-                for line in log.splitlines():
-                    fields = line.split("\x00")
-                    if (len(fields) != 3 or fields[2] != ""
-                            or re.fullmatch(r"[0-9a-f]{40}", fields[0]) is None
-                            or datetime.fromisoformat(fields[1].replace("Z", "+00:00")).utcoffset() is None):
-                        raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
-                    raw = git("show", fields[0] + ":" + path)
-                    revisions.append({"commit": fields[0], "committed_at": fields[1],
-                        "content_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest()})
-                if revisions:
+                selectors = _parse_history_log(git("log", "--max-count=8",
+                    "--format=%H%x00%cI%x00", expected_macro_sha, "--", path,
+                    limit=_HISTORY_LOG_BYTES))
+                if selectors:
+                    # One request-local batch read replaces the per-revision
+                    # historical capture, inside the same cumulative deadline.
+                    stream = git("cat-file", "--batch",
+                        input_bytes=_history_request(selectors, path),
+                        limit=_HISTORY_BATCH_BYTES)
                     value["plan"]["version_history"] = {"state": "AVAILABLE",
-                        "kind": "GIT_RECORD_REVISIONS", "revisions": revisions}
+                        "kind": "GIT_RECORD_REVISIONS",
+                        "revisions": _parse_history_batch(selectors, stream)}
             except (ProjectPlanSourceUnavailable, ValueError, OverflowError):
                 # Missing history never fabricates adoption or makes available
                 # current authored plan content disappear.

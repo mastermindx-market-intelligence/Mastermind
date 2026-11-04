@@ -1,6 +1,8 @@
 import { projectAdmissionHostMethods, projectAdmissionPublicRequest, type ProjectAdmissionRawMethods, type ProjectAdmissionHostMethods } from "./admission/project-admission-host";
 import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/project-archive-continuation";
 import { decodeProjectArchive, type ProjectArchiveRead } from "./projects/archive/project-archive";
+import type { ProjectFileSearchOwner, FileSearchCatalogue, FileSearchSource } from "./discovery/project-file-search";
+import { knowledgeReadSelection, validateKnowledgeRead, type KnowledgeReadSelection, type KnowledgeSourceSelection, type KnowledgeReadKind } from "./knowledge/library/knowledge-read-port";
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
@@ -92,6 +94,9 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   readProjectArchivePage?(request: ArchiveCursor & { signal: AbortSignal }): Promise<unknown>;
   readProjectArchive?(request: { signal: AbortSignal }): Promise<unknown>;
   readProjectDirection?(request: DirectionSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectKnowledgeCatalogue?(request: KnowledgeReadSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectKnowledgeMemory?(request: KnowledgeReadSelection & { signal: AbortSignal }): Promise<unknown>;
+  readProjectKnowledgeSource?(request: KnowledgeSourceSelection & { signal: AbortSignal }): Promise<unknown>;
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
@@ -165,6 +170,10 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   readProjectArchivePage?: (request: ArchiveCursor & { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
   readProjectArchive?: (request: { signal: AbortSignal }) => Promise<ProjectArchiveRead>;
   readProjectDirection?: (request: DirectionSelection & { signal: AbortSignal }) => Promise<AcceptedDirectionRead>;
+  readonly projectFilesSearch?: ProjectFileSearchOwner;
+  readProjectKnowledgeCatalogue?: (request: KnowledgeReadSelection & { signal: AbortSignal }) => Promise<unknown>;
+  readProjectKnowledgeMemory?: (request: KnowledgeReadSelection & { signal: AbortSignal }) => Promise<unknown>;
+  readProjectKnowledgeSource?: (request: KnowledgeSourceSelection & { signal: AbortSignal }) => Promise<unknown>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
@@ -297,12 +306,48 @@ export function bindMissionHost(
       }
     };
   }
+  function knowledgeRead(kind: KnowledgeReadKind, raw: ((request: any) => Promise<unknown>) | undefined) {
+    if(!raw || !client.invalidationGeneration) return undefined;
+    return async (request: (KnowledgeReadSelection|KnowledgeSourceSelection)&{signal:AbortSignal}) => {
+      const {signal,...value}=request;
+      const selected=knowledgeReadSelection(value,kind);
+      if(!selected) throw new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID");
+      const started=epoch, generation=client.invalidationGeneration!();
+      const method=kind==="catalogue"?"readProjectKnowledgeCatalogue":kind==="memory"?"readProjectKnowledgeMemory":"readProjectKnowledgeSource";
+      const current=()=>{const state=client.getState();return !signal.aborted && epoch===started
+        && client[method]===raw && client.invalidationGeneration?.()===generation && state.status==="signed_in" && state.acquisition;};
+      if(!current()) throw new Error("PROJECT_KNOWLEDGE_READ_UNAUTHORIZED");
+      const result=await raw.call(client,{...selected,signal});
+      if(!current()) throw new Error("READ_CANCELLED");
+      const body=await validateKnowledgeRead(result,selected,kind);
+      if(!current()) throw new Error("READ_CANCELLED");
+      return body;
+    };
+  }
+  const catalogueRead=knowledgeRead("catalogue",client.readProjectKnowledgeCatalogue);
+  const memoryRead=knowledgeRead("memory",client.readProjectKnowledgeMemory);
+  const sourceRead=knowledgeRead("source",client.readProjectKnowledgeSource);
+  const projectFilesSearch: ProjectFileSearchOwner|undefined = catalogueRead && sourceRead ? Object.freeze({
+    context:()=>{
+      const state=client.getState(),generation=client.invalidationGeneration?.();
+      return state.status==="signed_in" && state.acquisition && Number.isSafeInteger(generation) && generation!>=0
+        ? Object.freeze({generation:JSON.stringify([epoch,generation])}) : null;
+    },
+    authGeneration:()=>epoch,
+    readCatalogue:({workRef,signal}:{workRef:string;signal:AbortSignal})=>catalogueRead({work_ref:workRef,signal}) as Promise<FileSearchCatalogue>,
+    readSource:({workRef,sourceRef,expectedRevision,signal}:{workRef:string;sourceRef:string;expectedRevision:string;signal:AbortSignal})=>
+      sourceRead({work_ref:workRef,source_ref:sourceRef,expected_revision:expectedRevision,signal}) as Promise<FileSearchSource>,
+  }):undefined;
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
     ...(client.openTerminalBriefs ? {
       openTerminalBriefs: createTerminalBriefsNavigationPort(() => client.openTerminalBriefs!()),
     } : {}),
     invalidationGeneration: () => epoch,
+    ...(catalogueRead ? {readProjectKnowledgeCatalogue: catalogueRead} : {}),
+    ...(projectFilesSearch ? {projectFilesSearch} : {}),
+    ...(memoryRead ? {readProjectKnowledgeMemory: memoryRead} : {}),
+    ...(sourceRead ? {readProjectKnowledgeSource: sourceRead} : {}),
     auth: {
       getState: () => client.getState(),
       subscribe: (listener) => client.subscribe(listener),
@@ -836,6 +881,9 @@ export async function createNativeClient(
       | "read_autonomy_policy"
       | "read_project_plan"
       | "read_project_journal"
+      | "read_project_knowledge_catalogue"
+      | "read_project_knowledge_memory"
+      | "read_project_knowledge_source"
       | "read_project_session"
       | "read_project_direction"
       | "read_project_archive"
@@ -987,6 +1035,21 @@ export async function createNativeClient(
       if (!validDirectionSelection(selected))
         return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
       return read("read_project_direction", signal, { selection: selected });
+    },
+    readProjectKnowledgeCatalogue: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"catalogue");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("read_project_knowledge_catalogue",signal,{selection:selected});
+    },
+    readProjectKnowledgeMemory: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"memory");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("read_project_knowledge_memory",signal,{selection:selected});
+    },
+    readProjectKnowledgeSource: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"source");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("read_project_knowledge_source",signal,{selection:selected});
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;

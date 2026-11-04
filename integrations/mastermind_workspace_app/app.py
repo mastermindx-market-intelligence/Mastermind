@@ -53,6 +53,9 @@ _RESULT_REFERENCES_ROUTE = "/workspace/result-references/current"
 _PLAN_ROUTE = "/workspace/plan/current"
 _PROJECT_PLAN_ROUTE = "/workspace/project-plan/current"
 _PROJECT_JOURNAL_ROUTE = "/workspace/project-journal/current"
+_PROJECT_KNOWLEDGE_CATALOGUE_ROUTE = "/workspace/project-knowledge/current"
+_PROJECT_KNOWLEDGE_MEMORY_ROUTE = "/workspace/project-memory/current"
+_PROJECT_KNOWLEDGE_SOURCE_ROUTE = "/workspace/project-source/current"
 _PROJECT_SESSION_ROUTE = "/workspace/project-session/current"
 _PROJECT_DIRECTION_ROUTE = "/workspace/project-direction/current"
 _PROJECT_ARCHIVE_ROUTE = "/workspace/projects/archive/current"
@@ -338,6 +341,10 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return selection(dict(query))
         except (TypeError, ValueError):
             return None
+    if operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"):
+        from common.workspace_project_knowledge_read_contract import selection
+        try: return selection(dict(query), operation=operation)
+        except (TypeError, ValueError): return None
     if operation == "project_plan":
         from common.workspace_project_plan_contract import validate_selection
         try:
@@ -1004,6 +1011,10 @@ async def _dispatch_v2(
             from common import workspace_project_session_contract as session_wire
             frame = session_wire.validate_frame({"schema": session_wire.FRAME_SCHEMA,
                 "operation": session_wire.OPERATION, "selection": selection_value, "principal": principal_frame})
+        elif operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"):
+            from common import workspace_project_knowledge_read_contract as knowledge_wire
+            frame = knowledge_wire.validate_frame({"schema": knowledge_wire.FRAME_SCHEMA,
+                "operation": operation, "selection": selection_value, "principal": principal_frame})
         elif operation == "project_journal":
             from common import workspace_project_journal_contract as plan_wire
             frame = plan_wire.validate_frame({
@@ -1076,9 +1087,15 @@ async def _dispatch_v2(
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
-    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "autonomy") and isinstance(envelope, dict) and envelope.get("ok") is True:
+    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "autonomy") and isinstance(envelope, dict) and envelope.get("ok") is True:
         body = envelope.get("result")
-        if type(body) is not dict or body.get("selection") != selection_value:
+        expected_selection = ({key: item for key, item in selection_value.items() if key != "expected_revision"}
+                              if operation == "project_knowledge_source" else selection_value)
+        if type(body) is not dict or body.get("selection") != expected_selection:
+            return _refuse_json(503, "source_unavailable")
+        if (operation == "project_knowledge_source" and body.get("availability") == "AVAILABLE"
+                and (type(body.get("source")) is not dict
+                     or body["source"].get("revision") != selection_value["expected_revision"])):
             return _refuse_json(503, "source_unavailable")
     if operation == "mission_v4":
         return _mission_v4_envelope_response(envelope, selection_value)
@@ -1353,6 +1370,39 @@ async def project_plan_current(request: Request, *, config: WorkspaceAppConfig) 
         required_keys=frozenset({"work_ref"}), response_fn=_project_plan_envelope_response)
 
 
+def _project_knowledge_envelope_response(envelope, *, operation):
+    from common import workspace_project_knowledge_read_contract as wire
+    if type(envelope) is not dict or envelope.get("ok") is not True:
+        return _envelope_response(envelope)
+    try:
+        if set(envelope) != {"ok", "result"}: raise ValueError("invalid envelope")
+        body = wire.validate_body(envelope["result"], operation=operation)
+        contract.bounded_canonical(envelope, limit=wire.MAX_RESPONSE_BYTES)
+        raw = contract.bounded_canonical(body, limit=wire.MAX_RESPONSE_BYTES)
+    except (TypeError, ValueError, KeyError, RecursionError):
+        return _refuse_json(503, "source_unavailable")
+    return Response(raw, status_code=200 if body["availability"] in ("AVAILABLE", "EMPTY") else 503,
+                    media_type="application/json", headers={"Cache-Control": "no-store"})
+
+
+async def project_knowledge_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_knowledge_catalogue",
+        required_keys=frozenset({"work_ref"}),
+        response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_knowledge_catalogue"))
+
+
+async def project_memory_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_knowledge_memory",
+        required_keys=frozenset({"work_ref"}),
+        response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_knowledge_memory"))
+
+
+async def project_source_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_knowledge_source",
+        required_keys=frozenset({"work_ref", "source_ref", "expected_revision"}),
+        response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_knowledge_source"))
+
+
 def _project_journal_envelope_response(envelope):
     from common import workspace_project_journal_contract as plan_wire
     if type(envelope) is not dict or envelope.get("ok") is not True:
@@ -1558,6 +1608,12 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         return await project_archive_current(request, config=config)
     async def project_direction_endpoint(request: Request) -> JSONResponse:
         return await project_direction_current(request, config=config)
+    async def project_knowledge_endpoint(request: Request) -> JSONResponse:
+        return await project_knowledge_current(request, config=config)
+    async def project_memory_endpoint(request: Request) -> JSONResponse:
+        return await project_memory_current(request, config=config)
+    async def project_source_endpoint(request: Request) -> JSONResponse:
+        return await project_source_current(request, config=config)
     async def project_journal_endpoint(request: Request) -> JSONResponse:
         return await project_journal_current(request, config=config)
 
@@ -1609,6 +1665,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
         Route(_PROJECT_JOURNAL_ROUTE, project_journal_endpoint, methods=["GET"]),
+        Route(_PROJECT_KNOWLEDGE_CATALOGUE_ROUTE, project_knowledge_endpoint, methods=["GET"]),
+        Route(_PROJECT_KNOWLEDGE_MEMORY_ROUTE, project_memory_endpoint, methods=["GET"]),
+        Route(_PROJECT_KNOWLEDGE_SOURCE_ROUTE, project_source_endpoint, methods=["GET"]),
         Route(_PROJECT_SESSION_ROUTE, project_session_endpoint, methods=["GET"]),
         Route(_PROJECT_DIRECTION_ROUTE, project_direction_endpoint, methods=["GET"]),
         Route(_PROJECT_ARCHIVE_ROUTE, project_archive_endpoint, methods=["GET"]),

@@ -13,7 +13,10 @@ import weakref
 _ISSUE_KEY = object()
 _METHODS = {"project_plan": "read_project_plan", "project_journal": "read_project_journal",
             "project_creation_source": "read_project_creation_source",
-            "project_direction": "read_project_direction", "project_archive": "read_project_archive"}
+            "project_direction": "read_project_direction", "project_archive": "read_project_archive",
+            "project_knowledge_catalogue": "read_project_knowledge_catalogue",
+            "project_knowledge_memory": "read_project_knowledge_memory",
+            "project_knowledge_source": "read_project_knowledge_source"}
 _COORDINATES = ("_source_root", "_macro_root", "_code_root", "_python",
                 "_expected_source_sha", "_allow_synthetic_fixture")
 
@@ -119,5 +122,23 @@ def read_installed_project_creation_binding(reader, *, work_ref, record_commit, 
         kwargs["expected_current_macro_sha"] = expected_current_macro_sha
     value = binding.callback(**kwargs)
     if not _matches(binding, reader=reader, owner=owner, kind="project_creation_source"):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    return value
+
+
+def read_installed_project_knowledge_source_binding(reader, *, work_ref, source_ref, expected_revision):
+    """Exact current opaque source tuple; never arbitrary callback kwargs."""
+    from common.workspace_project_knowledge_read_contract import selection
+    try:
+        selected = selection(dict(work_ref=work_ref, source_ref=source_ref,
+            expected_revision=expected_revision), operation="project_knowledge_source")
+    except (TypeError, ValueError):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE") from None
+    binding = reader._installed_reader_binding
+    owner = reader._installed_context_owner
+    if not _matches(binding, reader=reader, owner=owner, kind="project_knowledge_source"):
+        raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    value = binding.callback(**selected)
+    if not _matches(binding, reader=reader, owner=owner, kind="project_knowledge_source"):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
     return value

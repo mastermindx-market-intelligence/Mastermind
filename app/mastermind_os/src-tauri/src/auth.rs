@@ -1148,6 +1148,95 @@ pub async fn read_project_direction(app: AppHandle, selection: ProjectPlanSelect
     Ok(value)
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectKnowledgeSourceSelection {
+    work_ref: String,
+    source_ref: String,
+    expected_revision: String,
+}
+impl ProjectKnowledgeSourceSelection {
+    fn validate(&self) -> Result<()> {
+        ProjectPlanSelection { work_ref: self.work_ref.clone() }.validate()?;
+        let digest = self.source_ref.strip_prefix("project-file.v1.")
+            .or_else(|| self.source_ref.strip_prefix("project-record.v1.")).ok_or("SELECTION_INVALID")?;
+        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || self.expected_revision.len() != 40
+            || !self.expected_revision.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Copy)]
+enum ProjectKnowledgeReadKind { Catalogue, Memory, Source }
+impl ProjectKnowledgeReadKind {
+    fn path(self) -> &'static str { match self {
+        Self::Catalogue => "/workspace/project-knowledge/current",
+        Self::Memory => "/workspace/project-memory/current",
+        Self::Source => "/workspace/project-source/current",
+    }}
+    fn schema(self) -> &'static str { match self {
+        Self::Catalogue => "mastermind.workspace_project_knowledge.v1",
+        Self::Memory => "mastermind.workspace_project_preference.v1",
+        Self::Source => "mastermind.workspace_project_source.v1",
+    }}
+}
+fn project_knowledge_target(kind: ProjectKnowledgeReadKind, work_ref: &str,
+        source: Option<(&str, &str)>) -> Result<Url> {
+    ProjectPlanSelection { work_ref: work_ref.to_owned() }.validate()?;
+    if matches!(kind, ProjectKnowledgeReadKind::Source) != source.is_some() {
+        return Err("SELECTION_INVALID".into());
+    }
+    let mut url = Url::parse(&format!("{ORIGIN}{}",kind.path())).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("work_ref",work_ref);
+    if let Some((source_ref,revision)) = source {
+        ProjectKnowledgeSourceSelection {work_ref:work_ref.to_owned(),source_ref:source_ref.to_owned(),expected_revision:revision.to_owned()}.validate()?;
+        url.query_pairs_mut().append_pair("source_ref",source_ref).append_pair("expected_revision",revision);
+    }
+    Ok(url)
+}
+async fn project_knowledge_read(app: AppHandle, kind: ProjectKnowledgeReadKind,
+        work_ref: String, source: Option<(String,String)>) -> Result<Value> {
+    let url = project_knowledge_target(kind,&work_ref,source.as_ref().map(|(a,b)|(a.as_str(),b.as_str())))?;
+    let state=app.state::<NativeAuth>();
+    let (token,generation)=ensure_native_token(&app,Resource::Acquisition).await?;
+    let response=state.http.get(url).bearer_auth(token).header("Accept","application/json")
+        .header("Cache-Control","no-store").send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result=if response.status().as_u16()==503 {
+        read_json_body(response,131_072).await.and_then(|value|typed_unavailable(value,kind.schema(),false))
+    } else { bounded_json(response,131_072).await };
+    if !state.lock()?.release_allowed(generation,Resource::Acquisition) {return Err("AUTHENTICATION_CHANGED".into());}
+    let value=result?;
+    let selected=value.get("selection").and_then(Value::as_object).ok_or("RESPONSE_INVALID")?;
+    let expected_count=if source.is_some(){2}else{1};
+    if value.get("schema").and_then(Value::as_str)!=Some(kind.schema()) || selected.len()!=expected_count
+        || selected.get("work_ref").and_then(Value::as_str)!=Some(work_ref.as_str()) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    if let Some((source_ref,revision))=source {
+        if selected.get("source_ref").and_then(Value::as_str)!=Some(source_ref.as_str())
+            || (value.get("availability").and_then(Value::as_str)==Some("AVAILABLE")
+                && value.get("source").and_then(|v|v.get("revision")).and_then(Value::as_str)!=Some(revision.as_str())) {
+            return Err("RESPONSE_INVALID".into());
+        }
+    }
+    Ok(value)
+}
+#[tauri::command]
+pub async fn read_project_knowledge_catalogue(app:AppHandle,selection:ProjectPlanSelection)->Result<Value>{
+    project_knowledge_read(app,ProjectKnowledgeReadKind::Catalogue,selection.work_ref,None).await
+}
+#[tauri::command]
+pub async fn read_project_knowledge_memory(app:AppHandle,selection:ProjectPlanSelection)->Result<Value>{
+    project_knowledge_read(app,ProjectKnowledgeReadKind::Memory,selection.work_ref,None).await
+}
+#[tauri::command]
+pub async fn read_project_knowledge_source(app:AppHandle,selection:ProjectKnowledgeSourceSelection)->Result<Value>{
+    selection.validate()?;
+    project_knowledge_read(app,ProjectKnowledgeReadKind::Source,selection.work_ref,Some((selection.source_ref,selection.expected_revision))).await
+}
+
 const PROJECT_JOURNAL_PATH: &str = "/workspace/project-journal/current";
 const PROJECT_JOURNAL_SCHEMA: &str = "mastermind.workspace_project_journal.v1";
 const PROJECT_JOURNAL_RESPONSE_CAP: usize = 131_072;
@@ -2093,6 +2182,32 @@ fn original_reference_args(
     }
     Ok(args)
 }
+// Separate closed project-history selector. Never reinterpret an absent root
+// as a current/latest root, and never widen the incumbent selected-root command.
+fn project_original_reference_args(work_ref: &str, cursor: Option<&str>) -> Result<Value> {
+    let work = work_ref.strip_prefix("WS:").ok_or("SESSION_REFERENCES_INVALID")?;
+    if !(2..=64).contains(&work.len()) ||
+        !(work.as_bytes()[0].is_ascii_uppercase() || work.as_bytes()[0].is_ascii_digit()) ||
+        !work.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)) {
+        return Err("SESSION_REFERENCES_INVALID".into());
+    }
+    if cursor.is_some_and(|value| !valid_reference_cursor(value)) {
+        return Err("SESSION_REFERENCES_INVALID".into());
+    }
+    let mut args = serde_json::json!({ "work_ref": work_ref, "page_size": 4 });
+    if let Some(cursor) = cursor { args["cursor"] = Value::String(cursor.to_owned()); }
+    Ok(args)
+}
+#[tauri::command]
+pub async fn executive_project_session_references(
+    app: AppHandle, work_ref: String, cursor: Option<String>,
+) -> Result<Value> {
+    let args = project_original_reference_args(&work_ref, cursor.as_deref())?;
+    let result = executive_post(app.clone(), "/os/executive/session/references",
+        serde_json::json!({ "arguments": args })).await;
+    if result.is_err() { emit(&app); }
+    result
+}
 #[tauri::command]
 pub async fn executive_session_context(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     selection.validate()?;
@@ -2129,6 +2244,19 @@ pub async fn executive_session_references(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn project_history_omits_root_and_fixes_four_reference_budget() {
+        let args = project_original_reference_args("WS:ALPHA", Some("YQ==")).unwrap();
+        assert_eq!(args, serde_json::json!({"work_ref":"WS:ALPHA","page_size":4,"cursor":"YQ=="}));
+        assert!(args.get("root_job_id").is_none());
+        assert_eq!(project_original_reference_args("WS:ALPHA", None).unwrap(),
+            serde_json::json!({"work_ref":"WS:ALPHA","page_size":4}));
+        for work in ["WS:A", "WS:lower", "WS:ALPHA\n", "WS:../private", "https://private"] {
+            assert!(project_original_reference_args(work, None).is_err());
+        }
+        assert!(project_original_reference_args("WS:ALPHA", Some("abc/..")).is_err());
+        assert!(project_original_reference_args("WS:ALPHA", Some(&"A".repeat(2049))).is_err());
+    }
     #[test]
     fn native_original_reads_admit_only_closed_selection_operation_and_cursor() {
         let selected = MissionSelection { work_ref: "WS:ORIGINAL".into(), root_job_id: "JOB-1".into() };
@@ -3476,5 +3604,42 @@ mod project_archive_read_tests {
         assert!(serde_json::from_value::<ProjectArchiveCursor>(extra).is_err());
         assert!(project_archive_page_target(&ProjectArchiveCursor { after_work_ref: "../private".into(), catalogue_digest: "a".repeat(64) }).is_err());
         assert!(project_archive_page_target(&ProjectArchiveCursor { after_work_ref: "WS:PAGE-127".into(), catalogue_digest: "A".repeat(64) }).is_err());
+    }
+}
+
+#[cfg(test)]
+mod project_knowledge_read_tests {
+    use super::*;
+    #[test]
+    fn three_reads_have_only_fixed_rootless_project_routes() {
+        for (kind,path) in [(ProjectKnowledgeReadKind::Catalogue,"/workspace/project-knowledge/current"),
+                (ProjectKnowledgeReadKind::Memory,"/workspace/project-memory/current")] {
+            let url=project_knowledge_target(kind,"WS:ONE",None).unwrap();
+            assert_eq!(url.path(),path);
+            assert_eq!(url.query_pairs().map(|(k,v)|(k.into_owned(),v.into_owned())).collect::<Vec<_>>(),vec![("work_ref".to_string(),"WS:ONE".to_string())]);
+        }
+        let reference=format!("project-file.v1.{}","a".repeat(64)); let revision="b".repeat(40);
+        let url=project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",Some((&reference,&revision))).unwrap();
+        assert_eq!(url.path(),"/workspace/project-source/current");
+        assert_eq!(url.query_pairs().map(|(k,v)|(k.into_owned(),v.into_owned())).collect::<Vec<_>>(),vec![("work_ref".to_string(),"WS:ONE".to_string()),("source_ref".to_string(),reference),("expected_revision".to_string(),revision)]);
+    }
+    #[test]
+    fn source_selector_rejects_paths_and_foreign_principal_selectors() {
+        let valid=serde_json::json!({"work_ref":"WS:ONE","source_ref":format!("project-record.v1.{}","a".repeat(64)),"expected_revision":"b".repeat(40)});
+        let parsed:ProjectKnowledgeSourceSelection=serde_json::from_value(valid.clone()).unwrap();assert!(parsed.validate().is_ok());
+        for key in ["path","root_job_id","principal_scope","provider_session_id"] {
+            let mut value=valid.clone();value.as_object_mut().unwrap().insert(key.to_string(),serde_json::json!("caller"));
+            assert!(serde_json::from_value::<ProjectKnowledgeSourceSelection>(value).is_err());
+        }
+        for reference in ["docs/private.md","https://example.com/file","project-file.v1.not-a-digest"] {
+            assert!(project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",Some((reference,&"b".repeat(40)))).is_err());
+        }
+    }
+    #[test]
+    fn source_tuple_is_neither_optional_nor_transferable_to_another_read_kind() {
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",None).is_err());
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Memory,"WS:ONE",Some((&format!("project-file.v1.{}","a".repeat(64)),&"b".repeat(40)))).is_err());
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Catalogue,"WS:ONE\n",None).is_err());
+        assert!(project_knowledge_target(ProjectKnowledgeReadKind::Source,"WS:ONE",Some((&format!("project-file.v1.{}\n","a".repeat(64)),&"b".repeat(40)))).is_err());
     }
 }

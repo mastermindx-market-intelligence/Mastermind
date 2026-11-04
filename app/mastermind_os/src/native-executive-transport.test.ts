@@ -202,6 +202,24 @@ describe("native fixed Executive bridge", () => {
     expect(f.invoke).toHaveBeenCalledTimes(2);
     expect(f.sessionTransport.available()).toBe(false);
   });
+
+  it("projects four-item same-project history through one distinct fixed native command",async()=>{
+    const f=await fixture(), signal=new AbortController().signal;
+    f.invoke.mockResolvedValueOnce({reference_only:true});
+    await expect(f.sessionTransport.projectReferences!({work_ref:"WS:ALPHA",page_size:4,cursor:"YQ=="},signal))
+      .resolves.toEqual({reference_only:true});
+    expect(f.invoke).toHaveBeenLastCalledWith("executive_project_session_references",{workRef:"WS:ALPHA",cursor:"YQ=="});
+    f.invoke.mockClear();
+    for(const args of [{work_ref:"WS:ALPHA",page_size:16},{work_ref:"WS:ALPHA",page_size:4,root_job_id:"JOB-1"},
+      {work_ref:"WS:ALPHA\n",page_size:4},{work_ref:"WS:ALPHA",page_size:4,cursor:"bad/.."}]) {
+      await expect(f.sessionTransport.projectReferences!(args as never,signal)).rejects.toThrow("SESSION_REFERENCES_INVALID");
+    }
+    expect(f.invoke).not.toHaveBeenCalled();
+    const late=deferred(); f.invoke.mockReturnValueOnce(late.promise);
+    const pending=f.sessionTransport.projectReferences!({work_ref:"WS:ALPHA",page_size:4},signal);
+    const held=expect(pending).rejects.toThrow("EXECUTIVE_AUTH_CHANGED");
+    f.invalidate(); await held; late.resolve({private:"old"});
+  });
   it("an initially missing command leaves Executive unavailable", async () => {
     const invoke = vi.fn(async () => { throw new Error("native missing"); });
     const f = await createNativeExecutiveTransport(invoke as never, async () => () => {});

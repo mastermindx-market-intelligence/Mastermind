@@ -58,6 +58,7 @@ class CeoIngressWorkspaceClient:
         timeout = self.timeout_seconds
         from common import workspace_project_plan_contract as plan_wire
         from common import workspace_project_journal_contract as journal_wire
+        from common import workspace_project_knowledge_read_contract as knowledge_wire
         from common import workspace_project_session_contract as session_wire
         from common import workspace_project_direction_contract as direction_wire
         from common import workspace_project_archive_contract as archive_wire
@@ -79,6 +80,10 @@ class CeoIngressWorkspaceClient:
         elif isinstance(frame, dict) and frame.get("schema") == session_wire.FRAME_SCHEMA:
             session_wire.validate_frame(frame)
             ceiling = session_wire.MAX_RESPONSE_BYTES
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == knowledge_wire.FRAME_SCHEMA:
+            knowledge_wire.validate_frame(frame)
+            ceiling = knowledge_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
         elif isinstance(frame, dict) and frame.get("schema") == journal_wire.FRAME_SCHEMA:
             journal_wire.validate_frame(frame)

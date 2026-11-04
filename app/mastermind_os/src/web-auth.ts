@@ -1,6 +1,8 @@
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
 import { validArchiveCursor } from "./projects/archive/project-archive-continuation";
+import { knowledgeReadSelection } from "./knowledge/library/knowledge-read-port";
 import { normalizeProjectAssociationSelection } from "./conversations/project-association";
+import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
 import { isAutonomySelection, AUTONOMY_READ_BODY_SCHEMA } from "./supervision/autonomy-policy";
 import { validJournalSelection } from "./project-journal";
@@ -1156,6 +1158,11 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       send: (arguments_, signal) => executivePost("session/send", arguments_, signal),
       reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
       references: (arguments_, signal) => executivePost("session/references", arguments_, signal),
+      projectReferences: (arguments_, signal) => {
+        const closed = projectHistoryArguments(arguments_);
+        return closed ? executivePost("session/references", closed, signal)
+          : Promise.reject(new Error("SESSION_REFERENCES_INVALID"));
+      },
     } satisfies ExecutiveSessionTransport,
     // Same existing OAuth generation used by every bounded acquisition read.
     // The MissionHost requires this proof before it mounts the plan port.
@@ -1250,6 +1257,24 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         return Promise.reject(new Error("DIRECTION_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/project-direction/current?${new URLSearchParams({ work_ref: selected.work_ref })}`,
         signal, { cap: 65_536, typedUnavailableSchema: "mastermind.workspace_project_direction.v1" });
+    },
+    readProjectKnowledgeCatalogue: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"catalogue");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-knowledge/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_knowledge.v1"});
+    },
+    readProjectKnowledgeMemory: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"memory");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-memory/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_preference.v1"});
+    },
+    readProjectKnowledgeSource: (request) => {
+      const {signal,...value}=request, selected=knowledgeReadSelection(value,"source");
+      if(!selected) return Promise.reject(new Error("PROJECT_KNOWLEDGE_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/project-source/current?${new URLSearchParams({...selected})}`,
+        signal,{cap:131_072,typedUnavailableSchema:"mastermind.workspace_project_source.v1"});
     },
     readProjectJournal: (request) => {
       const { signal, ...selected } = request;
