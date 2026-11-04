@@ -1,3 +1,4 @@
+import { appCopy } from "./app-copy";
 import { ProductAcceptancePanel } from "./product-acceptance/ProductAcceptancePanel";
 import type { AuthState, MissionHost } from "./host";
 import type {
@@ -1342,6 +1343,7 @@ export interface AppProps {
   preferencesControl?: React.ReactNode;
 }
 export function App({ locale = "en", theme = "dark", preferencesControl }: AppProps = {}) {
+  const copy = appCopy(locale);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationPane = useRef<HTMLElement>(null);
   const preferencesPane = useRef<HTMLDivElement>(null);
@@ -3082,7 +3084,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         onClick={checkCommandStatus}
         disabled={recoverInFlight}
       >
-        Check status
+        {copy.checkStatus}
       </button>
     </div>
   ) : null;
@@ -3105,23 +3107,23 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision]);
   const commandPanel =
     !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
-      <section className="card" aria-label="Retained Launch draft">
-        <h2>Unsent launch goal</h2>
-        <p className="muted">Your session expired. Copy or discard this local draft before signing in again. Commands are disabled.</p>
-        <label htmlFor="retained-launch-goal">Goal</label>
+      <section className="card" aria-label={copy.retainedDraft}>
+        <h2>{copy.unsentGoal}</h2>
+        <p className="muted">{copy.expiredDraft}</p>
+        <label htmlFor="retained-launch-goal">{copy.goal}</label>
         <textarea id="retained-launch-goal" value={retainedComposerDrafts.launch}
           onChange={event => updateRetainedComposer("launch", event.target.value)}
           rows={4} />
         <button type="button" onClick={() => updateRetainedComposer("launch", "")}>
-          Discard launch goal
+          {copy.discardGoal}
         </button>
       </section>
     ) : canLaunch && commandView && launchDraftDismissed ? (
       <section className="card">
         <div className="section-title">
-          <h2>Launch Orchestrator</h2>
+          <h2>{copy.startWork}</h2>
         </div>
-        <p className="muted">Launch draft dismissed.</p>
+        <p className="muted">{copy.draftDismissed}</p>
         <button
           type="button"
           onClick={() => {
@@ -3129,7 +3131,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             routeHeading.current?.focus();
           }}
         >
-          New launch
+          {copy.newGoal}
         </button>
       </section>
     ) : commandReady && commandView ? (
@@ -3163,7 +3165,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           unavailableReason={
             canLaunch
               ? undefined
-              : "Launch choices are unavailable. Your draft is retained."
+              : copy.choicesUnavailable
           }
           submitting={heldKind === "launch" && commandBusy}
           blocked={!!currentReopened || heldKind === "consume"}
@@ -3203,13 +3205,13 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       <section className="card">
         <div className="section-title">
           <div>
-            <h2>Launch Orchestrator</h2>
+            <h2>{copy.startWork}</h2>
           </div>
-          <span className="state state-unavailable">UNAVAILABLE</span>
+          <span className="state state-unavailable">{copy.unavailable}</span>
         </div>
-        <p className="muted">Command route is not available.</p>
+        <p className="muted">{copy.workUnavailable}</p>
         <details className="reason-details">
-          <summary>Technical details</summary>
+          <summary>{copy.technicalDetails}</summary>
           <code>{COMMAND_ROUTE_UNAVAILABLE}</code>
         </details>
         {heldKind === "launch" ? checkStatusControl : null}
@@ -4320,14 +4322,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           {selection ? (
             <div className="mission-context">
               <b>{d?.program.title || selection.workRef}</b>
-              <small>Exact mission selected</small>
+              <small>{copy.selectedWork}</small>
             </div>
           ) : (
             <div className="mission-context mission-context-empty">
-              No exact mission selected
+              {copy.noWork}
             </div>
           )}
-          <nav aria-label="Mission navigation">
+          <nav aria-label={copy.missionNavigation}>
             {advancedNavigation.map((x) => (
               <button
                 key={x}
@@ -4350,19 +4352,18 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         </div>
         <div ref={preferencesPane}>{preferencesControl}</div>
         <div className="side-note">
-          <b>Source-qualified viewer</b>
+          <b>{copy.statusSources}</b>
           <br />
-          Lifecycle, review, transport, acceptance and source freshness remain
-          separate facts.
+          {copy.statusNote}
         </div>
       </aside>
       <main id="content" tabIndex={-1}>
         <header className={quietHeader ? "workspace-header workspace-header-quiet" : "workspace-header"}>
           <div className="workspace-route">
             <button ref={navigationToggle} type="button" className="navigation-toggle" aria-expanded={navigationOpen} aria-controls="workspace-navigation" aria-label={locale === "zh-CN" ? "打开导航" : "Open navigation"} onClick={() => setNavigationOpen(value => !value)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
-            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : active}</span>
+            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : navigationLabel(active, locale)}</span>
             {quietHeader ? <h2 ref={routeHeading} tabIndex={-1}>{navigationLabel(active, locale)}</h2> : <h1 ref={routeHeading} tabIndex={-1}>
-              {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : active}
+              {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : navigationLabel(active, locale)}
             </h1>}
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>}
           </div>
@@ -4371,22 +4372,20 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {authState ? (
               <div>
                 <small>
-                  {authState.status === "unconfigured"
-                    ? "Sign-in setup pending"
-                    : authState.status.replaceAll("_", " ")}
+                  {copy.authStatus[authState.status]}
                 </small>
                 {authState.reason && authState.status !== "unconfigured" ? (
                   <p className="muted">
                     {authState.reason === "POPUP_BLOCKED"
-                      ? "Allow the sign-in popup and try again."
+                      ? copy.allowPopup
                       : authState.reason === "POPUP_CLOSED"
-                        ? "Sign-in window closed. Try again when ready."
+                        ? copy.popupClosed
                         : authState.reason.includes("EXPIRED") ||
                             authState.reason.includes("TIMEOUT")
-                          ? "Sign-in timed out. Please try again."
+                          ? copy.signInTimeout
                           : authState.acquisition
-                            ? "Workspace connected. Conversation access is unavailable."
-                            : "Sign-in could not complete. Please try again."}
+                            ? copy.conversationUnavailable
+                            : copy.signInFailed}
                   </p>
                 ) : null}
                 <button
@@ -4424,10 +4423,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   }}
                 >
                   {authState.status === "signing_in"
-                    ? "Cancel sign in"
+                    ? copy.cancelSignIn
                     : authState.acquisition || authState.content
-                      ? "Sign out"
-                      : "Sign in"}
+                      ? copy.signOut
+                      : copy.signIn}
                 </button>
               </div>
             ) : null}
@@ -4435,15 +4434,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         </header>
         {!native && authState && authState.status === "signed_out" &&
          passiveExpiryHold.current && hasUnsentUserText.current ? (
-          <section className="notice" aria-label="Unsent work protected">
-            <p>Authentication expired. Unsent work is retained only in this tab. Copy or finish it before signing in again.</p>
+          <section className="notice" aria-label={copy.unsentProtected}>
+            <p>{copy.expiredUnsent}</p>
             <button type="button" onClick={() => {
               office.changeDraft("");
               observedConversation.discardDraft();
               updateRetainedComposer("launch", "");
               updateRetainedComposer("session", "");
               passiveExpiryHold.current = false;
-            }}>Discard all unsent work</button>
+            }}>{copy.discardAll}</button>
           </section>
         ) : null}
         {active !== "Control Room" && active !== "Today" && !directRoute ? (
@@ -4453,27 +4452,27 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         ) : null}
         {build ? (
           <details className="build-details">
-            <summary>Build details</summary>
+            <summary>{copy.buildDetails}</summary>
             <dl>
-              <dt>Version</dt>
+              <dt>{copy.version}</dt>
               <dd>{build.version}</dd>
-              <dt>Source revision</dt>
+              <dt>{copy.sourceRevision}</dt>
               <dd>
                 <code>{build.source_revision}</code>
               </dd>
-              <dt>Build identity</dt>
+              <dt>{copy.buildIdentity}</dt>
               <dd>
                 <code>{build.build_identity}</code>
               </dd>
               {build.native_client_ref ? (
                 <>
-                  <dt>Native client reference</dt>
+                  <dt>{copy.nativeClient}</dt>
                   <dd>
                     <code>{build.native_client_ref}</code>
                   </dd>
                 </>
               ) : null}
-              <dt>Transport</dt>
+              <dt>{copy.transport}</dt>
               <dd>{`${build.transport} / ${build.state}`}</dd>
             </dl>
           </details>
