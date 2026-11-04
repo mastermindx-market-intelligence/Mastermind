@@ -33,7 +33,7 @@ AUTHORITY + EFFECTS
 9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
 
 ADAPTIVE MODE + CAPABILITIES
-10. ACTIVE_EXECUTION 1B governs attended mode; no invented Pro receipt. Automated router/budget gates remain; switch only for critical-path need.
+10. ACTIVE_EXECUTION 1B governs human-attended mode fit/stickiness; no invented Pro receipt. Automated router/budget gates remain; switch only for critical-path need.
 11. Capabilities vary by action/session. Extra High is a recovery candidate, not guaranteed access; one success proves no other capability.
 12. Discover needed actions; untested is not unavailable. Track permissions/results; use next authorized action or harmless check, not dummy production writes. Never invent telemetry.
 13. Distinguish tool/auth/safety denial, request error, rate limit, EFFECT_UNKNOWN. First explicit safety/permission denial ends that action: no rephrased/shortened/cross-tool/account retry. Reconcile effects; continue safe work.
