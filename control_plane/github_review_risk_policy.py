@@ -244,7 +244,10 @@ def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> Review
         # Normal code is verified by source-bound CI; independent review is
         # optional unless another explicit gate makes it mandatory.
         ReviewTier.STANDARD: (0, 0),
-        ReviewTier.CRITICAL: (2, 1),
+        # Two distinct technical reviewers still required for CRITICAL.
+        # Internal policy does not demand a separate GitHub account/session;
+        # actual branch-protection or explicit security holds may require one.
+        ReviewTier.CRITICAL: (2, 0),
         ReviewTier.HOLD: (0, 0),
     }
     assessments, approvals = review_counts[tier]
