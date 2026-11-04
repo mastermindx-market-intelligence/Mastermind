@@ -101,22 +101,16 @@ Use when a worker/Fable/Claude/Codex/Grok session returns code, a PR, research o
 completion. Reviews against original outcome, not merely implementation quality.
 
 ### `docs/SESSION_LOCAL_REVIEW_POLICY.md`
-Mandatory first for any PR/source review decision in ChatGPT Web, native Codex,
-Claude and Fabric. The working session owns a self-check and may spawn an
-actually available distinct reviewer subagent **inside that same session**:
-no third-party chat is a default dependency. Assess accepted risk-tier demands,
-technical independence and actual formal GitHub approval separately. This
-source pointer does not install a Project instruction or grant a spawn tool.
+Before every PR review, load this at the same pin. The current session
+self-checks routine work and may manage a real native reviewer child.
+Formal non-author GitHub approval is a distinct gate.
 
 ### `docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md`
-For a *new independent PR/source review*, load this shared session-side guide from the **same
-verified protected Mastermind commit** before choosing an avenue. It explains when the
-current session may use actually admitted Fabric versus a separately authorized Slack
-Dot assessment, preserving existing author/reviewer identity, original effects, and
-the non-author formal GitHub review gate. The guide is **not** an additional runtime,
-reviewer registry, permission, credential, watcher or retry authority. Source enrollment
-here does not install a ChatGPT Project instruction, Fabric plugin or native skill;
-prove each live surface separately.
+For a *new independent PR/source review* needing an external avenue, load
+this guide from the **same verified protected Mastermind commit** before choosing an avenue.
+It is **not** a second runtime, reviewer registry or permission owner, and
+**does not install** ChatGPT Project instructions, Fabric or native tools.
+Preserve exact reviewer identity, effects and formal GitHub approval boundaries.
 
 ### `COMMISSION_WAVE.md`
 Use when Chairman intent authorizes Sol to send bounded work to Fable/another operator or,
