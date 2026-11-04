@@ -471,6 +471,44 @@ def _c2_paper_v20_postpin_start(svc, account, roots, plan, raw, current, manifes
     return current == config_bytes and manifest == manifest_bytes
 
 
+def _fleet_paper_v20_postpin_start(svc, account, roots, plan, raw, current, manifest):
+    """Compose only frozen eight-seat Paper CAS with the selected native-pool pin.
+
+    The original native-pool result, selected phase and exact pool digest
+    remain mandatory in require_start. No new cohort, pin or writer is created.
+    """
+    enrolled = getattr(svc, "FLEET_V20_ENROLLED_ACCOUNTS", ())
+    if account not in enrolled or account == "mastermind-os-publication":
+        return False  # The publication seat has no native-pool pin to compose.
+    if any(stat.S_IMODE(roots[n].lstat().st_mode) != plan[n + "_mode"]
+           for n in ("config", "manifest")):
+        return False
+
+    cohort = svc._frozen_paper_fleet_module()
+    pinned = cohort.COHORTS.get(account)
+    if (pinned is None
+            or plan.get("manifest_after") != pinned.get("manifest_sha256")
+            or digest(raw["manifest.after.json"]) != pinned.get("manifest_sha256")
+            or digest(raw["config.after.json"]) != pinned.get("config_sha256")):
+        return False
+
+    # The already accepted pure planner checks original three byte-sealed
+    # resources, exact immutable predecessor, non-Paper profile and target v20.
+    plist_bytes = svc._fabric_release_bytes(roots["plist"], limit=64 * 1024)
+    try:
+        successor = cohort.plan_selection(
+            account,
+            manifest_bytes=raw["manifest.after.json"],
+            config_bytes=raw["config.after.json"],
+            plist_bytes=plist_bytes,
+            home=svc._user_root(),
+        )
+    except ValueError:
+        return False
+    return (current == successor["configBytes"]
+            and manifest == successor["manifestBytes"])
+
+
 def require_start(svc, account, roots):
     """Only an OWNED future-pin transition adds a startup fence."""
     path = roots["state"] / "native-pool-pin"
@@ -513,6 +551,8 @@ def require_start(svc, account, roots):
                  and manifest == raw["manifest.after.json"]
                  and state(svc, roots, raw, plan) == "COMPLETE")
                 or _c2_paper_v20_postpin_start(
+                    svc, account, roots, plan, raw, current, manifest)
+                or _fleet_paper_v20_postpin_start(
                     svc, account, roots, plan, raw, current, manifest)
             )
             or binding.get("phase") != "SELECTED"
