@@ -315,7 +315,7 @@ function privateFabricStatus(account, ready = false) {
   return row;
 }
 
-test('private Fabric seats are verified but never exposed in the 13-seat owner result', async t => {
+test('private owner seats are verified but never exposed in the 14-seat owner result', async t => {
   const publicSeats = [
     'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal',
     'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4',
@@ -323,6 +323,7 @@ test('private Fabric seats are verified but never exposed in the 13-seat owner r
   const privateSeats = [
     'fabric-c3-570f6f34', 'fabric-chatgpt3-w570f6f34',
     'fabric-design', 'fabric-read', 'subagent-fabric-c3',
+    'mastermind-os-publication',
   ];
   const owner = ownerFor([
     ...publicSeats.map((account) => ({ account, ready: false, error: 'owner status unavailable' })),
@@ -331,8 +332,9 @@ test('private Fabric seats are verified but never exposed in the 13-seat owner r
     { account: privateSeats[2], ready: false, error: '/private/root/key/shaped diagnostic' },
     { account: privateSeats[3], ready: false, error: 'private daemon unavailable' },
     privateFabricStatus(privateSeats[4]),
+    privateFabricStatus(privateSeats[5]),
   ]);
-  assert.equal(owner.accountCount, 13);
+  assert.equal(owner.accountCount, 14);
   assert.equal(owner.readyCount, 0);
   const fx = await fixture(JSON.stringify(owner));
   t.after(() => rm(fx.dir, { recursive:true, force:true }));
@@ -341,6 +343,7 @@ test('private Fabric seats are verified but never exposed in the 13-seat owner r
   assert.equal(result.accountCount, publicSeats.length);
   assert.equal(result.readyCount, 0);
   assert.equal(result.allReady, false);
+  assert.equal(result.ownerRosterClassified, true);
   assert.deepEqual(result.accounts.map((row) => row.account), publicSeats);
   const rendered = JSON.stringify(fleetStatusToolResult(result));
   for (const secret of [...privateSeats, '/private/root/key', 'tunnel_0123456789abcdef', 'org-SensitiveInternal']) {
@@ -411,6 +414,31 @@ test('new owner-enumerated private Fabric seats remain bounded and undisclosed',
   assert.deepEqual(result.issues, ['OWNER_FLEET_DEGRADED']);
   assert.deepEqual(result.accounts.map(x => x.account), ['chatgpt1']);
   assert.equal(JSON.stringify(result).includes('fabric-new-worker-catalog-2027'), false);
+});
+
+test('exact private OS publication seat is classified but not publicly visible', async t => {
+  const owner = ownerFor([
+    statusRow('chatgpt1', true),
+    privateFabricStatus('mastermind-os-publication'),
+  ]);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive: true, force: true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.ownerRosterClassified, true);
+  assert.equal(result.publicAllReady, true);
+  assert.equal(result.allReady, false);
+  assert.equal(result.state, 'DEGRADED');
+  assert.deepEqual(result.accounts.map(row => row.account), ['chatgpt1']);
+  assert.equal(JSON.stringify(fleetStatusToolResult(result)).includes('mastermind-os-publication'), false);
+  const unknown = ownerFor([
+    statusRow('chatgpt1', true),
+    privateFabricStatus('mastermind-os-publication-replacement', true),
+  ]);
+  const fx2 = await fixture(JSON.stringify(unknown));
+  t.after(() => rm(fx2.dir, {recursive: true, force: true}));
+  const result2 = await createFleetStatus(fx2.config).status();
+  assert.equal(result2.ownerRosterClassified, false);
+  assert.equal(result2.state, 'DEGRADED');
 });
 
 test('unknown future owner account is hidden and cannot produce READY even when full owner reports ready', async t => {

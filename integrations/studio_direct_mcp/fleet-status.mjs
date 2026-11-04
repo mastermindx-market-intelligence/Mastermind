@@ -159,7 +159,8 @@ const PUBLIC_TRANSPORT_TTL = '5h';
 const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
 const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
 // Validate the full owner enumeration, but disclose only the public subset.
-const PRIVATE_OWNER_ACCOUNT = /^(?:fabric|subagent-fabric)-[a-z0-9][a-z0-9-]{0,62}$/;
+// Include the already enrolled sixth private owner without exposing it as a public seat.
+const PRIVATE_OWNER_ACCOUNT = /^(?:(?:fabric|subagent-fabric)-[a-z0-9][a-z0-9-]{0,62}|mastermind-os-publication)$/;
 // Accept the incumbent owner's future valid account labels without treating
 // new identities as public or silently qualifying their readiness. Unknown
 // labels remain opaque and explicitly force a degraded result.
