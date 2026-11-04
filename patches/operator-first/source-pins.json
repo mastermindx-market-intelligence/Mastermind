@@ -1,16 +1,16 @@
 {
   "schema": "mastermind.source_patch_evidence.v1",
   "incumbent_pr": 1228,
-  "incumbent_head": "d2f73a8fbd360f2cfbcb39e67ff2dece1bde403c",
+  "incumbent_head": "a2b4964e789b5b75ac9236f8db6f839a41813d52",
   "path": "ops/executive_os/provider_orchestrator_policy.py",
-  "before_sha256": "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594",
-  "after_sha256": "292102adbec03b7076d766714872b40631534b0a1ba80955d5567dd3379c740b",
-  "patch_sha256": "774ea4fc460cceb657318fccb4b38283fd9586ec9bb702a421ee5102019998ef",
+  "before_sha256": "1db7e21fcbdac041304b27101eb506cc7810340d61330db293f2ad22efc0bfe1",
+  "after_sha256": "f8b14739a252214c4d90ec163b07f10d273da3a4649b65ba11650075467facb2",
+  "patch_sha256": "08796dacdc63b1295d9664432aa3d910985c4bad4d2bda617d352664b09133ff",
   "role_source_sha256": {
-    "SKILL.md": "926cd8d3ec4930589a85f74feca22efbf83dad7cf1920589261eae756fe40558",
-    "references/meta-ceo.md": "01bc3da774de8bb1abc9339dc93b91eda17680897a78bed44a3334eda6b14389",
-    "references/program-ceo.md": "323c765dd98aacf5aab3ad8af241864f564b86eda76ccd0d71c70b8f8f679a24",
-    "references/operator.md": "00324679522fc5d07d10c4fc57dcaf00277f1a301eff26c4deff7aa45c9afe7b",
+    "SKILL.md": "2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8",
+    "references/meta-ceo.md": "df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240",
+    "references/program-ceo.md": "91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47",
+    "references/operator.md": "8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c",
     "references/worker.md": "c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924",
     "references/reviewer.md": "0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c"
   },
@@ -18,9 +18,10 @@
   "runtime_admission_proven": false,
   "incumbent_tests": {
     "path": "tests/test_provider_orchestrator_policy.py",
-    "before_sha256": "ebb40cdccf6cfc454e25ed652700f3cae7402e5735192154b289936940e5bd5d",
-    "after_sha256": "897c869955b9b9afc60b5d8ed3442b67ae5c331ec0a4a1021ccecdc5ccc256d5",
-    "patch_sha256": "e385065ae78450c96a18c3110c7abf0e6379b04a798ab9dcb5291fe18a2eabf6",
+    "before_sha256": "591e0b91cac9a8d5ed0a43352900da13e2b878f6a705a60b3ac6755d5aa70bcc",
+    "after_sha256": "bebd41469d076a871082005784f06071fabe569c82e26ca4142b16e8d4b05b93",
+    "patch_sha256": "8ae720c7bfc0787f7ae6258838f33cb42950fea0310e2c49073f9ac2d69e968d",
     "reason": "Three old Sol-default assertions updated to current operator-first intent; all mechanical tests retained."
-  }
+  },
+  "guard_sha256": "6c3549eb0ff4616980ce34621548d76db7f784909716963927f1442e1a502e9e"
 }

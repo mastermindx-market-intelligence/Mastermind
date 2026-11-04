@@ -122,6 +122,8 @@ def foreground(api, run_id, task_class, **kwargs):
         raise ValueError("continuation_operator_children_not_qualified")
     if not all(provider_outcome.IDENT.fullmatch(v) for v in (run_id, root, parent)):
         raise ValueError("continuation_identity_invalid")
+    if kwargs.get("max_turns") is not None:
+        kwargs["max_turns"] = api.validate_request_max_turns(kwargs["max_turns"])
     here = api.HERE
     # The native transport's existing total fuse is conserved across attempts.
     budget = int(os.environ.get("REMOTE_SUB_MAX_SECS", "7200"))
@@ -138,7 +140,8 @@ def foreground(api, run_id, task_class, **kwargs):
         raise ValueError("continuation_origin_already_exists")
     provider_outcome.write_new(request_path, {"schema": SCHEMA, "origin_run_id": run_id,
         "root_id": root, "parent_run_id": parent, "max_attempts": MAX_ATTEMPTS,
-        "wall_seconds": budget, "deadline_ns": deadline_ns, "background_execution": False})
+        "wall_seconds": budget, "deadline_ns": deadline_ns, "background_execution": False,
+        **({"max_turns": kwargs["max_turns"]} if kwargs.get("max_turns") is not None else {})})
     current, rc, reason = run_id, 75, "controller_exception"
     try:
         for ordinal in range(MAX_ATTEMPTS):

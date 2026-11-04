@@ -1744,3 +1744,27 @@ def test_gateway_malformed_json_refuses_before_lifecycle(tmp_path, native_plutil
     assert "gateway release qualification failed" in err
     assert calls == []
     assert remaining == ""
+
+
+
+def test_a2_restored_readside_rejects_noninstalled_source_before_launchctl(tmp_path):
+    # This fixture executes the real case with all *valid* witness flags and
+    # simulated root/Darwin, but the controller bytes remain in a test checkout,
+    # not the canonical sealed release directory.
+    from tests.test_executive_autonomy_control import SHA
+    args = (
+        "--expected-sha", SHA,
+        "--expected-control-sha256", "a" * 64,
+        "--expected-previous-release-sha", "b" * 40,
+        "--expected-previous-tree-sha", "c" * 40,
+        "--expected-previous-config-sha256", "d" * 64,
+        "--expected-previous-plist-sha256", "e" * 64,
+        "--expected-bot-user-id", "U0BT71H4FQE",
+    )
+    assert len(args) == 14
+    rc, out, err, calls, remaining, *_ = _run(
+        tmp_path, "start-restored-a2-readside", [], extra_args=args,
+    )
+    assert rc == 65, (out, err)
+    assert not calls and not remaining
+    assert "usage:" not in err

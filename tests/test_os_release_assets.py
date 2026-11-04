@@ -42,24 +42,45 @@ def source(tmp_path):
     return repo, sha, git(repo, "rev-parse", "HEAD^{tree}")
 
 
-def built_dist(app):
+NOTICE_BYTES = {
+    "third-party/deepseek-client-dependency-NOTICES.txt": b"Dependency copyright notices\n",
+    "third-party/deepseek-harness-LICENSE.txt": b"Harness license and copyright\n",
+}
+
+
+def built_dist(app, *, noir_notices=False):
     dist = app / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text('<script src="/os/assets/index-a.js"></script><link href="/os/assets/index-a.css">')
     (dist / "assets/index-a.js").write_text("committed app bytes")
     (dist / "assets/index-a.css").write_text("body{}")
+    if noir_notices:
+        extra = {
+            "assets/atelier-office-a.jpg": b"office image",
+            "assets/Manrope-Variable-a.ttf": b"Manrope font",
+            "assets/Inter-Variable-a.woff2": b"Inter font",
+            "licenses/fonts/Inter-OFL.txt": b"Inter license",
+            "licenses/fonts/Manrope-OFL.txt": b"Manrope license",
+            "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
+            **NOTICE_BYTES,
+        }
+        for name, data in extra.items():
+            path = dist / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
     return {"operator_uid": 501, "tools": {"/test/node": "a" * 64, "/test/npm-cli.js": "b" * 64}}
 
 
 @pytest.fixture
-def bundle(tmp_path, source, monkeypatch):
+def bundle(tmp_path, source, monkeypatch, request):
     mod = helper()
     # Production requires root-sealed paths and a root preparer; ordinary unit
     # temporary directories only replace those OS ownership checks. Archive,
     # source policy, receipts, byte validation and import remain the real code.
     monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(mod, "_require_root", lambda: None)
-    monkeypatch.setattr(mod, "_build", lambda app, **kwargs: built_dist(app))
+    monkeypatch.setattr(mod, "_build", lambda app, **kwargs: built_dist(
+        app, noir_notices=getattr(request, "param", False)))
     repo, sha, tree = source
     out = tmp_path / "bundle"
     mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
@@ -180,6 +201,70 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     with pytest.raises(ValueError):
         mod.import_assets(checked, stage)
     assert before == {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("bundle", [True], indirect=True)
+def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path):
+    mod, out, sha, tree = bundle
+    manifest = json.loads((out / mod.DIST / "asset-manifest.json").read_bytes())
+    rows = {item["path"]: item for item in manifest["files"]}
+    assert len(rows) == 11
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    stage = tmp_path / "notice-stage"
+    stage.mkdir()
+    mod.import_assets(checked, stage)
+    for name, data in NOTICE_BYTES.items():
+        assert rows[name] == {"path": name, "byte_count": len(data),
+                              "sha256": hashlib.sha256(data).hexdigest(),
+                              "mime": "text/plain; charset=utf-8"}
+        assert checked.files[name] == data
+        assert (stage / mod.DIST / name).read_bytes() == data
+    mod.compare_existing(checked, stage)
+
+
+@pytest.mark.parametrize("bundle", [True], indirect=True)
+def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
+    pytest.importorskip("mcp", reason="real HTTP loading belongs to the optional MCP network test environment")
+    _, out, _, _ = bundle
+    from ops.executive_os import executive_mcp_entry as entry
+    # Only sealed host ownership is replaced for the temporary fixture. The
+    # manifest, hashes, file loading, route admission and response bytes are real.
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
+    app = entry.load_os_app(out)
+    import asyncio
+    async def request(path):
+        messages = []
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+        async def send(message):
+            messages.append(message)
+        await app({"type": "http", "method": "GET", "path": path,
+                   "raw_path": path.encode("ascii"), "query_string": b""}, receive, send)
+        return messages
+    for name, data in NOTICE_BYTES.items():
+        messages = asyncio.run(request("/os/" + name))
+        assert messages[0]["status"] == 200
+        assert dict(messages[0]["headers"])[b"content-type"] == b"text/plain; charset=utf-8"
+        assert messages[-1]["body"] == data
+    assert asyncio.run(request("/os/third-party/unknown.txt"))[0]["status"] == 404
+
+
+@pytest.mark.parametrize("bundle", [True], indirect=True)
+@pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "extra_directory"])
+def test_noir_notice_capture_keeps_file_and_directory_sets_closed(bundle, damage):
+    mod, out, _, _ = bundle
+    dist = out / mod.DIST
+    notice = dist / "third-party/deepseek-harness-LICENSE.txt"
+    if damage == "missing":
+        notice.unlink()
+    elif damage == "renamed":
+        notice.rename(notice.with_name("other-LICENSE.txt"))
+    elif damage == "extra":
+        (dist / "third-party/extra.txt").write_text("unapproved")
+    else:
+        (dist / "third-party/extra").mkdir()
+    with pytest.raises(ValueError):
+        mod._capture_dist(out, sealed=False)
 
 
 @pytest.mark.parametrize("damage", ["wrong_sha", "wrong_tree", "asset_changed", "manifest_changed", "missing_manifest", "extra", "symlink", "hardlink", "fifo", "traversal"])
@@ -507,7 +592,7 @@ def test_installer_optional_preflight_refuses_before_service_stop(bundle, tmp_pa
     variables = {"PYTHON_BINARY": str(wrapper), "SCRIPT_DIR": str(root / "ops/executive_os"),
                  "SOURCE_REPO": str(out.parent / "source"), "EXPECTED_SHA": "a" * 40 if choice == "wrong_source" else sha,
                  "TREE_SHA": tree, "OS_WEB_ASSETS": "" if choice == "absent" else str(out),
-                 "RELEASE_ROOT": str(release)}
+                 "RELEASE_ROOT": str(release), "CONTROL_AEAD_BUNDLE": ""}
     script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in variables.items())
     script += "\n" + block + f"\nprintf stopped > {shlex.quote(str(effects))}\n"
     result = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True)
@@ -802,3 +887,59 @@ def test_cli_prepare_reads_one_explicit_canonical_manifest_file_and_defaults_to_
     with pytest.raises(ValueError):
         mod.main()
     assert not (tmp_path / "cli-partial").exists()
+
+
+@pytest.mark.parametrize("choices", [
+    None, [], {}, [{"ref": "frontier.one"}], [{"label": "One"}],
+    [{"ref": "UPPER", "label": "One"}], [{"ref": "frontier.one\n", "label": "One"}],
+    [{"ref": "frontier.one\r\n", "label": "One"}], [{"ref": "a" * 65, "label": "One"}],
+    [{"ref": "frontier.one", "label": "One", "provider": "caller"}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": ""}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": None}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": "bad\nreason"}],
+    [{"ref": "frontier.one", "label": "One", "unavailableReason": "x" * 257}],
+    [{"ref": "frontier.one", "label": "One"}, {"ref": "frontier.one", "label": "Duplicate"}],
+    [{"ref": f"frontier.{index}", "label": "Model"} for index in range(17)],
+])
+def test_frontier_manifest_refuses_unqualified_choice_shapes(choices):
+    with pytest.raises(ValueError):
+        helper().decode_launch_manifest(canonical(launch_manifest(frontierModels=choices)))
+
+
+def test_frontier_choice_bytes_survive_build_qualification_and_import(launch_bundle, tmp_path):
+    mod, prior, sha, tree, calls = launch_bundle
+    choices = [{"ref": "frontier.one", "label": "One"},
+               {"ref": "2", "label": "Two", "unavailableReason": "Session qualification pending"}]
+    raw = canonical(launch_manifest(frontierModels=choices))
+    out = tmp_path / "selected-bundle"
+    repo = prior.parent / "source"
+    mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id",
+                output=out, build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                executive_resource=mod.OS_EXECUTIVE_RESOURCE, launch_manifest=raw)
+    assert calls[-1]["launch_manifest"] == raw
+    selected = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=repo)
+    receipt = json.loads(selected.receipt)
+    assert receipt["launch_config"] == raw.decode("utf-8")
+    assert receipt["launch_config_sha256"] == hashlib.sha256(raw).hexdigest()
+    original = mod.qualify(prior, expected_sha=sha, tree_sha=tree, source_repo=repo)
+    assert selected.digest != original.digest
+    stage = tmp_path / "selected-stage"
+    stage.mkdir()
+    mod.import_assets(selected, stage)
+    mod.compare_existing(selected, stage)
+    assert json.loads((stage / mod.INSTALLED_RECEIPT).read_bytes())["launch_config"] == raw.decode("utf-8")
+
+
+def test_malformed_frontier_choice_refuses_before_any_build(launch_bundle, tmp_path):
+    mod, prior, sha, _tree, calls = launch_bundle
+    before = len(calls)
+    out = tmp_path / "must-not-be-built"
+    with pytest.raises(ValueError):
+        mod.prepare(source_repo=prior.parent / "source", expected_sha=sha,
+                    web_client_id="test-public-client-id", output=out, build_user="test",
+                    node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                    executive_resource=mod.OS_EXECUTIVE_RESOURCE,
+                    launch_manifest=canonical(launch_manifest(frontierModels=[
+                        {"ref": "frontier.one\n", "label": "One"}])))
+    assert len(calls) == before
+    assert not out.exists()

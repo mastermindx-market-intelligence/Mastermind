@@ -12,6 +12,9 @@ Never prints key values. Reads config only at runtime.
 from __future__ import annotations
 
 import argparse
+import contextvars
+import io
+import stat
 import hashlib
 import json
 import math
@@ -32,6 +35,210 @@ POOLS_YAML = os.path.join(HERE, "..", "orch", "fabric", "pools.yaml")
 if os.path.lexists(os.path.join(HERE, "pools.yaml")):
     from fabric_policy_snapshot import verified_snapshot_path
     POOLS_YAML = str(verified_snapshot_path(HERE))
+# Optional diagnostics observe this exact call; they never ask capacity twice.
+_SELECTION_OBSERVER = contextvars.ContextVar("fabric_selection_observer", default=None)
+_POOLS_INPUT = None
+_DIAGNOSTIC_POOLS = frozenset({"glm", "grok", "cursor", "minimax", "bailian",
+                             "go", "codex-native", "claude-native", "claude", "fable", "claude-fable", "ocfree"})
+_DIAGNOSTIC_HOSTS = frozenset({"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4", "m2"})
+_DIAGNOSTIC_MODELS = frozenset({"glm-5.3", "glm-5.3-flash", "grok-4.6", "grok-4.7",
+    "cursor-grok-4.6-high", "qwen3.8-max", "qwen3-coder-plus", "MiniMax-M2.5", "MiniMax-M3"})
+_DIAGNOSTIC_REASONS = {
+    "host_mode": {"host_mode_absent"}, "policy": {"policy_refused"},
+    "needs": {"capability_refused"}, "subject": {"independence_refused"},
+    "hard_filter": {"quota_cooldown", "quota_state_unavailable", "model_cap",
+                    "pool_cap", "pool_disabled", "pool_exhausted", "hard_filter_refused"},
+    "meter": {"meter_parked", "meter_spill"},
+    "emission": {"economic_refused", "emission_refused"},
+}
+
+
+def _diagnostic_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def _selection_regular_bytes(path, limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise ValueError("diagnostic input unavailable")
+        raw = b""
+        while len(raw) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(raw)))
+            if not part: break
+            raw += part
+        after, retained = os.fstat(fd), os.lstat(path)
+        fields = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if (len(raw) != before.st_size or fields(before) != fields(after)
+                or fields(before) != fields(retained)):
+            raise ValueError("diagnostic input changed")
+        return raw
+    finally:
+        os.close(fd)
+
+
+def _selection_source_hashes():
+    # Fixed incumbent source operands only. No caller-selected reader path.
+    return {name: hashlib.sha256(_selection_regular_bytes(
+        os.path.join(os.path.dirname(__file__), name), 256 * 1024)).hexdigest()
+        for name in ("pick.py", "fabric_task.py")}
+
+
+class _SelectionFacts:
+    __slots__ = ("key", "request_sha256", "line_sha256", "raw", "seal", "sources", "policy", "consumed")
+
+    def __init__(self, key, request_sha256, line_sha256, raw, seal, sources, policy):
+        for name, value in zip(self.__slots__, (key, request_sha256, line_sha256,
+                raw, seal, sources, policy, False)):
+            object.__setattr__(self, name, value)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("issued observation is immutable")
+
+
+class _SelectionCapture:
+    def __init__(self):
+        self.rows, self.routes, self.policy = [], {}, None
+        self.truncated, self.invalid = False, False
+
+    def record(self, pool, stage, reason, model=None):
+        if pool not in _DIAGNOSTIC_POOLS or reason not in _DIAGNOSTIC_REASONS.get(stage, ()):
+            self.invalid = True
+            return
+        if len(self.rows) >= 64:
+            self.truncated = True
+            return
+        host, mode = self.routes.get(pool, (None, None))
+        self.rows.append({"pool": pool, "stage": stage, "reason": reason,
+            "host": host if host in _DIAGNOSTIC_HOSTS else None,
+            "mode": mode if mode in {m for values in _HOST_POOL_MODES.values() for m in values} else None,
+            "model": model if model in _DIAGNOSTIC_MODELS else None})
+
+
+def _selection_record(pool, stage, reason, model=None):
+    try:
+        observer = _SELECTION_OBSERVER.get()
+        if observer is not None: observer.record(pool, stage, reason, model)
+    except Exception:
+        # Diagnostics never become a new routing/refusal condition.
+        pass
+
+
+def _selection_hard_rejection(pool, reason):
+    try:
+        category = "hard_filter_refused"
+        if type(reason) is str:
+            if reason == "provider quota cooldown": category = "quota_cooldown"
+            elif reason == "provider quota state unavailable": category = "quota_state_unavailable"
+            elif reason.startswith("glm model at broker cap (") and reason.endswith(")"): category = "model_cap"
+            elif (re.fullmatch(r"(?:grok|cursor|bailian|minimax|go) at cap [0-9]+", reason)
+                    or reason == "native subscription at shared cap"): category = "pool_cap"
+            elif reason == "glm disabled (no key)": category = "pool_disabled"
+            elif reason == "grok exhausted (GROK_EXHAUSTED marker)": category = "pool_exhausted"
+        _selection_record(pool, "hard_filter", category)
+    except Exception:
+        pass
+
+
+def _selection_policy(doc):
+    try:
+        observer = _SELECTION_OBSERVER.get()
+        if observer is None: return
+        binding = _POOLS_INPUT
+        if binding is None or binding[2] is not doc:
+            observer.invalid = True
+            return
+        parsed = hashlib.sha256(_diagnostic_json(doc)).hexdigest()
+        if parsed != binding[3] or (observer.policy is not None and observer.policy != binding):
+            observer.invalid = True
+        else:
+            observer.policy = binding
+    except Exception:
+        if _SELECTION_OBSERVER.get() is not None:
+            _SELECTION_OBSERVER.get().invalid = True
+
+
+def observed_format_pick(task_class, *, observation_key, request_sha256, **options):
+    """One normal pick plus optional facts; no alternate selection on failure."""
+    capture, sources = None, None
+    try:
+        sources = _selection_source_hashes()
+        capture = _SelectionCapture()
+    except Exception:
+        pass
+    token = _SELECTION_OBSERVER.set(capture)
+    try:
+        line = format_pick(task_class, **options)
+    finally:
+        _SELECTION_OBSERVER.reset(token)
+    facts = None
+    try:
+        if (capture is not None and not capture.invalid and capture.policy is not None
+                and capture.rows and type(line) is str and line == "NONE reason=no_operator_available"
+                and type(request_sha256) is str and re.fullmatch("[a-f0-9]{64}", request_sha256)):
+            policy = capture.policy
+            value = {"schema": "mastermind.fabric_selection_diagnostics.v1",
+                "request_sha256": request_sha256, "sources": sources,
+                "coverage": "judgment_rejection_branches",
+                "policy_sha256": policy[1], "parsed_policy_sha256": policy[3],
+                "decisions": capture.rows, "truncated": capture.truncated}
+            raw = _diagnostic_json(value)
+            if len(raw) <= 16384:
+                facts = _SelectionFacts(observation_key, request_sha256,
+                    hashlib.sha256(line.encode()).hexdigest(), raw,
+                    hashlib.sha256(raw).hexdigest(), sources, policy)
+    except Exception:
+        pass
+    return line, facts
+
+
+def consume_selection_refusal(facts, key, request_sha256, line):
+    """One issued observer, exact request/line and unchanged evaluated inputs.
+
+    Failure omits optional facts; it cannot change the incumbent refusal outcome.
+    """
+    try:
+        if (type(facts) is not _SelectionFacts or facts.key is not key or facts.consumed
+                or facts.request_sha256 != request_sha256 or type(line) is not str
+                or line != "NONE reason=no_operator_available"
+                or facts.line_sha256 != hashlib.sha256(line.encode()).hexdigest()):
+            return None
+        object.__setattr__(facts, "consumed", True)
+        if (len(facts.raw) > 16384 or hashlib.sha256(facts.raw).hexdigest() != facts.seal
+                or _selection_source_hashes() != facts.sources):
+            return None
+        path, input_sha, doc, parsed_sha = facts.policy
+        # This is an integrity recheck of the consumed text, not another YAML
+        # evaluation. Text-mode normalization matches incumbent load_pools.
+        raw_policy = _selection_regular_bytes(path, 1024 * 1024)
+        text = io.TextIOWrapper(io.BytesIO(raw_policy), encoding="utf-8").read()
+        if (hashlib.sha256(text.encode()).hexdigest() != input_sha
+                or hashlib.sha256(_diagnostic_json(doc)).hexdigest() != parsed_sha):
+            return None
+        value = json.loads(facts.raw)
+        if (set(value) != {"schema", "request_sha256", "sources", "policy_sha256",
+                "parsed_policy_sha256", "coverage", "decisions", "truncated"}
+                or value["schema"] != "mastermind.fabric_selection_diagnostics.v1"
+                or value["coverage"] != "judgment_rejection_branches"
+                or value["sources"] != facts.sources or value["request_sha256"] != request_sha256
+                or value["policy_sha256"] != input_sha or value["parsed_policy_sha256"] != parsed_sha
+                or type(value["truncated"]) is not bool
+                or not 1 <= len(value["decisions"]) <= 64):
+            return None
+        for row in value["decisions"]:
+            if (set(row) != {"pool", "stage", "reason", "host", "mode", "model"}
+                    or row["pool"] not in _DIAGNOSTIC_POOLS
+                    or row["reason"] not in _DIAGNOSTIC_REASONS.get(row["stage"], ())
+                    or row["host"] not in _DIAGNOSTIC_HOSTS | {None}
+                    or row["mode"] not in {None, *[m for modes in _HOST_POOL_MODES.values() for m in modes]}
+                    or row["model"] not in _DIAGNOSTIC_MODELS | {None}):
+                return None
+        return value
+    except Exception:
+        return None
+
+
 LEDGER_PATH = os.path.join(HERE, "..", "orch", "fabric", "ledger.jsonl")
 SLOT_ROOT = os.path.join(HERE, "slots")
 GROK_EXHAUSTED = os.path.join(HERE, "GROK_EXHAUSTED")
@@ -1006,16 +1213,48 @@ def _glm_pick_model(task_class: Optional[str],
 
 
 def _parked_bailian_keys() -> set:
-    """Keys parked due to high usage."""
+    """Keys parked due to high usage.
+
+    Only a fresh, applicable usage row with a literal parked=True parks its
+    account; stale, future, expired, malformed or missing usage facts stay
+    UNKNOWN and leave the key eligible (unknown usage never fabricates
+    exhaustion). Reads the same existing BAILIAN_USAGE document through the
+    shared bailian_keys.read_usage_eligibility helper; an unreadable document
+    or an unavailable helper parks nothing (previous behavior).
+    """
     parked = set()
     try:
-        with open(BAILIAN_USAGE, encoding="utf-8") as fh:
-            data = json.load(fh)
-        for name, info in data.get("keys", {}).items():
-            if info.get("parked"):
-                parked.add(name)
+        with open(BAILIAN_USAGE, "rb") as fh:
+            raw = fh.read(1048577)
+        if len(raw) > 1048576:
+            return parked
+        data = json.loads(raw)
     except Exception:
-        pass
+        return parked
+    try:
+        import os as _os
+        import sys as _sys
+
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        import bailian_keys
+
+        _reader = bailian_keys.read_usage_eligibility
+    except Exception:
+        return parked
+    if not isinstance(data, dict):
+        return parked
+    keys_map = data.get("keys")
+    if not isinstance(keys_map, dict):
+        return parked
+    for _name in list(keys_map):
+        try:
+            _info = _reader(_name, path=BAILIAN_USAGE)
+        except Exception:
+            continue
+        if _info.get("state") == "CURRENT" and _info.get("parked") is True:
+            parked.add(_name)
     return parked
 
 
@@ -1091,7 +1330,7 @@ def _default_model(pool: str, task_class: Optional[str] = None) -> str:
             return _glm_model_for_class(task_class)
         return _glm_model()
     MODELS = {
-        "grok":    "grok-4.6",
+        "grok":    "grok-4.7",
         "cursor":  "composer-2.5",
         "codex-native": "gpt-6.1-sol",
         "claude-native": "opus",
@@ -1107,24 +1346,36 @@ def _default_model(pool: str, task_class: Optional[str] = None) -> str:
 
 def load_pools(path: Optional[str] = None) -> Dict[str, Any]:
     """Load orch/fabric/pools.yaml. Cached. Empty dict if unreadable."""
-    global _POOLS_DOC
+    global _POOLS_DOC, _POOLS_INPUT
     if path is None and _POOLS_DOC is not None:
+        _selection_policy(_POOLS_DOC)
         return _POOLS_DOC
     target = path or POOLS_YAML
     try:
         import yaml  # type: ignore
         with open(target, encoding="utf-8") as fh:
-            doc = yaml.safe_load(fh) or {}
+            text = fh.read()
+        doc = yaml.safe_load(text) or {}
     except Exception:
         doc = {}
+        text = None
     if path is None:
         _POOLS_DOC = doc
+        _POOLS_INPUT = None
+        try:
+            if text is not None:
+                _POOLS_INPUT = (target, hashlib.sha256(text.encode()).hexdigest(), doc,
+                                hashlib.sha256(_diagnostic_json(doc)).hexdigest())
+        except Exception:
+            pass
+        _selection_policy(doc)
     return doc
 
 
 def reset_pools_cache() -> None:
-    global _POOLS_DOC
+    global _POOLS_DOC, _POOLS_INPUT
     _POOLS_DOC = None
+    _POOLS_INPUT = None
 
 
 def canonical_pool(name: Optional[str]) -> Optional[str]:
@@ -1177,7 +1428,7 @@ def judgment_order(doc: Optional[Dict[str, Any]] = None) -> List[str]:
 
 
 JUDGMENT_CLASSES_R28 = frozenset({
-    "operator", "reviewer", "adjudicate", "decompose", "audit", "repair",
+    "operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",
     "domain_orchestration",
 })
 LABOR_CLASSES_R30 = frozenset({
@@ -1578,7 +1829,11 @@ def _selection_model(pool: str, task_class: str,
             suffix += "+glm_credit_promo"
         return resolved_model, suffix
     spec = ((doc or load_pools()).get("pools") or {}).get(pool) or {}
-    model = (model if pool == "cursor" and model == "cursor-grok-4.6-high" else None) or spec.get("default_model") or _default_model(pool, task_class)
+    # Preserve the exact caller-authorized Grok Build version. A default
+    # upgrade must never relabel a historical explicitly pinned 4.6 job.
+    pinned = ((pool == "grok" and model in ("grok-4.6", "grok-4.7"))
+              or (pool == "cursor" and model == "cursor-grok-4.6-high"))
+    model = (model if pinned else None) or spec.get("default_model") or _default_model(pool, task_class)
     if pool == "bailian" and task_class.lower() == "review":
         model = spec.get("review_model") or "qwen3.8-max"
     return model, suffix
@@ -1600,10 +1855,13 @@ def _emit(pool: str, reason: str, task_class: str,
                           task_complexity=task_complexity,
                           escalation_reason=escalation_reason)
     if not guard.get("allowed"):
+        _selection_record(pool, "emission", "economic_refused", resolved_model)
         return "NONE reason=" + str(guard.get("reason") or "launch_policy_refused")
-    key = _bailian_key_name() if pool == "bailian" else "-"
+    # Account identity belongs to the incumbent lease broker. The advisory
+    # picker must never print names supplied by an account/credential source,
+    # even when one happens to resemble a harmless label.
     reason += suffix
-    line = f"POOL={pool} KEY={key} MODEL={resolved_model} REASON={reason}"
+    line = f"POOL={pool} KEY=- MODEL={resolved_model} REASON={reason}"
     if is_execute_class(task_class, doc):
         escalate = next_escalate(
             pool, doc, model=resolved_model, task_class=task_class
@@ -1874,19 +2132,25 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
                   required_platforms=required_platforms)
     if excluded_hosts is not None:
         common["excluded_hosts"] = excluded_hosts
-    affinity = (requested_model == "grok-4.6" and canonical_pool(pool) in (None, "grok")) or (
+    affinity = (requested_model in ("grok-4.6", "grok-4.7") and canonical_pool(pool) in (None, "grok")) or (
         canonical_pool(pool) == "grok" and requested_model is None)
     if not affinity:
         return _format_pick_host(task_class, pool=pool, requested_model=requested_model, **common)
-    primary = _format_pick_host(task_class, pool="grok", **common)
-    if primary.startswith("POOL=") or not _grok_exhausted():
+    primary = _format_pick_host(task_class, pool="grok", requested_model=requested_model, **common)
+    # A caller's exact Grok Build version is a model-identity constraint,
+    # not a transferable quality/affinity hint. Cursor's similarly named
+    # model and all other pools are distinct; never substitute for an explicit
+    # requested_model, even when the weekly Grok pool is exhausted. The
+    # existing monthly Cursor failover remains for *unpinned* Grok affinity.
+    if (primary.startswith("POOL=") or not _grok_exhausted()
+            or requested_model in ("grok-4.6", "grok-4.7")):
         return primary
     same = _format_pick_host(task_class, pool="cursor", requested_model="cursor-grok-4.6-high", **common)
     if same.startswith("POOL="):
-        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
+        return same + " AFFINITY=grok QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true"
     other = _format_pick_host(task_class, **common)
     if other.startswith("POOL="):
-        return other + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-exhausted MODEL_CHANGED=true"
+        return other + " AFFINITY=grok QUOTA_FAILOVER=grok-exhausted MODEL_CHANGED=true"
     return other
 
 
@@ -1927,7 +2191,8 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
     if host is not None:
         try:
             glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
-                model=requested_model if requested_model != "cursor-grok-4.6-high" else None)[0]
+                model=(requested_model if requested_model not in
+                       ("cursor-grok-4.6-high", "grok-4.6", "grok-4.7") else None))[0]
             qwen_candidate_model = _selection_model("bailian", task_class, load_pools(), needs)[0]
             routes = _eligible_host_routes(
                 host, glm_model=glm_candidate_model,
@@ -1938,6 +2203,11 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
                 **({"excluded_hosts": excluded_hosts} if excluded_hosts is not None else {}),
             )
             modes = {pool: route[1] for pool, route in routes.items()}
+            try:
+                observer = _SELECTION_OBSERVER.get()
+                if observer is not None: observer.routes = dict(routes)
+            except Exception:
+                pass
         except Exception as exc:
             return f"NONE reason=host prerequisite unavailable ({type(exc).__name__})"
         if not modes:
@@ -1984,10 +2254,15 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
     explicit_model = str(requested_model or "").strip().casefold()
     forced = canonical_pool(pool)
     if complexity and complexity not in TASK_COMPLEXITY_CLASSES:
-        return f"NONE reason=unknown_task_complexity ({complexity})"
+        return "NONE reason=unknown_task_complexity"
     # Complexity alone is classification, never permission to upgrade. Only
     # the existing full-GLM C2 build escalation is admitted by this narrow API.
     native_alias = explicit_model == "cursor-grok-4.6-high"
+    grok_pin = explicit_model in ("grok-4.6", "grok-4.7")
+    if grok_pin:
+        if forced not in (None, "grok"):
+            return "NONE reason=exact Grok Build model requires grok pool"
+        forced = "grok"
     if native_alias:
         if forced != "cursor":
             return "NONE reason=exact native alias requires cursor pool"
@@ -2002,29 +2277,42 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
         # This exact high-effort alias was observed in the authenticated Cursor
         # catalog. Capability/host, economic, quality and independence gates
         # below are still required; catalog presence is not worker admission.
-    if explicit_model and not native_alias:
-        models = {str(value).casefold() for value in _glm_models(doc).values()}
-        full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
-        if explicit_model not in models:
-            return f"NONE reason=unknown requested_model ({explicit_model})"
-        effective_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
-        if forced and effective_pool != "glm":
-            return f"NONE reason=requested_model contradicts pool={pool!r}"
-        if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
-            return "NONE reason=requested model/complexity escalation not admitted"
-        guard = launch_policy(
-            "glm", tc, explicit_model, escalation_reason=escalation_reason,
-            doc=doc, task_complexity=complexity,
-        )
-        if not guard.get("allowed"):
-            return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
-        if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
-            return "NONE reason=explicit model held by GLM peak labor policy"
-        forced = "glm"
+    if explicit_model and not native_alias and not grok_pin:
+        # Exact worker pinning is never an arbitrary model promotion. Permit
+        # the current task-qualified default for its explicitly chosen pool;
+        # keep the pre-existing full GLM C2 escalation narrow and witnessed.
+        selected_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
+        glm_models = {str(value).casefold() for value in _glm_models(doc).values()}
+        if explicit_model in glm_models:
+            if selected_pool and selected_pool != "glm":
+                return f"NONE reason=requested_model contradicts pool={pool!r}"
+            normal_model, _ = _selection_model("glm", tc, doc)
+            if not (selected_pool == "glm" and explicit_model == str(normal_model).casefold()):
+                full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
+                if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
+                    return "NONE reason=requested model/complexity escalation not admitted"
+                guard = launch_policy(
+                    "glm", tc, explicit_model, escalation_reason=escalation_reason,
+                    doc=doc, task_complexity=complexity,
+                )
+                if not guard.get("allowed"):
+                    return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
+                if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
+                    return "NONE reason=explicit model held by GLM peak labor policy"
+            forced = "glm"
+        elif selected_pool:
+            if selected_pool not in (doc.get("pools") or {}):
+                return "NONE reason=unknown forced pool"
+            admitted_default, _ = _selection_model(selected_pool, tc, doc)
+            if not admitted_default or admitted_default.casefold() != explicit_model:
+                return "NONE reason=requested model not admitted for selected pool/task"
+            forced = selected_pool
+        else:
+            return "NONE reason=exact model requires provider pool"
     if forced:
         forced = ROUTING_TOKEN_POOLS.get(forced, forced)
         if forced not in (doc.get("pools") or {}):
-            return f"NONE reason=unknown forced pool={pool!r}"
+            return "NONE reason=unknown forced pool"
     prefer_c = canonical_pool(prefer)
     needs = [n.lower().strip() for n in (needs or []) if n and n.strip()]
 
@@ -2033,7 +2321,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             return "NONE reason=go_short_capability_only_for_c0_c1"
         if host_modes is not None and forced not in host_modes:
             return f"NONE reason=pool {forced} has no eligible mode on requested host"
-        selected_model = (explicit_model or None) if forced == "glm" or native_alias else None
+        selected_model = (explicit_model or None) if forced in ("glm", "grok") or native_alias else None
         ok, reason = policy_allows(forced, tc, doc, model=selected_model)
         if not ok:
             return f"NONE reason={reason}"
@@ -2058,7 +2346,9 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             host_modes=host_modes, task_complexity=complexity, escalation_reason=escalation_reason
         )
 
-    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:
+    # Independent review/audit remain judgment even when legacy execute_classes includes them.
+    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.
+    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):
         return _pick_execute(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                              task_complexity=complexity, escalation_reason=escalation_reason,
                              route_key=route_key)
@@ -2177,7 +2467,7 @@ def _cursor_grok_after_quota(tc, *, needs=None, subject_pool=None, host_modes=No
         needs=needs, subject_pool=subject_pool, host_modes=host_modes,
         task_complexity=task_complexity, escalation_reason=escalation_reason)
     if same.startswith("POOL="):
-        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
+        return same + " AFFINITY=grok QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true"
     return same
 
 
@@ -2301,24 +2591,31 @@ def _pick_scored(tc: str, prefer: Optional[str],
                 if same.startswith("POOL="):
                     return same
             if host_modes is not None and p not in host_modes:
+                _selection_record(p, "host_mode", "host_mode_absent")
                 continue
             ok, reason = policy_allows(p, tc, doc)
             if not ok:
+                _selection_record(p, "policy", "policy_refused")
                 continue
             ok, reason = _needs_ok(p, needs, tc, doc)
             if not ok:
+                _selection_record(p, "needs", "capability_refused")
                 continue
             ok, reason = _subject_ok(p, tc, subject_pool, doc)
             if not ok:
+                _selection_record(p, "subject", "independence_refused")
                 continue
             ok, reason = hard_filter(p, tc, doc, needs)
             if not ok:
+                _selection_hard_rejection(p, reason)
                 continue
             if p == "glm":
                 state = _glm_meter_state()
                 if state == "PARKED":
+                    _selection_record(p, "meter", "meter_parked")
                     continue
                 if state == "SPILL":
+                    _selection_record(p, "meter", "meter_spill")
                     continue
             why = f"judgment_order_{p}"
             if burn_down_urgent(p, doc):
@@ -2550,7 +2847,7 @@ def launch_policy(mode: str, task_class: str, model: str,
         result["reason"] = "frontier_witness_recorded"
         return result
 
-    if (normalized_mode == "grok" and normalized_model == "grok-4.6"
+    if (normalized_mode == "grok" and normalized_model in ("grok-4.6", "grok-4.7")
             and model_tier.CLASS_TIER.get(normalized_task) == "leaf-labor"
             and _grok_priority_active(policy_doc, normalized_task)):
         result.update(reason="grok_expiring_quota_authorization", tier="leaf-labor")
@@ -2587,7 +2884,9 @@ def pick(task_class: str, prefer: Optional[str] = None,
         escalation_reason=escalation_reason, requested_model=requested_model,
         route_key=route_key,
     )
-    print(line)
+    # This is a bounded CLI result, not an application logger. Do not log
+    # arbitrarily supplied model/pool strings or a credential's value.
+    sys.stdout.write(line + "\n")
     if explain:
         print("REASON_CHAIN")
         for reason in _explain_pick(task_class, line, doc):

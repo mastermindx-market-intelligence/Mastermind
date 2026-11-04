@@ -2,7 +2,7 @@ mcp.mastermind-x.com {
   route {
     @get {
       method GET
-      path /os/ /os/auth/callback /workspace/programs/current /workspace/work/current /workspace/mission/current /workspace/mission/v3/current /workspace/result/current /workspace/plan/current /workspace/operator/activity/current /workspace/window/current __ASSET_PATHS__
+      path /os/ /os/auth/callback /workspace/programs/current /workspace/work/current /workspace/mission/current /workspace/mission/v3/current /workspace/result/current /workspace/result-references/current /workspace/plan/current /workspace/operator/activity/current /workspace/window/current /workspace/control-room/state/current /workspace/control-room/discover/current /workspace/mission/v4/current /workspace/fabric/catalog/current /workspace/fabric/status/current __ASSET_PATHS__
     }
     handle @get {
       reverse_proxy 127.0.0.1:__RELAY_PORT__ {
@@ -20,7 +20,7 @@ mcp.mastermind-x.com {
     }
     @post {
       method POST
-      path /os/executive/context /os/executive/submit /os/executive/status
+      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references /workspace/control-room/open /workspace/control-room/bind /workspace/control-room/unbind /workspace/control-room/refresh-builds
     }
     handle @post {
       request_body {
@@ -35,6 +35,45 @@ mcp.mastermind-x.com {
         header_up -EO-Connecting-IP
         header_up -EO-Client-IP
         header_up Host mcp.mastermind-x.com
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For 127.0.0.1
+      }
+    }
+    @mcpmeta {
+      method GET
+      path /.well-known/oauth-protected-resource/mcp
+    }
+    handle @mcpmeta {
+      reverse_proxy 127.0.0.1:__RELAY_PORT__ {
+        header_up -Forwarded
+        header_up -X-Forwarded-Host
+        header_up -X-Forwarded-Port
+        header_up -X-Real-IP
+        header_up -CF-Connecting-IP
+        header_up -EO-Connecting-IP
+        header_up -EO-Client-IP
+        header_up Host mcp.mastermind-x.com
+        header_up X-Forwarded-Proto https
+        header_up X-Forwarded-For 127.0.0.1
+      }
+    }
+    @mcp {
+      method POST
+      path /mcp
+    }
+    handle @mcp {
+      request_body {
+        max_size 64KB
+      }
+      reverse_proxy 127.0.0.1:__RELAY_PORT__ {
+        header_up -Forwarded
+        header_up -X-Forwarded-Host
+        header_up -X-Forwarded-Port
+        header_up -X-Real-IP
+        header_up -CF-Connecting-IP
+        header_up -EO-Connecting-IP
+        header_up -EO-Client-IP
+        header_up Host 127.0.0.1
         header_up X-Forwarded-Proto https
         header_up X-Forwarded-For 127.0.0.1
       }
