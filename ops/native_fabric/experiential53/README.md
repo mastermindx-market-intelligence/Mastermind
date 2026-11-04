@@ -147,7 +147,9 @@ inference transport behind the manual pin — not a second status scaffold:
   environment or file credential path (it does not even import `os`), and a
   provider `xpl_` key is refused outright (`PROVIDER_KEY_REFUSED`). The token
   is excluded from `repr`/results/summaries/refusal details; refusal details
-  carry metadata only, so they are log-safe.
+  carry metadata only, so they are log-safe. Rejected model values and
+  Content-Type headers contribute only bounded expected-model/content-type
+  metadata; their raw values never enter reason, detail, str or repr.
 * **Per-request acks.** Retention acknowledgement, sensitive-data disclosure
   opt-in and the independent proprietary-code opt-in are re-validated by the
   pin admission on every call — nothing cached, nothing implied. Account A
@@ -155,7 +157,7 @@ inference transport behind the manual pin — not a second status scaffold:
   authenticated readback, has unknown quota = no capacity.
 * **Packet identity preserved.** `run_id` and `packet_root` are validated,
   carried through unchanged, and returned on the secret-free outcome.
-* **Mock proof vs live proof.** `test_experiential_transport.py` (86 tests)
+* **Mock proof vs live proof.** `test_experiential_transport.py` (91 tests)
   and the CLI `mockproof` subcommand prove every law above against an
   in-process mock gateway on an ephemeral loopback port with zero provider
   contact. That is SOURCE MOCK PROOF only — not a live provider call, not an

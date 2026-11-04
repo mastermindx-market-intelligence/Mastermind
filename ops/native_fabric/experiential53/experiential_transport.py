@@ -527,7 +527,7 @@ def _classify_http_error(status: int, content_type: str,
         refusal = ExperientialTransportRefused("GATEWAY_STATUS_REFUSED", f"status {status}")
     else:
         refusal = ExperientialTransportRefused(
-            "GATEWAY_RESPONSE_MALFORMED", f"content-type {content_type!r}")
+            "GATEWAY_RESPONSE_MALFORMED", "expected Content-Type application/json")
     if provider_request_id:
         refusal.detail = (f"{refusal.detail}; provider_request_id="
                           f"{provider_request_id}")
@@ -547,7 +547,7 @@ def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str]
     """
     if not content_type.lower().startswith("application/json"):
         raise ExperientialTransportRefused(
-            "GATEWAY_RESPONSE_MALFORMED", f"content-type {content_type!r}")
+            "GATEWAY_RESPONSE_MALFORMED", "expected Content-Type application/json")
     try:
         frame = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -560,7 +560,7 @@ def _parse_completion(raw: bytes, content_type: str) -> Tuple[str, Optional[str]
         if not isinstance(model_echo, str) or model_echo != MODEL:
             raise ExperientialTransportRefused(
                 "GATEWAY_RESPONSE_MODEL_MISMATCH",
-                f"expected {MODEL!r}, gateway returned {model_echo!r}")
+                f"expected pinned model {MODEL!r}")
     choices = frame.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ExperientialTransportRefused("GATEWAY_RESPONSE_MALFORMED", "no choices")

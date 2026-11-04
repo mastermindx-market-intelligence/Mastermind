@@ -91,7 +91,7 @@ describe("React read lifecycle fences", () => {
     window.MastermindMissionHost = { readPrograms: () => pending.promise, readMission };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
     expect(header.getByText("SOURCE READ PENDING")).toBeTruthy();
     const raw = controlRoomFixture();
@@ -112,7 +112,7 @@ describe("React read lifecycle fences", () => {
     raw.autonomy.responsibilities = [];
     window.MastermindMissionHost = { readPrograms: async () => raw };
     render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: "Open Programs" }));
+    await userEvent.click(screen.getByRole("button", { name: "Programs workspace" }));
     const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
     expect(await header.findByText("AVAILABLE")).toBeTruthy();
     expect(header.getByText("0 Programs from the bounded source observation.")).toBeTruthy();
@@ -122,7 +122,7 @@ describe("React read lifecycle fences", () => {
     history.replaceState(null, "", "/os/");
     window.MastermindMissionHost = { readPrograms: async () => { throw new Error("private producer detail"); } };
     render(<App />);
-    await userEvent.click(screen.getByRole("button", { name: "Open Programs" }));
+    await userEvent.click(screen.getByRole("button", { name: "Programs workspace" }));
     const header = within(screen.getByRole("heading", { name: "Programs", level: 1 }).closest("header")!);
     expect(await header.findByText("Program source unavailable; current company movement is not inferred.")).toBeTruthy();
     expect(header.getByText("UNAVAILABLE")).toBeTruthy();
@@ -135,7 +135,7 @@ describe("React read lifecycle fences", () => {
     window.MastermindMissionHost = { readPrograms: async () => raw, readMission };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(await screen.findByText(/Next action withheld/)).toBeTruthy();
     expect(document.body.innerHTML).not.toContain(unsafe);
     await user.click(screen.getByRole("button", { name: /Beta program/ }));
@@ -192,7 +192,7 @@ describe("React read lifecycle fences", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     await user.click(
       await screen.findByRole("button", { name: /Beta program/ }),
     );
@@ -252,7 +252,7 @@ describe("React read lifecycle fences", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(await screen.findByText("SOURCE_UNAVAILABLE")).toBeTruthy();
     expect(document.body.textContent).not.toContain("private detail");
   });
@@ -291,7 +291,7 @@ describe("React read lifecycle fences", () => {
     window.MastermindMissionHost = { readPrograms: () => pending.promise };
     const user = userEvent.setup();
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(
       screen.getByText(/Reading the bounded Control Room projection/),
     ).toBeTruthy();
@@ -310,7 +310,7 @@ describe("React read lifecycle fences", () => {
     const failed = deferred<unknown>();
     window.MastermindMissionHost = { readPrograms: () => failed.promise };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     await act(async () => failed.reject(new Error("private detail")));
     expect(await screen.findByText("SOURCE_UNAVAILABLE")).toBeTruthy();
     expect(
@@ -495,7 +495,7 @@ describe("Executive OS convergence surfaces", () => {
     expect(
       screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 }),
     ).toBeTruthy();
-    expect(screen.getByText("CAPACITY_SOURCE_NOT_CONNECTED")).toBeTruthy();
+    expect(screen.getByText("No qualified retained host observation is connected. CPU, memory and disk readings remain unknown.")).toBeTruthy();
     expect(screen.queryByText("Missingness and source state")).toBeNull();
   });
 
@@ -524,8 +524,9 @@ describe("Executive OS convergence surfaces", () => {
     expect(readMission).toHaveBeenCalledTimes(readsBeforeActivity);
   });
 
-  it("does not turn the absent Chairman-decision feed into an all-clear", () => {
+  it("does not turn the absent Chairman-decision feed into an all-clear", async () => {
     render(<App />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
     const attention = screen
       .getByRole("heading", {
         name: "Chairman attention is not established.",
@@ -544,16 +545,16 @@ describe("Executive OS convergence surfaces", () => {
 });
 
 describe("native and interaction contracts", () => {
-  it("keeps exactly five Company destinations and contextual operational routes", async () => {
+  it("keeps five Company destinations and readable advanced operational routes", async () => {
     render(<App />);
     const company = screen.getByRole("navigation", { name: "Company navigation" });
     expect(within(company).getAllByRole("button").map(button => button.textContent?.trim().replace(/^[^A-Za-z]+/, ""))).toEqual([
       "Today", "Projects", "Inbox", "Conversations", "Knowledge",
     ]);
-    const operations = screen.getByRole("navigation", { name: "Company operations" });
-    expect(within(operations).getByRole("button", { name: "Work" })).toBeTruthy();
-    expect(within(operations).getByRole("button", { name: "Open Programs" })).toBeTruthy();
-    await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity" }));
+    const operations = screen.getByRole("navigation", { name: "Mission navigation" });
+    expect(within(operations).getByRole("button", { name: "Work queue" })).toBeTruthy();
+    expect(within(operations).getByRole("button", { name: "Programs workspace" })).toBeTruthy();
+    await userEvent.setup().click(within(operations).getByRole("button", { name: "Fleet & Capacity workspace" }));
     expect(screen.getByRole("heading", { name: "Fleet & Capacity", level: 1 })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "Company operations" })).toBeNull();
   });
@@ -565,12 +566,12 @@ describe("native and interaction contracts", () => {
     };
     const user = userEvent.setup();
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Today", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What would you like done?", level: 1 })).toBeTruthy();
     const originalUrl = location.href;
     await user.click(screen.getByRole("link", { name: "Skip to workspace" }));
     expect(document.activeElement).toBe(screen.getByRole("main"));
     expect(location.href).toBe(originalUrl);
-    expect(screen.getByRole("heading", { name: "Today", level: 1 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What would you like done?", level: 1 })).toBeTruthy();
   });
   it("native mode invokes readiness only and never fetches", async () => {
     const fetchSpy = vi
@@ -585,7 +586,7 @@ describe("native and interaction contracts", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("heading", { name: "Today", level: 1 }),
+      screen.getByRole("heading", { name: "What would you like done?", level: 1 }),
     ).toBeTruthy();
     expect(
       screen.getByText(
@@ -637,7 +638,7 @@ describe("native and interaction contracts", () => {
   it("distinguishes an absent Programs source from a malformed source", async () => {
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(
       screen.getByRole("heading", { name: "Programs", level: 1 }),
     ).toBeTruthy();
@@ -650,7 +651,7 @@ describe("native and interaction contracts", () => {
       readPrograms: async () => ({ invalid: true }),
     };
     render(<App />);
-    await user.click(screen.getByRole("button", { name: "Open Programs" }));
+    await user.click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(await screen.findByText("SCHEMA_INVALID")).toBeTruthy();
   });
   it("graph and list share identities and restore keyboard focus", async () => {
@@ -1274,6 +1275,7 @@ describe("route focus handoff", () => {
     const user = userEvent.setup();
     render(<App />);
     expect(document.activeElement).toBe(document.body);
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     screen.getByRole("button", { name: "Open Programs" }).focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(
@@ -1305,6 +1307,7 @@ describe("route focus handoff", () => {
     };
     const user = userEvent.setup();
     render(<App />);
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     screen.getByRole("button", { name: "Open Programs" }).focus();
     await user.keyboard("{Enter}");
     (await screen.findByRole("button", { name: /Beta program/ })).focus();
@@ -1327,6 +1330,7 @@ describe("route focus handoff", () => {
     };
     render(<App />);
     expect(document.activeElement).toBe(document.body);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Meta-CEO" }));
     const action = screen.getByRole("button", { name: "Open Programs" });
     action.focus();
     await act(async () => pending.resolve(controlRoomFixture()));
@@ -1435,6 +1439,7 @@ describe("result card and same-observation Mission lifecycle", () => {
     render(<App />);
     await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
     expect(h.detail).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await user.click(screen.getByText("Subagent Fabric · inspect execution"));
     const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
     await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
@@ -1468,7 +1473,8 @@ describe("result card and same-observation Mission lifecycle", () => {
       const user = userEvent.setup();
       render(<App />);
       await waitFor(() => expect(window.MastermindMissionHost!.readMissionV3).toHaveBeenCalledTimes(1));
-      await user.click(screen.getByText("Subagent Fabric · inspect execution"));
+      await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
+    await user.click(screen.getByText("Subagent Fabric · inspect execution"));
       const inside = within(screen.getByRole("region", { name: "Inside this mission" }));
       await user.click(await inside.findByRole("button", { name: new RegExp("^" + ref.job_id + " ·") }));
       const button = inside.getByRole("button", { name: "Inspect indexed result" });
@@ -1623,9 +1629,9 @@ describe("actual unconfigured web owner lifecycle", () => {
     ).toBe(true);
     await userEvent
       .setup()
-      .click(screen.getByRole("button", { name: "Open Programs" }));
+      .click(screen.getByRole("button", { name: "Programs workspace" }));
     expect(document.activeElement).toBe(
-      screen.getByRole("heading", { name: "Programs", level: 1 }),
+      screen.getByRole("button", { name: "Programs workspace" }),
     );
     expect(calls).toBe(0);
   });
@@ -2281,7 +2287,7 @@ describe("App command composition", () => {
       screen.getByRole("heading", { name: "Projects", level: 1 }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected"),
+      screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected"),
     ).toBe("true");
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledTimes(1);

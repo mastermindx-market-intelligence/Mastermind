@@ -1082,6 +1082,65 @@ class ExactModelEchoTests(unittest.TestCase):
         self._case("glm-5.3")
 
 
+class MalformedMetadataSecretFreeTests(unittest.TestCase):
+    """Rejected provider metadata must not enter any public refusal surface."""
+
+    PROMPT_MARKER = "PROMPT_SENTINEL_2042_PRIVATE"
+    TOKEN_MARKER = "xpl_2042_fixture_private_token"
+
+    def _assert_secret_free(self, refusal):
+        surfaces = (refusal.reason, refusal.detail, str(refusal), repr(refusal))
+        for surface in surfaces:
+            for marker in (self.PROMPT_MARKER, self.TOKEN_MARKER,
+                           PROXY_TOKEN, PROVIDER_KEY):
+                self.assertNotIn(marker, surface)
+        self.assertLessEqual(len(refusal.detail), 128)
+
+    def _case(self, payload, content_type, reason):
+        server = MockGateway(lambda *a: (200, content_type, payload, {}))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with self.assertRaises(REFUSED) as caught:
+                run_ok(server, prompt=self.PROMPT_MARKER)
+            self.assertEqual(caught.exception.reason, reason)
+            self.assertEqual([request[0] for request in server.requests], ["POST"])
+            self.assertEqual(server.requests[0][1], "/v1/chat/completions")
+            self._assert_secret_free(caught.exception)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_wrong_string_model_does_not_reflect_prompt_or_token(self):
+        model = f"wrong/{self.PROMPT_MARKER}/{self.TOKEN_MARKER}/{PROXY_TOKEN}"
+        self._case(completion_frame(model=model), "application/json",
+                   "GATEWAY_RESPONSE_MODEL_MISMATCH")
+
+    def test_wrong_object_model_does_not_reflect_nested_private_values(self):
+        model = {"unexpected": {"prompt": self.PROMPT_MARKER,
+                                "token": self.TOKEN_MARKER,
+                                "proxy": PROXY_TOKEN, "provider": PROVIDER_KEY}}
+        self._case(completion_frame(model=model), "application/json",
+                   "GATEWAY_RESPONSE_MODEL_MISMATCH")
+
+    def test_wrong_array_model_does_not_reflect_nested_private_values(self):
+        model = [self.PROMPT_MARKER, {"secret": self.TOKEN_MARKER}, PROXY_TOKEN]
+        self._case(completion_frame(model=model), "application/json",
+                   "GATEWAY_RESPONSE_MODEL_MISMATCH")
+
+    def test_non_json_header_does_not_reflect_private_parameters(self):
+        content_type = (
+            f"text/plain; prompt={self.PROMPT_MARKER}; token={self.TOKEN_MARKER}; "
+            f"proxy={PROXY_TOKEN}"
+        )
+        self._case(completion_frame(), content_type, "GATEWAY_RESPONSE_MALFORMED")
+
+    def test_classification_helper_does_not_reflect_unvalidated_content_type(self):
+        refusal = transport._classify_http_error(
+            200, f"text/plain; prompt={self.PROMPT_MARKER}; token={self.TOKEN_MARKER}")
+        self.assertEqual(refusal.reason, "GATEWAY_RESPONSE_MALFORMED")
+        self._assert_secret_free(refusal)
+
+
 def run_mockproof() -> bool:
     """The CLI-embedded hermetic proof.  Loopback mock only; no provider.
 

@@ -103,7 +103,7 @@ Dispatch does not end the turn. Advance independent principal judgment, integrat
 
 Repair allowance comes from the admitted job, not a universal retry count or per-edit parent messages. Two equivalent failures require reassessment. A genuinely changed candidate/input/failure signature may justify another bounded attempt under its real retry owner and budget; cosmetic revisions do not reset the count. Return architectural contradiction to the principal. Cancellation/reset/replacement retains its existing effect contract.
 
-Consume compact artifact identity/digest, validation, findings, blockers and next decision. A summary navigates to proof; it does not replace proof. Review depth follows consequence and uncertainty. Read decisive underlying evidence without replaying full transcripts or all labor; preserve required independent review.
+Consume compact artifact identity/digest, validation, findings, blockers and next decision. A summary navigates to proof; it does not replace proof. Review depth follows consequence and uncertainty. Read decisive underlying evidence without replaying full transcripts or all labor; preserve binding independent review.
 
 Global Capacity and existing child/depth/budget grants bound fanout across sessions. Parallelize independent, custody-compatible work, not coupled writers. Unconsumed review backlogs require useful review/integration before more dispatch. Cheap compute and spare cores do not enlarge the admitted graph or budget.
 

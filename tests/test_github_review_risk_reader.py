@@ -200,7 +200,7 @@ def test_non_app_fake_reader_refused():
         GitHubReviewRiskReader(api=object(), repository=REPO)
 
 
-def test_full_signed_current_head_preflight_uses_four_authenticated_gets():
+def test_full_signed_current_head_preflight_uses_three_authenticated_gets():
     fixture = ApiFixture()
     advice = advise_current_pr_review(
         fixture.reader, origin=ReviewOrigin.AUTOMATIC_POLICY,
@@ -208,7 +208,10 @@ def test_full_signed_current_head_preflight_uses_four_authenticated_gets():
     )
     assert advice.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
     assert advice.head_sha == SHA
-    assert len(fixture.calls) == 4
+    assert len(fixture.calls) == 3
+    assert fixture.calls[0][1].endswith("/pulls/1989")
+    assert fixture.calls[1][1].endswith("/files?per_page=100&page=1")
+    assert fixture.calls[2][1].endswith("/pulls/1989")
 
 
 def test_changed_head_after_completed_census_fails_closed():
@@ -252,6 +255,7 @@ def test_real_reviewer_falsifiers_through_signed_reader_and_dispatch(path, tier)
     expected = (ReviewDispatch.SKIP_NO_REVIEW_NEEDED if tier is ReviewTier.FAST
                 else ReviewDispatch.AUTO_REVIEW_ELIGIBLE)
     assert advice.action is expected
+    assert advice.source_tier is tier
 
 
 def test_explicit_manual_review_skips_risk_preflight_and_keeps_original_route():
