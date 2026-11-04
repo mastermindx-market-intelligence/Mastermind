@@ -78,8 +78,8 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
             "original carrier",
             "not canonically reconciled",
             "do not infer PASS from rc0",
-            "do not rerun the operation",
-            "an explicit safety/permission denial",
+            "Do not rerun the operation",
+            "An explicit safety/permission denial",
             "advance genuinely independent authorized work",
             "all useful independent lanes are exhausted",
             '"Ask the original owner/chat"',
@@ -125,7 +125,6 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
             "preserve its original carrier and release hold",
             "do not infer PASS from rc0",
             "Do not rerun the operation",
-            "do not",
         ):
             self.assertIn(phrase, contract)
 
