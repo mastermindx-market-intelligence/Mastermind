@@ -28,7 +28,7 @@ def shell_function(path):
 
 
 def budget(path, maximum, poll):
-    assert isinstance(maximum, int) and 1 <= maximum <= 7200
+    assert isinstance(maximum, int) and 1 <= maximum <= 14400
     assert isinstance(poll, int) and 1 <= poll <= maximum
     script = (
         f'COMMISSION_ACTIVE=0; MAX_SECS={maximum}; POLL_SECS={poll}; '
@@ -46,6 +46,7 @@ class TerminalPollBudgetTests(unittest.TestCase):
     def test_max_fuse_unchanged_and_two_interval_reserve(self):
         for file in PATHS:
             for maximum, poll, expected_child in (
+                (14400, 30, 14340),
                 (7200, 30, 7140),
                 (3600, 30, 3540),
                 (3600, 10, 3580),
@@ -103,7 +104,8 @@ class TerminalPollBudgetTests(unittest.TestCase):
             self.assertIn('while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do', body)
             self.assertIn('EFFECT_UNKNOWN timeout max_secs=$MAX_SECS rc_file_missing=1; preserve broker lease until TTL', body)
             self.assertIn('PRESERVE_LEASE=1', body)
-            self.assertIn('MAX_SECS must not exceed 7200', body)
+            self.assertIn('MAX_SECS must not exceed 14400' if file == PATHS[0]
+                          else 'MAX_SECS must not exceed 7200', body)
 
     def test_native_inventory_closure_and_original_preimage(self):
         manifest = json.loads((ROOT / 'rollout/native-manifest.json').read_text())
@@ -117,7 +119,7 @@ class TerminalPollBudgetTests(unittest.TestCase):
         # binds S7 same-operation private-diagnostic proof retention.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         '7da97d3b99a0b9bc7f8aa15f7b405a099f22d8954feb9fb9ec24acf2c3092e92')
+                         'e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),

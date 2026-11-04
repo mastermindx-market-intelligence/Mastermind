@@ -5,9 +5,10 @@ This verifies that adding Qwen selection fixes does not silently revert it.
 No live generation, provider, account, bridge, lease or runner is touched.
 
 2026-10-22 release-composition extension: the builder first checks all nine
-exact protected overlay bases, then substitutes exactly the four
-previously-reviewed candidate-forward bytes. This file adds the closed
-four-name forward-map set check, absolute SHA-256 pinning for the four
+exact protected overlay bases, then substitutes the four
+previously-reviewed candidate-forward bytes plus three new finite-runtime
+forward candidates (not independently reviewed or installed). This file adds the closed
+protected four-name historical map plus three bounded new names, absolute SHA-256 pinning for the four
 protected Qwen files, symlinked-candidate and tampered-accepted-base
 negatives (typed mismatch, no completed manifest). Existing guarded runtime
 suites qualify freshness and caller UTC behavior separately. Every negative
@@ -33,11 +34,10 @@ NAMES = (
 )
 QWEN = ("bailian_keys.py", "lease_broker.py",
         "glm_host_account_probe.py", "glm_host_account_source.py")
-FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
-BASE_ONLY_OVERLAY_NAMES = (
-    "artifact_delivery.py", "fabric_operator_client.py",
-    "fabric_operator_contract.py", "native_remote.py", "sub.sh",
-)
+HISTORICAL_FORWARD_NAMES = ("pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py")
+LONG_HORIZON_FORWARD_NAMES = ("fabric_operator_contract.py", "native_remote.py", "sub.sh")
+FORWARD_NAMES = HISTORICAL_FORWARD_NAMES + LONG_HORIZON_FORWARD_NAMES
+BASE_ONLY_OVERLAY_NAMES = ("artifact_delivery.py", "fabric_operator_client.py")
 PROTECTED_QWEN_SOURCE_DIGESTS = {
     "bailian_keys.py":
         "a6a775dd3204c4e508dedf9a892d80d3dd42069e88c1e9462c049e9cedbee085",
@@ -311,13 +311,15 @@ def test_builder_refuses_tampered_overlay_base_despite_valid_forward(tmp_path, n
     assert not (stage / "native-source-inventory.json").exists()
 
 
-def test_forward_map_is_the_closed_reviewed_four_name_set():
-    """The forward substitution is exactly four reviewed names over nine bases."""
+def test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds():
+    """Keep the historical four and byte-pin three new finite-runtime deltas."""
     builder = read_builder()
     forward = builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS
     merged = builder.GROK47_MERGED_SOURCE_DIGESTS
     assert len(merged) == 9 and set(merged) == set(NAMES)
-    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 4
+    assert set(HISTORICAL_FORWARD_NAMES) == {"pick.py", "remote_sub.sh", "remote_sub_exec.py", "remote_sub_helpers.py"}
+    assert set(LONG_HORIZON_FORWARD_NAMES) == {"fabric_operator_contract.py", "native_remote.py", "sub.sh"}
+    assert set(forward) == set(FORWARD_NAMES) and len(forward) == 7
     assert set(forward) < set(merged)
     assert set(merged) - set(forward) == set(BASE_ONLY_OVERLAY_NAMES)
     for name, value in sorted(forward.items()):

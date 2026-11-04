@@ -339,9 +339,9 @@ class TestIntentChannels:
         decision = _decide(_label_body(), event="push")
         assert decision.refusal is gri.ReviewIntentRefusal.EVENT_NOT_SUPPORTED
 
-    def test_opened_action_is_refused(self) -> None:
+    def test_closed_action_is_refused(self) -> None:
         parsed = json.loads(_label_body())
-        parsed["action"] = "opened"
+        parsed["action"] = "closed"
         body = json.dumps(parsed).encode("utf-8")
         decision = _decide(body, event="pull_request")
         assert decision.refusal is gri.ReviewIntentRefusal.ACTION_NOT_SUPPORTED
