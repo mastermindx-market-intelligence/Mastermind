@@ -42,19 +42,33 @@ empty = dict(schema='mastermind.fabric_task_status.v1', run_id=rid,
              root_id=None, parent_run_id=None, state='NOT_FOUND',
              result_available=False, result_bytes=None, accepted=None, accepted_by=None)
 if args.action == 'preview':
-    if args.pool != 'glm' or args.requested_model not in ('glm-5.3', 'auto'):
+    if args.pool == 'glm' and args.requested_model in ('glm-5.3', 'auto'):
+        model, mode = 'glm-5.3', 'glm'
+    elif args.pool == 'experiential' and args.requested_model == 'glm-5.3-uncensored':
+        model, mode = 'glm-5.3-uncensored', 'experiential'
+    else:
         raise SystemExit(78)
     # Read-only preview, intentionally no per-run file or reservation.
+    # This is a synthetic route, not native admission or provider entitlement.
     print(json.dumps(dict(state='PREVIEW_ONLY', reserved=False, run_id=rid,
-                          pool='glm', model='glm-5.3', mode='glm', host='synthetic-host',
+                          pool=args.pool, model=model, mode=mode, host='synthetic-host',
                           selection_rechecked_at_request=True,
                           strict_pin_enforced_at_request=True)))
 elif args.action == 'request':
     # Independently require strict policy after the prior no-effect preview.
-    if (not args.strict_manual_pin or args.pool != 'glm'
-        or args.requested_model != 'glm-5.3' or args.quota_fallback
-        or args.task_class != 'review' or args.max_turns != 12
-        or args.subject_pool != 'openai' or path.exists()):
+    # The Experiential branch is a provider-free fixture only.
+    if not args.strict_manual_pin or args.quota_fallback or path.exists():
+        raise SystemExit(78)
+    if args.pool == 'glm':
+        if (args.requested_model != 'glm-5.3' or args.task_class != 'review'
+            or args.max_turns != 12 or args.subject_pool != 'openai'):
+            raise SystemExit(78)
+    elif args.pool == 'experiential':
+        if (args.requested_model != 'glm-5.3-uncensored'
+            or args.task_class != 'mechanical' or args.max_turns is not None
+            or args.subject_pool is not None):
+            raise SystemExit(78)
+    else:
         raise SystemExit(78)
     packet = sys.stdin.read()
     response = b'RETURN: VERIFIED\n\n'

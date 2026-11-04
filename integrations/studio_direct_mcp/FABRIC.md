@@ -276,11 +276,12 @@ passing cloud source tests alone does not establish this installed-engine proof.
 The optional `fabric-http-manual-qualification.mjs` invokes a real authenticated
 HTTP gateway/SDK plus the maintained Desktop Commander process engine, but binds
 only the separately marked **synthetic** `fixtures/fabric-adapter-manual.py`.
-It verifies a successful exact GLM-5.3 model-pin preview, strictly constrained
-native request with the original root, no cross-provider fallback, cross-session
-result retrieval and deterministic acceptance. All fixture host/model/return data
-are synthetic and no provider key, quota, actual worker or live Fabric ledger is
-accessed. Run it only on the qualified host with `MMX_FABRIC_ENGINE_ENTRY` bound
+It verifies separate exact Z.AI GLM-5.3 and manual Experiential GLM-5.3 Uncensored
+model-pin previews, strictly constrained synthetic requests with original roots,
+Experiential retention opt-in, no cross-provider fallback, cross-session result
+retrieval and deterministic acceptance. All fixture host/model/return data
+are synthetic; no provider key, quota, actual worker or live Fabric ledger is
+accessed. A green fixture is not native provider installation or paid inference. Run it only on the qualified host with `MMX_FABRIC_ENGINE_ENTRY` bound
 to its installed maintained engine; it is intentionally not a GitHub hosted test.
 The existing `fabric-http-qualification.mjs` retains the negative test for older
 native adapters that cannot enforce strict pins.
