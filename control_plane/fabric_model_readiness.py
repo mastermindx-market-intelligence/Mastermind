@@ -27,6 +27,9 @@ class ModelWitness:
     complete: bool
     models: tuple[str, ...]
     source_verified: bool
+    # Existing broker lease identity, verified by the incumbent native owner.
+    # Caller-supplied text does not by itself prove the lease is genuine.
+    lease_id: str
 
 
 @dataclass(frozen=True)
@@ -49,24 +52,32 @@ def qualify_model(
     *,
     provider: str,
     host: str,
+    lease_id: str,
     now: datetime,
 ) -> ModelPreflight:
     """Fail closed on unknown, stale, cross-host or incomplete model evidence.
 
-    This is suitable only at the *new-request pre-effect boundary*. Callers
-    must not apply it to a prior RUNNING/TERMINAL/EFFECT_UNKNOWN Attempt to
-    justify another launch. The original runtime remains authority on custody.
+    This is suitable only for a new request, after its incumbent broker has
+    assigned an exact lease and BEFORE provider/task execution. The same
+    native owner must verify that lease covers the selected host, account,
+    provider and installed credential realm. Merely passing matching lease
+    strings is not authentication and does not grant a new effect. Never
+    apply this to prior RUNNING/TERMINAL/EFFECT_UNKNOWN attempts.
     """
     if not all(_valid_identifier(v, _OWNER) for v in (provider, host)):
         return ModelPreflight(False, "MODEL_PREFLIGHT_SCOPE_INVALID")
     if not _valid_identifier(requested_model, _MODEL):
         return ModelPreflight(False, "MODEL_PREFLIGHT_REQUEST_INVALID")
+    if not _valid_identifier(lease_id, _OWNER):
+        return ModelPreflight(False, "MODEL_PREFLIGHT_LEASE_UNBOUND")
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
         return ModelPreflight(False, "MODEL_PREFLIGHT_CLOCK_INVALID")
     if not isinstance(witness, ModelWitness):
         return ModelPreflight(False, "MODEL_PREFLIGHT_EVIDENCE_MISSING")
     if witness.provider != provider or witness.host != host:
         return ModelPreflight(False, "MODEL_PREFLIGHT_ORIGIN_MISMATCH")
+    if witness.lease_id != lease_id or not _valid_identifier(witness.lease_id, _OWNER):
+        return ModelPreflight(False, "MODEL_PREFLIGHT_LEASE_MISMATCH")
     if witness.source_verified is not True or witness.complete is not True:
         return ModelPreflight(False, "MODEL_PREFLIGHT_UNQUALIFIED")
     if (not isinstance(witness.observed_at, datetime)
@@ -90,6 +101,7 @@ def qualify_grok_native_route(
     witness: ModelWitness | None,
     *,
     now: datetime,
+    lease_id: str,
     original_state: str,
 ) -> ModelPreflight:
     """Adapt an incumbent native pick to the read-only model-identity guard.
@@ -99,7 +111,9 @@ def qualify_grok_native_route(
     from a request argument. The selected host must *also* supply its own
     authenticated complete catalog evidence through its existing native
     owner. No caller-supplied dataclass or source_verified flag is trusted
-    without that owner-bound proof.
+    without that owner-bound proof. The same applies to lease_id: the
+    incumbent broker/host owner must prove its current lease/account binding;
+    a matching caller-supplied string is not trustworthy evidence.
     """
     if original_state != "NEW_UNATTEMPTED":
         return ModelPreflight(False, "MODEL_PREFLIGHT_EXISTING_OPERATION")
@@ -111,7 +125,8 @@ def qualify_grok_native_route(
         if not _valid_identifier(route.get(field), _OWNER if field == "HOST" else _MODEL):
             return ModelPreflight(False, "MODEL_PREFLIGHT_ROUTE_INVALID")
     return qualify_model(
-        route["MODEL"], witness, provider="grok", host=route["HOST"], now=now
+        route["MODEL"], witness, provider="grok", host=route["HOST"],
+        lease_id=lease_id, now=now
     )
 
 

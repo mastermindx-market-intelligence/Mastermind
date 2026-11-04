@@ -16,7 +16,8 @@ NOW = datetime(2026, 11, 3, 23, 0, tzinfo=timezone.utc)
 def witness(**overrides):
     return replace(ModelWitness(
         provider="grok", host="ubuntu1", observed_at=NOW,
-        complete=True, models=("grok-4.6",), source_verified=True
+        complete=True, models=("grok-4.6",), source_verified=True,
+        lease_id="lease-123"
     ), **overrides)
 
 
@@ -25,6 +26,7 @@ def decision(model="grok-4.7", proof=None, **kwargs):
         model, witness() if proof is None else proof,
         provider=kwargs.get("provider", "grok"),
         host=kwargs.get("host", "ubuntu1"),
+        lease_id=kwargs.get("lease_id", "lease-123"),
         now=kwargs.get("now", NOW)
     )
 
@@ -56,6 +58,20 @@ class TestModelReadiness(unittest.TestCase):
                          "MODEL_PREFLIGHT_ORIGIN_MISMATCH")
         self.assertEqual(decision(provider="glm").code,
                          "MODEL_PREFLIGHT_ORIGIN_MISMATCH")
+
+    def test_credential_scoped_lease_identity_is_not_reusable(self):
+        # No catalog observed under another broker lease can qualify a new
+        # request, even when host, provider, model and timestamp are identical.
+        self.assertEqual(decision("grok-4.6", lease_id="lease-456").code,
+                         "MODEL_PREFLIGHT_LEASE_MISMATCH")
+        self.assertEqual(decision("grok-4.6", proof=witness(lease_id="lease-old")).code,
+                         "MODEL_PREFLIGHT_LEASE_MISMATCH")
+        self.assertEqual(decision("grok-4.6", lease_id="").code,
+                         "MODEL_PREFLIGHT_LEASE_UNBOUND")
+        self.assertEqual(decision("grok-4.6", lease_id="../lease").code,
+                         "MODEL_PREFLIGHT_LEASE_UNBOUND")
+        self.assertEqual(decision("grok-4.6", proof=witness(lease_id="")).code,
+                         "MODEL_PREFLIGHT_LEASE_MISMATCH")
 
     def test_time_window_does_not_permit_stale_or_future_proof(self):
         self.assertEqual(decision(proof=witness(observed_at=NOW-MAX_AGE)).code,
@@ -89,7 +105,8 @@ class TestNativeGrokRoute(unittest.TestCase):
         route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.7",
                  "HOST": "ubuntu3", "KEY": "-", "REASON": "judgment_order_grok"}
         snapshot = witness(host="ubuntu3", models=("grok-4.6",))
-        found = qualify_grok_native_route(route, snapshot, now=NOW, original_state="NEW_UNATTEMPTED")
+        found = qualify_grok_native_route(
+            route, snapshot, now=NOW, lease_id="lease-123", original_state="NEW_UNATTEMPTED")
         self.assertEqual(found.code, "MODEL_PREFLIGHT_MODEL_UNAVAILABLE")
         self.assertFalse(found.eligible)
         self.assertFalse(found.retry_authorized)
@@ -99,10 +116,21 @@ class TestNativeGrokRoute(unittest.TestCase):
         route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.6",
                  "HOST": "ubuntu3"}
         found = qualify_grok_native_route(
-            route, witness(host="ubuntu3"), now=NOW, original_state="NEW_UNATTEMPTED")
+            route, witness(host="ubuntu3"), now=NOW, lease_id="lease-123", original_state="NEW_UNATTEMPTED")
         self.assertEqual(found.code, "MODEL_ID_LISTED")
         self.assertTrue(found.eligible)
         self.assertFalse(found.dispatch_authorized)
+
+    def test_native_route_cannot_reuse_catalog_under_another_lease(self):
+        route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.6",
+                 "HOST": "ubuntu3"}
+        found = qualify_grok_native_route(
+            route, witness(host="ubuntu3"), now=NOW, lease_id="lease-456",
+            original_state="NEW_UNATTEMPTED")
+        self.assertEqual(found.code, "MODEL_PREFLIGHT_LEASE_MISMATCH")
+        self.assertFalse(found.eligible)
+        self.assertFalse(found.dispatch_authorized)
+        self.assertFalse(found.retry_authorized)
 
     def test_terminal_and_effect_unknown_cannot_reuse_eligibility(self):
         route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.6",
@@ -111,7 +139,7 @@ class TestNativeGrokRoute(unittest.TestCase):
                       "REQUEST_REFUSED_BEFORE_LAUNCH"):
             with self.subTest(prior=prior):
                 found = qualify_grok_native_route(
-                    route, witness(host="ubuntu3"), now=NOW, original_state=prior)
+                    route, witness(host="ubuntu3"), now=NOW, lease_id="lease-123", original_state=prior)
                 self.assertEqual(found.code, "MODEL_PREFLIGHT_EXISTING_OPERATION")
                 self.assertFalse(found.eligible)
                 self.assertFalse(found.retry_authorized)
@@ -125,7 +153,7 @@ class TestNativeGrokRoute(unittest.TestCase):
         for route in cases:
             with self.subTest(route=route):
                 found = qualify_grok_native_route(
-                    route, witness(host="ubuntu3"), now=NOW, original_state="NEW_UNATTEMPTED")
+                    route, witness(host="ubuntu3"), now=NOW, lease_id="lease-123", original_state="NEW_UNATTEMPTED")
                 self.assertFalse(found.eligible)
                 self.assertFalse(found.dispatch_authorized)
 
@@ -149,7 +177,7 @@ class TestGrokCliCatalogParser(unittest.TestCase):
         route = {"POOL": "grok", "MODE": "grok", "MODEL": "grok-4.7",
                  "HOST": "ubuntu3"}
         untrusted = qualify_grok_native_route(
-            route, None, now=NOW, original_state="NEW_UNATTEMPTED")
+            route, None, now=NOW, lease_id="lease-123", original_state="NEW_UNATTEMPTED")
         self.assertEqual(untrusted.code, "MODEL_PREFLIGHT_EVIDENCE_MISSING")
 
     def test_documented_auth_banner_variants(self):
