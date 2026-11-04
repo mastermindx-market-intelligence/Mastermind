@@ -81,7 +81,7 @@ class WorkerResponsibilityContinuityContractTests(unittest.TestCase):
             "Do not rerun the operation",
             "An explicit safety/permission denial",
             "advance genuinely independent authorized work",
-            "all useful independent lanes are exhausted",
+            "other useful independent lanes are exhausted",
             '"Ask the original owner/chat"',
         ):
             with self.subTest(required=required):
