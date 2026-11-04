@@ -73,3 +73,21 @@ Preserve the active Experiential gateway and Brain carriers #1849, #1918, #1920,
 Principal owns architecture, contradiction resolution, admission/effect decisions and integrated acceptance. Eligible bounded census/implementation uses the existing paid Fabric route; native agents, if useful, have judgment/coordinator roles only. Each worker receives one bounded source-bound question/outcome, exact original root/parent, original-carrier return, and no independent expansion. WHY NOT FABLE: source census and frozen bounded implementation do not need scarce principal-builder continuity.
 
 Source evidence is persisted in this repository and #983; Agent OS remains the organizational owner. Update this task tree at semantic milestones and continue safe ready work. This source plan grants no runtime launch or provider activation by itself.
+
+
+## 2026-11-04 source milestone: production API consumer
+
+- Architecture reconciled with existing Macro #7179 at `54d4e13be4b5545de661c56d0c1085f0a8ac9d52`: ordinary inference and durable agent jobs are separate execution classes under the existing governance. No new programme, account ledger, queue or service principal was introduced.
+- Direct principal source work reason: UNIQUE_APPROVED_ACCESS / CRITICAL_PATH_SHORTCUT. GitHub source mutation and local hermetic execution are verified; no delegated modifying worker started. The two read-only Fabric census effects below remain on their original carrier. This is not their re-dispatch or result acceptance.
+- Added the explicit Brain `production_mode` adapter through the incumbent Macro production API owner; the actual CIO narration composition passes 14 tests. Companion Macro commit: `3078e01887a5dc9faa0e403fd01ef51897e978d8` (no implicit MiniMax SDK replay). Detailed scope/proof: `docs/brain/production_inference.md`.
+- This is **BUILT_NOT_PROVEN** for production and **not unified Fabric pooling**. Both production modes stay disabled; GLM remains unqualified. Shared atomic capacity, original operation identity and web streaming/tool composition remain open.
+- Mastermind protected movement to `0a2768613c280102617c92c8e4d16e7585384293` changes only SOL_CEO_ACCOUNT_INSTRUCTIONS and BOOTSTRAP_KERNEL. The exact law delta was read; application code and original pin remain compatible. Routine project authority does not override actual denials, holds or unknown effects.
+- Related writers preserved: Mastermind #1918/#1946; Macro #7179. This branch does not mutate their branches or lift their holds.
+
+### Exact runtime boundaries
+
+- Original Fabric census `fabric-app-census-macro-terminal-20261104-01`, controller 50741, MiniMax/ubuntu0: terminal remote rc=1, missing usage receipt, `remote_cleanup_unproven`, retained lease `8e7c215e79d6`. Canonical status `EFFECT_UNKNOWN`, root null, consumption not authorized. No acceptance or retry.
+- Original Fabric census `fabric-app-census-mastermind-20261104-01`, controller 52049, MiniMax/ubuntu0: terminal remote rc=1, missing usage receipt, `remote_cleanup_unproven`, retained lease `cd90045928be`. Canonical status `EFFECT_UNKNOWN`, root null, consumption not authorized. No acceptance or retry.
+- Original typed Mastermind workspace acquisition: `REPOSITORY_SOURCE_UNAVAILABLE`, `NOT_APPLIED`; one bounded local source diagnostic timed out. GitHub is this operation's source publication carrier.
+- Read-only VPS service check through provisioned Studio SSH to `root@146.190.142.17` was denied `Permission denied (publickey)`. No alternate account/tool/SSH retry. Deployment is blocked on restored intended authentication; this source work makes no deployment claim.
+- Exact next source action: finish the bounded pinned census and route/migration matrix, publish the coupled source PRs, verify current-head checks, then continue safe consumer work only through owner-qualified interfaces. Exact runtime actions: reconcile the original two Fabric attempts through their existing owner, restore the intended VPS authentication, and prove a qualified canary before broader cutover.
