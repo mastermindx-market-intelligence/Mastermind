@@ -227,7 +227,7 @@ class FixedDiagnostics:
                 self.failures.append(value.copy())
             else:
                 self.truncated = True
-            # Only the actual two wrapper exceptions carry a live, validated
+            # Only the actual selected wrapper exceptions carry a live, validated
             # private channel. Raw child output is never a diagnostic input.
             try:
                 from scripts.native_unittest_diagnostics import records_for_error
@@ -272,11 +272,10 @@ class FixedDiagnostics:
             if native:fields|={'native_invocation','native_wrapper'}
             if set(value)!=fields:return False
             if native:
-                wrappers={'test_native_quota_continuity_owners':'tests',
-                    'test_native_generation_and_ingress_rollout':'rollout'}
+                from scripts.native_unittest_diagnostics import module_selected,selection_for_wrapper_name
                 wrapper=value['native_wrapper']
-                if (type(wrapper) is not str or wrapper not in wrappers
-                        or not module.startswith('ops/native_fabric/quota_continuity/'+wrappers[wrapper]+'/')
+                selection=selection_for_wrapper_name(wrapper)
+                if (selection is None or not module_selected(module,selection)
                         or type(value['native_invocation']) is not str
                         or not re.fullmatch(r'[a-f0-9]{32}',value['native_invocation'])):return False
                 catalog=self.native_catalog

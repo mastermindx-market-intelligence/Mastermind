@@ -6,6 +6,8 @@ facts are test diagnostics, not authentication, acceptance or replay authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
+from types import MappingProxyType
 import json
 import os
 from pathlib import Path
@@ -23,6 +25,43 @@ COUNTS = frozenset({'tests_run','failures','errors','skipped','expected_failures
 SCHEMA = 'ci.native-unittest-facts.v1'
 FIELDS = frozenset({'module','case','function','phase','line','kind'})
 PREFIX = 'ops/native_fabric/quota_continuity/'
+
+# These are the four existing-repository qualification routes, not caller argv.
+# Each process keeps ordinary unittest discovery within its selected modules.
+WRAPPER_SELECTIONS = MappingProxyType({
+    'tests/test_native_fabric_quota_continuity_a_f.py::test_native_quota_continuity_owners_a_f':
+        ('tests', 'test_[a-f]*.py'),
+    'tests/test_native_fabric_quota_continuity_g_o.py::test_native_quota_continuity_owners_g_o':
+        ('tests', 'test_[g-o]*.py'),
+    'tests/test_native_fabric_quota_continuity_p_z.py::test_native_quota_continuity_owners_p_z':
+        ('tests', 'test_[p-z]*.py'),
+    'tests/test_native_fabric_quota_continuity.py::test_native_generation_and_ingress_rollout':
+        ('rollout', 'test_*.py'),
+})
+OWNER_SELECTIONS = tuple(value for value in WRAPPER_SELECTIONS.values() if value[0] == 'tests')
+
+
+def checked_selection(directory, selection):
+    if (type(directory) is not str or type(selection) is not tuple
+            or selection not in WRAPPER_SELECTIONS.values() or selection[0] != directory):
+        raise ValueError('native_selection_unavailable')
+    return selection
+
+
+def selection_for_wrapper_name(name):
+    if type(name) is not str:
+        return None
+    for nodeid, selection in WRAPPER_SELECTIONS.items():
+        if nodeid.split('::')[1] == name:
+            return selection
+    return None
+
+
+def module_selected(module, selection):
+    return (type(module) is str and type(selection) is tuple
+        and selection in WRAPPER_SELECTIONS.values()
+        and module.startswith(PREFIX + selection[0] + '/')
+        and fnmatchcase(module.rsplit('/', 1)[-1], selection[1]))
 
 
 def _fixed():
@@ -44,11 +83,12 @@ def _strict(raw):
         parse_constant=lambda _: (_ for _ in ()).throw(ValueError('native_diagnostic_unavailable')))
 
 
-def decode(raw, *, head, invocation, directory, catalog, returncode):
+def decode(raw, *, head, invocation, directory, selection, catalog, returncode):
     """Reject the entire channel on stale identity, extra keys or private names."""
     try:
         if type(raw) is not bytes or not 0<len(raw)<=MAX_CHANNEL:
             raise ValueError()
+        selection=checked_selection(directory,selection)
         value=_strict(raw)
         if (type(value) is not dict or set(value)!={'schema','head','invocation','directory','counts','records','truncated'}
                 or value['schema']!=SCHEMA or value['head']!=head or catalog.head!=head
@@ -68,7 +108,7 @@ def decode(raw, *, head, invocation, directory, catalog, returncode):
         for record in value['records']:
             if (type(record) is not dict or set(record)!=FIELDS
                     or type(record['module']) is not str
-                    or not record['module'].startswith(PREFIX+directory+'/')):
+                    or not module_selected(record['module'],selection)):
                 raise ValueError()
             source=catalog.source(record['module'])
             if (source is None or record['phase'] not in ('call','collect','setup','teardown')
@@ -90,6 +130,7 @@ class NativeFacts:
     directory: str
     raw: bytes
     returncode: int
+    selection: tuple[str, str]
 
 
 class NativeInvocation:
@@ -98,19 +139,21 @@ class NativeInvocation:
     No global/persistent registry. The matching exception owns consumption;
     whole old carriers cannot be attached to a later wrapper exception.
     """
-    __slots__=('directory','started','token','head','issued','error','wrapper','consumed')
-    def __init__(self,directory):
+    __slots__=('directory','selection','started','token','head','issued','error','wrapper','consumed')
+    def __init__(self,directory,selection):
+        self.selection=checked_selection(directory,selection)
         self.directory=directory;self.started=False;self.token=None;self.head=None
         self.issued=None;self.error=None;self.wrapper=None;self.consumed=False
 
 
 def bind_facts(error, facts, invocation, nodeid):
-    expected={'tests/test_native_fabric_quota_continuity.py::test_native_quota_continuity_owners':'tests',
-        'tests/test_native_fabric_quota_continuity.py::test_native_generation_and_ingress_rollout':'rollout'}
+    expected=WRAPPER_SELECTIONS
     if (type(error) is not AssertionError or type(facts) is not NativeFacts
             or type(invocation) is not NativeInvocation or invocation.issued is not facts
             or invocation.error is not None or invocation.consumed or not invocation.started
-            or nodeid not in expected or invocation.directory!=expected[nodeid]
+            or type(nodeid) is not str or nodeid not in expected
+            or invocation.selection!=expected[nodeid] or facts.selection!=expected[nodeid]
+            or invocation.directory!=expected[nodeid][0] or facts.directory!=expected[nodeid][0]
             or invocation.token!=facts.invocation or invocation.head!=facts.head):
         return False
     invocation.error=error;invocation.wrapper=nodeid
@@ -119,10 +162,9 @@ def bind_facts(error, facts, invocation, nodeid):
 
 
 def records_for_error(error, nodeid, root, head):
-    """Only the existing two wrapper cases can contribute this typed channel."""
-    expected={'tests/test_native_fabric_quota_continuity.py::test_native_quota_continuity_owners':'tests',
-        'tests/test_native_fabric_quota_continuity.py::test_native_generation_and_ingress_rollout':'rollout'}
-    if type(error) is not AssertionError or nodeid not in expected:
+    """Only the closed, selected wrapper invocation can contribute this channel."""
+    expected=WRAPPER_SELECTIONS
+    if type(error) is not AssertionError or type(nodeid) is not str or nodeid not in expected:
         return [],False
     try:
         attributes=object.__getattribute__(error,'__dict__')
@@ -130,10 +172,11 @@ def records_for_error(error, nodeid, root, head):
         if (type(facts) is not NativeFacts or type(invocation) is not NativeInvocation
                 or invocation.error is not error or invocation.issued is not facts
                 or invocation.wrapper!=nodeid or invocation.consumed
-                or facts.head!=head or invocation.head!=head or facts.directory!=expected[nodeid]
-                or invocation.directory!=expected[nodeid] or facts.invocation!=invocation.token):return [],True
+                or facts.head!=head or invocation.head!=head or facts.directory!=expected[nodeid][0]
+                or invocation.directory!=expected[nodeid][0] or facts.invocation!=invocation.token
+                or facts.selection!=expected[nodeid] or invocation.selection!=expected[nodeid]):return [],True
         invocation.consumed=True;invocation.error=None;invocation.issued=None
-        value=decode(facts.raw,head=head,invocation=invocation.token,directory=facts.directory,
+        value=decode(facts.raw,head=head,invocation=invocation.token,directory=facts.directory,selection=invocation.selection,
             catalog=_fixed().PublicCatalog(root,native=True),returncode=facts.returncode)
         return [dict(record,native_invocation=facts.invocation,native_wrapper=nodeid.split('::')[1])
                 for record in value['records']],value['truncated']
@@ -141,10 +184,11 @@ def records_for_error(error, nodeid, root, head):
         return [],True
 
 
-def run_native(directory, *, timeout_seconds, root, cwd, invocation=None):
+def run_native(directory, *, selection, timeout_seconds, root, cwd, invocation=None):
     """Same CLI discovery and private output; opt-in diagnostics are incidental."""
+    selection=checked_selection(directory,selection)
     env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1'
-    args=['discover','-s',directory,'-p','test_*.py','-v']
+    args=['discover','-s',directory,'-p',selection[1],'-v']
     ordinary=[sys.executable,'-m','unittest',*args]
     head=None
     if env.get('MMX_CI_FIXED_DIAGNOSTICS_DIR'):
@@ -152,8 +196,9 @@ def run_native(directory, *, timeout_seconds, root, cwd, invocation=None):
         except Exception:pass
     if head is None:
         return subprocess.run(ordinary,cwd=cwd,env=env,capture_output=True,text=True,timeout=timeout_seconds),None
-    if invocation is None:invocation=NativeInvocation(directory)
-    if (type(invocation) is not NativeInvocation or invocation.directory!=directory or invocation.started):
+    if invocation is None:invocation=NativeInvocation(directory,selection)
+    if (type(invocation) is not NativeInvocation or invocation.directory!=directory
+            or invocation.selection!=selection or invocation.started):
         return subprocess.run(ordinary,cwd=cwd,env=env,capture_output=True,text=True,timeout=timeout_seconds),None
     invocation.started=True;invocation.token=secrets.token_hex(16);invocation.head=head
     token=invocation.token
@@ -178,16 +223,16 @@ def run_native(directory, *, timeout_seconds, root, cwd, invocation=None):
             if (len(raw)!=after.st_size or (after.st_size,after.st_mtime_ns,after.st_ctime_ns)
                     !=(os.fstat(channel.fileno()).st_size,os.fstat(channel.fileno()).st_mtime_ns,os.fstat(channel.fileno()).st_ctime_ns)):
                 raise ValueError()
-            decode(raw,head=head,invocation=token,directory=directory,
+            decode(raw,head=head,invocation=token,directory=directory,selection=selection,
                 catalog=_fixed().PublicCatalog(root,native=True),returncode=result.returncode)
-            facts=NativeFacts(head,token,directory,raw,result.returncode)
+            facts=NativeFacts(head,token,directory,raw,result.returncode,selection)
             invocation.issued=facts
         except Exception:
             pass  # Diagnostic failure never replaces the original test result.
         return result,facts
 
 
-def _node(test, catalog, directory):
+def _node(test, catalog, directory, selection):
     """Never call id()/str() or inspect subtest parameter values."""
     cls=type(test)
     module_name=type.__getattribute__(cls,'__module__')
@@ -196,7 +241,7 @@ def _node(test, catalog, directory):
     if type(filename) is not str:return None
     try:path=Path(filename).absolute().relative_to(catalog.root).as_posix()
     except ValueError:return None
-    if not path.startswith(PREFIX+directory+'/'):return None
+    if not module_selected(path,selection):return None
     source=catalog.source(path)
     if source is None:return None
     name=object.__getattribute__(test,'_testMethodName')
@@ -206,7 +251,7 @@ def _node(test, catalog, directory):
     return path+'::'+class_name.replace('.','::')+'::'+name
 
 
-def _holder(test, catalog, directory):
+def _holder(test, catalog, directory, selection):
     """Only unittest's actual fixed holders; never exception/log text."""
     name=None;phase='collect';function=None
     if type(test) is unittest.loader._FailedTest:
@@ -224,15 +269,61 @@ def _holder(test, catalog, directory):
             if type(filename) is not str:return None
             try:path=Path(filename).absolute().relative_to(catalog.root).as_posix()
             except ValueError:return None
+            if not module_selected(path,selection):return None
             source=catalog.source(path)
             if source is None or not any(c.startswith(class_name+'.') for c in source['cases']):return None
             return path,phase,function
     else:return None
     if type(name) is not str or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.]*',name):return None
     path=PREFIX+directory+'/'+name.replace('.','/')+'.py'
+    if not module_selected(path,selection):return None
     source=catalog.source(path)
     if source is None or (function is not None and function not in source['functions']):return None
     return path,phase,function
+
+
+def owner_inventory(directory):
+    # Match normal discovery: a nested directory is traversed only as a package.
+    paths = []
+    for path in directory.rglob("test_*.py"):
+        if not path.is_file():
+            continue
+        parent = path.parent
+        while parent != directory and (parent / "__init__.py").is_file():
+            parent = parent.parent
+        if parent == directory:
+            assert not path.is_symlink(), "Native owner test source must be a regular file"
+            paths.append(path.relative_to(directory).as_posix())
+    return tuple(sorted(paths))
+
+
+def verify_owner_partitions(inventory, selections):
+    groups = tuple(tuple(name for name in inventory
+        if fnmatchcase(name.rsplit("/", 1)[-1], pattern)) for directory,pattern in selections)
+    flattened = tuple(name for group in groups for name in group)
+    assert inventory and all(groups), "Native owner partitions must each discover source"
+    assert len(flattened) == len(inventory) and sorted(flattened) == sorted(inventory), (
+        "Native owner partitions must cover every test module exactly once")
+    return groups
+
+
+def qualify_wrapper(nodeid, *, timeout_seconds, root, cwd):
+    """Run one closed qualification and bind only its own completed facts."""
+    if type(nodeid) is not str or nodeid not in WRAPPER_SELECTIONS:
+        raise ValueError("native_selection_unavailable")
+    selection = WRAPPER_SELECTIONS[nodeid]
+    directory = selection[0]
+    if directory == "tests":
+        verify_owner_partitions(owner_inventory(Path(cwd) / "tests"), OWNER_SELECTIONS)
+    invocation = NativeInvocation(directory, selection)
+    result,facts = run_native(directory, selection=selection, timeout_seconds=timeout_seconds,
+        root=root, cwd=cwd, invocation=invocation)
+    if result.returncode != 0 and facts is not None:
+        error = AssertionError(result.stdout + result.stderr)
+        bind_facts(error, facts, invocation, nodeid)
+        raise error
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Ran 0 tests" not in result.stderr, "Native qualification discovered no tests"
 
 
 def main(argv=None):
@@ -240,10 +331,12 @@ def main(argv=None):
     if (len(argv)!=12 or argv[0]!='--result-fd' or not argv[1].isdigit()
             or argv[2]!='--head' or not re.fullmatch(r'[a-f0-9]{40}',argv[3])
             or argv[4]!='--invocation' or not re.fullmatch(r'[a-f0-9]{32}',argv[5])
-            or argv[6:] not in (['discover','-s','tests','-p','test_*.py','-v'],
-                               ['discover','-s','rollout','-p','test_*.py','-v'])):
+            or argv[6:] not in [
+                ['discover','-s',directory,'-p',pattern,'-v']
+                for directory,pattern in WRAPPER_SELECTIONS.values()]):
         return 2
     descriptor=int(argv[1]);head=argv[3];invocation=argv[5];directory=argv[8]
+    selection=checked_selection(directory,(directory,argv[10]))
     root=Path(__file__).resolve().parents[1]
     try:catalog=_fixed().PublicCatalog(root,native=True)
     except Exception:
@@ -257,10 +350,10 @@ def main(argv=None):
     class Result(unittest.TextTestResult):
         def observe(self,test,error):
             try:
-                node=_node(test,catalog,directory)
+                node=_node(test,catalog,directory,selection)
                 value=catalog.failure(node,'call',error=error) if node else None
                 if value is None:
-                    holder=_holder(test,catalog,directory)
+                    holder=_holder(test,catalog,directory,selection)
                     if holder is not None:
                         module,phase,function=holder
                         value=catalog.failure(module,phase,error=error)
@@ -305,7 +398,7 @@ def main(argv=None):
                         skipped=len(result.skipped),expected_failures=len(result.expectedFailures),unexpected_successes=len(result.unexpectedSuccesses)),
                     records=records,truncated=truncated[0])
                 raw=json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode('ascii')
-                decode(raw,head=head,invocation=invocation,directory=directory,catalog=catalog,returncode=returncode)
+                decode(raw,head=head,invocation=invocation,directory=directory,selection=selection,catalog=catalog,returncode=returncode)
                 if len(raw)>MAX_CHANNEL:raise ValueError()
                 while raw:
                     n=os.write(descriptor,raw)
