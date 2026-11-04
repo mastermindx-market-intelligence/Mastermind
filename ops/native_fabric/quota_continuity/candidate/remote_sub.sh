@@ -923,6 +923,44 @@ else
 fi
 case "$POLL_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_POLL_SECS" >&2; RC=2; exit "$RC";; esac
 case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2; exit "$RC";; esac
+# Completion visibility is fastest just after launch, with a hard bounded
+# number of additional SSH observations per job. A transport/protocol failure
+# uses backoff; it never triggers a second launch, provider switch or lease loss.
+# The caller's validated POLL_SECS remains the maximum and the original fuse
+# still owns expiration, heartbeat, collection and EFFECT_UNKNOWN handling.
+fabric_poll_delay() {
+  local observed_elapsed="$1" remaining_seconds="$2" failed_reads="$3"
+  local proposed="$POLL_SECS"
+  if [ "$observed_elapsed" -lt 30 ]; then
+    proposed=2
+  elif [ "$observed_elapsed" -lt 120 ]; then
+    proposed=5
+  elif [ "$observed_elapsed" -lt 600 ]; then
+    proposed=10
+  fi
+  # Outages can only slow observations, never accelerate them.
+  if [ "$failed_reads" -ge 3 ]; then
+    proposed="$POLL_SECS"
+  elif [ "$failed_reads" -eq 2 ] && [ "$proposed" -lt 10 ]; then
+    proposed=10
+  elif [ "$failed_reads" -eq 1 ] && [ "$proposed" -lt 5 ]; then
+    proposed=5
+  fi
+  [ "$proposed" -le "$POLL_SECS" ] || proposed="$POLL_SECS"
+  [ "$proposed" -le "$remaining_seconds" ] || proposed="$remaining_seconds"
+  FABRIC_POLL_DELAY_S="$proposed"
+}
+
+# The faster first-minute completion observations must not multiply provider
+# broker-heartbeat writes. Keep at least the old caller-selected heartbeat
+# cadence, bounded to 30s even when a caller selects a longer result interval.
+# The original lease and its separate slot-heartbeat remain authoritative.
+fabric_poll_heartbeat_due() {
+  local heartbeat_age="$1" heartbeat_interval="$POLL_SECS"
+  [ "$heartbeat_interval" -le 30 ] || heartbeat_interval=30
+  [ "$heartbeat_age" -ge "$heartbeat_interval" ]
+}
+
 if [ "$MAX_SECS" -gt 14400 ]; then
   echo "REMOTE_SUB_MAX_SECS must not exceed 14400" >&2
   RC=2
@@ -1791,14 +1829,18 @@ while true; do
   WAIT_STARTED_SECONDS=$SECONDS
   RC=""
   poll_count=0
+  POLL_FAILURE_STREAK=0
+  LAST_POLL_BROKER_HEARTBEAT=$((SECONDS - POLL_SECS))
   CANONICAL_LAUNCH_RELAYED=0
   while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do
     if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
       commission_poll_remaining=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || break
       [ "$commission_poll_remaining" -gt 0 ] || break
     fi
-    if [ -n "$LEASE_ID" ]; then
+    if [ -n "$LEASE_ID" ] &&
+       fabric_poll_heartbeat_due "$((SECONDS - LAST_POLL_BROKER_HEARTBEAT))"; then
       broker heartbeat "$LEASE_ID" >/dev/null 2>&1 || true
+      LAST_POLL_BROKER_HEARTBEAT=$SECONDS
     fi
     poll_count=$((poll_count + 1))
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
@@ -1824,19 +1866,21 @@ while true; do
         log "RC value=$RC poll=$poll_count"
         break
       elif [ "$POLL_VALUE" = "__REMOTE_SUB_PENDING__" ]; then
+        POLL_FAILURE_STREAK=0
         log "POLL_PENDING poll=$poll_count"
       else
+        [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
         log "POLL_PROTOCOL_INVALID poll=$poll_count bytes=$(wc -c < "$POLL_FILE" 2>/dev/null || echo 0)"
       fi
     else
+      [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
       log "POLL_TRANSPORT_FAILED rc=$poll_rc poll=$poll_count"
     fi
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
     remaining=$((MAX_SECS - elapsed))
     [ "$remaining" -gt 0 ] || break
-    sleep_for="$POLL_SECS"
-    [ "$sleep_for" -le "$remaining" ] || sleep_for="$remaining"
-    commission_run poll-sleep sleep "$sleep_for" || break
+    fabric_poll_delay "$elapsed" "$remaining" "$POLL_FAILURE_STREAK"
+    commission_run poll-sleep sleep "$FABRIC_POLL_DELAY_S" || break
   done
 
   if [ -z "$RC" ]; then
