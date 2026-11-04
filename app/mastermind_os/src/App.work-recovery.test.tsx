@@ -136,7 +136,7 @@ describe("Work read recovery in the actual App", () => {
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(await screen.findByRole("button", { name: "Open project Alpha program" }));
     await screen.findByRole("heading", { name: "Mission" });
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     await user.type(screen.getByRole("textbox", { name: "Direction to Meta-CEO" }), "Keep this direction");
     await user.click(screen.getByRole("button", { name: "Projects" }));
     await user.click(screen.getByRole("button", { name: "Open project Alpha program" }));
@@ -153,7 +153,7 @@ describe("Work read recovery in the actual App", () => {
     expect(readMission).toHaveBeenCalledTimes(missionCalls);
     expect(readProgramsObservation).toHaveBeenCalledTimes(programCalls);
     expect(screen.getByRole("tab", { name: "Work" }).getAttribute("aria-selected")).toBe("true");
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Direction to Meta-CEO" }).value).toBe("Keep this direction");
   });
 

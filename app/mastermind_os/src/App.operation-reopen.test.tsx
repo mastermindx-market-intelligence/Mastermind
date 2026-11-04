@@ -171,6 +171,8 @@ describe("status-only operation reopen", () => {
     history.replaceState(null, "", location);
     const made = fixture(); render(<App />); const user = userEvent.setup();
     await screen.findByText(original.operationKey);
+    // Today itself must expose recovery; a later route cannot substitute for it.
+    expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
     act(() => { history.pushState(null, "", location); window.dispatchEvent(new PopStateEvent("popstate")); });
     await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Retain the original operation");
@@ -180,6 +182,14 @@ describe("status-only operation reopen", () => {
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.readOperation).not.toHaveBeenCalled();
     expect(made.data.get("owner-a")).toEqual(original);
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
+    expect(screen.getByText(original.operationKey)).toBeTruthy();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Retain the original operation");
+    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.readOperation).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
   });
   it("a retained pointer blocks Launch while leaving the unsent draft editable and status usable", async () => {
     const made = fixture(); render(<App />);

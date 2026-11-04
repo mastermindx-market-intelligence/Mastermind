@@ -36,7 +36,7 @@ describe("Projects in the actual App", () => {
     expect(new URLSearchParams(location.search).get("root_job_id")).toBe("JOB-B");
     await user.click(screen.getByRole("button", { name: "Projects" }));
     expect(await screen.findByRole("region", { name: "Selected project" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Today" }));
+    await user.click(screen.getByRole("button", { name: "Meta-CEO" }));
     for (const route of ["Today", "Work", "Open Programs", "Fleet & Capacity", "Mission Workspace", "Conversation", "Activity", "Connections", "Evidence"])
       expect(screen.getByRole("button", { name: route })).toBeTruthy();
     expect(read).toHaveBeenCalledTimes(2); // one original collection plus the new exact selection
