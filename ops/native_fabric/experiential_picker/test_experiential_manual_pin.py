@@ -41,8 +41,8 @@ POLICY = {
         # Registered only inside this fixture to prove the owner-registration
         # dependency; no repo or host pool configuration is touched.
         "experiential": {
-            "role": ["operator", "reviewer"],
-            "task_classes": ["review", "audit", "verify", "design",
+            "role": ["operator", "reviewer", "executor"],
+            "task_classes": ["mechanical", "fix_build", "review", "audit", "verify", "design",
                              "architecture", "decompose", "adjudicate",
                              "high_level"],
             "default_model": "glm-5.3-uncensored",
@@ -211,7 +211,7 @@ class SealedPreimageEnforcement(unittest.TestCase):
 
 
 class RouteAdmission(unittest.TestCase):
-    def pick_line(self, kit: _Kit, task_class="review", pool="experiential",
+    def pick_line(self, kit: _Kit, task_class="mechanical", pool="experiential",
                   model="glm-5.3-uncensored", **extra):
         pick = kit.module
         with patch.object(pick, "load_pools", return_value=kit.policy), \
@@ -230,7 +230,7 @@ class RouteAdmission(unittest.TestCase):
             self.assertNotIn("ESCALATE_TO=experiential", line)
             # Economic guard consumed the same witnesses at emission.
             guard = kit.module.launch_policy(
-                "experiential", "review", "glm-5.3-uncensored", doc=kit.policy)
+                "experiential", "mechanical", "glm-5.3-uncensored", doc=kit.policy)
             self.assertTrue(guard["allowed"], guard)
             self.assertEqual(guard["reason"], "experiential_manual_witnessed")
 
@@ -265,7 +265,7 @@ class RouteAdmission(unittest.TestCase):
                  patch.object(pick, "_grok_exhausted", return_value=False), \
                  patch.object(pick, "_glm_meter_state", return_value=""), \
                  patch.object(pick, "launch_policy", side_effect=spy):
-                line = pick.format_pick("review", pool="experiential",
+                line = pick.format_pick("mechanical", pool="experiential",
                                         requested_model="glm-5.3-uncensored")
             self.assertTrue(line.startswith("POOL=experiential"), line)
             self.assertNotEqual(observed, [])
@@ -278,7 +278,7 @@ class RouteAdmission(unittest.TestCase):
             self.assertTrue(line.startswith("NONE reason="), line)
             self.assertIn("witnesses unavailable or stale", line)
             guard = kit.module.launch_policy(
-                "experiential", "review", "glm-5.3-uncensored", doc=kit.policy)
+                "experiential", "mechanical", "glm-5.3-uncensored", doc=kit.policy)
             self.assertFalse(guard["allowed"])
             self.assertEqual(guard["reason"],
                              "experiential_owner_witnesses_unavailable")
@@ -301,6 +301,7 @@ class RouteAdmission(unittest.TestCase):
             {"witness_ttl_minutes": 0},
             {"witness_ttl_minutes": 100000},
             {"witnessed_at": "not-a-timestamp"},
+            {"witnessed_at": "2100-01-01T00:00:00+00:00"},
             {"consent": None},
             {"consent_replace": {}},
             {"consent_replace": {"retention_opt_in": True}},
@@ -323,7 +324,7 @@ class RouteAdmission(unittest.TestCase):
 
 
 class IdentityDiscipline(unittest.TestCase):
-    def pick_line(self, kit: _Kit, pool, model, task_class="review"):
+    def pick_line(self, kit: _Kit, pool, model, task_class="mechanical"):
         pick = kit.module
         with patch.object(pick, "load_pools", return_value=kit.policy), \
              patch.object(pick, "floor_demotes", return_value=False), \
@@ -362,20 +363,24 @@ class IdentityDiscipline(unittest.TestCase):
             self.assertTrue(line.startswith("NONE reason="), line)
             self.assertIn("unknown forced pool", line)
 
-    def test_labor_classes_never_serve_the_route(self):
+    def test_manual_pin_admits_only_the_web_and_native_approved_labor_classes(self):
         with _Kit(True, POLICY, witness_document()) as kit:
-            for labor in sorted({"executor", "census", "extract", "mechanical"}):
+            for admitted in ("mechanical", "fix_build"):
                 line = self.pick_line(kit, "experiential",
-                                      "glm-5.3-uncensored", task_class=labor)
-                self.assertTrue(line.startswith("NONE reason="), (labor, line))
-                self.assertIn("never serves labor classes", line)
+                                      "glm-5.3-uncensored", task_class=admitted)
+                self.assertTrue(line.startswith("POOL=experiential"), (admitted, line))
+            for refused in ("review", "audit", "verify", "executor", "census", "extract", "architecture"):
+                line = self.pick_line(kit, "experiential",
+                                      "glm-5.3-uncensored", task_class=refused)
+                self.assertTrue(line.startswith("NONE reason="), (refused, line))
+                self.assertIn("only admits mechanical/fix_build", line)
 
     def test_no_fallback_to_glm_when_route_unavailable(self):
         with _Kit(True, POLICY, witness=None) as kit:
             pick = kit.module
             with patch.object(pick, "load_pools", return_value=kit.policy), \
                  patch.object(pick, "_glm_meter_state", return_value=""):
-                line = pick.format_pick("review", pool="experiential",
+                line = pick.format_pick("mechanical", pool="experiential",
                                         requested_model="glm-5.3-uncensored")
             self.assertTrue(line.startswith("NONE reason="), line)
             self.assertNotIn("MODEL=glm-5.3-flash", line)
