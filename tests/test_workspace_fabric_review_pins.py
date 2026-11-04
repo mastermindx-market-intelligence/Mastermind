@@ -24,6 +24,11 @@ BLOCK = "".join(SOURCE.splitlines(keepends=True)[METHOD.lineno - 1:METHOD.end_li
 FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
 STATUS_SITES = ((5733, 66, 69, 'int'), (5746, 74, 77, 'int'), (5748, 75, 78, 'int'))
 
+BACKEND_SITES = (
+    (120, 73, 76, "int"),
+    (310, 78, 81, "int"),
+    (405, 83, 86, "int"),
+)
 
 def _assert_catalog_refused(source):
     spans = reviewed_literal_spans(SERVICE_PATH, source)

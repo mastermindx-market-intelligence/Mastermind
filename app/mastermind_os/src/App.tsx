@@ -3153,6 +3153,60 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         owner.generation !== ownerContext?.generation) return {state: "UNAVAILABLE" as const};
     return readLaunchRequestPreview(binding, form);
   }, [commandBinding, ownerContext?.principalScope, ownerContext?.generation, authRevision]);
+  // Presentation reuses the incumbent explicit auth action and its guards.
+  const authenticationControl = authState ? (
+                <button
+                  disabled={authState.status === "unconfigured"}
+                  onClick={() => {
+                    const auth = window.MastermindMissionHost?.auth;
+                    if (!auth) return;
+                    const signingOut =
+                      authState.acquisition ||
+                      authState.content ||
+                      authState.status === "signing_in";
+                    if (signingOut) {
+                      setWindowDocument(null);
+                      setMission(
+                        unavailableMission(
+                          selection,
+                          "AUTHENTICATION_REQUIRED",
+                        ),
+                      );
+                    }
+                    try {
+                      const request = signingOut
+                        ? auth.signOut()
+                        : auth.signIn();
+                      request.catch(() =>
+                        setNotice(
+                          "Sign-in could not complete. Please try again.",
+                        ),
+                      );
+                    } catch {
+                      setNotice(
+                        "Sign-in could not complete. Please try again.",
+                      );
+                    }
+                  }}
+                >
+                  {authState.status === "signing_in"
+                    ? copy.cancelSignIn
+                    : authState.acquisition || authState.content
+                      ? copy.signOut
+                      : copy.signIn}
+                </button>
+  ) : null;
+  const todayNeedsAuthentication = !!authState && !authState.acquisition &&
+    ["signed_out", "error", "signing_in", "unconfigured"].includes(authState.status);
+  const todayAuthenticationCue = todayNeedsAuthentication ? <section className="card" aria-label={locale === "zh-CN" ? "工作区登录" : "Workspace sign-in"}>
+    <h2>{authState?.status === "signing_in" ? (locale === "zh-CN" ? "正在登录…" : "Signing in…")
+      : authState?.status === "unconfigured" ? (locale === "zh-CN" ? "此处暂时无法登录。" : "Sign-in is unavailable here.")
+      : (locale === "zh-CN" ? "登录以继续" : "Sign in to continue")}</h2>
+    {authState?.status !== "signing_in" && authState?.status !== "unconfigured" &&
+      <p>{locale === "zh-CN" ? "登录以访问工作区。" : "Sign in to access your workspace."}</p>}
+    {authenticationControl}
+    {authState?.reason && <details><summary>{copy.technicalDetails}</summary><code>{authState.reason}</code></details>}
+  </section> : null;
   const commandPanel =
     !signedIn && passiveExpiryHold.current && retainedComposerDrafts.launch ? (
       <section className="card" aria-label={copy.retainedDraft}>
@@ -3257,7 +3311,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
           </div>
           <span className="state state-unavailable">{copy.unavailable}</span>
         </div>
-        <p className="muted">{copy.workUnavailable}</p>
+        <p className="muted">{locale === "zh-CN" ? "暂时无法开始工作。" : "Starting work is unavailable right now."}</p>
         <details
           className="reason-details"
           onToggle={(event) => {
@@ -3974,6 +4028,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
       composer={commandPanel}
+      authenticationCue={todayAuthenticationCue}
+      retainComposerWithAuth={Boolean(passiveExpiryHold.current && retainedComposerDrafts.launch) || heldKind === "launch"}
       onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
       onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
       onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
@@ -4613,46 +4669,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                             : copy.signInFailed}
                   </p>
                 ) : null}
-                <button
-                  disabled={authState.status === "unconfigured"}
-                  onClick={() => {
-                    const auth = window.MastermindMissionHost?.auth;
-                    if (!auth) return;
-                    const signingOut =
-                      authState.acquisition ||
-                      authState.content ||
-                      authState.status === "signing_in";
-                    if (signingOut) {
-                      setWindowDocument(null);
-                      setMission(
-                        unavailableMission(
-                          selection,
-                          "AUTHENTICATION_REQUIRED",
-                        ),
-                      );
-                    }
-                    try {
-                      const request = signingOut
-                        ? auth.signOut()
-                        : auth.signIn();
-                      request.catch(() =>
-                        setNotice(
-                          "Sign-in could not complete. Please try again.",
-                        ),
-                      );
-                    } catch {
-                      setNotice(
-                        "Sign-in could not complete. Please try again.",
-                      );
-                    }
-                  }}
-                >
-                  {authState.status === "signing_in"
-                    ? copy.cancelSignIn
-                    : authState.acquisition || authState.content
-                      ? copy.signOut
-                      : copy.signIn}
-                </button>
+                {active === "Today" && todayNeedsAuthentication ? null : authenticationControl}
               </div>
             ) : null}
           </div>

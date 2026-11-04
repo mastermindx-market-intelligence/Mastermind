@@ -11,7 +11,7 @@ afterEach(()=>{cleanup();localStorage.clear();delete window.MastermindMissionHos
 it("shows plain Chinese unavailable work, selection and footer without changing raw diagnostics",()=>{
  render(<App locale="zh-CN" theme="light"/>);
  expect(screen.getByRole("heading",{name:"开始工作"})).toBeTruthy();
- expect(screen.getByText("此处暂时无法开始工作。")).toBeTruthy();
+ expect(screen.getByText("暂时无法开始工作。")).toBeTruthy();
  expect(screen.getByText("尚未选择工作项")).toBeTruthy();
  expect(screen.getByRole("navigation",{name:"工作导航"})).toBeTruthy();
  expect(screen.getByText("状态与来源")).toBeTruthy();
@@ -52,4 +52,14 @@ it("changes language in the real ready composer without remounting or sending it
  expect(screen.getByLabelText("目标")).toBe(goal);
  expect(goal.value).toBe("Keep this exact unsent goal");
  expect(submit).not.toHaveBeenCalled();
+});
+
+it.each(["en", "zh-CN"] as const)("shows an explicit signed-out cue with the original sign-in action (%s)", locale => {
+ const signIn=vi.fn(async()=>{});
+ window.MastermindMissionHost={auth:{getState:()=>({status:"signed_out",reason:null,acquisition:false,content:false}),subscribe:()=>()=>{},signIn,signOut:vi.fn(async()=>{})}};
+ render(<App locale={locale}/>);
+ expect(screen.getByRole("heading",{name:locale==="zh-CN"?"登录以继续":"Sign in to continue"})).toBeTruthy();
+ expect(screen.queryByText(locale==="zh-CN"?"暂时无法获取待决策事项。":"Decision information is unavailable right now.")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:locale==="zh-CN"?"登录":"Sign in"}));
+ expect(signIn).toHaveBeenCalledTimes(1);
 });
