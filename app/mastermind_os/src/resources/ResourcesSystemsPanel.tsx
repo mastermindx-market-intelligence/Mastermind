@@ -4,6 +4,8 @@ import type { ControlRoomCapabilityProvider } from "../control-room-navigation";
 import { WORK_GROUP_ORDER, type WorkDocument } from "../work";
 import type { HostCapacityState } from "./host-capacity";
 import { HostTelemetryPanel } from "./HostTelemetryPanel";
+import { RetainedProviderCapacityPanel } from "./RetainedProviderCapacityPanel";
+import type { RetainedProviderCapacityState } from "./retained-provider-capacity";
 import "./resources.css";
 
 export type ResourcesWorkState =
@@ -18,6 +20,7 @@ type Props = {
   onOpenWork?: (rootJobId: string) => void;
   /** Fixed authenticated retained owner only; no default probe/read is implied. */
   capacity?: HostCapacityState;
+  providerCapacity?: RetainedProviderCapacityState;
 };
 const names: Record<ControlRoomCapabilityProvider, string> = {
   chatgpt: "ChatGPT", claude_code: "Claude Code", claude_desktop: "Claude Desktop",
@@ -29,7 +32,7 @@ const providers = Object.keys(names) as ControlRoomCapabilityProvider[];
  * admission, per-task serviceability and queue pressure remain distinct facts.
  * No source read, placement, admission, reservation or provider effect occurs here.
  */
-export function ResourcesSystemsPanel({ controlRoom, work, locale = "en", onReviewSources, onOpenWork, capacity }: Props) {
+export function ResourcesSystemsPanel({ controlRoom, work, locale = "en", onReviewSources, onOpenWork, capacity, providerCapacity }: Props) {
   const zh = locale === "zh-CN";
   const t = (en: string, cn: string) => zh ? cn : en;
   const labelId = useId();
@@ -116,6 +119,7 @@ export function ResourcesSystemsPanel({ controlRoom, work, locale = "en", onRevi
       </> : <p role="status">{work.kind === "PENDING" ? t("Reading work capacity evidence…", "正在读取工作容量证据…") : t("Work capacity evidence is unavailable. No idle or busy state is inferred.", "无法获取工作容量证据，不能推断为空闲或繁忙。")}</p>}
     </section>
     <HostTelemetryPanel state={capacity ?? { state: "UNAVAILABLE" }} locale={locale} />
+    {providerCapacity && <RetainedProviderCapacityPanel state={providerCapacity} locale={locale} />}
     <aside className="card resources-missing" aria-label={t("Missing evidence", "缺失证据")}>
       <h3>{t("Provider capacity is not supplied", "未提供供应商容量")}</h3>
       <p>{t("Host admission, task serviceability, protected assignments and provider queue pressure need separate owner observations before placement can be assessed.", "评估工作安排前，需要分别获取主机准入、任务服务能力、受保护分配和供应商队列压力的来源观测。")}</p>
