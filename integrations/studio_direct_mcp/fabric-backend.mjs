@@ -67,6 +67,12 @@ const ACCEPT_VERIFICATION_CODES = Object.freeze([
   'manual_result_review', 'independent_review_evidence'
 ]);
 const COMPLEXITIES = ['C0_MECHANICAL', 'C1_ROUTINE_BOUNDED', 'C2_COMPLEX_BOUNDED', 'C3_FRONTIER_JUDGMENT'];
+const MANUAL_POOLS = ['grok', 'glm', 'minimax', 'bailian', 'cursor', 'ocfree', 'go', 'experiential'];
+// Experiential uncensored pool: the exact slug is mandatory (never
+// glm-5.3-flash-uncensored, auto or omitted) and the provider retains prompts
+// and responses, so every request needs an explicit caller opt-in first.
+const EXPERIENTIAL_POOL = 'experiential';
+const EXPERIENTIAL_MODEL = 'glm-5.3-uncensored';
 const DEFAULT_ADAPTER = resolve(homedir(), '.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py');
 const idSchema = { type: 'string', pattern: ID_PATTERN, minLength: 1, maxLength: 128 };
 const identity = { run_id: idSchema, root_id: idSchema };
@@ -85,8 +91,9 @@ export const FABRIC_TOOLS = Object.freeze([
     max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
     work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
-    pool:{type:'string',enum:['grok','glm','minimax','bailian','cursor','ocfree','go'],description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation.'},
-    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model.'},
+    pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation. experiential additionally requires the exact model glm-5.3-uncensored and retention_opt_in:true on every request.'},
+    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model. pool experiential accepts only the exact glm-5.3-uncensored; auto and every other slug are refused before dispatch.'},
+    retention_opt_in:{type:'boolean',description:'Explicit caller acknowledgment that the Experiential uncensored provider retains prompts and responses. Required exactly true for pool experiential before any packet is sent; never sent to the provider and refused for every other pool. Never send proprietary or unpublished code to that provider without this deliberate opt-in.'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
@@ -134,6 +141,13 @@ function validate(name, args) {
     // Refuse incompatible manual pools before reserving a run or controller.
     if (args.pool && args.max_turns!==undefined && !['glm','minimax'].includes(args.pool))
       fail('INVALID_ARGUMENT',{field:'max_turns'});
+    // Experiential uncensored retention gate, enforced before reserving a run
+    // or touching the native adapter: exact-model pin plus explicit per-request
+    // opt-in for the prompt+response-retaining provider, scoped to this pool.
+    if (args.pool===EXPERIENTIAL_POOL) {
+      if (args.model!==EXPERIENTIAL_MODEL) fail('INVALID_ARGUMENT',{field:'model'});
+      if (args.retention_opt_in!==true) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
+    } else if (args.retention_opt_in!==undefined) fail('INVALID_ARGUMENT',{field:'retention_opt_in'});
   }
 }
 function response(value, isError=false) {
@@ -552,6 +566,10 @@ export function createFabricFacade(engine, options={}) {
             || (args.max_turns!==undefined && !['glm','minimax'].includes(route.mode))
             || (args.model && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
             fail('MANUAL_ROUTE_UNAVAILABLE');
+          // The experiential slug is checked exactly, not case-insensitively:
+          // the native recheck must witness the identical uncensored model.
+          if(args.pool===EXPERIENTIAL_POOL && route.model!==EXPERIENTIAL_MODEL)
+            fail('MANUAL_ROUTE_UNAVAILABLE');
         }
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
         if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
@@ -578,7 +596,8 @@ export function createFabricFacade(engine, options={}) {
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
-          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true}:{}),
+          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true,
+            ...(args.pool===EXPERIENTIAL_POOL?{retention_opt_in:true}:{})}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }

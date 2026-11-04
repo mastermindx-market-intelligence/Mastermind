@@ -40,7 +40,22 @@ will start. Manual pins disable cross-provider/model quota continuation; a 429 c
 silently substitute another model. Optional `max_turns` is limited by native
 policy to GLM/MiniMax: incompatible pool pins fail before dispatch, and the
 read-only preview must report a compatible native execution mode. `subject_pool` remains the separate author
-independence filter. Existing model quality, budget, entitlement, host and policy
+independence filter.
+
+`pool: "experiential"` is an additional strictly manual pin for the Experiential Labs
+uncensored route and accepts exactly `model: "glm-5.3-uncensored"` — no omitted model, no
+`auto`, and no other slug (including `glm-5.3-flash-uncensored` or any case variant);
+every deviation is refused before reservation or dispatch. **That provider retains prompts
+and responses.** Each request must therefore also carry `retention_opt_in: true`, an
+explicit per-request caller acknowledgment that the packet will reach a prompt+response-
+retaining provider; the field is refused for every other pool and is never forwarded to the
+provider. Never send proprietary or unpublished source to this pool without that deliberate
+opt-in. `max_turns` is refused for this pool until the native adapter proves compatibility.
+The same native `preview`, `--strict-manual-pin` recheck, exact run/pool/model witnesses and
+no-fallback rules apply, with the experiential slug compared exactly; if the native adapter
+has no qualified Experiential route the request fails closed with `MANUAL_ROUTE_UNAVAILABLE`
+before any worker dispatch. Source presence alone activates nothing in connected ChatGPT.
+Existing model quality, budget, entitlement, host and policy
 gates always win; a model string is never proof that a model is served or permitted.
 
 `fabric_capabilities.manual_routing.available` is true only when the installed native
