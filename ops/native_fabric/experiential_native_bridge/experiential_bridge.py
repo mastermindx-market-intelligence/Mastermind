@@ -305,6 +305,7 @@ def request_gate(
         sensitive_data_opt_in=sensitive_data_opt_in,
         proprietary_code=proprietary_code,
         code_exposure_opt_in=code_exposure_opt_in,
+        phase="request",
     )
 
 
@@ -352,6 +353,27 @@ def preflight(
     if host is not None and type(host) is str and host.strip() and host.strip() != route_host:
         _refuse("EXPERIENTIAL_ROUTE_HOST_MISMATCH",
                 "requested host does not match the host-attested route host")
+    if phase == "request":
+        # This is the LAST side-effect-free boundary before fabric_task
+        # acquires a host, lease or packet. The owner pin law, not a local
+        # copy of its flags, must validate the true account/entitlement/cap.
+        # The exec boundary repeats this same gate against fresh owner state.
+        try:
+            adapter.pin.admit_execution(
+                pool=POOL, model=MODEL, task_class=syntax["task_class"],
+                registry_entry=context.get("registry_entry"),
+                entitlement=context.get("entitlement"),
+                retention_acknowledged=syntax["consents"]["retention_acknowledged"],
+                sensitive_data_opt_in=syntax["consents"]["sensitive_data_opt_in"],
+                proprietary_code=syntax["consents"]["proprietary_code"],
+                code_exposure_opt_in=syntax["consents"]["code_exposure_opt_in"],
+                account=context.get("account"),
+                quota_readback=context.get("quota_readback"),
+            )
+        except Exception as exc:
+            reason = getattr(exc, "reason", None)
+            _refuse(reason if type(reason) is str and reason else
+                    "EXPERIENTIAL_ADMISSION_REFUSED", str(exc))
     return {
         "state": f"{phase.upper()}_QUALIFIED",
         "run_id": syntax["run_id"],
