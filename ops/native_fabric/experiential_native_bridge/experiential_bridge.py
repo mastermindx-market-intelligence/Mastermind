@@ -115,7 +115,20 @@ def _load_host_module(path: Path, name: str) -> Any:
         if spec is None or spec.loader is None:
             return None
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        # dataclasses (including the real experiential_transport module) use
+        # sys.modules[cls.__module__] while defining fields/annotations.
+        # A raw exec_module without registering its module silently breaks
+        # this owner-owned transport and incorrectly reports it as missing.
+        prior = sys.modules.get(name)
+        sys.modules[name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            if prior is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = prior
+            raise
         return module
     except Exception:
         return None

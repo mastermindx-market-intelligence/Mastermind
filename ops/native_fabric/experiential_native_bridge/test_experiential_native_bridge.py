@@ -380,8 +380,13 @@ def _qualified_owner_source_fixture(tmp_path):
     owner = tmp_path / "owner_modules"
     owner.mkdir()
     for name, data in {
-        "experiential_pin.py": b"POOL = 'experiential'\\nMODEL = 'glm-5.3-uncensored'\\n",
-        "experiential_transport.py": b"import experiential_pin as pin\\n",
+        "experiential_pin.py": b"POOL = 'experiential'\nMODEL = 'glm-5.3-uncensored'\n",
+        "experiential_transport.py": (
+            b"from dataclasses import dataclass\n"
+            b"@dataclass(frozen=True)\n"
+            b"class GatewayRoute:\n"
+            b"    route_id: str\n"
+        ),
     }.items():
         (owner / name).write_bytes(data)
     manifest = json.loads(MANIFEST.read_text())
@@ -423,6 +428,19 @@ def test_source_owner_modules_are_staged_with_exact_digest_only(tmp_path):
     assert not (out / "experiential53" / "experiential_host_context.py").exists()
     assert receipt["admission_granted"] is False
     assert receipt["worker_started"] is False
+
+
+def test_staged_owner_transport_with_dataclass_is_loadable(tmp_path):
+    owner, out, args = _compose_with_owner_modules(tmp_path)
+    proc = subprocess.run(args, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    bridge = load_bridge(out)
+    adapter = bridge.resolve_host_adapter(out)
+    assert adapter.pin is not None
+    assert adapter.transport is not None, "owner transport dataclass must load"
+    assert hasattr(adapter.transport, "GatewayRoute")
+    assert adapter.transport.GatewayRoute(route_id="sealed").route_id == "sealed"
+    assert adapter.context is None, "no synthetic host entitlement or cap"
 
 
 def test_owner_modules_verify_only_writes_no_overlay(tmp_path):
