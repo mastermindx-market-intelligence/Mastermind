@@ -10,6 +10,7 @@ import {
   canNavigateForAutomaticSignIn, explicitLogoutRecorded, registerUnsavedNavigationHold,
 } from "./auth-navigation-guard";
 import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { Today } from "./today/Today";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
 import { qualifyWorkerResultRef } from "./fabric/mission-worker-result";
 import { useOfficeProjection } from "./meta-ceo/useOfficeProjection";
@@ -3553,15 +3554,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     ) : null;
   let content: React.ReactNode;
   if (active === "Today")
-    content = <section className="today-source-entry" aria-label={locale === "zh-CN" ? "今天" : "Today"}>
-      <div className="today-source-heading"><h1>{locale === "zh-CN" ? "你想完成什么？" : "What would you like done?"}</h1>
-        <p>{locale === "zh-CN" ? "开始一项新工作，或继续已有项目。" : "Start something new, or continue an existing project."}</p></div>
-      <section className="today-source-composer" aria-label={locale === "zh-CN" ? "新任务" : "New mission"}>{commandPanel}</section>
-      <nav className="today-source-destinations" aria-label={locale === "zh-CN" ? "继续工作" : "Continue your work"}>
-        <button type="button" onClick={() => { setProjectTab(null); setActive("Inbox"); }}>{locale === "zh-CN" ? "打开收件箱" : "Open Inbox"}</button>
-        <button type="button" onClick={() => { setProjectTab(null); setActive("Projects"); }}>{locale === "zh-CN" ? "查看项目" : "View projects"}</button>
-      </nav>
-    </section>;
+    content = <Today locale={locale} projection={office.projection} work={workState}
+      composer={commandPanel}
+      onOpenInbox={() => { setProjectTab(null); setActive("Inbox"); }}
+      onOpenProjects={() => { setProjectTab(null); setActive("Projects"); }}
+      onOpenMission={(!authState || authState.acquisition) ? target => open(target.workRef, target.rootJobId) : undefined}
+    />;
   else if (active === "Meta-CEO")
     content = (
       <>

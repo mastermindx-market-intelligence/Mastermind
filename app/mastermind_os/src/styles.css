@@ -1001,18 +1001,6 @@ main .form-actions button:disabled {
 
 /* Existing-owner ingress is mounted immediately; the bounded Today leaf adds
    the canonical attention/project presentation without owning any command. */
-.today-source-entry { max-width: 1120px; margin: 0 auto; padding: 64px 0 48px; display: grid; gap: 40px; }
-.today-source-heading h1 { font: 500 40px/48px var(--font-display); letter-spacing: -.035em; margin: 0 0 12px; }
-.today-source-heading p { color: var(--muted); font: 400 16px/24px var(--font-ui); margin: 0; }
-.today-source-composer { border: 1px solid var(--border); border-radius: 18px; background: var(--panel); padding: 20px; min-width: 0; }
-.today-source-composer > .card { margin: 0; border: 0; padding: 0; background: transparent; }
-.today-source-destinations { display: flex; flex-wrap: wrap; gap: 12px; }
-.today-source-destinations button { min-height: 44px; }
-@media (max-width: 959px) {
-  .today-source-entry { padding: 24px 0; gap: 24px; }
-  .today-source-heading h1 { max-width: 300px; font-size: 30px; line-height: 36px; }
-}
-
 /* Today uses the incumbent launch form with a compact, fully visible choice row. */
 main .launch-orchestrator-composer.card { background: transparent; border: 0; padding: 0; box-shadow: none; }
 .launch-orchestrator-composer > .section-title { margin-bottom: 12px; }
