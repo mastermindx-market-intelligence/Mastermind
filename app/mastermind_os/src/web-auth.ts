@@ -1,6 +1,8 @@
 import { projectAdmissionPublicRequest, projectAdmissionQuery, type ProjectAdmissionPauseRequest, type ProjectAdmissionResumeRequest } from "./admission/project-admission-host";
 import { validArchiveCursor } from "./projects/archive/project-archive-continuation";
 import { knowledgeReadSelection } from "./knowledge/library/knowledge-read-port";
+import { validSourceOperationContextSelection } from './source-operations/context';
+import {createSourceOperationTransport,SOURCE_OPERATION_CAP} from './source-operations/transport';
 import { normalizeProjectAssociationSelection } from "./conversations/project-association";
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import { validResourceCapacitySelection } from "./resources/resource-capacity-read";
@@ -919,6 +921,49 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     } finally {if(timeout!==undefined)clear(timeout);signal.removeEventListener("abort",cancel);controller.abort();}
   }
 
+  async function sourcePost(
+    path: string,
+    body: Record<string, unknown>,
+    signal: AbortSignal,
+  ) {
+    const ticket = generation,
+      token = tokens.acquisition;
+    if (!token || !valid("acquisition")) throw new Error("TOKEN_REQUIRED");
+    const controller = new AbortController(),
+      onAbort = () => controller.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    const timer = later(() => controller.abort(), READ_TIMEOUT_MS);
+    try {
+      if (controller.signal.aborted) throw new Error("READ_CANCELLED");
+      const response = await fetchFn(ORIGIN + path, {
+        method: "POST",
+        redirect: "error",
+        credentials: "omit",
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token.value}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error("SOURCE_OPERATION_FAILED");
+      const result = await boundedJson(response, SOURCE_OPERATION_CAP);
+      if (
+        signal.aborted ||
+        controller.signal.aborted ||
+        ticket !== generation ||
+        !valid("acquisition")
+      )
+        throw new Error("READ_CANCELLED");
+      return result;
+    } finally {
+      clear(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
   /**
    * One acquisition-authenticated attempt at a fixed Control Room route.
    * The server owns each action grant. A post-dispatch auth change cannot
@@ -1228,6 +1273,16 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/autonomy/current?${new URLSearchParams({
         work_ref: selected.work_ref, root_job_id: selected.root_job_id,
       })}`, signal, { cap: 32_768, typedUnavailableSchema: AUTONOMY_READ_BODY_SCHEMA });
+    },
+    sourceOperations:createSourceOperationTransport((method,path,body,signal)=>method==='read'
+      ?read('acquisition',ORIGIN+path,signal,{cap:SOURCE_OPERATION_CAP,typedUnavailableSchema:null})
+      :sourcePost(path,body,signal)),
+    readSourceOperationContext: (request) => {
+      const { signal, ...selected } = request;
+      if (!validSourceOperationContextSelection(selected)) return Promise.reject(new Error("SOURCE_OPERATION_CONTEXT_SELECTION_INVALID"));
+      const query = new URLSearchParams({ action: selected.action });
+      if (selected.workRef !== null) query.set('work_ref', selected.workRef);
+      return read("acquisition", `${ORIGIN}/workspace/source-operation/context?${query}`, signal, { cap: 4096, typedUnavailableSchema: null });
     },
     readProjectPlan: (request) => {
       const { signal, ...selected } = request;

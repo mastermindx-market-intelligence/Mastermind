@@ -1,0 +1,184 @@
+import {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import {OperationController, type PendingPointerStore} from '../orchestration/operation-controller';
+import type {SourceOperationTransport} from '../source-operations/transport';
+import type {SourceOperationContextSelection} from '../source-operations/context';
+import {bindProjectKnowledgeCommandOwner, createProjectKnowledgeCommandPort,
+  prepareProjectKnowledgeWrite, type PreparedProjectKnowledgeWrite} from './library/project-knowledge-port';
+import type {ProjectFileAddRequest, ProjectPreferenceSetRequest, ProjectKnowledgeSourceContext} from './library/project-knowledge-requests';
+import type {ProjectSourceAction, ProjectSourceStatus} from './library/project-source-operation';
+import type {KnowledgeLibrarySourceOwner} from './library/knowledge-library-contract';
+import type {KnowledgeEditPhase} from './library/ProjectKnowledgeEditor';
+
+const actions = ['add_project_file','set_project_communication_preference'] as const;
+type Request = ProjectFileAddRequest | ProjectPreferenceSetRequest;
+export interface ProjectKnowledgeWorkspaceProps {
+  workRef: string | null;
+  authGeneration: number;
+  hostGeneration: number | null;
+  /** Rechecks the actual installed host, auth, methods and host generation. */
+  canRead: () => boolean;
+  readContext?: (request: SourceOperationContextSelection & {signal: AbortSignal}) => Promise<unknown>;
+  transport?: SourceOperationTransport;
+  /** Only the actual incumbent commandBinding.store. */
+  store?: PendingPointerStore;
+  onSourceObserved?: () => void;
+}
+
+/** App-lifetime Knowledge composition. There is no mount read, replacement
+ * store, automatic mutation or automatic reconciliation. Preparation remains
+ * unsaved local material until the explicit publication gesture reserves the
+ * original v5 pointer. The Library owns the current CODE/DATA source witness. */
+export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspaceProps) {
+  const identities = useRef({read:props.readContext, transport:props.transport, store:props.store, epoch:0});
+  if (identities.current.read !== props.readContext || identities.current.transport !== props.transport || identities.current.store !== props.store)
+    identities.current = {read:props.readContext, transport:props.transport, store:props.store, epoch:identities.current.epoch+1};
+  const scope = JSON.stringify([props.workRef,props.authGeneration,props.hostGeneration,identities.current.epoch]);
+  const live = useRef({props,scope}); live.current = {props,scope};
+  const sourceOwner = useRef<{scope:string;value:KnowledgeLibrarySourceOwner}|null>(null);
+  const contexts = useRef<{scope:string; values:Partial<Record<ProjectSourceAction,unknown>>}|null>(null);
+  const prepared = useRef<{scope:string; value:PreparedProjectKnowledgeWrite;sourceOwner:KnowledgeLibrarySourceOwner;contextTicket:object}|null>(null);
+  const pendingPrepare = useRef<AbortController|null>(null);
+  const phaseRef = useRef<{scope:string;value:KnowledgeEditPhase}>({scope,value:'idle'});
+  const [, repaint] = useState(0);
+  const setPhase = (value:KnowledgeEditPhase) => {phaseRef.current={scope:live.current.scope,value};repaint(n=>n+1);};
+  function current(started=scope) {
+    const now=live.current;
+    try {return now.scope===started && now.props.workRef!==null && now.props.hostGeneration!==null && now.props.canRead()===true;}
+    catch {return false;}
+  }
+  const sourceCurrent = (snapshot:ProjectKnowledgeSourceContext) => {
+    if (!current() || snapshot.workRef!==live.current.props.workRef || sourceOwner.current?.scope!==scope) return false;
+    try {const value=sourceOwner.current.value.current({workRef:snapshot.workRef,sourceCommit:snapshot.sourceCommit,baseRevision:snapshot.baseRevision});return value.workRef===snapshot.workRef && value.sourceCommit===snapshot.sourceCommit && value.baseRevision===snapshot.baseRevision;}
+    catch {return false;}
+  };
+  function owner() {
+    if (!current() || contexts.current?.scope!==scope || !props.workRef) return null;
+    const ticket=contexts.current;
+    try {return bindProjectKnowledgeCommandOwner({workRef:props.workRef,generation:scope,
+      contexts:ticket.values,isCurrent:()=>current() && contexts.current===ticket,
+      sourceIsCurrent:sourceCurrent});} catch {return null;}
+  }
+  const currentOwner = owner();
+  const slot = useRef<{scope:string;store:PendingPointerStore;transport:SourceOperationTransport;controller:OperationController}|null>(null);
+  if (props.workRef && props.store && props.transport &&
+      (slot.current?.scope!==scope || slot.current.store!==props.store || slot.current.transport!==props.transport)) {
+    const delegate = {
+      context:()=>owner()?.context()??null,
+      canInspect:(action:ProjectSourceAction)=>owner()?.canInspect(action)===true,
+      canPrepare:(action:ProjectSourceAction,source:ProjectKnowledgeSourceContext)=>owner()?.canPrepare(action,source)===true,
+    };
+    const port=createProjectKnowledgeCommandPort({workRef:props.workRef,transport:props.transport,owner:delegate,
+      prepared:()=>prepared.current?.scope===scope?prepared.current.value:null,
+      isPreparedCurrent:anchor=>current() && prepared.current?.value===anchor && sourceOwner.current?.value===prepared.current.sourceOwner && contexts.current===prepared.current.contextTicket && sourceCurrent({workRef:anchor.request.work_ref,sourceCommit:anchor.request.source_commit,baseRevision:anchor.request.base_revision}),
+      onStatus:status=>{
+        if (!current()) return;
+        lastStatus.current={scope,value:status};
+        if (status.receipt?.kind==='SOURCE_OBSERVED' && status.disposition==='accepted') {
+          setPhase('source-published');
+          if (observed.current!==status.receipt.receipt_sha256) {
+            observed.current=status.receipt.receipt_sha256;live.current.props.onSourceObserved?.();
+          }
+        } else if (status.disposition==='refused') setPhase('refused');
+        else setPhase(status.receipt?.kind==='PROPOSAL_OBSERVED'?'proposal-published':'unknown');
+      }});
+    slot.current={scope,store:props.store,transport:props.transport,controller:new OperationController(port,props.store)};
+  }
+  const lastStatus=useRef<{scope:string;value:ProjectSourceStatus}|null>(null), observed=useRef<string|null>(null);
+  const controller=props.store && props.transport && slot.current?.scope===scope && slot.current.store===props.store && slot.current.transport===props.transport?slot.current.controller:undefined;
+  const committed=useRef({scope,controller});
+  useLayoutEffect(()=>{
+    if (committed.current.scope!==scope || committed.current.controller!==controller) {
+      committed.current.controller?.invalidate(); pendingPrepare.current?.abort();
+      prepared.current=null; contexts.current=null;
+      committed.current={scope,controller}; repaint(n=>n+1);
+    }
+  },[scope,controller]);
+  useEffect(()=>()=>{pendingPrepare.current?.abort();committed.current.controller?.invalidate();},[]);
+  const registerSourceOwner=useCallback((value:KnowledgeLibrarySourceOwner|null)=>{sourceOwner.current=value?{scope:live.current.scope,value}:null;},[]);
+
+  async function readContexts(signal:AbortSignal) {
+    const started=scope, read=props.readContext, workRef=props.workRef;
+    if (!read || !workRef || !current() || signal.aborted) throw Error('PROJECT_KNOWLEDGE_UNAVAILABLE');
+    const values:Partial<Record<ProjectSourceAction,unknown>>={};
+    await Promise.all(actions.map(async action=>{
+      try {const value=await read({action,workRef,signal});
+        if (current(started) && !signal.aborted) values[action]=value;
+      } catch { /* Missing distinct action context remains unavailable. */ }
+    }));
+    if (!current(started) || signal.aborted) throw Error('SOURCE_CHANGED');
+    contexts.current={scope:started,values};
+  }
+  async function readActions(snapshot:ProjectKnowledgeSourceContext & {signal:AbortSignal}) {
+    const started=scope, originalSource=sourceOwner.current;
+    if (!current() || !sourceCurrent(snapshot)) throw Error('SOURCE_CHANGED');
+    await readContexts(snapshot.signal);
+    if (!current(started) || snapshot.signal.aborted || sourceOwner.current!==originalSource || !sourceCurrent(snapshot)) throw Error('SOURCE_CHANGED');
+    const qualified=owner(); repaint(n=>n+1);
+    return {schema:'mastermind.project_knowledge_actions.v1',selection:{work_ref:snapshot.workRef},
+      source_commit:snapshot.sourceCommit,base_revision:snapshot.baseRevision,actions:{
+        add_files:props.store && props.transport && qualified?.canInspect('add_project_file')?'AVAILABLE':'UNAVAILABLE',
+        edit_preference:props.store && props.transport && qualified?.canInspect('set_project_communication_preference')?'AVAILABLE':'UNAVAILABLE'}};
+  }
+  function startDraft() {
+    if (!current() || !controller || ["submitting","checking","unknown"].includes(controller.getState().status)) return false;
+    pendingPrepare.current?.abort(); prepared.current=null;setPhase('idle');return true;
+  }
+  async function prepare(request:Request) {
+    const selected=owner(), transport=props.transport, started=scope, originalSource=sourceOwner.current, originalContexts=contexts.current;
+    if (!current()) return;
+    if (!selected || !transport || !controller || !originalSource || !originalContexts) {setPhase('prepare-unavailable');return;}
+    if (['submitting','checking','unknown'].includes(controller.getState().status)) return;
+    prepared.current=null;
+    pendingPrepare.current?.abort();const pending=new AbortController();pendingPrepare.current=pending;
+    try {
+      const principal=selected.context();if(!principal)throw Error('PROJECT_KNOWLEDGE_UNAVAILABLE');
+      const original=await props.store!.read(principal.principalScope,pending.signal);
+      if(pending.signal.aborted || !current(started) || contexts.current!==originalContexts || sourceOwner.current!==originalSource)return;
+      if(original){setPhase('publication-held');return;}
+      const value=await prepareProjectKnowledgeWrite({request,transport,owner:selected,isCurrent:()=>current(started) && sourceOwner.current===originalSource && contexts.current===originalContexts},pending.signal);
+      if (pending.signal.aborted || !current(started) || sourceOwner.current!==originalSource) return;
+      prepared.current={scope:started,value,sourceOwner:originalSource.value,contextTicket:originalContexts};setPhase('prepared');
+    } catch {if (!pending.signal.aborted && current(started)) setPhase('prepare-unavailable');}
+  }
+  function canPublish() {
+    const anchor=prepared.current;
+    return !!anchor && anchor.scope===scope && current() && sourceOwner.current?.value===anchor.sourceOwner && contexts.current===anchor.contextTicket && sourceCurrent({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision});
+  }
+  async function publish() {
+    const anchor=prepared.current;
+    if (!current() || !controller || anchor?.scope!==scope) return;
+    if (!canPublish()) {setPhase('stale');return;}
+    setPhase('pending');
+    const result=await controller.begin({kind:'project_source_write',targetKey:anchor.value.targetKey,
+      payload:{action:anchor.value.target.action,request:anchor.value.request}});
+    if (current() && phaseRef.current.value==='pending') setPhase(result.status==='unknown' && result.pointer.kind!=='project_source_write'?'publication-held':result.status==='refused'?'refused':result.status==='accepted'?'source-published':'unknown');
+  }
+  async function checkOriginal() {
+    if (!current() || !controller) return;
+    if (!owner()?.context()) {
+      try {await readContexts(new AbortController().signal);} catch {return;}
+    }
+    if (!current() || !owner()?.context()) return;
+    const result=await controller.recover({reconcileSource:true});
+    if(current()){if(result.status==='unknown' && result.pointer.kind!=='project_source_write')setPhase('publication-held');else repaint(n=>n+1);}
+  }
+  const methods=useRef({readActions,prepare,publish,checkOriginal,startDraft,
+    currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(!sourceCurrent(snapshot))throw Error('SOURCE_CHANGED');return {...snapshot};}});
+  methods.current={readActions,prepare,publish,checkOriginal,startDraft,
+    currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(!sourceCurrent(snapshot))throw Error('SOURCE_CHANGED');return {...snapshot};}};
+  // The editor captures callback identity at open. Locale, phase and unrelated
+  // source updates must not replace those callbacks or discard the typed draft.
+  const stable=useMemo(()=>({
+    readActions:(...args:Parameters<typeof readActions>)=>live.current.scope===scope?methods.current.readActions(...args):Promise.reject(Error('SOURCE_CHANGED')),
+    startDraft:()=>live.current.scope===scope && methods.current.startDraft(),
+    prepare:(request:Request)=>live.current.scope===scope?methods.current.prepare(request):Promise.resolve(),
+    publish:()=>live.current.scope===scope?methods.current.publish():Promise.resolve(),
+    checkOriginal:()=>live.current.scope===scope?methods.current.checkOriginal():Promise.resolve(),
+    currentSource:(snapshot:ProjectKnowledgeSourceContext)=>{if(live.current.scope!==scope)throw Error('SOURCE_CHANGED');return methods.current.currentSource(snapshot);},
+  }),[scope]);
+  return {scope,registerSourceOwner,...stable,canPublish:canPublish(),
+    phase:phaseRef.current.scope===scope?phaseRef.current.value:'idle' as KnowledgeEditPhase,
+    prepared:prepared.current?.scope===scope?prepared.current.value:null,
+    status:lastStatus.current?.scope===scope?lastStatus.current.value:null,
+    controller:currentOwner?controller:undefined};
+}

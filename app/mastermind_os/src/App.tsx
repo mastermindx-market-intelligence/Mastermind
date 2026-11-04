@@ -25,6 +25,9 @@ import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { knowledgeDraftBinding, type KnowledgeDraftPort } from "./knowledge/KnowledgeDraftCompanion";
 import type { ProjectSourceDraftPort } from "./knowledge/library/project-source-draft";
+import { useProjectKnowledgeWorkspace } from "./knowledge/useProjectKnowledgeWorkspace";
+import { ProjectKnowledgeEditor } from "./knowledge/library/ProjectKnowledgeEditor";
+import type { ProjectMemoryDocument, KnowledgeLibrarySourceContext } from "./knowledge/library/knowledge-library-contract";
 import { ProjectKnowledgeLibrary } from "./knowledge/library/ProjectKnowledgeLibrary";
 import type { KnowledgeLibraryProps } from "./knowledge/library/knowledge-library-contract";
 import { ProjectSearchWorkspace } from "./discovery/ProjectSearchWorkspace";
@@ -3744,6 +3747,67 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     index.state === "AVAILABLE" && requestedProjectWorkRef
       ? index.programs.filter(card => card.workRef === requestedProjectWorkRef) : [];
   const projectWorkRef = currentProjectCards.length === 1 ? currentProjectCards[0].workRef : null;
+  const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
+  const knowledgePorts = useMemo(() => {
+    const host=retainedResultHost;
+    return {readContext:host?.readSourceOperationContext
+      ? (request:Parameters<NonNullable<MissionHost["readSourceOperationContext"]>>[0])=>host.readSourceOperationContext!(request):undefined,
+      transport:host?.sourceOperations};
+  },[retainedResultHost,authRevision]);
+  const knowledgePublication=useProjectKnowledgeWorkspace({workRef:projectWorkRef,
+    authGeneration:authRevision,hostGeneration:archiveHostGeneration,canRead:projectReaders.canRead,
+    readContext:knowledgePorts.readContext,transport:knowledgePorts.transport,store:commandBinding?.store,
+    onSourceObserved:()=>setKnowledgeRefresh(value=>value+1)});
+  const [knowledgeEditor,setKnowledgeEditor]=useState<{scope:string;mode:"file"|"preference";
+    context:KnowledgeLibrarySourceContext;requestId:string;memory:ProjectMemoryDocument|null}|null>(null);
+  const currentKnowledgeEditor=knowledgeEditor?.scope===knowledgePublication.scope?knowledgeEditor:null;
+  hasUnsentUserText.current ||= !!currentKnowledgeEditor;
+  useLayoutEffect(()=>{if(knowledgeEditor && !currentKnowledgeEditor)setKnowledgeEditor(null);},[knowledgeEditor,currentKnowledgeEditor]);
+  const knowledgeWriteAvailable=!!(commandBinding?.store && knowledgePorts.readContext && knowledgePorts.transport &&
+    projectWorkRef && projectReaders.canRead());
+  const openKnowledgeEditor=(mode:"file"|"preference",context:KnowledgeLibrarySourceContext,memory:ProjectMemoryDocument|null)=>{
+    if(!knowledgeWriteAvailable || context.workRef!==projectWorkRef ||
+      ["submitting","checking","unknown"].includes(knowledgePublication.controller?.getState().status??"idle"))return;
+    try {
+      knowledgePublication.currentSource(context);
+      if(!knowledgePublication.startDraft())return;
+      const bytes=new Uint8Array(20);globalThis.crypto.getRandomValues(bytes);
+      const suffix=Array.from(bytes,byte=>byte.toString(16).padStart(2,"0")).join("");
+      setKnowledgeEditor({scope:knowledgePublication.scope,mode,context:{...context},memory,
+        requestId:`mmos-project-${mode==="file"?"file-add":"preference-set"}-${suffix}`});
+    } catch { /* No current source or original identifier means no editor action. */ }
+  };
+  const knowledgePublicationPanel=<>
+    {currentKnowledgeEditor && (currentKnowledgeEditor.mode==="file"
+      ? <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="file"
+          sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
+          authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
+          current={knowledgePublication.currentSource} phase={knowledgePublication.phase}
+          onSubmitFile={knowledgePublication.prepare} onClose={()=>setKnowledgeEditor(null)}
+          onCheckOriginal={knowledgePublication.checkOriginal}/>
+      : <ProjectKnowledgeEditor key={currentKnowledgeEditor.requestId} mode="preference"
+          sourceContext={currentKnowledgeEditor.context} requestId={currentKnowledgeEditor.requestId}
+          authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale}
+          initialValue={currentKnowledgeEditor.memory?.value??""} expectedPreferenceRevision={currentKnowledgeEditor.memory?.revision??null}
+          current={knowledgePublication.currentSource} phase={knowledgePublication.phase}
+          onSubmitPreference={knowledgePublication.prepare} onClose={()=>setKnowledgeEditor(null)}
+          onCheckOriginal={knowledgePublication.checkOriginal}/>)}
+    {currentKnowledgeEditor && knowledgePublication.phase==="prepared" && knowledgePublication.prepared && <section className="card" aria-label={locale==="zh-CN"?"检查准备好的更改":"Review prepared changes"}>
+      <h2>{locale==="zh-CN"?"检查你的更改":"Review your changes"}</h2>
+      <p>{locale==="zh-CN"?"尚未发布。确认后才会提交这一次更改。":"Nothing has been published. Publish submits this original change once."}</p>
+      <pre className="visible-text">{"file" in knowledgePublication.prepared.request
+        ? `${knowledgePublication.prepared.request.file.display_name}\n${knowledgePublication.prepared.request.file.content_utf8}`
+        : knowledgePublication.prepared.request.value}</pre>
+      <button type="button" disabled={!knowledgePublication.canPublish} onClick={knowledgePublication.publish}>{locale==="zh-CN"?"发布更改":"Publish changes"}</button>
+    </section>}
+    {knowledgeWriteAvailable && <section className="card" aria-label={locale==="zh-CN"?"原始发布状态":"Original publication status"}>
+      {knowledgePublication.phase==="proposal-published" || knowledgePublication.phase==="unknown"
+        ? <p>{locale==="zh-CN"?"项目源尚未确认保存。请检查原始发布，不要重复提交。":"The project source has not confirmed this save. Check the original publication; do not submit it again."}</p>:null}
+      {knowledgePublication.phase==="publication-held"?<p>{locale==="zh-CN"?"之前的项目操作尚未确定。请使用它的原始控件检查；这些更改尚未提交。":"A previous project action is unresolved. Use its original controls; these changes have not been submitted."}</p>:null}
+      {knowledgePublication.phase==="source-published"?<p>{locale==="zh-CN"?"已保存到项目源。":"Saved to the project source."}</p>:null}
+      <button type="button" onClick={knowledgePublication.checkOriginal}>{locale==="zh-CN"?"检查发布状态":"Check publication status"}</button>
+    </section>}
+  </>;
   // Admission gates address the canonical programme, not an inferred Runtime
   // root. The owner independently brackets its exact Agent OS source and grant.
   const admissionPorts = useMemo(() => {
@@ -3977,10 +4041,14 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       hostGeneration={archiveHostGeneration} owner={projectHistoryOwner} locale={locale} theme={theme} draftPort={projectSourceDraftPort}
       onBack={() => setSavedConversationNavigation(null)}/> : null;
   else if (active === "Knowledge" && hasProjectLibrary && knowledgeMode === "project")
-    content = <ProjectKnowledgeLibrary host={retainedResultHost} workRef={projectWorkRef}
+    content = <>{knowledgePublicationPanel}<ProjectKnowledgeLibrary host={retainedResultHost} workRef={projectWorkRef}
       authGeneration={authRevision} hostGeneration={archiveHostGeneration} locale={locale} theme={theme}
-      requestedFile={requestedProjectFile} draftPort={projectSourceDraftPort}
-      onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/>
+      requestedFile={requestedProjectFile} draftPort={projectSourceDraftPort} refreshKey={knowledgeRefresh}
+      onCurrentSourceOwner={knowledgePublication.registerSourceOwner}
+      readActions={knowledgeWriteAvailable?knowledgePublication.readActions:undefined}
+      onAddFiles={knowledgeWriteAvailable?context=>openKnowledgeEditor("file",context,null):undefined}
+      onEditPreference={knowledgeWriteAvailable?(context,memory)=>openKnowledgeEditor("preference",context,memory):undefined}
+      onReturnToSearch={() => { setRequestedProjectFile(undefined); setActive("Search"); setProjectSearchSelected(true); }}/></>
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} locale={locale}
       readResultReferences={retainedResultHost?.readResultReferences}

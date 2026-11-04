@@ -3,6 +3,9 @@ import { validArchiveCursor, type ArchiveCursor } from "./projects/archive/proje
 import { decodeProjectArchive, type ProjectArchiveRead } from "./projects/archive/project-archive";
 import type { ProjectFileSearchOwner, FileSearchCatalogue, FileSearchSource } from "./discovery/project-file-search";
 import { knowledgeReadSelection, validateKnowledgeRead, type KnowledgeReadSelection, type KnowledgeSourceSelection, type KnowledgeReadKind } from "./knowledge/library/knowledge-read-port";
+import { decodeSourceOperationContext, validSourceOperationContextSelection, type SourceOperationContext, type SourceOperationContextSelection } from './source-operations/context';
+import {createSourceOperationTransport,type SourceOperationTransport} from './source-operations/transport';
+import {decodeSourceOperationStatus} from './planning/plan-adoption-status';
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
@@ -69,6 +72,7 @@ import {
 export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   /** Public fixed navigation only; Terminal owns its user's authentication and access. */
   openTerminalBriefs?(): Promise<unknown>;
+  readonly sourceOperations?:SourceOperationTransport;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional private owner publication; never reconstructed from browser input. */
@@ -88,6 +92,7 @@ export interface RawClient extends Partial<ProjectAdmissionRawMethods> {
   restore?(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAutonomyPolicy?(request: AutonomySelection & { signal: AbortSignal }): Promise<unknown>;
+  readSourceOperationContext?(request: SourceOperationContextSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectPlan?(request: ProjectPlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectSessionAssociation?(request: ProjectAssociationSelection & { signal: AbortSignal }): Promise<unknown>;
   readProjectJournal?(request: JournalSelection & { signal: AbortSignal }): Promise<unknown>;
@@ -153,6 +158,7 @@ export interface MissionResultRead {
 export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
   /** Optional zero-input navigation; no private content or access receipt. */
   openTerminalBriefs?: TerminalBriefsNavigationPort;
+  readonly sourceOperations?:SourceOperationTransport;
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
   readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
   readonly productAcceptanceOwner?: ProductAcceptanceOwner;
@@ -164,6 +170,7 @@ export interface MissionHost extends Partial<ProjectAdmissionHostMethods> {
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readAutonomyPolicy?: (request: AutonomySelection & { signal: AbortSignal }) => Promise<AutonomyRead>;
+  readSourceOperationContext?: (request: SourceOperationContextSelection & { signal: AbortSignal }) => Promise<SourceOperationContext>;
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
   readProjectSessionAssociation?: (request: ProjectAssociationSelection & { signal: AbortSignal }) => Promise<ProjectAssociationDocument>;
   readProjectJournal?: (request: JournalSelection & { signal: AbortSignal }) => Promise<ProjectJournalDocument>;
@@ -236,6 +243,66 @@ export function bindMissionHost(
       previousClientGeneration = generation;
     }
   });
+  const sourceContextReader = client.readSourceOperationContext;
+  const sourceGroup = client.sourceOperations;
+  const sourceEpochReader = client.invalidationGeneration;
+  const sourceMethods = sourceGroup
+    ? {
+        prepare: sourceGroup.prepareSourceOperation,
+        read: sourceGroup.readSourceOperation,
+        submit: sourceGroup.submitSourceOperation,
+        reconcile: sourceGroup.reconcileSourceOperation,
+        advance: sourceGroup.advanceSourceOperation,
+      }
+    : null;
+  const boundSource =
+    sourceGroup &&
+    sourceMethods &&
+    sourceEpochReader &&
+    Object.values(sourceMethods).every((fn) => typeof fn === "function")
+      ? createSourceOperationTransport(async (method, _path, body, signal) => {
+          const started = epoch,
+            source = sourceEpochReader.call(client);
+          const name = (
+            {
+              prepare: "prepareSourceOperation",
+              read: "readSourceOperation",
+              submit: "submitSourceOperation",
+              reconcile: "reconcileSourceOperation",
+              advance: "advanceSourceOperation",
+            } as const
+          )[method];
+          const authorized = () => {
+            const state = client.getState();
+            return (
+              !signal.aborted &&
+              started === epoch &&
+              client.invalidationGeneration === sourceEpochReader &&
+              sourceEpochReader.call(client) === source &&
+              client.sourceOperations === sourceGroup &&
+              sourceGroup[name] === sourceMethods[method] &&
+              state.status === "signed_in" &&
+              state.acquisition
+            );
+          };
+          if (!authorized()) throw new Error("SOURCE_OPERATION_UNAUTHORIZED");
+          const call = sourceMethods[method] as (
+            input: unknown,
+            signal: AbortSignal,
+          ) => Promise<unknown>;
+          const result = await call.call(sourceGroup, body, signal);
+          if (!authorized()) throw new Error("READ_CANCELLED");
+          if (method === "prepare") return result;
+          const decoded = decodeSourceOperationStatus(result);
+          if (
+            decoded.selection.action !== body.action ||
+            decoded.selection.request_id !== body.request_id ||
+            decoded.selection.work_ref !== body.work_ref
+          )
+            throw new Error("SOURCE_OPERATION_RESPONSE_INVALID");
+          return decoded;
+        })
+      : undefined;
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
@@ -375,6 +442,23 @@ export function bindMissionHost(
         const raw = await client.readAutonomyPolicy!({ ...selected, signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAutonomyPolicy(raw, selected);
+      },
+    } : {}),
+    ...(boundSource?{sourceOperations:boundSource}:{}),
+    ...(sourceContextReader && client.invalidationGeneration ? {
+      async readSourceOperationContext(request: SourceOperationContextSelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validSourceOperationContextSelection(selected)) throw new Error("SOURCE_OPERATION_CONTEXT_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => { const state = client.getState();
+          return !signal.aborted && started === epoch && source === client.invalidationGeneration?.()
+            && client.readSourceOperationContext === sourceContextReader
+            && state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("SOURCE_OPERATION_CONTEXT_UNAUTHORIZED");
+        const raw = await sourceContextReader.call(client, { ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeSourceOperationContext(raw, selected);
       },
     } : {}),
     ...(client.readProjectPlan && client.invalidationGeneration ? {
@@ -888,6 +972,12 @@ export async function createNativeClient(
       | "read_project_direction"
       | "read_project_archive"
       | "read_project_archive_page"
+      | "read_source_operation_context"
+      | "source_operation_prepare"
+      | "source_operation_read"
+      | "source_operation_submit"
+      | "source_operation_reconcile"
+      | "source_operation_advance"
       | "read_admitted_plan"
       | "read_retained_activity"
       | "read_resource_capacity"
@@ -969,6 +1059,25 @@ export async function createNativeClient(
       const result = await invoke("sign_out");
       if (ticket === control && started === epoch) update(result);
     },
+  sourceOperations: createSourceOperationTransport(
+    (method, _path, body, signal) => {
+      if (current.status !== "signed_in" || !current.acquisition)
+        return Promise.reject(new Error("SOURCE_OPERATION_UNAUTHORIZED"));
+      return read(
+        (
+          {
+            prepare: "source_operation_prepare",
+            read: "source_operation_read",
+            submit: "source_operation_submit",
+            reconcile: "source_operation_reconcile",
+            advance: "source_operation_advance",
+          } as const
+        )[method],
+        signal,
+        { request: body },
+      );
+    },
+  ),
     readPrograms: ({ signal }) => read("read_programs", signal),
     readWork: ({ signal }) => read("read_work", signal),
     readAttendedFabricCatalog: ({ signal }) => read("read_fabric_catalog", signal),
@@ -1011,6 +1120,11 @@ export async function createNativeClient(
       if (!isAutonomySelection(selected))
         return Promise.reject(new Error("AUTONOMY_SELECTION_INVALID"));
       return read("read_autonomy_policy", signal, { selection: selected });
+    },
+    readSourceOperationContext: (request) => {
+      const { signal, ...selected } = request;
+      if (!validSourceOperationContextSelection(selected)) return Promise.reject(new Error("SOURCE_OPERATION_CONTEXT_SELECTION_INVALID"));
+      return read("read_source_operation_context", signal, { selection: { action: selected.action, work_ref: selected.workRef } });
     },
     readProjectPlan: (request) => {
       const { signal, ...selected } = request;

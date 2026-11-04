@@ -56,6 +56,7 @@ export type KnowledgeEditPhase =
   | 'pending'
   | 'prepared'
   | 'prepare-unavailable'
+  | 'publication-held'
   | 'unknown'
   | 'proposal-published'
   | 'source-published'
@@ -452,6 +453,8 @@ function EditorCore(props: EditorCoreProps) {
     switch (effectivePhase) {
       case 'prepared':
         return zh ? '更改已准备好供你检查，尚未发布。' : 'Your changes are prepared for review. Nothing has been published.';
+      case 'publication-held':
+        return zh ? '之前的项目操作尚未确定。请先使用它的原始控件检查；这些更改尚未提交发布。' : 'A previous project action is unresolved. Use its original controls first; these changes have not been submitted for publication.';
       case 'prepare-unavailable':
         return zh ? '暂时无法准备更改。尚未提交发布，你的草稿已保留。' : 'Your changes could not be prepared. Nothing was submitted for publication. Your draft is kept.';
       case 'pending':
