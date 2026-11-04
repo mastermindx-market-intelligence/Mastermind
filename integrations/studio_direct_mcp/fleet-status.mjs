@@ -159,8 +159,15 @@ const PUBLIC_TRANSPORT_TTL = '5h';
 const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
 const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
 // Validate the full owner enumeration, but disclose only the public subset.
-// Include the already enrolled sixth private owner without exposing it as a public seat.
-const PRIVATE_OWNER_ACCOUNT = /^(?:(?:fabric|subagent-fabric)-[a-z0-9][a-z0-9-]{0,62}|mastermind-os-publication)$/;
+// Classify only these six reviewed private identities; none is a public seat.
+const PRIVATE_OWNER_ACCOUNTS = new Set([
+  'fabric-c3-570f6f34',
+  'fabric-chatgpt3-w570f6f34',
+  'fabric-design',
+  'fabric-read',
+  'subagent-fabric-c3',
+  'mastermind-os-publication',
+]);
 // Accept the incumbent owner's future valid account labels without treating
 // new identities as public or silently qualifying their readiness. Unknown
 // labels remain opaque and explicitly force a degraded result.
@@ -565,7 +572,7 @@ function validateAndProjectOwnerResult(value) {
   // qualified by this narrower public projection. Preserve the owner truth,
   // but withhold READY until the account's privacy/scope classification is reviewed.
   const ownerRosterClassified = verified.every((row) =>
-    PUBLIC_ACCOUNTS.has(row.account) || PRIVATE_OWNER_ACCOUNT.test(row.account));
+    PUBLIC_ACCOUNTS.has(row.account) || PRIVATE_OWNER_ACCOUNTS.has(row.account));
   return {
     scope: 'public_accounts',
     accountCount: accounts.length,
