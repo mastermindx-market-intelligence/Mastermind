@@ -31,6 +31,8 @@ def facts(paths=("app/src/component.tsx",), *, additions=12, deletions=4,
 @pytest.mark.parametrize("paths", [
     ("docs/user-guide.md",),
     ("README.md", "docs/screenshots/welcome.png"),
+    ("docs/evidence/2026-11-02-github-release-triage.md",),
+    ("docs/superpowers/plans/2026-10-22-reconciliation.md",),
 ])
 def test_bounded_routine_changes_need_no_independent_review(paths):
     decision = assess_review_risk(facts(paths))

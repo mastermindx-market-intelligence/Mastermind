@@ -312,6 +312,7 @@ _SUPPORTING_PREFIXES = (
     "research/evidence/", "mockups/evidence/", "ux-evidence/",
     "terminal/docs/pr-crops/", "terminal/docs/verification/",
     "docs/verification/", "docs/screenshots/",
+    "docs/evidence/", "docs/superpowers/plans/",
 )
 _INERT_DOC_EXACT = frozenset({
     "readme.md", "docs/readme.md", "docs/guide.md", "docs/user-guide.md",
