@@ -21,7 +21,7 @@ function setup() {
     canRead:()=>current,store,transport,onSourceObserved:vi.fn(),
     readContext:vi.fn(async selected=>{if(selected.action!==journey.context.selection.action)throw Error('Distinct permission unavailable');return journey.context;})};
   const snapshot={workRef:request.work_ref,sourceCommit:request.source_commit,baseRevision:request.base_revision};
-  const owner={current:(value:typeof snapshot)=>{if(!source||JSON.stringify(value)!==JSON.stringify(snapshot))throw Error('SOURCE_CHANGED');return {...snapshot};}};
+  const owner={codeContext:()=>source?({schema:'mastermind.project_knowledge_code_context.v1' as const,work_ref:request.work_ref,executable_macro_commit:request.source_commit,reader_source_commit:'07e317ef5b6e0107fcfca9228f179c7d269bb234'}):null,current:(value:typeof snapshot)=>{if(!source||JSON.stringify(value)!==JSON.stringify(snapshot))throw Error('SOURCE_CHANGED');return {...snapshot};}};
   const mounted=renderHook((value:ProjectKnowledgeWorkspaceProps)=>useProjectKnowledgeWorkspace(value),{initialProps:props});
   async function ready(){act(()=>mounted.result.current.registerSourceOwner(owner));
     await act(async()=>{await mounted.result.current.readActions({...snapshot,signal:new AbortController().signal});});}
@@ -108,4 +108,12 @@ it('binds a retained same-scope Review callback to A and only the rendered B cal
   await act(async()=>{await f.result.current.publish();});
   expect(f.transport.submitSourceOperation).toHaveBeenCalledTimes(1);
   expect(vi.mocked(f.transport.submitSourceOperation).mock.calls[0]![0]).toMatchObject({request_id:replacement.request_id});
+});
+
+it('legacy Library bodies remain read-only without an independent CODE owner',async()=>{
+  const f=setup();act(()=>f.result.current.registerSourceOwner({current:f.owner.current}));
+  await expect(f.result.current.readActions({...f.snapshot,signal:new AbortController().signal})).rejects.toThrow('SOURCE_CHANGED');
+  await act(async()=>{await f.result.current.prepare(f.request);});
+  expect(f.transport.prepareSourceOperation).not.toHaveBeenCalled();expect(f.transport.submitSourceOperation).not.toHaveBeenCalled();
+  expect(await f.store.read(f.journey.context.owner_context.principal_scope)).toBeNull();
 });

@@ -7,6 +7,7 @@ import {bindProjectKnowledgeCommandOwner, createProjectKnowledgeCommandPort,
 import type {ProjectFileAddRequest, ProjectPreferenceSetRequest, ProjectKnowledgeSourceContext} from './library/project-knowledge-requests';
 import type {ProjectSourceAction, ProjectSourceStatus} from './library/project-source-operation';
 import type {KnowledgeLibrarySourceOwner} from './library/knowledge-library-contract';
+import {sameKnowledgeCodeContext,type ProjectKnowledgeCodeContext} from './library/project-data-observation';
 import type {KnowledgeEditPhase} from './library/ProjectKnowledgeEditor';
 
 const actions = ['add_project_file','set_project_communication_preference'] as const;
@@ -36,7 +37,7 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
   const live = useRef({props,scope}); live.current = {props,scope};
   const sourceOwner = useRef<{scope:string;value:KnowledgeLibrarySourceOwner}|null>(null);
   const contexts = useRef<{scope:string; values:Partial<Record<ProjectSourceAction,unknown>>}|null>(null);
-  const prepared = useRef<{scope:string; value:PreparedProjectKnowledgeWrite;sourceOwner:KnowledgeLibrarySourceOwner;contextTicket:object}|null>(null);
+  const prepared = useRef<{scope:string; value:PreparedProjectKnowledgeWrite;sourceOwner:KnowledgeLibrarySourceOwner;contextTicket:object;codeContext:ProjectKnowledgeCodeContext}|null>(null);
   const pendingPrepare = useRef<AbortController|null>(null);
   const phaseRef = useRef<{scope:string;value:KnowledgeEditPhase}>({scope,value:'idle'});
   const [, repaint] = useState(0);
@@ -46,8 +47,13 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
     try {return now.scope===started && now.props.workRef!==null && now.props.hostGeneration!==null && now.props.canRead()===true;}
     catch {return false;}
   }
+  const codeContext = (snapshot:ProjectKnowledgeSourceContext) => {
+    if (!current() || sourceOwner.current?.scope!==scope) return null;
+    try {const value=sourceOwner.current.value.codeContext?.();return value?.work_ref===snapshot.workRef?value:null;}
+    catch {return null;}
+  };
   const sourceCurrent = (snapshot:ProjectKnowledgeSourceContext) => {
-    if (!current() || snapshot.workRef!==live.current.props.workRef || sourceOwner.current?.scope!==scope) return false;
+    if (!current() || snapshot.workRef!==live.current.props.workRef || sourceOwner.current?.scope!==scope || !codeContext(snapshot)) return false;
     try {const value=sourceOwner.current.value.current({workRef:snapshot.workRef,sourceCommit:snapshot.sourceCommit,baseRevision:snapshot.baseRevision});return value.workRef===snapshot.workRef && value.sourceCommit===snapshot.sourceCommit && value.baseRevision===snapshot.baseRevision;}
     catch {return false;}
   };
@@ -69,7 +75,7 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
     };
     const port=createProjectKnowledgeCommandPort({workRef:props.workRef,transport:props.transport,owner:delegate,
       prepared:()=>prepared.current?.scope===scope?prepared.current.value:null,
-      isPreparedCurrent:anchor=>current() && prepared.current?.value===anchor && sourceOwner.current?.value===prepared.current.sourceOwner && contexts.current===prepared.current.contextTicket && sourceCurrent({workRef:anchor.request.work_ref,sourceCommit:anchor.request.source_commit,baseRevision:anchor.request.base_revision}),
+      isPreparedCurrent:anchor=>current() && prepared.current?.value===anchor && sourceOwner.current?.value===prepared.current.sourceOwner && contexts.current===prepared.current.contextTicket && sameKnowledgeCodeContext(prepared.current.codeContext,codeContext({workRef:anchor.request.work_ref,sourceCommit:anchor.request.source_commit,baseRevision:anchor.request.base_revision})??undefined) && sourceCurrent({workRef:anchor.request.work_ref,sourceCommit:anchor.request.source_commit,baseRevision:anchor.request.base_revision}),
       onStatus:status=>{
         if (!current()) return;
         lastStatus.current={scope,value:status};
@@ -124,9 +130,9 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
     pendingPrepare.current?.abort(); prepared.current=null;setPhase('idle');return true;
   }
   async function prepare(request:Request) {
-    const selected=owner(), transport=props.transport, started=scope, originalSource=sourceOwner.current, originalContexts=contexts.current;
+    const selected=owner(), transport=props.transport, started=scope, originalSource=sourceOwner.current, originalContexts=contexts.current, originalCode=codeContext({workRef:request.work_ref,sourceCommit:request.source_commit,baseRevision:request.base_revision});
     if (!current()) return;
-    if (!selected || !transport || !controller || !originalSource || !originalContexts) {setPhase('prepare-unavailable');return;}
+    if (!selected || !transport || !controller || !originalSource || !originalContexts || !originalCode) {setPhase('prepare-unavailable');return;}
     if (['submitting','checking','unknown'].includes(controller.getState().status)) return;
     prepared.current=null;
     pendingPrepare.current?.abort();const pending=new AbortController();pendingPrepare.current=pending;
@@ -135,14 +141,14 @@ export function useProjectKnowledgeWorkspace(props: ProjectKnowledgeWorkspacePro
       const original=await props.store!.read(principal.principalScope,pending.signal);
       if(pending.signal.aborted || !current(started) || contexts.current!==originalContexts || sourceOwner.current!==originalSource)return;
       if(original){setPhase('publication-held');return;}
-      const value=await prepareProjectKnowledgeWrite({request,transport,owner:selected,isCurrent:()=>current(started) && sourceOwner.current===originalSource && contexts.current===originalContexts},pending.signal);
+      const value=await prepareProjectKnowledgeWrite({request,transport,owner:selected,isCurrent:()=>current(started) && sourceOwner.current===originalSource && contexts.current===originalContexts && sameKnowledgeCodeContext(originalCode,codeContext({workRef:request.work_ref,sourceCommit:request.source_commit,baseRevision:request.base_revision})??undefined)},pending.signal);
       if (pending.signal.aborted || !current(started) || sourceOwner.current!==originalSource) return;
-      prepared.current={scope:started,value,sourceOwner:originalSource.value,contextTicket:originalContexts};setPhase('prepared');
+      prepared.current={scope:started,value,sourceOwner:originalSource.value,contextTicket:originalContexts,codeContext:originalCode};setPhase('prepared');
     } catch {if (!pending.signal.aborted && current(started)) setPhase('prepare-unavailable');}
   }
   function canPublish() {
     const anchor=prepared.current;
-    return !!anchor && anchor.scope===scope && current() && sourceOwner.current?.value===anchor.sourceOwner && contexts.current===anchor.contextTicket && sourceCurrent({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision});
+    return !!anchor && anchor.scope===scope && current() && sourceOwner.current?.value===anchor.sourceOwner && contexts.current===anchor.contextTicket && sameKnowledgeCodeContext(anchor.codeContext,codeContext({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision})??undefined) && sourceCurrent({workRef:anchor.value.request.work_ref,sourceCommit:anchor.value.request.source_commit,baseRevision:anchor.value.request.base_revision});
   }
   async function publish(expected:PreparedProjectKnowledgeWrite) {
     const anchor=prepared.current;
