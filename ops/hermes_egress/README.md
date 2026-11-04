@@ -15,8 +15,10 @@ side before enabling any real bot.
 | `hermes-runtime-mmmeta.service` | `127.0.0.3:18652` | `api.z.ai:443` |
 
 The Squid config defines two `http_port` listeners in one process, gates
-access by `myportname`, exact `dstdomain` host (without a leading dot),
-method CONNECT and destination port 443. It denies non-CONNECT, all other
+access by `myportname`, exact `dstdomain -n` host (without a leading dot),
+method CONNECT and destination port 443. Both vendor ACLs disable reverse-DNS
+lookups: a numeric CONNECT target cannot qualify through a vendor-shaped PTR
+record. This is hostname-only matching, not an assumption about vendor TLS. It denies non-CONNECT, all other
 ports, private/loopback destinations and every unmatched request. There
 are **no generic allow-lists, wildcard domains, open forward HTTP
 requests, TLS interception, CA injection or bearer token handling** in

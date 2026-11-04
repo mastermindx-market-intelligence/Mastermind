@@ -16,6 +16,21 @@ CONF = ROOT / "ops" / "hermes_egress" / "squid.conf"
 UNIT = ROOT / "ops" / "hermes_egress" / "hermes-egress.service"
 
 
+def _require_exact_hostname_acls(config: str) -> None:
+    """Pin actual Squid syntax; this is not a substitute DNS/proxy evaluator.
+
+    Without -n, dstdomain may turn a numeric target into a matching PTR name.
+    The no-lookup flag is independently required for each exact vendor ACL.
+    """
+    active = [line.split("#", 1)[0].strip() for line in config.splitlines()]
+    domain_acls = [line.split() for line in active
+                   if line.startswith("acl ") and "dstdomain" in line.split()]
+    assert domain_acls == [
+        ["acl", "secretary_vendor", "dstdomain", "-n", "ark.ap-southeast.bytepluses.com"],
+        ["acl", "meta_vendor", "dstdomain", "-n", "api.z.ai"],
+    ], "both vendor ACLs must use exact hostname-only dstdomain -n"
+
+
 class FixedRoleProxyPolicy(unittest.TestCase):
     def setUp(self):
         self.conf = CONF.read_text(encoding="utf-8")
@@ -50,13 +65,34 @@ class FixedRoleProxyPolicy(unittest.TestCase):
         ]
         self.assertEqual(self.rules, expected)
         self.assertEqual(self.active.count("acl tls_only port 443"), 1)
-        self.assertEqual(self.active.count("acl secretary_vendor dstdomain ark.ap-southeast.bytepluses.com"), 1)
-        self.assertEqual(self.active.count("acl meta_vendor dstdomain api.z.ai"), 1)
+        self.assertEqual(self.active.count("acl secretary_vendor dstdomain -n ark.ap-southeast.bytepluses.com"), 1)
+        self.assertEqual(self.active.count("acl meta_vendor dstdomain -n api.z.ai"), 1)
         self.assertEqual(self.active.count("acl secretary_socket myportname hermes_secretary"), 1)
         self.assertEqual(self.active.count("acl meta_socket myportname hermes_meta"), 1)
         self.assertFalse(any(x.startswith("http_access allow all") for x in self.active))
         self.assertFalse(any("dstdomain ." in x for x in self.active))
         self.assertFalse(any("allow localhost" in x for x in self.active))
+
+    def test_both_vendor_acls_disable_reverse_dns(self):
+        _require_exact_hostname_acls(self.conf)
+
+    def test_hostname_only_guard_rejects_each_role_lookup_or_domain_relaxation(self):
+        _require_exact_hostname_acls(self.conf)
+        for role, host in (
+            ("secretary_vendor", "ark.ap-southeast.bytepluses.com"),
+            ("meta_vendor", "api.z.ai"),
+        ):
+            expected = f"acl {role} dstdomain -n {host}"
+            for replacement in (
+                f"acl {role} dstdomain {host}",
+                f"acl {role} dstdomain -n .{host}",
+                expected + " unapproved.invalid",
+            ):
+                with self.subTest(role=role, replacement=replacement):
+                    damaged = self.conf.replace(expected, replacement, 1)
+                    self.assertNotEqual(damaged, self.conf)
+                    with self.assertRaises(AssertionError):
+                        _require_exact_hostname_acls(damaged)
 
     def test_internal_destinations_rejected_before_either_allow(self):
         forbidden = next(x for x in self.active if x.startswith("acl forbidden_dst dst "))
