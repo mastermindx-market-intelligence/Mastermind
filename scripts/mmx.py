@@ -128,6 +128,8 @@ async def _run(args: argparse.Namespace) -> int:
     command, values = _request(args)
     response = await send_control_request(args.socket, command, values)
     if response.get("ok") is not True:
+        if args.json:
+            print(json.dumps(response, indent=2, sort_keys=True, ensure_ascii=False))
         error = response.get("error")
         if isinstance(error, dict):
             code = error.get("code", "unknown")

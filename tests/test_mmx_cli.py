@@ -125,3 +125,45 @@ def test_json_mode_returns_full_service_envelope(monkeypatch, capsys):
     ])
     assert code == 0
     assert json.loads(capsys.readouterr().out) == response
+
+
+def test_json_refusal_preserves_full_service_envelope(monkeypatch, capsys):
+    module = _module()
+    response = {
+        "ok": False,
+        "error": {"code": "NOT_READY", "message": "closed"},
+        "request_id": "refusal-123",
+        "metadata": {"retry_allowed": False, "reasons": ["closed"], "detail": "未就绪"},
+        "effect_state": "NOT_APPLIED",
+    }
+    seen = []
+
+    async def fake_transport(socket_path, command, values):
+        seen.append((socket_path, command, values))
+        return response
+
+    monkeypatch.setattr(module, "send_control_request", fake_transport)
+    code = module.main([
+        "executive", "--socket", "/tmp/executive.sock", "--json", "jobs"
+    ])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert json.loads(captured.out) == response
+    assert "refused: [NOT_READY] closed" in captured.err
+    assert seen == [(Path("/tmp/executive.sock"), "jobs", {})]
+
+
+def test_json_transport_error_does_not_fabricate_service_envelope(monkeypatch, capsys):
+    module = _module()
+
+    async def fake_transport(socket_path, command, values):
+        raise OSError("control socket unavailable")
+
+    monkeypatch.setattr(module, "send_control_request", fake_transport)
+    code = module.main([
+        "executive", "--socket", "/tmp/executive.sock", "--json", "jobs"
+    ])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert "error: control socket unavailable" in captured.err
