@@ -32,6 +32,7 @@ class AgentOsProjectJournalReader:
             raise ValueError("journal source must be absolute")
         self._installed_context_owner = None
         self._installed_context_binding = None
+        self._installed_reader_binding = None
 
     @staticmethod
     def _context_binding(owner):
@@ -41,13 +42,13 @@ class AgentOsProjectJournalReader:
         ))
 
     def read(self, *, work_ref: str):
-        from integrations.executive_mcp.installed import InstalledBootPacketCollector
-        owner = self._installed_context_owner
-        if (type(owner) is not InstalledBootPacketCollector
-                or self._context_binding(owner) != self._installed_context_binding
-                or owner._macro_root != self._macro_root.resolve()):
-            raise ProjectJournalSourceUnavailable("SOURCE_UNAVAILABLE")
-        return owner.read_project_journal(work_ref=work_ref)
+        from control_plane.installed_project_read_binding import (
+            InstalledProjectReadUnavailable, read_installed_project_binding,
+        )
+        try:
+            return read_installed_project_binding(self, kind="project_journal", work_ref=work_ref)
+        except InstalledProjectReadUnavailable:
+            raise ProjectJournalSourceUnavailable("SOURCE_UNAVAILABLE") from None
 
 
 def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
@@ -96,7 +97,7 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
     def captured(path, limit=262144):
         return git("show", expected_macro_sha + ":" + path, limit=limit)
 
-    module = types.ModuleType("_mastermind_bound_agentos_journal_owner")
+    module = types.ModuleType("agentos_bound_journal_source")
     module.__file__ = str(root / "scripts/agentos.py")
     prior = sys.modules.get(module.__name__)
     original_path = list(sys.path)

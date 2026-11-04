@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import ownerProjection from "./fixtures/native-capacity-owner-projection.json";
+import ownerProjection from "../../../../research/evidence/native-capacity-owner-projection.json";
 import { capacityBindingFields, decodeHostCapacityRead, qualifyHostCapacityRead, type HostCapacityBinding } from "./host-capacity";
 const copy = () => structuredClone(ownerProjection);
 const binding = () => Object.fromEntries(capacityBindingFields.map(field => [field, ownerProjection[field]])) as HostCapacityBinding;
