@@ -55,15 +55,15 @@ def test_auto_fast_skips_review_job_only_for_matching_current_source():
     assert (result.repository, result.pull_number, result.head_sha) == (REPO, PR, SHA)
 
 
-def test_auto_consequential_skips_mandatory_review_but_retains_tier():
+def test_auto_consequential_keeps_separate_machine_review():
     result = auto(risk(("server/schema/refresh.py",)))
-    assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
+    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
     assert result.source_tier is ReviewTier.STANDARD
 
 
-def test_auto_sensitive_skips_mandatory_review_but_retains_tier():
+def test_auto_sensitive_keeps_separate_machine_review():
     result = auto(risk((".github/workflows/release.yml",)))
-    assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
+    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
     assert result.source_tier is ReviewTier.CRITICAL
 
 
@@ -136,3 +136,12 @@ def test_auto_bounded_app_source_skips_review_job():
     result = auto(risk(("app/src/component.tsx",)))
     assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
     assert result.source_tier is ReviewTier.FAST
+
+
+def test_forged_zero_assessment_counts_cannot_skip_signed_critical_machine_risk():
+    assessment = replace(
+        risk((".github/workflows/ci.yml",)),
+        minimum_independent_assessments=0,
+        minimum_formal_non_author_approvals=0,
+    )
+    assert auto(assessment).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE

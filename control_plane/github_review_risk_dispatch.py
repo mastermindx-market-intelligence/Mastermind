@@ -112,18 +112,20 @@ def decide_risk_dispatch(
         "pull_number": expected_pull_number,
         "head_sha": expected_head_sha,
     }
-    if assessment.tier in (ReviewTier.FAST, ReviewTier.STANDARD, ReviewTier.CRITICAL):
-        if (
-            assessment.minimum_independent_assessments != 0
-            or assessment.minimum_formal_non_author_approvals != 0
-        ):
-            return RiskDispatchAdvice(
-                ReviewDispatch.AUTO_REVIEW_ELIGIBLE, assessment.tier,
-                "REVIEW_REQUIRED_BY_ACCEPTED_POLICY", **bound,
-            )
+    if assessment.tier is ReviewTier.FAST:
+        if assessment.minimum_independent_assessments != 0 or assessment.minimum_formal_non_author_approvals != 0:
+            return _hold("FAST_COUNTS_INCONSISTENT")
         return RiskDispatchAdvice(
-            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, assessment.tier,
-            "CHAIRMAN_NO_MANDATORY_AUTO_REVIEW", **bound,
+            ReviewDispatch.SKIP_NO_REVIEW_NEEDED, ReviewTier.FAST,
+            "FAST_NO_INDEPENDENT_REVIEW_REQUIRED", **bound,
+        )
+    if assessment.tier in (ReviewTier.STANDARD, ReviewTier.CRITICAL):
+        # The Web author waiver does not cross this signed automatic machine
+        # trust boundary. A malformed/forged zero-count assessment is never a
+        # blanket exemption for critical authenticated automation.
+        return RiskDispatchAdvice(
+            ReviewDispatch.AUTO_REVIEW_ELIGIBLE, assessment.tier,
+            "AUTOMATIC_MACHINE_REVIEW_RISK", **bound,
         )
     return _hold("RISK_TIER_INVALID")
 

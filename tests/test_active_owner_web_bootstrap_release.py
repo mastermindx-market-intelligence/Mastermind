@@ -30,10 +30,10 @@ def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
     # the integrated Project fence must still fit after the accepted rule.
     block = _project_block()
     macro_rule = "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm."
-    if macro_rule in block:
-        assert len(block.encode("utf-8")) <= 8000
-    else:
-        assert len(block.encode("utf-8")) + len(macro_rule.encode("utf-8")) + 1 <= 8000
+    assert macro_rule in block, "retain accepted #1999 Macro rule"
+    assert len(block.encode("utf-8")) <= 8000
+    assert "Native read-only child may review here; child != GitHub APPROVED." in block
+    assert "No denied/EFFECT_UNKNOWN review reroute." in block
 
 
 def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():

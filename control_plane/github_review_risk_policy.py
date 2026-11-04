@@ -82,6 +82,15 @@ _CRITICAL_EXACT = frozenset({
     "docs/EXECUTIVE_WORKER_ROUTING_CHAIRMAN_ADDENDUM.md",
     "docs/REVIEW_RISK_POLICY.md",
     "docs/GITHUB_REVIEW_INGRESS.md",
+    # Accepted #2018 constitutional/security pins. An apparently tiny diff in
+    # any of these must stay CRITICAL even under the CEO Web review waiver.
+    "control_plane/packet_gate.py",
+    "control_plane/governance.py",
+    "control_plane/strategic_state.py",
+    "config/strategic_state.yml",
+    "config/contracts.yml",
+    "research/MASTERMIND_CHARTER_V2.md",
+    "DOCTRINE.md",
 })
 _CRITICAL_SEGMENTS = frozenset({
     "auth", "authentication", "authorization", "oauth", "security", "secrets",
@@ -242,16 +251,17 @@ def _validate(facts: ReviewChangeFacts) -> None:
 
 
 def _result(facts: ReviewChangeFacts, tier: ReviewTier, *reasons: str) -> ReviewRiskAssessment:
-    # Chairman's 2026-11-03 Web-CEO review waiver: no *additional*
-    # independent review or formal approval is imposed by this classifier,
-    # even for risk-elevated code. The tier still governs focused security,
-    # correctness and production-path qualification; native GitHub rules and
-    # explicit release/security holds are adjudicated by their own owners.
-    # Manual authorized review stays available on the existing ingress.
+    # This authority-neutral assessment is also consumed by signed AUTOMATIC
+    # GitHub/Executive ingress, which has no authenticated attended-CEO-Web
+    # origin discriminator. Keep the accepted machine review-risk requirements.
+    # The Chairman's all-tier no-mandatory-review waiver is for attended CEO
+    # Web author workflow (docs/DELIVERY_WORKFLOW.md / Project instructions),
+    # NOT a global exemption for bot/privileged release or financial ingress.
+    # The optional automatic review host stays OFF unless separately enabled.
     review_counts = {
         ReviewTier.FAST: (0, 0),
-        ReviewTier.STANDARD: (0, 0),
-        ReviewTier.CRITICAL: (0, 0),
+        ReviewTier.STANDARD: (1, 1),
+        ReviewTier.CRITICAL: (2, 1),
         ReviewTier.HOLD: (0, 0),
     }
     assessments, approvals = review_counts[tier]

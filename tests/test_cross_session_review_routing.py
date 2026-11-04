@@ -26,7 +26,7 @@ def test_web_project_instruction_block_loads_review_guide_within_budget():
     assert block.startswith("MASTERMIND SOL BOOTSTRAP")
     assert "protected master docs/sol_skills/INDEX.md" in block
     assert GUIDE in block, "outside-fence Markdown is not installed Project text"
-    assert "Review only when required: load " + GUIDE in block
+    assert "Review: load " + GUIDE in block
     assert "at pin" in block
     assert "Fabric block" in block
     assert "never native Sol labor" in block
@@ -54,7 +54,7 @@ def test_outside_fence_only_pointer_fails_project_consumer():
     assert GUIDE in block
     # Simulate accidentally moving the only review pointer to supporting
     # Markdown outside the actual Project instruction code fence.
-    moved = kernel.replace("Review only when required: load " + GUIDE + " at pin.", "")
+    moved = kernel.replace("Review: load " + GUIDE + " at pin.", "")
     assert GUIDE not in _project_instructions(moved)
     assert GUIDE in moved, "supporting Markdown should still contain the guide"
     assert GUIDE not in _project_instructions(moved), (

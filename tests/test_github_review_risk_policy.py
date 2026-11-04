@@ -69,11 +69,11 @@ def test_bounded_routine_changes_need_no_independent_review(paths):
     ("plugins/mastermind-sol/skills/review-pull-request/SKILL.md",),
     ("pytest.ini",),
 ])
-def test_small_sensitive_changes_are_critical_but_do_not_force_reviewer(paths):
+def test_small_sensitive_changes_keep_machine_critical_risk(paths):
     decision = assess_review_risk(facts(paths, additions=1, deletions=0))
     assert decision.tier is ReviewTier.CRITICAL
-    assert decision.minimum_independent_assessments == 0
-    assert decision.minimum_formal_non_author_approvals == 0
+    assert decision.minimum_independent_assessments == 2
+    assert decision.minimum_formal_non_author_approvals == 1
     assert not decision.fast_lane_candidate
 
 
@@ -86,11 +86,11 @@ def test_small_sensitive_changes_are_critical_but_do_not_force_reviewer(paths):
     ("control_plane/ordinary_worker.py",),
     ("integrations/external_client.py",),
 ])
-def test_consequential_code_keeps_elevated_tier_without_mandatory_review(paths):
+def test_consequential_code_keeps_machine_standard_risk(paths):
     decision = assess_review_risk(facts(paths))
     assert decision.tier is ReviewTier.STANDARD
-    assert decision.minimum_independent_assessments == 0
-    assert decision.minimum_formal_non_author_approvals == 0
+    assert decision.minimum_independent_assessments == 1
+    assert decision.minimum_formal_non_author_approvals == 1
 
 
 def test_large_unremarkable_diff_gets_one_review():
@@ -258,8 +258,8 @@ def test_real_managed_workspace_identity_change_is_critical_with_verified_metric
     )
     verdict = assess_review_risk(source)
     assert verdict.tier is ReviewTier.CRITICAL
-    assert verdict.minimum_independent_assessments == 0
-    assert verdict.minimum_formal_non_author_approvals == 0
+    assert verdict.minimum_independent_assessments == 2
+    assert verdict.minimum_formal_non_author_approvals == 1
 
 
 @pytest.mark.parametrize("path", [
@@ -294,3 +294,38 @@ def test_broadening_never_downgrades_privileged_changes(path):
 
 def test_broad_fast_lane_does_not_accept_unknown_executable_format():
     assert assess_review_risk(facts(("app/native/main.rs",))).tier is ReviewTier.STANDARD
+
+
+_CONSTITUTIONAL_CRITICAL_PATHS = (
+    "control_plane/packet_gate.py",
+    "control_plane/governance.py",
+    "control_plane/strategic_state.py",
+    "config/strategic_state.yml",
+    "config/contracts.yml",
+    "research/MASTERMIND_CHARTER_V2.md",
+    "DOCTRINE.md",
+)
+
+
+@pytest.mark.parametrize("path", _CONSTITUTIONAL_CRITICAL_PATHS)
+def test_one_line_authority_source_remains_critical_in_machine_risk(path):
+    for candidate in (path, path.upper()):
+        decision = assess_review_risk(
+            facts((candidate,), additions=1, deletions=0)
+        )
+        assert decision.tier is ReviewTier.CRITICAL, candidate
+        assert decision.minimum_independent_assessments == 2
+        assert decision.minimum_formal_non_author_approvals == 1
+
+
+def test_sensitive_previous_rename_path_remains_critical():
+    source = replace(
+        facts(("docs/screenshots/new.webp", "control_plane/packet_gate.py"),
+              additions=1, deletions=0),
+        file_metrics=(ReviewFileStat(
+            path="docs/screenshots/new.webp",
+            previous_path="control_plane/packet_gate.py",
+            additions=1, deletions=0,
+        ),),
+    )
+    assert assess_review_risk(source).tier is ReviewTier.CRITICAL
