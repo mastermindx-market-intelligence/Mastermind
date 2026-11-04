@@ -31,6 +31,7 @@ class AgentOsProjectPlanReader:
             raise ValueError("project plan source must be absolute")
         self._installed_context_owner = None
         self._installed_context_binding = None
+        self._installed_reader_binding = None
 
     @staticmethod
     def _context_binding(owner):
@@ -40,13 +41,13 @@ class AgentOsProjectPlanReader:
         ))
 
     def read(self, *, work_ref: str):
-        owner = self._installed_context_owner
-        from integrations.executive_mcp.installed import InstalledBootPacketCollector
-        if (type(owner) is not InstalledBootPacketCollector
-                or self._context_binding(owner) != self._installed_context_binding
-                or owner._macro_root != self._macro_root.resolve()):
-            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE")
-        return owner.read_project_plan(work_ref=work_ref)
+        from control_plane.installed_project_read_binding import (
+            InstalledProjectReadUnavailable, read_installed_project_binding,
+        )
+        try:
+            return read_installed_project_binding(self, kind="project_plan", work_ref=work_ref)
+        except InstalledProjectReadUnavailable:
+            raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE") from None
 
 
 def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
@@ -97,7 +98,7 @@ def read_from_macro_owner(*, macro_root: Path, expected_macro_sha: str,
             return unavailable(work_ref, "RECORD_INVALID")
         text = captured(path, _RECORD_BYTES)
         parser_text = captured("scripts/agentos.py", _OWNER_BYTES)
-        owner = types.ModuleType("_mastermind_bound_agentos_plan_owner")
+        owner = types.ModuleType("agentos_bound_plan_source")
         owner.__file__ = str(root / "scripts/agentos.py")
         prior = sys.modules.get(owner.__name__)
         sys.modules[owner.__name__] = owner

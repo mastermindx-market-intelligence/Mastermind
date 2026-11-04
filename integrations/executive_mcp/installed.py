@@ -2337,6 +2337,11 @@ class InstalledBootPacketCollector:
         reader = AgentOsProjectPlanReader(macro_root=root)
         reader._installed_context_owner = self
         reader._installed_context_binding = reader._context_binding(self)
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_plan",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
         return reader
 
     def read_project_plan(self, *, work_ref: str, timeout: float = 15.0):
@@ -2360,6 +2365,11 @@ class InstalledBootPacketCollector:
         reader = AgentOsProjectJournalReader(macro_root=root)
         reader._installed_context_owner = self
         reader._installed_context_binding = reader._context_binding(self)
+        from control_plane.installed_project_read_binding import _issue_installed_project_read
+        reader._installed_reader_binding = _issue_installed_project_read(
+            reader, owner=self, kind="project_journal",
+            qualified_owner=lambda owner: type(owner) is InstalledBootPacketCollector,
+        )
         return reader
 
     def read_project_journal(self, *, work_ref: str, timeout: float = 15.0):

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import fixture from "./fixtures/native-capacity-owner-projection.json";
+import fixture from "../../../../research/evidence/native-capacity-owner-projection.json";
 import { decodeHostCapacityRead } from "./host-capacity";
 import { HostTelemetryPanel } from "./HostTelemetryPanel";
 afterEach(cleanup);
