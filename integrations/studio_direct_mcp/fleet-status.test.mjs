@@ -157,6 +157,29 @@ test('extra closed internal service rows do not invalidate eight public ChatGPT 
   for (const name of internal) assert.equal(out.includes(name), false);
 });
 
+test('healthy internal services do not hide or change public ChatGPT readiness', async t => {
+  const publicReady = statusRow('chatgpt1', true);
+  const internalReady = statusRow('fabric-read', true);
+  const internalDown = statusRow('fabric-design', false);
+  internalDown.tunnel.gatewayReady = false;
+  internalDown.tunnel.transportTTL = null;
+  const owner = ownerFor([publicReady, internalReady, internalDown]);
+  assert.equal(owner.accountCount, 3);
+  assert.equal(owner.readyCount, 2);
+  assert.equal(owner.allReady, false);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.accountCount, 1);
+  assert.equal(result.readyCount, 1);
+  assert.equal(result.allReady, true);
+  assert.equal(result.state, 'READY');
+  assert.deepEqual(result.accounts.map(row => row.account), ['chatgpt1']);
+  const surfaced = JSON.stringify(fleetStatusToolResult(result));
+  assert.equal(surfaced.includes('fabric-read'), false);
+  assert.equal(surfaced.includes('fabric-design'), false);
+});
+
 test('internal fleet status rows cannot hide malformed or duplicated owner evidence', async t => {
   const internal = statusRow('fabric-design', false);
   internal.tunnel.gatewayReady = false;

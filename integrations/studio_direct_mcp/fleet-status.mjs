@@ -167,7 +167,6 @@ function projectStatusRow(row, internal = false) {
   const account = expectAccount(row.account, internal);
   if (row.action !== 'status' || !Array.isArray(row.steps) || row.steps.length !== 0) invalidOwner();
   const ready = expectBoolean(row.ready);
-  if (internal && ready) invalidOwner();
 
   exactKeys(row.gateway, ['account', 'label', 'loaded', 'pid', 'port', 'running']);
   if (row.gateway.account !== account) invalidOwner();
